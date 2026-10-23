@@ -361,9 +361,13 @@ browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
 device.read       device.write       notification.read    notification.write
 memory.read       memory.write
+records.read      records.write
 ```
 
-`approval.resolve` is the one the corpus already names; the rest follow
+`records.read` and `records.write` gate no route; they are the
+`required_scopes` of the five `records.*` tools in
+[owner-records.md](owner-records.md), enumerated here because the vocabulary
+is one closed list. `approval.resolve` is the one the corpus already names; the rest follow
 its form. Membership is exact string equality against the principal's
 scope set. There is no wildcard, no prefix rule, and no hierarchy in
 which `run.write` implies `run.read`.

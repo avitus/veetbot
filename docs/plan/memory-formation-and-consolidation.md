@@ -199,6 +199,17 @@ the project it was learned in, and is defined in
   failed manual save from pending background formation (`tool.trust_rejected`
   remains the generic refusal), so the model does
   not retry the same unsafe write as though its JSON shape were wrong.
+- **Recorded elsewhere (Milestone 34).** A reading the owner logged as a
+  record never becomes a belief. Formation collects the
+  `records.entry.appended` events among the segment's extraction events, and
+  the governed service's candidate loop rejects a candidate whose statement
+  carries, as standalone numeric tokens, every component value of one entry
+  appended in the same segment; the rejection counts with the run's rejected
+  candidates as `recorded_elsewhere`. Because the pre-check sits in the
+  service's loop, every extractor's candidates pass through it; explicit
+  owner corrections and `memory.remember` do not.
+  [owner-records.md](owner-records.md#formation-recorded_elsewhere) owns the
+  token rule and the value forms.
 - **Salience (soft ranking).** Keep candidates above a worth-remembering
   threshold: durability (will this matter next week?), specificity, corroboration,
   and user-signaled importance. Sub-threshold candidates are dropped or held in the

@@ -2717,7 +2717,17 @@ milestones:
     design: docs/plan/owner-records.md
     adr: docs/adr/0239-owner-records-and-numeric-series.md
     gates_registered: 10
-    implementation_status: authorized_specification_checked_in_implementation_beginning
+    implementation_status: implemented_behind_flag_off_by_default_review_and_delivery_pending
+    implementation_evidence:
+      - tests/gates/test_records_m34.py
+      - tests/unit/test_records_domain.py
+      - tests/unit/test_records_service.py
+      - tests/unit/test_records_tools.py
+      - tests/unit/test_records_catalog.py
+      - tests/contract/test_record_store_contract.py
+      - tests/integration/test_records_persistence_m34.py
+      - tests/gates/test_context_m7.py::test_prefix_stability
+      - tests/unit/test_memory_formation.py::test_recorded_values_never_form_beliefs
     open_items:
       - Implement the build sequence test-first and repoint each gate from the pending check to its test
       - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion

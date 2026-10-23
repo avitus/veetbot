@@ -1524,6 +1524,22 @@ need SELECT (the surface allowlist above includes it). Check these privileges fo
 ones before restarting dispatch. Apple clients from before this change still receive
 alerts; cleanup and viewed-result acknowledgement require the updated client.
 
+## Optional owner records (ADR-0239)
+
+`AGENT_RECORDS_ENABLED` (default `0`) registers the five `records.*` tools and
+puts the records catalog in the request body
+([owner records](plan/owner-records.md)). The migration that adds
+`record_series` and `record_entries` applies with every release whether or
+not the flag is on. To enable records, set `AGENT_RECORDS_ENABLED=1` in the
+application environment file for the API and the workers, add
+`records.read,records.write` to the owner's `AUTH_SCOPES` (and
+`records.read` to the schedule environment's, if scheduled runs should see
+the catalog), and restart the API and the workers. The policy profile is
+unchanged, so enabling records moves no policy version. To turn records off,
+set the flag back to `0` and restart the same units; the tables and their
+rows stay. Do not downgrade the migration to roll back code: its
+`downgrade()` refuses while either table holds a row.
+
 
 ## Owner-reviewed dreaming rollout (ADR-0174)
 

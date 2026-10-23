@@ -4,6 +4,11 @@
   implementation on 2026-10-22 with "Push to dev and then I authorize the
   roadmap entry. Begin implementation"; entered as Milestone 34
 - Date: 2026-10-22 (drafted and authorized the same day)
+- Amended: 2026-10-22 — the implemented slice changes no policy profile
+  (section 5): `records.create_series` and `records.delete` require approval
+  by their `EXTERNAL_WRITE` and `EXTERNAL_DELETE` class, and the records
+  service refuses an untrusted-turn append with `records.untrusted_turn`; the
+  owner's decision for an approval stays on record as the pending alternative
 - Related: ADR-0018, ADR-0019, ADR-0021, ADR-0026, ADR-0029, ADR-0031,
   ADR-0033, ADR-0100, ADR-0117, ADR-0122, ADR-0126; Sections 8, 9.2, 15,
   18.4, 21 (roadmap), 22 and 24 of the engineering plan
@@ -309,6 +314,25 @@ which these have not. The rows are written unconditionally, like the
 `device.sms.send` row: a profile is a file, not a flag, and with the tools
 unregistered the rows are inert because an unknown tool is denied anyway.
 Hardline rules run first and are untouched.
+
+**Amended 2026-10-22, at implementation.** The text above records the
+owner's decision and is kept as decided. The slice that shipped does not
+carry it, because any edit to `policy/default.yaml` changes the shipped
+policy version, and production's formation release evidence is bound to that
+version (`tests/unit/test_release_evidence_bundle.py`): the three rows would
+unbind the evidence the running release was admitted on, which the owner has
+not accepted. The slice therefore adds no condition and no row.
+`records.create_series` is classified `EXTERNAL_WRITE` and `records.delete`
+`EXTERNAL_DELETE`, so the deterministic matrix requires approval for both in
+every turn by class; `records.append` stays `NONE`, and the records service
+refuses an append whose turn origin trust is `EXTERNAL_UNTRUSTED` with
+`records.untrusted_turn`, a replay included, writing nothing and telling the
+model to ask the owner to state the value in chat. `USER`, `MEMORY` and
+`INTERNAL_TOOL` origins append without a card, as decided. The approval path
+for untrusted appends, the condition and its row, is the pending
+alternative: it lands when the owner accepts re-admitting the formation
+release evidence, and it replaces the service check rather than joining it.
+`docs/plan/owner-records.md` states the shipped mechanism.
 
 ### 6. Scans and sensitivity
 

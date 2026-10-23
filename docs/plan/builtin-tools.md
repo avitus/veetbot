@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Twenty-nine more model-callable tools are declared at build time by other
+Thirty-four more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -163,10 +163,15 @@ email.unsubscribe             capability  email-unsubscribe
 people.search                 capability  people-and-relationships
 people.context                capability  people-and-relationships
 people.history                capability  people-and-relationships
+records.list                  capability  owner-records
+records.create_series         capability  owner-records
+records.append                capability  owner-records
+records.query                 capability  owner-records
+records.delete                capability  owner-records
 ```
 
-Thirty-nine model-callable builtin tools in total: the original roster of
-eight, the twenty-nine above, and the two media-generation tools in ADR-0140.
+Forty-four model-callable builtin tools in total: the original roster of
+eight, the thirty-four above, and the two media-generation tools in ADR-0140.
 Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
@@ -181,11 +186,11 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other twenty-nine, `skill.manage`, `web.search`,
+nothing else.** Of the other thirty-four, `skill.manage`, `web.search`,
 `web.fetch`, the three `browser.*` tools, and the six `schedule.*` tools are
-fully classified in their subject specifications, and the four `email.*` and
-three `people.*` tools in this document's Milestone 26, 28, and 31 sections
-below;
+fully classified in their subject specifications, and the four `email.*`,
+three `people.*`, and five `records.*` tools in this document's Milestone 26,
+28, 31, and 34 sections below;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
 `skill.load` carries three. The four remaining control tools inherit
 `side_effect: NONE` and `target_kind: in_process` from the
@@ -1663,9 +1668,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; thirty-nine model-callable builtin tools
-    are declared at build time across the corpus, and twenty-nine of them
-    belong to other specifications. Resolved by naming those twenty-nine here,
+    is the original roster; forty-four model-callable builtin tools
+    are declared at build time across the corpus, and thirty-four of them
+    belong to other specifications. Resolved by naming those thirty-four here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
@@ -1907,6 +1912,32 @@ evidence digests only, its destination is server-derived, its result is closed
 outcome codes with no remote content, and it always requires approval. It is
 `IDEMPOTENT` because the request is a constant whose repetition changes
 nothing, which is what lets recovery re-execute a call that has no read-back.
+
+## Milestone 34 records tools
+
+[owner-records.md](owner-records.md#the-five-tools) owns `records.list`,
+`records.create_series`, `records.append`, `records.query`, and
+`records.delete`. All five are `in_process` capabilities with
+`INTERNAL_TOOL` result trust and a ten-second timeout, and exist only with
+`AGENT_RECORDS_ENABLED=1`; with the flag unset or off the roster is
+unchanged. Their closed JSON schemas expose every bound.
+
+| Tool | Required scopes | Side effect / risk / idempotency | Parallel |
+| --- | --- | --- | --- |
+| `records.list` | `records.read` | `NONE` / `LOW` / `READ_ONLY` | yes |
+| `records.query` | `records.read` | `NONE` / `LOW` / `READ_ONLY` | yes |
+| `records.create_series` | `records.write` | `EXTERNAL_WRITE` / `MEDIUM` / `IDEMPOTENT` | no |
+| `records.append` | `records.write` | `NONE` / `MEDIUM` / `CONDITIONALLY_IDEMPOTENT` | no |
+| `records.delete` | `records.write` | `EXTERNAL_DELETE` / `MEDIUM` / `IDEMPOTENT` | no |
+
+The writes land in the platform's own store and leave the host for nowhere.
+Create and delete carry external classes so that the deterministic matrix
+requires the owner's approval for them in every turn, with no `tool_rules`
+row and no policy profile change. The append stays `NONE`: it awaits
+`mark_effect_sent` before its insert and returns the stored entry with
+`replayed` set for a key the series already holds, and the records service
+refuses it in a turn whose origin trust is `EXTERNAL_UNTRUSTED` with
+`records.untrusted_turn`.
 
 ## Image and video generation (ADR-0140)
 

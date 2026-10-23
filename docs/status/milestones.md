@@ -358,10 +358,12 @@ The staged implementation is in progress; optional channels remain evidence-gate
 Authorized on 2026-10-22 by [ADR-0239](../adr/0239-owner-records-and-numeric-series.md),
 with ten gates in the [design](../plan/owner-records.md): five `records.*`
 tools over named numeric series, approval-gated series creation and deletion,
-an approval for appends in untrusted turns, a formation rule so that a reading
-never becomes a belief, and a body-region catalog of the series in every
-request. The specification is checked in; implementation begins in its build
-sequence and no gate is green.
+a refusal of appends in untrusted turns (the owner's chosen approval is pending
+because a profile edit would unbind the formation release evidence), a
+formation rule so that a reading never becomes a belief, and a body-region
+catalog of the series in every request. The build sequence is implemented
+behind `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its
+test; review, hosted CI and production delivery are pending.
 
 - [ ] Implement the build sequence test-first and repoint each gate from the pending check to its test
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion

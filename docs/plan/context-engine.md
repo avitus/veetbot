@@ -110,6 +110,7 @@ Assembly order is fixed and total:
 | 11 | B | Loaded skill bodies, in load order | per skill |
 | 12 | B | Working-state block | per entry |
 | 13 | B | In-turn recall and correction lines | `MEMORY` |
+| 13a | B | Records catalog, if any | `INTERNAL_TOOL` |
 | 14 | B | Runtime metadata: current date, principal scope, surface; the origins `browser.navigate` accepts when the plan offers it | `PLATFORM` |
 | 15 | B | A new trailing user input, if present | `USER` |
 
@@ -132,8 +133,16 @@ persona renders no
 bytes at all, so a session without one reproduces the three-row instruction
 prefix exactly. Row 6 is added by
 [ADR-0123](../adr/0123-deferred-tools-past-the-item-cap.md); an empty index
-renders no bytes either. They are listed here because assembly
-order is fixed and total, and a table that omits four of its rows is neither.
+renders no bytes either. Row 13a is added at Milestone 34 by
+[owner-records.md](owner-records.md#the-records-catalog-in-context), which
+owns its content, its trust label and its ceiling: a `UserMessage` with
+`trust=INTERNAL_TOOL` and `source="records.catalog"`, read inside assembly
+through an injected `RecordsCatalogSource` as in-turn recall is read through
+its retriever, and absent, with no bytes, when the flag is off, the principal
+lacks `records.read`, or the owner has no series. Row 2's framing gains one
+fixed sentence for it, the same in every session whether or not the catalog
+is present. They are listed here because assembly
+order is fixed and total, and a table that omits five of its rows is neither.
 
 Platform policy comes first because it is the only content that must be read before
 anything that might try to override it. The current user message comes last because
@@ -358,6 +367,7 @@ ceiling.
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
 | B | Working state | 1,000 | No | Never |
+| B | Records catalog | 16 series / 600 tokens | No | First |
 | B | Knowledge passages | 3 passages / 3,000 tokens | No | First |
 | B | In-turn recall | 2,000 | No | Second |
 | B | Tool results | 25% of body | Partly | Third |
@@ -439,7 +449,10 @@ What fits in neither is skipped, and its name is recorded on the plan event as
 its skips the same way, so no tool leaves the roster silently. Builder version
 `context-builder@12` treats a `context-builder@11` plan as current, because it
 renders the same bytes: re-planning it could move the selection under a run
-parked on an approval. Earlier versions rebuild through the ordinary logged
+parked on an approval. From `context-builder@13` the framing's records catalog
+sentence changes those bytes, so such a plan fails its prefix-hash recheck and
+re-plans once
+([Milestone 34 records catalog framing](#milestone-34-records-catalog-framing)). Earlier versions rebuild through the ordinary logged
 epoch rotation, so existing sessions recover the configured capabilities
 without replacing their history. A snapshot containing People context is
 retained even when it contains no ordinary beliefs; the epoch rotation also
@@ -614,6 +627,12 @@ the same input, which is the failure this whole subsection exists to prevent.
 When the assembled body will not fit, the builder yields in a fixed order, taking
 the cheapest and most recoverable loss first:
 
+0. **The records catalog drops whole.** A shortened catalog misstates which
+   series exist, so it is never truncated, and one `records.list` call
+   recovers it. It also drops whole when it alone exceeds its 600-token class
+   cap. The builder has no knowledge-passage yield step today, so
+   `records_catalog` is the first entry a pressure event records, before in-turn
+   recall trims ([owner-records.md](owner-records.md#the-records-catalog-in-context)).
 1. **Knowledge passages drop, lowest-ranked first.** They are dropped whole and
    never truncated, because a passage shortened to fit is a misquotation of a
    document the model is about to cite. They go first because the corpus is still
@@ -780,7 +799,12 @@ Three properties matter:
   that it cannot alter policy or grant permission, and that a closing marker inside
   content is content — all of it is stable platform text, written once. Only the
   data varies. This is the same split the memory block already uses and it is the
-  only version that is cache-safe.
+  only version that is cache-safe. Since Milestone 34 the framing also carries one
+  fixed sentence on the records catalog: it lists the owner's series with their
+  last entries, holds names and dates and never values, may mention a due series
+  once per session and never while the owner is mid-task, and is not a request to
+  log ([owner-records.md](owner-records.md#the-records-catalog-in-context) gives
+  the text).
 - **Content cannot close its own envelope.** The closing marker carries a
   per-item nonce, and any occurrence of the delimiter syntax inside content is
   escaped at render time. Without this, "ignore the above and " preceded by a
@@ -940,6 +964,7 @@ class ContextBudget(BaseModel):
     working_state_tokens: int
     tool_result_tokens: int
     knowledge_tokens: int           # knowledge spec: Region B, passages
+    records_catalog_tokens: int = 0 # owner-records spec: Region B, row 13a
     safety_margin_ratio: float = 0.05
 ```
 
@@ -1147,10 +1172,11 @@ legitimate body changes and cache availability affect it.
   would duplicate in-turn recall and leave a missing turn ambiguous between a
   selection defect and a ranking miss; a live projection read would let two seeds
   of one run disagree.
-- **Yield order is knowledge passages, then in-turn recall, then tool-result
-  truncation, then compaction** — cheapest and most recoverable first. Knowledge
-  passages lead because the corpus is still there and one `knowledge.search`
-  re-reaches it; compaction is last because it alone costs a model call and
+- **Yield order is the records catalog, knowledge passages, then in-turn
+  recall, then tool-result truncation, then compaction** — cheapest and most
+  recoverable first. The catalog drops whole and one `records.list` recovers
+  it; knowledge passages follow because the corpus is still there and one
+  `knowledge.search` re-reaches it; compaction is last because it alone costs a model call and
   loses information irreversibly within the run. This is the same order stated
   where the ladder is specified, and the two must not drift apart.
 - **Tool call/result pairs are atomic budget units.** Dropping half a pair is a
@@ -1216,3 +1242,13 @@ rosters retain their cap guarantees. Application-only Gmail sync capabilities
 remain registered and callable by governed deterministic tasks. Hiding a tool
 never adds scope or action authority and cannot override tool policy. The new
 cache identity prevents reuse of prefixes built with the old visibility contract.
+
+## Milestone 34 records catalog framing
+
+Context builder identity advances to `context-builder@13` at Milestone 34,
+when row 2's framing gains the records catalog sentence of
+[owner-records.md](owner-records.md#the-records-catalog-in-context). The
+sentence is in every session's prefix whether or not the records flag is on,
+so a `context-builder@11` or `@12` plan no longer renders the same bytes: its
+stored prefix hash fails the planner's recheck and it re-plans once through
+the ordinary logged epoch rotation.

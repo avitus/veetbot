@@ -7,10 +7,11 @@ title: Current Milestone
 - **Milestone 34 — Owner records (ADR-0239):** On 2026-10-22 the owner
   authorized roadmap item B14. [Owner records](owner-records.md) specifies five
   `records.*` tools over named numeric series, approval-gated creation and
-  deletion, a trust-conditioned append, a formation rule that keeps readings
-  out of beliefs, and a body-region catalog, with ten registered gates.
-  Implementation begins test-first in the specification's build sequence; no
-  gate is green and nothing is activated.
+  deletion, an append refused in untrusted turns, a formation rule that keeps
+  readings out of beliefs, and a body-region catalog, with ten registered
+  gates. The build sequence is implemented test-first behind
+  `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its test;
+  nothing is activated, and review and delivery are pending.
 
 - **Owner-directed source learning — ADR-0233:** On 2026-10-21 the owner
   authorized governed website learning, tentative-memory reinforcement and

@@ -1502,7 +1502,7 @@ surface tables.
 ### Owner records, ten gates
 
 Ten gates open the `records` area at Milestone 34. They cover scope
-isolation on both adapters, the trust condition and the three approval rows,
+isolation on both adapters, the untrusted-turn refusal and approval by class,
 append replay, deterministic window summaries, the scans, erasure through
 the tool and through session and principal deletion, the formation rule that
 keeps a reading out of beliefs, registration under the flag, listing
@@ -1525,8 +1525,8 @@ stability.
 ```
 
 Gates 4 and 9 are properties because summaries and renderings range over
-generated stores. Gate 8 is structural, a walk over the registry and the
-profile. The remaining seven are boundary cases over the store, the service,
+generated stores. Gate 8 is structural, a walk over the registry, the
+builtin domains and the scope vocabulary. The remaining seven are boundary cases over the store, the service,
 the policy engine, formation and the context builder.
 
 ### This document, seven gates

@@ -127,7 +127,7 @@ not find it here should find the reason here.
   match. This milestone reuses that mechanism and generalizes its subject
   from one thread to one bounded batch of senders.
 - **The approval floor.** `EXTERNAL_WRITE` and `EXTERNAL_MESSAGE` require
-  approval in the default matrix (policy-and-approvals.md:612-613), and no
+  approval in the default matrix (policy-and-approvals.md:623-624), and no
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection
@@ -375,7 +375,7 @@ the arguments an approval of the destination.
 **Classification.** `IDEMPOTENT` is the honest class and not a convenience:
 the request is a constant, and sending it twice leaves the recipient exactly
 as unsubscribed as sending it once. Recovery may therefore re-execute
-(tool-system.md:666-675), which matters because an unsubscribe has no
+(tool-system.md:667-676), which matters because an unsubscribe has no
 read-back that could reconcile an unknown outcome. Per-target outcomes are
 persisted as each completes, so a re-execution skips targets already
 accepted rather than dialling them again.

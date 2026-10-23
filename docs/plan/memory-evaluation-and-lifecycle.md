@@ -21,18 +21,18 @@ not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
 scenarios (memory-retrieval-and-ranking.md:868), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:803-805).
+recall of consequential facts (memory-formation-and-consolidation.md:814-816).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
-(memory-formation-and-consolidation.md:312-314), usage that resets decay and raises
+(memory-formation-and-consolidation.md:323-325), usage that resets decay and raises
 utility without ever raising confidence (memory-retrieval-and-ranking.md:910-913),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
 resolved at read time (memory-retrieval-and-ranking.md:905), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:830) are
+that is opt-in per principal (memory-formation-and-consolidation.md:841) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -862,7 +862,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:362): the delta is issued for what the
+context engine caps (context-engine.md:372): the delta is issued for what the
 base block left of both the token and item budgets, excluding its already
 returned belief identifiers before candidate limits. It is not issued when either
 allowance is exhausted, so a session with a frozen snapshot cannot carry twice the recall a
@@ -944,7 +944,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:830), so it is a command and it demands
+(memory-formation-and-consolidation.md:841), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the
