@@ -84,8 +84,22 @@ def test_validate_value_quantizes_and_bounds() -> None:
     assert short_value(validate_value(Decimal("1E+2"))) == "100"
     assert short_value(validate_value(Decimal("0"))) == "0"
     assert short_value(validate_value(Decimal("-0.5"))) == "-0.5"
+    assert canonical_value(validate_value(Decimal("-0"))) == "0.000000"
+    assert short_value(validate_value(Decimal("-0"))) == "0"
+    assert short_value(Decimal("-0")) == "0"
     assert validate_value(Decimal("999999999999.999999")) == Decimal("999999999999.999999")
-    for bad in ("NaN", "Infinity", "-Infinity", "1234567890123", "0.1234567", "1E+12"):
+    for bad in (
+        "NaN",
+        "Infinity",
+        "-Infinity",
+        "1234567890123",
+        "0.1234567",
+        "1E+12",
+        "1E+23",
+        "1E+30",
+        "1E+999999",
+        "1E-30",
+    ):
         with pytest.raises(RecordValueError):
             validate_value(Decimal(bad))
 
@@ -179,6 +193,7 @@ def test_entry_refusals() -> None:
         {"values": {}},
         {"values": {"lbs": Decimal("NaN")}},
         {"values": {"lbs": Decimal("0.1234567")}},
+        {"values": {"lbs": Decimal("1E+30")}},
         {"values": {"Bad": Decimal("1")}},
         {"values": {f"c{i}": Decimal(i) for i in range(5)}},
         {"note": "x" * 201},

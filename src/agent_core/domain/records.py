@@ -22,6 +22,7 @@ FUTURE_SKEW = timedelta(minutes=5)
 _NAME_MAX: Final = 64
 _COMPONENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _MAX_INTEGER_DIGITS: Final = 12
+_MAX_FRACTION_DIGITS: Final = 6
 _SIX_PLACES = Decimal("0.000001")
 
 
@@ -55,18 +56,28 @@ def normalize_series_name(display_name: str) -> str:
     return name
 
 
+def _quantized(value: Decimal) -> Decimal:
+    quantized = value.quantize(_SIX_PLACES)
+    return abs(quantized) if quantized == 0 else quantized
+
+
 def validate_value(value: Decimal) -> Decimal:
     if not value.is_finite():
         raise RecordValueError("value must be finite")
-    if value != value.quantize(_SIX_PLACES):
-        raise RecordValueError("value has more than six fraction digits")
-    if value != 0 and value.adjusted() + 1 > _MAX_INTEGER_DIGITS:
-        raise RecordValueError("value has more than twelve integer digits")
-    return value.quantize(_SIX_PLACES)
+    _, digits, exponent = value.as_tuple()
+    assert isinstance(exponent, int)
+    if any(digits):
+        coefficient = "".join(map(str, digits)).rstrip("0")
+        trailing = len(digits) - len(coefficient)
+        if exponent + trailing < -_MAX_FRACTION_DIGITS:
+            raise RecordValueError("value has more than six fraction digits")
+        if value.adjusted() + 1 > _MAX_INTEGER_DIGITS:
+            raise RecordValueError("value has more than twelve integer digits")
+    return _quantized(value)
 
 
 def canonical_value(value: Decimal) -> str:
-    return f"{value.quantize(_SIX_PLACES):f}"
+    return f"{_quantized(value):f}"
 
 
 def short_value(value: Decimal) -> str:
