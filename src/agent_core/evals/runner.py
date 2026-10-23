@@ -65,7 +65,7 @@ async def _append_eval_record(
 ) -> None:
     """Create a series and append one entry through the records service."""
 
-    records = RecordsService(composition.uow_factory, composition.clock)
+    records = RecordsService(composition.uow_factory, composition.clock, composition.ids)
     await records.create_series(
         principal,
         display_name="Eval weight",

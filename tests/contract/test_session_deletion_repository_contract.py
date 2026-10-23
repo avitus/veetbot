@@ -51,7 +51,7 @@ from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, princi
 from tests.contract.test_browser_task_grant_repository_contract import grant as task_grant
 from tests.contract.test_delegation_repository_contract import delegation
 from tests.contract.test_integrated_episode_store_contract import integrated_episode
-from tests.contract.test_records_store_contract import everything, make_entry, make_series
+from tests.contract.test_record_store_contract import everything, make_entry, make_series
 from tests.contract.test_schedule_repository_contract import revision, schedule
 
 

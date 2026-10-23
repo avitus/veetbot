@@ -18,7 +18,7 @@ from agent_core.domain.policies import TrustLevel
 from agent_core.domain.records import RecordPrecision
 
 if TYPE_CHECKING:
-    from agent_core.application.records import CatalogLine, RecordsCatalog
+    from agent_core.domain.records import CatalogLine, RecordsCatalog
 
 CATALOG_SOURCE = "records.catalog"
 CATALOG_SCOPE = "records.read"

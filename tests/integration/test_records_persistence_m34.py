@@ -11,7 +11,7 @@ from agent_core.adapters.persistence.database import create_engine, create_sessi
 from agent_core.adapters.persistence.records import PostgresRecordStore
 from agent_core.adapters.persistence.sqlalchemy_models import RecordEntryRow
 from tests.contract.support import NOW, principal
-from tests.contract.test_records_store_contract import (
+from tests.contract.test_record_store_contract import (
     CONTRACTS,
     make_entry,
     make_series,

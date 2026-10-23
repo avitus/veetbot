@@ -3,15 +3,16 @@
 from dataclasses import replace
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.application.records import RecordsService
 from agent_core.domain.errors import AuthorizationError
-from agent_core.domain.records import RecordValueError
+from agent_core.domain.records import Order, RecordValueError
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult
-from agent_core.ports.records import Order
 from agent_core.tools.records import (
     RecordsAppendTool,
     RecordsCreateSeriesTool,
@@ -38,7 +39,9 @@ class Harness:
 
 async def harness() -> Harness:
     clock, factory = await memory_uow_factory()
-    return Harness(RecordsService(factory, clock))
+    return Harness(
+        RecordsService(factory, clock, SequenceIdFactory(UUID(int=n) for n in range(9_000, 10_000)))
+    )
 
 
 def context(key: str = "k1", *, scopes: set[str] | None = None) -> ToolExecutionContext:

@@ -7,7 +7,7 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import ColumnElement, delete, func, select, update
+from sqlalchemy import ColumnElement, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -370,8 +370,8 @@ class PostgresRecordStore:
                 return stored, False
             try:
                 async with self._session.begin_nested():
-                    self._session.add(
-                        RecordSeriesRow(
+                    await self._session.execute(
+                        insert(RecordSeriesRow).values(
                             tenant_id=series.tenant_id,
                             principal_id=series.principal_id,
                             id=series.id,
@@ -387,7 +387,6 @@ class PostgresRecordStore:
                             updated_at=series.updated_at,
                         )
                     )
-                    await self._session.flush()
             except IntegrityError:
                 if attempt:
                     raise
@@ -481,8 +480,8 @@ class PostgresRecordStore:
             raise ValueError("entry values must be exactly the declared components")
         try:
             async with self._session.begin_nested():
-                self._session.add(
-                    RecordEntryRow(
+                await self._session.execute(
+                    insert(RecordEntryRow).values(
                         tenant_id=entry.tenant_id,
                         principal_id=entry.principal_id,
                         id=entry.id,
@@ -498,7 +497,6 @@ class PostgresRecordStore:
                         created_at=entry.created_at,
                     )
                 )
-                await self._session.flush()
         except IntegrityError as exc:
             stored = await self._replay(entry)
             if stored is not None:

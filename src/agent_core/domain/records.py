@@ -220,3 +220,95 @@ class RecordEntry(RecordValue):
         if len(trimmed) > NOTE_MAX_CHARACTERS:
             raise ValueError("note is at most 200 characters")
         return trimmed or None
+
+
+class Order(StrEnum):
+    ASC = "asc"
+    DESC = "desc"
+
+
+class Bucket(StrEnum):
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+
+
+class _Result(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class Window(_Result):
+    """A half-open interval ``[since, until)``; an absent ``since`` is unbounded."""
+
+    since: AwareDatetime | None = None
+    until: AwareDatetime
+
+
+class SeriesSummary(_Result):
+    series: RecordSeries
+    entry_count: int
+    first_observed_at: datetime | None
+    last_observed_at: datetime | None
+
+
+class ValueAt(_Result):
+    value: Decimal
+    observed_at: datetime
+
+
+class ComponentSummary(_Result):
+    count: int
+    minimum: Decimal
+    maximum: Decimal
+    mean: Decimal
+    first: ValueAt
+    last: ValueAt
+
+
+class BucketStats(_Result):
+    count: int
+    minimum: Decimal
+    maximum: Decimal
+    mean: Decimal
+
+
+class BucketRow(_Result):
+    start: datetime
+    end: datetime
+    components: dict[str, BucketStats]
+
+
+class AppendResult(_Result):
+    entry: RecordEntry
+    series: RecordSeries
+    entry_count: int
+    replayed: bool
+
+
+class QueryResult(_Result):
+    series: RecordSeries
+    window: Window
+    entries: list[RecordEntry]
+    summary: dict[str, ComponentSummary]
+    buckets: list[BucketRow] | None
+
+
+class DeleteResult(_Result):
+    series: RecordSeries
+    entries_removed: int
+    series_removed: bool
+
+
+class CatalogLine(_Result):
+    display_name: str
+    components: tuple[RecordComponent, ...]
+    entry_count: int
+    last_observed_at: datetime | None
+    last_precision: RecordPrecision | None
+    cadence: RecordCadence | None
+    due_since: datetime | None
+
+
+class RecordsCatalog(_Result):
+    lines: tuple[CatalogLine, ...]
+    omitted: int

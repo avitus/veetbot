@@ -3747,7 +3747,7 @@ async def _compose(
     except ValueError as exc:
         raise ConfigurationError(str(exc)) from exc
     if settings.records_enabled:
-        records_service = RecordsService(uow_factory, clock)
+        records_service = RecordsService(uow_factory, clock, ids)
         records_zone = ZoneInfo("UTC")
         registry.register(RecordsListTool(records_service, records_zone))
         registry.register(RecordsCreateSeriesTool(records_service, records_zone))

@@ -4,14 +4,14 @@ import hashlib
 from dataclasses import replace
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.models.fake import FakeModelProvider
-from agent_core.application.records import RecordsCatalog, RecordsService
+from agent_core.application.records import RecordsService
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
 from agent_core.context.builder import BudgetedContextBuilder
@@ -41,13 +41,18 @@ from agent_core.domain.policies import (
     SideEffectClass,
     TrustLevel,
 )
-from agent_core.domain.records import RecordCadence, RecordComponent, RecordPrecision
+from agent_core.domain.records import (
+    Order,
+    RecordCadence,
+    RecordComponent,
+    RecordPrecision,
+    RecordsCatalog,
+)
 from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.domain.tools import ExecutionTarget, ToolFailureKind, ToolSpec
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import DEFAULT_RULESET
 from agent_core.policy.scopes import PLATFORM_SCOPES
-from agent_core.ports.records import Order
 from agent_core.tools.messages import TOOL_MESSAGES
 from agent_core.tools.records import (
     RecordsAppendTool,
@@ -96,6 +101,10 @@ REASON_CODES = (
 )
 
 
+def _ids() -> SequenceIdFactory:
+    return SequenceIdFactory(UUID(int=value) for value in range(9_000, 10_000))
+
+
 def _environment(flag: str | None) -> dict[str, str]:
     values = {
         "DATABASE_URL": "postgresql+asyncpg://localhost/records-m34",
@@ -124,7 +133,7 @@ async def _registered(flag: str | None) -> set[str]:
 
 async def test_registration_under_flag() -> None:
     clock, factory = await memory_uow_factory()
-    service = RecordsService(factory, clock)
+    service = RecordsService(factory, clock, _ids())
     zone = ZoneInfo("UTC")
     tools = [
         RecordsListTool(service, zone),
@@ -155,7 +164,7 @@ BP = [{"name": "systolic", "unit": "mmHg"}, {"name": "diastolic", "unit": "mmHg"
 
 async def _seeded(origin: TrustLevel) -> tuple[Any, Any, Any]:
     clock, factory = await memory_uow_factory()
-    service = RecordsService(factory, clock)
+    service = RecordsService(factory, clock, _ids())
     zone = ZoneInfo("UTC")
     owner = principal().model_copy(update={"scopes": {"records.read", "records.write"}})
     context = replace(tool_context(), principal=owner, origin_trust=origin)
@@ -306,7 +315,7 @@ class _StaticCatalog:
 
 async def _stored_catalog() -> tuple[RecordsService, Any]:
     clock, factory = await memory_uow_factory()
-    service = RecordsService(factory, clock)
+    service = RecordsService(factory, clock, _ids())
     await service.create_series(
         CATALOG_OWNER,
         display_name="Blood pressure",
@@ -527,7 +536,7 @@ async def test_composed_builder_carries_the_catalog_under_the_flag(flag: str) ->
         assert isinstance(provider, FakeModelProvider)
         assert "records.read" in composition.principal.scopes
         session_id = await composition.sessions.create()
-        records = RecordsService(composition.uow_factory, composition.clock)
+        records = RecordsService(composition.uow_factory, composition.clock, composition.ids)
         await records.create_series(
             composition.principal,
             display_name="Blood pressure",

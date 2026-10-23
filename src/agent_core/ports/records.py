@@ -1,77 +1,40 @@
 """Owner-isolated record series storage (Milestone 34)."""
 
-from datetime import datetime
-from decimal import Decimal
-from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict
-
 from agent_core.domain.agents import Principal
 from agent_core.domain.memory import Sensitivity
-from agent_core.domain.records import RecordEntry, RecordSeries
+from agent_core.domain.records import (
+    Bucket,
+    BucketRow,
+    BucketStats,
+    ComponentSummary,
+    Order,
+    RecordEntry,
+    RecordSeries,
+    SeriesSummary,
+    ValueAt,
+    Window,
+)
 
-
-class Order(StrEnum):
-    ASC = "asc"
-    DESC = "desc"
-
-
-class Bucket(StrEnum):
-    DAY = "day"
-    WEEK = "week"
-    MONTH = "month"
+__all__ = [
+    "Bucket",
+    "BucketRow",
+    "BucketStats",
+    "ComponentSummary",
+    "Order",
+    "RecordStore",
+    "SeriesExists",
+    "SeriesSummary",
+    "ValueAt",
+    "Window",
+]
 
 
 class SeriesExists(Exception):  # noqa: N818
     """A series of that name exists with a different declaration."""
-
-
-class _Result(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class Window(_Result):
-    """A half-open interval ``[since, until)``; an absent ``since`` is unbounded."""
-
-    since: AwareDatetime | None = None
-    until: AwareDatetime
-
-
-class SeriesSummary(_Result):
-    series: RecordSeries
-    entry_count: int
-    first_observed_at: datetime | None
-    last_observed_at: datetime | None
-
-
-class ValueAt(_Result):
-    value: Decimal
-    observed_at: datetime
-
-
-class ComponentSummary(_Result):
-    count: int
-    minimum: Decimal
-    maximum: Decimal
-    mean: Decimal
-    first: ValueAt
-    last: ValueAt
-
-
-class BucketStats(_Result):
-    count: int
-    minimum: Decimal
-    maximum: Decimal
-    mean: Decimal
-
-
-class BucketRow(_Result):
-    start: datetime
-    end: datetime
-    components: dict[str, BucketStats]
 
 
 class RecordStore(Protocol):

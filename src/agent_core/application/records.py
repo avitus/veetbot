@@ -6,10 +6,8 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final
-from uuid import UUID, uuid4
+from uuid import UUID
 from zoneinfo import ZoneInfo
-
-from pydantic import BaseModel, ConfigDict
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import NewEvent
@@ -20,30 +18,31 @@ from agent_core.domain.records import (
     FUTURE_SKEW,
     MAX_ENTRIES_PER_SERIES,
     MAX_SERIES_PER_PRINCIPAL,
+    AppendResult,
+    Bucket,
+    CatalogLine,
+    DeleteResult,
+    Order,
+    QueryResult,
     RecordCadence,
     RecordComponent,
     RecordEntry,
     RecordFutureError,
     RecordPrecision,
+    RecordsCatalog,
     RecordSeries,
     RecordValueError,
+    SeriesSummary,
+    Window,
     canonical_value,
     due_since,
     normalize_series_name,
     resolve_observed_at,
     validate_value,
 )
-from agent_core.ports.determinism import Clock
+from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
-from agent_core.ports.records import (
-    Bucket,
-    BucketRow,
-    ComponentSummary,
-    Order,
-    SeriesExists,
-    SeriesSummary,
-    Window,
-)
+from agent_core.ports.records import SeriesExists
 
 MAX_BUCKETS: Final = 1_000
 _MIN_BUCKET_SPAN: Final = {
@@ -62,57 +61,19 @@ class RecordsRefusal(Exception):  # noqa: N818
         self.detail = detail
 
 
-class _Result(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class AppendResult(_Result):
-    entry: RecordEntry
-    series: RecordSeries
-    entry_count: int
-    replayed: bool
-
-
-class QueryResult(_Result):
-    series: RecordSeries
-    window: Window
-    entries: list[RecordEntry]
-    summary: dict[str, ComponentSummary]
-    buckets: list[BucketRow] | None
-
-
-class DeleteResult(_Result):
-    series: RecordSeries
-    entries_removed: int
-    series_removed: bool
-
-
-class CatalogLine(_Result):
-    display_name: str
-    components: tuple[RecordComponent, ...]
-    entry_count: int
-    last_observed_at: datetime | None
-    last_precision: RecordPrecision | None
-    cadence: RecordCadence | None
-    due_since: datetime | None
-
-
-class RecordsCatalog(_Result):
-    lines: tuple[CatalogLine, ...]
-    omitted: int
-
-
 class RecordsService:
     def __init__(
         self,
         uow_factory: UnitOfWorkFactory,
         clock: Clock,
+        ids: IdFactory,
         *,
         max_series: int = MAX_SERIES_PER_PRINCIPAL,
         max_entries: int = MAX_ENTRIES_PER_SERIES,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
+        self._ids = ids
         self._max_series = max_series
         self._max_entries = max_entries
 
@@ -158,7 +119,7 @@ class RecordsService:
                     "records.series_limit", f"at most {self._max_series} series are allowed"
                 )
             candidate = RecordSeries(
-                id=uuid4(),
+                id=self._ids.new_id(),
                 tenant_id=principal.tenant_id,
                 principal_id=principal.principal_id,
                 name=name,
@@ -246,7 +207,7 @@ class RecordsService:
                     "records.entry_limit", f"at most {self._max_entries} entries are allowed"
                 )
             entry = RecordEntry(
-                id=uuid4(),
+                id=self._ids.new_id(),
                 series_id=series.id,
                 tenant_id=principal.tenant_id,
                 principal_id=principal.principal_id,
