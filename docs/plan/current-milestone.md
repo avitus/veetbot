@@ -274,6 +274,10 @@ title: Current Milestone
   review-only sign-in works with thirty-day cookie persistence. Supervised review
   remains enabled and unattended application remains off; this operational
   delivery does not supply the missing comparative quality or independent review.
+  On October 22 the owner authorized verified metadata-only legacy recovery
+  (ADR-0241), followed by full-bank supervised eligibility under the existing
+  source and erasure checks. The cutoff remains active until complete recovery;
+  deleted payloads, historical decisions, budgets and unattended gates are unchanged.
   The once/dry-run operator
   controls, remaining complete runtime gates and fresh matching comparative
   release evidence remain required; no verified sequential ceiling advances.

@@ -108,6 +108,14 @@ class InMemoryReconsolidationStore:
         self._dreaming = dreaming
         self._audits: list[ReconsolidationAudit] = []
 
+    async def restart_full_inventory(self, principal: Principal) -> None:
+        owner = (principal.tenant_id, principal.principal_id)
+        job = self._jobs.get(owner)
+        if job is not None:
+            self._jobs[owner] = job.model_copy(
+                update={"full_cursor": 0, "state": "ready", "revision": job.revision + 1}
+            )
+
     async def retire_dreaming_groups(self, principal: Principal) -> None:
         for key, group in self._groups.items():
             if (group.tenant_id, group.principal_id) == (

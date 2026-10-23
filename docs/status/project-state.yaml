@@ -309,6 +309,20 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Owner-authorized verified legacy recovery (2026-10-22, ADR-0241)
+      outcome: implemented_pending_production_recovery
+      detail: >-
+        The owner authorized metadata-only recovery and full-bank supervised
+        dreaming after a read-only investigation matched missing attribution
+        through deterministic identifiers and retained cleanup receipts. The
+        recovery must validate every unknown erased head, preserve deleted
+        content and all existing privacy checks, retain the cutover as history,
+        and restart inventory without resetting budgets or decisions. Production
+        retains the forward-only cutoff until verified recovery is delivered.
+        The bounded operator command previews before confirmation, validates all
+        proofs atomically, and preserves daily scheduling, spending and erased
+        sources. Read-only validation matched all 469 uncertain heads (142
+        attribution-bearing), without restoring content or writing production.
     - check: Independent supervised dreaming delivery and cutover (2026-10-15, ADR-0202)
       outcome: delivered_supervised_cutover_verified
       detail: >-

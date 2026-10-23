@@ -83,6 +83,16 @@ class ForwardDreamingBoundary(ReconValue):
     creation_sequence: int = Field(ge=0)
     change_sequence: int = Field(ge=0)
     legacy_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    recovered_at: AwareDatetime | None = None
+    recovery_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def complete_recovery_receipt(self) -> "ForwardDreamingBoundary":
+        if (self.recovered_at is None) != (self.recovery_digest is None):
+            raise ValueError("Recovery requires both its timestamp and manifest digest")
+        if self.recovered_at is not None and self.recovered_at < self.activated_at:
+            raise ValueError("Recovery cannot precede its original cutover")
+        return self
 
 
 class DreamingStatus(ReconValue):

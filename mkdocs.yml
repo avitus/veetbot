@@ -375,4 +375,5 @@ nav:
       - "0238 — Owner overviews and memory delivery": adr/0238-owner-overview-and-memory-delivery.md
       - ADR-0239 Owner records and numeric series (Proposed): adr/0239-owner-records-and-numeric-series.md
       - "0240 — Cockpit mode and agent-authored widgets": adr/0240-cockpit-mode-and-agent-authored-widgets.md
+      - "0241 — Verified legacy dreaming recovery": adr/0241-verified-legacy-dreaming-recovery.md
   - Changelog: changelog.md

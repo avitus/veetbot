@@ -76,6 +76,10 @@ def _deletion_artifact_ref(artifact: ArtifactRef) -> ArtifactRef:
 class PostgresSessionDeletionRepository:
     """Atomically remove a session graph and retain byte-deletion work."""
 
+    async def deleted_at(self, principal: Principal, session_id: UUID) -> datetime | None:
+        row = await self._owned_tombstone(session_id, principal)
+        return None if row is None else row.deleted_at
+
     def __init__(self, session: AsyncSession, people: PeopleStore, traces: TraceStore) -> None:
         self._session = session
         self._people = people
@@ -539,6 +543,14 @@ class PostgresSessionDeletionRepository:
 class InMemorySessionDeletionRepository:
     """Deterministic erasure over the in-process adapter's shared maps."""
 
+    async def deleted_at(self, principal: Principal, session_id: UUID) -> datetime | None:
+        value = self._tombstones.get(session_id)
+        return (
+            value[2]
+            if value is not None and value[:2] == (principal.tenant_id, principal.principal_id)
+            else None
+        )
+
     def __init__(
         self,
         *,
@@ -655,6 +667,7 @@ class InMemorySessionDeletionRepository:
             if key in self._people._records:
                 continue
             self._people._records[key] = [receipt]
+            self._people._remember_attribution(receipt)
             owner = (principal.tenant_id, principal.principal_id)
             self._people._positions[owner] = self._people._positions.get(owner, 0) + 1
 

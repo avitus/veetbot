@@ -67,3 +67,10 @@ following the existing linear migration contract. Their old evaluated checkouts,
 databases and observations retain their original ancestry and identities; new
 recall candidates use freshly migrated databases and fresh release evidence.
 This release includes no optional recall implementation or evaluation-rule change.
+
+## Verified recovery amendment (2026-10-22)
+
+ADR-0241 permits explicit retirement of the cutoff after complete, verified
+metadata-only recovery. The original boundary remains in audit history; neither
+its coordinates nor past observations are rewritten. Existing erasure and source
+checks remain mandatory for older memories.
