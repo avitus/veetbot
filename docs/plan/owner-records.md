@@ -299,7 +299,10 @@ and a `structured` body the harness and the clients read.
   "window", "bucket", "buckets": [{"start", "end", component: {"count",
   "min", "max", "mean"}}]}` and no entries. Empty buckets are omitted.
 - `records.delete` → `{"series", "entries_removed": n, "series_removed":
-  bool}`; a delete of what is already gone succeeds with zeros.
+  bool}`. An entry delete on an existing series whose entry is already gone
+  succeeds with zeros; a delete naming an unknown series, entry or whole
+  series, is `records.series_unknown`, so a stranger's delete is
+  indistinguishable from a missing one.
 
 The window is half-open, `[since, until)`. `since` defaults to the earliest
 entry and `until` to the clock plus the five-minute future skew, so an entry
