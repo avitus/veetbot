@@ -52,7 +52,7 @@ test('each rejection category stops the build with its diagnostic and no bundle'
     ['screen.credential', { 'widget.tsx': (text) => text.replace('const feed =', 'const token: string = "x";\n  void token;\n  const feed =') }],
     ['fixture.undeclared_feed', { 'fixtures/typical.json': (text) => JSON.stringify({ ...JSON.parse(text), feeds: { 'agent.other': { observedAt: null, expectedIntervalSec: 60 } } }) }],
     ['compile.typecheck', { 'widget.tsx': (text) => text.replace('size={size === \'sm\' ? \'m\' : \'l\'}', 'size={7}') }],
-    ['render.throws', { 'widget.tsx': (text) => text.replace('const flight =', "if (!feed) throw new Error('missing');\n  const flight =") }],
+    ['render.throws', { 'widget.tsx': (text) => text.replace('const flight =', "if (!feed?.data) throw new Error('missing');\n  const flight =") }],
   ];
   for (const [rule, edits] of cases) {
     const result = await buildWidget({ files: changed(edits), slug: 'flight-tracker' });

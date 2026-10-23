@@ -105,6 +105,17 @@ for (const [name, engine] of ENGINES) {
     }
   });
 
+  test(`${name}: a declared feed with no snapshot yet renders as pending`, { timeout: 60000 }, async () => {
+    const board = await openBoard(engine, [await reference('approvals-waiting')], {});
+    try {
+      await board.settled(1);
+      const level = await board.realm().$eval('.ck-tile', (element) => element.getAttribute('data-level'));
+      assert.equal(level, 'pending');
+    } finally {
+      await board.browser.close();
+    }
+  });
+
   test(`${name}: a widget sees only its declared feeds and its own settings`, { timeout: 60000 }, async () => {
     const snoop = await placement('snoop', await adversarial('snoop'), {
       feeds: [{ id: 'agent.weather', history: 1 }],

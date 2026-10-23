@@ -73,5 +73,8 @@ test('fixture props are what a widget receives', () => {
     data: { gate: 'B12' },
     history: [{ observedAt: Date.parse('2026-10-22T17:54:30Z'), data: { gate: 'B10' } }],
   });
-  assert.deepEqual(fixtureProps({ ...TYPICAL, feeds: {} }, MANIFEST).feeds, {});
+  // A declared feed with no snapshot yet reaches the widget as pending, not missing.
+  assert.deepEqual(fixtureProps({ ...TYPICAL, feeds: {} }, MANIFEST).feeds, {
+    'agent.flight-status': { observedAt: null, expectedIntervalSec: 0, error: null, data: null, history: [] },
+  });
 });

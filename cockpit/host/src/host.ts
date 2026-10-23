@@ -37,6 +37,9 @@ function keyOf(widget: WidgetPlacement) {
   return `${widget.slug}@${widget.revision}`;
 }
 
+// A declared feed with no snapshot yet; the kit renders it as pending.
+const PENDING: FeedView = { observedAt: null, expectedIntervalSec: 0, error: null, data: null, history: [] };
+
 function view(envelope: FeedEnvelope, depth: number): FeedView {
   return {
     observedAt: envelope.observedAt,
@@ -54,7 +57,7 @@ export function tilesFor(current: Snapshot, excluded: ReadonlySet<string>): Real
       const feeds: Record<string, FeedView> = {};
       for (const { id, history } of widget.feeds) {
         const envelope = current.feeds[id];
-        if (envelope) feeds[id] = view(envelope, history);
+        feeds[id] = envelope ? view(envelope, history) : { ...PENDING, history: [] };
       }
       return {
         key: keyOf(widget),

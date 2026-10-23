@@ -186,7 +186,9 @@ The **component** receives `{feeds, settings, size, theme}`, where:
 
 - each declared feed is
   `{observedAt, expectedIntervalSec, error, data, history}`, with instants in
-  epoch milliseconds, or absent before its first snapshot;
+  epoch milliseconds; before its first snapshot it is a pending envelope with
+  `observedAt` and `data` null, `expectedIntervalSec` 0 and no history, so the
+  kit renders it as pending;
 - time comes from the kit's clock (`useNow`), which the realm drives with
   server-corrected time and each fixture freezes, so rendering is
   deterministic for a given input.
@@ -741,9 +743,10 @@ which closes that step. The approved designs fix these choices:
   and states its last update and expected interval.
 - Lists fold the rows that do not fit into "+N more".
 - Night watch is a third theme, darker than A2 dark, with amber kept at full
-  strength. The assistant
-authors the production versions of these seeds itself at activation, as the
-milestone's first real use.
+  strength.
+
+The assistant authors the production versions of these seeds itself at
+activation, as the milestone's first real use.
 
 ## Events, telemetry, and privacy
 

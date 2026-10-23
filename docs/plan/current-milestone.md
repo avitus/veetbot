@@ -904,6 +904,6 @@ route and a resumable per-tenant stream carry the data, under new scopes and
 a default-off flag. The widget write tool is allowed by an exact-name rule,
 and the trust overlay stays intact.
 
-The design and its pending gates are registered and nothing is implemented.
-Implementation begins with the MagicPath designs and the `cockpit/` workspace.
-This independent workstream is authorized; the verified ceiling does not move.
+The `cockpit/` workspace and the stores are implemented and gate 1 is bound;
+every other gate is pending. This independent workstream is authorized; the
+verified ceiling does not move.

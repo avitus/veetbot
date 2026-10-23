@@ -57,7 +57,11 @@ export function fixtureProps(fixture, manifest) {
   const feeds = {};
   for (const { id } of manifest.feeds) {
     const feed = fixture.feeds[id];
-    if (!feed) continue;
+    if (!feed) {
+      // Before its first snapshot a declared feed reaches the widget as pending.
+      feeds[id] = { observedAt: null, expectedIntervalSec: 0, error: null, data: null, history: [] };
+      continue;
+    }
     feeds[id] = {
       observedAt: feed.observedAt === null ? null : Date.parse(feed.observedAt),
       expectedIntervalSec: feed.expectedIntervalSec,

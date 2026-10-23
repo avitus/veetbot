@@ -82,7 +82,7 @@ test('every fixture renders at every declared size', async () => {
 });
 
 test('a widget that throws or renders nothing is rejected per fixture and size', async () => {
-  const throwing = GOOD.replace('const status =', "if (!feed) throw new Error('no feed');\n  const status =");
+  const throwing = GOOD.replace('const status =', "if (!feed?.data) throw new Error('no feed');\n  const status =");
   const thrown = await compileWidget(packageWith(throwing));
   const failures = await renderFixtures(packageWith(throwing), /** @type {string} */ (thrown.bundle), MANIFEST);
   assert.deepEqual(rules(failures), ['render.throws', 'render.throws']);
