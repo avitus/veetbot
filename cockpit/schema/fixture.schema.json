@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://veetbot.com/schemas/cockpit/fixture.schema.json",
+  "title": "Cockpit widget fixture: synthetic inputs for one render",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["now", "settings", "feeds"],
+  "properties": {
+    "now": { "$ref": "#/definitions/instant" },
+    "settings": { "type": "object" },
+    "feeds": { "type": "object", "additionalProperties": { "$ref": "#/definitions/feed" } }
+  },
+  "definitions": {
+    "instant": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,3})?)?Z$"
+    },
+    "feed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observedAt", "expectedIntervalSec"],
+      "properties": {
+        "observedAt": { "oneOf": [{ "$ref": "#/definitions/instant" }, { "type": "null" }] },
+        "expectedIntervalSec": { "type": "integer", "minimum": 1 },
+        "error": { "type": ["string", "null"], "maxLength": 200 },
+        "data": true,
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["observedAt", "data"],
+            "properties": { "observedAt": { "$ref": "#/definitions/instant" }, "data": true }
+          }
+        }
+      }
+    }
+  }
+}

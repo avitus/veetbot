@@ -37,6 +37,8 @@ from agent_core.domain.reconsolidation_views import (
 
 
 class ReconsolidationStore(Protocol):
+    async def restart_full_inventory(self, principal: Principal) -> None: ...
+
     async def retire_dreaming_groups(self, principal: Principal) -> None:
         """Under the owner/People locks, retire queued work during a one-time cutover."""
         ...

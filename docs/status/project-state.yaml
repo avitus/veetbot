@@ -1,3 +1,6 @@
+# ADR-0240: Owner authorized Milestone 35, Cockpit mode and agent-authored
+# widgets, on 2026-10-22; design and pending gates only. The verified ceiling
+# does not move.
 # ADR-0233: Owner authorized governed source learning and save reporting on
 # 2026-10-21; PR 181 delivered it on 2026-10-22. The owner-reported deferred-format
 # repair is authorized and awaits release; so does the 2026-10-22 owner-named site
@@ -259,9 +262,31 @@ project:
     - 30
     - 31
     - 32
+    - 33
+    - 34
+    - 35
 
 
 milestones:
+  '35':
+    title: Cockpit mode and agent-authored widgets
+    status: authorized
+    authorized_on: '2026-10-22'
+    design: docs/plan/cockpit.md
+    adr: docs/adr/0240-cockpit-mode-and-agent-authored-widgets.md
+    gates_registered: 23
+    authorized_scope:
+    - A third client mode, Cockpit, on iPhone, iPad and Mac, with the mode shell made exhaustive over three modes
+    - A MagicPath-designed widget kit, host page, network-less realm, builder and schemas in a cockpit/ workspace on main
+    - Assistant-authored widgets validated, privacy-screened and built offline in a second platform-owned sandbox image
+    - Commit-before-activate publication through a GitHub App to the orphan cockpit/widgets branch, with human-commit import
+    - Platform and assistant-published feeds with freshness, private widget settings and per-device-class layouts
+    - A snapshot route, a resumable per-tenant event stream, asset routes, cockpit.read and cockpit.write scopes and a default-off flag
+    - Five deferred builtin tools, the widget write tool allowed by an exact-name rule with the trust overlay intact
+    deferred_scope:
+    - Deterministic collectors that fetch outside data without a model run, and their egress allowlist
+    - A browser or television rendering, WidgetKit, Lock Screen widgets and Live Activities
+    - The assistant using MagicPath at runtime, webhook-driven import, and widgets that act
   '32':
     title: Memory reconsolidation (dreaming)
     status: in_progress
@@ -284,6 +309,20 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Owner-authorized verified legacy recovery (2026-10-22, ADR-0241)
+      outcome: implemented_pending_production_recovery
+      detail: >-
+        The owner authorized metadata-only recovery and full-bank supervised
+        dreaming after a read-only investigation matched missing attribution
+        through deterministic identifiers and retained cleanup receipts. The
+        recovery must validate every unknown erased head, preserve deleted
+        content and all existing privacy checks, retain the cutover as history,
+        and restart inventory without resetting budgets or decisions. Production
+        retains the forward-only cutoff until verified recovery is delivered.
+        The bounded operator command previews before confirmation, validates all
+        proofs atomically, and preserves daily scheduling, spending and erased
+        sources. Read-only validation matched all 469 uncertain heads (142
+        attribution-bearing), without restoring content or writing production.
     - check: Independent supervised dreaming delivery and cutover (2026-10-15, ADR-0202)
       outcome: delivered_supervised_cutover_verified
       detail: >-
@@ -2954,5 +2993,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
   documents_required_before_coding_reaches_them: []
 
-last_updated: '2026-10-10T19:45:12Z'
+last_updated: '2026-10-23T03:30:00Z'
 last_reviewed_commit: e55551fa

@@ -1635,3 +1635,22 @@ and completion requires positive Following evidence on that profile. Changed
 targets and unrelated writes retain their normal approval rules. A consumed or
 uncertain request cannot authorize another click. Verified connection/sign-in
 resumes the same bounded request; it does not create general browser authority.
+
+## Milestone 35 widget publication rule
+
+[ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md) records
+the owner's decision that widget changes from the owner's own turns need no
+per-change approval. The default profile therefore gains one exact-name
+`tool_rules` entry allowing `cockpit.widget.write`, whose side effect is
+`publication`. It follows the `device.sms.send` and `browser.act` precedent,
+and it does not set `human_confirms_arguments`.
+
+The trust overlay continues to escalate a turn whose origin is not the user,
+the platform or trusted configuration, and any untrusted argument. The
+credential-to-egress hardline rule continues to apply to the tool's
+arguments; the builder checks the same pattern first, so the assistant sees a
+diagnostic rather than a denial.
+
+The edit moves the content-addressed policy version. The step that makes it
+updates the pinned shipped version and names any version-bound evidence it
+affects. [cockpit.md](cockpit.md#the-tools) owns the tool contract.

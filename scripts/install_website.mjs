@@ -5,7 +5,13 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const website = fileURLToPath(new URL('../website/', import.meta.url));
+// The npm workspaces this installer manages: the public site and Cockpit.
+const workspace = process.argv[2] ?? 'website';
+if (!['website', 'cockpit'].includes(workspace)) {
+  console.error(`Unknown npm workspace: ${workspace}`);
+  process.exit(2);
+}
+const website = fileURLToPath(new URL(`../${workspace}/`, import.meta.url));
 const stamp = `${website}node_modules/.veetbot-install-key`;
 
 function npm(args, stdio = 'pipe') {
@@ -34,7 +40,7 @@ try {
   const forced = Boolean(process.env.CI) || process.env.WEBSITE_INSTALL_FORCE === '1';
   const reusable = !forced && existsSync(stamp) && readFileSync(stamp, 'utf8') === key;
   if (reusable && npm(['ls', '--all', '--json']).status === 0) {
-    console.log('Website dependencies unchanged; reusing verified local install.');
+    console.log(`${workspace} dependencies unchanged; reusing verified local install.`);
   } else {
     rmSync(stamp, { force: true });
     const result = npm(['ci', '--no-audit', '--no-fund'], 'inherit');
@@ -42,6 +48,6 @@ try {
     writeFileSync(stamp, key);
   }
 } catch (error) {
-  console.error(`Website dependency installation failed: ${error.message}`);
+  console.error(`${workspace} dependency installation failed: ${error.message}`);
   process.exitCode = 1;
 }

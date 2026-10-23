@@ -1,0 +1,1 @@
+{ "now": "2026-10-22T18:00:00Z", "settings": {}, "feeds": { "veetbot.schedules.health": { "observedAt": "2026-10-22T17:57:50Z", "expectedIntervalSec": 300, "data": { "onTime": 0, "total": 0, "failed": 0, "items": [] } } } }

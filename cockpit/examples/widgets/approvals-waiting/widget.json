@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "slug": "approvals-waiting",
+  "title": "Approvals",
+  "purpose": "Shows how many approvals are waiting on the owner and the oldest of them.",
+  "kit_api": 1,
+  "sizes": ["sm", "md"],
+  "feeds": [{ "id": "veetbot.approvals.pending" }],
+  "settings": { "type": "object", "additionalProperties": false, "properties": {} }
+}

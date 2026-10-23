@@ -485,11 +485,24 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(row)
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
         XCTAssertFalse(panel.waitForExistence(timeout: 2), "Three columns leave no room for the panel")
+        let mailboxSettings = app.buttons["email.global.settings"]
+        XCTAssertTrue(mailboxSettings.exists)
         app.buttons["email.sender.people"].firstMatch.click()
         let senderCard = app.descendants(matching: .any)["inspector.email.sender"]
         XCTAssertTrue(senderCard.waitForExistence(timeout: 5))
         XCTAssertTrue(waitForFrame(of: senderCard, timeout: 5) { panel.frame.contains($0) },
                       "Opening the closed panel must bring the requested sender into view")
+        // The panel takes the mailbox sidebar's place, so the thread keeps a reading width.
+        waitForDisappearance(of: mailboxSettings)
+        XCTAssertTrue(app.buttons["mode.chat"].isHittable, "The mode switch moves above the inbox")
+        let thread = app.scrollViews["email.detail"].firstMatch
+        XCTAssertTrue(waitForFrame(of: thread, timeout: 5) { $0.width >= 400 },
+                      "The thread is \(thread.frame.width) points wide beside the panel")
+        attachEmailScreenshot("Email panel in a narrow window")
+        // The window's sidebar button brings the sidebar back and folds the panel.
+        activate(sidebarToggle())
+        XCTAssertTrue(mailboxSettings.waitForExistence(timeout: 5))
+        XCTAssertTrue(panel.waitForNonExistence(timeout: 5), "In a narrow window the sidebar and the panel take turns")
     }
 
     /// The fixture resizes the window after launch. A click computed before

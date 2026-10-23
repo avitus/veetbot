@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "slug": "weather",
+  "title": "Weather",
+  "purpose": "Shows the temperature, the next rain and the coming hours for one place.",
+  "kit_api": 1,
+  "sizes": ["sm", "md", "tall"],
+  "feeds": [{ "id": "agent.weather" }],
+  "settings": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["place"],
+    "properties": { "place": { "type": "string", "maxLength": 40, "title": "Place" } }
+  }
+}

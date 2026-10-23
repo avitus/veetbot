@@ -2025,3 +2025,21 @@ allows the call. Default instructions proactively retain useful separate
 observations and search for tentative memories to reinforce, while reporting
 only confirmed tool outcomes. A manual trust refusal does not imply that
 background formation failed or completed.
+
+## Milestone 35 Cockpit domain
+
+[cockpit.md](cockpit.md#the-tools) adds the `cockpit` builtin domain, which
+registers only under `AGENT_COCKPIT_ENABLED`. Its five tools are deferred
+index entries, never definitions, so the thirty-item roster is unchanged.
+They are:
+
+- `cockpit.read` (`none`);
+- `cockpit.check` (`code_execution` in the isolated builder image);
+- `cockpit.widget.write` (`publication`, conditionally idempotent through the
+  revision trailer);
+- `cockpit.configure` (`none`);
+- `cockpit.feed.publish` (`none`).
+
+Session-environment filtering withholds `cockpit.widget.write` from
+scheduled, delegated, operational and email-task sessions. Delegated children
+cannot write widgets.

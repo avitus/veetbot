@@ -1,0 +1,21 @@
+/* The host page and the realm's board: the grid from the approved boards. */
+html, body { margin: 0; height: 100%; background: transparent; }
+.cockpit-realm { display: block; width: 100%; height: 100%; border: 0; }
+
+.ck-board { min-height: 100%; box-sizing: border-box; padding: var(--ck-gap); background: var(--paper); }
+.ck-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--ck-cols, 4), minmax(0, 1fr));
+  grid-auto-rows: minmax(var(--ck-row), 1fr);
+  grid-auto-flow: row dense;
+  gap: var(--ck-gap);
+}
+.ck-root[data-ck-platform='iphone'] .ck-grid { --ck-cols: 2; grid-auto-rows: var(--ck-row); }
+.ck-slot { position: relative; display: grid; min-width: 0; min-height: 0; }
+.ck-slot > .ck-tile { height: 100%; box-sizing: border-box; }
+.ck-slot[data-size='sm'] { grid-column: span 1; grid-row: span 1; }
+.ck-slot[data-size='md'] { grid-column: span 2; grid-row: span 1; }
+.ck-slot[data-size='tall'] { grid-column: span 1; grid-row: span 2; }
+.ck-slot[data-size='lg'] { grid-column: span 2; grid-row: span 2; }
+.ck-slot[data-size='wide'] { grid-column: 1 / -1; grid-row: span 1; }
+.ck-root[data-ck-platform='iphone'] .ck-slot[data-size='tall'] { grid-column: 1 / -1; }

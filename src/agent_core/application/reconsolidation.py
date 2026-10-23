@@ -10,6 +10,7 @@ from uuid import UUID
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, ForwardDreamingBoundary
+from agent_core.domain.dreaming_recovery import LegacyAttributionManifest, LegacyRecoveryResult
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.reconsolidation_views import (
@@ -90,7 +91,9 @@ class PublicReconsolidationService:
         async with self._uow_factory() as uow:
             event_id = await uow.events.dreaming_cutover_event_id()
             async with uow.people.lock(principal):
-                existing = await uow.people.forward_dreaming_boundary(principal)
+                existing = await uow.people.forward_dreaming_boundary(
+                    principal, include_recovered=True
+                )
                 if existing is not None:
                     return existing
                 if not await uow.reconsolidation.dreaming_cutover_idle(
@@ -103,6 +106,30 @@ class PublicReconsolidationService:
                 return await uow.people.enable_forward_dreaming(
                     principal, event_id, self._clock.now()
                 )
+
+    async def recover_legacy_dreaming(
+        self,
+        principal: Principal,
+        manifest: LegacyAttributionManifest,
+        *,
+        confirm: bool = False,
+    ) -> LegacyRecoveryResult:
+        require_scope(principal, "memory.write")
+        async with self._uow_factory() as uow, uow.people.lock(principal):
+            now = self._clock.now()
+            if not await uow.reconsolidation.dreaming_cutover_idle(principal, now):
+                raise ConflictError("Dreaming is running; retry recovery after its lease ends")
+            deleted_sessions = {}
+            for session_id in {p.session_id for p in manifest.proofs if p.session_id is not None}:
+                deleted_at = await uow.session_deletions.deleted_at(principal, session_id)
+                if deleted_at is not None:
+                    deleted_sessions[session_id] = deleted_at
+            result = await uow.people.recover_legacy_attribution(
+                principal, manifest, deleted_sessions, now, confirm=confirm
+            )
+            if confirm and not result.already_applied:
+                await uow.reconsolidation.restart_full_inventory(principal)
+            return result
 
     async def dreaming_status(self, principal: Principal) -> DreamingStatus:
         require_scope(principal, "memory.read")

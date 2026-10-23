@@ -52,6 +52,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import ForwardDreamingBoundary
+from agent_core.domain.dreaming_recovery import LegacyAttributionManifest, LegacyRecoveryResult
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
@@ -269,12 +270,32 @@ class InMemoryPeopleStore:
         return hashlib.sha256("\n".join(heads).encode()).hexdigest()
 
     async def forward_dreaming_boundary(
-        self, principal: Principal
+        self, principal: Principal, *, include_recovered: bool = False
     ) -> ForwardDreamingBoundary | None:
         if self._memory_index is None:
             return None
-        return self._memory_index.forward_dreaming.get(
+        boundary = self._memory_index.forward_dreaming.get(
             (principal.tenant_id, principal.principal_id)
+        )
+        return (
+            boundary
+            if boundary is None or include_recovered or boundary.recovered_at is None
+            else None
+        )
+
+    async def recover_legacy_attribution(
+        self,
+        principal: Principal,
+        manifest: LegacyAttributionManifest,
+        deleted_sessions: dict[UUID, datetime],
+        now: datetime,
+        *,
+        confirm: bool,
+    ) -> LegacyRecoveryResult:
+        from agent_core.adapters.persistence.dreaming_recovery import recover_memory
+
+        return await recover_memory(
+            self, principal, manifest, deleted_sessions, now, confirm=confirm
         )
 
     async def enable_forward_dreaming(
@@ -282,7 +303,7 @@ class InMemoryPeopleStore:
     ) -> ForwardDreamingBoundary:
         if self._memory_index is None:
             raise ConflictError("Forward dreaming requires the memory index")
-        existing = await self.forward_dreaming_boundary(principal)
+        existing = await self.forward_dreaming_boundary(principal, include_recovered=True)
         if existing is not None:
             return existing
         owner = (principal.tenant_id, principal.principal_id)
@@ -307,7 +328,10 @@ class InMemoryPeopleStore:
 
     async def memory_attribution_complete(self, principal: Principal) -> bool:
         owner = (principal.tenant_id, principal.principal_id)
-        return not any(key[:2] == owner and key not in self._attributions for key in self._erased)
+        return not any(
+            key[:2] == owner and key not in self._attributions
+            for key in self._records.keys() | self._erased
+        )
 
     async def memory_attribution_records(
         self,
@@ -1254,7 +1278,7 @@ class PostgresPeopleStore:
         ).hexdigest()
 
     async def forward_dreaming_boundary(
-        self, principal: Principal
+        self, principal: Principal, *, include_recovered: bool = False
     ) -> ForwardDreamingBoundary | None:
         value = await self._session.scalar(
             select(ReconsolidationOwnerRow.forward_dreaming).where(
@@ -1262,7 +1286,27 @@ class PostgresPeopleStore:
                 ReconsolidationOwnerRow.principal_id == principal.principal_id,
             )
         )
-        return None if value is None else ForwardDreamingBoundary.model_validate(value)
+        boundary = None if value is None else ForwardDreamingBoundary.model_validate(value)
+        return (
+            boundary
+            if boundary is None or include_recovered or boundary.recovered_at is None
+            else None
+        )
+
+    async def recover_legacy_attribution(
+        self,
+        principal: Principal,
+        manifest: LegacyAttributionManifest,
+        deleted_sessions: dict[UUID, datetime],
+        now: datetime,
+        *,
+        confirm: bool,
+    ) -> LegacyRecoveryResult:
+        from agent_core.adapters.persistence.dreaming_recovery import recover_postgres
+
+        return await recover_postgres(
+            self, principal, manifest, deleted_sessions, now, confirm=confirm
+        )
 
     async def enable_forward_dreaming(
         self, principal: Principal, event_id: int, now: datetime

@@ -1782,3 +1782,26 @@ Pending groups retain their membership, attempt counts, ordering and retry limit
 they are processed alongside newly selected groups under the unchanged four-group,
 two-call and daily-review limits. Provider deferrals cannot prevent new inventory,
 and inventory completion is still distinct from completed provider analysis.
+
+## Verified legacy attribution recovery (ADR-0241)
+
+The owner-authorized `agent memory reconsolidations recover-legacy --owner
+TENANT/PRINCIPAL --manifest PATH` command previews a bounded metadata-only proof
+manifest; `--confirm` applies it. Complete, deterministic proofs restore missing
+attribution for erased legacy heads. Revision-one memory-link identities bind
+owner-owned beliefs and people; deleted beliefs require retained applied receipts.
+Revision-one source identities require exact deleted-session tombstones and applied
+source-cleanup receipts. Mention identities bind exact source/span tuples to those
+proved erased sources. Unsupported kinds, later attribution-bearing revisions,
+unknown live heads, changed cutover digests, missing or conflicting proofs refuse.
+Non-attribution record kinds receive only their schema-defined empty footprint.
+
+The owner/People transaction refuses active leases and validates every proof before
+writing. It retains the original cutover with a recovery timestamp and manifest
+digest, restarts full inventory at zero and preserves change progress, budgets,
+retry counters, daily schedules, groups, original content and all review history.
+Exact retries do nothing. Once attribution is complete, retained older memories
+follow the same supervised admission as newer memories. Existing erasure and
+source suppression still apply, and new unknown attribution blocks admission.
+This recovery exports no source content, makes no provider calls and does not
+change unattended activation or evaluation requirements.

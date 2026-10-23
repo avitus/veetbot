@@ -613,7 +613,13 @@ Each mode's width and the owner's open-or-closed choice are kept on this Mac
 (`veetbot.inspector.<mode>.width`, `.open`). A window narrower than 1,100
 points starts with Chat's panel collapsed, and narrower than 1,300 points
 Email's, whose inbox and thread already take three columns; crossing the
-threshold collapses or restores it without recording a choice.
+threshold collapses or restores it without recording a choice. When the owner
+opens Email's panel in such a window, the mailbox sidebar and the panel take
+turns so the thread keeps its reading width: the sidebar folds away (its mode
+switch, search and collections move above the inbox) until the panel closes or
+the window widens, and the window's sidebar button brings the sidebar back by
+folding the panel. Neither is recorded as a choice or changes the window's own
+sidebar state, which macOS restores at the next launch.
 
 Chat's panel has two tabs. **Activity** holds a card naming what the run is
 doing (running, waiting for an approval or an answer, finished, failed or

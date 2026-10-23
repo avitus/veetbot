@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://veetbot.com/schemas/cockpit/widget.schema.json",
+  "title": "Cockpit widget manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "slug", "title", "purpose", "kit_api", "sizes", "feeds", "settings"],
+  "properties": {
+    "schema": { "const": 1 },
+    "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,47}$" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "purpose": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "kit_api": { "type": "integer", "minimum": 1 },
+    "sizes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["sm", "md", "tall", "lg", "wide"] }
+    },
+    "feeds": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^(veetbot|agent)\\.[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$"
+          },
+          "history": { "type": "integer", "minimum": 0, "maximum": 288 }
+        }
+      }
+    },
+    "settings": { "$ref": "#/definitions/settingsSchema" }
+  },
+  "definitions": {
+    "label": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 40 },
+        "description": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "settingsSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "additionalProperties", "properties"],
+      "properties": {
+        "type": { "const": "object" },
+        "additionalProperties": { "const": false },
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" }
+        },
+        "properties": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+          "additionalProperties": { "$ref": "#/definitions/settingField" }
+        }
+      }
+    },
+    "settingField": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "maxLength"],
+          "properties": {
+            "type": { "const": "string" },
+            "minLength": { "type": "integer", "minimum": 0, "maximum": 200 },
+            "maxLength": { "type": "integer", "minimum": 1, "maximum": 200 },
+            "title": { "$ref": "#/definitions/label/properties/title" },
+            "description": { "$ref": "#/definitions/label/properties/description" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "enum"],
+          "properties": {
+            "type": { "const": "string" },
+            "enum": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 50,
+              "uniqueItems": true,
+              "items": { "type": "string", "maxLength": 60 }
+            },
+            "title": { "$ref": "#/definitions/label/properties/title" },
+            "description": { "$ref": "#/definitions/label/properties/description" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "minimum", "maximum"],
+          "properties": {
+            "type": { "enum": ["number", "integer"] },
+            "minimum": { "type": "number" },
+            "maximum": { "type": "number" },
+            "title": { "$ref": "#/definitions/label/properties/title" },
+            "description": { "$ref": "#/definitions/label/properties/description" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "boolean" },
+            "title": { "$ref": "#/definitions/label/properties/title" },
+            "description": { "$ref": "#/definitions/label/properties/description" }
+          }
+        }
+      ]
+    }
+  }
+}

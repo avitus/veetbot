@@ -28,12 +28,12 @@ let args = process.argv.slice(2);
 if (args[0] === '--prefix') args = args.slice(2);
 if (args[0] === '--version') console.log(process.env.TEST_NPM_VERSION || '10.0.0');
 else if (args[0] === 'config') console.log(JSON.stringify({ omit: process.env.TEST_OMIT || '' }));
-else if (args[0] === 'ls') process.exit(existsSync(path.join(root, 'website/node_modules/present')) ? 0 : 1);
+else if (args[0] === 'ls') process.exit(existsSync(path.join(process.cwd(), 'node_modules/present')) ? 0 : 1);
 else if (args[0] === 'ci') {
   appendFileSync(path.join(root, 'installs'), 'ci\\n');
   if (process.env.TEST_INSTALL_FAIL) process.exit(19);
-  mkdirSync(path.join(root, 'website/node_modules'), { recursive: true });
-  writeFileSync(path.join(root, 'website/node_modules/present'), 'installed');
+  mkdirSync(path.join(process.cwd(), 'node_modules'), { recursive: true });
+  writeFileSync(path.join(process.cwd(), 'node_modules/present'), 'installed');
 } else process.exit(23);
 `;
   // .mjs makes the stub independent of the checkout's package type.
@@ -42,12 +42,12 @@ else if (args[0] === 'ci') {
   return {
     root,
     count: () => readFileSync(path.join(root, 'installs'), 'utf8').trim().split('\n').length,
-    run: (settings = {}) => {
+    run: (settings = {}, target = 'website-install') => {
       const env = { ...process.env, PATH: `${root}/bin:${process.env.PATH}`, CI: '', ...settings };
       delete env.MAKEFLAGS;
       delete env.MFLAGS;
       delete env.MAKELEVEL;
-      return spawnSync('make', ['website-install'], { cwd: root, env, encoding: 'utf8', timeout: 15000 });
+      return spawnSync('make', [target], { cwd: root, env, encoding: 'utf8', timeout: 15000 });
     },
   };
 }
@@ -98,4 +98,16 @@ test('a failed forced reinstall invalidates the previous success', (t) => {
   assert.notEqual(f.run({ WEBSITE_INSTALL_FORCE: '1', TEST_INSTALL_FAIL: '1' }).status, 0);
   succeeds(f.run());
   assert.equal(f.count(), 3);
+});
+
+test('the cockpit workspace uses the same locked install', (t) => {
+  const f = fixture(t);
+  mkdirSync(path.join(f.root, 'cockpit'));
+  for (const file of ['package.json', 'package-lock.json']) writeFileSync(path.join(f.root, 'cockpit', file), '{}');
+  succeeds(f.run({}, 'cockpit-install'));
+  assert.equal(f.count(), 1);
+  assert.ok(existsSync(path.join(f.root, 'cockpit/node_modules/.veetbot-install-key')));
+  assert.ok(!existsSync(path.join(f.root, 'website/node_modules')));
+  succeeds(f.run({}, 'cockpit-install'));
+  assert.equal(f.count(), 1, 'an unchanged install is reused');
 });

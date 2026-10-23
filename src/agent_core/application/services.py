@@ -25,6 +25,7 @@ from agent_core.domain.browser_task_grants import (
 from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, ForwardDreamingBoundary
+from agent_core.domain.dreaming_recovery import LegacyAttributionManifest, LegacyRecoveryResult
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
 from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
@@ -464,6 +465,14 @@ class SurfaceService(Protocol):
 
 
 class ReconsolidationService(Protocol):
+    async def recover_legacy_dreaming(
+        self,
+        principal: Principal,
+        manifest: LegacyAttributionManifest,
+        *,
+        confirm: bool = False,
+    ) -> LegacyRecoveryResult: ...
+
     async def enable_forward_dreaming(self, principal: Principal) -> ForwardDreamingBoundary: ...
 
     async def dreaming_status(self, principal: Principal) -> DreamingStatus: ...

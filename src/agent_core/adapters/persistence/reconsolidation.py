@@ -168,6 +168,16 @@ class PostgresReconsolidationStore:
             .values(**job_values(job))
         )
 
+    async def restart_full_inventory(self, principal: Principal) -> None:
+        await self._session.execute(
+            update(ReconsolidationJobRow)
+            .where(
+                ReconsolidationJobRow.tenant_id == principal.tenant_id,
+                ReconsolidationJobRow.principal_id == principal.principal_id,
+            )
+            .values(full_cursor=0, state="ready", revision=ReconsolidationJobRow.revision + 1)
+        )
+
     async def retire_dreaming_groups(self, principal: Principal) -> None:
         await self._session.execute(
             update(ReconsolidationGroupRow)

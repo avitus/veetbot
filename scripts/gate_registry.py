@@ -13,7 +13,7 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|persona|whatsapp|call|people|folder|judgment|records)"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email|persona|whatsapp|call|people|folder|judgment|records|cockpit)"
     r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
@@ -36,8 +36,9 @@ MAP_ROW = re.compile(
 # under ADR-0111, and Milestone 31 on 2026-09-19 under ADR-0112.
 # Milestone 32 was authorized on 2026-10-02 under ADR-0169; its gates landed in Phase 1.
 # Milestone 33 was authorized on 2026-10-11 under ADR-0178.
-# Milestone 34 was authorized on 2026-10-22 under ADR-0239.
-MAX_MILESTONE = 34
+# Milestone 34 was authorized on 2026-10-22 under ADR-0239, and Milestone 35
+# on 2026-10-22 under ADR-0240.
+MAX_MILESTONE = 35
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -79,6 +80,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "device-channel-and-sms.md": (12, 0),
     "whatsapp-surface.md": (12, 0),
     "owner-records.md": (10, 0),
+    "cockpit.md": (23, 0),
     "milestone-map.md": (7, 0),
 }
 
