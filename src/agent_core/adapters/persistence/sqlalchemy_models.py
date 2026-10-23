@@ -23,6 +23,7 @@ from sqlalchemy import (
     LargeBinary,
     MetaData,
     Numeric,
+    PrimaryKeyConstraint,
     Sequence,
     SmallInteger,
     String,
@@ -2348,6 +2349,72 @@ class PeopleRevisionRow(Base):
     search_text: Mapped[str] = mapped_column(Text)
     source_session_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class RecordSeriesRow(Base):
+    __tablename__ = "record_series"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "id", name="pk_record_series"),
+        UniqueConstraint("tenant_id", "principal_id", "name", name="uq_record_series_name"),
+        CheckConstraint(
+            "jsonb_typeof(components) = 'array' AND jsonb_array_length(components) BETWEEN 1 AND 4",
+            name="components",
+        ),
+        CheckConstraint("sensitivity BETWEEN 0 AND 3", name="sensitivity"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    name: Mapped[str] = mapped_column(Text)
+    display_name: Mapped[str] = mapped_column(Text)
+    components: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    sensitivity: Mapped[int] = mapped_column(Integer)
+    cadence: Mapped[str | None] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecordEntryRow(Base):
+    __tablename__ = "record_entries"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "id", name="pk_record_entries"),
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "series_id"],
+            ["record_series.tenant_id", "record_series.principal_id", "record_series.id"],
+            name="fk_record_entries_tenant_id_record_series",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "principal_id",
+            "series_id",
+            "idempotency_key",
+            name="uq_record_entries_idempotency",
+        ),
+        Index(
+            "ix_record_entries_series_observed",
+            "tenant_id",
+            "principal_id",
+            "series_id",
+            "observed_at",
+        ),
+        Index("ix_record_entries_source_session", "source_session_id"),
+        CheckConstraint("jsonb_typeof(values) = 'object'", name="values"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    series_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    observed_precision: Mapped[str] = mapped_column(Text)
+    values: Mapped[dict[str, str]] = mapped_column(JSONB)
+    note: Mapped[str | None] = mapped_column(Text)
+    note_withheld: Mapped[bool] = mapped_column(Boolean)
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    source_session_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    source_event_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class PeopleLinkRow(Base):

@@ -30,6 +30,7 @@ from agent_core.adapters.persistence.people_erasure import (
 )
 from agent_core.adapters.persistence.people_reference_index import reference_overlap
 from agent_core.adapters.persistence.reconsolidation_sources import erase_sources, lock_owner
+from agent_core.adapters.persistence.records import InMemoryRecordStore
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
@@ -44,6 +45,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     PeopleLinkRow,
     PeopleRevisionRow,
     RecallTraceRow,
+    RecordEntryRow,
     RunRow,
     ScheduleOccurrenceRow,
     SessionDeletionArtifactRow,
@@ -413,6 +415,13 @@ class PostgresSessionDeletionRepository:
             .values(session_id=None, run_id=None, links_erased_at=deleted_at)
         )
 
+        # Owner records outlive the chat; only their provenance is cleared.
+        await self._session.execute(
+            update(RecordEntryRow)
+            .where(RecordEntryRow.source_session_id == session_id)
+            .values(source_session_id=None, source_event_id=None)
+        )
+
         await self._session.execute(
             delete(MemoryRejectionRow).where(
                 MemoryRejectionRow.trace_id.in_(trace_ids)
@@ -554,6 +563,7 @@ class InMemorySessionDeletionRepository:
         artifacts: Any,
         memories: Any,
         people: InMemoryPeopleStore,
+        records: InMemoryRecordStore,
         episodes: Any,
         traces: Any,
         knowledge: Any,
@@ -574,6 +584,7 @@ class InMemorySessionDeletionRepository:
         self._artifacts = artifacts
         self._memories = memories
         self._people = people
+        self._records = records
         self._episodes = episodes
         self._traces = traces
         self._knowledge = knowledge
@@ -1008,6 +1019,13 @@ class InMemorySessionDeletionRepository:
             for key, delivery in self._notification_outbox._deliveries.items()
             if delivery.notification_id not in pending_notification_ids
         }
+
+        for entries in self._records._entries.values():
+            for index, entry in enumerate(entries):
+                if entry.source_session_id == session_id:
+                    entries[index] = entry.model_copy(
+                        update={"source_session_id": None, "source_event_id": None}
+                    )
 
         self._schedules._occurrences = {
             occurrence_id: (

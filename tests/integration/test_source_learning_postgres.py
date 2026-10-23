@@ -50,6 +50,7 @@ async def test_source_learning_downgrade_refuses_to_erase_attribution() -> None:
 
     import pytest
 
+    from agent_core.adapters.persistence.revision import EXPECTED_REVISION
     from tests.integration.test_migrations import _alembic
 
     async with read_archive(storage="postgres") as (app, context, _):
@@ -57,7 +58,7 @@ async def test_source_learning_downgrade_refuses_to_erase_attribution() -> None:
     with pytest.raises(subprocess.CalledProcessError) as failure:
         _alembic("downgrade", "d5f2b8c3a216")
     assert "Source-learning attribution must be preserved" in failure.value.stderr
-    assert "e6a3c9d4b217" in _alembic("current")
+    assert EXPECTED_REVISION in _alembic("current")
 
 
 async def test_postgres_forgetting_erases_source_learning_receipts() -> None:

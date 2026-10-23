@@ -168,7 +168,7 @@ from agent_core.adapters.persistence.projections import (
 )
 from agent_core.adapters.persistence.queue import PostgresRunQueue
 from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
-from agent_core.adapters.persistence.records import InMemoryRecordStore, UnavailableRecordStore
+from agent_core.adapters.persistence.records import InMemoryRecordStore, PostgresRecordStore
 from agent_core.adapters.persistence.reliability_monitor import check_reliability
 from agent_core.adapters.persistence.reliability_report import reliability_report
 from agent_core.adapters.persistence.repositories import (
@@ -1278,6 +1278,7 @@ def _memory_uow_repositories(
     trajectory_exports = InMemoryTrajectoryExportRepository()
     artifacts = InMemoryArtifactRepository()
     browser_task_grants = InMemoryBrowserTaskGrantRepository()
+    records = InMemoryRecordStore()
     session_deletions = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -1291,6 +1292,7 @@ def _memory_uow_repositories(
         artifacts=artifacts,
         memories=memories,
         people=people,
+        records=records,
         episodes=episodes,
         traces=traces,
         knowledge=knowledge,
@@ -1337,7 +1339,7 @@ def _memory_uow_repositories(
         email=InMemoryEmailStore(),
         calls=InMemoryCallStore(),
         people=people,
-        records=InMemoryRecordStore(),
+        records=records,
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -1383,6 +1385,7 @@ def _postgres_repository_factory(
         memories = PostgresMemoryStore(session, clock)
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
+        records = PostgresRecordStore(session, clock)
         memories.bind_people(people)
         reconsolidation = PostgresReconsolidationStore(
             session,
@@ -1438,7 +1441,7 @@ def _postgres_repository_factory(
             email=PostgresEmailStore(session),
             calls=PostgresCallStore(session),
             people=people,
-            records=UnavailableRecordStore(),
+            records=records,
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,

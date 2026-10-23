@@ -4,13 +4,25 @@ import asyncio
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
-from typing import NoReturn
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import ColumnElement, delete, func, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agent_core.adapters.persistence.sqlalchemy_models import RecordEntryRow, RecordSeriesRow
 from agent_core.domain.agents import Principal
 from agent_core.domain.memory import SENSITIVITY_ORDER, Sensitivity
-from agent_core.domain.records import RecordEntry, RecordSeries
+from agent_core.domain.records import (
+    RecordCadence,
+    RecordComponent,
+    RecordEntry,
+    RecordPrecision,
+    RecordSeries,
+    canonical_value,
+)
+from agent_core.ports.determinism import Clock
 from agent_core.ports.records import (
     Bucket,
     BucketRow,
@@ -257,53 +269,339 @@ class InMemoryRecordStore:
             return removed
 
 
-class UnavailableRecordStore:
-    """Stands in for the PostgreSQL store until it lands; every call fails loudly."""
+def _series_from_row(row: RecordSeriesRow) -> RecordSeries:
+    return RecordSeries(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        name=row.name,
+        display_name=row.display_name,
+        components=tuple(
+            RecordComponent(name=item["name"], unit=item["unit"]) for item in row.components
+        ),
+        sensitivity=_SENSITIVITY_BY_ORDINAL[row.sensitivity],
+        cadence=None if row.cadence is None else RecordCadence(row.cadence),
+        revision=row.revision,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
-    def _fail(self) -> NoReturn:
-        raise RuntimeError("PostgreSQL record store is not available yet")
+
+def _entry_from_row(row: RecordEntryRow) -> RecordEntry:
+    return RecordEntry(
+        id=row.id,
+        series_id=row.series_id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        observed_at=row.observed_at,
+        observed_precision=RecordPrecision(row.observed_precision),
+        values={name: Decimal(text) for name, text in row.values.items()},
+        note=row.note,
+        note_withheld=row.note_withheld,
+        idempotency_key=row.idempotency_key,
+        source_session_id=row.source_session_id,
+        source_event_id=row.source_event_id,
+        created_at=row.created_at,
+    )
+
+
+_SENSITIVITY_BY_ORDINAL = {ordinal: level for level, ordinal in SENSITIVITY_ORDER.items()}
+
+
+class PostgresRecordStore:
+    """Owner records in PostgreSQL; the unit of work owns the transaction."""
+
+    def __init__(self, session: AsyncSession, clock: Clock) -> None:
+        self._session = session
+        self._clock = clock
+
+    @staticmethod
+    def _series_scope(principal: Principal) -> list[ColumnElement[bool]]:
+        return [
+            RecordSeriesRow.tenant_id == principal.tenant_id,
+            RecordSeriesRow.principal_id == principal.principal_id,
+        ]
+
+    @staticmethod
+    def _entry_scope(principal: Principal, series_id: UUID) -> list[ColumnElement[bool]]:
+        return [
+            RecordEntryRow.tenant_id == principal.tenant_id,
+            RecordEntryRow.principal_id == principal.principal_id,
+            RecordEntryRow.series_id == series_id,
+        ]
+
+    async def _series_row(self, principal: Principal, name: str) -> RecordSeriesRow | None:
+        return (
+            await self._session.execute(
+                select(RecordSeriesRow).where(
+                    *self._series_scope(principal), RecordSeriesRow.name == name
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def _owned_row(self, principal: Principal, series_id: UUID) -> RecordSeriesRow | None:
+        return (
+            await self._session.execute(
+                select(RecordSeriesRow).where(
+                    *self._series_scope(principal), RecordSeriesRow.id == series_id
+                )
+            )
+        ).scalar_one_or_none()
 
     async def create_series(self, series: RecordSeries) -> tuple[RecordSeries, bool]:
-        self._fail()
+        owner = Principal(tenant_id=series.tenant_id, principal_id=series.principal_id)
+        for attempt in range(2):
+            existing = await self._series_row(owner, series.name)
+            if existing is not None:
+                stored = _series_from_row(existing)
+                if _declaration(stored) != _declaration(series):
+                    raise SeriesExists(series.name)
+                return stored, False
+            try:
+                async with self._session.begin_nested():
+                    self._session.add(
+                        RecordSeriesRow(
+                            tenant_id=series.tenant_id,
+                            principal_id=series.principal_id,
+                            id=series.id,
+                            name=series.name,
+                            display_name=series.display_name,
+                            components=[
+                                {"name": item.name, "unit": item.unit} for item in series.components
+                            ],
+                            sensitivity=SENSITIVITY_ORDER[series.sensitivity],
+                            cadence=None if series.cadence is None else series.cadence.value,
+                            revision=series.revision,
+                            created_at=series.created_at,
+                            updated_at=series.updated_at,
+                        )
+                    )
+                    await self._session.flush()
+            except IntegrityError:
+                if attempt:
+                    raise
+                continue
+            return series, True
+        raise AssertionError("unreachable")  # pragma: no cover
 
     async def get_series(self, principal: Principal, name: str) -> RecordSeries | None:
-        self._fail()
+        row = await self._series_row(principal, name)
+        return None if row is None else _series_from_row(row)
 
     async def count_series(self, principal: Principal) -> int:
-        self._fail()
+        return int(
+            (
+                await self._session.execute(
+                    select(func.count())
+                    .select_from(RecordSeriesRow)
+                    .where(*self._series_scope(principal))
+                )
+            ).scalar_one()
+        )
 
     async def list_series(self, principal: Principal, ceiling: Sensitivity) -> list[SeriesSummary]:
-        self._fail()
+        rows = (
+            (
+                await self._session.execute(
+                    select(RecordSeriesRow)
+                    .where(
+                        *self._series_scope(principal),
+                        RecordSeriesRow.sensitivity <= SENSITIVITY_ORDER[ceiling],
+                    )
+                    .order_by(RecordSeriesRow.name.collate("C"))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        stats = {
+            series_id: (count, first, last)
+            for series_id, count, first, last in (
+                await self._session.execute(
+                    select(
+                        RecordEntryRow.series_id,
+                        func.count(),
+                        func.min(RecordEntryRow.observed_at),
+                        func.max(RecordEntryRow.observed_at),
+                    )
+                    .where(
+                        RecordEntryRow.tenant_id == principal.tenant_id,
+                        RecordEntryRow.principal_id == principal.principal_id,
+                    )
+                    .group_by(RecordEntryRow.series_id)
+                )
+            ).all()
+        }
+        summaries: list[SeriesSummary] = []
+        for row in rows:
+            count, first, last = stats.get(row.id, (0, None, None))
+            summaries.append(
+                SeriesSummary(
+                    series=_series_from_row(row),
+                    entry_count=count,
+                    first_observed_at=first,
+                    last_observed_at=last,
+                )
+            )
+        return summaries
+
+    async def _replay(self, entry: RecordEntry) -> RecordEntry | None:
+        row = (
+            await self._session.execute(
+                select(RecordEntryRow).where(
+                    RecordEntryRow.tenant_id == entry.tenant_id,
+                    RecordEntryRow.principal_id == entry.principal_id,
+                    RecordEntryRow.series_id == entry.series_id,
+                    RecordEntryRow.idempotency_key == entry.idempotency_key,
+                )
+            )
+        ).scalar_one_or_none()
+        return None if row is None else _entry_from_row(row)
 
     async def append(self, entry: RecordEntry) -> tuple[RecordEntry, bool]:
-        self._fail()
+        owner = Principal(tenant_id=entry.tenant_id, principal_id=entry.principal_id)
+        series_row = await self._owned_row(owner, entry.series_id)
+        if series_row is None:
+            raise ValueError("series not found for this principal")
+        stored = await self._replay(entry)
+        if stored is not None:
+            return stored, True
+        if set(entry.values) != {item["name"] for item in series_row.components}:
+            raise ValueError("entry values must be exactly the declared components")
+        try:
+            async with self._session.begin_nested():
+                self._session.add(
+                    RecordEntryRow(
+                        tenant_id=entry.tenant_id,
+                        principal_id=entry.principal_id,
+                        id=entry.id,
+                        series_id=entry.series_id,
+                        observed_at=entry.observed_at,
+                        observed_precision=entry.observed_precision.value,
+                        values={name: canonical_value(v) for name, v in entry.values.items()},
+                        note=entry.note,
+                        note_withheld=entry.note_withheld,
+                        idempotency_key=entry.idempotency_key,
+                        source_session_id=entry.source_session_id,
+                        source_event_id=entry.source_event_id,
+                        created_at=entry.created_at,
+                    )
+                )
+                await self._session.flush()
+        except IntegrityError as exc:
+            stored = await self._replay(entry)
+            if stored is not None:
+                return stored, True
+            raise ValueError("series not found for this principal") from exc
+        return entry, False
 
     async def count_entries(self, principal: Principal, series_id: UUID) -> int:
-        self._fail()
+        return int(
+            (
+                await self._session.execute(
+                    select(func.count())
+                    .select_from(RecordEntryRow)
+                    .where(*self._entry_scope(principal, series_id))
+                )
+            ).scalar_one()
+        )
+
+    def _window_clauses(self, window: Window) -> list[ColumnElement[bool]]:
+        clauses = [RecordEntryRow.observed_at < window.until]
+        if window.since is not None:
+            clauses.append(RecordEntryRow.observed_at >= window.since)
+        return clauses
+
+    async def _in_window(
+        self, principal: Principal, series_id: UUID, window: Window
+    ) -> list[RecordEntry]:
+        rows = (
+            (
+                await self._session.execute(
+                    select(RecordEntryRow).where(
+                        *self._entry_scope(principal, series_id), *self._window_clauses(window)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [_entry_from_row(row) for row in rows]
 
     async def query(
-        self, principal: Principal, series_id: UUID, window: Window, order: Order, limit: int
+        self,
+        principal: Principal,
+        series_id: UUID,
+        window: Window,
+        order: Order,
+        limit: int,
     ) -> list[RecordEntry]:
-        self._fail()
+        keys = (RecordEntryRow.observed_at, RecordEntryRow.created_at, RecordEntryRow.id)
+        ordering = [key.desc() if order is Order.DESC else key.asc() for key in keys]
+        rows = (
+            (
+                await self._session.execute(
+                    select(RecordEntryRow)
+                    .where(*self._entry_scope(principal, series_id), *self._window_clauses(window))
+                    .order_by(*ordering)
+                    .limit(max(limit, 0))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [_entry_from_row(row) for row in rows]
 
     async def summarize(
         self, principal: Principal, series_id: UUID, window: Window
     ) -> dict[str, ComponentSummary]:
-        self._fail()
+        return summarize_entries(await self._in_window(principal, series_id, window))
 
     async def bucket(
-        self, principal: Principal, series_id: UUID, window: Window, bucket: Bucket, zone: ZoneInfo
+        self,
+        principal: Principal,
+        series_id: UUID,
+        window: Window,
+        bucket: Bucket,
+        zone: ZoneInfo,
     ) -> list[BucketRow]:
-        self._fail()
+        return bucket_entries(await self._in_window(principal, series_id, window), bucket, zone)
 
     async def delete_entry(self, principal: Principal, series_id: UUID, entry_id: UUID) -> int:
-        self._fail()
+        result = await self._session.execute(
+            delete(RecordEntryRow).where(
+                *self._entry_scope(principal, series_id), RecordEntryRow.id == entry_id
+            )
+        )
+        return int(result.rowcount)  # type: ignore[attr-defined]
 
     async def delete_series(self, principal: Principal, series_id: UUID) -> tuple[int, bool]:
-        self._fail()
+        if await self._owned_row(principal, series_id) is None:
+            return 0, False
+        entries = await self.count_entries(principal, series_id)
+        await self._session.execute(
+            delete(RecordSeriesRow).where(
+                *self._series_scope(principal), RecordSeriesRow.id == series_id
+            )
+        )
+        return entries, True
 
     async def detach_session(self, session_id: UUID) -> int:
-        self._fail()
+        result = await self._session.execute(
+            update(RecordEntryRow)
+            .where(RecordEntryRow.source_session_id == session_id)
+            .values(source_session_id=None, source_event_id=None)
+        )
+        return int(result.rowcount)  # type: ignore[attr-defined]
 
     async def erase_principal(self, principal: Principal) -> int:
-        self._fail()
+        entries = await self._session.execute(
+            delete(RecordEntryRow).where(
+                RecordEntryRow.tenant_id == principal.tenant_id,
+                RecordEntryRow.principal_id == principal.principal_id,
+            )
+        )
+        series = await self._session.execute(
+            delete(RecordSeriesRow).where(*self._series_scope(principal))
+        )
+        return int(entries.rowcount) + int(series.rowcount)  # type: ignore[attr-defined]

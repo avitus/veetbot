@@ -564,3 +564,47 @@ def test_model_settings_are_versioned_per_principal_under_tenant_isolation() -> 
     assert "ALTER TABLE model_settings ENABLE ROW LEVEL SECURITY" in migration_sql
     assert "ALTER TABLE model_settings FORCE ROW LEVEL SECURITY" in migration_sql
     assert "model_settings_tenant_isolation" in migration_sql
+
+
+def test_record_tables_are_owner_scoped_under_forced_tenant_isolation() -> None:
+    series = Base.metadata.tables["record_series"]
+    entries = Base.metadata.tables["record_entries"]
+    assert series.primary_key.name == "pk_record_series"
+    assert entries.primary_key.name == "pk_record_entries"
+    assert {c.name for c in series.primary_key.columns} == {"tenant_id", "principal_id", "id"}
+    assert set(series.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "id",
+        "name",
+        "display_name",
+        "components",
+        "sensitivity",
+        "cadence",
+        "revision",
+        "created_at",
+        "updated_at",
+    }
+    assert set(entries.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "id",
+        "series_id",
+        "observed_at",
+        "observed_precision",
+        "values",
+        "note",
+        "note_withheld",
+        "idempotency_key",
+        "source_session_id",
+        "source_event_id",
+        "created_at",
+    }
+    assert series.columns["cadence"].nullable
+    assert entries.columns["source_session_id"].nullable
+
+    migration = next((ROOT / "migrations" / "versions").glob("*_owner_records.py"))
+    migration_sql = migration.read_text(encoding="utf-8")
+    for table in ("record_series", "record_entries"):
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in migration_sql
+        assert f"{table}_tenant_isolation" in migration_sql
