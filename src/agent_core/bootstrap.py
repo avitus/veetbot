@@ -19,6 +19,7 @@ from types import TracebackType
 from typing import Any, Literal, Self, cast
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI
@@ -101,6 +102,16 @@ from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
 from agent_core.adapters.models.unavailable import MissingCredentialProvider
 from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
 from agent_core.adapters.persistence.calls import InMemoryCallStore, PostgresCallStore
+from agent_core.adapters.persistence.cockpit import (
+    InMemoryCockpitEventLog,
+    InMemoryFeedStore,
+    InMemoryWidgetCommitOutbox,
+    InMemoryWidgetStore,
+    PostgresCockpitEventLog,
+    PostgresFeedStore,
+    PostgresWidgetCommitOutbox,
+    PostgresWidgetStore,
+)
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
@@ -168,6 +179,7 @@ from agent_core.adapters.persistence.projections import (
 )
 from agent_core.adapters.persistence.queue import PostgresRunQueue
 from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
+from agent_core.adapters.persistence.records import InMemoryRecordStore, PostgresRecordStore
 from agent_core.adapters.persistence.reliability_monitor import check_reliability
 from agent_core.adapters.persistence.reliability_report import reliability_report
 from agent_core.adapters.persistence.repositories import (
@@ -319,6 +331,7 @@ from agent_core.application.public_services import (
     PublicSessionService,
 )
 from agent_core.application.reconsolidation import PublicReconsolidationService
+from agent_core.application.records import RecordsService
 from agent_core.application.run_service import RunService
 from agent_core.application.schedule_service import ScheduleService
 from agent_core.application.services import (
@@ -422,6 +435,7 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
+from agent_core.context.budget import records_catalog_caps
 from agent_core.context.builder import BudgetedContextBuilder
 from agent_core.context.compactor import StructuredCompactor
 from agent_core.context.estimator import ConservativeTokenEstimator
@@ -690,6 +704,13 @@ from agent_core.tools.people import (
     PeopleContextTool,
     PeopleHistoryTool,
     PeopleSearchTool,
+)
+from agent_core.tools.records import (
+    RecordsAppendTool,
+    RecordsCreateSeriesTool,
+    RecordsDeleteTool,
+    RecordsListTool,
+    RecordsQueryTool,
 )
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
@@ -1277,6 +1298,7 @@ def _memory_uow_repositories(
     trajectory_exports = InMemoryTrajectoryExportRepository()
     artifacts = InMemoryArtifactRepository()
     browser_task_grants = InMemoryBrowserTaskGrantRepository()
+    records = InMemoryRecordStore()
     session_deletions = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -1290,6 +1312,7 @@ def _memory_uow_repositories(
         artifacts=artifacts,
         memories=memories,
         people=people,
+        records=records,
         episodes=episodes,
         traces=traces,
         knowledge=knowledge,
@@ -1336,6 +1359,11 @@ def _memory_uow_repositories(
         email=InMemoryEmailStore(),
         calls=InMemoryCallStore(),
         people=people,
+        records=records,
+        cockpit_widgets=InMemoryWidgetStore(),
+        cockpit_outbox=InMemoryWidgetCommitOutbox(),
+        cockpit_feeds=InMemoryFeedStore(),
+        cockpit_events=InMemoryCockpitEventLog(),
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -1381,6 +1409,7 @@ def _postgres_repository_factory(
         memories = PostgresMemoryStore(session, clock)
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
+        records = PostgresRecordStore(session, clock)
         memories.bind_people(people)
         reconsolidation = PostgresReconsolidationStore(
             session,
@@ -1436,6 +1465,11 @@ def _postgres_repository_factory(
             email=PostgresEmailStore(session),
             calls=PostgresCallStore(session),
             people=people,
+            records=records,
+            cockpit_widgets=PostgresWidgetStore(session),
+            cockpit_outbox=PostgresWidgetCommitOutbox(session),
+            cockpit_feeds=PostgresFeedStore(session),
+            cockpit_events=PostgresCockpitEventLog(session),
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,
@@ -3725,6 +3759,19 @@ async def _compose(
         # Chats pinned before ADR-0126 keep 1.0.0; the latest registration wins.
         registry.register(LegacyPeopleHistoryTool(people_service))
         registry.register(PeopleHistoryTool(people_service))
+    records_service: RecordsService | None = None
+    try:
+        records_catalog_max_series, _ = records_catalog_caps(context_classes)
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
+    if settings.records_enabled:
+        records_service = RecordsService(uow_factory, clock, ids)
+        records_zone = ZoneInfo("UTC")
+        registry.register(RecordsListTool(records_service, records_zone))
+        registry.register(RecordsCreateSeriesTool(records_service, records_zone))
+        registry.register(RecordsAppendTool(records_service, records_zone))
+        registry.register(RecordsQueryTool(records_service, records_zone))
+        registry.register(RecordsDeleteTool(records_service, records_zone))
     registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None
     try:
@@ -3870,6 +3917,8 @@ async def _compose(
             # Memory/People watermarks do not cover elapsed expiry, semantic
             # cache availability or admission. Read current evidence per assembly.
             inline_output_bytes=inline_output_bytes,
+            catalog_source=records_service,
+            catalog_max_series=records_catalog_max_series,
         )
         compactor = StructuredCompactor(
             estimator,

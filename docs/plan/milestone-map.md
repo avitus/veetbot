@@ -332,9 +332,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 36 subject specifications declare 601 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 610
-declarations, 607 registry entries once the 3 aliases are subtracted.
+The 38 subject specifications declare 634 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 643
+declarations, 640 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1499,6 +1499,36 @@ Gates 6 and 10 are structural — the egress graph and the bind walk. The
 remaining ten are boundary cases over the listener, the adapter, and the
 surface tables.
 
+### Owner records, ten gates
+
+Ten gates open the `records` area at Milestone 34. They cover scope
+isolation on both adapters, the untrusted-turn refusal and approval by class,
+append replay, deterministic window summaries, the scans, erasure through
+the tool and through session and principal deletion, the formation rule that
+keeps a reading out of beliefs, registration under the flag, listing
+stability, and the catalog item's region, cap, yield, ceiling and prefix
+stability.
+
+```text
+#   id                                 kind         M
+--  ---------------------------------  -----------  --
+1   gate.records.scope_isolation       case         34
+2   gate.records.trust_gate            case         34
+3   gate.records.append_replay         case         34
+4   gate.records.query_determinism     property     34
+5   gate.records.scans                 case         34
+6   gate.records.erasure               case         34
+7   gate.records.no_belief_per_value   case         34
+8   gate.records.registration          structural   34
+9   gate.records.listing_stable        property     34
+10  gate.records.catalog               case         34
+```
+
+Gates 4 and 9 are properties because summaries and renderings range over
+generated stores. Gate 8 is structural, a walk over the registry, the
+builtin domains and the scope vocabulary. The remaining seven are boundary cases over the store, the service,
+the policy engine, formation and the context builder.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1743,6 +1773,37 @@ gates, authorized on 2026-10-11 under ADR-0178.
 12 gate.memory.general_activation_evidence case 33
 ```
 
+### Cockpit mode and agent-authored widgets
+
+[cockpit.md](cockpit.md) declares twenty-three Milestone 35 gates in a new
+`gate.cockpit.*` area, authorized on 2026-10-22 under ADR-0240.
+
+```text
+1 gate.cockpit.schema_additive case 35
+2 gate.cockpit.builder_rejects_forbidden case 35
+3 gate.cockpit.builder_offline_under_runsc case 35
+4 gate.cockpit.privacy_screen_blocks_commit case 35
+5 gate.cockpit.commit_scope_and_no_force case 35
+6 gate.cockpit.commit_before_activate case 35
+7 gate.cockpit.ambiguous_commit_reconciles case 35
+8 gate.cockpit.invalid_import_keeps_live case 35
+9 gate.cockpit.delete_and_restore case 35
+10 gate.cockpit.untrusted_origin_escalates case 35
+11 gate.cockpit.declared_feeds_only case 35
+12 gate.cockpit.feed_text_inert case 35
+13 gate.cockpit.stale_renders_stale property 35
+14 gate.cockpit.stream_resume_and_reset case 35
+15 gate.cockpit.flag_off_absent structural 35
+16 gate.cockpit.realm_network_blocked case 35
+17 gate.cockpit.token_absent_from_web_content case 35
+18 gate.cockpit.scheme_handler_allowlist case 35
+19 gate.cockpit.kit_upgrade_rebuilds case 35
+20 gate.cockpit.three_mode_state_parity case 35
+21 gate.cockpit.streams_only_while_visible case 35
+22 gate.cockpit.realm_memory_budget case 35
+23 gate.cockpit.release_evidence case 35
+```
+
 ## The census
 
 What each milestone must turn green, counting registry entries and not
@@ -1845,6 +1906,9 @@ milestone  new gates  cumulative  the earliest of them
                                   suspected-spam flag and thread Report spam
 32                24         595  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
 33                12         607  general recall: candidate relevance, semantic search, evidence use and comparative activation
+34                10         617  owner records: isolation, trust rows, replay, determinism, scans, erasure, formation and the catalog
+35                23         640  Cockpit: offline widget builds, the public data-free branch, commit-before-activate,
+                                  the network-less realm, feeds, the stream and the three-mode shell
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1865,15 +1929,15 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of six hundred and seven gates are green before
+2.  **Forty-one of six hundred and forty gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches six hundred and seven, which is every
-registry entry, at Milestone 33. Six of Milestone 10's gates are
+The cumulative column reaches six hundred and forty, which is every
+registry entry, at Milestone 35. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
@@ -1895,7 +1959,8 @@ returns to the `gate.policy.*` area with five. Milestone 31 adds twenty
 `gate.email.unsubscribe_*` and three `gate.email.spam_*` entries to the email
 area. Milestone 32 adds twenty-four
 `gate.memory.recon_*` entries. Milestone 33 adds twelve `gate.memory.general_*`
-entries. Every authorized milestone now has a specification
+entries, Milestone 34's ten open a `gate.records.*` area, and Milestone 35's
+twenty-three open a `gate.cockpit.*` area of their own. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.

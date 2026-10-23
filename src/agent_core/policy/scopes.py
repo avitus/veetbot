@@ -44,6 +44,9 @@ PLATFORM_SCOPES = frozenset(
         "memory.write",
         "people.read",
         "people.write",
+        # ADR-0239: owner records.
+        "records.read",
+        "records.write",
         "persona.read",
         "persona.write",
         "settings.read",

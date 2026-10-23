@@ -1,0 +1,5 @@
+{
+  "now": "2026-10-22T18:00:00Z",
+  "settings": { "place": "Example City" },
+  "feeds": { "agent.weather": { "observedAt": null, "expectedIntervalSec": 900, "data": null } }
+}

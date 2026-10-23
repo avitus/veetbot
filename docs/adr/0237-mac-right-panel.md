@@ -95,3 +95,14 @@ attachments and opens their list. These items are visible only while the
 panel is open, as Teach Veetbot already was; journeys open it first. iPhone
 and iPad keep every item in the thread. No server contract, policy, or
 milestone changes.
+
+Because the panel now matters more, a narrow window no longer squeezes the
+thread to its minimum when the owner opens Email's panel there (below the
+1,300 points of decision 4): the mailbox sidebar and the panel take turns.
+Opening the panel folds the sidebar, whose mode switch, search and collections
+move above the inbox as when the owner hides it; closing the panel or widening
+the window brings it back. Showing the sidebar with the window's sidebar button
+folds the panel instead. Neither is recorded as the owner's choice, and the
+fold leaves the window's own sidebar state untouched, since macOS restores that
+state at the next launch. A sender too long to share a line with the date puts
+the date below it.

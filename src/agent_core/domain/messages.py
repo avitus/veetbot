@@ -71,6 +71,10 @@ class UserMessage(BaseModel):
     trust: TrustLevel = TrustLevel.USER
     principal_id: str | None = None
     source_event_sequence: int | None = Field(default=None, ge=1)
+    # The envelope source a platform-rendered item names, such as
+    # "records.catalog". Absent, it is left out of the serialized item so
+    # every existing envelope nonce and prefix hash keeps its bytes.
+    source: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class AssistantMessage(BaseModel):

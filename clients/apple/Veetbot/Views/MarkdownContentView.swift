@@ -530,6 +530,11 @@ private struct MarkdownBlocksView: View {
         VStack(alignment: .leading, spacing: VeetSpace.s3) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 MarkdownBlockView(block: block)
+                    // Proposed less height than its wrap needs, a block cuts
+                    // its last line off with an ellipsis; a quote's bar also
+                    // stretched past its text and took that height from the
+                    // paragraphs around it.
+                    .fixedSize(horizontal: false, vertical: true)
                     // 24 before a heading: the 12 between blocks and 12 more.
                     .padding(.top, index > 0 && block.isHeading ? VeetSpace.s3 : 0)
             }

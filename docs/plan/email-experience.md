@@ -1381,3 +1381,17 @@ new conversations per UTC day are admitted; replay costs no further slot and
 evidence revisions never reset the allowance. A concurrent last-slot loser uses
 ordinary assessment. Expiry is rechecked before dispatch and at save. No other
 first-pass protection, budget, quality gate, or mail mutation authority changes.
+
+## Milestone 35 Cockpit mode extension
+
+[ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md) adds
+Cockpit as a third mode on this document's shell, as the mode-navigation
+section anticipated: a mode descriptor and a presentation module. Selecting it
+confers no authority, and Memory, Persona, Schedules and Settings stay global.
+
+The shell's two-way assumptions become exhaustive over three modes, and
+switching among the three preserves each mode's state. Email's retrieval rules
+are unchanged: Email still refreshes only while Email is visible, and Cockpit
+holds its own stream only while Cockpit is visible.
+
+[cockpit.md](cockpit.md) owns the mode.

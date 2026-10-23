@@ -43,6 +43,10 @@ classes:
   in_turn_recall:
     region: B
     max_tokens: 2000
+  records_catalog:
+    region: B
+    max_items: 16
+    max_tokens: 600
   tool_results:
     region: B
     max_body_ratio: 0.25

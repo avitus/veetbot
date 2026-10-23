@@ -8,6 +8,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import ForwardDreamingBoundary
+from agent_core.domain.dreaming_recovery import LegacyAttributionManifest, LegacyRecoveryResult
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import PeopleQuery, PeopleRecord
 
@@ -26,8 +27,18 @@ class PeopleStore(Protocol):
     ) -> PeopleRecord | None: ...
 
     async def forward_dreaming_boundary(
-        self, principal: Principal
+        self, principal: Principal, *, include_recovered: bool = False
     ) -> ForwardDreamingBoundary | None: ...
+
+    async def recover_legacy_attribution(
+        self,
+        principal: Principal,
+        manifest: LegacyAttributionManifest,
+        deleted_sessions: dict[UUID, datetime],
+        now: datetime,
+        *,
+        confirm: bool,
+    ) -> LegacyRecoveryResult: ...
 
     async def enable_forward_dreaming(
         self, principal: Principal, event_id: int, now: datetime

@@ -30,6 +30,7 @@ from agent_core.adapters.persistence.people_erasure import (
 )
 from agent_core.adapters.persistence.people_reference_index import reference_overlap
 from agent_core.adapters.persistence.reconsolidation_sources import erase_sources, lock_owner
+from agent_core.adapters.persistence.records import InMemoryRecordStore
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
@@ -44,6 +45,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     PeopleLinkRow,
     PeopleRevisionRow,
     RecallTraceRow,
+    RecordEntryRow,
     RunRow,
     ScheduleOccurrenceRow,
     SessionDeletionArtifactRow,
@@ -75,6 +77,10 @@ def _deletion_artifact_ref(artifact: ArtifactRef) -> ArtifactRef:
 
 class PostgresSessionDeletionRepository:
     """Atomically remove a session graph and retain byte-deletion work."""
+
+    async def deleted_at(self, principal: Principal, session_id: UUID) -> datetime | None:
+        row = await self._owned_tombstone(session_id, principal)
+        return None if row is None else row.deleted_at
 
     def __init__(self, session: AsyncSession, people: PeopleStore, traces: TraceStore) -> None:
         self._session = session
@@ -413,6 +419,13 @@ class PostgresSessionDeletionRepository:
             .values(session_id=None, run_id=None, links_erased_at=deleted_at)
         )
 
+        # Owner records outlive the chat; only their provenance is cleared.
+        await self._session.execute(
+            update(RecordEntryRow)
+            .where(RecordEntryRow.source_session_id == session_id)
+            .values(source_session_id=None, source_event_id=None)
+        )
+
         await self._session.execute(
             delete(MemoryRejectionRow).where(
                 MemoryRejectionRow.trace_id.in_(trace_ids)
@@ -539,6 +552,14 @@ class PostgresSessionDeletionRepository:
 class InMemorySessionDeletionRepository:
     """Deterministic erasure over the in-process adapter's shared maps."""
 
+    async def deleted_at(self, principal: Principal, session_id: UUID) -> datetime | None:
+        value = self._tombstones.get(session_id)
+        return (
+            value[2]
+            if value is not None and value[:2] == (principal.tenant_id, principal.principal_id)
+            else None
+        )
+
     def __init__(
         self,
         *,
@@ -554,6 +575,7 @@ class InMemorySessionDeletionRepository:
         artifacts: Any,
         memories: Any,
         people: InMemoryPeopleStore,
+        records: InMemoryRecordStore,
         episodes: Any,
         traces: Any,
         knowledge: Any,
@@ -574,6 +596,7 @@ class InMemorySessionDeletionRepository:
         self._artifacts = artifacts
         self._memories = memories
         self._people = people
+        self._records = records
         self._episodes = episodes
         self._traces = traces
         self._knowledge = knowledge
@@ -655,6 +678,7 @@ class InMemorySessionDeletionRepository:
             if key in self._people._records:
                 continue
             self._people._records[key] = [receipt]
+            self._people._remember_attribution(receipt)
             owner = (principal.tenant_id, principal.principal_id)
             self._people._positions[owner] = self._people._positions.get(owner, 0) + 1
 
@@ -1008,6 +1032,13 @@ class InMemorySessionDeletionRepository:
             for key, delivery in self._notification_outbox._deliveries.items()
             if delivery.notification_id not in pending_notification_ids
         }
+
+        for entries in self._records._entries.values():
+            for index, entry in enumerate(entries):
+                if entry.source_session_id == session_id:
+                    entries[index] = entry.model_copy(
+                        update={"source_session_id": None, "source_event_id": None}
+                    )
 
         self._schedules._occurrences = {
             occurrence_id: (

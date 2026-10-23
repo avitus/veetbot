@@ -1142,11 +1142,18 @@ private struct EmailThreadScreen: View {
         return VStack(alignment: .leading, spacing: 18) {
             ForEach(messages) { message in
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        senderName(message)
-                        Spacer(minLength: 4)
-                        Text(message.sentAt, format: .dateTime.month(.abbreviated).day().year().hour().minute())
-                            .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
+                    // A sender too long to share the line puts the date below
+                    // it rather than wrapping letter by letter.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            senderName(message)
+                            Spacer(minLength: 4)
+                            sentDate(message)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            senderName(message)
+                            sentDate(message)
+                        }
                     }
                     if describesInline {
                         Button {
@@ -1201,6 +1208,11 @@ private struct EmailThreadScreen: View {
         } else {
             Text(message.sender).veetType(EmailType.sender, weight: .semibold).textSelection(.enabled)
         }
+    }
+
+    private func sentDate(_ message: EmailMessageView) -> some View {
+        Text(message.sentAt, format: .dateTime.month(.abbreviated).day().year().hour().minute())
+            .veetType(EmailType.meta).foregroundColor(AppTheme.inkFaint).fixedSize()
     }
 
     /// Attachment names and the fact they were not read. The Mac lists them in

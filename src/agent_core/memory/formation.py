@@ -77,6 +77,7 @@ from agent_core.memory.profiles import (
     PersonaNominationProfile,
     UsageDeltas,
 )
+from agent_core.memory.recorded_values import recorded_elsewhere, recorded_value_sets
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
@@ -3145,6 +3146,7 @@ class GovernedMemoryService:
             extracted.provider_failure if isinstance(extracted, MemoryExtractionResult) else None
         )
         admitted_sources = formation_sources(extraction_events, self._principal)
+        recorded = recorded_value_sets(extraction_events)
         trusted_user_sources = {
             sequence
             for sequence, source in admitted_sources.items()
@@ -3384,6 +3386,10 @@ class GovernedMemoryService:
                             if _SECRET.search(source_text) is not None
                             else "rejected_injection"
                         ] += 1
+                        continue
+                    if recorded and recorded_elsewhere(candidate.statement, recorded):
+                        rejected += 1
+                        decisions["recorded_elsewhere"] += 1
                         continue
                     prepared_people = None
                     if (

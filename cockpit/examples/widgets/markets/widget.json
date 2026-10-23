@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "slug": "markets",
+  "title": "Markets",
+  "purpose": "Shows the day's move for a short list of market instruments.",
+  "kit_api": 1,
+  "sizes": ["sm", "tall"],
+  "feeds": [{ "id": "agent.markets" }],
+  "settings": { "type": "object", "additionalProperties": false, "properties": {} }
+}

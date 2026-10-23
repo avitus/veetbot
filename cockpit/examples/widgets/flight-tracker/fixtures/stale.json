@@ -1,0 +1,1 @@
+{ "now": "2026-10-22T18:00:00Z", "settings": { "flight": "EX 100" }, "feeds": { "agent.flight-status": { "observedAt": "2026-10-22T17:00:00Z", "expectedIntervalSec": 300, "data": { "boardingAt": "2026-10-22T20:10:00Z", "status": "delayed", "gate": null } } } }

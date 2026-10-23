@@ -5,9 +5,9 @@ import Testing
 
 @testable import VeetbotCore
 
-/// A list item must draw every line its text wraps to. In this reply the
-/// transcript gave the first two items a line less than they needed and cut
-/// each off with an ellipsis; every block drawn alone was whole.
+/// Every block of a reply must draw every line its text wraps to. In these
+/// replies the transcript gave list items and paragraphs a line less than they
+/// needed and cut each off with an ellipsis; every block drawn alone was whole.
 @Suite(.serialized) @MainActor struct MarkdownListLayoutTests {
     private static let reply = """
         That sounds like **baked-on food or oil plus underlying staining**. Focus on removing the raised deposits first; the smooth brown discoloration may be harmless.
@@ -28,6 +28,27 @@ import Testing
         let together = Self.drawnLines(Self.reply, width: width)
 
         #expect(alone[1] >= 6, "each item wraps to at least two lines at \(width) points")
+        #expect(together == alone.reduce(0, +), "at \(width) points the reply drew \(together) of \(alone) lines")
+    }
+
+    /// A quote stretched past its text and squeezed the paragraphs around it:
+    /// the first and last paragraphs of this reply each lost their final line
+    /// to an ellipsis, so the answer read as cut short.
+    private static let quotedReply = """
+        **For a tow to a repair shop, request a flatbed tow truck—not a rope or strap tow behind another car.** That avoids drivetrain damage regardless of which Cherokee drivetrain she has.
+
+        Tell the dispatcher:
+        > “It’s a 2014 Jeep Cherokee with no visible front tow hooks. Please send a flatbed.”
+
+        You don’t need to install a hitch or find a front hook yourself; the operator should use the proper loading equipment and attachment points. **If it won’t shift into Neutral or the electronic parking brake won’t release, mention that when booking** so they bring skates or dollies.
+        """
+
+    @Test(arguments: [400.0, 600.0, 720.0])
+    func everyParagraphBesideAQuoteDrawsAllItsLines(width: CGFloat) {
+        let blocks = Self.quotedReply.components(separatedBy: "\n\n")
+        let alone = blocks.map { Self.drawnLines($0, width: width) }
+        let together = Self.drawnLines(Self.quotedReply, width: width)
+
         #expect(together == alone.reduce(0, +), "at \(width) points the reply drew \(together) of \(alone) lines")
     }
 

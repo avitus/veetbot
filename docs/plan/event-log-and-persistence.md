@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:941`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:945`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1275-1283`) run over every message body,
+   (`bootstrap-and-composition.md:1283-1291`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1288-1290`).
+(`bootstrap-and-composition.md:1296-1298`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -568,7 +568,7 @@ agent run export <run-id> --json   the ArtifactRef on stdout
 ```
 
 `export` becomes the fourth reserved word after `agent run`
-(`bootstrap-and-composition.md:1091`), which is cheaper than a thirteenth
+(`bootstrap-and-composition.md:1099`), which is cheaper than a thirteenth
 top-level command and follows the precedent `agent eval`'s five
 subcommands already set. It reuses the existing exit codes without
 addition: a refused consent check exits 1, an unknown run exits 2, an
@@ -902,6 +902,25 @@ The delete request tries every queued reference after commit; the maintenance
 worker retries remaining rows and deletes each row only after byte deletion
 succeeds. Removing a tombstone cascades its pending queue, although normal
 operation retains the tombstone.
+
+### Milestone 34 owner records
+
+[owner-records.md](owner-records.md#persistence) adds `record_series` and
+`record_entries`, both with composite tenant-scoped primary keys and forced
+tenant row-level security, and four session-scoped event types, each at
+payload schema version 1 and appended in the same unit of work as the write:
+
+```text
+records.series.created   series_id, name, display_name, components, sensitivity, cadence
+records.entry.appended   series_id, entry_id, observed_at, observed_precision, values, note_withheld
+records.entry.deleted    series_id, entry_id
+records.series.deleted   series_id, entries_removed
+```
+
+Session deletion's cascade gains `record_entries`, which it does not delete:
+records are owner-authored, so the deletion transaction nulls the entries'
+`source_session_id` and `source_event_id` for the session and keeps the rows,
+using the `source_session_id` index the migration adds for it.
 
 ## Authoring migrations
 

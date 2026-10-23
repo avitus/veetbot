@@ -36,6 +36,11 @@ Milestone 12 amends the inventory additively to 126 paths. Its five additions
 are the notification claim batch, claim lease, notification-dispatch fallback poll interval, closed
 retry schedule, and terminal-notice expiry; ADR-0062 authorizes that surface.
 
+Amended 2026-10-22: Milestone 34 (ADR-0239) amends the inventory additively
+from 205 to 207 paths with `classes.records_catalog.max_items` and
+`classes.records_catalog.max_tokens` in `context/plan.yaml`; the records
+bounds are module constants and enter no count.
+
 Schema versions, profile and rule identifiers, conditions, model-catalog data,
 and the frozen hardline rules are not knobs and therefore do not enter the count.
 They remain validated configuration, but they cannot inflate the declared total.

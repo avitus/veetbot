@@ -10,8 +10,10 @@ from uuid import UUID
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import (
     ATTACHMENT_METADATA_KEY,
+    AUTO_INGEST_KEY,
     AttachmentContent,
     AttachmentRead,
+    KnowledgeState,
     StoredArtifactRef,
 )
 from agent_core.domain.errors import AttachmentValidationError, NotFoundError
@@ -157,25 +159,7 @@ class StoredAttachmentResolver:
     ) -> dict[UUID, AttachmentContent]:
         if not reads:
             return {}
-        now = self._clock.now()
-        released: dict[UUID, ArtifactRef] = {}
-        async with self._uow_factory() as uow:
-            try:
-                run = await uow.runs.get(run_id, self._principal)
-            except NotFoundError:
-                return {}
-            for read in reads:
-                try:
-                    artifact = await uow.artifacts.get(read.artifact_id, self._principal)
-                except NotFoundError:
-                    continue
-                if (
-                    artifact.session_id == run.session_id
-                    and artifact.origin in {"upload", "knowledge_source"}
-                    and ATTACHMENT_METADATA_KEY in artifact.metadata
-                    and (artifact.expires_at is None or artifact.expires_at > now)
-                ):
-                    released[artifact.id] = artifact
+        released = await self._released([read.artifact_id for read in reads], run_id)
         contents: dict[UUID, AttachmentContent] = {}
         for read in reads:
             chosen = released.get(read.artifact_id)
@@ -186,6 +170,45 @@ class StoredAttachmentResolver:
             except Exception:  # an unreadable object renders as unavailable, never fails a turn
                 logger.warning("attachment_read_failed", extra={"artifact_id": str(chosen.id)})
         return contents
+
+    async def knowledge_states(
+        self, artifact_ids: Sequence[UUID], *, run_id: UUID
+    ) -> dict[UUID, KnowledgeState]:
+        if not artifact_ids:
+            return {}
+        released = await self._released(artifact_ids, run_id)
+        states = {state.value: state for state in KnowledgeState}
+        return {
+            artifact.id: states[recorded]
+            for artifact in released.values()
+            if (recorded := artifact.metadata.get(AUTO_INGEST_KEY)) in states
+        }
+
+    async def _released(
+        self, artifact_ids: Sequence[UUID], run_id: UUID
+    ) -> dict[UUID, ArtifactRef]:
+        """The named artifacts that are live uploads of the caller in the run's session."""
+
+        now = self._clock.now()
+        released: dict[UUID, ArtifactRef] = {}
+        async with self._uow_factory() as uow:
+            try:
+                run = await uow.runs.get(run_id, self._principal)
+            except NotFoundError:
+                return {}
+            for artifact_id in artifact_ids:
+                try:
+                    artifact = await uow.artifacts.get(artifact_id, self._principal)
+                except NotFoundError:
+                    continue
+                if (
+                    artifact.session_id == run.session_id
+                    and artifact.origin in {"upload", "knowledge_source"}
+                    and ATTACHMENT_METADATA_KEY in artifact.metadata
+                    and (artifact.expires_at is None or artifact.expires_at > now)
+                ):
+                    released[artifact.id] = artifact
+        return released
 
     async def _read(self, artifact: ArtifactRef, max_bytes: int) -> AttachmentContent:
         ref = StoredArtifactRef(

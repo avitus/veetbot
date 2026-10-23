@@ -78,7 +78,9 @@ enum EmailInspectorReveal: Equatable { case sender, attachments }
 /// toolbar toggles the active mode's panel.
 @MainActor
 final class InspectorModel: ObservableObject {
-    @Published private var open: [ClientMode: Bool] = [:]
+    @Published private var open: [ClientMode: Bool] = [:] {
+        didSet { updateMailboxSidebarFold() }
+    }
     @Published private var widths: [ClientMode: CGFloat]
     @Published var chatTab: ChatInspectorTab = .activity
     @Published var emailTab: EmailInspectorTab = .context
@@ -103,6 +105,9 @@ final class InspectorModel: ObservableObject {
 
     /// Show original for every message in the open thread, chosen in Context.
     @Published var showsOriginal = false
+    /// Email's panel is open in a window too narrow for four columns, so the
+    /// mailbox sidebar folds away and the thread keeps its reading width.
+    @Published private(set) var foldsMailboxSidebar = false
     private let store: InspectorLayoutStore
     private var windowWidth: CGFloat?
 
@@ -143,6 +148,21 @@ final class InspectorModel: ObservableObject {
             guard previous == nil || (previous! >= threshold) != fits else { continue }
             open[mode] = fits && (store.openChoice(for: mode) ?? true)
         }
+        updateMailboxSidebarFold()
+    }
+
+    /// The owner showed the mailbox sidebar in a window too narrow for it and
+    /// the panel: they take turns, so the panel folds, and as a squeeze this
+    /// is not recorded as a choice.
+    func mailboxSidebarShown() {
+        guard foldsMailboxSidebar else { return }
+        open[.email] = false
+    }
+
+    private func updateMailboxSidebarFold() {
+        let narrow = windowWidth.map { $0 < InspectorLayout.minimumWindowWidth(.email) } ?? false
+        let folds = isOpen(.email) && narrow
+        if folds != foldsMailboxSidebar { foldsMailboxSidebar = folds }
     }
 
     /// A work strip in the transcript: its calls in the Activity tab.

@@ -457,6 +457,8 @@ class MaintenanceRepository(Protocol):
 
 
 class SessionDeletionRepository(Protocol):
+    async def deleted_at(self, principal: Principal, session_id: UUID) -> datetime | None: ...
+
     async def erase_people_copies(
         self,
         principal: Principal,

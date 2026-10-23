@@ -353,7 +353,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 205 knobs live, at the values the
+    module that owns it. This is where all 207 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -431,7 +431,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 205. Schema versions, profile names, rule identifiers,
+and asserts the total is 207. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -439,13 +439,13 @@ or invariants rather than knobs and are not counted.
 | --- | ---: |
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
-| `context/plan.yaml` | 30 |
+| `context/plan.yaml` | 32 |
 | `tools/limits.yaml` | 25 |
 | `runtime/limits.yaml` | 65 |
 | `memory/profiles.yaml` | 44 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
-| **Total** | **205** |
+| **Total** | **207** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -469,6 +469,14 @@ invocation timeout the push-wake channel waits out, the per-device daily ingest
 cap, and the interval between poll-backs. They are knobs rather than constants
 because the timeout and the cap are the two numbers an operator retunes when a
 phone answers slowly or a chatty channel floods triage.
+
+Milestone 34 adds the two `context/plan.yaml` knobs
+[owner-records.md](owner-records.md#configuration-and-scopes) fixes values
+for, `classes.records_catalog.max_items` (16) and
+`classes.records_catalog.max_tokens` (600), taking that document to
+thirty-two and the inventory to 207. The records series, entry and note
+bounds are module constants rather than knobs, and `AGENT_RECORDS_ENABLED`
+is a deployment flag, not a file-layer knob.
 
 Five required operational defaults had no numeric value in the corpus. ADR-0036
 sets the initial values: a 4 MiB global tool-output ceiling, a 30-second worker
@@ -1334,7 +1342,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 205 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 207 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default
@@ -1674,3 +1682,23 @@ the browser authorizers; setting `0` omits it and every call asks for approval.
 derives `mcp.bland_call.use` and `mcp.bland_read.use` from `AGENT_CALL_ENABLED`
 as it derives Gmail scopes, reading `BLAND_CONFIGURATION_FILE` but never a
 Bland credential. The contract is [bland-calling.md](bland-calling.md).
+
+## Milestone 35 Cockpit composition
+
+`AGENT_COCKPIT_ENABLED` defaults to off. When it is set, the composition root:
+
+- mounts the Cockpit routes;
+- registers the `cockpit` builtin domain's five tools as deferred entries in
+  the default agent's configuration;
+- constructs a second `SandboxManager` for `AGENT_COCKPIT_BUILDER_IMAGE`, and
+  the execution service then admits exactly the two configured images;
+- registers three maintenance-role work items: the platform feed projector,
+  the commit outbox and the branch importer.
+
+The outbox and the importer require the GitHub App credential delivered with
+`LoadCredential` to the maintenance role. That role refuses to start them
+without it, and no other process receives the credential.
+
+Unset, none of these exists. The flag, the image setting, the App identifiers
+and the `cockpit/profiles.yaml` knobs join the executable inventory when the
+implementation lands. The detailed contract is [cockpit.md](cockpit.md).

@@ -353,6 +353,37 @@ The staged implementation is in progress; optional channels remain evidence-gate
 - [ ] Complete the staged implementation and comparative activation evidence
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
+### Milestone 34 — Owner records
+
+Authorized on 2026-10-22 by [ADR-0239](../adr/0239-owner-records-and-numeric-series.md),
+with ten gates in the [design](../plan/owner-records.md): five `records.*`
+tools over named numeric series, approval-gated series creation and deletion,
+a refusal of appends in untrusted turns (the owner's chosen approval is pending
+because a profile edit would unbind the formation release evidence), a
+formation rule so that a reading never becomes a belief, and a body-region
+catalog of the series in every request. The build sequence is implemented
+behind `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its
+test; review, hosted CI and production delivery are pending.
+
+- [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
+
+### Milestone 35 — Cockpit mode and agent-authored widgets
+
+Authorized on 2026-10-22 by
+[ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md), with
+twenty-three gates in the [design](../plan/cockpit.md). The owner approved the
+MagicPath kit and boards on 2026-10-22. The `cockpit/` workspace is
+implemented: the ported kit, the builder, and the host and network-less realm,
+proven against an adversarial corpus in headless Chromium and WebKit. The
+domain, the five ports and their contract suites, the migration and both store
+adapters are implemented, and gate 1 is bound to the PostgreSQL parity test.
+Every other gate is pending.
+
+- [ ] Build step 3: the builder sandbox image, release wiring, the runsc canary, the second manager and reaper leases
+- [ ] Build steps 5 to 8: the GitHub App adapter and commit outbox, the routes and stream, the agent tools and policy rule, and the platform feeds
+- [ ] Build steps 9 to 11: the Apple mode refactor, the native Cockpit mode and preview rendering
+- [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the assistant's seed widgets; hosted CI, review and production delivery
+
 ## Outside a milestone
 
 Open work that no active milestone owns: owner-only steps of non-milestone
@@ -400,7 +431,8 @@ hand-off (the B7 residue after Milestone 24), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and
 multi-tenant billing and quotas (B12), and the WhatsApp linked-device
-bridge (B13).
+bridge (B13). Owner records (B14) entered as Milestone 34 on 2026-10-22
+under ADR-0239.
 
 Work each milestone explicitly set aside is recorded as that milestone's
 `deferred_scope` in [`project-state.yaml`](project-state.yaml); a deferred

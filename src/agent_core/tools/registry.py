@@ -47,6 +47,7 @@ BUILTIN_DOMAINS = frozenset(
         "skill",
         "memory",
         "people",
+        "records",
         "email",
         "knowledge",
         "web",

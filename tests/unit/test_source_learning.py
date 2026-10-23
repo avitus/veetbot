@@ -378,6 +378,75 @@ async def test_learning_requires_owner_authority_for_the_actual_destination(
 
 
 @pytest.mark.parametrize(
+    "message,destination",
+    [
+        # The 2026-10-22 production request, verbatim: a scheme-less site name.
+        (
+            "Much of my work life is captured at www.scalevp.com. Scour it and learn "
+            "everything you can about my career, work associates, investments, and work life",
+            "https://www.scalevp.com/team/andy-vitus",
+        ),
+        ("Learn about our family from family.example.org/albums.", None),
+        ("Learn from https://www.family.example.org/albums.", None),
+        (f"Learn from {URL}.", "https://www.family.example.org/albums"),
+        (f"Learn from {URL} - don't skip the captions.", None),
+        (f"Learn from {URL}; I am not on Facebook much.", None),
+        (f"Learn about us from {URL}, and don\u2019t forget the captions.", None),
+    ],
+)
+async def test_learning_admits_how_owners_name_a_website(
+    message: str, destination: str | None
+) -> None:
+    async with read_archive(message=message, destination=destination) as (app, context, _):
+        assert (await learn(app, context, observation()))[0]["status"] == "committed"
+
+
+@pytest.mark.parametrize(
+    "message,destination,reason",
+    [
+        (f"Read {URL} but don\u2019t remember anything about us.", None, "source_not_authorized"),
+        (f"Learn from {URL}, but not about Erin.", None, "source_not_authorized"),
+        # "not from" excludes a source; without it both named sites would be roots.
+        (f"Learn from {URL}, not from www.facebook.com.", None, "source_not_authorized"),
+        ("Write to erin@family.example.org and learn about us.", None, "source_not_named"),
+        ("Learn about our family from the album site.", None, "source_not_named"),
+        ("Learn from blog.family.example.org.", None, "source_not_authorized"),
+        (
+            "Learn from family.example.org.",
+            "https://blog.family.example.org/albums",
+            "source_not_authorized",
+        ),
+        (
+            "Learn from www.family.example.org/albums.",
+            "https://family.example.org/albums-elsewhere",
+            "source_not_authorized",
+        ),
+    ],
+)
+async def test_learning_keeps_owner_named_site_boundaries(
+    message: str, destination: str | None, reason: str
+) -> None:
+    async with read_archive(message=message, destination=destination) as (app, context, _):
+        result = await learn(app, context, observation())
+        assert result[0]["status"] == "rejected"
+        assert result[0]["reason"] == reason
+        assert await app.memory.list_memories() == []
+
+
+async def test_www_and_bare_domain_contribute_once_as_one_website() -> None:
+    second = "https://www.family.example.org/albums"
+    async with read_archive(message=f"Learn from {URL}.", second_url=second) as (app, context, run):
+        before = await tentative(app, run)
+        first = await learn(app, context, observation(reinforce_id=str(before.id)))
+        again = await learn(
+            app, context, observation(call_id="read-second", reinforce_id=str(before.id))
+        )
+        assert first == [{"status": "reinforced", "belief_id": str(before.id)}]
+        assert again == [{"status": "unchanged", "belief_id": str(before.id)}]
+        assert (await app.memory.list_memories())[0].confidence == pytest.approx(0.45)
+
+
+@pytest.mark.parametrize(
     "item",
     [
         observation(call_id="invented-call"),

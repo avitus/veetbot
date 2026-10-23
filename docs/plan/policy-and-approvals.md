@@ -359,21 +359,32 @@ made thirty-three strings. Milestone 27 adds `call.read`, `call.cancel`, and
 `call.delete` for the call routes in [bland-calling.md](bland-calling.md);
 Milestone 28 adds `people.read` and `people.write`; ADR-0117 adds
 `memory.write`; ADR-0119 adds `settings.read` and `settings.write`; ADR-0140
-adds `media.generate`; ADR-0143 adds `notification.write`. The implemented
-platform vocabulary therefore contains forty-three strings.
+adds `media.generate`; ADR-0143 adds `notification.write`; ADR-0225 adds
+`schedule.run` for the Run now route; and Milestone 34 adds `records.read` and
+`records.write` for the five `records.*` tools in
+[owner-records.md](owner-records.md). The implemented platform vocabulary,
+`PLATFORM_SCOPES` in `src/agent_core/policy/scopes.py`, therefore contains
+forty-six strings.
+
+The records tools add no `tool_rules` row: `records.create_series` is
+`EXTERNAL_WRITE` and `records.delete` `EXTERNAL_DELETE`, so the existing
+matrix requires approval for both, and `records.list`, `records.query` and
+`records.append` are `NONE` and allowed. The append's untrusted-turn rule is
+a check in the records service, not a policy condition, so the default
+profile and its version are unchanged.
 
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
 joined by dots, of which the last is the action. The four `browser.` scopes
-have three; the other thirty-nine have exactly two.
+have three; the other forty-two have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1382` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1383` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
-when it is one of the forty-three, or when its first segment is `mcp` and its
+when it is one of the forty-six, or when its first segment is `mcp` and its
 second is the server id. `mcp.files.write` is legal on a tool from the
 `files` server. `run.cancel` on that tool is not.
 
@@ -1595,7 +1606,7 @@ policy remain enforced. An uncertain write is not automatically repeated.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
 arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
 and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
-matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:613);
+matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:624);
 the arm holds that decision under every profile, so no profile can turn an
 unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent
@@ -1624,3 +1635,22 @@ and completion requires positive Following evidence on that profile. Changed
 targets and unrelated writes retain their normal approval rules. A consumed or
 uncertain request cannot authorize another click. Verified connection/sign-in
 resumes the same bounded request; it does not create general browser authority.
+
+## Milestone 35 widget publication rule
+
+[ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md) records
+the owner's decision that widget changes from the owner's own turns need no
+per-change approval. The default profile therefore gains one exact-name
+`tool_rules` entry allowing `cockpit.widget.write`, whose side effect is
+`publication`. It follows the `device.sms.send` and `browser.act` precedent,
+and it does not set `human_confirms_arguments`.
+
+The trust overlay continues to escalate a turn whose origin is not the user,
+the platform or trusted configuration, and any untrusted argument. The
+credential-to-egress hardline rule continues to apply to the tool's
+arguments; the builder checks the same pattern first, so the assistant sees a
+diagnostic rather than a denial.
+
+The edit moves the content-addressed policy version. The step that makes it
+updates the pinned shipped version and names any version-bound evidence it
+affects. [cockpit.md](cockpit.md#the-tools) owns the tool contract.

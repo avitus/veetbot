@@ -18,6 +18,7 @@ from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from agent_core.ports.calls import CallStore
+from agent_core.ports.cockpit import CockpitEventLog, FeedStore, WidgetCommitOutbox, WidgetStore
 from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
 from agent_core.ports.devices import (
@@ -37,6 +38,7 @@ from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.personas import PersonaStore
 from agent_core.ports.reconsolidation import ReconsolidationStore
+from agent_core.ports.records import RecordStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -121,6 +123,11 @@ class UnitOfWorkRepositories:
     email: EmailStore
     calls: CallStore
     people: PeopleStore
+    records: RecordStore
+    cockpit_widgets: WidgetStore
+    cockpit_outbox: WidgetCommitOutbox
+    cockpit_feeds: FeedStore
+    cockpit_events: CockpitEventLog
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository
@@ -192,6 +199,11 @@ class MemoryUnitOfWork:
         self.email = repositories.email
         self.calls = repositories.calls
         self.people = repositories.people
+        self.records = repositories.records
+        self.cockpit_widgets = repositories.cockpit_widgets
+        self.cockpit_outbox = repositories.cockpit_outbox
+        self.cockpit_feeds = repositories.cockpit_feeds
+        self.cockpit_events = repositories.cockpit_events
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules
@@ -329,6 +341,11 @@ class PostgresUnitOfWork:
         self.email = repositories.email
         self.calls = repositories.calls
         self.people = repositories.people
+        self.records = repositories.records
+        self.cockpit_widgets = repositories.cockpit_widgets
+        self.cockpit_outbox = repositories.cockpit_outbox
+        self.cockpit_feeds = repositories.cockpit_feeds
+        self.cockpit_events = repositories.cockpit_events
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules

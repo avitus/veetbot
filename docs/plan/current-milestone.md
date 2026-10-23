@@ -4,13 +4,35 @@ title: Current Milestone
 
 # Current milestone
 
+- **Milestone 35 — Cockpit mode and agent-authored widgets:** authorized by the
+  owner on 2026-10-22 as an independent parallel workstream under ADR-0240.
+  [Cockpit](cockpit.md) declares twenty-three gates for a third client mode
+  whose widgets the assistant creates, updates and deletes: a MagicPath-designed
+  React kit in a `cockpit/` workspace, offline validation, privacy screening
+  and builds in a second platform-owned sandbox image, commit-before-activate
+  publication to the public orphan branch `cockpit/widgets` through a GitHub
+  App, platform and assistant-published feeds with freshness, a resumable
+  per-tenant stream, five deferred tools, and a network-less realm on iPhone,
+  iPad and Mac. The `cockpit/` workspace and the stores are implemented and
+  gate 1 is bound; every other gate is pending.
+
+- **Milestone 34 — Owner records (ADR-0239):** On 2026-10-22 the owner
+  authorized roadmap item B14. [Owner records](owner-records.md) specifies five
+  `records.*` tools over named numeric series, approval-gated creation and
+  deletion, an append refused in untrusted turns, a formation rule that keeps
+  readings out of beliefs, and a body-region catalog, with ten registered
+  gates. The build sequence is implemented test-first behind
+  `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its test;
+  nothing is activated, and review and delivery are pending.
+
 - **Owner-directed source learning — ADR-0233:** On 2026-10-21 the owner
   authorized governed website learning, tentative-memory reinforcement and
   truthful manual-save reporting. This extends Milestone 21 without changing
   frozen extraction policies or moving gates. Pull request 181 delivered the initial
   path on 2026-10-22; the owner-reported deferred-format repair is authorized and
-  awaits release. Governed recovery retained 23 observations from the motivating
-  chat and verified them through the production memory API.
+  awaits release, as does the 2026-10-22 repair admitting owner-named sites as
+  typed. Governed recovery retained 23 observations from the motivating chat and
+  verified them through the production memory API.
 
 - **Independent reliability repair — ADR-0205:** The owner authorized safe
   failure diagnostics, bounded recovery, cleanup isolation and scoped reliability
@@ -254,6 +276,10 @@ title: Current Milestone
   review-only sign-in works with thirty-day cookie persistence. Supervised review
   remains enabled and unattended application remains off; this operational
   delivery does not supply the missing comparative quality or independent review.
+  On October 22 the owner authorized verified metadata-only legacy recovery
+  (ADR-0241), followed by full-bank supervised eligibility under the existing
+  source and erasure checks. The cutoff remains active until complete recovery;
+  deleted payloads, historical decisions, budgets and unattended gates are unchanged.
   The once/dry-run operator
   controls, remaining complete runtime gates and fresh matching comparative
   release evidence remain required; no verified sequential ceiling advances.
@@ -655,6 +681,7 @@ plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 - [Milestone 29 — Chat thread folders](engineering-plan.md#milestone-29-chat-thread-folders)
 - [Milestone 30 — Advisory approval layer](engineering-plan.md#milestone-30-advisory-approval-layer)
 - [Milestone 31 — Email unsubscribe assistance](engineering-plan.md#milestone-31-email-unsubscribe-assistance)
+- [Milestone 35 — Cockpit mode and agent-authored widgets](engineering-plan.md#milestone-35-cockpit-mode-and-agent-authored-widgets)
 
 ## Completion rule
 
@@ -858,3 +885,25 @@ suspected spam without touching Gmail; the owner clears a flag or reports one
 thread as spam with Archive's gesture, through two routes under
 `/v1/email/threads` behind the same flag. This independent workstream is in
 progress and does not move the verified ceiling.
+
+## Milestone 35: Cockpit mode and agent-authored widgets
+
+The owner requested Cockpit on 2026-10-22 and decided its authorship, visual
+layer, source of truth, privacy posture and approval model under ADR-0240.
+[Cockpit mode and agent-authored widgets](cockpit.md) specifies twenty-three
+gates.
+
+The assistant writes widgets as data-free React components on a
+MagicPath-designed kit. A second platform-owned sandbox image validates,
+privacy-screens and builds them offline. A GitHub App commits them to the
+public orphan branch `cockpit/widgets`, and a widget goes live only after its
+commit is recorded. Human commits to the branch pass through the same
+pipeline. Widgets render platform and assistant-published feeds with
+freshness, inside one network-less realm on iPhone, iPad and Mac. A snapshot
+route and a resumable per-tenant stream carry the data, under new scopes and
+a default-off flag. The widget write tool is allowed by an exact-name rule,
+and the trust overlay stays intact.
+
+The `cockpit/` workspace and the stores are implemented and gate 1 is bound;
+every other gate is pending. This independent workstream is authorized; the
+verified ceiling does not move.

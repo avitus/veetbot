@@ -1194,7 +1194,7 @@ requires-dist = [
     { name = "pgvector", specifier = ">=0.4,<0.5" },
     { name = "playwright", specifier = ">=1.55,<2" },
     { name = "publicsuffixlist", specifier = "==1.0.2.20260925" },
-    { name = "pydantic", specifier = ">=2.10.6,<3" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pypdf", specifier = ">=6.1,<7" },
     { name = "python-dotenv", specifier = ">=1.0,<2" },
     { name = "pyyaml", specifier = ">=6.0,<7" },

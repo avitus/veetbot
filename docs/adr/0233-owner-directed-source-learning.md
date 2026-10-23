@@ -101,3 +101,23 @@ It retained 23 attributed tentative observations; two source-hazard refusals
 remained. An independent authenticated memory-API read found all 23 IDs and the
 already-formed album location. This verifies recovery of that chat, not delivery
 of the deferred-interface repair.
+
+## Repair: Owner-named sites as typed (2026-10-22)
+
+A production request to learn from `www.scalevp.com` rejected every
+observation as `source_not_authorized`, although all retained reads were on
+that site. Admission recognized an owner-named site only with an explicit
+`https://` scheme, so the request named nothing. Every test had written the
+scheme. Separately, any "not" or "stop" anywhere in the request withheld
+learning, while a curly-apostrophe "don’t remember" did not.
+
+On the owner's direction, admission now reads a scheme-less site name as
+HTTPS and treats `www.` and the bare domain as one host, for authority and for
+the once-per-host corroboration ceiling. No receipt retained before this repair
+used a `www.` host. Other subdomains, email addresses, query strings, ports,
+and paths outside the named subtree remain ineligible. A negation withholds
+learning when it governs a learning verb or limits the request's subject. A
+request with learning intent but no recognizable site is rejected as
+`source_not_named`, so the agent can ask the owner for the address. The
+verbatim production request is a regression case. Grounding, hazard, erasure,
+reinforcement, and authority checks are unchanged.

@@ -48,6 +48,7 @@ from agent_core.cli.people import app as people_app
 from agent_core.cli.people import configure as configure_people
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.dreaming_recovery import LegacyAttributionManifest
 from agent_core.domain.email import EmailBulkExclusionReport
 from agent_core.domain.errors import (
     AgentCoreError,
@@ -1064,9 +1065,53 @@ async def _forward_dreaming(owner: str) -> None:
             raise NotFoundError("Reconsolidation controls are unavailable")
         boundary = await service.enable_forward_dreaming(principal)
         typer.echo(
-            f"Forward-only dreaming since {boundary.activated_at.isoformat()}. "
-            "Existing evidence remains excluded."
+            "Legacy attribution recovered; full-bank dreaming is eligible."
+            if boundary.recovered_at is not None
+            else (
+                f"Forward-only dreaming since {boundary.activated_at.isoformat()}. "
+                "Existing evidence remains excluded."
+            )
         )
+
+
+async def _recover_legacy_dreaming(
+    owner: str, manifest: LegacyAttributionManifest, confirm: bool
+) -> None:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise ConflictError("Owner must match the configured tenant/principal")
+        service = composition.services.reconsolidation
+        if service is None:
+            raise NotFoundError("Reconsolidation controls are unavailable")
+        result = await service.recover_legacy_dreaming(principal, manifest, confirm=confirm)
+        typer.echo(result.model_dump_json())
+
+
+@reconsolidations_app.command("recover-legacy")
+def recover_legacy_dreaming(
+    owner: Annotated[
+        str, typer.Option("--owner", help="Exact configured tenant/principal identity.")
+    ],
+    manifest: Annotated[Path, typer.Option("--manifest", help="Content-free recovery proof JSON.")],
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Apply verified recovery and retire the cutoff.")
+    ] = False,
+) -> None:
+    """Preview complete legacy attribution recovery; confirm explicitly to apply."""
+    try:
+        with manifest.open("rb") as source:
+            data = source.read(2_000_001)
+        if len(data) > 2_000_000:
+            raise ValueError("Recovery manifest exceeds the input limit")
+        proof = LegacyAttributionManifest.model_validate_json(data)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter("Recovery manifest must be valid bounded proof JSON") from exc
+    try:
+        asyncio.run(_recover_legacy_dreaming(owner, proof, confirm))
+    except (ConfigurationError, AgentCoreError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
 
 @reconsolidations_app.command("forward-only")
@@ -1075,12 +1120,12 @@ def forward_dreaming(
         str, typer.Option("--owner", help="Exact configured tenant/principal identity.")
     ],
     confirm: Annotated[
-        bool, typer.Option("--confirm", help="Permanently exclude existing dreaming evidence.")
+        bool, typer.Option("--confirm", help="Establish the forward-only cutoff.")
     ] = False,
 ) -> None:
     """Enable a one-time forward-only boundary without changing the daily schedule."""
     if not confirm:
-        raise typer.BadParameter("--confirm is required to establish the permanent boundary")
+        raise typer.BadParameter("--confirm is required to establish the forward-only boundary")
     try:
         asyncio.run(_forward_dreaming(owner))
     except (ConfigurationError, AgentCoreError) as exc:

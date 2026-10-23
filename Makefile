@@ -28,7 +28,8 @@ endif
 	test-apple-ui-ios \
 	test-deploy sandbox-image browser-image test-browser-image \
 	production-check \
-	docs docs-serve docs-check citations-fix website-install test-website
+	docs docs-serve docs-check citations-fix website-install test-website cockpit-install test-cockpit \
+	cockpit-widgets-worktree
 
 install:
 	uv sync --all-groups
@@ -167,6 +168,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2SchedulesKeepListBesideSelectedSchedule \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2EmailHasMailboxBesideTheInbox \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarHidesFromTheWindowToolbar \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailPanelShowsTheThreadsContextAndFoldsInANarrowWindow \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2HandledCollectionDoesNotArchiveMail \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2PeopleHasDirectoryNavigation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2InlineUnsubscribeKeepsTheConfirmation \
@@ -367,6 +369,20 @@ test-website: website-install
 	npm --prefix website test
 	npm --prefix website run lint
 
+cockpit-install:
+	node scripts/install_website.mjs cockpit
+
+# The realm boundary tests drive a real browser engine; Chromium is required.
+test-cockpit: cockpit-install
+	npm --prefix cockpit exec -- playwright install chromium
+	npm --prefix cockpit test
+	npm --prefix cockpit run lint
+
+# Check out the public widget branch beside main to build widgets against the kit.
+cockpit-widgets-worktree:
+	git fetch origin cockpit/widgets
+	git worktree add .worktrees/cockpit-widgets origin/cockpit/widgets
+
 production-check:
 	uv run python scripts/check_production_deployment.py
 
@@ -382,7 +398,7 @@ docs-check:
 citations-fix:
 	uv run $(PYTHON) scripts/check_citations.py --update
 
-check: test-fast test-browser test-website lint typecheck test-deploy docs-check
+check: test-fast test-browser test-website test-cockpit lint typecheck test-deploy docs-check
 
 db-up:
 	docker compose up -d postgres

@@ -33,6 +33,7 @@ from agent_core.adapters.persistence.notifications import (
     InMemoryNotificationOutbox,
 )
 from agent_core.adapters.persistence.people import InMemoryPeopleStore
+from agent_core.adapters.persistence.records import InMemoryRecordStore
 from agent_core.adapters.persistence.schedules import InMemoryScheduleRepository
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
@@ -45,10 +46,12 @@ from agent_core.domain.schedules import OccurrenceDisposition, ScheduleOccurrenc
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
+from agent_core.ports.records import Order
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
 from tests.contract.test_browser_task_grant_repository_contract import grant as task_grant
 from tests.contract.test_delegation_repository_contract import delegation
 from tests.contract.test_integrated_episode_store_contract import integrated_episode
+from tests.contract.test_record_store_contract import everything, make_entry, make_series
 from tests.contract.test_schedule_repository_contract import revision, schedule
 
 
@@ -92,6 +95,7 @@ async def _repository() -> tuple[
         artifacts=artifacts,
         memories=InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction())),
         people=InMemoryPeopleStore(FixedClock(NOW)),
+        records=InMemoryRecordStore(),
         episodes=episodes,
         traces=InMemoryTraceStore(),
         knowledge=InMemoryKnowledgeStore(clock),
@@ -369,6 +373,7 @@ async def test_session_deletion_removes_task_grants() -> None:
         artifacts=InMemoryArtifactRepository(),
         memories=InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction())),
         people=InMemoryPeopleStore(FixedClock(NOW)),
+        records=InMemoryRecordStore(),
         episodes=InMemoryIntegratedEpisodeStore(),
         traces=InMemoryTraceStore(),
         knowledge=InMemoryKnowledgeStore(clock),
@@ -398,3 +403,42 @@ async def test_session_deletion_removes_task_grants() -> None:
     with pytest.raises(NotFoundError):
         await task_grants.get(deleted.id, principal())
     assert await task_grants.get(kept.id, principal()) == kept
+
+
+async def test_session_deletion_detaches_record_entries() -> None:
+    """Owner records outlive a deleted chat; only the provenance is cleared."""
+
+    clock, sessions, runs, events = await memory_stack()
+    records = InMemoryRecordStore()
+    repository = InMemorySessionDeletionRepository(
+        sessions=sessions,
+        runs=runs,
+        events=events,
+        invocations=InMemoryToolInvocationRepository(runs),
+        approvals=InMemoryApprovalRepository(clock),
+        checkpoints=InMemoryCheckpointRepository(),
+        idempotency=InMemoryIdempotencyRepository(clock),
+        usage=InMemoryUsageRepository(runs),
+        trajectory_exports=InMemoryTrajectoryExportRepository(),
+        artifacts=InMemoryArtifactRepository(),
+        memories=InMemoryMemoryStore(clock, ReconsolidationIndex(MemoryTransaction())),
+        people=InMemoryPeopleStore(FixedClock(NOW)),
+        records=records,
+        episodes=InMemoryIntegratedEpisodeStore(),
+        traces=InMemoryTraceStore(),
+        knowledge=InMemoryKnowledgeStore(clock),
+        schedules=InMemoryScheduleRepository(),
+        notification_outbox=InMemoryNotificationOutbox(clock, InMemoryDeviceRegistry()),
+        delegations=InMemoryDelegationRepository(),
+        browser_task_grants=InMemoryBrowserTaskGrantRepository(),
+    )
+    series, _ = await records.create_series(make_series(principal(), components=("weight",)))
+    linked = make_entry(series, NOW, {"weight": "70"}, session=SESSION_ID)
+    await records.append(linked)
+
+    assert await repository.delete(SESSION_ID, principal(), NOW + timedelta(minutes=1))
+
+    rows = await records.query(principal(), series.id, everything(), Order.ASC, 10)
+    assert [row.id for row in rows] == [linked.id]
+    assert rows[0].source_session_id is None
+    assert rows[0].source_event_id is None

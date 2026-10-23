@@ -16,6 +16,7 @@ session:
   revoke_scope_turn: 10
   memory_write_turn: 20
   memory_correction_turn: 30
+  records_append_turn: 40
 expected:
   terminal_status: COMPLETED
   final_text: Long-session turn completed.

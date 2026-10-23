@@ -361,9 +361,13 @@ browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
 device.read       device.write       notification.read    notification.write
 memory.read       memory.write
+records.read      records.write
 ```
 
-`approval.resolve` is the one the corpus already names; the rest follow
+`records.read` and `records.write` gate no route; they are the
+`required_scopes` of the five `records.*` tools in
+[owner-records.md](owner-records.md), enumerated here because the vocabulary
+is one closed list. `approval.resolve` is the one the corpus already names; the rest follow
 its form. Membership is exact string equality against the principal's
 scope set. There is no wildcard, no prefix rule, and no hierarchy in
 which `run.write` implies `run.read`.
@@ -2376,3 +2380,27 @@ a durable `run.failed` event, and shows the reference beside the failure. The
 additive `dependency_unavailable` reason carries fixed recovery guidance for an
 email draft whose source could not be refreshed; it never implies the draft was
 sent or that an external write may be replayed.
+
+## Milestone 35 Cockpit routes
+
+[cockpit.md](cockpit.md#the-routes-and-the-stream) owns nine routes under
+`/v1/cockpit`, and their contracts. They are:
+
+- the snapshot;
+- a server-sent event stream;
+- immutable assets by content hash;
+- widget detail;
+- owner writes for settings, layouts, revert, delete and restore.
+
+They are absent unless `AGENT_COCKPIT_ENABLED=1`. They require the new
+`cockpit.read` or `cockpit.write` scope, which joins the closed vocabulary.
+
+The stream follows the run stream's conventions: every check before the first
+byte, a fifteen-second heartbeat, `Last-Event-ID` resume, and disabled proxy
+buffering. It reads a durable per-tenant `cockpit_events` table, and its
+NOTIFY payload carries only kind and sequence. It adds `stream.reset` for a
+resume point past retention, and a bounded lifetime so a revoked token takes
+effect on reconnect.
+
+Every response except an asset carries `Cache-Control: private, no-store`. A
+foreign or unknown widget, revision or feed is an indistinguishable 404.

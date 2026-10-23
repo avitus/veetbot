@@ -142,6 +142,25 @@ import Testing
         #expect(!mode.contains("inspectorReveal.sender("))
     }
 
+    /// In a window too narrow for four columns the root folds Email's mailbox
+    /// sidebar while the panel is open, and the window's sidebar button folds
+    /// the panel instead. The fold never touches the window's own sidebar
+    /// state, which macOS restores at the next launch. A long sender drops
+    /// below the date rather than wrapping letter by letter.
+    @Test
+    func testANarrowWindowGivesTheThreadItsReadingWidth() throws {
+        let root = try source(at: "Veetbot/Views/RootView.swift")
+        let mode = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(root.contains("@State private var mailboxSidebarFolded = false"))
+        #expect(root.contains(".onReceive(inspector.$foldsMailboxSidebar) { mailboxSidebarFolded = $0 }"))
+        #expect(root.contains("sidebarVisibility != .detailOnly && !mailboxSidebarFolded"))
+        #expect(root.contains("inspector.mailboxSidebarShown()"))
+        #expect(root.contains("sidebarVisibility = previous"))
+        #expect(!root.contains("MailboxSidebarFold"))
+        #expect(mode.contains("ViewThatFits(in: .horizontal) {\n                        HStack(alignment: .firstTextBaseline, spacing: 8) {"))
+    }
+
     @Test
     func testUIJourneysKeepTheirOwnPanelLayout() throws {
         let fixture = try source(at: "Veetbot/ConversationNavigationUITestFixture.swift")

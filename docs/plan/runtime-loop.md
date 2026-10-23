@@ -1420,7 +1420,7 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Eighteen more belong to subsystems this document does not touch. They are
+Twenty-two more belong to subsystems this document does not touch. They are
 listed here for the same reason: Section 6.8's list is where an implementer
 looks for the vocabulary, and these are not in it either.
 
@@ -1444,13 +1444,19 @@ memory.recalled              memory-retrieval-and-ranking.md
 knowledge.document.ingested  knowledge-documents.md
 browser.task_grant.created   browser-automation.md, ADR-0129
 browser.task_grant.ended     browser-automation.md, ADR-0129
+records.series.created       owner-records.md, ADR-0239
+records.entry.appended       owner-records.md, ADR-0239
+records.entry.deleted        owner-records.md, ADR-0239
+records.series.deleted       owner-records.md, ADR-0239
 ```
 
-Twenty-four in Section 6.8 plus these thirty-three is the whole vocabulary
-of session-scoped events: fifty-seven persisted event types, not one of
-them introduced here.
+Twenty-four in Section 6.8 plus these thirty-seven is the whole vocabulary
+of session-scoped events: sixty-one persisted event types, not one of
+them introduced here. The four `records.*` types arrived with Milestone 34
+and are appended to the run's session in the same unit of work as the
+record write.
 
-Two of the eighteen were declared after this consolidation was written and
+Two of the original eighteen were declared after this consolidation was written and
 never folded into it. `mcp.server.reauthenticated` sits in the same
 tool-system table as the seven that were taken;
 `knowledge.document.ingested` arrived with the knowledge spec. Both are
@@ -1467,8 +1473,8 @@ the run, under a span root that is explicitly not `agent.run`. A harness
 event has no session, and `events.session_id` is `NOT NULL`. They are event
 types by every other measure and they cannot be rows in `events` as the
 schema stands — the same wall `multi-device-and-surfaces.md` hits for
-device lifecycle events and leaves open. Fifty-seven plus these four is
-sixty-one declared types, of which fifty-seven have somewhere to be
+device lifecycle events and leaves open. Sixty-one plus these four is
+sixty-five declared types, of which sixty-one have somewhere to be
 stored.
 
 Two ownership assignments close gaps that were nobody's:

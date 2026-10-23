@@ -1717,3 +1717,25 @@ builtin and logged under its own refusal reason so the two stay separately
 auditable. Neither is selectable from a serialized sandbox policy, neither
 changes what an approved `SANDBOX_NETWORK` grants, and the operator's
 `egress` grammar above is unchanged.
+
+## Milestone 35 widget builder image
+
+[ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md) answers
+the image question above for one platform-owned purpose. The second image is
+`execution/cockpit-builder`. It is built from this image's base, keeps
+`python` for the workspace operations, and adds Node, the locked `cockpit/`
+dependencies and Playwright WebKit.
+
+It runs through the same execution service under gVisor, with:
+
+- networking off;
+- a read-only root and a no-exec `/tmp`;
+- the standard limits;
+- an empty environment and no credentials.
+
+The service admits only the two configured images. A build that starts
+outside a run holds its own lease, with a `purpose=cockpit_build` label, so
+the reaper treats it as live. Release preflight builds a canary under runsc.
+
+Tenants still cannot choose an image. The per-tenant question remains open.
+[cockpit.md](cockpit.md) owns the build contract.

@@ -531,7 +531,13 @@ async def test_context_planner_ranks_required_session_tools_first_and_never_defe
 async def test_context_planner_keeps_a_plan_from_an_equivalent_earlier_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A context-builder@11 plan renders the same bytes, so it stays current (ADR-0123)."""
+    """An equivalent earlier builder's version alone does not rotate a plan (ADR-0123).
+
+    Here both plans render today's framing, so the hash matches and the plan is
+    reused. A stored context-builder@11 plan no longer renders the same bytes
+    since context-builder@13 changed the framing row: its stored prefix hash
+    fails the planner's recheck and it is re-planned.
+    """
     clock, factory, _service, _retriever = await formation_stack()
     config = yaml.safe_load(
         (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")

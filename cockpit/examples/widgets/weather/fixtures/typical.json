@@ -1,0 +1,11 @@
+{
+  "now": "2026-10-22T18:00:00Z",
+  "settings": { "place": "Example City" },
+  "feeds": {
+    "agent.weather": {
+      "observedAt": "2026-10-22T17:57:40Z",
+      "expectedIntervalSec": 900,
+      "data": { "temperature": 64, "summary": "Light rain from 3 pm", "rainStartsAt": "2026-10-22T18:42:00Z", "hourly": [58, 59, 61, 62, 63, 64, 64, 63, 61, 59] }
+    }
+  }
+}

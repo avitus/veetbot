@@ -564,3 +564,132 @@ def test_model_settings_are_versioned_per_principal_under_tenant_isolation() -> 
     assert "ALTER TABLE model_settings ENABLE ROW LEVEL SECURITY" in migration_sql
     assert "ALTER TABLE model_settings FORCE ROW LEVEL SECURITY" in migration_sql
     assert "model_settings_tenant_isolation" in migration_sql
+
+
+def test_record_tables_are_owner_scoped_under_forced_tenant_isolation() -> None:
+    series = Base.metadata.tables["record_series"]
+    entries = Base.metadata.tables["record_entries"]
+    assert series.primary_key.name == "pk_record_series"
+    assert entries.primary_key.name == "pk_record_entries"
+    assert {c.name for c in series.primary_key.columns} == {"tenant_id", "principal_id", "id"}
+    assert set(series.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "id",
+        "name",
+        "display_name",
+        "components",
+        "sensitivity",
+        "cadence",
+        "revision",
+        "created_at",
+        "updated_at",
+    }
+    assert set(entries.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "id",
+        "series_id",
+        "observed_at",
+        "observed_precision",
+        "values",
+        "note",
+        "note_withheld",
+        "idempotency_key",
+        "source_session_id",
+        "source_event_id",
+        "created_at",
+    }
+    assert series.columns["cadence"].nullable
+    assert entries.columns["source_session_id"].nullable
+
+    migration = next((ROOT / "migrations" / "versions").glob("*_owner_records.py"))
+    migration_sql = migration.read_text(encoding="utf-8")
+    for table in ("record_series", "record_entries"):
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in migration_sql
+        assert f"{table}_tenant_isolation" in migration_sql
+
+
+COCKPIT_TABLES: dict[str, tuple[set[str], set[str]]] = {
+    "cockpit_widgets": (
+        {"tenant_id", "principal_id", "slug"},
+        {"state", "live_revision_id", "created_at", "updated_at"},
+    ),
+    "cockpit_widget_revisions": (
+        {"tenant_id", "principal_id", "id"},
+        {
+            "slug",
+            "source",
+            "state",
+            "files",
+            "diagnostics",
+            "bundle",
+            "bundle_sha256",
+            "kit_api",
+            "commit_sha",
+            "origin_run_id",
+            "created_at",
+            "updated_at",
+        },
+    ),
+    "cockpit_widget_settings": (
+        {"tenant_id", "principal_id", "slug"},
+        {"values", "updated_at"},
+    ),
+    "cockpit_layouts": (
+        {"tenant_id", "principal_id", "device_class"},
+        {"placements", "revision", "updated_at"},
+    ),
+    "cockpit_feeds": (
+        {"tenant_id", "principal_id", "id"},
+        {"schema", "schema_version", "trust", "created_at", "updated_at"},
+    ),
+    "cockpit_feed_snapshots": (
+        {"tenant_id", "principal_id", "feed_id", "sequence"},
+        {
+            "observed_at",
+            "expected_interval_seconds",
+            "error",
+            "data",
+            "schema_version",
+            "recorded_at",
+        },
+    ),
+    "cockpit_events": (
+        {"sequence"},
+        {"tenant_id", "principal_id", "kind", "subject", "occurred_at"},
+    ),
+    "cockpit_commit_outbox": (
+        {"tenant_id", "principal_id", "revision_id"},
+        {
+            "slug",
+            "operation",
+            "attempts",
+            "next_attempt_at",
+            "last_error",
+            "expected_parent_sha",
+            "created_at",
+        },
+    ),
+    "cockpit_import_failures": (
+        {"tenant_id", "principal_id", "id"},
+        {"commit_sha", "slug", "diagnostics", "seen", "created_at"},
+    ),
+}
+
+
+def test_cockpit_tables_are_owner_scoped_under_forced_tenant_isolation() -> None:
+    migration = next((ROOT / "migrations" / "versions").glob("*_cockpit_widgets_and_feeds.py"))
+    migration_sql = migration.read_text(encoding="utf-8")
+    for name, (key, columns) in COCKPIT_TABLES.items():
+        table = Base.metadata.tables[name]
+        assert table.primary_key.name == f"pk_{name}"
+        assert {column.name for column in table.primary_key.columns} == key
+        assert set(table.columns.keys()) == key | columns
+        assert "tenant_id" in table.columns and "principal_id" in table.columns
+        assert f"ALTER TABLE {name} FORCE ROW LEVEL SECURITY" in migration_sql
+        assert f"{name}_tenant_isolation" in migration_sql
+    revisions = Base.metadata.tables["cockpit_widget_revisions"]
+    for nullable in ("bundle", "bundle_sha256", "kit_api", "commit_sha", "origin_run_id"):
+        assert revisions.columns[nullable].nullable
+    assert "Cockpit data must be exported and erased before downgrade" in migration_sql

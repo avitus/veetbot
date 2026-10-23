@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agent_core.context.budget import ContextBudgetAllocator
+from agent_core.context.budget import ContextBudgetAllocator, records_catalog_caps
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.messages import ModelLimits, ResolvedModel
 
@@ -73,7 +73,9 @@ def test_shipped_plan_allocates_the_documented_caps_on_the_default_window() -> N
     assert budget.retrieved_context_tokens == 1_500 + 2_000
     assert budget.working_state_tokens == 1_000
     assert budget.knowledge_tokens == 3_000
+    assert budget.records_catalog_tokens == 600
     assert budget.tool_result_tokens == tool_results
+    # The records catalog is optional and yieldable: it is not subtracted from history.
     assert budget.history_tokens == usable - 1_000 - tool_results
     assert budget.history_tokens >= 8_000
     assert budget.safety_margin_ratio == pytest.approx(0.05)
@@ -95,6 +97,7 @@ def test_only_history_and_tool_results_grow_with_the_window() -> None:
         "retrieved_context_tokens",
         "working_state_tokens",
         "knowledge_tokens",
+        "records_catalog_tokens",
     )
     assert {name: getattr(large, name) for name in fixed} == {
         name: getattr(small, name) for name in fixed
@@ -160,15 +163,29 @@ def test_a_session_snapshot_allocation_replaces_the_configured_snapshot_cap() ->
         allocator.allocate(_model(), prefix_tokens=10_000, memory_snapshot_tokens=-1)
 
 
-def test_optional_persona_and_snapshot_classes_default_to_zero() -> None:
+def test_optional_persona_snapshot_and_catalog_classes_default_to_zero() -> None:
     config = _config()
     del config["classes"]["persona"]
     del config["classes"]["memory_snapshot"]
+    del config["classes"]["records_catalog"]
 
     budget = ContextBudgetAllocator(config).allocate(_model(), prefix_tokens=10_000)
 
     assert budget.persona_tokens == 0
+    assert budget.records_catalog_tokens == 0
     assert budget.retrieved_context_tokens == 2_000
+
+
+def test_records_catalog_caps_are_parsed_in_one_place() -> None:
+    config = _config()
+
+    assert records_catalog_caps(config["classes"]) == (16, 600)
+    del config["classes"]["records_catalog"]
+    assert records_catalog_caps(config["classes"]) == (0, 0)
+    with pytest.raises(ValueError, match=r"classes\.records_catalog must be a mapping"):
+        records_catalog_caps({"records_catalog": 16})
+    with pytest.raises(ValueError, match="max_items must be a nonnegative integer"):
+        records_catalog_caps({"records_catalog": {"max_items": -1, "max_tokens": 600}})
 
 
 def _with(path: tuple[str, ...], value: object) -> dict[str, Any]:
@@ -187,6 +204,7 @@ def _with(path: tuple[str, ...], value: object) -> dict[str, Any]:
         (("output",), None, "output must be a mapping"),
         (("classes", "history"), 8_000, "classes.history must be a mapping"),
         (("classes", "persona"), 2_000, "classes.persona must be a mapping"),
+        (("classes", "records_catalog"), 600, "classes.records_catalog must be a mapping"),
         (("output", "reserve_tokens"), -1, "reserve_tokens must be a nonnegative integer"),
         (("output", "reserve_tokens"), True, "reserve_tokens must be a nonnegative integer"),
         (("classes", "agent_instructions", "max_tokens"), 4_000.5, "max_tokens must be"),

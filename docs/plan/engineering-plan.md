@@ -4352,6 +4352,84 @@ requests, formation decisions and reader behavior are unchanged. This narrow
 compatibility exception cannot admit another runtime change or retag old evidence.
 All coverage, quality and security gates and the existing absolute deadline remain.
 
+### Milestone 34: Owner records
+
+The owner authorized roadmap item B14 on 2026-10-22 under ADR-0239.
+[Owner records](owner-records.md) declares ten gates and gives the owner's
+principal a bounded record store: named numeric series with one to four
+components, appended to, listed, queried and deleted through five `records.*`
+tools, with a catalog of the series in every request. It requires approval
+for a new series and for every deletion, a refusal of an append in a turn
+that read untrusted content (the model then asks the owner to state the
+value; the owner chose this over an approval through a new policy condition
+on 2026-10-22, to be revisited around 2026-12-22), scans on names
+and notes, forced row-level security, value-free deletion events, a formation
+eligibility rule so that a reading never becomes a belief, and a body-region
+catalog item with an absolute cap and a stability gate. No SQL surface, HTTP
+route or native screen is included. This parallel workstream does not advance
+the sequential verified ceiling.
+
+### Milestone 35: Cockpit mode and agent-authored widgets
+
+The owner authorized this scope on 2026-10-22 under ADR-0240. Implement
+[cockpit.md](cockpit.md):
+
+- **The mode.** A third client mode, Cockpit, on iPhone, iPad and Mac: a
+  heads-up board of widgets that the assistant itself creates, updates and
+  deletes.
+- **The kit.** Widgets are React and TypeScript on a MagicPath-designed kit in
+  a `cockpit/` workspace on `main`. They run on the clients inside one
+  network-less sandboxed realm, and the bearer token never enters it.
+- **The branch.** Each widget change is validated, screened for personal data
+  and built offline in a second, platform-owned sandbox image. It is then
+  committed through a GitHub App to the orphan branch `cockpit/widgets` of
+  this public repository, and activated only after its commit is recorded.
+  Human commits to the branch are imported through the same pipeline.
+- **Feeds.** Widgets render platform feeds and assistant-published feeds,
+  with freshness, and receive only the feeds they declare. Personal values
+  live in private settings and feeds, never in widget code.
+- **Delivery and tools.** A per-tenant snapshot and resumable event stream
+  carry everything to the clients under new `cockpit.read` and `cockpit.write`
+  scopes and a default-off flag. Five deferred builtin tools carry the
+  assistant's side.
+
+The design declares twenty-three gates.
+
+The widget write tool is classified as `publication` and allowed by an
+exact-name rule in the default profile, as the owner decided. The trust
+overlay, the credential-to-egress hardline rule and the restriction to
+interactive owner chat still apply.
+
+This amends no roadmap item:
+
+- Widgets never enter the assistant's instructions or context, so B1 is
+  untouched.
+- No standing approval grant is introduced, so B8 is untouched.
+- The visual workflow builder in B11 stays deferred.
+
+The second sandbox image answers `sandbox-isolation.md`'s open question about
+images for one platform-owned purpose only.
+
+Acceptance requires:
+
+- all twenty-three gates;
+- both store adapters;
+- the adversarial realm corpus in headless WebKit and a hosted `WKWebView`;
+- the Apple package and simulator lanes;
+- the owner's activation of the GitHub App, its rulesets and the flag;
+- a production widget the assistant authored, whose commit is on the branch;
+- final-head hosted CI and review, plus separately authorized production
+  delivery.
+
+The verified sequential ceiling does not move. These remain outside this
+milestone:
+
+- deterministic collectors that fetch outside data with no model run;
+- a browser or television rendering;
+- WidgetKit, Lock Screen and Live Activities;
+- the assistant using MagicPath at runtime;
+- webhook-driven import.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -4375,6 +4453,7 @@ owner's current ranking, not a schedule.
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. Email entered as Milestone 18 (ADR-0071), Bland telephone calling as Milestone 27 (ADR-0097); other voice input and calendar remain deferred |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 | B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 25 |
+| B14 | Owner records: named numeric series the owner appends to and queries over time (blood pressure, weight, sleep), kept apart from beliefs, with a trust-gated append, deterministic window summaries, approval-gated deletion and no automatic recall in the first slice | Entered as Milestone 34 on 2026-10-22 (ADR-0239), specified in `owner-records.md`. Not a general SQL surface and not an alternate memory store |
 
 ## 22. Security baseline
 
