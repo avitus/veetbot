@@ -37,6 +37,7 @@ from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.personas import PersonaStore
 from agent_core.ports.reconsolidation import ReconsolidationStore
+from agent_core.ports.records import RecordStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -121,6 +122,7 @@ class UnitOfWorkRepositories:
     email: EmailStore
     calls: CallStore
     people: PeopleStore
+    records: RecordStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository
@@ -192,6 +194,7 @@ class MemoryUnitOfWork:
         self.email = repositories.email
         self.calls = repositories.calls
         self.people = repositories.people
+        self.records = repositories.records
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules
@@ -329,6 +332,7 @@ class PostgresUnitOfWork:
         self.email = repositories.email
         self.calls = repositories.calls
         self.people = repositories.people
+        self.records = repositories.records
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
         self.schedules = repositories.schedules

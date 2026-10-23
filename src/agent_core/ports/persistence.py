@@ -32,6 +32,7 @@ from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.personas import PersonaStore
 from agent_core.ports.reconsolidation import ReconsolidationStore
+from agent_core.ports.records import RecordStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -100,6 +101,7 @@ class RepositoryUnitOfWork(Protocol):
     email: EmailStore
     calls: CallStore
     people: PeopleStore
+    records: RecordStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository
