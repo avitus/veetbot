@@ -9,6 +9,12 @@
   by their `EXTERNAL_WRITE` and `EXTERNAL_DELETE` class, and the records
   service refuses an untrusted-turn append with `records.untrusted_turn`; the
   owner's decision for an approval stays on record as the pending alternative
+- Amended: 2026-10-22 — the owner chose to "Stay with variant A for now": the
+  refusal is the accepted behaviour, the engineering plan's Milestone 34
+  paragraph says so, and the approval path (a `turn_origin_trusted` condition
+  with three profile rows, which unbinds the formation release evidence until
+  it is regenerated) is deferred to a revisit the owner asked to be reminded
+  of in two months, around 2026-12-22
 - Amended: 2026-10-22 — scheduled records access is not wired in the
   implemented slice: the schedule authority may hold `records.read`, but a
   scheduled run carries only its revision's requested scopes and no schedule

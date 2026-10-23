@@ -903,12 +903,13 @@ existing requirement.
   obligations, rather than a new side-effect class, because the write leaves
   the host for nowhere; create and delete take `EXTERNAL_WRITE` and
   `EXTERNAL_DELETE` so the existing matrix asks the owner for them.
-- No policy profile change. The owner chose an approval for untrusted-turn
-  appends through a profile row with a condition; a profile edit changes the
-  shipped policy version and unbinds production's formation release
-  evidence, which the owner has not accepted, so the slice refuses such an
-  append in the service with `records.untrusted_turn`, and the profile row
-  remains the pending alternative (ADR-0239, amended 2026-10-22).
+- No policy profile change. The owner first chose an approval for
+  untrusted-turn appends through a profile row with a condition; a profile
+  edit changes the shipped policy version and unbinds production's formation
+  release evidence, so the slice refuses such an append in the service with
+  `records.untrusted_turn`. On 2026-10-22 the owner accepted the refusal for
+  now and deferred the approval path to a revisit around 2026-12-22
+  (ADR-0239, amended 2026-10-22).
 - The catalog is `INTERNAL_TOOL`, not `MEMORY`, so its presence never turns
   a fresh chat's append into an approval.
 - Series creation is an approval, because an approval card is enforceable
