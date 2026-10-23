@@ -98,7 +98,7 @@ _KNOWLEDGE_NOTES: dict[KnowledgeState, str] = {
     KnowledgeState.PENDING: (
         " The owner's file was also sent to knowledge: use knowledge.search to find its "
         "passages. Ingestion takes a short while after sending, so an empty result now "
-        "means it is still being added, not that the file is unusable."
+        "may mean it is still being added, not that the file is unusable."
     ),
     KnowledgeState.INGESTED: (
         " The owner's file is in knowledge: use knowledge.search to find its passages."

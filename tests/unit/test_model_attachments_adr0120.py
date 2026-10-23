@@ -270,7 +270,7 @@ def test_a_marker_for_a_document_sent_to_knowledge_points_at_knowledge_search() 
     assert "not included because it exceeds the per-file limit for one request." in marker
     assert "also sent to knowledge" in marker
     assert "knowledge.search" in marker
-    assert "still being added, not that the file is unusable" in marker
+    assert "may mean it is still being added, not that the file is unusable" in marker
     assert marker.endswith(".]")
     assert rendered[(0, 1)].marker == attachments.reference_marker(kept, MarkerReason.TOO_LARGE)
     assert rendered[(0, 2)].marker is None
