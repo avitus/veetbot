@@ -22,9 +22,9 @@ from agent_core.domain.records import (
     RecordCadence,
     RecordComponent,
     RecordEntry,
+    RecordFutureError,
     RecordPrecision,
     RecordSeries,
-    RecordTimeError,
     RecordValueError,
     canonical_value,
     due_since,
@@ -179,8 +179,10 @@ class RecordsService:
                         {
                             "series_id": str(series.id),
                             "name": series.name,
+                            "display_name": series.display_name,
                             "components": [c.name for c in series.components],
                             "sensitivity": series.sensitivity.value,
+                            "cadence": series.cadence.value if series.cadence else None,
                         },
                     )
                 )
@@ -216,11 +218,9 @@ class RecordsService:
                 when = resolve_observed_at(observed_at, precision, now)
             except RecordValueError as exc:
                 raise RecordsRefusal("records.value_out_of_range", str(exc)) from exc
-            except RecordTimeError as exc:
-                if "future" in str(exc):
-                    raise RecordsRefusal("records.observed_in_future", str(exc)) from exc
-                raise
-            kept = note.strip() if note is not None else None
+            except RecordFutureError as exc:
+                raise RecordsRefusal("records.observed_in_future", str(exc)) from exc
+            kept = (note.strip() or None) if note is not None else None
             withheld = False
             if kept:
                 if contains_secret_material(kept):
@@ -228,7 +228,8 @@ class RecordsService:
                 if contains_injection_pattern(kept):
                     kept, withheld = None, True
             count = await uow.records.count_entries(principal, series.id)
-            if count >= self._max_entries:
+            known = await uow.records.find_entry(principal, series.id, idempotency_key)
+            if known is None and count >= self._max_entries:
                 raise RecordsRefusal(
                     "records.entry_limit", f"at most {self._max_entries} entries are allowed"
                 )

@@ -229,6 +229,48 @@ async def test_events_are_appended_in_the_same_unit_of_work() -> None:
     assert appended["observed_precision"] == "exact"
     assert events[3].payload == {"series_id": str(series.id), "entries_removed": 0}
     assert events[0].actor_id == principal().principal_id
+    assert events[0].payload == {
+        "series_id": str(series.id),
+        "name": "blood pressure",
+        "display_name": "Blood pressure",
+        "components": ["systolic", "diastolic"],
+        "sensitivity": "sensitive",
+        "cadence": None,
+    }
+    assert {e.payload_schema_version for e in events} == {1}
+
+
+async def test_replay_at_the_entry_limit_is_not_refused() -> None:
+    svc, factory, _ = await service(max_entries=1)
+    await create(svc)
+    ok = {"systolic": D(1), "diastolic": D(2)}
+    first = await append(svc, ok, key="k1")
+    again = await append(svc, ok, key="k1")
+
+    assert again.replayed and again.entry.id == first.entry.id and again.entry_count == 1
+    assert (await event_types(factory)).count("records.entry.appended") == 1
+    assert await refusal(append(svc, ok, key="k2")) == "records.entry_limit"
+
+
+async def test_whitespace_note_is_stored_as_none() -> None:
+    svc, _, _ = await service()
+    await create(svc)
+    result = await append(svc, {"systolic": D(1), "diastolic": D(2)}, note="   ")
+    assert result.entry.note is None and not result.entry.note_withheld
+
+
+async def test_delete_missing_entry_removes_nothing_and_appends_no_event() -> None:
+    svc, factory, _ = await service()
+    await create(svc)
+    result = await svc.delete(
+        principal(),
+        series_name="blood pressure",
+        entry_id=uuid4(),
+        session_id=SESSION_ID,
+        run_id=None,
+    )
+    assert result.entries_removed == 0 and not result.series_removed
+    assert await event_types(factory) == ["records.series.created"]
 
 
 async def test_delete_unknown_series_and_missing_entry() -> None:

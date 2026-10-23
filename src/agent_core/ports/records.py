@@ -91,6 +91,10 @@ class RecordStore(Protocol):
         """Insert, or return ``(stored, True)`` when the series holds the idempotency key."""
         ...
 
+    async def find_entry(
+        self, principal: Principal, series_id: UUID, idempotency_key: str
+    ) -> RecordEntry | None: ...
+
     async def count_entries(self, principal: Principal, series_id: UUID) -> int: ...
 
     async def query(

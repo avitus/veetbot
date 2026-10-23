@@ -174,6 +174,17 @@ async def records_append_replay_contract(store: RecordStore) -> None:
     assert await store.count_entries(owner, series.id) == 1
 
 
+async def records_find_entry_contract(store: RecordStore) -> None:
+    owner = principal()
+    series, _ = await store.create_series(make_series(owner))
+    first = make_entry(series, NOW, {"systolic": "120", "diastolic": "80"}, key="k1")
+    await store.append(first)
+    assert await store.find_entry(owner, series.id, "k1") == first
+    assert await store.find_entry(owner, series.id, "unknown") is None
+    for foreign in (other(), foreign_tenant()):
+        assert await store.find_entry(foreign, series.id, "k1") is None
+
+
 async def records_component_invariant_contract(store: RecordStore) -> None:
     owner = principal()
     series, _ = await store.create_series(make_series(owner))
@@ -356,6 +367,7 @@ CONTRACTS = [
     records_create_series_contract,
     records_name_collision_contract,
     records_append_replay_contract,
+    records_find_entry_contract,
     records_component_invariant_contract,
     records_query_contract,
     records_reversed_window_contract,

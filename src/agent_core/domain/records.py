@@ -45,6 +45,10 @@ class RecordTimeError(ValueError):
     """An observation time is unparsable, lacks an offset, or lies in the future."""
 
 
+class RecordFutureError(RecordTimeError):
+    """An observation time lies beyond the clock plus the permitted skew."""
+
+
 class RecordNameError(ValueError):
     """A series name is empty, too long, or has no letter or digit."""
 
@@ -95,7 +99,7 @@ def resolve_observed_at(text: str | None, precision: RecordPrecision, now: datet
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise RecordTimeError("observed_at needs a UTC offset")
     if parsed.astimezone(UTC) > now + FUTURE_SKEW:
-        raise RecordTimeError("observed_at is in the future")
+        raise RecordFutureError("observed_at is in the future")
     if precision is RecordPrecision.DAY:
         parsed = datetime.combine(parsed.date(), time(12, 0), tzinfo=parsed.tzinfo)
     return parsed.astimezone(UTC)

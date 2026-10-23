@@ -194,6 +194,17 @@ class InMemoryRecordStore:
             self._entries[series.id].append(entry)
             return entry, False
 
+    async def find_entry(
+        self, principal: Principal, series_id: UUID, idempotency_key: str
+    ) -> RecordEntry | None:
+        async with self._lock:
+            if self._owned(principal, series_id) is None:
+                return None
+            for stored in self._entries.get(series_id, []):
+                if stored.idempotency_key == idempotency_key:
+                    return stored
+            return None
+
     async def count_entries(self, principal: Principal, series_id: UUID) -> int:
         async with self._lock:
             if self._owned(principal, series_id) is None:
@@ -494,6 +505,20 @@ class PostgresRecordStore:
                 return stored, True
             raise ValueError("series not found for this principal") from exc
         return entry, False
+
+    async def find_entry(
+        self, principal: Principal, series_id: UUID, idempotency_key: str
+    ) -> RecordEntry | None:
+        if await self._owned_row(principal, series_id) is None:
+            return None
+        return await self._replay(
+            RecordEntry.model_construct(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                series_id=series_id,
+                idempotency_key=idempotency_key,
+            )
+        )
 
     async def count_entries(self, principal: Principal, series_id: UUID) -> int:
         return int(
