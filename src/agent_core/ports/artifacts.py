@@ -12,6 +12,7 @@ from agent_core.domain.artifacts import (
     AttachmentContent,
     AttachmentFacts,
     AttachmentRead,
+    KnowledgeState,
     StoredArtifactRef,
 )
 from agent_core.domain.policies import TrustLevel
@@ -93,12 +94,12 @@ class AttachmentResolver(Protocol):
         self, reads: Sequence[AttachmentRead], *, run_id: UUID
     ) -> Mapping[UUID, AttachmentContent]: ...
 
-    async def knowledge_bound(
+    async def knowledge_states(
         self, artifact_ids: Sequence[UUID], *, run_id: UUID
-    ) -> frozenset[UUID]:
-        """The named uploads, under the same release checks, sent to knowledge.
+    ) -> Mapping[UUID, KnowledgeState]:
+        """The knowledge state of each named upload, under the same release checks.
 
-        A document counts while its ingestion is pending or done; a refused or
-        failed ingestion, and anything `resolve` would not release, is absent.
+        A document is present while its ingestion is pending or done; a refused
+        or failed ingestion, and anything `resolve` would not release, is absent.
         """
         ...

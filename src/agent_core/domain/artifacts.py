@@ -90,6 +90,13 @@ AUTO_INGEST_FAILED = "failed"
 UPLOAD_UNCLAIMED_TTL = timedelta(hours=24)
 
 
+class KnowledgeState(StrEnum):
+    """How far an owner-sent document has reached knowledge, for its marker."""
+
+    PENDING = AUTO_INGEST_PENDING
+    INGESTED = AUTO_INGEST_INGESTED
+
+
 def claimed_upload(artifact: ArtifactRef, *, run_id: UUID, auto_ingest: bool) -> ArtifactRef:
     """Apply the claim rule: first claim binds the run and ends the expiry."""
 

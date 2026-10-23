@@ -116,11 +116,12 @@ per-item limits or the per-request budget becomes a marker. The budget selects
 the newest owner messages first; the limits, the selection, and the token
 estimate per attachment live in one module, `agent_core.model.attachments`,
 which the token estimator also uses. A marker for a text, Markdown, or PDF
-attachment whose knowledge ingestion is pending or done, as the resolver reads
-it from the artifact row, adds that the file was sent to knowledge, that
-`knowledge.search` finds its passages, and that an empty result right after
-sending means ingestion is still running. A refused or failed ingestion keeps
-the plain marker.
+attachment adds its knowledge state, which the resolver reads from the
+artifact row. While ingestion is pending, the marker says the file was sent to
+knowledge, that `knowledge.search` finds its passages, and that an empty result
+means ingestion is still running. Once it is ingested, the marker says only that
+the file is in knowledge and `knowledge.search` finds its passages. A refused or
+failed ingestion keeps the plain marker.
 
 SVG attachments (`image/svg+xml`) use the text path: the model receives their
 UTF-8 XML source, without rasterization, XML parsing, or loading external

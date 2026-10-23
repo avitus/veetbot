@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import base64
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
-from agent_core.domain.artifacts import AttachmentContent
+from agent_core.domain.artifacts import AttachmentContent, KnowledgeState
 from agent_core.domain.messages import (
     AssistantMessage,
     ContentPart,
@@ -288,10 +288,10 @@ async def rendered_attachments(
         except Exception:  # resolution failure degrades to markers, never a failed turn
             logger.warning("attachment_resolution_failed", extra={"run_id": str(attempt.run_id)})
     checks = knowledge_checks(decisions, resolved.capabilities)
-    knowledge: frozenset[UUID] = frozenset()
+    knowledge: Mapping[UUID, KnowledgeState] = {}
     if checks and resolver is not None:
         try:
-            knowledge = frozenset(await resolver.knowledge_bound(checks, run_id=attempt.run_id))
+            knowledge = await resolver.knowledge_states(checks, run_id=attempt.run_id)
         except Exception:  # an unknown knowledge state renders the plain marker
             logger.warning("attachment_knowledge_failed", extra={"run_id": str(attempt.run_id)})
     return render_attachments(decisions, resolved.capabilities, contents, knowledge=knowledge)

@@ -1533,10 +1533,10 @@ class _StubResolver:
     """Release fixed bytes and record every read the adapter asked for."""
 
     def __init__(
-        self, released: dict[UUID, bytes], knowledge: frozenset[UUID] = frozenset()
+        self, released: dict[UUID, bytes], knowledge: dict[UUID, Any] | None = None
     ) -> None:
         self._released = released
-        self._knowledge = knowledge
+        self._knowledge = knowledge or {}
         self.reads: list[Any] = []
         self.knowledge_checks: list[UUID] = []
 
@@ -1554,10 +1554,10 @@ class _StubResolver:
             if read.artifact_id in self._released
         }
 
-    async def knowledge_bound(self, artifact_ids: Any, *, run_id: UUID) -> frozenset[UUID]:
+    async def knowledge_states(self, artifact_ids: Any, *, run_id: UUID) -> dict[UUID, Any]:
         assert run_id == RUN_ID
         self.knowledge_checks.extend(artifact_ids)
-        return self._knowledge & frozenset(artifact_ids)
+        return {key: state for key, state in self._knowledge.items() if key in artifact_ids}
 
 
 _IMAGE = UUID("00000000-0000-0000-0000-000000000501")
@@ -1742,7 +1742,9 @@ async def test_an_unreleased_attachment_is_described_as_unavailable() -> None:
 
 async def test_an_oversized_document_sent_to_knowledge_tells_the_model_to_search_it() -> None:
     source = ScriptedRawSource([openai_text_events()])
-    resolver = _StubResolver({}, knowledge=frozenset({_PDF}))
+    from agent_core.domain.artifacts import KnowledgeState
+
+    resolver = _StubResolver({}, knowledge={_PDF: KnowledgeState.PENDING})
     provider = OpenAIResponsesProvider(event_source=source, attachment_resolver=resolver)
     conversation = [
         UserMessage(
@@ -1767,7 +1769,7 @@ async def test_an_oversized_document_sent_to_knowledge_tells_the_model_to_search
     marker = source.requests[0]["input"][0]["content"][0]["text"]
     assert "exceeds the per-file limit for one request" in marker
     assert "also sent to knowledge" in marker
-    assert "knowledge.search" in marker
+    assert "still being added" in marker
 
 
 @pytest.mark.parametrize("provider_name", ["openai", "anthropic", "chat_completions"])

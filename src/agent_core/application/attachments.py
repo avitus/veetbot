@@ -10,11 +10,10 @@ from uuid import UUID
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import (
     ATTACHMENT_METADATA_KEY,
-    AUTO_INGEST_INGESTED,
     AUTO_INGEST_KEY,
-    AUTO_INGEST_PENDING,
     AttachmentContent,
     AttachmentRead,
+    KnowledgeState,
     StoredArtifactRef,
 )
 from agent_core.domain.errors import AttachmentValidationError, NotFoundError
@@ -172,17 +171,18 @@ class StoredAttachmentResolver:
                 logger.warning("attachment_read_failed", extra={"artifact_id": str(chosen.id)})
         return contents
 
-    async def knowledge_bound(
+    async def knowledge_states(
         self, artifact_ids: Sequence[UUID], *, run_id: UUID
-    ) -> frozenset[UUID]:
+    ) -> dict[UUID, KnowledgeState]:
         if not artifact_ids:
-            return frozenset()
+            return {}
         released = await self._released(artifact_ids, run_id)
-        return frozenset(
-            artifact.id
+        states = {state.value: state for state in KnowledgeState}
+        return {
+            artifact.id: states[recorded]
             for artifact in released.values()
-            if artifact.metadata.get(AUTO_INGEST_KEY) in {AUTO_INGEST_PENDING, AUTO_INGEST_INGESTED}
-        )
+            if (recorded := artifact.metadata.get(AUTO_INGEST_KEY)) in states
+        }
 
     async def _released(
         self, artifact_ids: Sequence[UUID], run_id: UUID

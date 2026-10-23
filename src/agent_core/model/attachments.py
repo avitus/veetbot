@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
 
-from agent_core.domain.artifacts import AttachmentContent, AttachmentRead
+from agent_core.domain.artifacts import AttachmentContent, AttachmentRead, KnowledgeState
 from agent_core.domain.messages import (
     ConversationItem,
     FileReferencePart,
@@ -93,12 +93,17 @@ _REASON_PHRASES: dict[MarkerReason, str] = {
     MarkerReason.UNREADABLE: "it could not be read",
 }
 
-# Ingestion runs after the reply starts, so the note must not promise passages yet.
-_KNOWLEDGE_NOTE = (
-    " The owner's file was also sent to knowledge: use knowledge.search to find its "
-    "passages. Ingestion takes a short while after sending, so an empty result now "
-    "means it is still being added, not that the file is unusable."
-)
+# Ingestion runs after the reply starts, so a pending note must not promise passages yet.
+_KNOWLEDGE_NOTES: dict[KnowledgeState, str] = {
+    KnowledgeState.PENDING: (
+        " The owner's file was also sent to knowledge: use knowledge.search to find its "
+        "passages. Ingestion takes a short while after sending, so an empty result now "
+        "means it is still being added, not that the file is unusable."
+    ),
+    KnowledgeState.INGESTED: (
+        " The owner's file is in knowledge: use knowledge.search to find its passages."
+    ),
+}
 
 
 def is_text_media_type(media_type: str) -> bool:
@@ -285,10 +290,12 @@ def attachment_label(part: AttachmentPart) -> str:
     )
 
 
-def reference_marker(part: AttachmentPart, reason: MarkerReason, *, knowledge: bool = False) -> str:
+def reference_marker(
+    part: AttachmentPart, reason: MarkerReason, *, knowledge: KnowledgeState | None = None
+) -> str:
     noun = "image" if isinstance(part, ImageReferencePart) else "file"
     phrase = _REASON_PHRASES[reason]
-    note = _KNOWLEDGE_NOTE if knowledge else ""
+    note = "" if knowledge is None else _KNOWLEDGE_NOTES[knowledge]
     head = (
         f'[Referenced {noun} "{display_name(part)}" ({_facts(part)}), artifact:{part.artifact_id}'
     )
@@ -359,15 +366,16 @@ def render_attachments(
     capabilities: ModelCapabilities,
     resolved: Mapping[UUID, AttachmentContent],
     *,
-    knowledge: frozenset[UUID] = frozenset(),
+    knowledge: Mapping[UUID, KnowledgeState] | None = None,
 ) -> dict[tuple[int, int], RenderedAttachment]:
     """Turn decisions and resolved bytes into adapter-neutral rendering units.
 
     An attachment the resolver did not release is absent from `resolved` and
     renders as unavailable. A marker for a document in `knowledge` tells the
-    model to find its text with knowledge search.
+    model to find its text with knowledge search, and whether it is still being added.
     """
 
+    states = knowledge or {}
     rendered: dict[tuple[int, int], RenderedAttachment] = {}
     for key, decision in decisions.items():
         part = decision.part
@@ -407,6 +415,6 @@ def render_attachments(
             part=part,
             kind=kind,
             label=label,
-            marker=reference_marker(part, reason, knowledge=part.artifact_id in knowledge),
+            marker=reference_marker(part, reason, knowledge=states.get(part.artifact_id)),
         )
     return rendered

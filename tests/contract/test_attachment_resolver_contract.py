@@ -11,7 +11,12 @@ from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.determinism import FixedClock
 from agent_core.application.attachments import StoredAttachmentResolver
 from agent_core.bootstrap import build
-from agent_core.domain.artifacts import ArtifactMetadata, ArtifactOrigin, AttachmentRead
+from agent_core.domain.artifacts import (
+    ArtifactMetadata,
+    ArtifactOrigin,
+    AttachmentRead,
+    KnowledgeState,
+)
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.domain.views import TextContentBlock
@@ -126,7 +131,7 @@ async def test_resolver_releases_only_the_runs_live_uploads(tmp_path: Path) -> N
         assert await resolver.resolve([], run_id=submitted.run_id) == {}
 
 
-async def test_resolver_reports_only_the_runs_documents_sent_to_knowledge() -> None:
+async def test_resolver_reports_the_knowledge_state_of_the_runs_documents() -> None:
     async with build(settings=memory_settings(), sequential_ids=True) as composition:
         principal = composition.principal
         session = await composition.services.sessions.create(principal, "general", {})
@@ -176,9 +181,9 @@ async def test_resolver_reports_only_the_runs_documents_sent_to_knowledge() -> N
             clock=FixedClock(composition.clock.now()),
         )
         asked = [pending, ingested, refused, failed, unmarked, elsewhere, UUID(int=99)]
-        assert await resolver.knowledge_bound(asked, run_id=submitted.run_id) == {
-            pending,
-            ingested,
+        assert await resolver.knowledge_states(asked, run_id=submitted.run_id) == {
+            pending: KnowledgeState.PENDING,
+            ingested: KnowledgeState.INGESTED,
         }
-        assert await resolver.knowledge_bound(asked, run_id=UUID(int=12345)) == frozenset()
-        assert await resolver.knowledge_bound([], run_id=submitted.run_id) == frozenset()
+        assert await resolver.knowledge_states(asked, run_id=UUID(int=12345)) == {}
+        assert await resolver.knowledge_states([], run_id=submitted.run_id) == {}
