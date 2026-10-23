@@ -406,6 +406,8 @@ async def test_learning_admits_how_owners_name_a_website(
     [
         (f"Read {URL} but don\u2019t remember anything about us.", None, "source_not_authorized"),
         (f"Learn from {URL}, but not about Erin.", None, "source_not_authorized"),
+        # "not from" excludes a source; without it both named sites would be roots.
+        (f"Learn from {URL}, not from www.facebook.com.", None, "source_not_authorized"),
         ("Write to erin@family.example.org and learn about us.", None, "source_not_named"),
         ("Learn about our family from the album site.", None, "source_not_named"),
         ("Learn from blog.family.example.org.", None, "source_not_authorized"),
