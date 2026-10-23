@@ -183,6 +183,35 @@ TOOL_MESSAGES: dict[str, str] = {
         "No visible person or source has that id. Use a person id returned by "
         "people.search and a source_id from a people.history item."
     ),
+    "records.series_unknown": (
+        "No such series. Call records.list to see the series, or records.create_series "
+        "first (it needs the owner's approval)."
+    ),
+    "records.series_exists": (
+        "A series with that name exists with different components; components cannot "
+        "change. Use another name or append to the existing series."
+    ),
+    "records.component_mismatch": (
+        "The values must carry exactly the series' declared components, each once."
+    ),
+    "records.value_out_of_range": (
+        "Each value must be a finite number with at most twelve integer digits and six "
+        "fraction digits."
+    ),
+    "records.observed_in_future": (
+        "The observed time is later than now. Use the time the owner measured it."
+    ),
+    "records.series_limit": "The owner already holds the maximum number of record series.",
+    "records.entry_limit": "This series already holds the maximum number of entries.",
+    "records.window_too_large": (
+        "The bucketed window spans too many buckets. Narrow it or use a larger bucket."
+    ),
+    "records.secret_detected": ("Not recorded. A name or note looked like a credential or secret."),
+    "records.name_rejected": "Not recorded. A series or component name looked like an instruction.",
+    "records.invalid_arguments": (
+        "An argument has an invalid shape or value; check the observed time format "
+        "and the component names."
+    ),
 }
 
 

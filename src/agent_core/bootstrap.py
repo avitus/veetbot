@@ -19,6 +19,7 @@ from types import TracebackType
 from typing import Any, Literal, Self, cast
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI
@@ -320,6 +321,7 @@ from agent_core.application.public_services import (
     PublicSessionService,
 )
 from agent_core.application.reconsolidation import PublicReconsolidationService
+from agent_core.application.records import RecordsService
 from agent_core.application.run_service import RunService
 from agent_core.application.schedule_service import ScheduleService
 from agent_core.application.services import (
@@ -691,6 +693,13 @@ from agent_core.tools.people import (
     PeopleContextTool,
     PeopleHistoryTool,
     PeopleSearchTool,
+)
+from agent_core.tools.records import (
+    RecordsAppendTool,
+    RecordsCreateSeriesTool,
+    RecordsDeleteTool,
+    RecordsListTool,
+    RecordsQueryTool,
 )
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
@@ -3731,6 +3740,14 @@ async def _compose(
         # Chats pinned before ADR-0126 keep 1.0.0; the latest registration wins.
         registry.register(LegacyPeopleHistoryTool(people_service))
         registry.register(PeopleHistoryTool(people_service))
+    if settings.records_enabled:
+        records_service = RecordsService(uow_factory, clock)
+        records_zone = ZoneInfo("UTC")
+        registry.register(RecordsListTool(records_service, records_zone))
+        registry.register(RecordsCreateSeriesTool(records_service, records_zone))
+        registry.register(RecordsAppendTool(records_service, records_zone))
+        registry.register(RecordsQueryTool(records_service, records_zone))
+        registry.register(RecordsDeleteTool(records_service, records_zone))
     registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None
     try:

@@ -149,6 +149,7 @@ class Settings:
     persona_api_enabled: bool = False
     thread_folders_api_enabled: bool = False
     delegation_enabled: bool = False
+    records_enabled: bool = False
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
     surface_api_enabled: bool = False
@@ -1712,6 +1713,7 @@ def _load_settings(
     persona_api_enabled = _parse_flag(values, "AGENT_PERSONA_API_ENABLED")
     thread_folders_api_enabled = _parse_flag(values, "AGENT_THREAD_FOLDERS_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
+    records_enabled = _parse_flag(values, "AGENT_RECORDS_ENABLED")
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
     device_sms_enabled = _parse_flag(values, "AGENT_DEVICE_SMS_ENABLED")
     surface_api_enabled = _parse_flag(values, "AGENT_SURFACE_API_ENABLED")
@@ -2037,6 +2039,7 @@ def _load_settings(
         persona_api_enabled=persona_api_enabled,
         thread_folders_api_enabled=thread_folders_api_enabled,
         delegation_enabled=delegation_enabled,
+        records_enabled=records_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,
         surface_api_enabled=surface_api_enabled,

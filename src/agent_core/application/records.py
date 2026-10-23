@@ -115,6 +115,11 @@ class RecordsService:
         self._max_series = max_series
         self._max_entries = max_entries
 
+    def now(self) -> datetime:
+        """The composition clock, for callers that render due state."""
+
+        return self._clock.now()
+
     async def list_series(
         self, principal: Principal, *, ceiling: Sensitivity = Sensitivity.RESTRICTED
     ) -> list[SeriesSummary]:
