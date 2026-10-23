@@ -27,6 +27,10 @@ def other() -> Principal:
     return principal().model_copy(update={"principal_id": "other"})
 
 
+def foreign_tenant() -> Principal:
+    return principal().model_copy(update={"tenant_id": "tenant-b"})
+
+
 def make_series(
     owner: Principal,
     display: str = "Blood pressure",
@@ -56,6 +60,7 @@ def make_entry(
     *,
     key: str | None = None,
     session: UUID | None = None,
+    created_at: datetime = NOW,
 ) -> RecordEntry:
     return RecordEntry(
         id=uuid4(),
@@ -67,7 +72,7 @@ def make_entry(
         idempotency_key=key or str(uuid4()),
         source_session_id=session,
         source_event_id=uuid4() if session else None,
-        created_at=NOW,
+        created_at=created_at,
     )
 
 
@@ -76,11 +81,33 @@ def everything() -> Window:
 
 
 async def records_scope_isolation_contract(store: RecordStore) -> None:
-    owner, foreign = principal(), other()
+    owner = principal()
     series, created = await store.create_series(make_series(owner))
     assert created
     entry = make_entry(series, NOW, {"systolic": "120", "diastolic": "80"})
     await store.append(entry)
+    for foreign in (other(), foreign_tenant()):
+        await _assert_isolated(store, owner, foreign, series, entry)
+        stolen = entry.model_copy(
+            update={
+                "id": uuid4(),
+                "idempotency_key": "x",
+                "tenant_id": foreign.tenant_id,
+                "principal_id": foreign.principal_id,
+            }
+        )
+        with pytest.raises(ValueError, match="series"):
+            await store.append(stolen)
+    assert await store.count_entries(owner, series.id) == 1
+
+
+async def _assert_isolated(
+    store: RecordStore,
+    owner: Principal,
+    foreign: Principal,
+    series: RecordSeries,
+    entry: RecordEntry,
+) -> None:
     assert await store.get_series(foreign, series.name) is None
     assert await store.count_series(foreign) == 0
     assert await store.list_series(foreign, Sensitivity.RESTRICTED) == []
@@ -90,7 +117,6 @@ async def records_scope_isolation_contract(store: RecordStore) -> None:
     assert await store.bucket(foreign, series.id, everything(), Bucket.DAY, ZoneInfo("UTC")) == []
     assert await store.delete_entry(foreign, series.id, entry.id) == 0
     assert await store.delete_series(foreign, series.id) == (0, False)
-    assert await store.count_entries(owner, series.id) == 1
 
 
 async def records_create_series_contract(store: RecordStore) -> None:
@@ -101,6 +127,22 @@ async def records_create_series_contract(store: RecordStore) -> None:
         make_series(owner, cadence=RecordCadence.DAILY)
     )
     assert not created_again and again == first
+    reordered, created_reordered = await store.create_series(
+        make_series(owner, components=("diastolic", "systolic"), cadence=RecordCadence.DAILY)
+    )
+    assert not created_reordered and reordered == first
+    assert [c.name for c in reordered.components] == ["systolic", "diastolic"]
+    changed_unit = make_series(owner, cadence=RecordCadence.DAILY)
+    changed_unit = changed_unit.model_copy(
+        update={
+            "components": (
+                changed_unit.components[0],
+                RecordComponent(name="diastolic", unit="other"),
+            )
+        }
+    )
+    with pytest.raises(SeriesExists):
+        await store.create_series(changed_unit)
     with pytest.raises(SeriesExists):
         await store.create_series(make_series(owner, components=("systolic",)))
     with pytest.raises(SeriesExists):
@@ -160,6 +202,17 @@ async def records_query_contract(store: RecordStore) -> None:
     assert len(await store.query(owner, series.id, everything(), Order.DESC, 2)) == 2
     newest = await store.query(owner, series.id, everything(), Order.DESC, 1)
     assert newest[0].observed_at == days[4]
+    early = make_entry(series, NOW + timedelta(days=1), {"weight": "1"}, created_at=NOW)
+    late = make_entry(
+        series, NOW + timedelta(days=1), {"weight": "2"}, created_at=NOW + timedelta(seconds=1)
+    )
+    await store.append(late)
+    await store.append(early)
+    tied = Window(since=NOW + timedelta(days=1), until=NOW + timedelta(days=2))
+    ascending = await store.query(owner, series.id, tied, Order.ASC, 10)
+    assert [e.id for e in ascending] == [early.id, late.id]
+    descending = await store.query(owner, series.id, tied, Order.DESC, 10)
+    assert [e.id for e in descending] == [late.id, early.id]
 
 
 async def records_reversed_window_contract(store: RecordStore) -> None:

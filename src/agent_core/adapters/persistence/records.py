@@ -34,9 +34,13 @@ def _mean(values: list[Decimal]) -> Decimal:
     return (sum(values, Decimal(0)) / len(values)).quantize(_SIX_PLACES, rounding=ROUND_HALF_EVEN)
 
 
+def _entry_order(entry: RecordEntry) -> tuple[datetime, datetime, str]:
+    return entry.observed_at, entry.created_at, str(entry.id)
+
+
 def summarize_entries(entries: Iterable[RecordEntry]) -> dict[str, ComponentSummary]:
     """Per-component statistics in Decimal; shared by every adapter."""
-    ordered = sorted(entries, key=lambda entry: entry.observed_at)
+    ordered = sorted(entries, key=_entry_order)
     names = sorted({name for entry in ordered for name in entry.values})
     result: dict[str, ComponentSummary] = {}
     for name in names:
@@ -95,7 +99,8 @@ def bucket_entries(
 
 
 def _declaration(series: RecordSeries) -> tuple[object, ...]:
-    return (series.components, series.sensitivity, series.cadence)
+    pairs = frozenset((component.name, component.unit) for component in series.components)
+    return (pairs, series.sensitivity, series.cadence)
 
 
 class InMemoryRecordStore:
@@ -194,7 +199,7 @@ class InMemoryRecordStore:
         async with self._lock:
             rows = sorted(
                 self._in_window(principal, series_id, window),
-                key=lambda entry: entry.observed_at,
+                key=_entry_order,
                 reverse=order is Order.DESC,
             )
             return rows[: max(limit, 0)]
