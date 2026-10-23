@@ -238,3 +238,29 @@ def test_text_rendering_rejects_corruption_but_allows_a_truncated_utf8_suffix(
     else:
         assert rendered.text is None
         assert rendered.marker == attachments.reference_marker(part, MarkerReason.UNREADABLE)
+
+
+def test_a_marker_for_a_document_sent_to_knowledge_points_at_knowledge_search() -> None:
+    manual = _pdf(1, pages=424, size=5_764_203)
+    kept = _pdf(2, pages=61)
+    sendable = _pdf(3)
+    conversation = [UserMessage(content=[manual, kept, sendable, _image(4, size=6 * 1024 * 1024)])]
+    decisions = attachments.select_attachments(conversation)
+    capabilities = ModelCapabilities(images=True, files=True)
+    assert attachments.knowledge_checks(decisions, capabilities) == [UUID(int=1), UUID(int=2)]
+    rendered = attachments.render_attachments(
+        decisions,
+        capabilities,
+        {UUID(int=3): AttachmentContent(artifact_id=UUID(int=3), data=b"%PDF-")},
+        knowledge=frozenset({UUID(int=1), UUID(int=3)}),
+    )
+    marker = rendered[(0, 0)].marker
+    assert marker is not None
+    assert "not included because it exceeds the per-file limit for one request." in marker
+    assert "also sent to knowledge" in marker
+    assert "knowledge.search" in marker
+    assert "still being added, not that the file is unusable" in marker
+    assert marker.endswith(".]")
+    assert rendered[(0, 1)].marker == attachments.reference_marker(kept, MarkerReason.TOO_LARGE)
+    assert rendered[(0, 2)].marker is None
+    assert "knowledge" not in rendered[(0, 2)].label

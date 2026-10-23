@@ -93,6 +93,13 @@ _REASON_PHRASES: dict[MarkerReason, str] = {
     MarkerReason.UNREADABLE: "it could not be read",
 }
 
+# Ingestion runs after the reply starts, so the note must not promise passages yet.
+_KNOWLEDGE_NOTE = (
+    " The owner's file was also sent to knowledge: use knowledge.search to find its "
+    "passages. Ingestion takes a short while after sending, so an empty result now "
+    "means it is still being added, not that the file is unusable."
+)
+
 
 def is_text_media_type(media_type: str) -> bool:
     return (
@@ -278,15 +285,16 @@ def attachment_label(part: AttachmentPart) -> str:
     )
 
 
-def reference_marker(part: AttachmentPart, reason: MarkerReason) -> str:
+def reference_marker(part: AttachmentPart, reason: MarkerReason, *, knowledge: bool = False) -> str:
     noun = "image" if isinstance(part, ImageReferencePart) else "file"
     phrase = _REASON_PHRASES[reason]
+    note = _KNOWLEDGE_NOTE if knowledge else ""
     head = (
         f'[Referenced {noun} "{display_name(part)}" ({_facts(part)}), artifact:{part.artifact_id}'
     )
     if not phrase:
-        return f"{head}.]"
-    return f"{head}; not included because {phrase}.]"
+        return f"{head}.{note}]"
+    return f"{head}; not included because {phrase}.{note}]"
 
 
 def envelope_text(part: AttachmentPart, text: str, *, truncated: bool) -> str:
@@ -331,15 +339,33 @@ def planned_reads(
     return list(reads.values())
 
 
+def knowledge_checks(
+    decisions: Mapping[tuple[int, int], AttachmentDecision], capabilities: ModelCapabilities
+) -> list[UUID]:
+    """Documents that will render as markers, whose knowledge state the marker reports."""
+
+    checks: dict[UUID, None] = {}
+    for decision in decisions.values():
+        part = decision.part
+        if part.media_type not in KNOWLEDGE_MEDIA_TYPES:
+            continue
+        if decision.reason is not None or capability_reason(part, capabilities):
+            checks[part.artifact_id] = None
+    return list(checks)
+
+
 def render_attachments(
     decisions: Mapping[tuple[int, int], AttachmentDecision],
     capabilities: ModelCapabilities,
     resolved: Mapping[UUID, AttachmentContent],
+    *,
+    knowledge: frozenset[UUID] = frozenset(),
 ) -> dict[tuple[int, int], RenderedAttachment]:
     """Turn decisions and resolved bytes into adapter-neutral rendering units.
 
     An attachment the resolver did not release is absent from `resolved` and
-    renders as unavailable.
+    renders as unavailable. A marker for a document in `knowledge` tells the
+    model to find its text with knowledge search.
     """
 
     rendered: dict[tuple[int, int], RenderedAttachment] = {}
@@ -378,6 +404,9 @@ def render_attachments(
                 )
                 continue
         rendered[key] = RenderedAttachment(
-            part=part, kind=kind, label=label, marker=reference_marker(part, reason)
+            part=part,
+            kind=kind,
+            label=label,
+            marker=reference_marker(part, reason, knowledge=part.artifact_id in knowledge),
         )
     return rendered

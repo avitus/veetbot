@@ -1532,9 +1532,13 @@ async def test_anthropic_error_type_drives_retry_and_sdk_validation_is_protocol(
 class _StubResolver:
     """Release fixed bytes and record every read the adapter asked for."""
 
-    def __init__(self, released: dict[UUID, bytes]) -> None:
+    def __init__(
+        self, released: dict[UUID, bytes], knowledge: frozenset[UUID] = frozenset()
+    ) -> None:
         self._released = released
+        self._knowledge = knowledge
         self.reads: list[Any] = []
+        self.knowledge_checks: list[UUID] = []
 
     async def resolve(self, reads: Any, *, run_id: UUID) -> dict[UUID, Any]:
         from agent_core.domain.artifacts import AttachmentContent
@@ -1549,6 +1553,11 @@ class _StubResolver:
             for read in reads
             if read.artifact_id in self._released
         }
+
+    async def knowledge_bound(self, artifact_ids: Any, *, run_id: UUID) -> frozenset[UUID]:
+        assert run_id == RUN_ID
+        self.knowledge_checks.extend(artifact_ids)
+        return self._knowledge & frozenset(artifact_ids)
 
 
 _IMAGE = UUID("00000000-0000-0000-0000-000000000501")
@@ -1729,6 +1738,36 @@ async def test_an_unreleased_attachment_is_described_as_unavailable() -> None:
     assert turn.stop_reason is StopReason.END_TURN
     texts = [block["text"] for block in source.requests[0]["input"][0]["content"]]
     assert sum("it is no longer available" in text for text in texts) == 3
+
+
+async def test_an_oversized_document_sent_to_knowledge_tells_the_model_to_search_it() -> None:
+    source = ScriptedRawSource([openai_text_events()])
+    resolver = _StubResolver({}, knowledge=frozenset({_PDF}))
+    provider = OpenAIResponsesProvider(event_source=source, attachment_resolver=resolver)
+    conversation = [
+        UserMessage(
+            content=[
+                FileReferencePart(
+                    artifact_id=_PDF,
+                    media_type="application/pdf",
+                    filename="BMW Owner Manual.pdf",
+                    size_bytes=5_764_203,
+                    page_count=424,
+                ),
+                TextPart(text="keep this as a reference"),
+            ]
+        )
+    ]
+    try:
+        await collect_turn(provider.stream(request(conversation), _multimodal("openai"), ATTEMPT))
+    finally:
+        await provider.close()
+    assert resolver.reads == []
+    assert resolver.knowledge_checks == [_PDF]
+    marker = source.requests[0]["input"][0]["content"][0]["text"]
+    assert "exceeds the per-file limit for one request" in marker
+    assert "also sent to knowledge" in marker
+    assert "knowledge.search" in marker
 
 
 @pytest.mark.parametrize("provider_name", ["openai", "anthropic", "chat_completions"])

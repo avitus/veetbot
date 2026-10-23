@@ -33,6 +33,7 @@ from agent_core.model.attachments import (
     AttachmentKind,
     MarkerReason,
     RenderedAttachment,
+    knowledge_checks,
     planned_reads,
     reference_marker,
     render_attachments,
@@ -286,7 +287,14 @@ async def rendered_attachments(
             contents = dict(await resolver.resolve(reads, run_id=attempt.run_id))
         except Exception:  # resolution failure degrades to markers, never a failed turn
             logger.warning("attachment_resolution_failed", extra={"run_id": str(attempt.run_id)})
-    return render_attachments(decisions, resolved.capabilities, contents)
+    checks = knowledge_checks(decisions, resolved.capabilities)
+    knowledge: frozenset[UUID] = frozenset()
+    if checks and resolver is not None:
+        try:
+            knowledge = frozenset(await resolver.knowledge_bound(checks, run_id=attempt.run_id))
+        except Exception:  # an unknown knowledge state renders the plain marker
+            logger.warning("attachment_knowledge_failed", extra={"run_id": str(attempt.run_id)})
+    return render_attachments(decisions, resolved.capabilities, contents, knowledge=knowledge)
 
 
 def has_attachment_parts(item: UserMessage) -> bool:

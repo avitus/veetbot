@@ -92,3 +92,13 @@ class AttachmentResolver(Protocol):
     async def resolve(
         self, reads: Sequence[AttachmentRead], *, run_id: UUID
     ) -> Mapping[UUID, AttachmentContent]: ...
+
+    async def knowledge_bound(
+        self, artifact_ids: Sequence[UUID], *, run_id: UUID
+    ) -> frozenset[UUID]:
+        """The named uploads, under the same release checks, sent to knowledge.
+
+        A document counts while its ingestion is pending or done; a refused or
+        failed ingestion, and anything `resolve` would not release, is absent.
+        """
+        ...

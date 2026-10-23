@@ -124,3 +124,61 @@ async def test_resolver_releases_only_the_runs_live_uploads(tmp_path: Path) -> N
         assert released[long].truncated is True
         assert await resolver.resolve(reads, run_id=UUID(int=12345)) == {}
         assert await resolver.resolve([], run_id=submitted.run_id) == {}
+
+
+async def test_resolver_reports_only_the_runs_documents_sent_to_knowledge() -> None:
+    async with build(settings=memory_settings(), sequential_ids=True) as composition:
+        principal = composition.principal
+        session = await composition.services.sessions.create(principal, "general", {})
+        other = await composition.services.sessions.create(principal, "general", {})
+        submitted = await composition.services.runs.submit(
+            principal, session.id, [TextContentBlock(text="hi")], None, None
+        )
+
+        async def stored(
+            n: int, state: str | None, *, session_id: UUID, origin: str = "upload"
+        ) -> UUID:
+            metadata: dict[str, object] = {"attachment": {"kind": "pdf", "page_count": 424}}
+            if state is not None:
+                metadata["auto_ingest"] = state
+            async with composition.uow_factory() as uow:
+                await uow.artifacts.create(
+                    ArtifactRef(
+                        id=UUID(int=n),
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        session_id=session_id,
+                        run_id=submitted.run_id,
+                        name="manual.pdf",
+                        media_type="application/pdf",
+                        storage_uri="",
+                        sha256="0" * 64,
+                        size_bytes=5_764_203,
+                        origin=origin,  # type: ignore[arg-type]
+                        trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                        expires_at=None,
+                        created_at=NOW,
+                        metadata=metadata,
+                    )
+                )
+            return UUID(int=n)
+
+        pending = await stored(1, "pending", session_id=session.id)
+        ingested = await stored(2, "ingested", session_id=session.id, origin="knowledge_source")
+        refused = await stored(3, "refused", session_id=session.id, origin="knowledge_source")
+        failed = await stored(4, "failed", session_id=session.id)
+        unmarked = await stored(5, None, session_id=session.id)
+        elsewhere = await stored(6, "pending", session_id=other.id)
+        resolver = StoredAttachmentResolver(
+            uow_factory=composition.uow_factory,
+            store=FilesystemArtifactStore(Path("unused")),
+            principal=principal,
+            clock=FixedClock(composition.clock.now()),
+        )
+        asked = [pending, ingested, refused, failed, unmarked, elsewhere, UUID(int=99)]
+        assert await resolver.knowledge_bound(asked, run_id=submitted.run_id) == {
+            pending,
+            ingested,
+        }
+        assert await resolver.knowledge_bound(asked, run_id=UUID(int=12345)) == frozenset()
+        assert await resolver.knowledge_bound([], run_id=submitted.run_id) == frozenset()
