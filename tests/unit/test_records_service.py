@@ -1,5 +1,6 @@
 """The records application service enforces scans, limits, replay and events."""
 
+from collections.abc import Awaitable
 from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -13,11 +14,13 @@ from agent_core.application.records import RecordsRefusal, RecordsService
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.records import (
+    AppendResult,
     Bucket,
     Order,
     RecordCadence,
     RecordComponent,
     RecordPrecision,
+    RecordSeries,
 )
 from tests.contract.support import NOW, SESSION_ID, memory_uow_factory, principal
 
@@ -47,7 +50,7 @@ async def create(
     name: str = "Blood pressure",
     components: tuple[RecordComponent, ...] = BP,
     cadence: RecordCadence | None = None,
-):
+) -> tuple[RecordSeries, bool]:
     return await svc.create_series(
         principal(),
         display_name=name,
@@ -59,7 +62,14 @@ async def create(
     )
 
 
-async def append(svc: RecordsService, values, *, key: str | None = None, at=None, note=None):
+async def append(
+    svc: RecordsService,
+    values: dict[str, Decimal],
+    *,
+    key: str | None = None,
+    at: str | None = None,
+    note: str | None = None,
+) -> AppendResult:
     return await svc.append(
         principal(),
         series_name="blood pressure",
@@ -74,7 +84,7 @@ async def append(svc: RecordsService, values, *, key: str | None = None, at=None
     )
 
 
-async def refusal(awaitable) -> str:
+async def refusal(awaitable: Awaitable[object]) -> str:
     with pytest.raises(RecordsRefusal) as caught:
         await awaitable
     return caught.value.code
@@ -379,22 +389,25 @@ async def test_query_returns_entries_summary_and_buckets() -> None:
 
 async def test_query_unknown_series_and_window_too_large() -> None:
     svc, _, _ = await service()
-    args = {
-        "since": None,
-        "until": None,
-        "limit": 10,
-        "order": Order.ASC,
-        "bucket": Bucket.DAY,
-        "zone": UTC_ZONE,
-    }
-    assert await refusal(svc.query(principal(), series_name="x", **args)) == (
-        "records.series_unknown"
-    )
+
+    async def run(name: str, since: str | None = None) -> str:
+        return await refusal(
+            svc.query(
+                principal(),
+                series_name=name,
+                since=since,
+                until=None,
+                limit=10,
+                order=Order.ASC,
+                bucket=Bucket.DAY,
+                zone=UTC_ZONE,
+            )
+        )
+
+    assert await run("x") == "records.series_unknown"
     await create(svc)
-    wide = {**args, "since": (NOW - timedelta(days=2000)).isoformat()}
-    assert await refusal(svc.query(principal(), series_name="blood pressure", **wide)) == (
-        "records.window_too_large"
-    )
+    wide_since = (NOW - timedelta(days=2000)).isoformat()
+    assert await run("blood pressure", wide_since) == "records.window_too_large"
 
 
 async def test_mean_is_half_even_six_places() -> None:

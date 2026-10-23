@@ -5,11 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from agent_core.application.records import CatalogLine, RecordsCatalog
 from agent_core.context.records_catalog import catalog_item, render_records_catalog
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.records import RecordCadence, RecordComponent, RecordPrecision
+from agent_core.domain.records import (
+    CatalogLine,
+    RecordCadence,
+    RecordComponent,
+    RecordPrecision,
+    RecordsCatalog,
+)
 
 LOS_ANGELES = ZoneInfo("America/Los_Angeles")
 NOW = datetime(2026, 10, 22, 16, 0, tzinfo=UTC)

@@ -159,7 +159,7 @@ def test_series_defaults_and_sensitivity_floor() -> None:
         _series(sensitivity=Sensitivity.PUBLIC)
     assert _series(sensitivity=Sensitivity.INTERNAL).sensitivity is Sensitivity.INTERNAL
     with pytest.raises(ValidationError):
-        s.revision = 2  # type: ignore[misc]
+        s.revision = 2
 
 
 def test_series_name_and_display_bounds() -> None:
@@ -189,7 +189,7 @@ def test_entry_quantizes_values_and_trims_note() -> None:
 
 
 def test_entry_refusals() -> None:
-    for bad in (
+    bad_overrides: tuple[dict[str, object], ...] = (
         {"values": {}},
         {"values": {"lbs": Decimal("NaN")}},
         {"values": {"lbs": Decimal("0.1234567")}},
@@ -199,7 +199,8 @@ def test_entry_refusals() -> None:
         {"note": "x" * 201},
         {"observed_at": datetime(2026, 10, 22, 15, 0)},
         {"idempotency_key": ""},
-    ):
+    )
+    for bad in bad_overrides:
         with pytest.raises(ValidationError):
             _entry(**bad)
 
