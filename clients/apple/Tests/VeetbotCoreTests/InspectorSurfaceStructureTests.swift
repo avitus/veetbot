@@ -83,6 +83,11 @@ import Testing
         // StateObject retains its initial date unless both lookup inputs identify the card.
         #expect(email.contains(".id(lookup.asOf)"))
         #expect(email.contains(".id(lookup.text)"))
+        // Transient emphasis must not survive a thread transition or a closed panel.
+        #expect(email.contains("if model.isLoadingThread { cancelFlash() }"))
+        #expect(email.contains(".onDisappear { cancelFlash() }"))
+        let cleanup = email.components(separatedBy: "private func cancelFlash()").last ?? ""
+        #expect(cleanup.contains("senderFlash = false") && cleanup.contains("attachmentsFlash = false"))
         #expect(email.contains("PeopleViewModel(searchText: lookup.text, asOf: lookup.asOf)"))
         #expect(email.contains("EmailPriority(thread.priority)"))
         #expect(email.contains("EmailTeachCard(model: model"))

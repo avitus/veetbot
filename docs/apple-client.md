@@ -778,7 +778,8 @@ it together with Chat's sidebar; the mode bar with Chat / Email and More then
 returns, and account, search and collection pills sit above the inbox.
 This visibility binding is Mac-only; iPad retains UIKit-managed split navigation.
 Sender and attachment reveals are consumed once the Email panel mounts, including
-when it was closed; changing threads clears an unhandled reveal. Sender cards
+when it was closed; changing threads clears an unhandled reveal. Thread changes
+and panel dismissal also cancel transient highlights. Sender cards
 refresh People context for the selected message’s date, even for the same sender.
 The main page has an Email heading, count and appearance toggle. Compact screens put the mailbox collections in horizontal
 filter pills. Important / Other mail remains available under Find other mail.

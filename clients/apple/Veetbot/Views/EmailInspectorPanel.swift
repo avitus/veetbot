@@ -47,8 +47,11 @@ struct EmailInspectorPanel: View {
                 .onChange(of: inspector.pendingEmailReveal, initial: true) {
                     consumeReveal(with: proxy)
                 }
-                .onChange(of: model.isLoadingThread) { consumeReveal(with: proxy) }
-                .onDisappear { flashTask?.cancel() }
+                .onChange(of: model.isLoadingThread) {
+                    if model.isLoadingThread { cancelFlash() }
+                    consumeReveal(with: proxy)
+                }
+                .onDisappear { cancelFlash() }
 
             }
         }
@@ -69,6 +72,14 @@ struct EmailInspectorPanel: View {
             await Task.yield()
             withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(section, anchor: .top) }
         }
+    }
+
+    /// Clears transient emphasis when a thread changes or the panel leaves the screen.
+    private func cancelFlash() {
+        flashTask?.cancel()
+        flashTask = nil
+        senderFlash = false
+        attachmentsFlash = false
     }
 
     /// Handles a queued request on mount as well as requests to an already-open panel.
