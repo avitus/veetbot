@@ -171,6 +171,12 @@ public final class EmailViewModel: ObservableObject {
         accounts.first { $0.id == accountID }?.unsubscribeSupported == true
     }
 
+    /// The account's label and address, or its identifier before accounts load.
+    public func accountDescription(for accountID: String) -> String {
+        guard let account = accounts.first(where: { $0.id == accountID }) else { return accountID }
+        return account.emailAddress.map { "\(account.label) · \($0)" } ?? account.label
+    }
+
     /// Report spam and Not spam need this account's advertised support; Archive is never substituted.
     public func spamSupported(for accountID: String) -> Bool {
         !unavailable && !spamUnsupportedAccounts.contains(accountID)

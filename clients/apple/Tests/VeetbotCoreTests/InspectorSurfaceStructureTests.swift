@@ -93,9 +93,45 @@ import Testing
         }
         // The thread hands both to the panel on the Mac.
         #expect(mode.contains("struct EmailTeachCard"))
-        #expect(mode.contains("if inspectorReveal == nil {"))
-        #expect(mode.contains("inspectorReveal.sender(.correspondent(message.sender, at: message.sentAt))"))
+        #expect(mode.contains("if describesInline {\n                                EmailTeachCard("))
+        #expect(mode.contains("inspectorReveal.message(message)"))
         #expect(mode.contains(".macInspector(inspector, mode: .email)"))
+    }
+
+    /// The clean reader (MagicPath cozy-evening-6871): on the Mac the thread
+    /// keeps the mail itself, and Context holds everything that describes it.
+    @Test
+    func testTheMacThreadKeepsTheMailAndContextHoldsWhatDescribesIt() throws {
+        let email = try source(at: "Veetbot/Views/EmailInspectorPanel.swift")
+        let mode = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(email.contains("EmailThreadSummary.make(thread: thread, draft: model.draft ?? thread.draft)"))
+        #expect(email.contains("EmailSpamControls(model: model, thread: thread)"))
+        #expect(email.contains("model.subscriptions.beginUnsubscribe(thread: thread)"))
+        #expect(email.contains("model.unsubscribeSupported(for: thread.accountID)"))
+        #expect(email.contains("model.archiveUnavailableReason(for: thread)"))
+        #expect(email.contains("model.accountDescription(for: thread.accountID)"))
+        #expect(email.contains("Toggle(\"Show original\", isOn: $inspector.showsOriginal)"))
+        for identifier in [
+            "inspector.email.summary", "inspector.email.message", "inspector.email.thread",
+            "email.reader.original", "email.unsubscribe.thread",
+        ] {
+            #expect(email.contains(".accessibilityIdentifier(\"\(identifier)\")"), "\(identifier)")
+        }
+
+        // Without a panel (iPhone, iPad) the thread still describes itself.
+        #expect(mode.contains("private var describesInline: Bool { inspectorReveal == nil }"))
+        #expect(mode.contains("if describesInline {\n                                EmailGistBlock("))
+        #expect(mode.contains("if describesInline {\n                    Label(model.accountDescription(for: thread.accountID)"))
+        #expect(mode.contains("EmailArchiveStatus(model: model, thread: thread, showsAvailability: describesInline)"))
+        #expect(mode.contains("if describesInline {\n                // Bulk mail only"))
+        #expect(mode.contains("if describesInline {\n                EmailSpamControls(model: model, thread: thread)"))
+        #expect(mode.contains("if describesInline {\n                        Button {\n                            peopleLookup ="))
+        // On the Mac the sender's name, one attachment line and the panel's
+        // Show original stand in for them.
+        #expect(mode.contains("inspectorReveal.attachments()"))
+        #expect(mode.contains("EmailReadingView(message: message, showsOriginal: inspectorReveal?.showsOriginal)"))
+        #expect(!mode.contains("inspectorReveal.sender("))
     }
 
     @Test

@@ -29,12 +29,22 @@ class SemanticRecallPreparation:
         principal: Principal,
         retriever: HybridMemoryRetriever,
         former: QueryFormer,
+        *,
+        inline_output_bytes: int = 4096,
     ) -> None:
         self._factory, self._principal = factory, principal.model_copy(deep=True)
         self._retriever, self._former = retriever, former
-        self._tool = MemorySearchTool(retriever, model_planning=True)
-        legacy = MemorySearchTool(retriever)
-        self._tools = {tool.spec.version: tool for tool in (legacy, self._tool)}
+        self._tool = MemorySearchTool(
+            retriever,
+            model_planning=True,
+            overview_enabled=True,
+            inline_output_bytes=inline_output_bytes,
+        )
+        planned = MemorySearchTool(
+            retriever, model_planning=True, inline_output_bytes=inline_output_bytes
+        )
+        legacy = MemorySearchTool(retriever, inline_output_bytes=inline_output_bytes)
+        self._tools = {tool.spec.version: tool for tool in (legacy, planned, self._tool)}
         self._validators = {
             version: Draft202012Validator(tool.spec.input_schema)
             for version, tool in self._tools.items()

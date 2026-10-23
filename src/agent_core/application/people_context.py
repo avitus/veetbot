@@ -16,6 +16,7 @@ from agent_core.domain.memory import (
     SENSITIVITY_ORDER,
     BeliefType,
     MemoryCorrection,
+    Polarity,
     RecallQuery,
     RecallResult,
     Sensitivity,
@@ -24,10 +25,12 @@ from agent_core.domain.memory import (
 from agent_core.domain.memory_candidates import candidate_strength
 from agent_core.domain.messages import MemoryRecallUsage
 from agent_core.domain.people import (
+    OWNER_RELATIONSHIP_GROUPS,
     OrganizationReference,
     PeopleCommitment,
     PeopleInteraction,
     PeopleQuery,
+    PeopleRelationshipFilter,
     Person,
     PersonIdentifier,
     PersonMemoryLink,
@@ -313,6 +316,31 @@ class PeopleContextService:
         ids: list[UUID] = []
         person_query = False
         relationship_discovery = False
+        overview = query.relationship_group is not None or (
+            query.candidate_selection == "relevance"
+            and bool(
+                re.search(
+                    r"\b(?:everything (?:you )?(?:know|remember) about me|"
+                    r"what (?:do you |you )?(?:know|remember) about me|"
+                    r"(?:tell me|what (?:do you |you )?(?:know|remember)).*\bmy family)\b",
+                    query.text or "",
+                    re.IGNORECASE,
+                )
+            )
+        )
+        if query.relationship_group is not None:
+            require_scope(principal, "people.read")
+        if overview and "people.read" in principal.scopes and moment == "in_turn":
+            return await self._owner_overview(
+                principal,
+                query,
+                session_id=session_id,
+                run_id=run_id,
+                turn_id=turn_id,
+                moment=moment,
+                surface_id=surface_id,
+                measure_rendered_tokens=measure_rendered_tokens,
+            )
         if "people.read" in principal.scopes and query.text and moment == "in_turn":
             ceiling = min(
                 (query.sensitivity_ceiling, self._surface_ceiling),
@@ -432,6 +460,143 @@ class PeopleContextService:
             surface_id=surface_id,
             measure_rendered_tokens=measure_rendered_tokens,
         )
+
+    async def _owner_overview(
+        self,
+        principal: Principal,
+        query: RecallQuery,
+        *,
+        session_id: UUID,
+        run_id: UUID | None,
+        turn_id: UUID | None,
+        moment: str,
+        surface_id: str,
+        measure_rendered_tokens: Callable[[str], int] | None,
+    ) -> RecallResult:
+        require_scope(principal, "people.read")
+        if (principal.tenant_id, principal.principal_id) != (query.tenant_id, query.principal_id):
+            raise NotFoundError("person not found")
+        ceiling = min(
+            (query.sensitivity_ceiling, self._surface_ceiling), key=SENSITIVITY_ORDER.__getitem__
+        )
+        group = query.relationship_group or "family"
+        groups: tuple[PeopleRelationshipFilter, ...] = (
+            ("family", "partner") if group == "family" else (group,)
+        )
+        predicates = {predicate for key in groups for predicate in OWNER_RELATIONSHIP_GROUPS[key]}
+        context: list[TracedPersonContext] = []
+        evidence: set[UUID] = set()
+        bound_semantic_queries = await self._retriever.bind_semantic_queries(
+            query, session_id=session_id, run_id=run_id, surface_id=surface_id
+        )
+        async with self._factory() as uow, uow.people.lock(principal):
+            await uow.sessions.get(session_id, principal)
+            people: dict[UUID, Person] = {}
+            for key in groups:
+                page = await uow.people.query(
+                    PeopleQuery(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        relationship=key,
+                        sensitivity_ceiling=ceiling,
+                        states=["active", "provisional"],
+                        as_of=query.as_of,
+                        known_at=query.known_at,
+                        after=query.people_after,
+                        limit=3,
+                    )
+                )
+                people.update((row.id, row) for row in page if isinstance(row, Person))
+            ordered = sorted(people)
+            next_after = ordered[2] if len(ordered) > 3 else None
+            for person_id in ordered[:3]:
+                person = people[person_id]
+                if not _safe(person.display_name):
+                    continue
+                rows = await uow.people.query(
+                    PeopleQuery(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        kinds=["relationship"],
+                        person_id=person_id,
+                        sensitivity_ceiling=ceiling,
+                        as_of=query.as_of,
+                        known_at=query.known_at,
+                        limit=100,
+                    )
+                )
+                edges = [
+                    row
+                    for row in rows[:100]
+                    if isinstance(row, RelationshipAssertion)
+                    and not row.unresolved
+                    and row.predicate in predicates
+                    and any(endpoint.kind == "owner" for endpoint in (row.subject, row.object))
+                ]
+                # Exact linked IDs still pass every ordinary memory visibility predicate.
+                eligible = await uow.memories.query(
+                    query.model_copy(
+                        update={
+                            "text": None,
+                            "subjects": [],
+                            "structured_belief_types": [],
+                            "include_owned_resources": False,
+                            "expand_ids": (),
+                            "include_ids": tuple(
+                                sorted(
+                                    {edge.belief_id for edge in edges}
+                                    & (
+                                        set(query.include_ids)
+                                        if query.include_ids is not None
+                                        else {edge.belief_id for edge in edges}
+                                    )
+                                )
+                            ),
+                            "sensitivity_ceiling": ceiling,
+                            "max_items": 20,
+                        }
+                    )
+                )
+                permitted = {row.id: row for row in eligible if row.polarity is Polarity.ASSERT}
+                for edge in edges:
+                    belief = permitted.get(edge.belief_id)
+                    if belief is None:
+                        continue
+                    shown = await self._relationship_context(
+                        uow, principal, edge, query, ceiling, {person_id}, set()
+                    )
+                    if shown is not None:
+                        context.append(
+                            shown.model_copy(
+                                update={
+                                    "text": shown.text + f" Evidence: {belief.authority.value}; "
+                                    f"{belief.status.value}; confidence {belief.confidence:g}."
+                                }
+                            )
+                        )
+                        evidence.add(belief.id)
+            effective = query.model_copy(
+                update={
+                    "relationship_group": group,
+                    "next_people_after": next_after,
+                    "expand_ids": tuple(sorted(evidence)),
+                    "sensitivity_ceiling": ceiling,
+                    "budget_tokens": min(query.budget_tokens, 2000),
+                    "max_items": min(query.max_items, 20),
+                }
+            )
+            return await self._retriever.recall(
+                effective,
+                session_id=session_id,
+                run_id=run_id,
+                turn_id=turn_id,
+                moment=moment,
+                surface_id=surface_id,
+                people_items=context,
+                existing_uow=uow,
+                bound_semantic_queries=bound_semantic_queries,
+                measure_rendered_tokens=measure_rendered_tokens,
+            )
 
     async def _relationship_people(
         self,

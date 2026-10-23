@@ -531,6 +531,18 @@ select only an unambiguous visible direct owner relationship. No role dictionary
 or inferred graph path is used. Name ambiguity never falls back to role selection.
 Automatic and planned deliberate recall share this People context mechanism.
 
+[ADR-0238](../adr/0238-owner-overview-and-memory-delivery.md) adds direct owner
+relationship pages for explicit owner/family overviews. The first family page
+includes family and partner edges; deliberate `memory.search` can select a group
+and continue after the returned person identifier. Each page visits at most three
+focal identities and reads at most 100 relationship rows per identity, under the
+owner fence. Existing belief visibility predicates admit the supporting evidence
+before projection; neither names nor indirect graph paths infer relationships.
+Directed endpoints and evidence confidence are retained, including provisional
+status. Coverage and continuation are rendered inside the shared recall budget;
+a page never claims exhaustive knowledge. Other permitted ordinary recall remains
+available alongside the direct relationships.
+
 Disconnected source accounts make live source navigation unavailable; they do
 not automatically erase independently permitted shared memories. Explicit source
 exclusion/clear-learning decisions remove derived eligibility. Distinguish those

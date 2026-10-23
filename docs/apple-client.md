@@ -777,6 +777,8 @@ Schedules, Persona and Settings. On the Mac the window's sidebar button hides
 it together with Chat's sidebar; the mode bar with Chat / Email and More then
 returns, and account, search and collection pills sit above the inbox.
 This visibility binding is Mac-only; iPad retains UIKit-managed split navigation.
+Sender and attachment reveals are consumed once the Email panel mounts, including
+when it was closed; changing threads clears an unhandled reveal.
 The main page has an Email heading, count and appearance toggle. Compact screens put the mailbox collections in horizontal
 filter pills. Important / Other mail remains available under Find other mail.
 Mac uses a native draggable split divider: the inbox can grow from 280 to 560
@@ -811,10 +813,18 @@ and the thread menu join the back button in a paper navigation bar instead,
 so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
 its reason; the messages follow as prose, each under its sender's line and
 parted by hairlines, with View in People and Message details kept beside the
-sender. On the Mac, View in People opens the sender's card in the right panel's
-**Context** tab (ADR-0237), which also says why the thread is in the priority
-list (its level and reason), lists the attachments without opening them, shows
-the draft's state with a way to ask for one, and holds Teach Veetbot; its
+sender. The Mac thread is a clean reader instead (ADR-0237; MagicPath
+cozy-evening-6871): the account, the gist and state line, View in People,
+Message details, each message's Reading view switch, the attachment names,
+Unsubscribe and the spam flag leave it for the right panel's **Context** tab.
+A sender's name opens their card there with that message's From, To, Cc and
+date, and one line per message counts its attachments and opens their list.
+Context leads with any spam flag, then Veetbot's summary (a thread not yet
+assessed says "Assessment pending" once), why the thread is in the priority
+list (its level and reason), the sender, Teach Veetbot, the attachments
+(listed, never opened), the draft's state with a way to ask for one, and a
+Thread card with the account, the Gmail state and one Show original switch
+for the whole thread; its
 **Activity** tab replays the draft run's events and shows the calls that made
 the draft. Elsewhere a "Teach Veetbot" card on `paperDeep` below the
 conversation opens into the same scoped

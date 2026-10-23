@@ -34,7 +34,9 @@ async def test_composition_retains_pinned_legacy_memory_search() -> None:
         legacy = registry.get("memory.search", "1.1.0")
         assert legacy.spec.input_schema["required"] == ["text", "scope"]
         assert "belief_types" in legacy.spec.input_schema["properties"]
-        assert registry.get("memory.search").spec.version == "2.1.0"
+        assert registry.get("memory.search").spec.version == "2.2.0"
+        planned = registry.get("memory.search", "2.1.0")
+        assert "relationship_group" not in planned.spec.input_schema["properties"]
         original = memory()
         async with app.uow_factory() as uow:
             await uow.sessions.create(session())
@@ -110,7 +112,8 @@ async def test_live_search_does_not_ask_the_model_to_guess_hard_storage_filters(
         "A guessed storage kind must not exclude a differently classified true fact"
     )
     assert "type_hints" in search.input_schema["properties"]
-    assert search.version == "2.1.0"
+    assert search.version == "2.2.0"
+    assert "relationship_group" in search.input_schema["properties"]
     assert search.input_schema["required"] == ["text"]
 
 

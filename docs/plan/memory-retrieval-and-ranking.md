@@ -170,6 +170,9 @@ snapshot packing: direct durable owner facts and relationships join the durable
 set, which packs first; whole items larger than 256 tokens or one third of the
 current budget are omitted. The existing durable-slot reservation remains in force.
 The trace records `+owner-core@1`; legacy recent-mode selection stays unchanged.
+The production context planner explicitly propagates the configured selection mode
+when it builds a snapshot (ADR-0238), including ordinary epoch rotations. Persisted
+frozen prefixes retain their existing bytes.
 Successful relevance-mode reads label their bounded coverage in the rendered
 header and count that header against the token budget, including empty results.
 Neither a missing match nor a bounded result establishes a search outage.
@@ -695,12 +698,18 @@ Two tools, both returning `TrustLevel.MEMORY` data:
   personal context. The query names the fact needed to answer, such as home
   location, even when the question names another topic. Absence from the bounded
   snapshot or automatic recall does not establish that the fact is unknown.
-  Production `memory.search@2.1.0` uses `type_hints` as structured relevance
+  Production `memory.search@2.2.0` uses `type_hints` as structured relevance
   anchors, never guessed hard storage-type predicates (ADR-0198). Omitted scope
   resolves from the authenticated session, identically in preparation and execution;
   an explicit scope retains intentional cross-project lookup (ADR-0206). Explicit
   `RecallQuery.belief_types` filters and the frozen/direct legacy tool remain
   unchanged; the model-facing schema rejects that old argument.
+  Version 2.2 adds optional `relationship_group` and `people_after` for bounded
+  direct owner relationship pages (ADR-0238); prior versions remain registered.
+  Deliberate results pack whole evidence within both the token budget and the
+  configured serialized inline byte allowance before creating their trace receipt.
+  Headers and continuation instructions count toward those limits. Generic tool
+  excerpting and strict recall digest validation remain in force.
   `as_of` selects when a fact applied; `known_at` selects the recorded knowledge
   at a time. The planned tool and M33 rendering preserve both coordinates
   (ADR-0200); the frozen legacy tool and rendering retain their original schema.

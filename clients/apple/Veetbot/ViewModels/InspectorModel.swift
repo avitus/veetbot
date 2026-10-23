@@ -71,6 +71,8 @@ enum EmailInspectorTab: String, CaseIterable, Identifiable {
     var title: String { self == .context ? "Context" : "Activity" }
 }
 
+enum EmailInspectorReveal: Equatable { case sender, attachments }
+
 /// Which panel is open, at what width and on which tab, and what the
 /// transcript or thread last asked it to show. The root owns one; the
 /// toolbar toggles the active mode's panel.
@@ -88,6 +90,19 @@ final class InspectorModel: ObservableObject {
     /// The correspondent the Context card shows; nil shows the latest sender.
     @Published private(set) var sender: PeopleLookup?
     @Published private(set) var senderRevealCount = 0
+    /// The message whose envelope the Context card shows; nil shows the latest.
+    @Published private(set) var senderMessageID: String?
+    @Published private(set) var attachmentsRevealCount = 0
+    @Published private(set) var pendingEmailReveal: EmailInspectorReveal?
+
+    /// Returns the unhandled request once the Context panel can display it.
+    func consumeEmailReveal() -> EmailInspectorReveal? {
+        defer { pendingEmailReveal = nil }
+        return pendingEmailReveal
+    }
+
+    /// Show original for every message in the open thread, chosen in Context.
+    @Published var showsOriginal = false
     private let store: InspectorLayoutStore
     private var windowWidth: CGFloat?
 
@@ -151,10 +166,29 @@ final class InspectorModel: ObservableObject {
         emailTab = .context
         sender = lookup
         senderRevealCount += 1
+        pendingEmailReveal = .sender
     }
 
+    /// A sender's name in the thread: their card and that message's envelope.
+    func showMessage(_ message: EmailMessageView) {
+        showSender(.correspondent(message.sender, at: message.sentAt))
+        senderMessageID = message.id
+    }
+
+    /// A message's attachment line: the thread's attachments in Context.
+    func revealAttachments() {
+        open[.email] = true
+        emailTab = .context
+        attachmentsRevealCount += 1
+        pendingEmailReveal = .attachments
+    }
+
+    /// Each thread opens on its latest message, in the reading view.
     func threadChanged() {
         sender = nil
+        senderMessageID = nil
+        pendingEmailReveal = nil
+        showsOriginal = false
     }
 }
 
@@ -164,22 +198,27 @@ final class InspectorModel: ObservableObject {
 struct InspectorReveal: Equatable {
     let activity: (String) -> Void
     let artifact: (UUID) -> Void
-    let sender: (PeopleLookup) -> Void
+    let message: (EmailMessageView) -> Void
+    let attachments: () -> Void
     /// The strip whose calls the panel shows, drawn in teal.
     let activeActivityID: String?
+    /// The thread shows every message's original body, not the reading view.
+    let showsOriginal: Bool
 
     @MainActor
     init(_ model: InspectorModel) {
         activity = { [weak model] in model?.revealActivity($0) }
         artifact = { [weak model] in model?.openArtifact($0) }
-        sender = { [weak model] in model?.showSender($0) }
+        message = { [weak model] in model?.showMessage($0) }
+        attachments = { [weak model] in model?.revealAttachments() }
         activeActivityID = model.isOpen(.chat) && model.chatTab == .activity ? model.revealedActivityID : nil
+        showsOriginal = model.showsOriginal
     }
 
     /// The closures always reach the one model, so only the highlighted strip
-    /// distinguishes two values.
+    /// and the reading choice distinguish two values.
     static func == (lhs: InspectorReveal, rhs: InspectorReveal) -> Bool {
-        lhs.activeActivityID == rhs.activeActivityID
+        lhs.activeActivityID == rhs.activeActivityID && lhs.showsOriginal == rhs.showsOriginal
     }
 }
 
@@ -396,6 +435,52 @@ struct EmailDraftSummary: Equatable {
         case "uncertain": return EmailDraftSummary(title: "Check send status", detail: nil, tone: .attention)
         case "failed": return EmailDraftSummary(title: "Draft needs attention", detail: nil, tone: .attention)
         default: return EmailDraftSummary(title: "Draft", detail: nil, tone: .draft)
+        }
+    }
+}
+
+/// What Veetbot made of a thread: its gist and the state the row's chip
+/// names. A thread Veetbot has not read yet says so once, rather than as its
+/// gist and again as its reason.
+struct EmailThreadSummary: Equatable {
+    enum Tone { case attention, draft, settled }
+    let gist: String
+    let isPending: Bool
+    let state: String
+    let tone: Tone
+    /// Why the thread is in the priority list; nil when it would only repeat the gist.
+    let reason: String?
+
+    /// The server's gist and reason until the thread has been assessed.
+    static let pendingText = "Assessment pending"
+
+    static func make(thread: EmailThreadView, draft: EmailDraftView?) -> EmailThreadSummary {
+        let gist = thread.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = thread.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (state, tone) = state(thread: thread, draft: draft)
+        return EmailThreadSummary(
+            gist: gist, isPending: gist == pendingText, state: state, tone: tone,
+            reason: reason.isEmpty || reason == gist ? nil : reason)
+    }
+
+    /// An attention state, a draft state, or a settled conversation, in the
+    /// words the row's chip and the thread's status line use.
+    static func state(thread: EmailThreadView, draft: EmailDraftView?) -> (title: String, tone: Tone) {
+        if thread.isInSpam { return ("Reported as spam", .settled) }
+        if thread.isArchived { return ("Archived", .settled) }
+        if thread.isHandled { return ("Handled", .settled) }
+        switch (draft ?? thread.draft)?.status {
+        case "ready": return ("Draft ready", .draft)
+        case "generating": return ("Preparing draft", .draft)
+        case "awaiting_approval": return ("Awaiting approval", .attention)
+        case "sending": return ("Sending reply", .draft)
+        case "sent": return ("Reply sent", .draft)
+        case "uncertain": return ("Check send status", .attention)
+        case "failed": return ("Draft needs attention", .attention)
+        default:
+            return thread.draftID != nil
+                ? ("Draft", .draft)
+                : thread.needsReply ? ("Needs reply", .attention) : ("For your attention", .attention)
         }
     }
 }

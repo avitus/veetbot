@@ -279,3 +279,5 @@ implementation without one.
 - [ADR-0236: Real-browser cases run off the owner's desktop](0236-real-browser-cases-run-off-the-owners-desktop.md)
 
 - [ADR-0237: A right panel for activity, artifacts and thread context on the Mac](0237-mac-right-panel.md)
+
+- [ADR-0238: Owner relationship overviews and complete memory delivery](0238-owner-overview-and-memory-delivery.md)

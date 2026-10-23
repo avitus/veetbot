@@ -370,4 +370,5 @@ nav:
       - "0235 — Verified accessibility contrast findings": adr/0235-verified-accessibility-contrast-findings.md
       - ADR-0236 Real-browser cases off the desktop: adr/0236-real-browser-cases-run-off-the-owners-desktop.md
       - "0237 — Mac right panel": adr/0237-mac-right-panel.md
+      - "0238 — Owner overviews and memory delivery": adr/0238-owner-overview-and-memory-delivery.md
   - Changelog: changelog.md
