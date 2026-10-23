@@ -15,6 +15,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.events import NewEvent
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import SENSITIVITY_ORDER, Sensitivity
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.records import (
     FUTURE_SKEW,
     MAX_ENTRIES_PER_SERIES,
@@ -205,7 +206,13 @@ class RecordsService:
         idempotency_key: str,
         session_id: UUID,
         run_id: UUID | None,
+        origin_trust: TrustLevel,
     ) -> AppendResult:
+        if origin_trust is TrustLevel.EXTERNAL_UNTRUSTED:
+            raise RecordsRefusal(
+                "records.untrusted_turn",
+                "this turn read external content; ask the owner to state the value in chat",
+            )
         name = normalize_series_name(series_name)
         now = self._clock.now()
         async with self._uow_factory() as uow:

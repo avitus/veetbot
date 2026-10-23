@@ -10,7 +10,7 @@
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Trust gate.** An append in an EXTERNAL_UNTRUSTED turn evaluates to REQUIRE_APPROVAL and writes nothing before resolution; MEMORY turns are allowed without a card; turn_origin_trusted holds for USER, MEMORY and INTERNAL_TOOL; create and delete never execute without a resolved approval."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_untrusted_turn_append_is_refused_and_writes_nothing
 - id: gate.records.append_replay
   milestone: 34
   kind: case

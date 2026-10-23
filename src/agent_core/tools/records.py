@@ -45,7 +45,9 @@ _NOT_MEMORY = (
     " Records are the owner's own measurements and are not memory; they are never recalled "
     "unprompted."
 )
-_PERMISSION_CODES = frozenset({"records.secret_detected", "records.name_rejected"})
+_PERMISSION_CODES = frozenset(
+    {"records.secret_detected", "records.name_rejected", "records.untrusted_turn"}
+)
 
 
 def parse_decimal_values(raw: Mapping[str, object]) -> dict[str, Decimal]:
@@ -164,6 +166,7 @@ def _spec(
     scope: str,
     maximum_output_bytes: int,
     allow_parallel: bool,
+    side_effect: SideEffectClass = SideEffectClass.NONE,
 ) -> ToolSpec:
     return ToolSpec(
         name=name,
@@ -171,7 +174,7 @@ def _spec(
         description=description + _NOT_MEMORY,
         input_schema=schema,
         output_schema=_OUTPUT_SCHEMA,
-        side_effect=SideEffectClass.NONE,
+        side_effect=side_effect,
         risk=risk,
         idempotency=idempotency,
         required_scopes={scope},
@@ -269,6 +272,7 @@ class RecordsCreateSeriesTool(_RecordsTool):
         scope="records.write",
         maximum_output_bytes=4096,
         allow_parallel=False,
+        side_effect=SideEffectClass.EXTERNAL_WRITE,
     )
 
     async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
@@ -346,6 +350,7 @@ class RecordsAppendTool(_RecordsTool):
             idempotency_key=context.idempotency_key,
             session_id=context.session_id,
             run_id=context.run_id,
+            origin_trust=context.origin_trust,
         )
         entry, series = result.entry, result.series
         units = {c.name: c.unit or "" for c in series.components}
@@ -474,6 +479,7 @@ class RecordsDeleteTool(_RecordsTool):
         scope="records.write",
         maximum_output_bytes=4096,
         allow_parallel=False,
+        side_effect=SideEffectClass.EXTERNAL_DELETE,
     )
 
     async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:

@@ -11,6 +11,7 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.application.records import RecordsRefusal, RecordsService
 from agent_core.domain.memory import Sensitivity
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.records import RecordCadence, RecordComponent, RecordPrecision
 from agent_core.ports.records import Bucket, Order
 from tests.contract.support import NOW, SESSION_ID, memory_uow_factory, principal
@@ -58,6 +59,7 @@ async def append(svc: RecordsService, values, *, key: str | None = None, at=None
         idempotency_key=key or str(uuid4()),
         session_id=SESSION_ID,
         run_id=None,
+        origin_trust=TrustLevel.USER,
     )
 
 
@@ -398,6 +400,7 @@ async def test_mean_is_half_even_six_places() -> None:
             idempotency_key=str(uuid4()),
             session_id=SESSION_ID,
             run_id=None,
+            origin_trust=TrustLevel.USER,
         )
     result = await svc.query(
         principal(),
