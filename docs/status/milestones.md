@@ -353,6 +353,19 @@ The staged implementation is in progress; optional channels remain evidence-gate
 - [ ] Complete the staged implementation and comparative activation evidence
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
+### Milestone 34 — Owner records
+
+Authorized on 2026-10-22 by [ADR-0239](../adr/0239-owner-records-and-numeric-series.md),
+with ten gates in the [design](../plan/owner-records.md): five `records.*`
+tools over named numeric series, approval-gated series creation and deletion,
+an approval for appends in untrusted turns, a formation rule so that a reading
+never becomes a belief, and a body-region catalog of the series in every
+request. The specification is checked in; implementation begins in its build
+sequence and no gate is green.
+
+- [ ] Implement the build sequence test-first and repoint each gate from the pending check to its test
+- [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
+
 ## Outside a milestone
 
 Open work that no active milestone owns: owner-only steps of non-milestone
@@ -399,9 +412,9 @@ and a learned memory policy (B6) — presence routing and
 hand-off (the B7 residue after Milestone 24), standing approval grants (B8), the
 trajectory-to-fine-tuning loop (B9), S3-compatible artifact storage (B10),
 calendar integration and the other B11 surfaces beyond email, and
-multi-tenant billing and quotas (B12), the WhatsApp linked-device
-bridge (B13), and owner records — named numeric series the owner appends to
-and queries over time (B14, proposed in ADR-0239).
+multi-tenant billing and quotas (B12), and the WhatsApp linked-device
+bridge (B13). Owner records (B14) entered as Milestone 34 on 2026-10-22
+under ADR-0239.
 
 Work each milestone explicitly set aside is recorded as that milestone's
 `deferred_scope` in [`project-state.yaml`](project-state.yaml); a deferred

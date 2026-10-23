@@ -1,0 +1,61 @@
+# Canonical gate registry entries for Milestone 34 owner records.
+- id: gate.records.scope_isolation
+  milestone: 34
+  kind: case
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Scope isolation.** Another principal's series is None or zero to every store method and records.series_unknown to every tool, on both adapters, with forced RLS and the scoped foreign key refusing a cross-owner link at write time."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.trust_gate
+  milestone: 34
+  kind: case
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Trust gate.** An append in an EXTERNAL_UNTRUSTED turn evaluates to REQUIRE_APPROVAL and writes nothing before resolution; MEMORY turns are allowed without a card; turn_origin_trusted holds for USER, MEMORY and INTERNAL_TOOL; create and delete never execute without a resolved approval."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.append_replay
+  milestone: 34
+  kind: case
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Append replay.** An append re-executed after a simulated crash with the effect watermark set stores one entry and returns the stored entry with replayed set, on both adapters."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.query_determinism
+  milestone: 34
+  kind: property
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Query determinism.** Window summaries and bucketed aggregates for a fixed fixture are byte-identical across calls and adapters, the half-open window is exact, and a window past 1,000 buckets is refused."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.scans
+  milestone: 34
+  kind: case
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Scans.** A secret-shaped name, component name or note refuses the call and stores nothing; an instruction-like name is refused; an instruction-like note is stored withheld and absent from every model-facing result."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.erasure
+  milestone: 34
+  kind: case
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Erasure.** Deleting a series removes its entries from every read in one transaction with a value-free event; session deletion keeps entries and nulls provenance; erase_principal removes everything, on both adapters."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.no_belief_per_value
+  milestone: 34
+  kind: case
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**No belief per value.** A consolidation run over a session with appends forms no belief carrying every component value of an appended entry, on every extractor sharing the eligibility gate, while a statement carrying one value of a two-component entry still forms."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.registration
+  milestone: 34
+  kind: structural
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Registration.** Registration validation accepts all five tools with every ToolSpec field, the two scopes are in the closed vocabulary, the three tool_rules rows are in the default profile, and with the flag off the tools are unregistered and the roster unchanged."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.listing_stable
+  milestone: 34
+  kind: property
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Listing stable.** records.list output and the catalog rendering for the same store are byte-identical across calls."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.records.catalog
+  milestone: 34
+  kind: case
+  spec: docs/plan/owner-records.md#hard-gates
+  statement: "**Catalog.** The item is body-region, renders no bytes without series, carries names, counts, last times and due state and never a value, omits series above the ceiling, keeps one prefix hash across the extended fifty-turn script, drops whole after knowledge passages, and keeps USER origin trust when it is the only added item."
+  check: tests/gates/pending.py::pending_gate

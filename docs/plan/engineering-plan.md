@@ -4352,6 +4352,21 @@ requests, formation decisions and reader behavior are unchanged. This narrow
 compatibility exception cannot admit another runtime change or retag old evidence.
 All coverage, quality and security gates and the existing absolute deadline remain.
 
+### Milestone 34: Owner records
+
+The owner authorized roadmap item B14 on 2026-10-22 under ADR-0239.
+[Owner records](owner-records.md) declares ten gates and gives the owner's
+principal a bounded record store: named numeric series with one to four
+components, appended to, listed, queried and deleted through five `records.*`
+tools, with a catalog of the series in every request. It requires approval
+for a new series and for every deletion, an approval for an append in a turn
+that read untrusted content through a new policy condition, scans on names
+and notes, forced row-level security, value-free deletion events, a formation
+eligibility rule so that a reading never becomes a belief, and a body-region
+catalog item with an absolute cap and a stability gate. No SQL surface, HTTP
+route or native screen is included. This parallel workstream does not advance
+the sequential verified ceiling.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -4375,7 +4390,7 @@ owner's current ranking, not a schedule.
 | B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. Email entered as Milestone 18 (ADR-0071), Bland telephone calling as Milestone 27 (ADR-0097); other voice input and calendar remain deferred |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 | B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 25 |
-| B14 | Owner records: named numeric series the owner appends to and queries over time (blood pressure, weight, sleep), kept apart from beliefs, with a trust-gated append, deterministic window summaries, approval-gated deletion and no automatic recall in the first slice | The owner's authorization and `owner-records.md` with its gates registered; proposed in ADR-0239. Not a general SQL surface and not an alternate memory store |
+| B14 | Owner records: named numeric series the owner appends to and queries over time (blood pressure, weight, sleep), kept apart from beliefs, with a trust-gated append, deterministic window summaries, approval-gated deletion and no automatic recall in the first slice | Entered as Milestone 34 on 2026-10-22 (ADR-0239), specified in `owner-records.md`. Not a general SQL surface and not an alternate memory store |
 
 ## 22. Security baseline
 

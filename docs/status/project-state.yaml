@@ -2710,6 +2710,17 @@ milestones:
     open_items:
       - Complete the staged implementation and comparative activation evidence
       - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
+  "34":
+    title: Owner records
+    status: in_progress
+    authorized_on: 2026-10-22
+    design: docs/plan/owner-records.md
+    adr: docs/adr/0239-owner-records-and-numeric-series.md
+    gates_registered: 10
+    implementation_status: authorized_specification_checked_in_implementation_beginning
+    open_items:
+      - Implement the build sequence test-first and repoint each gate from the pending check to its test
+      - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 # Open work that no active milestone owns: owner-only steps of non-milestone
 # ADRs, and specification-versus-code gaps found in completed milestones.

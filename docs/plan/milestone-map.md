@@ -332,9 +332,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 36 subject specifications declare 601 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 610
-declarations, 607 registry entries once the 3 aliases are subtracted.
+The 37 subject specifications declare 611 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 620
+declarations, 617 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1499,6 +1499,36 @@ Gates 6 and 10 are structural — the egress graph and the bind walk. The
 remaining ten are boundary cases over the listener, the adapter, and the
 surface tables.
 
+### Owner records, ten gates
+
+Ten gates open the `records` area at Milestone 34. They cover scope
+isolation on both adapters, the trust condition and the three approval rows,
+append replay, deterministic window summaries, the scans, erasure through
+the tool and through session and principal deletion, the formation rule that
+keeps a reading out of beliefs, registration under the flag, listing
+stability, and the catalog item's region, cap, yield, ceiling and prefix
+stability.
+
+```text
+#   id                                 kind         M
+--  ---------------------------------  -----------  --
+1   gate.records.scope_isolation       case         34
+2   gate.records.trust_gate            case         34
+3   gate.records.append_replay         case         34
+4   gate.records.query_determinism     property     34
+5   gate.records.scans                 case         34
+6   gate.records.erasure               case         34
+7   gate.records.no_belief_per_value   case         34
+8   gate.records.registration          structural   34
+9   gate.records.listing_stable        property     34
+10  gate.records.catalog               case         34
+```
+
+Gates 4 and 9 are properties because summaries and renderings range over
+generated stores. Gate 8 is structural, a walk over the registry and the
+profile. The remaining seven are boundary cases over the store, the service,
+the policy engine, formation and the context builder.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1845,6 +1875,7 @@ milestone  new gates  cumulative  the earliest of them
                                   suspected-spam flag and thread Report spam
 32                24         595  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
 33                12         607  general recall: candidate relevance, semantic search, evidence use and comparative activation
+34                10         617  owner records: isolation, trust rows, replay, determinism, scans, erasure, formation and the catalog
 ```
 
 Two facts fall out of the table and both are worth stating rather than

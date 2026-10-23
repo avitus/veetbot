@@ -4,6 +4,14 @@ title: Current Milestone
 
 # Current milestone
 
+- **Milestone 34 — Owner records (ADR-0239):** On 2026-10-22 the owner
+  authorized roadmap item B14. [Owner records](owner-records.md) specifies five
+  `records.*` tools over named numeric series, approval-gated creation and
+  deletion, a trust-conditioned append, a formation rule that keeps readings
+  out of beliefs, and a body-region catalog, with ten registered gates.
+  Implementation begins test-first in the specification's build sequence; no
+  gate is green and nothing is activated.
+
 - **Owner-directed source learning — ADR-0233:** On 2026-10-21 the owner
   authorized governed website learning, tentative-memory reinforcement and
   truthful manual-save reporting. This extends Milestone 21 without changing

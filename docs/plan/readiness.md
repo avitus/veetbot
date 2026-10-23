@@ -571,7 +571,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:4686-4763`
+Section 28 of the plan is not empty — `engineering-plan.md:4701-4778`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -590,7 +590,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1538`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:4761` requires a container-escape attempt as
+    `engineering-plan.md:4776` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -1563,7 +1563,7 @@ acceptance criteria.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:4765-4922` for links to other documents returned
+`engineering-plan.md:4780-4937` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1784,7 +1784,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1521` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2663` against
-    `model-gateway.md:2005` and `milestone-map.md:1918`. The map
+    `model-gateway.md:2005` and `milestone-map.md:1949`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1793,7 +1793,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:4761` requires a test the harness's case set
+    `engineering-plan.md:4776` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -2016,3 +2016,13 @@ sequence from category-independent candidate repair to measured semantic search,
 contextual query formation, governed source recovery and answer use. No quality
 threshold is reported as passed by authorization. Frozen M16/M32 evidence remains
 unchanged; optional-channel activation and production delivery remain pending.
+
+## Milestone 34: Owner records, authorized; implementation beginning
+
+The owner authorized roadmap item B14 on 2026-10-22 under ADR-0239.
+[Owner records](owner-records.md) defines ten gates over five `records.*`
+tools, the `turn_origin_trusted` policy condition, two tables with forced
+row-level security, four events, the `recorded_elsewhere` formation rule and
+the body-region catalog item. Every gate is registered against the pending
+check until its test lands; no gate is reported green by authorization, and
+the five tools and the catalog stay off until `AGENT_RECORDS_ENABLED` is set.

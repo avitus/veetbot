@@ -1,8 +1,9 @@
 # ADR-0239: Owner records — named numeric series the agent appends to and queries over time
 
-- Status: Proposed (drafted at the repository owner's request, 2026-10-22; not
-  authorized, not scheduled, no milestone or gate moves)
-- Date: 2026-10-22
+- Status: Accepted — the owner authorized the roadmap entry and its
+  implementation on 2026-10-22 with "Push to dev and then I authorize the
+  roadmap entry. Begin implementation"; entered as Milestone 34
+- Date: 2026-10-22 (drafted and authorized the same day)
 - Related: ADR-0018, ADR-0019, ADR-0021, ADR-0026, ADR-0029, ADR-0031,
   ADR-0033, ADR-0100, ADR-0117, ADR-0122, ADR-0126; Sections 8, 9.2, 15,
   18.4, 21 (roadmap), 22 and 24 of the engineering plan
@@ -515,14 +516,13 @@ with the tools.
 
 ## Scope admission and entry condition
 
-This ADR adds roadmap item B14 to the engineering plan and authorizes
-nothing. The entry condition is the owner's authorization plus
-`docs/plan/owner-records.md` with the gates below registered in the milestone
-map, under the same rule the map states for a zero-gate milestone. On
-authorization the item enters as the next free milestone number, with an
-accepting amendment to this ADR recording the date and the owner's words, and
-`docs/status/project-state.yaml` carries it from then on. Until then nothing
-under `src/`, `tests/`, `evals/` or `migrations/` changes.
+This ADR added roadmap item B14 to the engineering plan as a proposal. The
+owner authorized it on 2026-10-22, and the item entered as Milestone 34 with
+[owner-records.md](../plan/owner-records.md) as its specification and its ten
+gates registered against the pending check until each test lands, as
+Milestone 32's were. `docs/status/project-state.yaml` carries the milestone
+from that date. Nothing under `src/`, `tests/`, `evals/` or `migrations/`
+changed before the specification was checked in.
 
 ## Verification: gates and metrics to register
 
@@ -652,6 +652,6 @@ the owner said:
 
 ## Acceptance status
 
-Proposed. No code, migration, test, evaluation case, gate or configuration
-knob exists for this item, and none may be written until the owner authorizes
-the roadmap entry and the specification is checked in.
+Accepted on 2026-10-22. The specification is checked in with its ten gates
+registered; implementation proceeds under Milestone 34 in the build sequence
+the specification states, and no gate is reported green by authorization.
