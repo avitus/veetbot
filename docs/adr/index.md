@@ -281,4 +281,4 @@ implementation without one.
 - [ADR-0237: A right panel for activity, artifacts and thread context on the Mac](0237-mac-right-panel.md)
 
 - [ADR-0238: Owner relationship overviews and complete memory delivery](0238-owner-overview-and-memory-delivery.md)
-- [ADR-0239: Owner records — named numeric series the agent appends to and queries over time (Proposed)](0239-owner-records-and-numeric-series.md)
+- [ADR-0239: Owner records — named numeric series the agent appends to and queries over time (Accepted)](0239-owner-records-and-numeric-series.md)

@@ -2729,7 +2729,6 @@ milestones:
       - tests/gates/test_context_m7.py::test_prefix_stability
       - tests/unit/test_memory_formation.py::test_recorded_values_never_form_beliefs
     open_items:
-      - Implement the build sequence test-first and repoint each gate from the pending check to its test
       - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 # Open work that no active milestone owns: owner-only steps of non-milestone

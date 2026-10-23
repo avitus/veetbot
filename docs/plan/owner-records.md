@@ -80,7 +80,7 @@ class RecordEntry(BaseModel):
     note_withheld: bool                   # instruction-like note, not rendered
     idempotency_key: str                  # the pipeline's key for the call
     source_session_id: UUID | None
-    source_event_id: UUID | None          # nulled by session deletion
+    source_event_id: UUID | None          # always null in this slice; nulled by session deletion
     created_at: datetime
 ```
 
@@ -111,7 +111,14 @@ minutes (`records.observed_in_future`) and defaults to the clock when
 omitted. `DAY` precision keeps the civil date in the offset the owner gave
 and renders no time; the stored instant is that date at noon in that
 offset, so a day-precision entry sorts inside its day and never crosses a
-date line when rendered elsewhere.
+date line when rendered elsewhere. The future refusal applies to the instant
+the owner gave, and the stored noon is capped at the clock: an entry for
+today whose local noon is still ahead is stored at the clock, so it is never
+in the future, sits inside the default query window and renders as its date
+in the catalog. Query window edges are read by `parse_instant`, which needs an
+offset and has no future bound, so an `until` days ahead is accepted; an edge
+without an offset is `records.invalid_arguments` with a detail naming the
+edge.
 
 **Cadence.** `DAILY`, `WEEKLY` and `MONTHLY` mean one, seven and thirty days.
 A series with a cadence is *due* when it has no entry or when the clock is
@@ -314,15 +321,15 @@ The closed vocabulary, each a structured refusal with no row written:
 
 ```text
 records.series_unknown        append, query or delete named a series that does not exist
-records.series_exists         create_series named an existing series with different components
+records.series_exists         create_series named an existing series with a different declaration
 records.component_mismatch    values carry a key not declared, or lack a declared one
 records.value_out_of_range    a value is not finite or exceeds 12 integer or 6 fraction digits
 records.observed_in_future    observed_at is past the clock plus five minutes
 records.series_limit          the principal already holds MAX_SERIES_PER_PRINCIPAL series
 records.entry_limit           the series holds MAX_ENTRIES_PER_SERIES entries and the key is new
 records.window_too_large      a bucketed query spans more than 1,000 buckets
-records.secret_detected       a name, component name or note matched the secret scan
-records.name_rejected         a series or component name matched the injection scan
+records.secret_detected       a name, component name, unit or note matched the secret scan
+records.name_rejected         a series name, component name or unit matched the injection scan
 records.untrusted_turn        an append in a turn whose origin trust is EXTERNAL_UNTRUSTED
 records.invalid_arguments     an argument the schema admits has an invalid value, such as
                               an observed_at without an offset
@@ -344,10 +351,9 @@ that `records.create_series` must come first; the description says so.
 Each description is three or four sentences, stable, and says what the tool
 cannot infer. `records.create_series` says that it needs the owner's approval
 and that a series must exist before an append. `records.append` says that
-values are the owner's words, that the series must already exist, and that an
-append in a turn that read external content asks the owner first: the
-refusal it receives there tells the model to ask the owner to state the value
-in chat.
+values are the owner's words, that the series must already exist, and that in
+a turn that read external content the tool refuses and the model asks the
+owner to state the value in chat, which the refusal it receives there repeats.
 `records.query` says the summary covers the window and that `bucket` replaces
 entries with aggregates. `records.delete` says it asks the owner. All five say
 that records are the owner's own measurements and are not memory.
@@ -409,10 +415,11 @@ beside it.
 
 ## Scans and the sensitivity ceiling
 
-Series names, component names and notes pass the shared secret scan and
-injection scan that governed memory writes pass. A secret-shaped value in any
+Series names, component names, component units and notes pass the shared
+secret scan and injection scan that governed memory writes pass; units are
+scanned because the catalog renders them. A secret-shaped value in any
 of them refuses the whole call with `records.secret_detected` and stores
-nothing. An instruction-like series or component name is refused with
+nothing. An instruction-like series name, component name or unit is refused with
 `records.name_rejected`, because a name needs no instructions and the catalog
 renders names on every request. An instruction-like note is stored with
 `note_withheld` set and is rendered as `[note withheld]` in every
@@ -551,7 +558,9 @@ exists.
 Records are owner-authored, not derived, so they outlive their source.
 Session deletion's enumerated cascade gains `record_entries`: it nulls
 `source_session_id` and `source_event_id` for the session and keeps the
-rows. The session-deletion repository applies it inside its own deletion
+rows. In this slice the service sets `source_session_id` only and
+`source_event_id` is always null; the cascade clears both so a later writer of
+the event link needs no new erasure rule. The session-deletion repository applies it inside its own deletion
 transaction, and the store's `detach_session` states the same contract for
 the contract suite. `erase_principal` removes every series
 and entry of the principal in one transaction. It is a store-level contract
@@ -606,12 +615,14 @@ that is itself followed by a digit. "128 over 82" against a `{128, 82}` entry
 is suppressed; "I ran 82 km" in the same segment is not; a one-component
 weight entry suppresses only a statement carrying that weight.
 
-Because the check sits in the service's candidate loop, every extractor's
-candidates pass through it, deterministic formation, People formation,
-provider extraction, distillation and reconsolidation alike, without a copy
-of its own. Explicit owner corrections and `memory.remember` do not pass
-through it: an explicit write stays the model's or the owner's choice, steered
-by the tool descriptions. The suppression is counted with the run's rejected
+Because the check sits in the governed consolidation loop's candidate path,
+every candidate that loop evaluates passes through it, deterministic,
+provider-extracted and distilled candidates alike, and the People data those
+candidates carry, without a copy of its own.
+Writes that do not pass through that loop are outside it: explicit owner
+corrections, `memory.remember`, email and other source formation, explicit
+People writes and reconsolidation. An explicit write stays the model's or the
+owner's choice, steered by the tool descriptions. The suppression is counted with the run's rejected
 candidates and named `recorded_elsewhere` in the formation diagnostic.
 
 ## The records catalog in context
@@ -699,9 +710,11 @@ asserts that every request from turn 40 on carries the catalog in its body,
 none before it does, and the session still yields exactly one
 `prefix_sha256`.
 
-**Reminders without a chat open** are an ordinary schedule the owner creates
-in plain words. Scheduled runs hold `records.read`, see the catalog and can
-call `records.query`; no new mechanism is needed.
+**Reminders without a chat open** are not wired in this slice. A scheduled
+run carries only its revision's requested scopes, and `schedule.create`
+requests no records scope, so no scheduled run sees the catalog or can call
+`records.query`, even though the schedule authority may hold `records.read`.
+Wiring a schedule to request it is a later design note.
 
 ## Configuration and scopes
 
@@ -722,10 +735,13 @@ entry and note bounds are module constants, not knobs (see
 [policy-and-approvals.md](policy-and-approvals.md) and the enumeration in
 [http-api-and-streaming.md](http-api-and-streaming.md). Holders in the first
 slice: the owner's principal carries both through the API and worker units
-(`AUTH_SCOPES` in `deploy/veetbot.env.example` and `.env.example`), and
-scheduled runs carry `records.read` only
-(`deploy/veetbot-schedule.env.example`), since a schedule cannot know a value
-the owner has not just said. The surface, notify and call env examples are
+(`AUTH_SCOPES` in `deploy/veetbot.env.example` and `.env.example`). The
+schedule authority may hold `records.read`
+(`deploy/veetbot-schedule.env.example`), never `records.write`, since a
+schedule cannot know a value the owner has not just said; but scheduled
+records access is not wired in this slice, because a scheduled run carries
+only its revision's requested scopes and no schedule requests a records
+scope. Wiring it is a later design note. The surface, notify and call env examples are
 unchanged in this slice; granting the scopes to an owner-paired surface, so
 that a reading typed into Telegram appends as one typed into Chat does, is an
 owner env edit, and production env edits remain the owner's. A delegated
@@ -782,6 +798,14 @@ Each step begins with its red test, and the gate a step turns green is named.
    `REQUIRE_APPROVAL` under the deterministic matrix in any turn, so neither
    executes without a resolved approval, and an approved create executes
    once. **M34.**
+   The registry check
+   `tests/gates/test_records_m34.py::test_untrusted_turn_append_is_refused_and_writes_nothing`
+   proves the refusal clause; the trusted-turn, approval and execute-once
+   clauses are proven by
+   `tests/gates/test_records_m34.py::test_memory_turn_append_is_allowed`,
+   `tests/gates/test_records_m34.py::test_create_and_delete_require_approval_by_matrix`
+   and `tests/gates/test_records_m34.py::test_approved_create_series_executes_once`,
+   which run beside it.
 3. **Append replay.** A `records.append` re-executed after a simulated crash
    with the effect watermark set stores one entry, and the re-invoked tool
    returns the stored entry with `replayed` set for its idempotency key, on

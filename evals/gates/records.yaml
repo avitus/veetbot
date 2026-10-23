@@ -57,5 +57,5 @@
   milestone: 34
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
-  statement: "**Catalog.** The item is body-region, renders no bytes without series, carries names, counts, last times and due state and never a value, omits series above the ceiling, keeps one prefix hash across the extended fifty-turn script, drops whole after knowledge passages, and keeps USER origin trust when it is the only added item."
+  statement: "**Catalog.** The item is body-region, renders no bytes without series, carries names, components, counts, last times and due state and never a value, omits series above the ceiling, keeps one prefix hash across the extended fifty-turn script, drops whole and first, before recall trims, under synthetic pressure or over its own token cap, and keeps USER origin trust when it is the only added item."
   check: tests/gates/test_records_m34.py::test_catalog_region_bytes_and_trust

@@ -9,11 +9,16 @@
   by their `EXTERNAL_WRITE` and `EXTERNAL_DELETE` class, and the records
   service refuses an untrusted-turn append with `records.untrusted_turn`; the
   owner's decision for an approval stays on record as the pending alternative
+- Amended: 2026-10-22 — scheduled records access is not wired in the
+  implemented slice: the schedule authority may hold `records.read`, but a
+  scheduled run carries only its revision's requested scopes and no schedule
+  requests a records scope, so the unattended reminder of section 9 and the
+  scheduled holder of section 10 await a later design note
 - Related: ADR-0018, ADR-0019, ADR-0021, ADR-0026, ADR-0029, ADR-0031,
   ADR-0033, ADR-0100, ADR-0117, ADR-0122, ADR-0126; Sections 8, 9.2, 15,
   18.4, 21 (roadmap), 22 and 24 of the engineering plan
-- Detailed design: `docs/plan/owner-records.md`, to be written when the item is
-  authorized; the tool classification lands in `docs/plan/builtin-tools.md`
+- Detailed design: `docs/plan/owner-records.md`, checked in; the tool
+  classification is in `docs/plan/builtin-tools.md`
 - Owner request: on 2026-10-21 the owner asked whether Veetbot "has write
   access to a SQL-style database", for example to "keep track of health
   metrics, such as blood pressure, over time", and on 2026-10-22 asked for this

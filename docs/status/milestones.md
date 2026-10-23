@@ -365,7 +365,6 @@ catalog of the series in every request. The build sequence is implemented
 behind `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its
 test; review, hosted CI and production delivery are pending.
 
-- [ ] Implement the build sequence test-first and repoint each gate from the pending check to its test
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 ## Outside a milestone
