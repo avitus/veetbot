@@ -411,6 +411,23 @@ async def test_query_unknown_series_and_window_too_large() -> None:
     assert await run("blood pressure", wide_since) == "records.window_too_large"
 
 
+async def test_a_month_window_under_1000_buckets_is_not_refused_early() -> None:
+    svc, _, _ = await service()
+    await create(svc)
+    # About 922 calendar months: past 1,000 x 28 days, within 1,000 months.
+    result = await svc.query(
+        principal(),
+        series_name="blood pressure",
+        since=(NOW - timedelta(days=28_030)).isoformat(),
+        until=None,
+        limit=10,
+        order=Order.ASC,
+        bucket=Bucket.MONTH,
+        zone=UTC_ZONE,
+    )
+    assert result.buckets is not None and len(result.buckets) <= 1_000
+
+
 async def test_mean_is_half_even_six_places() -> None:
     svc, _, _ = await service()
     await create(svc, "w", (RecordComponent(name="v"),))

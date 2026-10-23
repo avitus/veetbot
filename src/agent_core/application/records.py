@@ -48,10 +48,12 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.records import SeriesExists
 
 MAX_BUCKETS: Final = 1_000
-_MIN_BUCKET_SPAN: Final = {
+# The early refusal divides by the longest bucket, so it never refuses a window
+# that fits; the post-query row count is the authoritative 1,000-bucket check.
+_MAX_BUCKET_SPAN: Final = {
     Bucket.DAY: timedelta(days=1),
     Bucket.WEEK: timedelta(days=7),
-    Bucket.MONTH: timedelta(days=28),
+    Bucket.MONTH: timedelta(days=31),
 }
 
 
@@ -280,7 +282,7 @@ class RecordsService:
         if (
             bucket is not None
             and start is not None
-            and (end - start) / _MIN_BUCKET_SPAN[bucket] > MAX_BUCKETS
+            and (end - start) / _MAX_BUCKET_SPAN[bucket] > MAX_BUCKETS
         ):
             raise RecordsRefusal("records.window_too_large", "more than 1,000 buckets")
         async with self._uow_factory() as uow:
