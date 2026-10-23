@@ -102,6 +102,16 @@ from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
 from agent_core.adapters.models.unavailable import MissingCredentialProvider
 from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
 from agent_core.adapters.persistence.calls import InMemoryCallStore, PostgresCallStore
+from agent_core.adapters.persistence.cockpit import (
+    InMemoryCockpitEventLog,
+    InMemoryFeedStore,
+    InMemoryWidgetCommitOutbox,
+    InMemoryWidgetStore,
+    PostgresCockpitEventLog,
+    PostgresFeedStore,
+    PostgresWidgetCommitOutbox,
+    PostgresWidgetStore,
+)
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
@@ -1350,6 +1360,10 @@ def _memory_uow_repositories(
         calls=InMemoryCallStore(),
         people=people,
         records=records,
+        cockpit_widgets=InMemoryWidgetStore(),
+        cockpit_outbox=InMemoryWidgetCommitOutbox(),
+        cockpit_feeds=InMemoryFeedStore(),
+        cockpit_events=InMemoryCockpitEventLog(),
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
@@ -1452,6 +1466,10 @@ def _postgres_repository_factory(
             calls=PostgresCallStore(session),
             people=people,
             records=records,
+            cockpit_widgets=PostgresWidgetStore(session),
+            cockpit_outbox=PostgresWidgetCommitOutbox(session),
+            cockpit_feeds=PostgresFeedStore(session),
+            cockpit_events=PostgresCockpitEventLog(session),
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
             schedules=schedules,

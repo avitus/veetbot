@@ -4,7 +4,7 @@
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**The schema is additive and both stores agree.** The migration creates the widget, revision, settings, feed, snapshot, layout, event, outbox and import-failure tables with tenant and principal predicates, downgrades cleanly, and every Cockpit store passes one contract suite on both adapters."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_cockpit_store_postgres_m35.py::test_cockpit_stores_pass_their_contract_suites_on_postgres
 - id: gate.cockpit.builder_rejects_forbidden
   milestone: 35
   kind: case

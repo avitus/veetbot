@@ -1024,3 +1024,16 @@ Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
    should an LLM-free collector have for sub-minute external data?
 3. Should a widget be able to request a native share or copy action on its
    own displayed text, given that intents are navigation-only today?
+
+## Implementation checkpoint: 2026-10-22
+
+Build step 2 landed the `cockpit/` workspace: the kit ported from the approved
+MagicPath designs, the builder, and the host and realm. The adversarial corpus
+fails to reach the network in headless Chromium and WebKit. Build step 4
+landed the domain types, the five ports, one contract suite per port, the
+additive migration with forced tenant isolation and a downgrade guard, and the
+in-memory and PostgreSQL adapters plus the fake widget repository. Gate 1 is
+bound to the PostgreSQL parity test, which runs every store suite's scenarios
+on PostgreSQL. The other gates stay pending until their server and native
+halves land.
+

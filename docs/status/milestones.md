@@ -367,6 +367,23 @@ test; review, hosted CI and production delivery are pending.
 
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
+### Milestone 35 — Cockpit mode and agent-authored widgets
+
+Authorized on 2026-10-22 by
+[ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md), with
+twenty-three gates in the [design](../plan/cockpit.md). The owner approved the
+MagicPath kit and boards on 2026-10-22. The `cockpit/` workspace is
+implemented: the ported kit, the builder, and the host and network-less realm,
+proven against an adversarial corpus in headless Chromium and WebKit. The
+domain, the five ports and their contract suites, the migration and both store
+adapters are implemented, and gate 1 is bound to the PostgreSQL parity test.
+Every other gate is pending.
+
+- [ ] Build step 3: the builder sandbox image, release wiring, the runsc canary, the second manager and reaper leases
+- [ ] Build steps 5 to 8: the GitHub App adapter and commit outbox, the routes and stream, the agent tools and policy rule, and the platform feeds
+- [ ] Build steps 9 to 11: the Apple mode refactor, the native Cockpit mode and preview rendering
+- [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the assistant's seed widgets; hosted CI, review and production delivery
+
 ## Outside a milestone
 
 Open work that no active milestone owns: owner-only steps of non-milestone
@@ -393,16 +410,8 @@ succeeded on merge `a9b81420` (`outside_milestone_evidence` in the state file).
 
 ## Authorized
 
-Milestone 15 has begun its independent reliability repair; its remaining gates
-and backup tranche remain open. One authorized milestone has not started:
-
-- **Milestone 35 — Cockpit mode and agent-authored widgets** — twenty-three
-  gates; independent workstream under ADR-0240. A third client mode whose
-  widgets the assistant writes, commits to the public `cockpit/widgets` branch
-  as data-free code, and renders on iPhone, iPad and Mac inside a network-less
-  realm, fed by platform and assistant-published feeds. Design and pending
-  gates registered on 2026-10-22; implementation begins with the MagicPath
-  designs and the `cockpit/` workspace.
+No authorized milestone remains unstarted. Milestone 15 has begun its independent
+reliability repair; its remaining gates and backup tranche remain open.
 
 
 

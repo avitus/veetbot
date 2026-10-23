@@ -2867,3 +2867,213 @@ class SemanticSpendRow(Base):
         ),
         CheckConstraint("charge >= 0", name="semantic_spend_nonnegative"),
     )
+
+
+# Cockpit (Milestone 35, docs/plan/cockpit.md). Every row is owner-scoped under
+# forced tenant isolation; widget code is also on the public branch, while
+# settings, layouts and feeds are private.
+_OWNER_WIDGET = ("tenant_id", "principal_id", "slug")
+_WIDGET_REFERENCE = (
+    "cockpit_widgets.tenant_id",
+    "cockpit_widgets.principal_id",
+    "cockpit_widgets.slug",
+)
+
+
+class CockpitWidgetRow(Base):
+    __tablename__ = "cockpit_widgets"
+    __table_args__ = (
+        PrimaryKeyConstraint(*_OWNER_WIDGET, name="pk_cockpit_widgets"),
+        CheckConstraint("state IN ('active', 'deleted')", name="state"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    live_revision_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitWidgetRevisionRow(Base):
+    __tablename__ = "cockpit_widget_revisions"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "id", name="pk_cockpit_widget_revisions"),
+        ForeignKeyConstraint(
+            list(_OWNER_WIDGET),
+            list(_WIDGET_REFERENCE),
+            name="fk_cockpit_widget_revisions_tenant_id_cockpit_widgets",
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ix_cockpit_widget_revisions_widget_created",
+            "tenant_id",
+            "principal_id",
+            "slug",
+            "created_at",
+        ),
+        Index(
+            "ix_cockpit_widget_revisions_bundle",
+            "tenant_id",
+            "principal_id",
+            "bundle_sha256",
+        ),
+        CheckConstraint(
+            "state IN ('validating', 'rejected', 'pending_commit', 'committed', 'live', "
+            "'superseded', 'conflicted')",
+            name="state",
+        ),
+        CheckConstraint("source IN ('assistant', 'owner_git', 'revert')", name="source"),
+        CheckConstraint("jsonb_typeof(files) = 'object'", name="files"),
+        CheckConstraint("jsonb_typeof(diagnostics) = 'array'", name="diagnostics"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    slug: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    files: Mapped[dict[str, str]] = mapped_column(JSONB)
+    diagnostics: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    bundle: Mapped[str | None] = mapped_column(Text)
+    bundle_sha256: Mapped[str | None] = mapped_column(Text)
+    kit_api: Mapped[int | None] = mapped_column(Integer)
+    commit_sha: Mapped[str | None] = mapped_column(Text)
+    origin_run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitWidgetSettingsRow(Base):
+    __tablename__ = "cockpit_widget_settings"
+    __table_args__ = (
+        PrimaryKeyConstraint(*_OWNER_WIDGET, name="pk_cockpit_widget_settings"),
+        ForeignKeyConstraint(
+            list(_OWNER_WIDGET),
+            list(_WIDGET_REFERENCE),
+            name="fk_cockpit_widget_settings_tenant_id_cockpit_widgets",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("jsonb_typeof(values) = 'object'", name="values"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(Text)
+    values: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitLayoutRow(Base):
+    __tablename__ = "cockpit_layouts"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "tenant_id", "principal_id", "device_class", name="pk_cockpit_layouts"
+        ),
+        CheckConstraint("device_class IN ('compact', 'regular', 'wide')", name="device_class"),
+        CheckConstraint("jsonb_typeof(placements) = 'array'", name="placements"),
+        CheckConstraint("revision >= 1", name="revision"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    device_class: Mapped[str] = mapped_column(Text)
+    placements: Mapped[list[dict[str, str]]] = mapped_column(JSONB)
+    revision: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitFeedRow(Base):
+    __tablename__ = "cockpit_feeds"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "id", name="pk_cockpit_feeds"),
+        CheckConstraint("trust IN ('platform', 'untrusted')", name="trust"),
+        CheckConstraint("schema_version >= 1", name="schema_version"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[str] = mapped_column(Text)
+    schema: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    schema_version: Mapped[int] = mapped_column(Integer)
+    trust: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitFeedSnapshotRow(Base):
+    __tablename__ = "cockpit_feed_snapshots"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "tenant_id", "principal_id", "feed_id", "sequence", name="pk_cockpit_feed_snapshots"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "feed_id"],
+            ["cockpit_feeds.tenant_id", "cockpit_feeds.principal_id", "cockpit_feeds.id"],
+            name="fk_cockpit_feed_snapshots_tenant_id_cockpit_feeds",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("expected_interval_seconds >= 1", name="interval"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    feed_id: Mapped[str] = mapped_column(Text)
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expected_interval_seconds: Mapped[int] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    data: Mapped[Any] = mapped_column(JSONB)
+    schema_version: Mapped[int] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitEventRow(Base):
+    __tablename__ = "cockpit_events"
+    __table_args__ = (
+        Index("ix_cockpit_events_owner_sequence", "tenant_id", "principal_id", "sequence"),
+        Index("ix_cockpit_events_tenant_occurred", "tenant_id", "occurred_at"),
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitCommitOutboxRow(Base):
+    __tablename__ = "cockpit_commit_outbox"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "tenant_id", "principal_id", "revision_id", name="pk_cockpit_commit_outbox"
+        ),
+        Index("ix_cockpit_commit_outbox_due", "tenant_id", "next_attempt_at"),
+        CheckConstraint("operation IN ('write', 'remove')", name="operation"),
+        CheckConstraint("attempts >= 0", name="attempts"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    revision_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    slug: Mapped[str] = mapped_column(Text)
+    operation: Mapped[str] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    expected_parent_sha: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CockpitImportFailureRow(Base):
+    __tablename__ = "cockpit_import_failures"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "id", name="pk_cockpit_import_failures"),
+        Index(
+            "ix_cockpit_import_failures_owner_created", "tenant_id", "principal_id", "created_at"
+        ),
+        CheckConstraint("jsonb_typeof(diagnostics) = 'array'", name="diagnostics"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    commit_sha: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str | None] = mapped_column(Text)
+    diagnostics: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    seen: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

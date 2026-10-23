@@ -270,7 +270,7 @@ project:
 milestones:
   '35':
     title: Cockpit mode and agent-authored widgets
-    status: authorized
+    status: in_progress
     authorized_on: '2026-10-22'
     design: docs/plan/cockpit.md
     adr: docs/adr/0240-cockpit-mode-and-agent-authored-widgets.md
@@ -283,6 +283,17 @@ milestones:
     - Platform and assistant-published feeds with freshness, private widget settings and per-device-class layouts
     - A snapshot route, a resumable per-tenant event stream, asset routes, cockpit.read and cockpit.write scopes and a default-off flag
     - Five deferred builtin tools, the widget write tool allowed by an exact-name rule with the trust overlay intact
+    implementation_status: build_steps_2_and_4_implemented
+    implementation_evidence:
+    - cockpit/tests/realm.test.mjs
+    - cockpit/tests/builder.test.mjs
+    - tests/contract/test_widget_store_contract.py
+    - tests/integration/test_cockpit_store_postgres_m35.py
+    open_items:
+    - 'Build step 3: the builder sandbox image, release wiring, the runsc canary, the second manager and reaper leases'
+    - 'Build steps 5 to 8: the GitHub App adapter and commit outbox, the routes and stream, the agent tools and policy rule, and the platform feeds'
+    - 'Build steps 9 to 11: the Apple mode refactor, the native Cockpit mode and preview rendering'
+    - "Activation: the owner's GitHub App, rulesets, credential and flag; the assistant's seed widgets; hosted CI, review and production delivery"
     deferred_scope:
     - Deterministic collectors that fetch outside data without a model run, and their egress allowlist
     - A browser or television rendering, WidgetKit, Lock Screen widgets and Live Activities

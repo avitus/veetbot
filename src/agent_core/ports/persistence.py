@@ -14,6 +14,7 @@ from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from agent_core.ports.calls import CallStore
+from agent_core.ports.cockpit import CockpitEventLog, FeedStore, WidgetCommitOutbox, WidgetStore
 from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
 from agent_core.ports.devices import (
@@ -102,6 +103,10 @@ class RepositoryUnitOfWork(Protocol):
     calls: CallStore
     people: PeopleStore
     records: RecordStore
+    cockpit_widgets: WidgetStore
+    cockpit_outbox: WidgetCommitOutbox
+    cockpit_feeds: FeedStore
+    cockpit_events: CockpitEventLog
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
     schedules: ScheduleRepository

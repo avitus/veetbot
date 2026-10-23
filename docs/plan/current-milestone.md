@@ -13,7 +13,8 @@ title: Current Milestone
   publication to the public orphan branch `cockpit/widgets` through a GitHub
   App, platform and assistant-published feeds with freshness, a resumable
   per-tenant stream, five deferred tools, and a network-less realm on iPhone,
-  iPad and Mac. Nothing is implemented; every gate is pending.
+  iPad and Mac. The `cockpit/` workspace and the stores are implemented and
+  gate 1 is bound; every other gate is pending.
 
 - **Milestone 34 — Owner records (ADR-0239):** On 2026-10-22 the owner
   authorized roadmap item B14. [Owner records](owner-records.md) specifies five
