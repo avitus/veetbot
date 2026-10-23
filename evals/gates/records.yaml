@@ -4,7 +4,7 @@
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Scope isolation.** Another principal's series is None or zero to every store method and records.series_unknown to every tool, on both adapters, with forced RLS and the scoped foreign key refusing a cross-owner link at write time."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_scope_isolation
 - id: gate.records.trust_gate
   milestone: 34
   kind: case
@@ -16,25 +16,25 @@
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Append replay.** An append re-executed after a simulated crash with the effect watermark set stores one entry and returns the stored entry with replayed set, on both adapters."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_append_replay_after_crash
 - id: gate.records.query_determinism
   milestone: 34
   kind: property
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Query determinism.** Window summaries and bucketed aggregates for a fixed fixture are byte-identical across calls and adapters, the half-open window is exact, and a window past 1,000 buckets is refused."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_query_determinism
 - id: gate.records.scans
   milestone: 34
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Scans.** A secret-shaped name, component name or note refuses the call and stores nothing; an instruction-like name is refused; an instruction-like note is stored withheld and absent from every model-facing result."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_scans
 - id: gate.records.erasure
   milestone: 34
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Erasure.** Deleting a series removes its entries from every read in one transaction with a value-free event; session deletion keeps entries and nulls provenance; erase_principal removes everything, on both adapters."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_erasure
 - id: gate.records.no_belief_per_value
   milestone: 34
   kind: case
