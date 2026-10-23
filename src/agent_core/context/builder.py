@@ -9,6 +9,7 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.history import select_history, validate_tool_pairs
@@ -18,6 +19,12 @@ from agent_core.context.recall_budget import (
     context_ranking,
     ranking_block,
     select_current_search_results,
+)
+from agent_core.context.records_catalog import (
+    CATALOG_SCOPE,
+    RecordsCatalogSource,
+    catalog_item,
+    render_records_catalog,
 )
 from agent_core.context.rendering import (
     build_prefix,
@@ -30,7 +37,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.cache import session_cache_key
 from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure, WorkingState
 from agent_core.domain.errors import ContextOverflow
-from agent_core.domain.memory import MemoryCorrection, RecallProfile
+from agent_core.domain.memory import MemoryCorrection, RecallProfile, Sensitivity
 from agent_core.domain.messages import (
     CacheBreakpoint,
     CacheHints,
@@ -60,6 +67,9 @@ from agent_core.ports.memory import MemoryRetriever, QueryFormer
 from agent_core.ports.tools import ToolRegistry
 
 MAX_LOADED_SKILL_BODIES = 2
+# The shipped classes.records_catalog.max_items; composition passes the knob.
+CATALOG_MAX_SERIES = 16
+CATALOG_ZONE = ZoneInfo("UTC")
 RECALL_CACHE_CAPACITY = 1_024
 
 logger = logging.getLogger(__name__)
@@ -305,8 +315,14 @@ class BudgetedContextBuilder:
         session_scope: Callable[[UUID], Awaitable[str]] | None = None,
         recall_revision: Callable[[], Awaitable[int | None]] | None = None,
         inline_output_bytes: int = 4096,
+        catalog_source: RecordsCatalogSource | None = None,
+        catalog_max_series: int = CATALOG_MAX_SERIES,
     ) -> None:
         self._planner = planner
+        self._catalog_source = catalog_source
+        if catalog_max_series < 1:
+            raise ValueError("records catalog series limit must be positive")
+        self._catalog_max_series = catalog_max_series
         self._estimator = estimator
         self._clock = clock
         self._working_state = working_state
@@ -486,12 +502,41 @@ class BudgetedContextBuilder:
                     principal_id=None,
                 )
             )
+        catalog_items = await self._catalog_items(run, principal)
+        catalog_dropped = False
+        if catalog_items and (
+            self._estimator.estimate(envelope_items(catalog_items), plan.model_id)
+            > plan.budget.records_catalog_tokens
+        ):
+            # A shortened catalog misstates what exists; it yields whole.
+            catalog_dropped = True
+            catalog_items = []
         active_with_context, active_prefix = _with_step_context(
-            active, [*skill_items, *working_items, *recall_items, *correction_items, runtime_item]
+            active,
+            [
+                *skill_items,
+                *working_items,
+                *recall_items,
+                *correction_items,
+                *catalog_items,
+                runtime_item,
+            ],
         )
         fixed_body = [*summary_items, *active_with_context]
         fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
         fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
+        if catalog_items and fixed_total > plan.budget.total_tokens:
+            # The catalog yields before in-turn recall trims: one records.list
+            # call recovers it.
+            catalog_dropped = True
+            catalog_items = []
+            active_with_context, active_prefix = _with_step_context(
+                active,
+                [*skill_items, *working_items, *recall_items, *correction_items, runtime_item],
+            )
+            fixed_body = [*summary_items, *active_with_context]
+            fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
+            fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
         recall_dropped = False
         if recall_items and fixed_total > plan.budget.total_tokens:
             # Recall yields; the corrections do not. They override the frozen
@@ -501,7 +546,8 @@ class BudgetedContextBuilder:
             recall_dropped = True
             recall_items = []
             active_with_context, active_prefix = _with_step_context(
-                active, [*skill_items, *working_items, *correction_items, runtime_item]
+                active,
+                [*skill_items, *working_items, *correction_items, *catalog_items, runtime_item],
             )
             fixed_body = [*summary_items, *active_with_context]
             fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
@@ -530,6 +576,8 @@ class BudgetedContextBuilder:
             yield_steps.append("history")
         if recall_dropped:
             yield_steps.insert(0, "recall")
+        if catalog_dropped:
+            yield_steps.insert(0, "records_catalog")
 
         body = [
             *summary_items,
@@ -648,6 +696,32 @@ class BudgetedContextBuilder:
             ),
         )
         return ContextAssembly(request=request, pressure=pressure)
+
+    async def _catalog_items(self, run: Run, principal: Principal) -> list[ConversationItem]:
+        """Read the owner's records catalog once per assembly, as one body item.
+
+        Absent without a source (the flag is off), without `records.read`, or
+        when the store holds no series, so such a body keeps today's bytes.
+        """
+
+        if self._catalog_source is None or CATALOG_SCOPE not in principal.scopes:
+            return []
+        try:
+            catalog = await self._catalog_source.catalog(
+                principal,
+                ceiling=Sensitivity.RESTRICTED,
+                max_series=self._catalog_max_series,
+            )
+        except Exception as exc:
+            logger.warning(
+                "context_records_catalog_failed",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
+            return []
+        if catalog is None or (not catalog.lines and not catalog.omitted):
+            return []
+        text = render_records_catalog(catalog, zone=CATALOG_ZONE, now=self._clock.now())
+        return [catalog_item(text)]
 
     async def _recall_once(
         self,

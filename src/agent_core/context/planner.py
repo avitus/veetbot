@@ -54,7 +54,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@12"
+BUILDER_VERSION = "context-builder@13"
 # Plans from these builders carry no deferred tools and render the same bytes,
 # so they stay current: re-planning them would change no prefix, but it would
 # fail a run parked on an approval if its selection moved (ADR-0123).

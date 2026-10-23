@@ -353,6 +353,13 @@ async def test_prefix_stability() -> None:
     assert {"memory.formed", "memory.superseded"}.issubset(
         {event.event_type for event in result.events}
     )
+    # The records gate's extension: a series created and an entry appended
+    # mid-session put a catalog in the body and leave the prefix alone.
+    assert case.session is not None
+    assert case.session.records_append_turn == 40
+    assert {"records.series.created", "records.entry.appended"}.issubset(
+        {event.event_type for event in result.events}
+    )
     assert requests[0].created_at.date() != requests[-1].created_at.date()
 
 

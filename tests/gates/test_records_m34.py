@@ -1,19 +1,36 @@
 """Milestone 34 owner records gates."""
 
+import hashlib
 from dataclasses import replace
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from agent_core.application.records import RecordsService
+from agent_core.adapters.determinism import FixedClock
+from agent_core.application.records import RecordsCatalog, RecordsService
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
+from agent_core.context.builder import BudgetedContextBuilder
+from agent_core.context.estimator import ConservativeTokenEstimator, canonical_json_bytes
+from agent_core.context.records_catalog import RecordsCatalogSource, render_records_catalog
+from agent_core.context.rendering import build_prefix, prefix_bytes
+from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.context import REGION_ASSIGNMENTS, ContextClass, ContextPlan, ContextRegion
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.memory import Sensitivity
-from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
+from agent_core.domain.messages import (
+    ConversationItem,
+    FakeModelScript,
+    ModelRequest,
+    ScriptedToolCall,
+    ScriptedTurn,
+    TextPart,
+    UserMessage,
+)
 from agent_core.domain.policies import (
     ActionKind,
     IdempotencyClass,
@@ -23,7 +40,8 @@ from agent_core.domain.policies import (
     SideEffectClass,
     TrustLevel,
 )
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.records import RecordCadence, RecordComponent, RecordPrecision
+from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.domain.tools import ExecutionTarget, ToolFailureKind, ToolSpec
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import DEFAULT_RULESET
@@ -42,10 +60,18 @@ from tests.contract.support import (
     NOW,
     RUN_ID,
     SESSION_ID,
+    agent,
     memory_uow_factory,
     principal,
     run,
     tool_context,
+)
+from tests.gates.test_context_m7 import (
+    _budget,
+    _PlanStore,
+    _StaticMemoryRetriever,
+    _StaticQueryFormer,
+    _working_state,
 )
 
 TOOL_NAMES = (
@@ -255,3 +281,256 @@ async def test_approved_create_series_executes_once() -> None:
 async def _stored_series(composition: Any) -> list[Any]:
     async with composition.uow_factory() as uow:
         return list(await uow.records.list_series(composition.principal, Sensitivity.RESTRICTED))
+
+
+# --- The records catalog in context -------------------------------------------------
+
+CATALOG_OWNER = principal().model_copy(update={"scopes": {"records.read", "records.write"}})
+# Distinctive recorded values: neither may ever reach the context body.
+CATALOG_VALUES = {"systolic": Decimal("137.25"), "diastolic": Decimal("91.5")}
+
+
+class _StaticCatalog:
+    def __init__(self, catalog: RecordsCatalog | None) -> None:
+        self.catalog_value = catalog
+        self.calls: list[tuple[Sensitivity, int]] = []
+
+    async def catalog(
+        self, principal: Principal, *, ceiling: Sensitivity, max_series: int
+    ) -> RecordsCatalog | None:
+        del principal
+        self.calls.append((ceiling, max_series))
+        return None if self.catalog_value is None else self.catalog_value.model_copy(deep=True)
+
+
+async def _stored_catalog() -> tuple[RecordsService, Any]:
+    clock, factory = await memory_uow_factory()
+    service = RecordsService(factory, clock)
+    await service.create_series(
+        CATALOG_OWNER,
+        display_name="Blood pressure",
+        components=[
+            RecordComponent(name="systolic", unit="mmHg"),
+            RecordComponent(name="diastolic", unit="mmHg"),
+        ],
+        sensitivity=None,
+        cadence=RecordCadence.DAILY,
+        session_id=SESSION_ID,
+        run_id=None,
+    )
+    await service.create_series(
+        CATALOG_OWNER,
+        display_name="Sleep",
+        components=[RecordComponent(name="hours")],
+        sensitivity=None,
+        cadence=None,
+        session_id=SESSION_ID,
+        run_id=None,
+    )
+    await service.append(
+        CATALOG_OWNER,
+        series_name="Blood pressure",
+        values=CATALOG_VALUES,
+        observed_at=None,
+        precision=RecordPrecision.EXACT,
+        note=None,
+        idempotency_key="catalog-entry-1",
+        session_id=SESSION_ID,
+        run_id=None,
+        origin_trust=TrustLevel.USER,
+    )
+    return service, factory
+
+
+def _catalog_builder(
+    source: RecordsCatalogSource | None,
+    *,
+    total_tokens: int = 32_768,
+    records_catalog_tokens: int = 600,
+    recall: bool = False,
+) -> BudgetedContextBuilder:
+    configured_agent = agent()
+    estimator = ConservativeTokenEstimator()
+    prefix = build_prefix(configured_agent, [])
+    plan = ContextPlan(
+        session_id=SESSION_ID,
+        epoch=1,
+        prefix_sha256=hashlib.sha256(prefix_bytes(prefix, [])).hexdigest(),
+        prefix_tokens=estimator.estimate(prefix, "fake:scripted"),
+        model_id="fake:scripted",
+        tool_names=(),
+        tool_specs=(),
+        tool_schema_sha256=hashlib.sha256(b"[]").hexdigest(),
+        policy_version="milestone-34-test",
+        builder_version="context-builder@13",
+        budget=_budget().model_copy(
+            update={"total_tokens": total_tokens, "records_catalog_tokens": records_catalog_tokens}
+        ),
+        created_at=NOW,
+    )
+    return BudgetedContextBuilder(
+        _PlanStore(plan),
+        estimator,
+        FixedClock(NOW),
+        _working_state(),
+        _StaticMemoryRetriever() if recall else None,
+        _StaticQueryFormer() if recall else None,
+        catalog_source=source,
+    )
+
+
+def _checkpoint(text: str = "How is my blood pressure tracking?") -> RunCheckpoint:
+    return RunCheckpoint(
+        run_id=RUN_ID,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text=text)])],
+        created_at=NOW,
+    )
+
+
+def _body(request: ModelRequest) -> list[ConversationItem]:
+    return request.conversation[int(request.metadata["region_a_items"]) :]
+
+
+def _texts(items: list[ConversationItem]) -> list[str]:
+    return [
+        part.text
+        for item in items
+        for part in getattr(item, "content", [])
+        if isinstance(part, TextPart)
+    ]
+
+
+def _body_bytes(request: ModelRequest) -> bytes:
+    return canonical_json_bytes([item.model_dump(mode="json") for item in _body(request)])
+
+
+def test_every_context_class_has_a_region() -> None:
+    assert set(REGION_ASSIGNMENTS) == set(ContextClass)
+    assert REGION_ASSIGNMENTS[ContextClass.RECORDS_CATALOG] is ContextRegion.BODY
+
+
+async def test_catalog_region_bytes_and_trust() -> None:
+    assert set(REGION_ASSIGNMENTS) == set(ContextClass)
+    assert REGION_ASSIGNMENTS[ContextClass.RECORDS_CATALOG] is ContextRegion.BODY
+    active = run(status=RunStatus.RUNNING)
+
+    # No series renders no bytes: the body equals one built without a source.
+    without = await _catalog_builder(None).build(active, _checkpoint(), agent(), CATALOG_OWNER)
+    empty_source = _StaticCatalog(None)
+    empty = await _catalog_builder(empty_source).build(
+        active, _checkpoint(), agent(), CATALOG_OWNER
+    )
+    assert _body_bytes(empty) == _body_bytes(without)
+    assert empty.metadata["body_sha256"] == without.metadata["body_sha256"]
+    assert empty_source.calls == [(Sensitivity.RESTRICTED, 16)]
+
+    service, _factory = await _stored_catalog()
+    request = await _catalog_builder(service).build(active, _checkpoint(), agent(), CATALOG_OWNER)
+    stored = await service.catalog(CATALOG_OWNER, ceiling=Sensitivity.RESTRICTED, max_series=16)
+    assert stored is not None
+    rendered = render_records_catalog(stored, zone=ZoneInfo("UTC"), now=NOW)
+    body = _body(request)
+    catalog_texts = [text for text in _texts(body) if 'source="records.catalog"' in text]
+
+    assert len(catalog_texts) == 1
+    assert catalog_texts[0].startswith('<untrusted trust="internal_tool" source="records.catalog"')
+    assert f"\n{rendered}\n</untrusted:" in catalog_texts[0]
+    assert "Blood pressure (systolic mmHg, diastolic mmHg): 1 entries" in rendered
+    assert "Sleep (hours): no entries, logged ad hoc" in rendered
+    # The catalog lives in the body, ahead of the runtime metadata row, and
+    # never moves the prefix.
+    assert request.metadata["prefix_sha256"] == without.metadata["prefix_sha256"]
+    assert (
+        request.conversation[: len(request.conversation) - len(body)]
+        == (without.conversation[: len(without.conversation) - len(_body(without))])
+    )
+    runtime_index = next(
+        index for index, text in enumerate(_texts(body)) if "Runtime metadata" in text
+    )
+    catalog_index = next(
+        index for index, text in enumerate(_texts(body)) if 'source="records.catalog"' in text
+    )
+    assert catalog_index == runtime_index - 1
+    everything = "\n".join(_texts(request.conversation))
+    for value in ("137.25", "91.5"):
+        assert value not in everything
+    # INTERNAL_TOOL content leaves a fresh chat's origin trust at USER.
+    assert request.metadata["context_origin_trust"] == TrustLevel.USER.value
+
+    # A principal without records.read sees no catalog at all.
+    unscoped = principal().model_copy(update={"scopes": {"records.write"}})
+    refused_source = _StaticCatalog(stored)
+    refused = await _catalog_builder(refused_source).build(active, _checkpoint(), agent(), unscoped)
+    baseline = await _catalog_builder(None).build(active, _checkpoint(), agent(), unscoped)
+    assert _body_bytes(refused) == _body_bytes(baseline)
+    assert refused_source.calls == []
+
+
+async def test_catalog_yields_whole_under_pressure() -> None:
+    active = run(status=RunStatus.RUNNING)
+    service, _factory = await _stored_catalog()
+    roomy = await _catalog_builder(service, recall=True).assemble(
+        active, _checkpoint(), agent(), CATALOG_OWNER
+    )
+    bare = await _catalog_builder(None, recall=True).assemble(
+        active, _checkpoint(), agent(), CATALOG_OWNER
+    )
+    assert roomy.pressure.yield_steps == ()
+    catalog_tokens = roomy.pressure.total_tokens - bare.pressure.total_tokens
+    assert catalog_tokens > 0
+
+    # A window that holds everything but the catalog: the catalog yields
+    # whole, first, and the in-turn recall survives.
+    squeezed = await _catalog_builder(
+        service, recall=True, total_tokens=bare.pressure.total_tokens + catalog_tokens // 2
+    ).assemble(active, _checkpoint(), agent(), CATALOG_OWNER)
+    assert squeezed.pressure.yield_steps[0] == "records_catalog"
+    assert "recall" not in squeezed.pressure.yield_steps
+    assert squeezed.pressure.fits
+    squeezed_texts = _texts(_body(squeezed.request))
+    assert not any("records.catalog" in text for text in squeezed_texts)
+    assert not any("Blood pressure (" in text for text in squeezed_texts)
+    assert any("<memory" in text for text in squeezed_texts)
+    assert _body_bytes(squeezed.request) == _body_bytes(bare.request)
+
+    # Tighter still: the catalog is gone before the recall trims.
+    crushed = await _catalog_builder(
+        service, recall=True, total_tokens=bare.pressure.total_tokens - 1
+    ).assemble(active, _checkpoint(), agent(), CATALOG_OWNER)
+    assert crushed.pressure.yield_steps[:2] == ("records_catalog", "recall")
+
+    # A catalog over its own class cap drops whole, never truncated.
+    capped = await _catalog_builder(service, recall=True, records_catalog_tokens=1).assemble(
+        active, _checkpoint(), agent(), CATALOG_OWNER
+    )
+    assert capped.pressure.yield_steps == ("records_catalog",)
+    assert _body_bytes(capped.request) == _body_bytes(bare.request)
+
+
+async def test_catalog_listing_is_byte_stable() -> None:
+    service, _factory = await _stored_catalog()
+    zone = ZoneInfo("UTC")
+    first = await service.catalog(CATALOG_OWNER, ceiling=Sensitivity.RESTRICTED, max_series=16)
+    second = await service.catalog(CATALOG_OWNER, ceiling=Sensitivity.RESTRICTED, max_series=16)
+    assert first is not None
+    assert second is not None
+    assert render_records_catalog(first, zone=zone, now=NOW).encode(
+        "utf-8"
+    ) == render_records_catalog(second, zone=zone, now=NOW).encode("utf-8")
+
+    context = replace(tool_context(), principal=CATALOG_OWNER, origin_trust=TrustLevel.USER)
+    listed = [await RecordsListTool(service, zone).execute({}, context) for _ in range(2)]
+    assert all(result.ok for result in listed)
+    assert canonical_json_bytes(listed[0].model_dump(mode="json")) == canonical_json_bytes(
+        listed[1].model_dump(mode="json")
+    )
+
+    request_bytes = []
+    for _ in range(2):
+        request = await _catalog_builder(service).build(
+            run(status=RunStatus.RUNNING), _checkpoint(), agent(), CATALOG_OWNER
+        )
+        request_bytes.append(_body_bytes(request))
+    assert request_bytes[0] == request_bytes[1]

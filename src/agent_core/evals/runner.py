@@ -7,17 +7,21 @@ import importlib
 import json
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
+from agent_core.application.records import RecordsService
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import EvalExpectationError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import MemoryRecord
+from agent_core.domain.policies import TrustLevel
+from agent_core.domain.records import RecordCadence, RecordComponent, RecordPrecision
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.domain.skills import AuthoringContext, SkillSource
 from agent_core.evals.cases import EvalCase, EvalExpected, load_cases
@@ -41,7 +45,7 @@ class EvalResult:
     memories: tuple[MemoryRecord, ...] = ()
 
 
-def _settings(*, delegation_enabled: bool = False) -> Settings:
+def _settings(*, delegation_enabled: bool = False, records_enabled: bool = False) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://localhost/eval",
         deployment_mode=DeploymentMode.DEVELOPMENT,
@@ -52,6 +56,36 @@ def _settings(*, delegation_enabled: bool = False) -> Settings:
         credentials=MappingProxyType({}),
         interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
         delegation_enabled=delegation_enabled,
+        records_enabled=records_enabled,
+    )
+
+
+async def _append_eval_record(
+    composition: Any, principal: Principal, session_id: UUID, turn: int
+) -> None:
+    """Create a series and append one entry through the records service."""
+
+    records = RecordsService(composition.uow_factory, composition.clock)
+    await records.create_series(
+        principal,
+        display_name="Eval weight",
+        components=[RecordComponent(name="kg")],
+        sensitivity=None,
+        cadence=RecordCadence.DAILY,
+        session_id=session_id,
+        run_id=None,
+    )
+    await records.append(
+        principal,
+        series_name="Eval weight",
+        values={"kg": Decimal("70.5")},
+        observed_at=None,
+        precision=RecordPrecision.EXACT,
+        note=None,
+        idempotency_key=f"eval-records-turn-{turn}",
+        session_id=session_id,
+        run_id=None,
+        origin_trust=TrustLevel.USER,
     )
 
 
@@ -187,7 +221,13 @@ async def _run_single(
     )
     bootstrap: Any = importlib.import_module("agent_core.bootstrap")
     async with bootstrap.build(
-        settings=_settings(delegation_enabled="delegate.run" in effective_tools),
+        settings=_settings(
+            delegation_enabled="delegate.run" in effective_tools,
+            # Only a case that appends records turns the records flag on, so
+            # every other case keeps today's composition.
+            records_enabled=case.session is not None
+            and case.session.records_append_turn is not None,
+        ),
         script=script,
         fixed_clock_at=case.clock.start,
         sequential_ids=True,
@@ -280,6 +320,9 @@ async def _run_single(
                                 payload={"turn": turn, "case": case.name},
                             )
                         )
+                if turn == case.session.records_append_turn:
+                    assert session_id is not None
+                    await _append_eval_record(composition, principal, session_id, turn)
             run_id = await composition.runs.submit(prompt, session_id)
             if case.cancel_after_submission:
                 await composition.runs.cancel(run_id)

@@ -69,6 +69,12 @@ class ContextBudgetAllocator:
                 raise ValueError("memory snapshot token allocation must be nonnegative")
             memory = memory_snapshot_tokens
         recall = self._integer(class_config("in_turn_recall"), "max_tokens")
+        raw_catalog = classes.get("records_catalog")
+        records_catalog = (
+            0
+            if raw_catalog is None
+            else self._integer(self._mapping(raw_catalog, "classes.records_catalog"), "max_tokens")
+        )
         working = self._integer(class_config("working_state"), "max_tokens")
         knowledge = self._integer(class_config("knowledge_passages"), "max_tokens")
         history_floor = self._integer(class_config("history"), "floor_tokens")
@@ -115,5 +121,6 @@ class ContextBudgetAllocator:
             working_state_tokens=working,
             tool_result_tokens=tool_results,
             knowledge_tokens=knowledge,
+            records_catalog_tokens=records_catalog,
             safety_margin_ratio=float(raw_margin),
         )

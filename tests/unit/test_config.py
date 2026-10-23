@@ -1217,13 +1217,18 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_205_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_207_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 205
+    assert len(qualified_paths) == 207
+    # Owner records add the catalog's two class caps.
+    assert {
+        "context/plan.yaml:classes.records_catalog.max_items",
+        "context/plan.yaml:classes.records_catalog.max_tokens",
+    } <= qualified_paths
     # ADR-0155 adds the title pass's five knobs.
     assert {
         "titles/profiles.yaml:generation.enabled",

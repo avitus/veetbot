@@ -56,6 +56,9 @@ class EvalSession(StrictModel):
     revoke_scope_turn: int | None = Field(default=None, ge=2)
     memory_write_turn: int | None = Field(default=None, ge=2)
     memory_correction_turn: int | None = Field(default=None, ge=2)
+    # Owner records: before this turn a series is created and one entry
+    # appended, so a records catalog enters the body from that turn on.
+    records_append_turn: int | None = Field(default=None, ge=2)
 
     @model_validator(mode="after")
     def intervention_turns_fit(self) -> EvalSession:
@@ -63,6 +66,7 @@ class EvalSession(StrictModel):
             "revoke_scope_turn",
             "memory_write_turn",
             "memory_correction_turn",
+            "records_append_turn",
         ):
             value = getattr(self, name)
             if value is not None and value > self.turns:

@@ -52,10 +52,10 @@
   kind: property
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Listing stable.** records.list output and the catalog rendering for the same store are byte-identical across calls."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_catalog_listing_is_byte_stable
 - id: gate.records.catalog
   milestone: 34
   kind: case
   spec: docs/plan/owner-records.md#hard-gates
   statement: "**Catalog.** The item is body-region, renders no bytes without series, carries names, counts, last times and due state and never a value, omits series above the ceiling, keeps one prefix hash across the extended fifty-turn script, drops whole after knowledge passages, and keeps USER origin trust when it is the only added item."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_records_m34.py::test_catalog_region_bytes_and_trust
