@@ -360,7 +360,7 @@ public struct ChatView: View {
                 followUp: { model.prepareCallFollowUp($0) })
         }
         .sheet(isPresented: $showingWebsiteAccess) {
-            ConnectionSettingsView(model: model, embedded: false)
+            ConnectionSettingsView(model: model, embedded: false).websiteAccessSheetFrame()
         }
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)

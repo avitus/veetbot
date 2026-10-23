@@ -464,8 +464,10 @@ struct DeviceSignInSheet: View {
 
 extension View {
     /// Presents the device sign-in window: full screen on iPhone, where the
-    /// website needs the height; a large sheet on iPad; a sheet of at least
-    /// 820 by 680 points on the Mac. Dismissing it abandons the sign-in.
+    /// website needs the height; a large sheet on iPad; on the Mac a resizable
+    /// sheet that opens at 1000 by 760 points and shrinks no smaller than 820
+    /// by 680, so a website that needs more room can have it. Dismissing it
+    /// abandons the sign-in.
     func deviceSignInPresentation(model: ChatViewModel) -> some View {
         modifier(DeviceSignInPresentation(model: model))
     }
@@ -499,7 +501,7 @@ private struct DeviceSignInPresentation: ViewModifier {
         #else
         content.sheet(item: request) { request in
             DeviceSignInSheet(model: model, request: request)
-                .frame(minWidth: 820, minHeight: 680)
+                .sheetFrame(minWidth: 820, idealWidth: 1000, minHeight: 680, idealHeight: 760)
         }
         #endif
     }

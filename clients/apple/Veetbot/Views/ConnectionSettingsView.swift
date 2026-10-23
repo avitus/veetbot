@@ -1045,6 +1045,24 @@ public struct ConnectionSettingsView: View {
     }
 }
 
+extension View {
+    /// Frames settings presented as a sheet from Chat's Website Access button:
+    /// on the Mac, resizable and opening at the settings window's size.
+    @ViewBuilder
+    func websiteAccessSheetFrame() -> some View {
+        #if os(macOS)
+        sheetFrame(
+            minWidth: SettingsWindowConfiguration.minimumSize.width,
+            idealWidth: SettingsWindowConfiguration.initialSize.width,
+            minHeight: SettingsWindowConfiguration.minimumSize.height,
+            idealHeight: SettingsWindowConfiguration.initialSize.height
+        )
+        #else
+        self
+        #endif
+    }
+}
+
 extension BrowserProfileStatus {
     var displayName: String {
         switch self {

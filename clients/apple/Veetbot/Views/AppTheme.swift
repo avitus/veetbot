@@ -343,6 +343,9 @@ extension View {
 
     /// Frames sheet content so a Mac sheet opens at `idealWidth`: macOS
     /// honors a sheet's ideal size only with fitted presentation sizing.
+    /// A Mac sheet is resizable by default: without a presentation sizing, or
+    /// with a frame no larger than its content, macOS locks it at its opening
+    /// size, so an omitted `maxWidth` or `maxHeight` means unbounded there.
     /// `macMinWidth` is the narrowest the sheet can be resized to. iOS keeps
     /// the compact `minWidth`.
     @ViewBuilder
@@ -357,8 +360,8 @@ extension View {
     ) -> some View {
         #if os(macOS)
         let framed = frame(
-            minWidth: macMinWidth ?? minWidth, idealWidth: idealWidth, maxWidth: maxWidth,
-            minHeight: minHeight, idealHeight: idealHeight, maxHeight: maxHeight
+            minWidth: macMinWidth ?? minWidth, idealWidth: idealWidth, maxWidth: maxWidth ?? .infinity,
+            minHeight: minHeight, idealHeight: idealHeight, maxHeight: maxHeight ?? .infinity
         )
         framed.presentationSizing(.fitted)
         #else

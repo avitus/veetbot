@@ -428,7 +428,7 @@ struct MemoryWordingSheet: View {
         .toastHost()
         .onAppear { focused = true }
         #if os(macOS)
-        .frame(minWidth: 480, idealWidth: 560, minHeight: 300, idealHeight: 340)
+        .sheetFrame(minWidth: 480, idealWidth: 560, minHeight: 300, idealHeight: 340)
         #endif
     }
 

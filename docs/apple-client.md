@@ -121,7 +121,9 @@ limited to closing the configured settings surface. Configured macOS clients
 open settings in a separate window that resizes horizontally and vertically and
 restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
-position are restored without interfering with the settings window. Appearance
+position are restored without interfering with the settings window. Mac
+sheets are resizable by default: each opens at its ideal size and can grow in
+both directions unless it caps a dimension (`sheetFrame`). Appearance
 preferences choose a text size and a system, rounded, serif, or monospaced face.
 They are stored in device preferences and apply immediately. The face reaches
 transcript body text and the composer only; panels and controls keep the system
@@ -248,7 +250,9 @@ user choose one `READY` profile for new conversations. Adding access, or
 signing in again to a profile that is not revoked, uses Sign in on this device
 by default (ADR-0128). The private sign-in window places the instructions and
 confirmation beside the website on Mac and regular-width iPad; compact screens
-keep the explanation above the website and confirmation below it. The app opens
+keep the explanation above the website and confirmation below it. On the Mac
+the window is a resizable sheet that opens at 1000 by 760 points and shrinks
+no smaller than 820 by 680. The app opens
 a `WKWebView` with a non-persistent data store, the platform's own user agent,
 no injected script or message handler, and top-level navigation confined to
 the profile's origins. The user types usernames, passwords, and one-time codes
