@@ -376,11 +376,13 @@ public struct EmailModeView: View {
                 mailboxSidebar
                     .frame(width: shownSidebar - 1)
                     .frame(maxHeight: .infinity)
+                // The drag starts from the width on screen: a narrow window may
+                // squeeze the sidebar below the width the owner stored.
                 MacColumnDivider(
-                    edge: .trailing, width: sidebar, label: "Sidebar width", identifier: "email.sidebar.resize",
+                    edge: .trailing, width: shownSidebar - 1, label: "Sidebar width", identifier: "email.sidebar.resize",
                     resize: { width, remember in
                         let next = EmailColumnLayout.sidebarDrag(
-                            to: width, from: sidebar, available: available, inbox: inbox)
+                            to: width, from: shownSidebar - 1, available: available, inbox: inbox)
                         if remember {
                             sidebarStore.remember(next)
                             draggedSidebarWidth = nil
@@ -393,6 +395,12 @@ public struct EmailModeView: View {
                         draggedSidebarWidth = nil
                     }
                 )
+                // The hairline's grab area reaches into both neighbours; the
+                // inbox split view starts where the hairline ends, and a later
+                // sibling is hit-tested first, so without this the half of the
+                // grab area over the inbox, and the boundary point itself on a
+                // 1x display, belong to the inbox list instead of the hairline.
+                .zIndex(1)
             }
             // The toolbar's hairline (the design's scrolled toolbar) also keeps the
             // inbox and the thread from scrolling up beneath the window toolbar.

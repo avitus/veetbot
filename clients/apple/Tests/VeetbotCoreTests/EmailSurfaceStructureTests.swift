@@ -169,6 +169,19 @@ import Testing
         #expect(!email[start..<end].contains("emailHeading"), "The Mac columns carry no Email heading")
     }
 
+    /// A narrow window squeezes the sidebar below its stored width; the divider
+    /// then drags from the width on screen, not the hidden stored one, so the
+    /// first point of a drag moves the edge instead of waiting for the pointer
+    /// to pass the stored width.
+    @Test
+    func testTheSidebarDividerDragsFromTheWidthOnScreen() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(email.contains("edge: .trailing, width: shownSidebar - 1, label: \"Sidebar width\""))
+        #expect(email.contains("to: width, from: shownSidebar - 1, available: available, inbox: inbox)"))
+        #expect(!email.contains("from: sidebar, available: available"), "The stored width is never the drag base")
+    }
+
     private func source(at relativePath: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -481,7 +481,9 @@ read them.
 
 **Commit before activate** holds without exception. During a GitHub outage
 the entry retries with backoff and the previous live revision keeps rendering
-from PostgreSQL.
+from PostgreSQL. Any other failure of one entry is handled the same way: the
+entry is logged and rescheduled with backoff, later entries for its widget wait
+behind it, and the other widgets' entries in the same pass still commit.
 
 ### Ambiguity and conflict
 
@@ -689,12 +691,18 @@ The stream's own rules:
   notification is missed.
 - **Event kinds.** `feed.updated`, `widget.revised`, `widget.deleted`,
   `layout.updated`, `settings.updated`, `import.failed` and `stream.reset`.
+- **Cursor.** Without a resume point the stream starts after the principal's
+  latest event. It takes that cursor before it subscribes to the channel, so
+  an event that commits while it subscribes is replayed, not lost.
 - **Reset.** A resume point older than the retention window gets
   `stream.reset`, and the client refetches the snapshot. Sequences are shared
   across tenants, so one principal's have gaps. A resume point is always one
   of the principal's own sequences, though, and retention removes the oldest
   events first. So a nonzero resume point below the principal's oldest
-  retained event, or with none retained, gets the reset.
+  retained event, or with none retained, gets the reset. The check is made in
+  the first replay page's unit of work, after that page is fetched, so a
+  retention sweep between a client's connect and its first page costs at most
+  a refetch and never a silently shortened replay.
 - **Retention.** Events are kept for `stream.event_retention_seconds` (knob,
   default one day). The maintenance role prunes them on the importer's timer.
 - **Start.** A stream without `Last-Event-ID` starts after the latest event;

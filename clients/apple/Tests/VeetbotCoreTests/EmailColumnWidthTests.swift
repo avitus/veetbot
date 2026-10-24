@@ -53,6 +53,10 @@ import Testing
         #expect(EmailColumnLayout.sidebarDrag(to: 330, from: 260, available: 1_000, inbox: 300) == 280)
         // Narrowing is always allowed.
         #expect(EmailColumnLayout.sidebarDrag(to: 220, from: 260, available: 860, inbox: 300) == 220)
+        // A squeezed sidebar drags from the 268 it shows, so widening stops there instead
+        // of jumping to a width the owner never saw; from the stored 340 it would reach 300.
+        #expect(EmailColumnLayout.sidebarDrag(to: 300, from: 268, available: 780, inbox: 260) == 268)
+        #expect(EmailColumnLayout.sidebarDrag(to: 300, from: 340, available: 780, inbox: 260) == 300)
         #expect(EmailColumnLayout.readerMinimum == 420)
     }
 
