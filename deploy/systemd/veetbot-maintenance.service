@@ -15,9 +15,11 @@ EnvironmentFile=-/opt/veetbot/current/.owner-scopes.env
 LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential
 Environment=BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=%d/browser-control-plane
 # The Cockpit GitHub App key (docs/plan/cockpit.md); only this unit commits widgets.
-# The empty default keeps the unit starting until the owner installs the key.
+# The whitespace-only default keeps the unit starting until the owner installs the
+# key: systemd rejects an empty SetCredential value, and the key loader reads
+# whitespace as "empty; install the key".
 LoadCredential=cockpit-github-app:/etc/veetbot/secrets/cockpit-github-app.pem
-SetCredential=cockpit-github-app:
+SetCredential=cockpit-github-app:\n
 Environment=AGENT_COCKPIT_GITHUB_KEY_FILE=%d/cockpit-github-app
 ExecStart=/opt/veetbot/current/.venv/bin/agent worker --role maintenance
 Restart=on-failure
