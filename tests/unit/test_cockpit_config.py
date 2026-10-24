@@ -146,8 +146,12 @@ def test_only_the_maintenance_unit_receives_the_github_app_key() -> None:
         "LoadCredential=cockpit-github-app:/etc/veetbot/secrets/cockpit-github-app.pem"
         in maintenance.splitlines()
     )
-    # An empty default keeps the unit starting before the owner installs the App.
-    assert "SetCredential=cockpit-github-app:" in maintenance.splitlines()
+    # A whitespace-only default keeps the unit starting before the owner installs
+    # the App: systemd 255 rejects an empty `SetCredential` value as invalid
+    # syntax and then fails the unit on the missing `LoadCredential` file
+    # (pipeline 1422, 2026-10-24), while the key loader reads whitespace as
+    # "empty; install the key".
+    assert "SetCredential=cockpit-github-app:\\n" in maintenance.splitlines()
     assert (
         "Environment=AGENT_COCKPIT_GITHUB_KEY_FILE=%d/cockpit-github-app"
         in maintenance.splitlines()
@@ -157,6 +161,17 @@ def test_only_the_maintenance_unit_receives_the_github_app_key() -> None:
             text = unit.read_text(encoding="utf-8")
             assert "cockpit-github-app" not in text, unit.name
             assert "AGENT_COCKPIT_GITHUB_KEY_FILE" not in text, unit.name
+
+
+def test_no_unit_sets_an_empty_credential_default() -> None:
+    """systemd 255 ignores `SetCredential=ID:` as invalid syntax, so an empty
+    default is no default at all and the unit fails on a missing file."""
+
+    for unit in (ROOT / "deploy/systemd").glob("*.service"):
+        for line in unit.read_text(encoding="utf-8").splitlines():
+            if line.startswith("SetCredential="):
+                _, _, value = line.partition(":")
+                assert value, f"{unit.name}: {line!r} has no value"
 
 
 def test_each_tenant_has_its_own_short_cockpit_channel() -> None:

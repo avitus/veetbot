@@ -423,8 +423,9 @@ through the existing HTTP client. The execution service, the builder image,
 the API process and every sandbox stay credential-free.
 
 The maintenance unit loads the key as `cockpit-github-app` and names it in
-`AGENT_COCKPIT_GITHUB_KEY_FILE`. An empty `SetCredential` default keeps the
-unit starting before the owner installs the key. With the flag on, the
+`AGENT_COCKPIT_GITHUB_KEY_FILE`. A whitespace-only `SetCredential` default
+(`\n`; systemd rejects an empty value) keeps the unit starting before the
+owner installs the key. With the flag on, the
 maintenance role refuses to build its worker until the repository, App id,
 installation id and a private, non-empty key are all present. The adapter only
 ever touches a branch under `cockpit/`.
