@@ -243,6 +243,16 @@ def diagram_source(spec: dict[str, Any]) -> str:
     return "\n".join([*lines, "}", ""])
 
 
+def _csv_cell(value: object) -> object:
+    """Prefix formula-like CSV text without changing numbers or source data."""
+    formula_prefixes = ("=", "+", "-", "@", "\uff1d", "\uff0b", "\uff0d", "\uff20")
+    if isinstance(value, str) and (
+        value.startswith(("\t", "\r", "\n")) or value.lstrip().startswith(formula_prefixes)
+    ):
+        return "'" + value
+    return value
+
+
 def _render_chart(spec: dict[str, Any], directory: Path, formats: list[str]) -> None:
     # Imports stay lazy: worker dependencies and pure validation need no plotting stack.
     with tempfile.TemporaryDirectory(prefix="veetbot-mpl-") as cache:
@@ -276,9 +286,9 @@ def _render_chart(spec: dict[str, Any], directory: Path, formats: list[str]) -> 
             finally:
                 plt.close(figure)
     with (directory / "chart.csv").open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(spec["columns"])
-        writer.writerows(spec["rows"])
+        writer = csv.writer(stream, quoting=csv.QUOTE_NONNUMERIC)
+        writer.writerow([_csv_cell(name) for name in spec["columns"]])
+        writer.writerows([_csv_cell(cell) for cell in row] for row in spec["rows"])
 
 
 def _plot(spec: dict[str, Any], axes: Any, figure: Any) -> None:

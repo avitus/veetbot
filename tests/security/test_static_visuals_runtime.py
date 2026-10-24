@@ -148,6 +148,41 @@ async def test_chart_png_vectors_and_original_csv(
     assert json.loads(files["source.json"]) == spec
 
 
+async def test_chart_csv_neutralizes_formulas_without_changing_source_or_plot(
+    visual_sandbox: SandboxManager,
+) -> None:
+    spec = {
+        **CHART,
+        "columns": ["=Category", "+Amount", "-Notes", "@Other"],
+        "x": "=Category",
+        "y": ["+Amount"],
+        "formats": ["svg"],
+        "rows": [
+            ['=HYPERLINK("https://example.invalid","x")', -12.5, "-1+2", "@SUM(1,2)"],
+            ["+1+2", 0, "\uff1d1+2", "\uff0b1+2"],
+            ["-1+2", None, "\uff0d1+2", "\uff20SUM(1,2)"],
+            ["@SUM(1,2)", 5, "  =1+2", "\n=1+2"],
+            ["ordinary", 3, 'comma,"quoted"\nvalue', "'=already text"],
+            ["\nplain", 2, "line\nbreak", "    ordinary"],
+        ],
+    }
+    files = await _render(visual_sandbox, spec)
+    csv_rows = list(csv.reader(io.StringIO(files["chart.csv"].decode())))
+    assert csv_rows == [
+        ["'=Category", "'+Amount", "'-Notes", "'@Other"],
+        ['\'=HYPERLINK("https://example.invalid","x")', "-12.5", "'-1+2", "'@SUM(1,2)"],
+        ["'+1+2", "0", "'\uff1d1+2", "'\uff0b1+2"],
+        ["'-1+2", "", "'\uff0d1+2", "'\uff20SUM(1,2)"],
+        ["'@SUM(1,2)", "5", "'  =1+2", "'\n=1+2"],
+        ["ordinary", "3", 'comma,"quoted"\nvalue', "'=already text"],
+        ["'\nplain", "2", "line\nbreak", "    ordinary"],
+    ]
+    assert json.loads(files["source.json"]) == spec
+    texts = " ".join(ElementTree.fromstring(files["chart.svg"]).itertext())
+    assert '=HYPERLINK("https://example.invalid","x")' in texts
+    assert '\'=HYPERLINK("https://example.invalid","x")' not in texts
+
+
 async def test_diagram_topology_literal_labels_and_all_downloads(
     visual_sandbox: SandboxManager,
 ) -> None:

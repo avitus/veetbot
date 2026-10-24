@@ -15,8 +15,9 @@ Tini reaps orphaned command children so exited processes do not exhaust the
 PID quota on the Debian image. The existing PID-limit regression stays unchanged.
 A bundled, offline rendering helper accepts
 bounded JSON data and emits a PNG preview, optional SVG and PDF downloads, and
-the original chart rows as CSV. Diagrams accept named nodes and directed edges
-for flowcharts, architecture and relationship graphs, and include editable DOT
+the chart rows as CSV with the text safety encoding below. Diagrams accept named
+nodes and directed edges for flowcharts, architecture and relationship graphs,
+and include editable DOT
 source. This is an owner-authorized extension of existing artifact generation;
 it introduces no milestone, tool, permission, provider or activation gate.
 
@@ -44,6 +45,15 @@ CSV and PNG; vector formats are produced only when requested. Diagrams include
 PNG and DOT, with the same optional vector formats. The machine-readable source
 specification accompanies both, so the render can be reproduced.
 
+CSV headers and text cells are quoted. Formula-triggering text receives a
+leading apostrophe: ASCII or full-width `=`, `+`, `-`, and `@`, including after
+leading whitespace, and a leading line break. This addresses
+[CSV formula injection](https://owasp.org/www-community/attacks/CSV_Injection)
+without altering plotted labels, numeric values, row order, or the original
+values in `source.json`. Null remains an empty CSV cell. The guide explains the
+encoding and identifies JSON as the source for exact reuse. Spreadsheet
+applications may remove escaping on re-save; CSV remains an untrusted artifact.
+
 ## Verification
 
 On 2026-10-24, the real Docker sandbox passed all 23 cases in
@@ -55,6 +65,12 @@ artifact byte fidelity and tenant separation, plus the existing isolation and
 resource-limit regressions. The original image first failed the new capability
 probe with both Matplotlib and Graphviz absent. The unchanged PID-limit test
 reproduced the Debian zombie-process failure before Tini made it pass.
+
+The CSV formula-injection regression first failed on unescaped headers and
+cells. After the fix, all 26 visualization and sandbox runtime cases passed in
+78.25 seconds, including ASCII/full-width formula prefixes, leading whitespace,
+quoted and multiline text, unchanged numeric values, original JSON, and literal
+plot labels. This supplements the original implementation evidence above.
 
 The 38 pure validation/cleanup cases in `tests/unit/test_static_visuals.py`
 passed. A chart and diagram downloaded through the artifact path were visually

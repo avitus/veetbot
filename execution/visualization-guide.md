@@ -13,7 +13,8 @@ Never use `image.generate` to invent data points, labels or diagram connections.
 4. Check both the process exit code and the JSON result. A success lists `files`,
    each with `path`, `filename`, `media_type` and `size_bytes`. Export each file
    using `artifact.export` with that path, filename and media type. The PNG is the
-   preview; chart CSV preserves the underlying data; diagram DOT is editable.
+   preview; chart CSV includes the underlying data with text safety encoding;
+   diagram DOT is editable.
    JSON preserves the complete specification. Only claim attachments after export
    succeeds. If an export fails, explain which file is missing.
 
@@ -25,6 +26,14 @@ paths, so always use the returned paths rather than guessing filenames.
 The input filename is relative to the command's working directory. Output paths
 are always relative to `/workspace`, including when the command runs in a
 subdirectory; pass them directly to `artifact.export`.
+
+CSV text fields are quoted. Headers and text cells beginning with `=`, `+`, `-`,
+or `@` (including full-width forms or after leading whitespace), or a line break,
+receive a leading apostrophe to prevent formula interpretation on import.
+Numbers, null cells, and row order are unchanged. Explain this CSV transformation;
+`source.json` retains every original value for exact reuse, and plotted labels
+remain unchanged. Spreadsheet applications can remove escaping when a CSV is
+saved again; do not treat a re-saved CSV as trusted executable input.
 
 ## Charts
 

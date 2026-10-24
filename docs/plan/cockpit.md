@@ -89,7 +89,7 @@ The owner decided these on 2026-10-22:
   (`email-experience.md:52-53`), and that a mode confers no authority.
 - **The execution service.** It runs gVisor containers with a read-only root,
   networking off, an empty environment and run leases. Its one-image
-  assumption is an open question in `sandbox-isolation.md:1730-1734`. This
+  assumption is an open question in `sandbox-isolation.md:1735-1739`. This
   design answers it for exactly one additional, platform-owned image.
 - **The tool pipeline.** Classification decides policy, and a `tool_rules`
   entry can allow one tool by exact name. The trust overlay escalates an

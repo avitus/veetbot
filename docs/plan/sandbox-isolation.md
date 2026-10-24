@@ -1063,7 +1063,12 @@ and sizes, not artifact IDs or an attachment claim.
 
 Every render contains PNG and its JSON specification. Charts also contain CSV
 with the supplied columns, rows and order preserved; a null becomes an empty
-CSV cell. Diagrams contain editable DOT source. SVG and PDF are optional. The
+CSV cell. Text fields are quoted, and formula-triggering headers or text cells
+receive a leading apostrophe (ASCII or full-width `=`, `+`, `-`, or `@`, including
+after leading whitespace, or a leading line break). Numeric values and plotted
+labels stay unchanged. The JSON specification retains the original values;
+the agent explains the CSV encoding and uses JSON for exact reuse. Diagrams
+contain editable DOT source. SVG and PDF are optional. The
 agent exports the PNG and CSV or DOT, the requested vectors, and the source
 specification through ordinary `artifact.export` calls. The existing Apple image
 viewer previews PNG and downloads all formats; it need not execute SVG or HTML.
