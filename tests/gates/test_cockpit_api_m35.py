@@ -520,6 +520,35 @@ async def test_an_event_committed_while_the_stream_subscribes_is_still_delivered
         ]
 
 
+async def test_a_sweep_while_the_stream_subscribes_still_resets_a_pruned_resume_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pruned-cursor check rides in the first replay's unit of work, after
+    the fetch, so a retention sweep between connecting and the first page
+    yields `stream.reset`, never a silently shortened replay."""
+
+    async with cockpit_api(config_dir=_overlay(tmp_path, max_seconds=1)) as (composition, client):
+        old = await _event(composition, OWNER, "old")
+        await _event(composition, OWNER, "kept")
+        board = composition.services.cockpit
+        assert board is not None
+        live_events = board._live_events
+
+        class SweepsWhileSubscribing:
+            @asynccontextmanager
+            async def listen(self, channel: str) -> AsyncIterator[Any]:
+                async with live_events.listen(channel) as subscription:
+                    async with composition.uow_factory() as uow:
+                        await uow.cockpit_events.prune_before(
+                            "local", before=NOW.replace(year=2027)
+                        )
+                    yield subscription
+
+        monkeypatch.setattr(board, "_live_events", SweepsWhileSubscribing())
+        response = await client.get("/v1/cockpit/stream", headers={"Last-Event-ID": str(old)})
+        assert [frame.get("event") for frame in _frames(response.text)] == ["stream.reset"]
+
+
 async def _heartbeats_while_idle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with monkeypatch.context() as patched:
         patched.setattr("agent_core.api.cockpit.HEARTBEAT_SECONDS", 0.2)

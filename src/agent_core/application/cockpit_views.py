@@ -367,25 +367,33 @@ class CockpitBoard:
 
         require_scope(principal, "cockpit.read")
         deadline = self._clock.now() + self._stream_max
-        # The cursor is taken before the subscription opens: an event that commits
-        # while it opens is then after the cursor and replayed, never folded in.
-        async with self._uow_factory() as uow:
-            oldest = await uow.cockpit_events.oldest_sequence(principal)
-            latest = await uow.cockpit_events.latest_sequence(principal)
         if after is None:
+            # The cursor is taken before the subscription opens: an event that
+            # commits while it opens is then after the cursor and replayed.
+            async with self._uow_factory() as uow:
+                latest = await uow.cockpit_events.latest_sequence(principal)
             watermark = latest or 0
-        elif after > 0 and (oldest is None or after < oldest):
-            # The client's last event was pruned, so events after it may be too.
-            yield TransientStreamFrame(event="stream.reset", data={})
-            return
         else:
             watermark = after
+        resuming = after is not None and after > 0
         async with self._live_events.listen(cockpit_channel(principal.tenant_id)) as subscription:
             while True:
                 async with self._uow_factory() as uow:
                     events = await uow.cockpit_events.after(
                         principal, sequence=watermark, limit=_REPLAY_PAGE
                     )
+                    # A resume point is checked against retention in the first
+                    # page's unit of work, after the fetch: a sweep between the
+                    # two can only cost a refetch, never hide a pruned gap.
+                    oldest = (
+                        await uow.cockpit_events.oldest_sequence(principal) if resuming else None
+                    )
+                if resuming:
+                    resuming = False
+                    if oldest is None or watermark < oldest:
+                        # The client's last event was pruned, so events after it may be too.
+                        yield TransientStreamFrame(event="stream.reset", data={})
+                        return
                 for event in events:
                     watermark = event.sequence
                     yield PersistedStreamFrame(

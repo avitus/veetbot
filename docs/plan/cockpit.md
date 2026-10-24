@@ -699,7 +699,10 @@ The stream's own rules:
   across tenants, so one principal's have gaps. A resume point is always one
   of the principal's own sequences, though, and retention removes the oldest
   events first. So a nonzero resume point below the principal's oldest
-  retained event, or with none retained, gets the reset.
+  retained event, or with none retained, gets the reset. The check is made in
+  the first replay page's unit of work, after that page is fetched, so a
+  retention sweep between a client's connect and its first page costs at most
+  a refetch and never a silently shortened replay.
 - **Retention.** Events are kept for `stream.event_retention_seconds` (knob,
   default one day). The maintenance role prunes them on the importer's timer.
 - **Start.** A stream without `Last-Event-ID` starts after the latest event;
