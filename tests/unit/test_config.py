@@ -1217,13 +1217,21 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_207_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_212_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 207
+    assert len(qualified_paths) == 212
+    # Milestone 35 adds Cockpit's two commit rate limits and the importer's poll interval.
+    assert {
+        "cockpit/profiles.yaml:publication.commits_per_widget_per_hour",
+        "cockpit/profiles.yaml:publication.commits_per_principal_per_hour",
+        "cockpit/profiles.yaml:publication.import_interval_seconds",
+        "cockpit/profiles.yaml:stream.max_seconds",
+        "cockpit/profiles.yaml:stream.event_retention_seconds",
+    } <= qualified_paths
     # Owner records add the catalog's two class caps.
     assert {
         "context/plan.yaml:classes.records_catalog.max_items",

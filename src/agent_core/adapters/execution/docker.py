@@ -34,6 +34,7 @@ from agent_core.domain.execution import (
     ExecutionResult,
     FileChange,
     KillReason,
+    SandboxPurpose,
     WorkspaceEntry,
     WorkspaceProvenance,
 )
@@ -546,6 +547,8 @@ class DockerExecutionEnvironment:
             f"agent.core.expires_at={int(expires_at.timestamp())}",
             "--label",
             f"agent.core.created_at={int(now.timestamp())}",
+            "--label",
+            f"agent.core.purpose={specification.purpose.value}",
         )
         await _docker("volume", "create", *labels, volume)
         try:
@@ -1117,13 +1120,17 @@ class DockerExecutionEnvironment:
                 '{{.ID}}\t{{.Label "agent.core.environment_id"}}\t'
                 '{{.Label "agent.core.run_id"}}\t{{.Label "agent.core.lease_epoch"}}\t'
                 '{{.Label "agent.core.expires_at"}}'
-                '\t{{.Label "agent.core.created_at"}}'
+                '\t{{.Label "agent.core.created_at"}}\t{{.Label "agent.core.purpose"}}'
             ),
         )
         reaped = 0
         now_epoch = int(self._clock.now().timestamp())
         for line in raw.decode("utf-8").splitlines():
             try:
+                fields = line.split("\t")
+                # Sandboxes created before the purpose label list one column fewer.
+                if len(fields) == 6:
+                    fields.append(SandboxPurpose.RUN.value)
                 (
                     container_id,
                     environment_id,
@@ -1131,7 +1138,8 @@ class DockerExecutionEnvironment:
                     raw_epoch,
                     raw_expiry,
                     raw_created,
-                ) = line.split("\t")
+                    raw_purpose,
+                ) = fields
                 run_id = UUID(raw_run_id)
                 lease_epoch = int(raw_epoch)
                 expired = int(raw_expiry) <= now_epoch
@@ -1139,6 +1147,10 @@ class DockerExecutionEnvironment:
                     not raw_created or int(raw_created) + self._reaper_grace_seconds <= now_epoch
                 )
             except (ValueError, TypeError):
+                continue
+            # A Cockpit build is not a run: no run lease holds it, and its own
+            # hard deadline is its lease. It is reaped only once that passes.
+            if not expired and raw_purpose == SandboxPurpose.COCKPIT_BUILD.value:
                 continue
             if not expired:
                 if (run_id, lease_epoch) in live_leases:

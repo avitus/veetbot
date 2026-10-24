@@ -96,8 +96,8 @@ The owner decided these on 2026-10-22:
   untrusted origin or untrusted arguments. The credential-to-egress hardline
   rule covers `publication` arguments.
 - **The deferred tool index.** Definitions are capped at thirty items, and
-  that cap already binds the owner's roster (`context-engine.md:378-382`).
-  The deferred index (`context-engine.md:409-414`) admits a tool as a
+  that cap already binds the owner's roster (`context-engine.md:379-383`).
+  The deferred index (`context-engine.md:410-415`) admits a tool as a
   one-line entry reached through `tool.call`.
 - **Durable live delivery.** The run event stream already works this way: a
   row is written, then NOTIFY sends its sequence inside the same transaction,
@@ -329,7 +329,10 @@ importer, release preflight or a developer's checkout. In order:
    - email addresses and telephone numbers;
    - the owner's name and the display names of People records and known
      contacts (multi-token names, or single tokens of four or more
-     characters, matched case-insensitively on word boundaries);
+     characters, matched case-insensitively on word boundaries). The owner's
+     name is the calling configuration's `public_name` when calling is
+     configured. People contribute every person's display name and every
+     `name` identifier, in any state;
    - every current private settings string value of four or more characters,
      across all of the principal's widgets.
 
@@ -347,25 +350,50 @@ importer, release preflight or a developer's checkout. In order:
 Rejection records the revision as `rejected` with diagnostics and nothing
 else. No outbox entry, commit or event is created.
 
-The builder runs in the **builder image** `execution/cockpit-builder`:
+The builder runs in the **builder image**, `execution/cockpit-builder.Dockerfile`:
 
-- **Base.** It is built from the sandbox image's base, keeping `python` for
-  the execution service's workspace operations. It adds Node, the locked
-  `cockpit/` dependencies including esbuild's linux binary, Playwright WebKit,
-  and the built kit.
+- **Base.** It is built from a digest-pinned Debian Node image, not the
+  sandbox's Alpine base, because the preview renderer's Playwright WebKit
+  needs glibc. It installs `python` for the execution service's workspace
+  operations, the locked `cockpit/` runtime dependencies (including esbuild's
+  Linux binary), and the kit built at image build time. Playwright WebKit
+  joins it with the preview renderer.
 - **Isolation.** It runs through the existing execution service under gVisor,
-  with networking off, a read-only root, a no-exec `/tmp`, the standard
-  limits, an empty environment and no credentials.
+  with:
+  - networking off;
+  - a read-only root and a no-exec `/tmp`;
+  - the standard limits;
+  - an empty environment and no credentials.
+- **Transport.** The package and the privacy screen travel on the command's
+  stdin, and the report, bundle and manifest come back on stdout. Nothing is
+  written to the workspace, so a hostile file name cannot overwrite the
+  screen, and the builder judges the package's raw file names.
 - **Configuration.** It has its own `AGENT_COCKPIT_BUILDER_IMAGE` setting and
-  `SandboxManager`. The execution service accepts only the two configured
-  images.
-- **Leases.** A build inside a run uses that run's lease. A build started by
-  the importer or release preflight holds its own lease row and a
-  `purpose=cockpit_build` label, so the reaper leaves it alone.
-- **Release preflight.** It builds a canary under runsc and rebuilds every
-  live widget against the release's kit. A widget whose rebuild fails stays on
-  its previous `kit_api` runtime, the failure is reported, and nothing
-  half-migrates.
+  `SandboxManager`, constructed only when `AGENT_COCKPIT_ENABLED` is on. The
+  execution service admits only the images its unit names with
+  `--allow-image`, resolved on each admission, so a release that moves a
+  `:production` tag needs no restart.
+- **Leases.** Every build provisions a fresh sandbox, also inside a run, and
+  releases it when the build returns or is cancelled. Nothing carries from one
+  build to the next or into the run's own sandbox. The sandbox is labelled
+  `purpose=cockpit_build`, and that label with its wall-clock deadline is the
+  build's own lease. The reaper leaves a labelled sandbox alone until the
+  deadline and removes it after, so a build that the importer or release
+  preflight starts outside any run survives the reaper without a lease row.
+- **Verdicts.** A rejection is a verdict with at least one diagnostic. The
+  adapter raises instead of returning a verdict when the build:
+  - timed out or exceeded a limit;
+  - exited with a usage error;
+  - printed something other than one report for the package;
+  - returned an exit code that disagrees with its report;
+  - returned a bundle that does not hash to its digest or exceeds the cap.
+
+  Diagnostic fields are clamped to the domain's lengths.
+- **Release preflight.** It builds the image, then builds the reference
+  `weather` widget under runsc with the sandbox's flags as a canary. It also
+  rebuilds every live widget against the release's kit. A widget whose
+  rebuild fails stays on its previous `kit_api` runtime, the failure is
+  reported, and nothing half-migrates.
 
 ## The repository branch and the commit outbox
 
@@ -393,6 +421,13 @@ the **maintenance** role only. The adapter mints short-lived installation
 tokens with the existing `cryptography` dependency and calls the REST API
 through the existing HTTP client. The execution service, the builder image,
 the API process and every sandbox stay credential-free.
+
+The maintenance unit loads the key as `cockpit-github-app` and names it in
+`AGENT_COCKPIT_GITHUB_KEY_FILE`. An empty `SetCredential` default keeps the
+unit starting before the owner installs the key. With the flag on, the
+maintenance role refuses to build its worker until the repository, App id,
+installation id and a private, non-empty key are all present. The adapter only
+ever touches a branch under `cockpit/`.
 
 ### Writing
 
@@ -423,9 +458,32 @@ When the commit is recorded, the revision becomes `committed`. The
 application then makes it `live` and supersedes the previous live revision in
 one transaction, and emits `widget.revised` or `widget.deleted`.
 
+Acceptance and the outbox derive the commit message the same way, so the
+message the screen checked is the message committed. The verb depends on the
+change:
+
+- `create`, when no live commit is being changed;
+- `update`, when one is;
+- `restore`, for a deleted widget's last live package;
+- `revert`, for an earlier revision of a live widget.
+
+Restore and revert revisions have source `revert`. A delete carries a fresh
+operation id in its `Veetbot-Revision` trailer, never a revision id, so finding
+it on the branch cannot mistake the widget's original commit for the removal.
+
+An update names the widget's newest accepted revision as `expected_revision`:
+the one waiting for its commit, or else the live one. An accepted change is
+therefore never silently overwritten before it lands.
+
+The rate limits and the importer's poll interval are the knobs of
+`cockpit/profiles.yaml` so far; the other knobs join it with the steps that
+read them.
+
 **Commit before activate** holds without exception. During a GitHub outage
 the entry retries with backoff and the previous live revision keeps rendering
-from PostgreSQL.
+from PostgreSQL. Any other failure of one entry is handled the same way: the
+entry is logged and rescheduled with backoff, later entries for its widget wait
+behind it, and the other widgets' entries in the same pass still commit.
 
 ### Ambiguity and conflict
 
@@ -434,6 +492,12 @@ from PostgreSQL.
 - **A human changed the same widget.** If the new commits since the expected
   parent touched the same widget directory, the person's commit wins. The
   revision becomes `conflicted` and the importer takes the person's version.
+  The expected parent is the commit of the live revision the change was based
+  on. For a new widget it is the importer's cursor, after which every commit
+  is unimported. A person's version that the importer made live after the
+  change was queued also wins. A commit counts as the platform's only when its
+  trailer names one of the principal's own revisions or a commit the outbox
+  recorded, so a forged trailer does not hide a person's change.
 - **Lost response.** If the ref update's response is lost, the worker reads
   the head and its ancestry for the revision's `Veetbot-Revision` trailer
   before retrying, so a retry never commits twice. The write tool is
@@ -449,6 +513,10 @@ At most twelve commits per widget per hour and sixty per principal per hour
 The importer polls the branch head (knob, default sixty seconds). For each
 commit that does not carry a `Veetbot-Revision` trailer this deployment
 issued, it reads the changed widget directories and runs the builder on each.
+Each commit's effects and its import record land in one transaction, and the
+importer resumes after the last recorded commit, so a commit is never imported
+twice. The importer screens a person's files but not their commit message,
+which is theirs and already public.
 
 - A valid package becomes a `owner_git` revision, then `committed`, then
   `live`.
@@ -592,6 +660,21 @@ feed is an indistinguishable 404.
 
 The owner's own write routes go through the same outbox and pipeline as the
 tool. They need no approval, because the owner's gesture is the decision.
+Revert, delete and restore answer `202` with the change: a revert or restore
+carries its revision's state and diagnostics, and a delete is `queued`.
+
+The routes' other contracts:
+
+- **Errors.** Settings that fail the live manifest's settings schema, and a
+  layout that places a widget that is not live or at a size its manifest does
+  not offer, are `malformed_request` (400). A build that reached no verdict
+  is `sandbox_execution_error` (502), and nothing is recorded.
+- **Runtime assets.** The snapshot's runtime and the asset route read the
+  manifest a release exports to `artifact_root/cockpit-runtime/`. Until that
+  export lands with the native mode, `runtime` is null.
+- **Asset caching.** An asset answers
+  `Cache-Control: private, max-age=31536000, immutable` and
+  `X-Content-Type-Options: nosniff`.
 
 **The stream** follows the run stream's pattern:
 
@@ -608,13 +691,31 @@ The stream's own rules:
   notification is missed.
 - **Event kinds.** `feed.updated`, `widget.revised`, `widget.deleted`,
   `layout.updated`, `settings.updated`, `import.failed` and `stream.reset`.
+- **Cursor.** Without a resume point the stream starts after the principal's
+  latest event. It takes that cursor before it subscribes to the channel, so
+  an event that commits while it subscribes is replayed, not lost.
 - **Reset.** A resume point older than the retention window gets
-  `stream.reset`, and the client refetches the snapshot.
-- **Lifetime.** A stream lives at most `stream_max_seconds` (knob, default
+  `stream.reset`, and the client refetches the snapshot. Sequences are shared
+  across tenants, so one principal's have gaps. A resume point is always one
+  of the principal's own sequences, though, and retention removes the oldest
+  events first. So a nonzero resume point below the principal's oldest
+  retained event, or with none retained, gets the reset. The check is made in
+  the first replay page's unit of work, after that page is fetched, so a
+  retention sweep between a client's connect and its first page costs at most
+  a refetch and never a silently shortened replay.
+- **Retention.** Events are kept for `stream.event_retention_seconds` (knob,
+  default one day). The maintenance role prunes them on the importer's timer.
+- **Start.** A stream without `Last-Event-ID` starts after the latest event;
+  a client opens it with the snapshot's `cursor`.
+- **Frames.** Each event's frame has the sequence as its id, the kind as its
+  event and `{"subject": …}` as its data, naming the widget, feed or device
+  class that changed.
+- **Lifetime.** A stream lives at most `stream.max_seconds` (knob, default
   600) before a clean close, so token revocation takes effect on reconnect.
 
 `cockpit.read` and `cockpit.write` join `PLATFORM_SCOPES`, the deployment
-scope classification, and `AUTH_SCOPES` in `deploy/veetbot.env.example`.
+scope classification, and `AUTH_SCOPES` in `deploy/veetbot.env.example`. The
+schedule principal gains `cockpit.write` with the feed publishing tool.
 
 ## The native experience
 
@@ -797,10 +898,17 @@ contract suite.
 ### Configuration
 
 - **Flag.** `AGENT_COCKPIT_ENABLED`, exactly `0` or `1`, default `0`.
-- **Settings.** `AGENT_COCKPIT_BUILDER_IMAGE`, the repository, the branch and
-  the App identifiers, plus a `LoadCredential` name for the key. The
-  maintenance role refuses to start the outbox or the importer without the
-  credential.
+- **Settings.** The settings are:
+  - `AGENT_COCKPIT_BUILDER_IMAGE`;
+  - `AGENT_COCKPIT_GITHUB_REPOSITORY`;
+  - `AGENT_COCKPIT_GITHUB_BRANCH`, default `cockpit/widgets`;
+  - `AGENT_COCKPIT_GITHUB_APP_ID`;
+  - `AGENT_COCKPIT_GITHUB_INSTALLATION_ID`;
+  - `AGENT_COCKPIT_GITHUB_KEY_FILE`, which the maintenance unit points at its
+    `cockpit-github-app` credential.
+
+  The maintenance role refuses to start the outbox or the importer without
+  the credential.
 - **Tuning document.** The shipped configuration root gains
   `cockpit/profiles.yaml`, beside `folders/profiles.yaml`. This is distinct
   from the repository's `cockpit/` workspace. Its knobs:
@@ -1027,6 +1135,29 @@ Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
    should an LLM-free collector have for sub-minute external data?
 3. Should a widget be able to request a native share or copy action on its
    own displayed text, given that intents are navigation-only today?
+
+## Implementation checkpoint: 2026-10-23
+
+Build step 3 landed the builder image, its own sandbox manager, the image
+allowlist, the build reaper lease and the release's runsc canary. Build step 5
+landed the publication path:
+
+- the GitHub App adapter, which passes the repository contract suite against
+  an in-memory GitHub remote;
+- the commit outbox with lost-response reconciliation and person-wins
+  conflicts;
+- the branch importer;
+- delete, restore and revert;
+- the privacy screen's server-supplied names, settings and commit message;
+- the maintenance role's credential wiring.
+
+Gates 2 and 4 are bound to sandbox tests that build in the real builder image.
+Gates 5 to 9 are bound to the publication path over the GitHub adapter and
+the in-memory remote. Gate 3 awaits the first production release's canary.
+
+Build step 6 landed the nine routes behind the flag, the two scopes, the
+tenant channel with NOTIFY on the event log, the resumable stream, and event
+retention. Gates 14 and 15 are bound. Tools and feeds are the next steps.
 
 ## Implementation checkpoint: 2026-10-22
 

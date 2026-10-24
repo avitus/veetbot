@@ -377,11 +377,21 @@ implemented: the ported kit, the builder, and the host and network-less realm,
 proven against an adversarial corpus in headless Chromium and WebKit. The
 domain, the five ports and their contract suites, the migration and both store
 adapters are implemented, and gate 1 is bound to the PostgreSQL parity test.
+The builder sandbox image, its own manager, the execution service's image
+allowlist and the build reaper lease are implemented. Each release builds the
+image and requires a runsc canary build before promotion. The publication path
+is implemented: the GitHub App adapter, the commit outbox with reconciliation,
+the branch importer, delete and restore, and the privacy screen's server
+context. The nine routes, the scopes, the tenant channel and the resumable
+stream are implemented behind the flag. Gates 2, 4 through 9, 14 and 15 are
+bound. The Apple mode shell
+runs over three modes (build step 9): the switch reads Cockpit · Chat · Email
+at the top of each Mac left pane, and Cockpit shows its unavailable state.
 Every other gate is pending.
 
-- [ ] Build step 3: the builder sandbox image, release wiring, the runsc canary, the second manager and reaper leases
-- [ ] Build steps 5 to 8: the GitHub App adapter and commit outbox, the routes and stream, the agent tools and policy rule, and the platform feeds
-- [ ] Build steps 9 to 11: the Apple mode refactor, the native Cockpit mode and preview rendering
+- [ ] Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image
+- [ ] Build steps 7 and 8: the agent tools and policy rule, and the platform feeds
+- [ ] Build steps 10 and 11: the native Cockpit mode (the Apple client shows only its unavailable state behind the three-mode switch) and preview rendering
 - [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the assistant's seed widgets; hosted CI, review and production delivery
 
 ## Outside a milestone

@@ -285,3 +285,4 @@ implementation without one.
 - [ADR-0240: Cockpit mode and agent-authored widgets (Accepted; Milestone 35)](0240-cockpit-mode-and-agent-authored-widgets.md)
 
 - [ADR-0241: Verified legacy attribution recovery for dreaming](0241-verified-legacy-dreaming-recovery.md)
+- [ADR-0242: Tool-result truncation moves in blocks to keep the body cached](0242-block-quantized-tool-result-truncation.md)

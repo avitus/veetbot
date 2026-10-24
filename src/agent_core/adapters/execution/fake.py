@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from uuid import UUID
 
@@ -21,6 +21,7 @@ from agent_core.domain.execution import (
     ExecutionCommand,
     ExecutionResult,
     KillReason,
+    SandboxPurpose,
     WorkspaceEntry,
     WorkspaceProvenance,
 )
@@ -102,6 +103,7 @@ class FakeExecutionEnvironment:
         self.commands: list[tuple[EnvironmentHandle, ExecutionCommand]] = []
         self.specifications: list[EnvironmentSpec] = []
         self._live: dict[str, EnvironmentSpec] = {}
+        self._expiry: dict[str, datetime] = {}
         self._workspaces: dict[str, _FakeWorkspaceHandle] = {}
         self._script: deque[ExecutionResult] = deque()
 
@@ -121,6 +123,7 @@ class FakeExecutionEnvironment:
         )
         self.specifications.append(specification)
         self._live[environment_id] = specification
+        self._expiry[environment_id] = handle.expires_at
         self._workspaces[environment_id] = _FakeWorkspaceHandle()
         return handle
 
@@ -163,6 +166,7 @@ class FakeExecutionEnvironment:
 
     async def destroy(self, environment: EnvironmentHandle) -> None:
         self._live.pop(environment.environment_id, None)
+        self._expiry.pop(environment.environment_id, None)
         self._workspaces.pop(environment.environment_id, None)
 
     async def reap(
@@ -171,7 +175,14 @@ class FakeExecutionEnvironment:
         is_live: Callable[[UUID, int], Awaitable[bool]] | None = None,
     ) -> int:
         stale: list[str] = []
+        now = self._clock.now()
         for environment_id, specification in tuple(self._live.items()):
+            expired = self._expiry[environment_id] <= now
+            # As in the Docker adapter, a build's own deadline is its lease.
+            if specification.purpose is SandboxPurpose.COCKPIT_BUILD:
+                if expired:
+                    stale.append(environment_id)
+                continue
             lease = (specification.run_id, specification.lease_epoch)
             if lease in live_leases:
                 continue
@@ -180,6 +191,7 @@ class FakeExecutionEnvironment:
             stale.append(environment_id)
         for environment_id in stale:
             self._live.pop(environment_id, None)
+            self._expiry.pop(environment_id, None)
             self._workspaces.pop(environment_id, None)
         return len(stale)
 

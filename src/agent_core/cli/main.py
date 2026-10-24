@@ -880,12 +880,19 @@ def execution_service_command(
         Path,
         typer.Option("--socket", help="Absolute Unix socket used by application workers."),
     ] = Path("/run/veetbot/execution.sock"),
+    allow_image: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--allow-image",
+            help="An image reference sandboxes may run; repeat for each. Omit to allow any.",
+        ),
+    ] = None,
 ) -> None:
     """Serve sandbox lifecycle without loading application credentials."""
 
     if not socket_path.is_absolute():
         raise typer.BadParameter("execution service socket must be absolute", param_hint="--socket")
-    asyncio.run(serve_execution_service(socket_path))
+    asyncio.run(serve_execution_service(socket_path, allowed_images=tuple(allow_image or ())))
 
 
 @app.command("worker")

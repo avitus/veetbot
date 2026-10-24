@@ -1,0 +1,16 @@
+schema_version: 1
+publication:
+  # Commits the assistant and owner may make to one widget in an hour; a
+  # rejected revision does not count (docs/plan/cockpit.md, rate limits).
+  commits_per_widget_per_hour: 12
+  # Commits across all of the principal's widgets in an hour.
+  commits_per_principal_per_hour: 60
+  # How often the maintenance role polls the widget branch for human commits.
+  import_interval_seconds: 60
+stream:
+  # A stream closes cleanly after this long, so a revoked token takes effect
+  # on reconnect (docs/plan/cockpit.md, the stream).
+  max_seconds: 600
+  # How long stream events are kept; a client resuming from before this gets
+  # stream.reset and refetches the snapshot.
+  event_retention_seconds: 86400

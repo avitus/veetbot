@@ -206,6 +206,23 @@ trust overlay intact.
   The realm, the privacy screen, one-tap revert and the trust overlay carry
   that risk instead.
 
+## Amendment — 2026-10-23
+
+Build step 3 settled three details of decision 7. None changes what the image
+may reach.
+
+- **The base is Debian Node, not the sandbox base.** The sandbox image is
+  Alpine (musl), and the preview renderer's Playwright WebKit needs glibc. The
+  builder image is built from a digest-pinned `node` bookworm-slim image and
+  installs `python` for the execution service's workspace operations.
+- **The reaper lease is the sandbox's own label and deadline.** Every build
+  gets a fresh sandbox labelled `purpose=cockpit_build`, also inside a run, and
+  is released when it returns. The reaper spares the sandbox until its
+  wall-clock deadline and removes it after. No lease row is written.
+- **The package and the screen travel on stdin.** The builder writes nothing
+  to the workspace, so a hostile file name cannot overwrite the privacy
+  screen.
+
 ## Acceptance status
 
 The owner approved the plan in chat on 2026-10-22. Implementation proceeds

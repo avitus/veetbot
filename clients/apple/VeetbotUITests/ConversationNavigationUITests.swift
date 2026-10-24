@@ -3662,6 +3662,49 @@ final class ConversationNavigationUITests: XCTestCase {
         attachEmailScreenshot("Inbox width after relaunch")
     }
 
+    /// The switch reads Cockpit · Chat · Email at the top of each mode's left
+    /// pane; Cockpit shows its unavailable state on a server without it.
+    func testCockpitJoinsTheModeSwitchInEveryMode() {
+        app.launch()
+        let cockpit = app.buttons["mode.cockpit"]
+        XCTAssertTrue(cockpit.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertLessThan(cockpit.frame.minX, app.buttons["mode.chat"].frame.minX, "Cockpit leads the switch")
+        cockpit.click()
+        XCTAssertTrue(app.descendants(matching: .any)["cockpit.unavailable"].waitForExistence(timeout: 5))
+        app.buttons["mode.email"].click()
+        XCTAssertTrue(app.descendants(matching: .any)["email.inbox"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["mode.cockpit"].exists, "Email's sidebar offers Cockpit too")
+        app.buttons["mode.chat"].click()
+        XCTAssertTrue(app.descendants(matching: .any)["chat.composer"].waitForExistence(timeout: 10))
+    }
+
+    /// The mailbox sidebar's hairline widens it, and the next launch opens it at that width.
+    func testEmailMailboxSidebarWidthPersistsAcrossApplicationRestart() {
+        launchFullEmailInbox()
+        let handle = app.descendants(matching: .any)["email.sidebar.resize"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 10), app.debugDescription)
+        let before = handle.frame.midX
+        // Press on the hairline itself, on its sidebar side: the handle's frame is
+        // the eight-point grab area centred on the one-point line, and its centre
+        // is the boundary pixel where the inbox split view begins, which the
+        // hosted Mac's 1x display hands to the inbox list (pipelines 1417, 1419).
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.4375, dy: 0.5))
+        start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 40, dy: 0)))
+        XCTAssertTrue(waitForFrame(of: handle, timeout: 5) { abs($0.midX - (before + 40)) <= 4 },
+                      "Dragging the hairline must widen the sidebar\n\(app.debugDescription)")
+        let dragged = handle.frame.midX
+
+        app.launchEnvironment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] = "1"
+        defer { app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH") }
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.email"].waitForExistence(timeout: 10))
+        app.buttons["mode.email"].click()
+        let relaunched = app.descendants(matching: .any)["email.sidebar.resize"]
+        XCTAssertTrue(relaunched.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: relaunched, timeout: 5) { abs($0.midX - dragged) <= 3 },
+                      "The sidebar must reopen at its dragged width, not \(relaunched.frame)")
+    }
+
     /// Launch the five-priority email fixture in a deterministic Mac window.
     private func launchFullEmailInbox() {
         app.launchArguments.append("--ui-testing-email-full-inbox")

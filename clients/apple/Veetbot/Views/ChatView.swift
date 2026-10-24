@@ -341,7 +341,8 @@ public struct ChatView: View {
         // system draws it in the ui role at 600). The window's one toolbar
         // owner places People and Stop (RootView).
         .navigationTitle(
-            activeMode == .chat ? (headingScrolledAway ? model.selectedConversationTitle : "") : "Email"
+            // Email's title is its own toolbar item (EmailToolbarTitle).
+            activeMode == .chat ? (headingScrolledAway ? model.selectedConversationTitle : "") : ""
         )
         #else
         .navigationTitle(activeMode == .chat ? model.selectedConversationTitle : "Email")
@@ -360,7 +361,7 @@ public struct ChatView: View {
                 followUp: { model.prepareCallFollowUp($0) })
         }
         .sheet(isPresented: $showingWebsiteAccess) {
-            ConnectionSettingsView(model: model, embedded: false)
+            ConnectionSettingsView(model: model, embedded: false).websiteAccessSheetFrame()
         }
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)

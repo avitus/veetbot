@@ -2,10 +2,29 @@
 
 from typing import Any
 
-from sqlalchemy import Select, case, func, literal, or_, union_all
+from sqlalchemy import Select, case, func, literal, or_, select, union_all
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import LateralFromClause
 
 from agent_core.domain.memory import RecallQuery, recall_query_terms
+
+
+def lexemes(subject: Any, statement: Any) -> LateralFromClause:
+    """Compute a belief's lexeme vector once for every per-term match to read.
+
+    PostgreSQL does not share repeated `to_tsvector` calls between expressions,
+    so an inline vector ran once per term in each filter and sort: a scheduled
+    instruction's 221 terms took nine seconds per recall. `OFFSET 0` keeps the
+    planner from inlining the subquery back into those expressions. It reads
+    the joining row's columns, never a FROM of its own.
+    """
+
+    return (
+        select(func.to_tsvector("simple", subject + " " + statement).label("vector"))
+        .correlate_except(None)
+        .offset(0)
+        .lateral("lexemes")
+    )
 
 
 def ranked_candidates(
@@ -14,12 +33,15 @@ def ranked_candidates(
     *,
     identifier: Any,
     subject: Any,
-    statement: Any,
+    vector: Any,
     belief_type: Any,
     position: Any,
     owned_resource: ColumnElement[bool],
 ) -> Select[Any]:
-    """The base already contains all hard filters, including historical fences."""
+    """The base already contains all hard filters, including historical fences.
+
+    A query with lexical terms joins `vector` from `lexemes` into the base.
+    """
 
     limit = max(query.max_items * 8, 64)
     if query.candidate_selection == "recent" or not (
@@ -36,7 +58,6 @@ def ranked_candidates(
             identifier,
         ).limit(limit)
     terms = recall_query_terms(query.text)
-    vector = func.to_tsvector("simple", subject + " " + statement)
     lexical = sum(
         (
             case((vector.op("@@")(func.plainto_tsquery("simple", term)), 1), else_=0)

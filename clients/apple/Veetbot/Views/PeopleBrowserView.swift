@@ -64,7 +64,7 @@ struct PeopleLookupSheet: View {
         .accessibilityLabel("People")
         .toastHost()
         #if os(macOS)
-        .frame(minWidth: 960, minHeight: 650)
+        .sheetFrame(minWidth: 960, idealWidth: 960, minHeight: 650, idealHeight: 650)
         .background(PeopleSheetAccessibilityLabel())
         #else
         .frame(minWidth: 320, minHeight: 400)

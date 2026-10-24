@@ -19,7 +19,7 @@ function rejected(diagnostics, manifest) {
 }
 
 /**
- * @param {{files: Map<string, string>, slug: string, screen?: {names?: string[], settingsValues?: unknown[]}}} input
+ * @param {{files: Map<string, string>, slug: string, screen?: {names?: string[], settingsValues?: unknown[], commitMessage?: string}}} input
  */
 export async function buildWidget({ files, slug, screen = {} }) {
   const diagnostics = [...checkFiles(files)];

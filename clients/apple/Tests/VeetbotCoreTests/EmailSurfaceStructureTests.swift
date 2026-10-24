@@ -144,9 +144,42 @@ import Testing
 
         #expect(root.contains("NavigationSplitView(columnVisibility: $sidebarVisibility)"))
         #expect(root.contains("mailboxSidebarVisible: mailboxSidebarVisible"))
-        #expect(root.contains("|| !mailboxSidebarVisible {"))
+        #expect(root.contains("case .email: !mailboxSidebarVisible"))
         #expect(email.contains("if showsMailboxSidebar { mailboxSidebar"))
         #expect(email.contains("if !showsMailboxSidebar { inboxHeader"))
+    }
+
+    /// The Mac Email chrome follows the clean reader (MagicPath cozy-evening-6871):
+    /// the window toolbar carries the title and the appearance toggle instead of
+    /// an Email heading, the sidebar has its own draggable hairline and leads with
+    /// the mode switch and Search mail, and its rows sit under Mail and More.
+    @Test
+    func testTheMacEmailChromeFollowsTheCleanReaderDesign() throws {
+        let root = try source(at: "Veetbot/Views/RootView.swift")
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(root.contains("EmailToolbarTitle(model: coordinator.email)"))
+        #expect(root.contains("EmailAppearanceButton()"))
+        #expect(email.contains("identifier: \"email.sidebar.resize\""))
+        #expect(email.contains("SidebarSectionLabel(title: \"Mail\")"))
+        #expect(email.contains("SidebarSectionLabel(title: \"More\")"))
+        #expect(email.contains("\"Search mail\""))
+        let start = try #require(email.range(of: "private var macColumns: some View {")).upperBound
+        let end = try #require(email.range(of: "private var macSplit: some View {")).lowerBound
+        #expect(!email[start..<end].contains("emailHeading"), "The Mac columns carry no Email heading")
+    }
+
+    /// A narrow window squeezes the sidebar below its stored width; the divider
+    /// then drags from the width on screen, not the hidden stored one, so the
+    /// first point of a drag moves the edge instead of waiting for the pointer
+    /// to pass the stored width.
+    @Test
+    func testTheSidebarDividerDragsFromTheWidthOnScreen() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+
+        #expect(email.contains("edge: .trailing, width: shownSidebar - 1, label: \"Sidebar width\""))
+        #expect(email.contains("to: width, from: shownSidebar - 1, available: available, inbox: inbox)"))
+        #expect(!email.contains("from: sidebar, available: available"), "The stored width is never the drag base")
     }
 
     private func source(at relativePath: String) throws -> String {

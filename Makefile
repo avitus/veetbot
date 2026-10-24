@@ -26,7 +26,7 @@ endif
 	test-browser-cases \
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-macos-vm \
 	test-apple-ui-ios \
-	test-deploy sandbox-image browser-image test-browser-image \
+	test-deploy sandbox-image cockpit-builder-image browser-image test-browser-image \
 	production-check \
 	docs docs-serve docs-check citations-fix website-install test-website cockpit-install test-cockpit \
 	cockpit-widgets-worktree
@@ -111,7 +111,11 @@ test-integration:
 sandbox-image:
 	docker build -f execution/sandbox.Dockerfile -t agent-core-sandbox:dev .
 
-test-sandbox: sandbox-image
+# The Cockpit widget builder sandbox image (docs/plan/cockpit.md).
+cockpit-builder-image:
+	docker build -f execution/cockpit-builder.Dockerfile -t veetbot-cockpit-builder:dev .
+
+test-sandbox: sandbox-image cockpit-builder-image
 	uv run pytest -m sandbox
 
 # The browser's own requests, measured in the service image as built (ADR-0152).
@@ -206,6 +210,8 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarShowsFivePrioritiesWithoutScrolling \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarResizesWithItsDivider \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarWidthPersistsAcrossApplicationRestart \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailMailboxSidebarWidthPersistsAcrossApplicationRestart \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testCockpitJoinsTheModeSwitchInEveryMode \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testOlderServerSidebarStaysFlatWithoutFolderControls \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRecentChatsIncludesFiledChatsAndCollapses \

@@ -25,6 +25,7 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    true,
     update,
 )
 from sqlalchemy import cast as sql_cast
@@ -38,7 +39,7 @@ from sqlalchemy.sql.selectable import Subquery
 
 from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
-from agent_core.adapters.persistence.memory_candidates import ranked_candidates
+from agent_core.adapters.persistence.memory_candidates import lexemes, ranked_candidates
 from agent_core.adapters.persistence.people_erasure import lock_run_erasure
 from agent_core.adapters.persistence.reconsolidation_sources import (
     append_change,
@@ -646,6 +647,7 @@ class PostgresMemoryStore:
             return await self._query_at(query)
         predicates = self.current_predicates(query)
         terms = recall_query_terms(query.text)
+        vectors = lexemes(MemoryRow.subject, MemoryRow.statement)
         owned_resource = (
             _owned_resource_sql(
                 MemoryRow.belief_type,
@@ -665,10 +667,12 @@ class PostgresMemoryStore:
         ):
             # Any-term semantics: lexical recall is a ranking arm, so one term
             # matching is enough to make a record a candidate for the ranker.
-            vector = func.to_tsvector("simple", MemoryRow.subject + " " + MemoryRow.statement)
             text_match: ColumnElement[bool] = or_(
                 owned_resource,
-                *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms],
+                *[
+                    vectors.c.vector.op("@@")(func.plainto_tsquery("simple", term))
+                    for term in terms
+                ],
             )
             if query.subjects:
                 text_match = or_(
@@ -689,15 +693,18 @@ class PostgresMemoryStore:
                 if query.expand_ids
                 else text_match
             )
+        base = select(MemoryRow)
+        if terms:
+            base = base.join(vectors, true())
         rows = list(
             (
                 await self._session.scalars(
                     ranked_candidates(
-                        select(MemoryRow).where(*predicates),
+                        base.where(*predicates),
                         query,
                         identifier=MemoryRow.id,
                         subject=MemoryRow.subject,
-                        statement=MemoryRow.statement,
+                        vector=vectors.c.vector,
                         belief_type=MemoryRow.belief_type,
                         position=MemoryRow.store_position,
                         owned_resource=owned_resource,
@@ -779,6 +786,7 @@ class PostgresMemoryStore:
         payload = latest.c.payload
         subjects = tuple(item.casefold() for item in query.subjects)
         terms = recall_query_terms(query.text)
+        vectors = lexemes(payload["subject"].astext, payload["statement"].astext)
         owned_resource = (
             _owned_resource_sql(
                 payload["belief_type"].astext,
@@ -796,13 +804,13 @@ class PostgresMemoryStore:
             or query.structured_belief_types
             or query.include_owned_resources
         ):
-            vector = func.to_tsvector(
-                "simple", payload["subject"].astext + " " + payload["statement"].astext
-            )
             predicates.append(
                 or_(
                     owned_resource,
-                    *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms],
+                    *[
+                        vectors.c.vector.op("@@")(func.plainto_tsquery("simple", term))
+                        for term in terms
+                    ],
                     payload["belief_type"].astext.in_(
                         tuple(kind.value for kind in query.structured_belief_types)
                     ),
@@ -810,25 +818,24 @@ class PostgresMemoryStore:
                     latest.c.belief_id.in_(query.expand_ids),
                 )
             )
-        base = (
-            select(payload, MemoryRow.sensitivity)
-            .join(
-                MemoryRow,
-                and_(
-                    MemoryRow.id == latest.c.belief_id,
-                    MemoryRow.tenant_id == latest.c.tenant_id,
-                    MemoryRow.principal_id == latest.c.principal_id,
-                ),
-            )
-            .where(*predicates)
+        base = select(payload, MemoryRow.sensitivity).join(
+            MemoryRow,
+            and_(
+                MemoryRow.id == latest.c.belief_id,
+                MemoryRow.tenant_id == latest.c.tenant_id,
+                MemoryRow.principal_id == latest.c.principal_id,
+            ),
         )
+        if terms:
+            base = base.join(vectors, true())
+        base = base.where(*predicates)
         rows = await self._session.execute(
             ranked_candidates(
                 base,
                 query,
                 identifier=latest.c.belief_id,
                 subject=payload["subject"].astext,
-                statement=payload["statement"].astext,
+                vector=vectors.c.vector,
                 belief_type=payload["belief_type"].astext,
                 position=sql_cast(payload["store_position"].astext, Integer),
                 owned_resource=owned_resource,

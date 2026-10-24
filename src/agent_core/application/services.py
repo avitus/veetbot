@@ -22,6 +22,15 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskScopePolicy,
     TaskGrantEcho,
 )
+from agent_core.domain.cockpit import DeviceClass
+from agent_core.domain.cockpit_views import (
+    CockpitChangeView,
+    CockpitLayoutView,
+    CockpitLayoutWrite,
+    CockpitSettingsView,
+    CockpitSnapshotView,
+    CockpitWidgetDetailView,
+)
 from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, ForwardDreamingBoundary
@@ -107,6 +116,7 @@ from agent_core.domain.views import (
     SubmitResult,
     TestNotificationResult,
 )
+from agent_core.ports.cockpit import CockpitAsset
 
 
 class SessionService(Protocol):
@@ -588,6 +598,34 @@ class PeopleErasureOperations(Protocol):
         *,
         ceiling: Sensitivity,
     ) -> PeopleErasureView: ...
+
+
+class CockpitService(Protocol):
+    """The Cockpit board, its stream and the owner's changes (docs/plan/cockpit.md)."""
+
+    async def snapshot(self, principal: Principal) -> CockpitSnapshotView: ...
+
+    def stream(self, principal: Principal, after: int | None) -> AsyncIterator[StreamFrame]: ...
+
+    async def asset(self, principal: Principal, sha256: str) -> CockpitAsset: ...
+
+    async def widget(self, principal: Principal, slug: str) -> CockpitWidgetDetailView: ...
+
+    async def put_settings(
+        self, principal: Principal, slug: str, values: dict[str, str | int | float | bool]
+    ) -> CockpitSettingsView: ...
+
+    async def put_layout(
+        self, principal: Principal, device_class: DeviceClass, request: CockpitLayoutWrite
+    ) -> CockpitLayoutView: ...
+
+    async def revert(
+        self, principal: Principal, slug: str, revision_id: UUID
+    ) -> CockpitChangeView: ...
+
+    async def delete(self, principal: Principal, slug: str) -> CockpitChangeView: ...
+
+    async def restore(self, principal: Principal, slug: str) -> CockpitChangeView: ...
 
 
 class PeopleService(Protocol):

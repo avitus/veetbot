@@ -17,6 +17,7 @@ from uuid import UUID
 
 from agent_core.domain.cockpit import (
     WIDGET_BRANCH_DIRECTORY,
+    WIDGET_BRANCH_README,
     commit_trailers,
     is_widget_file,
     is_widget_slug,
@@ -38,7 +39,12 @@ def _directory(slug: str) -> str:
     return f"{WIDGET_BRANCH_DIRECTORY}/{slug}/"
 
 
-def _touched(paths: list[str]) -> tuple[tuple[str, ...], bool]:
+BRANCH_ROOT_MESSAGE = "cockpit: create the widget branch\n"
+
+
+def touched_widgets(paths: list[str]) -> tuple[tuple[str, ...], bool]:
+    """The widget slugs a commit's paths touch, and whether any path lies outside them."""
+
     slugs: set[str] = set()
     outside = False
     prefix = f"{WIDGET_BRANCH_DIRECTORY}/"
@@ -51,12 +57,6 @@ def _touched(paths: list[str]) -> tuple[tuple[str, ...], bool]:
 
 
 class FakeWidgetRepository:
-    README = (
-        "# Cockpit widgets\n\n"
-        "Widget packages Veetbot's assistant and its owner write. Generic code only:\n"
-        "personal values live in private settings and feeds, never here.\n"
-    )
-
     def __init__(self) -> None:
         self._commits: dict[str, _Commit] = {}
         self._order: list[str] = []
@@ -71,7 +71,7 @@ class FakeWidgetRepository:
             [len(self._order), parent, message, sorted(tree.items())], separators=(",", ":")
         )
         sha = hashlib.sha1(document.encode("utf-8"), usedforsecurity=False).hexdigest()
-        slugs, outside = _touched(changed)
+        slugs, outside = touched_widgets(changed)
         self._commits[sha] = _Commit(sha, parent, message, dict(tree), slugs, outside)
         self._order.append(sha)
         return sha
@@ -94,7 +94,7 @@ class FakeWidgetRepository:
             if head is not None:
                 return head
             readme = f"{WIDGET_BRANCH_DIRECTORY}/README.md"
-            return self._commit({readme: self.README}, "cockpit: create the widget branch\n", [])
+            return self._commit({readme: WIDGET_BRANCH_README}, BRANCH_ROOT_MESSAGE, [])
 
     async def write_widget(
         self,
@@ -155,6 +155,8 @@ class FakeWidgetRepository:
 
     async def commits_since(self, sha: str | None, *, limit: int) -> list[WidgetCommit]:
         async with self._lock:
+            if sha is not None and sha not in self._commits:
+                raise BranchMovedError(self._head())
             start = 0 if sha is None else self._order.index(sha) + 1
             return [self._public(item) for item in self._order[start : start + limit]]
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
@@ -52,6 +53,7 @@ from agent_core.domain.cockpit import (
     WidgetRevision,
     WidgetSettings,
     WidgetState,
+    cockpit_channel,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 
@@ -1336,6 +1338,16 @@ class PostgresCockpitEventLog:
                 .returning(CockpitEventRow.sequence)
             )
         ).scalar_one()
+        # Delivered on commit with the row; readers fetch the row, so only the kind and
+        # sequence travel (docs/plan/cockpit.md, the stream).
+        await self._session.execute(
+            select(
+                func.pg_notify(
+                    cockpit_channel(principal.tenant_id),
+                    json.dumps({"kind": "cockpit", "sequence": sequence}),
+                )
+            )
+        )
         return CockpitEvent(
             tenant_id=principal.tenant_id,
             principal_id=principal.principal_id,

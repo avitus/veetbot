@@ -120,6 +120,18 @@ enum ConversationNavigationUITestFixture {
         }
         return EmailInboxWidthStore(defaults: defaults)
     }
+
+    /// The mailbox sidebar width, kept like the inbox width: its own suite,
+    /// emptied at launch unless a relaunch journey keeps it.
+    static func makeEmailSidebarWidthIfRequested() -> EmailSidebarWidthStore? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.email-sidebar-width"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] != "1" {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return EmailSidebarWidthStore(defaults: defaults)
+    }
     #endif
 
     /// Whether a launch asked for one conversation to open by itself.

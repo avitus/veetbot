@@ -79,6 +79,19 @@ def _model_policy_failures(settings: Settings) -> list[str]:
     return []
 
 
+def _image_failures(settings: Settings) -> list[str]:
+    """The run sandbox image and the Cockpit builder image must both be present."""
+
+    failures: list[str] = []
+    for label, reference in (
+        ("sandbox image", settings.sandbox_image),
+        ("Cockpit builder image", settings.cockpit_builder_image),
+    ):
+        if _run("docker", "image", "inspect", reference).returncode != 0:
+            failures.append(f"{label} is unavailable: {reference}")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-database", action="store_true")
@@ -127,9 +140,7 @@ def main() -> int:
                     failures.append("Docker runtime 'runsc' is not installed")
 
     if settings is not None and available["docker"]:
-        image = _run("docker", "image", "inspect", settings.sandbox_image)
-        if image.returncode != 0:
-            failures.append(f"sandbox image is unavailable: {settings.sandbox_image}")
+        failures.extend(_image_failures(settings))
 
     if not args.skip_database and available["uv"]:
         migration = _run("uv", "run", "alembic", "current", "--check-heads")
@@ -142,7 +153,7 @@ def main() -> int:
         return 1
     print(
         "OK: production configuration, release identity, model credential, gVisor, "
-        "sandbox image, storage, and database"
+        "sandbox and Cockpit builder images, storage, and database"
     )
     return 0
 

@@ -730,6 +730,8 @@ approximates rather than reimplements the PostgreSQL parser: a URL carrying a
 query string and a date divide differently there. Those edges change what the
 ranker is offered, never what a principal may see, which is the reason lexical
 recall is allowed to be an approximation and the isolation predicates are not.
+Each belief's vector is computed once, in a lateral join every per-term match
+reads; inline, a 221-term scheduled instruction took nine seconds per recall.
 
 **Episode paging.** Episode search reads one page of events and stops, so a
 match beyond the first page is invisible. It becomes a bounded page loop with
@@ -862,7 +864,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:372): the delta is issued for what the
+context engine caps (context-engine.md:373): the delta is issued for what the
 base block left of both the token and item budgets, excluding its already
 returned belief identifiers before candidate limits. It is not issued when either
 allowance is exhausted, so a session with a frozen snapshot cannot carry twice the recall a

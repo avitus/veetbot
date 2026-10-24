@@ -19,6 +19,7 @@ from agent_core.domain.execution import (
     ExecutionCommand,
     ExecutionResult,
     ResourceLimits,
+    SandboxPurpose,
     WorkspaceEntry,
     WorkspaceProvenance,
 )
@@ -125,8 +126,10 @@ class SandboxManager:
         parent_environment: Mapping[str, str] | None = None,
         passthrough_names: tuple[str, ...] = (),
         drain_timeout_seconds: float = 5.0,
+        purpose: SandboxPurpose = SandboxPurpose.RUN,
     ) -> None:
         self._environment = environment
+        self._purpose = purpose
         self._image_digest = image_digest
         self._resolve_image_digest = resolve_image_digest
         self._limits = limits
@@ -182,6 +185,7 @@ class SandboxManager:
                     environment=build_sandbox_environment(
                         self._parent_environment, self._passthrough_names
                     ),
+                    purpose=self._purpose,
                 )
                 handle = await self._environment.provision(spec)
                 # No await may separate a live provisioned handle from manager

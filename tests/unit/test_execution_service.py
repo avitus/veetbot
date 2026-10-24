@@ -488,6 +488,7 @@ async def test_execution_service_composition_closes_server_and_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
+    allowed: list[object] = []
 
     class Runtime:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -497,8 +498,9 @@ async def test_execution_service_composition_closes_server_and_runtime(
             events.append("runtime-closed")
 
     class Server:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
+        def __init__(self, *_args: object, **kwargs: object) -> None:
             events.append("server-created")
+            allowed.append(kwargs.get("allowed_images"))
 
         async def serve_forever(self) -> None:
             events.append("served")
@@ -509,8 +511,11 @@ async def test_execution_service_composition_closes_server_and_runtime(
     monkeypatch.setattr(bootstrap, "DockerExecutionEnvironment", Runtime)
     monkeypatch.setattr(bootstrap, "ExecutionServiceServer", Server)
 
-    await bootstrap.serve_execution_service(tmp_path / "execution.sock")
+    await bootstrap.serve_execution_service(
+        tmp_path / "execution.sock", allowed_images=("agent-core-sandbox:production",)
+    )
 
+    assert allowed == [("agent-core-sandbox:production",)]
     assert events == [
         "runtime-created",
         "server-created",

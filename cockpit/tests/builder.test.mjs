@@ -70,6 +70,17 @@ test('the privacy screen uses the principal context the server supplies', async 
   assert.deepEqual(screened.diagnostics.map((diagnostic) => diagnostic.rule), ['screen.setting']);
 });
 
+test('the privacy screen also checks the commit message the outbox will write', async () => {
+  const files = flight();
+  const message = 'cockpit: create flight-tracker\n\nCockpit-Widget: flight-tracker\nVeetbot-Revision: 00000000-0000-4000-8000-000000000001\n';
+  const clean = await buildWidget({ files, slug: 'flight-tracker', screen: { commitMessage: message } });
+  assert.equal(clean.ok, true, JSON.stringify(clean.diagnostics));
+  const screened = await buildWidget({ files, slug: 'flight-tracker', screen: { names: ['Tracker'], commitMessage: message } });
+  const commit = screened.diagnostics.filter((diagnostic) => diagnostic.file === 'commit message');
+  assert.deepEqual(commit.map((diagnostic) => diagnostic.rule), ['screen.name']);
+  assert.ok(commit.every((diagnostic) => !diagnostic.message.includes('Tracker')));
+});
+
 test('source checks run before anything is compiled', async () => {
   const result = await buildWidget({ files: changed({ 'widget.tsx': (text) => `import _ from 'lodash';\n${text}` }), slug: 'flight-tracker' });
   assert.ok(result.diagnostics.every((diagnostic) => !diagnostic.rule.startsWith('compile.') && !diagnostic.rule.startsWith('render.')));
@@ -102,4 +113,44 @@ test('the CLI reports JSON, writes the bundle, and exits by outcome', (t) => {
 
   const usage = spawnSync(process.execPath, [cli, 'nonsense'], { encoding: 'utf8' });
   assert.equal(usage.status, 2);
+});
+
+test('the CLI can return the bundle and manifest in its report for a sandboxed caller', () => {
+  const emitted = spawnSync(process.execPath, [cli, 'build', path.join(examples, 'weather'), '--emit-bundle'], { encoding: 'utf8' });
+  assert.equal(emitted.status, 0, emitted.stderr);
+  const report = JSON.parse(emitted.stdout);
+  assert.equal(createHash('sha256').update(report.bundle).digest('hex'), report.sha256);
+  assert.equal(report.manifest.slug, 'weather');
+  const plain = JSON.parse(spawnSync(process.execPath, [cli, 'build', path.join(examples, 'weather')], { encoding: 'utf8' }).stdout);
+  assert.equal(plain.bundle, undefined);
+  assert.equal(plain.manifest, undefined);
+});
+
+test('the CLI builds a package and screen read from stdin, judging the raw file names', () => {
+  const files = Object.fromEntries(readPackage(path.join(examples, 'weather')).files);
+  const run = (input) => spawnSync(process.execPath, [cli, 'build', '--stdin', 'weather', '--emit-bundle'], { encoding: 'utf8', input });
+  const built = run(JSON.stringify({ files, screen: {} }));
+  assert.equal(built.status, 0, built.stderr);
+  const report = JSON.parse(built.stdout);
+  assert.equal(report.slug, 'weather');
+  assert.equal(createHash('sha256').update(report.bundle).digest('hex'), report.sha256);
+
+  const escaping = run(JSON.stringify({ files: { ...files, '../screen.json': '{}' }, screen: {} }));
+  assert.equal(escaping.status, 1);
+  assert.deepEqual(JSON.parse(escaping.stdout).diagnostics.map((diagnostic) => diagnostic.rule), ['package.path']);
+
+  const screened = run(JSON.stringify({ files, screen: { names: ['Example City'], settingsValues: [] } }));
+  assert.equal(screened.status, 1);
+  assert.deepEqual(new Set(JSON.parse(screened.stdout).diagnostics.map((diagnostic) => diagnostic.rule)), new Set(['screen.name']));
+
+  for (const input of [
+    'not json',
+    JSON.stringify({ files: { 'widget.tsx': 1 }, screen: {} }),
+    JSON.stringify({ files, screen: { names: 'x' } }),
+    JSON.stringify({ files, screen: { commitMessage: 7 } }),
+  ]) {
+    assert.equal(run(input).status, 2, input);
+  }
+  const slugless = spawnSync(process.execPath, [cli, 'build', '--stdin'], { encoding: 'utf8', input: '{}' });
+  assert.equal(slugless.status, 2);
 });

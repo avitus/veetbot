@@ -1722,9 +1722,10 @@ changes what an approved `SANDBOX_NETWORK` grants, and the operator's
 
 [ADR-0240](../adr/0240-cockpit-mode-and-agent-authored-widgets.md) answers
 the image question above for one platform-owned purpose. The second image is
-`execution/cockpit-builder`. It is built from this image's base, keeps
-`python` for the workspace operations, and adds Node, the locked `cockpit/`
-dependencies and Playwright WebKit.
+`execution/cockpit-builder.Dockerfile`. It is built from a digest-pinned
+Debian Node base rather than this image's Alpine base, because Playwright
+WebKit needs glibc. It installs `python` for the workspace operations and
+adds the locked `cockpit/` dependencies and the built kit.
 
 It runs through the same execution service under gVisor, with:
 
@@ -1733,9 +1734,11 @@ It runs through the same execution service under gVisor, with:
 - the standard limits;
 - an empty environment and no credentials.
 
-The service admits only the two configured images. A build that starts
-outside a run holds its own lease, with a `purpose=cockpit_build` label, so
-the reaper treats it as live. Release preflight builds a canary under runsc.
+The service admits only the images its unit names with `--allow-image`.
+Every build sandbox is labelled `purpose=cockpit_build`, and the reaper holds
+it to its own wall-clock deadline instead of a run lease. A build outside a
+run therefore survives until that deadline and no longer. Release preflight
+builds a canary under runsc.
 
 Tenants still cannot choose an image. The per-tenant question remains open.
 [cockpit.md](cockpit.md) owns the build contract.

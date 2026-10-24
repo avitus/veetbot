@@ -511,7 +511,7 @@ struct ScheduleCreateSheet: View {
             await model.readDraft(text)
         }
         #if os(macOS)
-        .frame(minWidth: 520, idealWidth: 600, minHeight: 320, idealHeight: 360)
+        .sheetFrame(minWidth: 520, idealWidth: 600, minHeight: 320, idealHeight: 360)
         #endif
     }
 

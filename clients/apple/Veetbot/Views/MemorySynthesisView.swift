@@ -346,7 +346,7 @@ struct MemorySynthesisDetailView: View {
         NavigationStack { undoContent }
         .tint(AppTheme.tealFill)
         #if os(macOS)
-        .frame(minWidth: 520, minHeight: 440)
+        .sheetFrame(minWidth: 520, idealWidth: 520, minHeight: 440, idealHeight: 440)
         #endif
     }
     private var undoContent: some View {

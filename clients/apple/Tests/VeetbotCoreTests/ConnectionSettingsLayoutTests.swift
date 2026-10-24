@@ -183,7 +183,7 @@ import Testing
         )
         #expect(sheet.contains(".fullScreenCover(item:"))
         #expect(sheet.contains("userInterfaceIdiom == .phone"))
-        #expect(sheet.contains(".frame(minWidth: 820, minHeight: 680)"))
+        #expect(sheet.contains(".sheetFrame(minWidth: 820, idealWidth: 1000, minHeight: 680, idealHeight: 760)"))
         #expect(sheet.contains("Button(\"I'm signed in\")"))
         #expect(sheet.contains("DeviceSignInNavigationPolicy.canConfirm("))
         #expect(sheet.contains("DeviceSignInNavigationPolicy.decide("))

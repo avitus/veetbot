@@ -240,13 +240,15 @@ test-cockpit      cockpit-install, Chromium, kit, builder and realm
                   tests, then ESLint and tsc
 ```
 
-Nine more serve checks, CI steps, or operators. `docs-check` runs
+Eleven more serve checks, CI steps, or operators. `docs-check` runs
 `scripts/check_docs.py` and `test-deploy` the release, rollback, and Nginx
 deployment script tests; both are inside `make check` and CI's static job,
 which also runs `client-build` to build the downloadable client zipapp.
 `citations-fix` updates the citation ledger after an edit moves cited lines.
 `docs-serve` serves the documentation locally, `sandbox-image` builds the
-development sandbox image, and `production-check` validates a host-native
+development sandbox image, `cockpit-builder-image` builds the development
+Cockpit builder image, which `test-sandbox` also needs
+([cockpit.md](cockpit.md)), and `production-check` validates a host-native
 production deployment. `browser-image` builds the browser-profile service
 image, and `test-browser-image` measures what its browser asks for on its own
 (ADR-0152); both need Docker and stay outside `make check`.

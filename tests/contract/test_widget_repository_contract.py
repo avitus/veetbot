@@ -1,18 +1,33 @@
 """Widget repository contract: the public branch, one widget directory, fast-forward only.
 
-The fake adapter passes it now; the GitHub adapter must pass it against a
-scratch repository when it lands (docs/plan/cockpit.md, build step 5).
+Both adapters pass it: the fake repository, and the GitHub App adapter against
+the in-memory GitHub remote in `fake_github.py`, which enforces fast-forward
+ref updates and installation tokens the way GitHub does (docs/plan/cockpit.md).
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
+import httpx
 import pytest
 
 from agent_core.adapters.cockpit.git import FakeWidgetRepository
-from agent_core.domain.cockpit import commit_trailers, widget_commit_message
-from agent_core.ports.cockpit import BranchMovedError, WidgetPathRefusedError
+from agent_core.adapters.cockpit.github import GitHubAppTokens, GitHubWidgetRepository
+from agent_core.adapters.determinism import FixedClock
+from agent_core.domain.cockpit import WIDGET_BRANCH_README, commit_trailers, widget_commit_message
+from agent_core.ports.cockpit import BranchMovedError, WidgetPathRefusedError, WidgetRepository
+from tests.contract.fake_github import (
+    APP_ID,
+    INSTALLATION_ID,
+    NAME,
+    OWNER,
+    FakeGitHubRemote,
+    app_private_key,
+)
 
 REVISION_1 = UUID("00000000-0000-0000-0000-00000000c001")
 REVISION_2 = UUID("00000000-0000-0000-0000-00000000c002")
@@ -21,32 +36,59 @@ FILES = {
     "widget.tsx": "export default function W() { return null; }",
     "fixtures/typical.json": "{}",
 }
+KEY = app_private_key()
 
 
-async def _branch() -> tuple[FakeWidgetRepository, str]:
-    repository = FakeWidgetRepository()
-    return repository, await repository.ensure_branch()
+@dataclass
+class Harness:
+    repository: WidgetRepository
+    commit_as_person: Callable[..., str]
+    tree: Callable[[str], Mapping[str, str]]
 
 
-async def test_the_branch_is_created_once_with_its_readme() -> None:
-    repository = FakeWidgetRepository()
+@pytest.fixture(params=["fake", "github"])
+async def harness(request: pytest.FixtureRequest) -> AsyncIterator[Harness]:
+    if request.param == "fake":
+        fake = FakeWidgetRepository()
+        yield Harness(fake, fake.commit_as_person, fake.tree)
+        return
+    clock = FixedClock(datetime(2026, 10, 23, 18, 0, tzinfo=UTC))
+    remote = FakeGitHubRemote(private_key_pem=KEY, now=clock.now)
+    async with httpx.AsyncClient(transport=remote.transport()) as client:
+        tokens = GitHubAppTokens(
+            client,
+            app_id=APP_ID,
+            installation_id=INSTALLATION_ID,
+            private_key_pem=KEY,
+            clock=clock,
+        )
+        repository = GitHubWidgetRepository(client, tokens, repository=f"{OWNER}/{NAME}")
+        yield Harness(repository, remote.commit_as_person, remote.files_at)
+
+
+async def _branch(harness: Harness) -> tuple[WidgetRepository, str]:
+    return harness.repository, await harness.repository.ensure_branch()
+
+
+async def test_the_branch_is_created_once_with_its_readme(harness: Harness) -> None:
+    repository = harness.repository
     assert await repository.head() is None
     root = await repository.ensure_branch()
     assert await repository.ensure_branch() == root
     assert await repository.head() == root
     [commit] = await repository.commits_since(None, limit=10)
     assert (commit.sha, commit.parent_sha, commit.changed_slugs) == (root, None, ())
-    assert repository.tree(root) == {"cockpit/widgets/README.md": repository.README}
+    assert dict(harness.tree(root)) == {"cockpit/widgets/README.md": WIDGET_BRANCH_README}
 
 
-async def test_a_write_is_a_fast_forward_inside_one_widget_directory() -> None:
-    repository, root = await _branch()
+async def test_a_write_is_a_fast_forward_inside_one_widget_directory(harness: Harness) -> None:
+    repository, root = await _branch(harness)
     message = widget_commit_message("create", "weather", REVISION_1)
     head = await repository.write_widget("weather", FILES, parent_sha=root, message=message)
     assert await repository.head() == head
     assert await repository.read_widget("weather", at=head) == FILES
     assert await repository.read_widget("weather", at=root) is None
-    assert set(repository.tree(head)) == {
+    assert set(harness.tree(head)) == {
         "cockpit/widgets/README.md",
         *(f"cockpit/widgets/weather/{name}" for name in FILES),
     }
@@ -57,8 +99,8 @@ async def test_a_write_is_a_fast_forward_inside_one_widget_directory() -> None:
     assert dict(commit.trailers) == commit_trailers(message)
 
 
-async def test_a_write_replaces_the_widget_directory_exactly() -> None:
-    repository, root = await _branch()
+async def test_a_write_replaces_the_widget_directory_exactly(harness: Harness) -> None:
+    repository, root = await _branch(harness)
     first = await repository.write_widget(
         "weather",
         FILES,
@@ -76,8 +118,8 @@ async def test_a_write_replaces_the_widget_directory_exactly() -> None:
     assert await repository.read_widget("weather", at=first) == FILES
 
 
-async def test_a_stale_parent_never_overwrites_the_branch() -> None:
-    repository, root = await _branch()
+async def test_a_stale_parent_never_overwrites_the_branch(harness: Harness) -> None:
+    repository, root = await _branch(harness)
     head = await repository.write_widget(
         "weather",
         FILES,
@@ -115,9 +157,9 @@ async def test_a_stale_parent_never_overwrites_the_branch() -> None:
     ],
 )
 async def test_paths_outside_one_widget_are_refused_before_anything_is_written(
-    slug: str, files: dict[str, str]
+    harness: Harness, slug: str, files: dict[str, str]
 ) -> None:
-    repository, root = await _branch()
+    repository, root = await _branch(harness)
     with pytest.raises(WidgetPathRefusedError):
         await repository.write_widget(
             slug,
@@ -128,8 +170,8 @@ async def test_paths_outside_one_widget_are_refused_before_anything_is_written(
     assert await repository.head() == root
 
 
-async def test_removal_deletes_the_directory_and_history_keeps_it() -> None:
-    repository, root = await _branch()
+async def test_removal_deletes_the_directory_and_history_keeps_it(harness: Harness) -> None:
+    repository, root = await _branch(harness)
     written = await repository.write_widget(
         "weather",
         FILES,
@@ -151,9 +193,9 @@ async def test_removal_deletes_the_directory_and_history_keeps_it() -> None:
         )
 
 
-async def test_human_commits_are_listed_with_what_they_touched() -> None:
-    repository, root = await _branch()
-    human = repository.commit_as_person(
+async def test_human_commits_are_listed_with_what_they_touched(harness: Harness) -> None:
+    repository, root = await _branch(harness)
+    human = harness.commit_as_person(
         {
             "cockpit/widgets/markets/widget.tsx": "export default () => null;",
             "cockpit/widgets/weather/widget.json": "{}",
@@ -168,18 +210,25 @@ async def test_human_commits_are_listed_with_what_they_touched() -> None:
     assert dict(commit.trailers) == {}
 
 
-async def test_a_lost_response_is_found_by_its_revision_trailer() -> None:
-    repository, root = await _branch()
+async def test_a_lost_response_is_found_by_its_revision_trailer(harness: Harness) -> None:
+    repository, root = await _branch(harness)
     first = await repository.write_widget(
         "weather",
         FILES,
         parent_sha=root,
         message=widget_commit_message("create", "weather", REVISION_1),
     )
-    repository.commit_as_person({"cockpit/widgets/markets/widget.json": "{}"}, message="human\n")
+    harness.commit_as_person({"cockpit/widgets/markets/widget.json": "{}"}, message="human\n")
     assert await repository.find_revision(REVISION_1, limit=10) == first
     assert await repository.find_revision(REVISION_2, limit=10) is None
     assert await repository.find_revision(REVISION_1, limit=1) is None
     oldest_first = await repository.commits_since(None, limit=10)
     assert [commit.sha for commit in oldest_first][:2] == [root, first]
     assert len(await repository.commits_since(None, limit=2)) == 2
+
+
+async def test_history_from_a_commit_not_on_the_branch_is_refused(harness: Harness) -> None:
+    repository, root = await _branch(harness)
+    with pytest.raises(BranchMovedError) as error:
+        await repository.commits_since("f" * 40, limit=10)
+    assert error.value.head == root

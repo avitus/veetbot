@@ -81,6 +81,14 @@ class DeviceValidationError(AgentCoreError):
         self.reason = reason
 
 
+class CockpitValidationError(AgentCoreError):
+    """A Cockpit settings or layout write does not fit the live widget it names."""
+
+
+class CockpitBuildUnavailable(AgentCoreError):  # noqa: N818 - normative taxonomy name
+    """The builder reached no verdict for an owner's widget change; nothing was recorded."""
+
+
 class DeviceChannelUnavailable(AgentCoreError):  # noqa: N818 - normative taxonomy name
     """A device-scoped call cannot reach the device it names."""
 
