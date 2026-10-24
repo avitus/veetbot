@@ -1,12 +1,5 @@
 import Foundation
 
-public enum ClientMode: String, CaseIterable, Identifiable, Sendable {
-    case chat, email
-    public var id: String { rawValue }
-    public var title: String { self == .chat ? "Chat" : "Email" }
-    public var symbol: String { self == .chat ? "bubble.left.and.bubble.right" : "envelope" }
-}
-
 public struct EmailAccountView: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public let label: String

@@ -106,3 +106,27 @@ folds the panel instead. Neither is recorded as the owner's choice, and the
 fold leaves the window's own sidebar state untouched, since macOS restores that
 state at the next launch. A sender too long to share a line with the date puts
 the date below it.
+
+## Owner-requested resizable Email columns (2026-10-23)
+
+The owner asked for all four Mac Email columns to be resizable with their
+widths remembered on each device, and for the shipped Email surface to match
+the MagicPath design "Mac — Email · Clean reader" (cozy-evening-6871), which
+was refined first: its sidebar, inbox and panel each gained the same draggable
+hairline, a remembered width and a double-click reset, and the reader a
+420-point minimum. The Mac follows it: the sidebar (200 to 340, starting at
+260) joins the inbox (now 260 to 480, starting at 300) and the panel (260 to
+440) as an owner-sized column kept in this Mac's defaults, and the reader takes
+what they leave. A drag of the sidebar or the panel stops before the reader
+falls below 420 points; a narrow window may still squeeze it to 250. The Mac
+also takes the design's chrome: the window toolbar's "Inbox · N need you"
+title and appearance toggle replace the Email heading, the sidebar leads with
+the mode switch and Search mail and groups Mail and More, and the reader takes
+the design's padding and bottom bar. The owner chose to keep every control the
+design does not draw (the account picker, Find other mail, New chat, pending
+chat attention, Email learning, the shortcuts row, the mailbox status and
+Refine with Veetbot), restyled into the design's sections rather than removed.
+iPhone and iPad are unchanged. The same pass carried the Cockpit · Chat ·
+Email switch of "Mac — Chat · Right panel" into the clean reader design and
+into each Mac left pane (ADR-0240's build step 9). No server contract, policy,
+or milestone changes.

@@ -32,9 +32,17 @@ private struct InspectorColumn<Content: View, Panel: View>: View {
                     .frame(maxHeight: .infinity)
                     .background(AppTheme.paperDeep)
                     .accessibilityElement(children: .contain)
-                    .accessibilityLabel(mode == .chat ? "Conversation panel" : "Thread panel")
+                    .accessibilityLabel(panelLabel)
                     .accessibilityIdentifier("inspector.\(mode.rawValue)")
             }
+        }
+    }
+
+    private var panelLabel: String {
+        switch mode {
+        case .cockpit: "Board panel"
+        case .chat: "Conversation panel"
+        case .email: "Thread panel"
         }
     }
 }
@@ -44,8 +52,36 @@ private struct InspectorColumn<Content: View, Panel: View>: View {
 private struct InspectorResizeHandle: View {
     @ObservedObject var inspector: InspectorModel
     let mode: ClientMode
+
+    var body: some View {
+        MacColumnDivider(
+            edge: .leading, width: inspector.width(mode), label: "Panel width",
+            identifier: "inspector.resize",
+            resize: { inspector.setWidth($0, for: mode, remember: $1) },
+            reset: { inspector.setWidth(InspectorLayout.defaultWidth(mode), for: mode, remember: true) }
+        )
+    }
+}
+
+/// A column's draggable hairline (MagicPath cozy-evening-6871): teal while
+/// hovered or dragged, the arrow keys of VoiceOver's adjust action step it,
+/// and a double-click returns the column to its starting width. `edge` is the
+/// side of the column the hairline sits on, so a trailing hairline widens its
+/// column as it moves right and a leading one as it moves left. `resize`
+/// receives each live width, then the final one with `remember` set.
+struct MacColumnDivider: View {
+    enum Edge { case leading, trailing }
+
+    let edge: Edge
+    let width: CGFloat
+    let label: String
+    let identifier: String
+    let resize: (_ width: CGFloat, _ remember: Bool) -> Void
+    let reset: () -> Void
     @State private var dragStart: CGFloat?
     @State private var hovering = false
+
+    private var sign: CGFloat { edge == .trailing ? 1 : -1 }
 
     var body: some View {
         Rectangle()
@@ -64,25 +100,26 @@ private struct InspectorResizeHandle: View {
                     .gesture(
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { value in
-                                let start = dragStart ?? inspector.width(mode)
+                                let start = dragStart ?? width
                                 dragStart = start
-                                inspector.setWidth(start - value.translation.width, for: mode, remember: false)
+                                resize(start + sign * value.translation.width, false)
                             }
                             .onEnded { value in
-                                let start = dragStart ?? inspector.width(mode)
-                                inspector.setWidth(start - value.translation.width, for: mode, remember: true)
+                                let start = dragStart ?? width
+                                resize(start + sign * value.translation.width, true)
                                 dragStart = nil
                             }
                     )
+                    .simultaneousGesture(TapGesture(count: 2).onEnded { reset() })
             }
             .accessibilityElement()
-            .accessibilityLabel("Panel width")
-            .accessibilityValue("\(Int(inspector.width(mode))) points")
+            .accessibilityLabel(label)
+            .accessibilityValue("\(Int(width)) points")
             .accessibilityAdjustableAction { direction in
                 let step: CGFloat = direction == .increment ? VeetSpace.s5 : -VeetSpace.s5
-                inspector.setWidth(inspector.width(mode) + step, for: mode, remember: true)
+                resize(width + step, true)
             }
-            .accessibilityIdentifier("inspector.resize")
+            .accessibilityIdentifier(identifier)
     }
 }
 

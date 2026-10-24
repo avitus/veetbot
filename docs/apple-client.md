@@ -753,7 +753,17 @@ and all existing transport-only client boundaries remain mandatory. Milestone
 26's new native evidence is required independently of existing Apple gates.
 
 `AppCoordinator` retains the Chat and Email view models and the mode shell keeps
-both navigation trees mounted. Email uses the Chat connection's authenticated
+every mode's navigation tree mounted. The shell has three modes, Cockpit · Chat
+· Email in that order (`ClientMode`, its own file; docs/plan/cockpit.md), and
+every mode-dependent surface switches over all three: the mode bar and its More
+menu, the mounted trees, the Mac toolbar and window title, the right panel's
+width table and label, and each mode switch. On the Mac the switch is the first
+thing in each mode's left pane (MagicPath merry-moon-8243, cozy-evening-6871,
+merrily-city-4157): above Chat's search and New chat, above Email's Search
+mail, and above Cockpit's widget list; the mode bar returns only while that
+pane is hidden. Cockpit shows its native unavailable state ("Cockpit isn't
+available yet", `cockpit.unavailable`) until a server offers its routes; the
+board, its web view and its stream arrive with the native Cockpit mode. Email uses the Chat connection's authenticated
 transport. Its compact navigation opens a thread from the inbox; regular iPad
 and Mac layouts keep a mailbox sidebar beside the list and thread detail.
 Inbox is the initial collection; Needs you and Handled are distinct server
@@ -783,23 +793,35 @@ an account failure only when the server has recorded a refresh error.
 The wide Email sidebar contains account and search controls, New chat, the
 Chat / Email switch, pending chat attention, and Mailbox navigation for Inbox,
 Needs you, Handled and Subscriptions. Its bottom row opens Chat, Memory, People,
-Schedules, Persona and Settings. On the Mac the window's sidebar button hides
-it together with Chat's sidebar; the mode bar with Chat / Email and More then
+Schedules, Persona and Settings. On the Mac it follows the clean reader design
+(MagicPath cozy-evening-6871): the Cockpit · Chat · Email switch and Search mail lead,
+then a Mail section (Inbox, Needs you behind an amber dot, Handled, with
+counts), a More section (Subscriptions, Email learning, Find other mail), any
+pending chat attention, and the account picker; New chat joins the bottom row. On the Mac the window's sidebar button hides
+it together with Chat's sidebar; the mode bar with the mode switch and More then
 returns, and account, search and collection pills sit above the inbox.
 This visibility binding is Mac-only; iPad retains UIKit-managed split navigation.
 Sender and attachment reveals are consumed once the Email panel mounts, including
 when it was closed; changing threads clears an unhandled reveal. Thread changes
 and panel dismissal also cancel transient highlights. Sender cards
 refresh People context for the selected message’s date, even for the same sender.
-The main page has an Email heading, count and appearance toggle. Compact screens put the mailbox collections in horizontal
+On touch the main page has an Email heading, count and appearance toggle; on
+the Mac the window toolbar carries the title instead ("Inbox · 2 need you":
+the collection in semibold, then how many need the owner in faint ink) and the
+appearance toggle, above a hairline. Compact screens put the mailbox collections in horizontal
 filter pills. Important / Other mail remains available under Find other mail.
-Mac uses a native draggable split divider: the inbox can grow from 280 to 560
-points while retaining at least 250 points for reading in a small window.
-Its width, selected thread and loaded rows survive Chat / Email switching, and
-the two modes cross-fade. The width the
-owner drags the divider to is kept on this Mac (`veetbot.email.inboxWidth`) and
-restored at the next launch; a window too narrow for it squeezes the inbox
-without replacing the remembered width.
+On the Mac all four Email columns take the width the owner gives them, each
+kept on this Mac and restored at the next launch (MagicPath cozy-evening-6871):
+the sidebar's hairline drags it from 200 to 340 points (260 before any drag,
+`veetbot.email.sidebarWidth`), a native split divider drags the inbox from 260
+to 480 (300 before any drag, `veetbot.email.inboxWidth`), the right panel's
+hairline drags it from 260 to 440 (below), and the reader takes the rest.
+Dragging the sidebar or the panel wider stops where the reader would fall
+below 420 points; a double-click on either hairline returns its column to its
+starting width. A window too narrow for the chosen widths squeezes the reader
+to 250 points and then the sidebar, without replacing a remembered width.
+The widths, selected thread and loaded rows survive mode switching, and the
+modes cross-fade.
 Rows follow the A2 Email reference: a Handled circle leads each row (empty
 while the conversation is in the Inbox, a filled teal check once Gmail has
 archived it, the same reversible label change under the same Archive in Gmail

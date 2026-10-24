@@ -31,7 +31,7 @@ import Testing
         #expect(model.contains("\"veetbot.inspector.\\(mode.rawValue).width\""))
         #expect(panel.contains(".accessibilityIdentifier(\"inspector.toggle\")"))
         #expect(panel.contains(".accessibilityIdentifier(\"inspector.hide\")"))
-        #expect(panel.contains(".accessibilityIdentifier(\"inspector.resize\")"))
+        #expect(panel.contains("identifier: \"inspector.resize\""))
         #expect(panel.contains(".accessibilityIdentifier(\"inspector.tabs\")"))
         #expect(panel.contains(".keyboardShortcut(\"i\", modifiers: [.command, .option])"))
         #expect(panel.contains("NSCursor.resizeLeftRight"))

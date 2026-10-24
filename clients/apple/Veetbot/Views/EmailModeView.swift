@@ -41,7 +41,9 @@ private extension EmailThreadView {
 /// unreadable value, the split view lays the inbox out as it always has.
 struct EmailInboxWidthStore {
     static let key = "veetbot.email.inboxWidth"
-    static let bounds: ClosedRange<CGFloat> = 280...560
+    static let bounds: ClosedRange<CGFloat> = 260...480
+    /// The design's starting width (MagicPath cozy-evening-6871).
+    static let idealWidth: CGFloat = 300
     /// This launch's store: the owner's defaults, or a UI journey's own suite.
     static let app: EmailInboxWidthStore = {
         #if DEBUG && !SWIFT_PACKAGE
@@ -68,6 +70,75 @@ struct EmailInboxWidthStore {
 
     private static func clamped(_ width: CGFloat) -> CGFloat {
         min(max(width, bounds.lowerBound), bounds.upperBound)
+    }
+}
+
+/// The mailbox sidebar width the owner chose by dragging its edge, kept on
+/// this Mac like the inbox width and never sent to the server. Before any
+/// drag it is the design's 260 points (MagicPath cozy-evening-6871).
+struct EmailSidebarWidthStore {
+    static let key = "veetbot.email.sidebarWidth"
+    static let bounds: ClosedRange<CGFloat> = 200...340
+    static var defaultWidth: CGFloat { A2Metrics.sidebarWidth }
+    /// This launch's store: the owner's defaults, or a UI journey's own suite.
+    static let app: EmailSidebarWidthStore = {
+        #if DEBUG && !SWIFT_PACKAGE
+        if let store = ConversationNavigationUITestFixture.makeEmailSidebarWidthIfRequested() { return store }
+        #endif
+        return EmailSidebarWidthStore()
+    }()
+    var defaults: UserDefaults = .standard
+
+    /// The remembered width, held within the column's bounds.
+    var width: CGFloat {
+        guard let stored = defaults.object(forKey: Self.key) as? Double, stored.isFinite, stored > 0 else {
+            return Self.defaultWidth
+        }
+        return Self.clamped(CGFloat(stored))
+    }
+
+    func remember(_ width: CGFloat) {
+        guard width.isFinite, width > 0 else { return }
+        defaults.set(Double(Self.clamped(width)), forKey: Self.key)
+    }
+
+    /// A double-click on the divider returns the sidebar to the design width.
+    func forget() {
+        defaults.removeObject(forKey: Self.key)
+    }
+
+    static func clamped(_ width: CGFloat) -> CGFloat {
+        min(max(width, bounds.lowerBound), bounds.upperBound)
+    }
+}
+
+/// How the Mac Email columns share a window: the sidebar, the inbox and the
+/// right panel take the widths the owner gave them, and the reader the rest.
+enum EmailColumnLayout {
+    /// A drag stops before the reader would fall below this (the design's
+    /// `READER_MIN`).
+    static let readerMinimum: CGFloat = 420
+    /// A window too narrow for every column squeezes the reader to this
+    /// before it squeezes the sidebar.
+    static let readerSqueezeMinimum: CGFloat = 250
+
+    /// Where a drag of the sidebar's edge to `width` leaves it, `available`
+    /// being the room for the sidebar, the inbox and the reader. Narrowing is
+    /// always allowed; widening stops where the reader keeps its minimum, and
+    /// never pulls the column in from where it already is.
+    static func sidebarDrag(to width: CGFloat, from current: CGFloat, available: CGFloat, inbox: CGFloat) -> CGFloat {
+        let room = available - inbox - readerMinimum
+        return EmailSidebarWidthStore.clamped(min(width, max(current, room)))
+    }
+
+    /// The sidebar's and the inbox's hairlines.
+    static let hairlines: CGFloat = 2
+
+    /// The width the sidebar shows at: the owner's, unless the window cannot
+    /// hold it beside the narrowest inbox and a squeezed reader.
+    static func sidebarShown(stored: CGFloat, available: CGFloat) -> CGFloat {
+        let room = available - EmailInboxWidthStore.bounds.lowerBound - readerSqueezeMinimum - hairlines
+        return EmailSidebarWidthStore.clamped(min(stored, room))
     }
 }
 
@@ -150,7 +221,8 @@ private final class EmailInboxWidthAutosaveView: NSView {
               let index = split.subviews.firstIndex(of: column), index < split.subviews.count - 1
         else { return }
         restored = true
-        guard let width = store.width else { return }
+        // Before any drag the inbox opens at the design's width.
+        let width = store.width ?? EmailInboxWidthStore.idealWidth
         // Restoring is not a choice: a window too narrow for the remembered
         // width holds the column below it, and the remembered width stays.
         restoring = true
@@ -167,9 +239,12 @@ public struct EmailModeView: View {
     var mailboxSidebarVisible = true
     #if os(macOS)
     var inboxWidth = EmailInboxWidthStore.app
+    var sidebarStore = EmailSidebarWidthStore.app
     #endif
     let discussInChat: () async -> Void
     var openChat: () -> Void = {}
+    /// The mailbox sidebar's mode switch: Cockpit, Chat or Email.
+    var openMode: (ClientMode) -> Void = { _ in }
     var newChat: () -> Void = {}
     var openMemory: () -> Void = {}
     var openPeople: () -> Void = {}
@@ -190,6 +265,12 @@ public struct EmailModeView: View {
     @State private var showingBudgetDetails = false
     @State private var showingOtherMailViews = false
     @State private var navigationPath: [UUID] = []
+    #if os(macOS)
+    /// The sidebar's live width while its edge is dragged; nil reads the store.
+    @State private var draggedSidebarWidth: CGFloat?
+    /// The width the four columns share, measured without affecting their layout.
+    @State private var columnsWidth: CGFloat = 0
+    #endif
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -209,14 +290,11 @@ public struct EmailModeView: View {
     public var body: some View {
         Group {
             if directSelection {
+                #if os(macOS)
+                macColumns
+                #else
                 HStack(spacing: 0) {
                     if showsMailboxSidebar { mailboxSidebar.frame(width: 232) }
-                    #if os(macOS)
-                    withPanel(VStack(spacing: 0) {
-                        emailHeading
-                        macSplit
-                    })
-                    #else
                     VStack(spacing: 0) {
                         emailHeading
                         HStack(spacing: 0) {
@@ -225,8 +303,8 @@ public struct EmailModeView: View {
                             detail.frame(maxWidth: .infinity)
                         }
                     }
-                    #endif
                 }
+                #endif
             } else {
                 NavigationStack(path: $navigationPath) {
                     inbox.navigationDestination(for: UUID.self) { id in
@@ -283,16 +361,63 @@ public struct EmailModeView: View {
         }
     }
 
+    /// The four Mac columns of the clean reader (MagicPath cozy-evening-6871):
+    /// the sidebar, the inbox and the right panel each keep the width the
+    /// owner drags them to, and the reader takes the rest. The window's
+    /// toolbar carries the title (RootView), so no heading sits above them.
+    private var macColumns: some View {
+        let panel = inspector.map { $0.isOpen(.email) ? $0.width(.email) + 1 : 0 } ?? 0
+        let available = columnsWidth > 0 ? columnsWidth - panel : .infinity
+        let inbox = inboxWidth.width ?? EmailInboxWidthStore.idealWidth
+        let sidebar = draggedSidebarWidth ?? sidebarStore.width
+        let shownSidebar = showsMailboxSidebar ? EmailColumnLayout.sidebarShown(stored: sidebar, available: available) + 1 : 0
+        return HStack(spacing: 0) {
+            if showsMailboxSidebar {
+                mailboxSidebar
+                    .frame(width: shownSidebar - 1)
+                    .frame(maxHeight: .infinity)
+                MacColumnDivider(
+                    edge: .trailing, width: sidebar, label: "Sidebar width", identifier: "email.sidebar.resize",
+                    resize: { width, remember in
+                        let next = EmailColumnLayout.sidebarDrag(
+                            to: width, from: sidebar, available: available, inbox: inbox)
+                        if remember {
+                            sidebarStore.remember(next)
+                            draggedSidebarWidth = nil
+                        } else {
+                            draggedSidebarWidth = next
+                        }
+                    },
+                    reset: {
+                        sidebarStore.forget()
+                        draggedSidebarWidth = nil
+                    }
+                )
+            }
+            // The toolbar's hairline (the design's scrolled toolbar) also keeps the
+            // inbox and the thread from scrolling up beneath the window toolbar.
+            withPanel(VStack(spacing: 0) {
+                HairlineDivider()
+                macSplit
+            })
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { columnsWidth = $0 }
+        // The panel's edge stops where the reader would fall below its minimum.
+        .onChange(of: columnsWidth - shownSidebar - inbox - EmailColumnLayout.readerMinimum - 1, initial: true) {
+            _, limit in inspector?.setWidthLimit(columnsWidth > 0 ? limit : nil, for: .email)
+        }
+    }
+
     /// Uses a native divider while the shared root owns the Mac window toolbar.
     private var macSplit: some View {
         HSplitView {
             inbox
-                .frame(minWidth: EmailInboxWidthStore.bounds.lowerBound, idealWidth: 340,
+                .frame(minWidth: EmailInboxWidthStore.bounds.lowerBound, idealWidth: EmailInboxWidthStore.idealWidth,
                        maxWidth: EmailInboxWidthStore.bounds.upperBound)
                 .frame(maxHeight: .infinity)
                 .background(EmailInboxWidthAutosave(store: inboxWidth))
             detail
-                .frame(minWidth: 250, maxWidth: .infinity)
+                .frame(minWidth: EmailColumnLayout.readerSqueezeMinimum, maxWidth: .infinity)
                 .frame(maxHeight: .infinity)
                 .layoutPriority(1)
         }
@@ -457,17 +582,102 @@ public struct EmailModeView: View {
             #if os(iOS)
             if directSelection { EmailRefreshButton(model: model) }
             #endif
-            Button { appearance.theme = colorScheme == .dark ? .light : .dark } label: {
-                Image(systemName: colorScheme == .dark ? "sun.max" : "moon")
-            }
-            .buttonStyle(QuietCapsuleButtonStyle())
-            .accessibilityLabel(colorScheme == .dark ? "Switch to light appearance" : "Switch to dark appearance")
-            .accessibilityIdentifier("email.appearance")
+            EmailAppearanceButton().buttonStyle(QuietCapsuleButtonStyle())
         }
         .padding(.horizontal, 24).padding(.vertical, 16)
         .background(AppTheme.paper)
     }
 
+    #if os(macOS)
+    /// The Mac sidebar in the design's order (MagicPath cozy-evening-6871):
+    /// the mode switch and Search mail, then Mail (the collections), then
+    /// More (other mail, subscriptions and learning). The account picker,
+    /// Chat's pending attention and the shortcuts to the other surfaces keep
+    /// their places beneath, in the same quiet rows.
+    private var mailboxSidebar: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: VeetSpace.s2) {
+                ModeSegment(selected: .email, choose: openMode)
+                    .frame(maxWidth: .infinity)
+                searchField
+            }
+            .padding(.horizontal, A2Metrics.sidebarGutter).padding(.top, VeetSpace.s3).padding(.bottom, VeetSpace.s2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    SidebarSectionLabel(title: "Mail")
+                    ForEach(EmailCollection.allCases, id: \.self) { collection in
+                        Button { model.setCollection(collection) } label: {
+                            SidebarRow {
+                                if collection == .needsYou {
+                                    Circle().fill(AppTheme.amber).frame(width: 6, height: 6)
+                                } else {
+                                    Image(systemName: collectionSymbol(collection))
+                                }
+                            } title: {
+                                Text(collectionTitle(collection))
+                                    .fontWeight(model.listView == collection.rawValue ? .medium : .regular)
+                            } trailing: { _ in
+                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
+                            }
+                            .padding(.horizontal, VeetSpace.s2)
+                            .background(RoundedRectangle(cornerRadius: A2Metrics.rowRadius, style: .continuous)
+                                .fill(model.listView == collection.rawValue ? AppTheme.selected : .clear))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(model.listView == collection.rawValue ? .isSelected : [])
+                        .accessibilityIdentifier("email.collection.\(collectionID(collection))")
+                    }
+                    SidebarSectionLabel(title: "More")
+                    if model.unsubscribeAvailable {
+                        Button { showingSubscriptions = true } label: {
+                            SidebarRow { Image(systemName: "envelope") } title: { Text("Subscriptions") }
+                                .padding(.horizontal, VeetSpace.s2)
+                        }.buttonStyle(.plain)
+                        .accessibilityIdentifier("email.mailbox.subscriptions")
+                    }
+                    Button { showingLearning = true } label: {
+                        SidebarRow { Image(systemName: "slider.horizontal.3") } title: { Text("Email learning") }
+                            .padding(.horizontal, VeetSpace.s2)
+                    }.buttonStyle(.plain)
+                    otherMailDisclosure
+                        .padding(.horizontal, VeetSpace.s2).padding(.top, VeetSpace.s2)
+                    if !chatAttention.isEmpty {
+                        SidebarSectionLabel(title: "Needs you")
+                        ForEach(chatAttention) { row in
+                            Button { openAttention(row.entry.sessionID) } label: {
+                                SidebarRow { AttentionDot(kind: row.kind) } title: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(row.label)
+                                        Text(row.entry.title).veetType(.meta).foregroundColor(AppTheme.inkSoft).lineLimit(1)
+                                    }
+                                }
+                                .padding(.horizontal, VeetSpace.s2)
+                            }.buttonStyle(.plain)
+                            .accessibilityLabel("\(row.label), \(row.entry.title)")
+                            .accessibilityIdentifier("email.chat-attention.\(row.id)")
+                        }
+                    }
+                    SidebarSectionLabel(title: "Accounts")
+                    accountsPicker.padding(.horizontal, VeetSpace.s1)
+                    if let pause = model.budgetPauseMessage { budgetPause(pause).padding(.top, VeetSpace.s3) }
+                }
+                .padding(.horizontal, A2Metrics.sidebarGutter).padding(.bottom, VeetSpace.s4)
+            }
+            HStack {
+                Button(action: newChat) { Image(systemName: "square.and.pencil").frame(maxWidth: .infinity, minHeight: 32) }
+                    .buttonStyle(.plain).foregroundColor(AppTheme.inkSoft)
+                    .accessibilityLabel("New chat").help("New chat")
+                    .accessibilityIdentifier("email.new-chat")
+                globalButton("Chat", "bubble.left", openChat)
+                globalButton("Memory", "brain", openMemory)
+                globalButton("People", "person.2", openPeople)
+                globalButton("Schedules", "calendar.badge.clock", openSchedules)
+                globalButton("Persona", "sparkles", openPersona)
+                globalButton("Settings", "gearshape", openSettings)
+            }.padding(10)
+        }.background(AppTheme.paperDeep)
+    }
+    #else
     private var mailboxSidebar: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -475,7 +685,7 @@ public struct EmailModeView: View {
                     inboxHeader
                     Button(action: newChat) { Label("New chat", systemImage: "plus").frame(maxWidth: .infinity) }
                         .primaryCapsule().accessibilityIdentifier("email.new-chat")
-                    ModeSegment(selected: .email) { if $0 == .chat { openChat() } }
+                    ModeSegment(selected: .email, choose: openMode)
                     if !chatAttention.isEmpty {
                         SidebarSectionLabel(title: "Needs you")
                         ForEach(chatAttention) { row in
@@ -535,6 +745,8 @@ public struct EmailModeView: View {
             }.padding(10)
         }.background(AppTheme.paperDeep)
     }
+
+    #endif
 
     private func globalButton(_ title: String, _ symbol: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).frame(maxWidth: .infinity, minHeight: 32) }
@@ -596,33 +808,11 @@ public struct EmailModeView: View {
     private var inboxHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Picker("Accounts", selection: Binding(get: { model.selectedAccountID }, set: { model.setAccount($0) }))
-                {
-                    Text("All accounts").tag(String?.none)
-                    ForEach(model.accounts) { account in Text(account.label).tag(Optional(account.id)) }
-                }
-                .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
-                .accessibilityIdentifier("email.accounts")
+                accountsPicker
                 Spacer(minLength: 8)
 
             }
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
-                TextField("Find mail", text: Binding(get: { model.searchText }, set: { model.setSearchText($0) }))
-                    .textFieldStyle(.plain).accessibilityLabel("Find mail")
-                    .accessibilityIdentifier("email.search")
-                if !model.searchText.isEmpty {
-                    Button {
-                        model.setSearchText("")
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain).foregroundColor(AppTheme.inkSoft).accessibilityLabel("Clear search")
-                }
-            }
-            .veetType(.ui)
-            .padding(.horizontal, 10).frame(minHeight: A2Metrics.controlHeight + 4)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.field))
+            searchField
             if !showsMailboxSidebar {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
@@ -642,6 +832,52 @@ public struct EmailModeView: View {
                     }
                 }
             }
+            otherMailDisclosure
+        }.padding(12)
+    }
+
+    private var accountsPicker: some View {
+        Picker("Accounts", selection: Binding(get: { model.selectedAccountID }, set: { model.setAccount($0) })) {
+            Text("All accounts").tag(String?.none)
+            ForEach(model.accounts) { account in Text(account.label).tag(Optional(account.id)) }
+        }
+        .pickerStyle(.menu).labelsHidden().accessibilityLabel("Accounts")
+        .accessibilityIdentifier("email.accounts")
+    }
+
+    /// The mail search field; the Mac sidebar calls it Search mail, as the design does.
+    private var searchField: some View {
+        #if os(macOS)
+        let prompt = showsMailboxSidebar ? "Search mail" : "Find mail"
+        #else
+        let prompt = "Find mail"
+        #endif
+        return HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
+            TextField(prompt, text: Binding(get: { model.searchText }, set: { model.setSearchText($0) }))
+                .textFieldStyle(.plain).accessibilityLabel("Find mail")
+                .accessibilityIdentifier("email.search")
+            if !model.searchText.isEmpty {
+                Button {
+                    model.setSearchText("")
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain).foregroundColor(AppTheme.inkSoft).accessibilityLabel("Clear search")
+            }
+        }
+        .veetType(.ui)
+        #if os(macOS)
+        .padding(.horizontal, VeetSpace.s2).frame(minHeight: A2Metrics.controlHeight)
+        .background(RoundedRectangle(cornerRadius: A2Metrics.fieldRadius, style: .continuous).fill(AppTheme.field))
+        #else
+        .padding(.horizontal, 10).frame(minHeight: A2Metrics.controlHeight + 4)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.field))
+        #endif
+    }
+
+    private var otherMailDisclosure: some View {
+        VStack(alignment: .leading, spacing: 8) {
             Button {
                 showingOtherMailViews.toggle()
             } label: {
@@ -657,7 +893,7 @@ public struct EmailModeView: View {
             .accessibilityIdentifier("email.other-mail-views")
             .accessibilityValue(showingOtherMailViews ? "Expanded" : "Collapsed")
             if showingOtherMailViews { mailViewControl }
-        }.padding(12)
+        }
     }
 
     /// Important and Other mail: a segmented control on the Mac, filter pills on touch.
@@ -967,7 +1203,11 @@ private struct EmailThreadScreen: View {
                             }
                             draftEditor.id("reply")
                         }
+                        #if os(macOS)
+                        .padding(.horizontal, VeetSpace.s6).padding(.top, VeetSpace.s4).padding(.bottom, VeetSpace.s7)
+                        #else
                         .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 28)
+                        #endif
                         .frame(maxWidth: 680, alignment: .leading).frame(maxWidth: .infinity)
                     }
                     .accessibilityIdentifier("email.detail")
@@ -995,8 +1235,8 @@ private struct EmailThreadScreen: View {
                             .buttonStyle(PrimaryCapsuleButtonStyle())
                             .accessibilityIdentifier("email.jump-to-reply")
                         }
-                        .padding(.horizontal, 20).padding(.vertical, 10)
-                        .background(.regularMaterial)
+                        .padding(.horizontal, VeetSpace.s5).padding(.vertical, 10)
+                        .background(AppTheme.paper.opacity(0.88).background(.ultraThinMaterial))
                         .overlay(alignment: .top) { HairlineDivider() }
                     }
                 }
@@ -1132,6 +1372,9 @@ private struct EmailThreadScreen: View {
             // macOS 26 and the journeys click what sits beside it.
             Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
         }
+        // The quiet icon button of the design, built as Draft options is.
+        .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden).fixedSize()
+        .foregroundColor(AppTheme.inkSoft).tint(AppTheme.inkSoft)
         .accessibilityLabel("Thread actions").help("Thread actions")
         .disabled(model.isPerformingAction)
     }
@@ -1887,6 +2130,55 @@ struct EmailEmptyState: View {
 }
 
 /// Observes refresh state directly even when the window toolbar is owned by the app coordinator's view.
+/// Light or dark, from the Email heading on touch and the window toolbar on the Mac.
+struct EmailAppearanceButton: View {
+    @EnvironmentObject private var appearance: AppearancePreferences
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button { appearance.theme = colorScheme == .dark ? .light : .dark } label: {
+            Image(systemName: colorScheme == .dark ? "sun.max" : "moon")
+        }
+        .accessibilityLabel(colorScheme == .dark ? "Switch to light appearance" : "Switch to dark appearance")
+        .help(colorScheme == .dark ? "Light appearance" : "Dark appearance")
+        .accessibilityIdentifier("email.appearance")
+    }
+}
+
+#if os(macOS)
+/// The Mac window's title while Email is showing (MagicPath
+/// cozy-evening-6871): the collection in semibold, then how many
+/// conversations need the owner in faint ink.
+struct EmailToolbarTitle: View {
+    @ObservedObject var model: EmailViewModel
+
+    var body: some View {
+        Text("\(Text(title).fontWeight(.semibold))\(Text(" · \(detail)").foregroundColor(AppTheme.inkFaint))")
+            .veetType(.ui)
+            .lineLimit(1)
+            .accessibilityIdentifier("email.toolbar-title")
+    }
+
+    private var title: String {
+        if model.listView == "other" { return "Other mail" }
+        switch model.collection {
+        case .inbox: return "Inbox"
+        case .needsYou: return "Needs you"
+        case .handled: return "Handled"
+        }
+    }
+
+    /// Prefers the server's count across pages; older servers describe only the loaded rows.
+    private var detail: String {
+        let needing = model.collectionCounts?.count(for: .needsYou)
+            ?? model.items.filter { $0.needsReply && !$0.isHandled && !$0.isArchived }.count
+        if needing > 0 { return "\(needing) need\(needing == 1 ? "s" : "") you" }
+        let count = model.collectionCounts?.count(for: model.collection) ?? model.items.count
+        return "\(count) \(count == 1 ? "thread" : "threads")"
+    }
+}
+#endif
+
 struct EmailRefreshButton: View {
     @ObservedObject var model: EmailViewModel
 

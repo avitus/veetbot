@@ -237,11 +237,11 @@ public struct RootView: View {
     @ViewBuilder
     private var configuredContent: some View {
         VStack(spacing: 0) {
-            if coordinator.mode != .email || !usesDirectSidebarActivation || !mailboxSidebarVisible {
+            if showsModeBar {
             HStack {
                 ModeSegment(selected: coordinator.mode) { coordinator.mode = $0 }
                 Spacer()
-                if coordinator.mode == .email {
+                if coordinator.mode != .chat {
                     Menu {
                         Button("Memory") { showingGlobalMemory = true }
                         Button("Persona") { showingGlobalPersona = true }
@@ -256,10 +256,24 @@ public struct RootView: View {
             .background(AppTheme.paperDeep)
             Rectangle().fill(AppTheme.hairline).frame(height: 1)
             }
+            #if os(macOS)
+            // Without the mode bar, Chat's split view would draw up beneath the
+            // window toolbar; an edge here holds it below, as Email's hairline does.
+            if !showsModeBar, coordinator.mode == .chat {
+                Rectangle().fill(AppTheme.hairline).frame(height: 1)
+            }
+            #endif
             // Keeping each navigation tree mounted preserves compact navigation,
             // scroll position and live Chat rendering across a mode switch.
             GeometryReader { geometry in
                 ZStack {
+                    CockpitModeView(chooseMode: { coordinator.mode = $0 })
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .opacity(coordinator.mode == .cockpit ? 1 : 0)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: coordinator.mode)
+                        .allowsHitTesting(coordinator.mode == .cockpit)
+                        .accessibilityHidden(coordinator.mode != .cockpit)
                     chatContent
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
@@ -272,6 +286,7 @@ public struct RootView: View {
                         mailboxSidebarVisible: mailboxSidebarVisible,
                         discussInChat: { await coordinator.discussSelectedThread() },
                         openChat: { coordinator.mode = .chat },
+                        openMode: { coordinator.mode = $0 },
                         newChat: { model.newSession(); coordinator.mode = .chat },
                         openMemory: { showingGlobalMemory = true },
                         openPeople: { globalPeopleLookup = PeopleLookup(text: "", asOf: nil) },
@@ -322,7 +337,17 @@ public struct RootView: View {
         // One window-level owner prevents the hidden navigation tree from replacing active controls.
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                if coordinator.mode == .chat {
+                switch coordinator.mode {
+                case .cockpit:
+                    // Cockpit's board actions arrive with the board itself.
+                    Button(action: presentSettings) {
+                        Image(systemName: "gearshape")
+                            .foregroundColor(AppTheme.inkSoft)
+                    }
+                    .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("cockpit.settings")
+                    EmailAppearanceButton()
+                case .chat:
                     Button(action: presentSettings) {
                         Image(systemName: "gearshape")
                             .foregroundColor(AppTheme.inkSoft)
@@ -355,7 +380,7 @@ public struct RootView: View {
                     .accessibilityIdentifier("sidebar.schedules")
                     ChatToolbarActions(model: model)
                     InspectorToggleButton(inspector: inspector, mode: .chat)
-                } else {
+                case .email:
                     // The entry exists only where an account advertises support.
                     if coordinator.email.unsubscribeAvailable {
                         Button { showingEmailSubscriptions = true } label: {
@@ -371,9 +396,19 @@ public struct RootView: View {
                     .accessibilityLabel("Email learning").help("Email learning")
                     .accessibilityIdentifier("email.learning")
                     EmailRefreshButton(model: coordinator.email)
+                    EmailAppearanceButton()
                     InspectorToggleButton(inspector: inspector, mode: .email)
                 }
             }
+            // Plain text, as the design's toolbar draws it, not a glass control.
+            ToolbarItem(placement: .navigation) {
+                switch coordinator.mode {
+                case .cockpit: CockpitToolbarTitle()
+                case .chat: EmptyView()
+                case .email: EmailToolbarTitle(model: coordinator.email)
+                }
+            }
+            .sharedBackgroundVisibility(.hidden)
         }
         .sheet(isPresented: $showingEmailLearning) { EmailLearningScreen(model: coordinator.email) }
         .sheet(isPresented: $showingEmailSubscriptions) {
@@ -448,7 +483,8 @@ public struct RootView: View {
         SessionSidebar(
             model: model,
             usesDirectActivation: usesDirectSidebarActivation,
-            openSettings: presentSettings
+            openSettings: presentSettings,
+            chooseMode: { coordinator.mode = $0 }
         )
         .navigationSplitViewColumnWidth(
             min: A2Metrics.sidebarWidth - VeetSpace.s7, ideal: A2Metrics.sidebarWidth,
@@ -517,6 +553,24 @@ public struct RootView: View {
         settingsWindowPresenter.show(model: model, appearance: appearance)
         #else
         showingSettings = true
+        #endif
+    }
+
+    /// The mode bar above the content carries the switch wherever the active
+    /// mode's left pane does not: on the Mac each pane leads with it, so the
+    /// bar returns only while that pane is hidden.
+    private var showsModeBar: Bool {
+        #if os(macOS)
+        switch coordinator.mode {
+        case .cockpit: false
+        case .chat: sidebarVisibility == .detailOnly
+        case .email: !mailboxSidebarVisible
+        }
+        #else
+        switch coordinator.mode {
+        case .cockpit, .chat: true
+        case .email: !usesDirectSidebarActivation || !mailboxSidebarVisible
+        }
         #endif
     }
 
@@ -646,12 +700,15 @@ private struct SessionSidebar: View {
     @StateObject private var scheduleGroups = ScheduleGroupSidebarPreferences()
     @State private var folderEditor: FolderEditorRequest?
     @State private var folderDeletionCandidate: FolderView?
+    /// The Mac switch at the top of the sidebar chooses a mode.
+    var chooseMode: (ClientMode) -> Void = { _ in }
 
     init(
         model: ChatViewModel,
         usesDirectActivation: Bool,
         inDrawer: Bool = false,
         openSettings: @escaping () -> Void,
+        chooseMode: @escaping (ClientMode) -> Void = { _ in },
         onActivate: @escaping () -> Void = {}
     ) {
         self.model = model
@@ -659,6 +716,7 @@ private struct SessionSidebar: View {
         self.usesDirectActivation = usesDirectActivation
         self.inDrawer = inDrawer
         self.openSettings = openSettings
+        self.chooseMode = chooseMode
         self.onActivate = onActivate
     }
 
@@ -822,10 +880,18 @@ private struct SessionSidebar: View {
 
     /// The top of the sidebar: search, and New chat as a teal compose
     /// button beside it.
+    /// On the Mac the mode switch leads the sidebar, above search and New
+    /// chat (MagicPath merry-moon-8243).
     private var sidebarTop: some View {
-        HStack(spacing: VeetSpace.s2) {
-            SidebarSearchField(text: $query)
-            newConversationButton
+        VStack(spacing: VeetSpace.s2) {
+            #if os(macOS)
+            ModeSegment(selected: .chat, choose: chooseMode)
+                .frame(maxWidth: .infinity)
+            #endif
+            HStack(spacing: VeetSpace.s2) {
+                SidebarSearchField(text: $query)
+                newConversationButton
+            }
         }
         .padding(.horizontal, A2Metrics.sidebarGutter)
         .padding(.top, VeetSpace.s2)

@@ -62,6 +62,13 @@ import SwiftUI
         #expect(table.visibleRect.contains(table.rect(ofRow: table.numberOfRows - 1)),
                 "Five priorities must fit completely without scrolling at the default text size")
         try snapshot("email-sidebar-default")
+        // Before any drag the inbox moves to the design's width once the split has laid out.
+        for _ in 0..<10 where abs(scroll.frame.width - EmailInboxWidthStore.idealWidth) > 2 {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            host.layoutSubtreeIfNeeded()
+        }
+        #expect(abs(scroll.frame.width - EmailInboxWidthStore.idealWidth) <= 2,
+                "Before any drag the inbox opens at the design's width, not \(scroll.frame.width)")
         let originalWidth = scroll.frame.width
         let split = try #require(descendant(NSSplitView.self, in: host))
         split.setPosition(500, ofDividerAt: 0)
@@ -69,14 +76,15 @@ import SwiftUI
         try await Task.sleep(nanoseconds: 200_000_000)
         host.layoutSubtreeIfNeeded()
         #expect(scroll.frame.width > originalWidth + 80, "The list must follow its divider to a useful wider width")
-        #expect(scroll.frame.width <= 560)
+        #expect(scroll.frame.width <= EmailInboxWidthStore.bounds.upperBound)
         try snapshot("email-sidebar-wide")
         window.setContentSize(NSSize(width: 780, height: 500))
         host.rootView = EmailModeView(model: model, viewportHeight: 500, inboxWidth: store, discussInChat: {})
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 200_000_000)
         host.layoutSubtreeIfNeeded()
-        #expect(scroll.frame.width >= 280, "A small window must retain usable inbox controls")
+        #expect(scroll.frame.width >= EmailInboxWidthStore.bounds.lowerBound,
+                "A small window must retain usable inbox controls")
         #expect(scroll.frame.width <= host.bounds.width - 360,
                 "Resizing the window must preserve room to read the selected email")
         #expect(host.bounds.contains(host.convert(scroll.bounds, from: scroll)))
@@ -137,7 +145,8 @@ import SwiftUI
 
         let (first, split) = try await open()
         #expect(store.width == nil)
-        #expect(inboxWidth(split) < 400, "Before any drag the inbox opens at its own width, not \(inboxWidth(split))")
+        #expect(try await inbox(of: split, in: first, settlesAt: EmailInboxWidthStore.idealWidth),
+                "Before any drag the inbox opens at the design's width, not \(inboxWidth(split))")
         // AppKit moves the divider while it handles the owner's pointer drag.
         handling = pointer(.leftMouseDragged, at: 480, in: first)
         split.setPosition(480, ofDividerAt: 0)

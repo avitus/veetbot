@@ -7,13 +7,19 @@ enum InspectorLayout {
     static let widthBounds: ClosedRange<CGFloat> = 260...440
 
     static func defaultWidth(_ mode: ClientMode) -> CGFloat {
-        mode == .chat ? 340 : 320
+        switch mode {
+        case .cockpit, .chat: 340
+        case .email: 320
+        }
     }
 
-    /// Chat is two columns beside the panel; Email is three (mailboxes,
-    /// inbox, thread), so it needs a wider window before a fourth fits.
+    /// Chat and Cockpit are two columns beside the panel; Email is three
+    /// (mailboxes, inbox, thread), so it needs a wider window before a fourth fits.
     static func minimumWindowWidth(_ mode: ClientMode) -> CGFloat {
-        mode == .chat ? 1100 : 1300
+        switch mode {
+        case .cockpit, .chat: 1100
+        case .email: 1300
+        }
     }
 
     static func clamped(_ width: CGFloat) -> CGFloat {
@@ -110,6 +116,7 @@ final class InspectorModel: ObservableObject {
     @Published private(set) var foldsMailboxSidebar = false
     private let store: InspectorLayoutStore
     private var windowWidth: CGFloat?
+    private var widthLimits: [ClientMode: CGFloat] = [:]
 
     init(store: InspectorLayoutStore = .app) {
         self.store = store
@@ -122,10 +129,20 @@ final class InspectorModel: ObservableObject {
 
     /// A drag moves the panel's edge live; only the end of the drag is the
     /// owner choosing a width.
+    /// Widening stops at the mode's limit, never pulling the panel in from
+    /// where it already is; narrowing is always allowed.
     func setWidth(_ width: CGFloat, for mode: ClientMode, remember: Bool) {
         guard width.isFinite else { return }
-        widths[mode] = InspectorLayout.clamped(width)
-        if remember { store.remember(width: InspectorLayout.clamped(width), for: mode) }
+        let current = self.width(mode)
+        let allowed = widthLimits[mode].map { min(width, max(current, $0)) } ?? width
+        widths[mode] = InspectorLayout.clamped(allowed)
+        if remember { store.remember(width: InspectorLayout.clamped(allowed), for: mode) }
+    }
+
+    /// The widest a drag may take a mode's panel before the columns beside
+    /// it lose their minimum; nil sets no limit beyond the panel's own bounds.
+    func setWidthLimit(_ limit: CGFloat?, for mode: ClientMode) {
+        widthLimits[mode] = limit
     }
 
     /// The toolbar button: the owner's choice, kept for the next launch.
