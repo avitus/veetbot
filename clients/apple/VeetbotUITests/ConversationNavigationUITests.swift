@@ -3684,10 +3684,11 @@ final class ConversationNavigationUITests: XCTestCase {
         let handle = app.descendants(matching: .any)["email.sidebar.resize"]
         XCTAssertTrue(handle.waitForExistence(timeout: 10), app.debugDescription)
         let before = handle.frame.midX
-        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        // The hosted Mac ignores the touch-style press-drag on the hairline (the
-        // pointer presses and never travels, pipeline 1417 twice); the mouse
-        // click-drag moves it, as it does the inbox divider above.
+        // Press on the hairline itself, on its sidebar side: the handle's frame is
+        // the eight-point grab area centred on the one-point line, and its centre
+        // is the boundary pixel where the inbox split view begins, which the
+        // hosted Mac's 1x display hands to the inbox list (pipelines 1417, 1419).
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.4375, dy: 0.5))
         start.click(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 40, dy: 0)))
         XCTAssertTrue(waitForFrame(of: handle, timeout: 5) { abs($0.midX - (before + 40)) <= 4 },
                       "Dragging the hairline must widen the sidebar\n\(app.debugDescription)")

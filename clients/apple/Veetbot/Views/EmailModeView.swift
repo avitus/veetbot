@@ -395,6 +395,12 @@ public struct EmailModeView: View {
                         draggedSidebarWidth = nil
                     }
                 )
+                // The hairline's grab area reaches into both neighbours; the
+                // inbox split view starts where the hairline ends, and a later
+                // sibling is hit-tested first, so without this the half of the
+                // grab area over the inbox, and the boundary point itself on a
+                // 1x display, belong to the inbox list instead of the hairline.
+                .zIndex(1)
             }
             // The toolbar's hairline (the design's scrolled toolbar) also keeps the
             // inbox and the thread from scrolling up beneath the window toolbar.
