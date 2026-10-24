@@ -691,6 +691,9 @@ The stream's own rules:
   notification is missed.
 - **Event kinds.** `feed.updated`, `widget.revised`, `widget.deleted`,
   `layout.updated`, `settings.updated`, `import.failed` and `stream.reset`.
+- **Cursor.** Without a resume point the stream starts after the principal's
+  latest event. It takes that cursor before it subscribes to the channel, so
+  an event that commits while it subscribes is replayed, not lost.
 - **Reset.** A resume point older than the retention window gets
   `stream.reset`, and the client refetches the snapshot. Sequences are shared
   across tenants, so one principal's have gaps. A resume point is always one

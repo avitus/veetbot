@@ -367,18 +367,20 @@ class CockpitBoard:
 
         require_scope(principal, "cockpit.read")
         deadline = self._clock.now() + self._stream_max
+        # The cursor is taken before the subscription opens: an event that commits
+        # while it opens is then after the cursor and replayed, never folded in.
+        async with self._uow_factory() as uow:
+            oldest = await uow.cockpit_events.oldest_sequence(principal)
+            latest = await uow.cockpit_events.latest_sequence(principal)
+        if after is None:
+            watermark = latest or 0
+        elif after > 0 and (oldest is None or after < oldest):
+            # The client's last event was pruned, so events after it may be too.
+            yield TransientStreamFrame(event="stream.reset", data={})
+            return
+        else:
+            watermark = after
         async with self._live_events.listen(cockpit_channel(principal.tenant_id)) as subscription:
-            async with self._uow_factory() as uow:
-                oldest = await uow.cockpit_events.oldest_sequence(principal)
-                latest = await uow.cockpit_events.latest_sequence(principal)
-            if after is None:
-                watermark = latest or 0
-            elif after > 0 and (oldest is None or after < oldest):
-                # The client's last event was pruned, so events after it may be too.
-                yield TransientStreamFrame(event="stream.reset", data={})
-                return
-            else:
-                watermark = after
             while True:
                 async with self._uow_factory() as uow:
                     events = await uow.cockpit_events.after(

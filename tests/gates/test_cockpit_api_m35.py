@@ -491,6 +491,35 @@ async def test_a_stream_without_a_resume_point_starts_live_and_new_events_arrive
         ]
 
 
+async def test_an_event_committed_while_the_stream_subscribes_is_still_delivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a resume point the stream takes its cursor before it subscribes,
+    so an event that commits while it subscribes is after the cursor and is
+    replayed rather than folded into it and lost."""
+
+    monkeypatch.setattr("agent_core.application.cockpit_views._IDLE_POLL_SECONDS", 0.05)
+    async with cockpit_api(config_dir=_overlay(tmp_path, max_seconds=1)) as (composition, client):
+        board = composition.services.cockpit
+        assert board is not None
+        live_events = board._live_events
+        sequences: list[int] = []
+
+        class AppendsWhileSubscribing:
+            @asynccontextmanager
+            async def listen(self, channel: str) -> AsyncIterator[Any]:
+                async with live_events.listen(channel) as subscription:
+                    sequences.append(await _event(composition, OWNER, "while subscribing"))
+                    yield subscription
+
+        monkeypatch.setattr(board, "_live_events", AppendsWhileSubscribing())
+        response = await client.get("/v1/cockpit/stream")
+        frames = [frame for frame in _frames(response.text) if "event" in frame]
+        assert [(frame["id"], frame["data"]) for frame in frames] == [
+            (str(sequences[0]), {"subject": "while subscribing"})
+        ]
+
+
 async def _heartbeats_while_idle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with monkeypatch.context() as patched:
         patched.setattr("agent_core.api.cockpit.HEARTBEAT_SECONDS", 0.2)
