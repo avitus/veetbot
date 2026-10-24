@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from uuid import UUID
 
@@ -18,6 +18,7 @@ from agent_core.domain.execution import (
     ExecutionCommand,
     ExecutionResult,
     ResourceLimits,
+    SandboxPurpose,
 )
 from agent_core.execution.manager import SandboxManager
 
@@ -455,3 +456,30 @@ async def test_sandbox_reaper_revalidates_a_lease_claimed_after_snapshot() -> No
     assert checked == [(run_id, 1)]
     assert len(adapter.live_environment_ids()) == 1
     await manager.close()
+
+
+async def test_a_build_sandbox_is_held_by_its_own_deadline_not_a_run_lease() -> None:
+    clock = FixedClock(datetime(2026, 10, 23, tzinfo=UTC))
+    adapter = FakeExecutionEnvironment(clock, SequenceIdFactory())
+    builds = SandboxManager(
+        adapter,
+        image_digest=fake_image_digest(),
+        limits=_limits(),
+        purpose=SandboxPurpose.COCKPIT_BUILD,
+    )
+    runs = SandboxManager(adapter, image_digest=fake_image_digest(), limits=_limits())
+    await builds.for_run("tenant-a", UUID(int=41)).write("widget.json", b"{}")
+    await runs.for_run("tenant-a", UUID(int=42)).write("note.txt", b"x")
+    assert [spec.purpose for spec in adapter.specifications] == [
+        SandboxPurpose.COCKPIT_BUILD,
+        SandboxPurpose.RUN,
+    ]
+
+    async def nothing_is_leased(_run_id: UUID, _lease_epoch: int) -> bool:
+        return False
+
+    assert await adapter.reap(frozenset(), nothing_is_leased) == 1
+    assert len(adapter.live_environment_ids()) == 1
+    clock.advance(timedelta(seconds=_limits().wall_clock_seconds + 1))
+    assert await adapter.reap(frozenset(), nothing_is_leased) == 1
+    assert adapter.live_environment_ids() == frozenset()

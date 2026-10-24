@@ -80,6 +80,13 @@ class BridgeEndpoint:
     token: str = field(repr=False)
 
 
+class SandboxPurpose(StrEnum):
+    """Why a sandbox exists; it decides what keeps it alive."""
+
+    RUN = "run"
+    COCKPIT_BUILD = "cockpit_build"
+
+
 @dataclass(frozen=True, slots=True)
 class EnvironmentSpec:
     tenant_id: str
@@ -90,6 +97,7 @@ class EnvironmentSpec:
     egress: EgressPolicy
     environment: Mapping[str, str]
     bridge: BridgeEndpoint | None = None
+    purpose: SandboxPurpose = SandboxPurpose.RUN
 
 
 @dataclass(frozen=True, slots=True)

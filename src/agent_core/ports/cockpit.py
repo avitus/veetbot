@@ -1,11 +1,11 @@
-"""Cockpit widget, feed, event and repository ports (Milestone 35)."""
+"""Cockpit widget, feed, event, repository and builder ports (Milestone 35)."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -268,3 +268,49 @@ class WidgetRepository(Protocol):
     async def find_revision(self, revision_id: UUID, *, limit: int) -> str | None:
         """The newest of the last `limit` commits whose trailer names the revision."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class BuildScreen:
+    """What the privacy screen matches: the principal's known names and settings values.
+
+    It reaches only the build sandbox and never a package, a diagnostic or a log.
+    """
+
+    names: tuple[str, ...] = ()
+    settings_values: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class WidgetBuild:
+    """The builder's verdict. A rejection carries diagnostics and nothing else."""
+
+    ok: bool
+    diagnostics: tuple[BuildDiagnostic, ...]
+    kit_api: int | None = None
+    bundle: str | None = None
+    bundle_sha256: str | None = None
+    manifest: Mapping[str, Any] | None = None
+
+
+class WidgetBuildFailedError(Exception):
+    """The builder reached no trustworthy verdict; the revision stays as it was."""
+
+
+class WidgetBuilder(Protocol):
+    """Validate, screen, type-check, bundle and render one widget package.
+
+    The steps are the builder CLI's, in one fresh offline sandbox per build that
+    is gone when the call returns or is cancelled. A package the builder rejects
+    is a verdict (`ok` false, with diagnostics); a build that timed out, crashed
+    or reported something inconsistent raises `WidgetBuildFailedError`.
+    """
+
+    async def build(
+        self,
+        principal: Principal,
+        slug: str,
+        files: Mapping[str, str],
+        *,
+        screen: BuildScreen,
+    ) -> WidgetBuild: ...

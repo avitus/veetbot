@@ -150,6 +150,7 @@ class Settings:
     thread_folders_api_enabled: bool = False
     delegation_enabled: bool = False
     records_enabled: bool = False
+    cockpit_enabled: bool = False
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
     surface_api_enabled: bool = False
@@ -190,6 +191,7 @@ class Settings:
     auth_roles: frozenset[str] = frozenset()
     auth_scopes: frozenset[str] = frozenset()
     sandbox_image: str = "agent-core-sandbox:dev"
+    cockpit_builder_image: str = "veetbot-cockpit-builder:dev"
     sandbox_passthrough: tuple[str, ...] = ()
     execution_service_socket: Path | None = None
     release_id: str | None = None
@@ -1716,6 +1718,7 @@ def _load_settings(
     thread_folders_api_enabled = _parse_flag(values, "AGENT_THREAD_FOLDERS_API_ENABLED")
     delegation_enabled = _parse_flag(values, "AGENT_DELEGATION_ENABLED")
     records_enabled = _parse_flag(values, "AGENT_RECORDS_ENABLED")
+    cockpit_enabled = _parse_flag(values, "AGENT_COCKPIT_ENABLED")
     device_channel_enabled = _parse_flag(values, "AGENT_DEVICE_CHANNEL_ENABLED")
     device_sms_enabled = _parse_flag(values, "AGENT_DEVICE_SMS_ENABLED")
     surface_api_enabled = _parse_flag(values, "AGENT_SURFACE_API_ENABLED")
@@ -1905,6 +1908,11 @@ def _load_settings(
     sandbox_image = values.get("AGENT_SANDBOX_IMAGE", "agent-core-sandbox:dev").strip()
     if not sandbox_image:
         raise ConfigurationError("AGENT_SANDBOX_IMAGE must not be empty")
+    cockpit_builder_image = values.get(
+        "AGENT_COCKPIT_BUILDER_IMAGE", "veetbot-cockpit-builder:dev"
+    ).strip()
+    if not cockpit_builder_image:
+        raise ConfigurationError("AGENT_COCKPIT_BUILDER_IMAGE must not be empty")
     sandbox_passthrough = tuple(
         name.strip()
         for name in values.get("AGENT_SANDBOX_PASSTHROUGH", "").split(",")
@@ -2042,6 +2050,7 @@ def _load_settings(
         thread_folders_api_enabled=thread_folders_api_enabled,
         delegation_enabled=delegation_enabled,
         records_enabled=records_enabled,
+        cockpit_enabled=cockpit_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,
         surface_api_enabled=surface_api_enabled,
@@ -2083,6 +2092,7 @@ def _load_settings(
         auth_roles=auth_roles,
         auth_scopes=auth_scopes,
         sandbox_image=sandbox_image,
+        cockpit_builder_image=cockpit_builder_image,
         sandbox_passthrough=sandbox_passthrough,
         execution_service_socket=execution_service_socket,
         release_id=release_id,

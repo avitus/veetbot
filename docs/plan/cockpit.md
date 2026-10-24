@@ -347,25 +347,50 @@ importer, release preflight or a developer's checkout. In order:
 Rejection records the revision as `rejected` with diagnostics and nothing
 else. No outbox entry, commit or event is created.
 
-The builder runs in the **builder image** `execution/cockpit-builder`:
+The builder runs in the **builder image**, `execution/cockpit-builder.Dockerfile`:
 
-- **Base.** It is built from the sandbox image's base, keeping `python` for
-  the execution service's workspace operations. It adds Node, the locked
-  `cockpit/` dependencies including esbuild's linux binary, Playwright WebKit,
-  and the built kit.
+- **Base.** It is built from a digest-pinned Debian Node image, not the
+  sandbox's Alpine base, because the preview renderer's Playwright WebKit
+  needs glibc. It installs `python` for the execution service's workspace
+  operations, the locked `cockpit/` runtime dependencies (including esbuild's
+  Linux binary), and the kit built at image build time. Playwright WebKit
+  joins it with the preview renderer.
 - **Isolation.** It runs through the existing execution service under gVisor,
-  with networking off, a read-only root, a no-exec `/tmp`, the standard
-  limits, an empty environment and no credentials.
+  with:
+  - networking off;
+  - a read-only root and a no-exec `/tmp`;
+  - the standard limits;
+  - an empty environment and no credentials.
+- **Transport.** The package and the privacy screen travel on the command's
+  stdin, and the report, bundle and manifest come back on stdout. Nothing is
+  written to the workspace, so a hostile file name cannot overwrite the
+  screen, and the builder judges the package's raw file names.
 - **Configuration.** It has its own `AGENT_COCKPIT_BUILDER_IMAGE` setting and
-  `SandboxManager`. The execution service accepts only the two configured
-  images.
-- **Leases.** A build inside a run uses that run's lease. A build started by
-  the importer or release preflight holds its own lease row and a
-  `purpose=cockpit_build` label, so the reaper leaves it alone.
-- **Release preflight.** It builds a canary under runsc and rebuilds every
-  live widget against the release's kit. A widget whose rebuild fails stays on
-  its previous `kit_api` runtime, the failure is reported, and nothing
-  half-migrates.
+  `SandboxManager`, constructed only when `AGENT_COCKPIT_ENABLED` is on. The
+  execution service admits only the images its unit names with
+  `--allow-image`, resolved on each admission, so a release that moves a
+  `:production` tag needs no restart.
+- **Leases.** Every build provisions a fresh sandbox, also inside a run, and
+  releases it when the build returns or is cancelled. Nothing carries from one
+  build to the next or into the run's own sandbox. The sandbox is labelled
+  `purpose=cockpit_build`, and that label with its wall-clock deadline is the
+  build's own lease. The reaper leaves a labelled sandbox alone until the
+  deadline and removes it after, so a build that the importer or release
+  preflight starts outside any run survives the reaper without a lease row.
+- **Verdicts.** A rejection is a verdict with at least one diagnostic. The
+  adapter raises instead of returning a verdict when the build:
+  - timed out or exceeded a limit;
+  - exited with a usage error;
+  - printed something other than one report for the package;
+  - returned an exit code that disagrees with its report;
+  - returned a bundle that does not hash to its digest or exceeds the cap.
+
+  Diagnostic fields are clamped to the domain's lengths.
+- **Release preflight.** It builds the image, then builds the reference
+  `weather` widget under runsc with the sandbox's flags as a canary. It also
+  rebuilds every live widget against the release's kit. A widget whose
+  rebuild fails stays on its previous `kit_api` runtime, the failure is
+  reported, and nothing half-migrates.
 
 ## The repository branch and the commit outbox
 

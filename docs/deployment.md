@@ -92,13 +92,17 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 3. installs a release-local `.venv` from `uv.lock` using a shared download
    cache, and compiles the bytecode of its dependencies and of `src`, because
    the units' read-only filesystem keeps Python from caching it at run time;
-4. builds `agent-core-sandbox:<release-id>`;
+4. builds `agent-core-sandbox:<release-id>` and
+   `veetbot-cockpit-builder:<release-id>`, then requires the builder to build
+   a reference widget under runsc with no network, a read-only root and the
+   sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`);
 5. checks active provider pins against the staged registry on an existing
    installation, then ensures the local PostgreSQL service is running;
 6. reconciles owner permissions into the staged `.owner-scopes.env`, applies
    `alembic upgrade head`, and runs the production preflight;
 7. stops both run workers, rechecks active provider pins, then switches
-   `/opt/veetbot/current`, tags the sandbox image as `production`, and
+   `/opt/veetbot/current`, tags the sandbox and builder images as
+   `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
@@ -107,8 +111,9 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    authoritative session index and model settings, and requires every process to run from the
    promoted directory;
 9. retains the five newest valid releases; and
-10. retains the two newest timestamped `agent-core-sandbox` and
-    `veetbot-browser-profile-service` image tags and prunes build cache that
+10. retains the two newest timestamped `agent-core-sandbox`,
+    `veetbot-cockpit-builder` and `veetbot-browser-profile-service` image
+    tags and prunes build cache that
     no build has used for 48 hours.
 
 The provider-pin checks enforce ADR-0119's requirement to drain runs before a
@@ -1226,7 +1231,9 @@ If it refuses the target, roll forward instead, or restore a database snapshot
 from before the first such revision and then roll the code back. Never run an
 automatic Alembic downgrade as part of rollback. Run the complete block in one
 shell so file descriptor 9 holds the same deployment lock from before writer
-quiescence through readiness verification.
+quiescence through readiness verification. The block retags the target's
+Cockpit builder image as `production` when the target has one; a target from
+before Milestone 35 has none, and the newer builder tag stays, unused by it.
 
 ```bash
 set -euo pipefail
@@ -1265,6 +1272,14 @@ previous_production_image="$(
   docker image inspect --format '{{.Id}}' agent-core-sandbox:production
 )"
 test -n "$previous_production_image"
+# A release from before Milestone 35 has no Cockpit builder image.
+target_builder_image=""
+if docker image inspect "veetbot-cockpit-builder:$target_id" >/dev/null 2>&1; then
+  target_builder_image="veetbot-cockpit-builder:$target_id"
+fi
+previous_builder_image="$(
+  docker image inspect --format '{{.Id}}' veetbot-cockpit-builder:production 2>/dev/null || true
+)"
 
 managed_units=(
   veetbot-execution
@@ -1319,6 +1334,9 @@ rollback_on_exit() {
     mv -Tf "$docs_restore" /opt/veetbot/shared/docs/current
     mv -Tf "$website_restore" /opt/veetbot/shared/website/current
     docker tag "$previous_production_image" agent-core-sandbox:production
+    if test -n "$previous_builder_image"; then
+      docker tag "$previous_builder_image" veetbot-cockpit-builder:production
+    fi
     sudo systemctl restart "${managed_units[@]}"
   fi
   if test -n "$health_headers"; then
@@ -1371,6 +1389,9 @@ ln -s "$target" "$app_next"
 ln -s "$docs_target" "$docs_next"
 ln -s "$website_target" "$website_next"
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
+if test -n "$target_builder_image"; then
+  docker tag "$target_builder_image" veetbot-cockpit-builder:production
+fi
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
 mv -Tf "$docs_next" /opt/veetbot/shared/docs/current

@@ -48,6 +48,7 @@ from agent_core.adapters.browser.unavailable import (
     UnavailableBrowserAuthenticationControlPlane,
     UnavailableBrowserProfileControlPlane,
 )
+from agent_core.adapters.cockpit.builder import SandboxWidgetBuilder, cockpit_build_sandbox
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -615,6 +616,7 @@ from agent_core.ports.browser_sessions import (
     BrowserSessionControlPlane,
 )
 from agent_core.ports.browser_upload import BrowserImageUploader
+from agent_core.ports.cockpit import WidgetBuilder
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
@@ -868,6 +870,9 @@ class Composition:
     attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
     call_plans: CallPlanSweep | None = None
+    # The Cockpit builder and its own sandbox manager, only behind the flag (M35).
+    cockpit_builder: WidgetBuilder | None = None
+    cockpit_sandbox: SandboxManager | None = None
     # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
     latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
     reliability_report: Callable[[datetime, datetime], Awaitable[ReliabilityReport]] | None = None
@@ -1818,8 +1823,14 @@ def _schedule_principal(settings: Settings) -> Principal:
     )
 
 
-async def serve_execution_service(socket_path: Path) -> None:
-    """Run the credential-free production execution-service composition."""
+async def serve_execution_service(
+    socket_path: Path, *, allowed_images: tuple[str, ...] = ()
+) -> None:
+    """Run the credential-free production execution-service composition.
+
+    Production names the sandbox and Cockpit builder images; the service then
+    provisions nothing else (docs/plan/cockpit.md).
+    """
 
     environment = DockerExecutionEnvironment(
         SystemClock(),
@@ -1830,6 +1841,7 @@ async def serve_execution_service(socket_path: Path) -> None:
         environment,
         socket_path,
         resolve_image_digest=resolve_local_image_digest,
+        allowed_images=allowed_images,
     )
     loop = asyncio.get_running_loop()
     serving = asyncio.create_task(server.serve_forever())
@@ -2752,6 +2764,7 @@ async def _compose(
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise ConfigurationError(f"MCP {name} must be a positive integer")
         warmup_limits[name] = value
+    cockpit_sandbox: SandboxManager | None = None
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -2762,6 +2775,10 @@ async def _compose(
             parent_environment=os.environ,
             passthrough_names=settings.sandbox_passthrough,
         )
+        if settings.cockpit_enabled:
+            cockpit_sandbox = cockpit_build_sandbox(
+                fake_environment, image_digest=fake_image_digest(), limits=sandbox_limits
+            )
     elif settings.sandbox.value in {"docker", "gvisor"}:
         execution_environment: ExecutionServiceClient | DockerExecutionEnvironment
         if settings.execution_service_socket is not None:
@@ -2770,11 +2787,18 @@ async def _compose(
                 execution_environment.resolve_image_digest,
                 settings.sandbox_image,
             )
+            builder_image_resolver = partial(
+                execution_environment.resolve_image_digest,
+                settings.cockpit_builder_image,
+            )
         else:
             execution_environment = DockerExecutionEnvironment(
                 clock, ids, runtime="runsc" if settings.sandbox.value == "gvisor" else None
             )
             image_resolver = partial(resolve_local_image_digest, settings.sandbox_image)
+            builder_image_resolver = partial(
+                resolve_local_image_digest, settings.cockpit_builder_image
+            )
         sandbox_manager = SandboxManager(
             execution_environment,
             resolve_image_digest=image_resolver,
@@ -2783,8 +2807,17 @@ async def _compose(
             parent_environment=os.environ,
             passthrough_names=settings.sandbox_passthrough,
         )
+        if settings.cockpit_enabled:
+            cockpit_sandbox = cockpit_build_sandbox(
+                execution_environment,
+                resolve_image_digest=builder_image_resolver,
+                limits=sandbox_limits,
+            )
     else:
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
+    cockpit_builder = (
+        SandboxWidgetBuilder(cockpit_sandbox, ids) if cockpit_sandbox is not None else None
+    )
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
@@ -3595,6 +3628,9 @@ async def _compose(
             # The complete-graph cleanup below has not been entered yet.
             with suppress(BaseException):
                 await sandbox_manager.close()
+            if cockpit_sandbox is not None:
+                with suppress(BaseException):
+                    await cockpit_sandbox.close()
             for provider in effective_providers.values():
                 with suppress(BaseException):
                     await provider.close()
@@ -5206,6 +5242,8 @@ async def _compose(
                 schedule_worker_factory=schedule_worker_factory,
                 surface_ingress=surface_ingress,
                 sandbox=sandbox_manager,
+                cockpit_builder=cockpit_builder,
+                cockpit_sandbox=cockpit_sandbox,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
                 skill_reviews=skill_reviews,
@@ -5239,6 +5277,9 @@ async def _compose(
                 await mcp_proxy.close()
         with suppress(BaseException):
             await sandbox_manager.close()
+        if cockpit_sandbox is not None:
+            with suppress(BaseException):
+                await cockpit_sandbox.close()
         for provider in effective_providers.values():
             with suppress(BaseException):
                 await provider.close()
@@ -6400,6 +6441,14 @@ async def build(
                 await composition.sandbox.close()
             except Exception as exc:
                 logger.warning("sandbox_close_failed", extra={"error_class": type(exc).__name__})
+            if composition.cockpit_sandbox is not None:
+                try:
+                    await composition.cockpit_sandbox.close()
+                except Exception as exc:
+                    logger.warning(
+                        "cockpit_sandbox_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
             if composition.mcp_proxy is not None:
                 try:
                     await composition.mcp_proxy.close()

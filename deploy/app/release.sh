@@ -80,6 +80,7 @@ reclaim_image_storage() {
     return 0
   fi
   prune_release_images "$SANDBOX_REPOSITORY" "$running"
+  prune_release_images "$BUILDER_REPOSITORY" "$running"
   prune_release_images "$PROFILE_REPOSITORY" "$running"
   docker builder prune --all --force --filter until=48h >/dev/null || \
     printf 'warning: could not prune the build cache; continuing.\n' >&2
@@ -115,6 +116,9 @@ SANDBOX_REPOSITORY="agent-core-sandbox"
 PROFILE_REPOSITORY="veetbot-browser-profile-service"
 RELEASE_IMAGE="$SANDBOX_REPOSITORY:$RELEASE_ID"
 PRODUCTION_IMAGE="$SANDBOX_REPOSITORY:production"
+BUILDER_REPOSITORY="veetbot-cockpit-builder"
+BUILDER_RELEASE_IMAGE="$BUILDER_REPOSITORY:$RELEASE_ID"
+BUILDER_PRODUCTION_IMAGE="$BUILDER_REPOSITORY:production"
 PROFILE_RELEASE_IMAGE="$PROFILE_REPOSITORY:$RELEASE_ID"
 PREVIOUS_RELEASE=""
 PROMOTED=0
@@ -203,6 +207,7 @@ for required in \
   deploy/systemd/veetbot-call.service \
   deploy/systemd/veetbot-call-ingress.service \
   execution/sandbox.Dockerfile \
+  execution/cockpit-builder.Dockerfile \
   scripts/check_schedule_database_permissions.py \
   scripts/check_surface_database_permissions.py \
   scripts/database_role_permissions.py \
@@ -229,7 +234,16 @@ uv sync --frozen --no-dev --compile-bytecode
 "$STAGE/.venv/bin/python" -m compileall -q src
 docker build -f deploy/postgres.Dockerfile -t veetbot-postgres:16-alpine-vector0.8.7 .
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
+docker build -f execution/cockpit-builder.Dockerfile -t "$BUILDER_RELEASE_IMAGE" .
 docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
+# The Cockpit builder canary: a reference widget must build under gVisor with
+# no network, a read-only root, no credentials and the sandbox's flags, or the
+# release stops here (docs/plan/cockpit.md, gate 3).
+docker run --rm --pull=never --runtime runsc --network none --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=67108864 --user 65534:65534 --cap-drop ALL \
+  --security-opt no-new-privileges "$BUILDER_RELEASE_IMAGE" \
+  node /opt/cockpit/builder/cli.mjs build /opt/cockpit/examples/widgets/weather >/dev/null || fail \
+  "the Cockpit builder could not build its canary offline under runsc"
 
 set -a
 # shellcheck disable=SC1090
@@ -439,6 +453,7 @@ docker compose --env-file "$ENV_FILE" \
 
 export VEETBOT_RELEASE_ID="$RELEASE_ID"
 export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
+export AGENT_COCKPIT_BUILDER_IMAGE="$BUILDER_RELEASE_IMAGE"
 "$STAGE/.venv/bin/alembic" upgrade head
 "$STAGE/.venv/bin/python" scripts/check_production_deployment.py
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
@@ -545,6 +560,7 @@ ln -s "$STAGE" "$NEXT_CURRENT"
 mv -Tf "$NEXT_CURRENT" "$CURRENT"
 PROMOTED=1
 docker tag "$RELEASE_IMAGE" "$PRODUCTION_IMAGE"
+docker tag "$BUILDER_RELEASE_IMAGE" "$BUILDER_PRODUCTION_IMAGE"
 sudo systemctl enable --now "${UNITS[@]}"
 sudo systemctl restart "${UNITS[@]}"
 for calling_unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
@@ -658,5 +674,5 @@ trap - EXIT
 printf 'Released %s successfully.\n' "$RELEASE_ID"
 if [[ -n "$PREVIOUS_RELEASE" && "$PREVIOUS_RELEASE" != "$STAGE" ]]; then
   printf 'Manual rollback target: %s\n' "$PREVIOUS_RELEASE"
-  printf 'Rollback requires repointing current, retagging that release image, and restarting all enabled units.\n'
+  printf 'Rollback requires repointing current, retagging the target release images, and restarting all enabled units.\n'
 fi

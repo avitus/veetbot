@@ -458,8 +458,11 @@ def test_worker_refuses_configuration_and_unknown_roles(monkeypatch: pytest.Monk
 def test_execution_service_requires_an_absolute_socket(monkeypatch: pytest.MonkeyPatch) -> None:
     served: list[object] = []
 
-    async def serve(path: object) -> None:
+    allowed: list[tuple[str, ...]] = []
+
+    async def serve(path: object, *, allowed_images: tuple[str, ...] = ()) -> None:
         served.append(path)
+        allowed.append(allowed_images)
 
     monkeypatch.setattr(cli_main, "serve_execution_service", serve)
     relative = runner.invoke(cli_main.app, ["execution-service", "--socket", "run/exec.sock"])
@@ -468,3 +471,20 @@ def test_execution_service_requires_an_absolute_socket(monkeypatch: pytest.Monke
     absolute = runner.invoke(cli_main.app, ["execution-service", "--socket", "/run/exec.sock"])
     assert absolute.exit_code == 0, absolute.output
     assert [str(path) for path in served] == ["/run/exec.sock"]
+    restricted = runner.invoke(
+        cli_main.app,
+        [
+            "execution-service",
+            "--socket",
+            "/run/exec.sock",
+            "--allow-image",
+            "agent-core-sandbox:production",
+            "--allow-image",
+            "veetbot-cockpit-builder:production",
+        ],
+    )
+    assert restricted.exit_code == 0, restricted.output
+    assert allowed == [
+        (),
+        ("agent-core-sandbox:production", "veetbot-cockpit-builder:production"),
+    ]

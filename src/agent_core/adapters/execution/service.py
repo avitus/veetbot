@@ -38,6 +38,7 @@ from agent_core.domain.execution import (
     FileChange,
     KillReason,
     ResourceLimits,
+    SandboxPurpose,
     WorkspaceEntry,
     WorkspaceProvenance,
 )
@@ -73,6 +74,7 @@ _ENUMS: dict[str, type[Enum]] = {
         ChangeKind,
         EgressMode,
         KillReason,
+        SandboxPurpose,
         WorkspaceProvenance,
     )
 }
@@ -528,13 +530,30 @@ class ExecutionServiceServer:
         socket_path: Path,
         *,
         resolve_image_digest: Callable[[str], Awaitable[str]],
+        allowed_images: tuple[str, ...] = (),
     ) -> None:
         if not socket_path.is_absolute():
             raise ValueError("execution service socket must be an absolute path")
         self._environment = environment
         self._socket_path = socket_path
         self._resolve_image_digest = resolve_image_digest
+        self._allowed_images = allowed_images
         self._server: asyncio.AbstractServer | None = None
+
+    async def admit(self, specification: EnvironmentSpec) -> None:
+        """Refuse an image the service was not configured with.
+
+        References are resolved on each admission, so a release that moves a
+        `:production` tag is admitted without restarting the service.
+        """
+
+        if not self._allowed_images:
+            return
+        for reference in self._allowed_images:
+            with suppress(Exception):
+                if await self._resolve_image_digest(reference) == specification.image_digest:
+                    return
+        raise ExecutionRejected("the requested image is not an allowed sandbox image")
 
     async def start(self) -> None:
         self._socket_path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -619,9 +638,9 @@ class ExecutionServiceServer:
         if operation == "resolve_image_digest":
             return await self._resolve_image_digest(_require(payload, "reference", str))
         if operation == "provision":
-            return await self._environment.provision(
-                _require(payload, "specification", EnvironmentSpec)
-            )
+            specification = _require(payload, "specification", EnvironmentSpec)
+            await self.admit(specification)
+            return await self._environment.provision(specification)
         if operation == "execute":
             return await self._environment.execute(
                 _require(payload, "environment", EnvironmentHandle),
