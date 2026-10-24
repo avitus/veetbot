@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 from uuid import UUID
 
@@ -46,20 +46,23 @@ class _QueueSubscription:
 
 class InMemoryLiveEventBroadcaster:
     def __init__(self) -> None:
-        self._subscriptions: dict[UUID, set[_QueueSubscription]] = {}
+        self._subscriptions: dict[str, set[_QueueSubscription]] = {}
+
+    def subscribe(self, session_id: UUID) -> AbstractAsyncContextManager[LiveSubscription]:
+        return self.listen(event_channel(session_id))
 
     @asynccontextmanager
-    async def subscribe(self, session_id: UUID) -> AsyncIterator[LiveSubscription]:
+    async def listen(self, channel: str) -> AsyncIterator[LiveSubscription]:
         subscription = _QueueSubscription(asyncio.Queue(maxsize=LIVE_QUEUE_SIZE))
-        self._subscriptions.setdefault(session_id, set()).add(subscription)
+        self._subscriptions.setdefault(channel, set()).add(subscription)
         try:
             yield subscription
         finally:
-            subscribers = self._subscriptions.get(session_id)
+            subscribers = self._subscriptions.get(channel)
             if subscribers is not None:
                 subscribers.discard(subscription)
                 if not subscribers:
-                    self._subscriptions.pop(session_id, None)
+                    self._subscriptions.pop(channel, None)
 
     async def publish(
         self,
@@ -69,7 +72,7 @@ class InMemoryLiveEventBroadcaster:
         data: dict[str, Any],
     ) -> None:
         notification = LiveNotification(kind="transient", run_id=run_id, event=event, data=data)
-        for subscriber in tuple(self._subscriptions.get(session_id, ())):
+        for subscriber in tuple(self._subscriptions.get(event_channel(session_id), ())):
             subscriber.offer(notification)
 
     async def close(self) -> None:
@@ -83,11 +86,13 @@ class PostgresLiveEventBroadcaster:
         self._publisher: asyncpg.Connection[Any] | None = None
         self._publisher_lock = asyncio.Lock()
 
+    def subscribe(self, session_id: UUID) -> AbstractAsyncContextManager[LiveSubscription]:
+        return self.listen(event_channel(session_id))
+
     @asynccontextmanager
-    async def subscribe(self, session_id: UUID) -> AsyncIterator[LiveSubscription]:
+    async def listen(self, channel: str) -> AsyncIterator[LiveSubscription]:
         connection = await asyncpg.connect(self._dsn)
         subscription = _QueueSubscription(asyncio.Queue(maxsize=LIVE_QUEUE_SIZE))
-        channel = event_channel(session_id)
         listening = False
 
         def listener(

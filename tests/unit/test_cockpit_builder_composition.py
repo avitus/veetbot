@@ -97,6 +97,7 @@ async def test_the_maintenance_role_commits_and_imports_with_the_github_app(
         worker = composition.maintenance_factory()
         assert worker._sweep_cockpit_outbox is not None  # type: ignore[attr-defined]
         assert worker._sweep_cockpit_import is not None  # type: ignore[attr-defined]
+        assert worker._sweep_cockpit_events is not None  # type: ignore[attr-defined]
     key.chmod(0o644)
     async with build(settings=settings, storage="memory") as composition:
         with pytest.raises(ConfigurationError, match="private"):

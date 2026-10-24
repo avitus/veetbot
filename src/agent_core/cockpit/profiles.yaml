@@ -7,3 +7,10 @@ publication:
   commits_per_principal_per_hour: 60
   # How often the maintenance role polls the widget branch for human commits.
   import_interval_seconds: 60
+stream:
+  # A stream closes cleanly after this long, so a revoked token takes effect
+  # on reconnect (docs/plan/cockpit.md, the stream).
+  max_seconds: 600
+  # How long stream events are kept; a client resuming from before this gets
+  # stream.reset and refetches the snapshot.
+  event_retention_seconds: 86400

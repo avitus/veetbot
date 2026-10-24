@@ -30,6 +30,10 @@ ERROR_STATUS_MAP: dict[type[BaseException], ErrorMapping] = {
     domain_errors.DeviceValidationError: ErrorMapping("device_validation_error", 422),
     domain_errors.DeviceIngestError: ErrorMapping("device_ingest_error", 422),
     domain_errors.DeviceChannelUnavailable: ErrorMapping("device_channel_unavailable", 503),
+    # Cockpit reuses the closed vocabulary: a write that does not fit is malformed, and a
+    # build that reached no verdict is a sandbox execution failure (docs/plan/cockpit.md).
+    domain_errors.CockpitValidationError: ErrorMapping("malformed_request", 400),
+    domain_errors.CockpitBuildUnavailable: ErrorMapping("sandbox_execution_error", 502),
     domain_errors.InvalidStateTransition: ErrorMapping("invalid_state_transition", 409),
     domain_errors.ToolNotFoundError: ErrorMapping("tool_not_found", 404),
     domain_errors.ToolValidationError: ErrorMapping("tool_validation_error", 422),

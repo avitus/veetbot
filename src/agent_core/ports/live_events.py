@@ -27,6 +27,10 @@ class LiveSubscription(Protocol):
 class LiveEventBroadcaster(Protocol):
     def subscribe(self, session_id: UUID) -> AbstractAsyncContextManager[LiveSubscription]: ...
 
+    def listen(self, channel: str) -> AbstractAsyncContextManager[LiveSubscription]:
+        """Wake on a named channel; Cockpit listens on its tenant's (docs/plan/cockpit.md)."""
+        ...
+
     async def publish(
         self,
         session_id: UUID,

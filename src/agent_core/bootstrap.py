@@ -54,6 +54,7 @@ from agent_core.adapters.cockpit.github import (
     GitHubWidgetRepository,
     load_app_private_key,
 )
+from agent_core.adapters.cockpit.runtime import FileCockpitRuntime, JsonSchemaSettingsCheck
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -312,6 +313,7 @@ from agent_core.application.cockpit import (
     CockpitPublicationLimits,
     CommitOutboxWorker,
 )
+from agent_core.application.cockpit_views import CockpitBoard, CockpitRetention
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_ingest import DeviceMessageIngestService
 from agent_core.application.device_management import (
@@ -838,6 +840,8 @@ class ApplicationServices:
     schedule_drafts: ScheduleDrafter | None = None
     # ADR-0225 part C: Run now materializes on the API's own unit of work.
     schedule_runs: ScheduleMaterializer | None = None
+    # Milestone 35: present only when AGENT_COCKPIT_ENABLED is set.
+    cockpit: CockpitBoard | None = None
 
 
 class _CockpitMaintenance:
@@ -918,8 +922,15 @@ class _CockpitMaintenance:
             "principal": self._principal,
             "limits": limits,
         }
+        retention = CockpitRetention(
+            uow_factory=self._uow_factory,
+            clock=self._clock,
+            tenant_id=self._principal.tenant_id,
+            seconds=self._profiles.stream.event_retention_seconds,
+        )
         return {
             "sweep_cockpit_outbox": CommitOutboxWorker(**common).run_once,
+            "sweep_cockpit_events": retention.run_once,
             "sweep_cockpit_import": BranchImporter(
                 **common, builder=self._builder, owner_names=self._owner_names
             ).run_once,
@@ -2924,6 +2935,7 @@ async def _compose(
         SandboxWidgetBuilder(cockpit_sandbox, ids) if cockpit_sandbox is not None else None
     )
     cockpit_publication: CockpitPublication | None = None
+    cockpit_service: CockpitBoard | None = None
     cockpit_maintenance: _CockpitMaintenance | None = None
     if cockpit_builder is not None:
         cockpit_profiles = CockpitProfiles.from_document(
@@ -2949,6 +2961,16 @@ async def _compose(
                     cockpit_profiles.publication.commits_per_principal_per_hour
                 ),
             ),
+        )
+        cockpit_service = CockpitBoard(
+            uow_factory=uow_factory,
+            clock=clock,
+            live_events=live_events,
+            publication=cockpit_publication,
+            runtime=FileCockpitRuntime(settings.artifact_root / "cockpit-runtime"),
+            settings_schema=JsonSchemaSettingsCheck(),
+            stream_max_seconds=cockpit_profiles.stream.max_seconds,
+            repository=settings.cockpit_github_repository,
         )
         cockpit_maintenance = _CockpitMaintenance(
             settings,
@@ -5148,6 +5170,7 @@ async def _compose(
             notifications=notification_inbox,
             surfaces=surface_management,
             reconsolidation=PublicReconsolidationService(uow_factory, clock),
+            cockpit=cockpit_service,
             memory=PublicMemoryService(
                 clock=clock,
                 derived_enabled=settings.memory_reconsolidation_api_enabled,

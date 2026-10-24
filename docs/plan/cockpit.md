@@ -658,6 +658,21 @@ feed is an indistinguishable 404.
 
 The owner's own write routes go through the same outbox and pipeline as the
 tool. They need no approval, because the owner's gesture is the decision.
+Revert, delete and restore answer `202` with the change: a revert or restore
+carries its revision's state and diagnostics, and a delete is `queued`.
+
+The routes' other contracts:
+
+- **Errors.** Settings that fail the live manifest's settings schema, and a
+  layout that places a widget that is not live or at a size its manifest does
+  not offer, are `malformed_request` (400). A build that reached no verdict
+  is `sandbox_execution_error` (502), and nothing is recorded.
+- **Runtime assets.** The snapshot's runtime and the asset route read the
+  manifest a release exports to `artifact_root/cockpit-runtime/`. Until that
+  export lands with the native mode, `runtime` is null.
+- **Asset caching.** An asset answers
+  `Cache-Control: private, max-age=31536000, immutable` and
+  `X-Content-Type-Options: nosniff`.
 
 **The stream** follows the run stream's pattern:
 
@@ -675,12 +690,24 @@ The stream's own rules:
 - **Event kinds.** `feed.updated`, `widget.revised`, `widget.deleted`,
   `layout.updated`, `settings.updated`, `import.failed` and `stream.reset`.
 - **Reset.** A resume point older than the retention window gets
-  `stream.reset`, and the client refetches the snapshot.
-- **Lifetime.** A stream lives at most `stream_max_seconds` (knob, default
+  `stream.reset`, and the client refetches the snapshot. Sequences are shared
+  across tenants, so one principal's have gaps. A resume point is always one
+  of the principal's own sequences, though, and retention removes the oldest
+  events first. So a nonzero resume point below the principal's oldest
+  retained event, or with none retained, gets the reset.
+- **Retention.** Events are kept for `stream.event_retention_seconds` (knob,
+  default one day). The maintenance role prunes them on the importer's timer.
+- **Start.** A stream without `Last-Event-ID` starts after the latest event;
+  a client opens it with the snapshot's `cursor`.
+- **Frames.** Each event's frame has the sequence as its id, the kind as its
+  event and `{"subject": …}` as its data, naming the widget, feed or device
+  class that changed.
+- **Lifetime.** A stream lives at most `stream.max_seconds` (knob, default
   600) before a clean close, so token revocation takes effect on reconnect.
 
 `cockpit.read` and `cockpit.write` join `PLATFORM_SCOPES`, the deployment
-scope classification, and `AUTH_SCOPES` in `deploy/veetbot.env.example`.
+scope classification, and `AUTH_SCOPES` in `deploy/veetbot.env.example`. The
+schedule principal gains `cockpit.write` with the feed publishing tool.
 
 ## The native experience
 
@@ -1119,7 +1146,10 @@ landed the publication path:
 Gates 2 and 4 are bound to sandbox tests that build in the real builder image.
 Gates 5 to 9 are bound to the publication path over the GitHub adapter and
 the in-memory remote. Gate 3 awaits the first production release's canary.
-Routes, tools and feeds are the next steps.
+
+Build step 6 landed the nine routes behind the flag, the two scopes, the
+tenant channel with NOTIFY on the event log, the resumable stream, and event
+retention. Gates 14 and 15 are bound. Tools and feeds are the next steps.
 
 ## Implementation checkpoint: 2026-10-22
 

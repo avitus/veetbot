@@ -22,6 +22,7 @@ from agent_core.api.auth import Authenticator
 from agent_core.api.boundary import MalformedRequestError
 from agent_core.api.browser_task_grants import browser_task_grants_router
 from agent_core.api.calls import call_router
+from agent_core.api.cockpit import cockpit_router
 from agent_core.api.dreaming import dreaming_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
@@ -48,6 +49,7 @@ from agent_core.application.services import (
     BrowserGrantService,
     BrowserProfileService,
     CallingService,
+    CockpitService,
     DeviceIngestService,
     DeviceService,
     EmailService,
@@ -233,6 +235,9 @@ class ApplicationServices(Protocol):
 
     @property
     def people(self) -> PeopleService | None: ...
+
+    @property
+    def cockpit(self) -> CockpitService | None: ...
 
 
 class UpdatePersonaEntryRequest(BaseModel):
@@ -1920,6 +1925,9 @@ def create_app(
 
     if settings.people_enabled and services.people is not None:
         app.include_router(people_router(services.people, secured))
+    # Milestone 35: absent unless AGENT_COCKPIT_ENABLED=1 (docs/plan/cockpit.md).
+    if settings.cockpit_enabled and services.cockpit is not None:
+        app.include_router(cockpit_router(services.cockpit, secured))
 
     if settings.memory_api_enabled:
         app.include_router(memory_router)

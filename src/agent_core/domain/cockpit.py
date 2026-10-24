@@ -354,6 +354,12 @@ WIDGET_BRANCH_README = (
 )
 
 
+def cockpit_channel(tenant_id: str) -> str:
+    """One tenant's Cockpit LISTEN/NOTIFY channel, within PostgreSQL's 63-byte identifiers."""
+
+    return f"cockpit_{hashlib.sha256(tenant_id.encode('utf-8')).hexdigest()[:32]}"
+
+
 def is_bundle_digest(value: str) -> bool:
     return bool(_SHA256.fullmatch(value))
 

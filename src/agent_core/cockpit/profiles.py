@@ -39,11 +39,19 @@ class CockpitPublicationProfile(_ProfileModel):
         return self
 
 
+class CockpitStreamProfile(_ProfileModel):
+    """How long one stream lives and how far back a client may resume."""
+
+    max_seconds: int = Field(default=600, ge=1)
+    event_retention_seconds: int = Field(default=86_400, ge=60)
+
+
 class CockpitProfiles(_ProfileModel):
     """The whole `cockpit/profiles.yaml` document."""
 
     schema_version: Literal[1] = 1
     publication: CockpitPublicationProfile = Field(default_factory=CockpitPublicationProfile)
+    stream: CockpitStreamProfile = Field(default_factory=CockpitStreamProfile)
 
     @classmethod
     def from_document(cls, document: Mapping[str, object]) -> CockpitProfiles:

@@ -157,3 +157,13 @@ def test_only_the_maintenance_unit_receives_the_github_app_key() -> None:
             text = unit.read_text(encoding="utf-8")
             assert "cockpit-github-app" not in text, unit.name
             assert "AGENT_COCKPIT_GITHUB_KEY_FILE" not in text, unit.name
+
+
+def test_each_tenant_has_its_own_short_cockpit_channel() -> None:
+    from agent_core.domain.cockpit import cockpit_channel
+
+    first, second = cockpit_channel("tenant-a"), cockpit_channel("tenant-b")
+    assert first != second
+    assert first == cockpit_channel("tenant-a")
+    assert first.startswith("cockpit_") and len(first) == len("cockpit_") + 32
+    assert len(cockpit_channel("t" * 500).encode()) <= 63

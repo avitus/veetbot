@@ -323,3 +323,34 @@ class WidgetBuilder(Protocol):
         *,
         screen: BuildScreen,
     ) -> WidgetBuild: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CockpitAsset:
+    content: bytes
+    content_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class CockpitRuntimeManifest:
+    """The exported host and realm assets: the entry page and each asset's digest."""
+
+    kit_api: int
+    entry: str
+    assets: Mapping[str, str]
+
+
+class CockpitRuntimeAssets(Protocol):
+    """The host page, realm, React and kit assets a release exported, by content hash."""
+
+    def manifest(self) -> CockpitRuntimeManifest | None: ...
+
+    def asset(self, sha256: str) -> CockpitAsset | None: ...
+
+
+class SettingsSchemaCheck(Protocol):
+    """A widget manifest's settings JSON Schema, applied to the owner's values."""
+
+    def violations(self, schema: Mapping[str, Any], values: Mapping[str, Any]) -> list[str]:
+        """Human-readable reasons the values do not fit, empty when they do."""
+        ...

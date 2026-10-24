@@ -47,6 +47,9 @@ PLATFORM_SCOPES = frozenset(
         # ADR-0239: owner records.
         "records.read",
         "records.write",
+        # ADR-0240: the Cockpit board and the owner's widget changes.
+        "cockpit.read",
+        "cockpit.write",
         "persona.read",
         "persona.write",
         "settings.read",

@@ -467,6 +467,7 @@ def _every_router_settings() -> Settings:
         browser_provider=BrowserProviderKind.HOSTED,
         browser_profile_service_url="https://profiles.example.test",
         browser_task_grants_enabled=True,
+        cockpit_enabled=True,
         credentials={
             **email.credentials,
             "bland_read": bland,
@@ -523,6 +524,7 @@ async def test_every_route_enforces_the_scope_it_declares() -> None:
             "browser-profiles",
             "browser-task-grants",
             "calls",
+            "cockpit",
             "devices",
             "email",
             "folders",

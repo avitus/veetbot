@@ -1569,11 +1569,15 @@ rows stay. Do not downgrade the migration to roll back code: its
 
 ## Cockpit widget publication (ADR-0240)
 
-Cockpit stays off until its routes, tools and native mode land. Nothing below
-is needed while `AGENT_COCKPIT_ENABLED=0`; every release still builds the
-builder image and runs its canary. The publication path
-([Cockpit](plan/cockpit.md)) commits widgets to the public `cockpit/widgets`
-branch through a GitHub App, and only the maintenance unit holds the App's key.
+Cockpit stays off until its tools and native mode land. Nothing below is
+needed while `AGENT_COCKPIT_ENABLED=0`, and with it off no `/v1/cockpit` route
+exists. Every release still builds the builder image and runs its canary.
+
+The publication path ([Cockpit](plan/cockpit.md)) commits widgets to the
+public `cockpit/widgets` branch through a GitHub App, and only the maintenance
+unit holds the App's key. The owner's `cockpit.read` and `cockpit.write`
+scopes ship in `deploy/veetbot.env.example`, so a release adds them to an
+existing host's owner scopes.
 
 **The App.** Create a GitHub App owned by the repository owner. Grant it one
 repository permission, **Contents: Read and write**, and nothing else. Install

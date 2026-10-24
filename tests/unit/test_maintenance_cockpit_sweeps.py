@@ -72,3 +72,26 @@ def test_the_import_interval_must_be_positive() -> None:
             clock=None,  # type: ignore[arg-type]
             cockpit_import_interval_seconds=0,
         )
+
+
+async def test_event_retention_runs_on_the_import_timer() -> None:
+    clock, uow_factory = await memory_uow_factory()
+    calls: list[str] = []
+
+    async def events() -> int:
+        calls.append("events")
+        return 0
+
+    worker = MaintenanceWorker(
+        uow_factory=uow_factory,
+        clock=clock,
+        sweep_cockpit_events=events,
+        cockpit_import_interval_seconds=60,
+    )
+    await worker.run_once()
+    clock.advance(timedelta(seconds=30))
+    await worker.run_once()
+    clock.advance(timedelta(seconds=30))
+    await worker.run_once()
+
+    assert calls == ["events", "events"]

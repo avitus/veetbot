@@ -362,6 +362,7 @@ schedule.read     schedule.write     schedule.cancel
 device.read       device.write       notification.read    notification.write
 memory.read       memory.write
 records.read      records.write
+cockpit.read      cockpit.write
 ```
 
 `records.read` and `records.write` gate no route; they are the
@@ -2404,3 +2405,6 @@ effect on reconnect.
 
 Every response except an asset carries `Cache-Control: private, no-store`. A
 foreign or unknown widget, revision or feed is an indistinguishable 404.
+Cockpit adds no error code. A write that does not fit its live widget is
+`malformed_request`, and a build that reached no verdict is
+`sandbox_execution_error`.

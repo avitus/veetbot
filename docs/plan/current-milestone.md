@@ -14,8 +14,8 @@ title: Current Milestone
   App, platform and assistant-published feeds with freshness, a resumable
   per-tenant stream, five deferred tools, and a network-less realm on iPhone,
   iPad and Mac. The `cockpit/` workspace, the stores, the builder sandbox
-  image and the publication path are implemented, and gates 1, 2 and 4 to 9
-  are bound; every other gate is pending.
+  image, the publication path, the routes and the stream are implemented,
+  and gates 1, 2, 4 to 9, 14 and 15 are bound; every other gate is pending.
 
 - **Milestone 34 — Owner records (ADR-0239):** On 2026-10-22 the owner
   authorized roadmap item B14. [Owner records](owner-records.md) specifies five
@@ -905,7 +905,7 @@ route and a resumable per-tenant stream carry the data, under new scopes and
 a default-off flag. The widget write tool is allowed by an exact-name rule,
 and the trust overlay stays intact.
 
-The `cockpit/` workspace, the stores, the builder sandbox image and the
-publication path are implemented, and gates 1, 2 and 4 to 9 are bound; every
-other gate is pending. This independent workstream is authorized; the verified
-ceiling does not move.
+The `cockpit/` workspace, the stores, the builder sandbox image, the
+publication path, the routes and the stream are implemented, and gates 1, 2,
+4 to 9, 14 and 15 are bound; every other gate is pending. This independent
+workstream is authorized; the verified ceiling does not move.
