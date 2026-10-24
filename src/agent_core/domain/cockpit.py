@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -114,6 +115,24 @@ class OutboxOperation(StrEnum):
     REMOVE = "remove"
 
 
+def package_violation(files: Mapping[str, str]) -> str | None:
+    """Why a file map cannot be stored as a package, or None when it can."""
+
+    if len(files) > WIDGET_PACKAGE_MAX_FILES:
+        return f"a package holds at most {WIDGET_PACKAGE_MAX_FILES} files"
+    total = 0
+    for name, content in files.items():
+        if not _WIDGET_FILE.fullmatch(name):
+            return f"{name!r} is not a widget package file"
+        size = len(content.encode("utf-8"))
+        if size > WIDGET_FILE_MAX_BYTES:
+            return f"{name} exceeds {WIDGET_FILE_MAX_BYTES} bytes"
+        total += size
+    if total > WIDGET_PACKAGE_MAX_BYTES:
+        return f"a package exceeds {WIDGET_PACKAGE_MAX_BYTES} bytes"
+    return None
+
+
 def _json_bytes(value: object) -> int:
     return len(json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8"))
 
@@ -165,18 +184,9 @@ class WidgetRevision(_Owned):
     @field_validator("files")
     @classmethod
     def files_form_a_package(cls, files: dict[str, str]) -> dict[str, str]:
-        if len(files) > WIDGET_PACKAGE_MAX_FILES:
-            raise ValueError(f"a package holds at most {WIDGET_PACKAGE_MAX_FILES} files")
-        total = 0
-        for name, content in files.items():
-            if not _WIDGET_FILE.fullmatch(name):
-                raise ValueError(f"{name!r} is not a widget package file")
-            size = len(content.encode("utf-8"))
-            if size > WIDGET_FILE_MAX_BYTES:
-                raise ValueError(f"{name} exceeds {WIDGET_FILE_MAX_BYTES} bytes")
-            total += size
-        if total > WIDGET_PACKAGE_MAX_BYTES:
-            raise ValueError(f"a package exceeds {WIDGET_PACKAGE_MAX_BYTES} bytes")
+        violation = package_violation(files)
+        if violation is not None:
+            raise ValueError(violation)
         return files
 
     @model_validator(mode="after")
@@ -337,6 +347,11 @@ class ImportFailure(_Owned):
 
 
 WIDGET_BRANCH_DIRECTORY = "cockpit/widgets"
+WIDGET_BRANCH_README = (
+    "# Cockpit widgets\n\n"
+    "Widget packages Veetbot's assistant and its owner write. Generic code only:\n"
+    "personal values live in private settings and feeds, never here.\n"
+)
 
 
 def is_bundle_digest(value: str) -> bool:

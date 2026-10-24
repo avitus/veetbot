@@ -192,6 +192,12 @@ class Settings:
     auth_scopes: frozenset[str] = frozenset()
     sandbox_image: str = "agent-core-sandbox:dev"
     cockpit_builder_image: str = "veetbot-cockpit-builder:dev"
+    # The GitHub App that commits widgets; only the maintenance role sets the key file.
+    cockpit_github_repository: str | None = None
+    cockpit_github_branch: str = "cockpit/widgets"
+    cockpit_github_app_id: int | None = None
+    cockpit_github_installation_id: int | None = None
+    cockpit_github_key_file: Path | None = None
     sandbox_passthrough: tuple[str, ...] = ()
     execution_service_socket: Path | None = None
     release_id: str | None = None
@@ -261,6 +267,7 @@ SHIPPED_CONFIGS = (
     "memory/semantic-index.yaml",
     "folders/profiles.yaml",
     "titles/profiles.yaml",
+    "cockpit/profiles.yaml",
 )
 # The design corpus declares 199 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
@@ -489,6 +496,11 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "generation.batch_size",
             "generation.recent_messages",
             "generation.message_chars",
+        ),
+        "cockpit/profiles.yaml": (
+            "publication.commits_per_widget_per_hour",
+            "publication.commits_per_principal_per_hour",
+            "publication.import_interval_seconds",
         ),
     }
 )
@@ -912,6 +924,19 @@ def _read_gmail_accounts_file(
                 expected_account_id=account_id,
             )
     return account_ids, credentials
+
+
+_GITHUB_REPOSITORY = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
+_COCKPIT_BRANCH = re.compile(r"^cockpit/[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def _optional_positive_int(values: Mapping[str, str], name: str) -> int | None:
+    raw = values.get(name, "").strip()
+    if not raw:
+        return None
+    if not raw.isdigit() or int(raw) <= 0:
+        raise ConfigurationError(f"{name} must be a positive integer")
+    return int(raw)
 
 
 def _validate_private_regular_file(path: Path, name: str) -> None:
@@ -1913,6 +1938,22 @@ def _load_settings(
     ).strip()
     if not cockpit_builder_image:
         raise ConfigurationError("AGENT_COCKPIT_BUILDER_IMAGE must not be empty")
+    cockpit_github_repository = values.get("AGENT_COCKPIT_GITHUB_REPOSITORY", "").strip() or None
+    if cockpit_github_repository is not None and not _GITHUB_REPOSITORY.fullmatch(
+        cockpit_github_repository
+    ):
+        raise ConfigurationError("AGENT_COCKPIT_GITHUB_REPOSITORY must be owner/name")
+    cockpit_github_branch = values.get("AGENT_COCKPIT_GITHUB_BRANCH", "cockpit/widgets").strip()
+    if not _COCKPIT_BRANCH.fullmatch(cockpit_github_branch):
+        raise ConfigurationError("AGENT_COCKPIT_GITHUB_BRANCH must be a branch under cockpit/")
+    cockpit_github_app_id = _optional_positive_int(values, "AGENT_COCKPIT_GITHUB_APP_ID")
+    cockpit_github_installation_id = _optional_positive_int(
+        values, "AGENT_COCKPIT_GITHUB_INSTALLATION_ID"
+    )
+    raw_cockpit_key_file = values.get("AGENT_COCKPIT_GITHUB_KEY_FILE", "").strip()
+    cockpit_github_key_file = Path(raw_cockpit_key_file) if raw_cockpit_key_file else None
+    if cockpit_github_key_file is not None and not cockpit_github_key_file.is_absolute():
+        raise ConfigurationError("AGENT_COCKPIT_GITHUB_KEY_FILE must be an absolute path")
     sandbox_passthrough = tuple(
         name.strip()
         for name in values.get("AGENT_SANDBOX_PASSTHROUGH", "").split(",")
@@ -2093,6 +2134,11 @@ def _load_settings(
         auth_scopes=auth_scopes,
         sandbox_image=sandbox_image,
         cockpit_builder_image=cockpit_builder_image,
+        cockpit_github_repository=cockpit_github_repository,
+        cockpit_github_branch=cockpit_github_branch,
+        cockpit_github_app_id=cockpit_github_app_id,
+        cockpit_github_installation_id=cockpit_github_installation_id,
+        cockpit_github_key_file=cockpit_github_key_file,
         sandbox_passthrough=sandbox_passthrough,
         execution_service_socket=execution_service_socket,
         release_id=release_id,

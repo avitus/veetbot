@@ -49,6 +49,11 @@ from agent_core.adapters.browser.unavailable import (
     UnavailableBrowserProfileControlPlane,
 )
 from agent_core.adapters.cockpit.builder import SandboxWidgetBuilder, cockpit_build_sandbox
+from agent_core.adapters.cockpit.github import (
+    GitHubAppTokens,
+    GitHubWidgetRepository,
+    load_app_private_key,
+)
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -301,6 +306,12 @@ from agent_core.application.call_authorization import OwnerCallAuthorizer
 from agent_core.application.call_plans import CallPlanSweep
 from agent_core.application.call_worker import CallWorker
 from agent_core.application.calling import CallService
+from agent_core.application.cockpit import (
+    BranchImporter,
+    CockpitPublication,
+    CockpitPublicationLimits,
+    CommitOutboxWorker,
+)
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_ingest import DeviceMessageIngestService
 from agent_core.application.device_management import (
@@ -405,6 +416,7 @@ from agent_core.application.trajectory_service import (
     TrajectoryExportService,
     TrajectoryRedactor,
 )
+from agent_core.cockpit.profiles import CockpitProfiles
 from agent_core.config import (
     MEMORY_DISTILLATION_CORPUS_PATH,
     MEMORY_DISTILLATION_HOLDOUT_PATH,
@@ -828,6 +840,97 @@ class ApplicationServices:
     schedule_runs: ScheduleMaterializer | None = None
 
 
+class _CockpitMaintenance:
+    """The maintenance role's GitHub App wiring (docs/plan/cockpit.md, the credential).
+
+    Only the maintenance role reads the App's key, when it builds its worker, and
+    it refuses to start the outbox or the importer without the App's settings.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        uow_factory: UnitOfWorkFactory,
+        clock: Clock,
+        ids: IdFactory,
+        principal: Principal,
+        builder: WidgetBuilder,
+        owner_names: tuple[str, ...],
+        profiles: CockpitProfiles,
+    ) -> None:
+        self._settings = settings
+        self._uow_factory = uow_factory
+        self._clock = clock
+        self._ids = ids
+        self._principal = principal
+        self._builder = builder
+        self._owner_names = owner_names
+        self._profiles = profiles
+        self._client: httpx.AsyncClient | None = None
+
+    def sweeps(self) -> dict[str, Any]:
+        settings = self._settings
+        required = {
+            "AGENT_COCKPIT_GITHUB_REPOSITORY": settings.cockpit_github_repository,
+            "AGENT_COCKPIT_GITHUB_APP_ID": settings.cockpit_github_app_id,
+            "AGENT_COCKPIT_GITHUB_INSTALLATION_ID": settings.cockpit_github_installation_id,
+            "AGENT_COCKPIT_GITHUB_KEY_FILE": settings.cockpit_github_key_file,
+        }
+        missing = sorted(name for name, value in required.items() if value is None)
+        if missing:
+            raise ConfigurationError(
+                "the Cockpit outbox and importer need the GitHub App: set " + ", ".join(missing)
+            )
+        assert settings.cockpit_github_key_file is not None
+        assert settings.cockpit_github_repository is not None
+        assert settings.cockpit_github_app_id is not None
+        assert settings.cockpit_github_installation_id is not None
+        try:
+            key = load_app_private_key(settings.cockpit_github_key_file)
+        except ValueError as exc:
+            raise ConfigurationError(f"AGENT_COCKPIT_GITHUB_KEY_FILE {exc}") from exc
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=30.0)
+        tokens = GitHubAppTokens(
+            self._client,
+            app_id=settings.cockpit_github_app_id,
+            installation_id=settings.cockpit_github_installation_id,
+            private_key_pem=key,
+            clock=self._clock,
+        )
+        repository = GitHubWidgetRepository(
+            self._client,
+            tokens,
+            repository=settings.cockpit_github_repository,
+            branch=settings.cockpit_github_branch,
+        )
+        publication = self._profiles.publication
+        limits = CockpitPublicationLimits(
+            commits_per_widget_per_hour=publication.commits_per_widget_per_hour,
+            commits_per_principal_per_hour=publication.commits_per_principal_per_hour,
+        )
+        common: dict[str, Any] = {
+            "uow_factory": self._uow_factory,
+            "clock": self._clock,
+            "ids": self._ids,
+            "repository": repository,
+            "principal": self._principal,
+            "limits": limits,
+        }
+        return {
+            "sweep_cockpit_outbox": CommitOutboxWorker(**common).run_once,
+            "sweep_cockpit_import": BranchImporter(
+                **common, builder=self._builder, owner_names=self._owner_names
+            ).run_once,
+            "cockpit_import_interval_seconds": publication.import_interval_seconds,
+        }
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+
+
 @dataclass(frozen=True, slots=True)
 class Composition:
     settings: Settings
@@ -873,6 +976,8 @@ class Composition:
     # The Cockpit builder and its own sandbox manager, only behind the flag (M35).
     cockpit_builder: WidgetBuilder | None = None
     cockpit_sandbox: SandboxManager | None = None
+    cockpit_publication: CockpitPublication | None = None
+    cockpit_maintenance: _CockpitMaintenance | None = None
     # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
     latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
     reliability_report: Callable[[datetime, datetime], Awaitable[ReliabilityReport]] | None = None
@@ -2818,6 +2923,43 @@ async def _compose(
     cockpit_builder = (
         SandboxWidgetBuilder(cockpit_sandbox, ids) if cockpit_sandbox is not None else None
     )
+    cockpit_publication: CockpitPublication | None = None
+    cockpit_maintenance: _CockpitMaintenance | None = None
+    if cockpit_builder is not None:
+        cockpit_profiles = CockpitProfiles.from_document(
+            load_config_document(settings, "cockpit/profiles.yaml")
+        )
+        # The owner's name as the calling configuration records it, when calling is set up.
+        owner_names = (
+            (settings.call_configuration.public_name,)
+            if settings.call_configuration is not None
+            else ()
+        )
+        cockpit_publication = CockpitPublication(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            builder=cockpit_builder,
+            owner_names=owner_names,
+            limits=CockpitPublicationLimits(
+                commits_per_widget_per_hour=(
+                    cockpit_profiles.publication.commits_per_widget_per_hour
+                ),
+                commits_per_principal_per_hour=(
+                    cockpit_profiles.publication.commits_per_principal_per_hour
+                ),
+            ),
+        )
+        cockpit_maintenance = _CockpitMaintenance(
+            settings,
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            principal=principal,
+            builder=cockpit_builder,
+            owner_names=owner_names,
+            profiles=cockpit_profiles,
+        )
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
@@ -5208,6 +5350,7 @@ async def _compose(
                     sweep_call_plans=(
                         call_plan_sweep.run_once if call_plan_sweep is not None else None
                     ),
+                    **({} if cockpit_maintenance is None else cockpit_maintenance.sweeps()),
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
                     ),
@@ -5244,6 +5387,8 @@ async def _compose(
                 sandbox=sandbox_manager,
                 cockpit_builder=cockpit_builder,
                 cockpit_sandbox=cockpit_sandbox,
+                cockpit_publication=cockpit_publication,
+                cockpit_maintenance=cockpit_maintenance,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
                 skill_reviews=skill_reviews,
@@ -6441,6 +6586,9 @@ async def build(
                 await composition.sandbox.close()
             except Exception as exc:
                 logger.warning("sandbox_close_failed", extra={"error_class": type(exc).__name__})
+            if composition.cockpit_maintenance is not None:
+                with suppress(Exception):
+                    await composition.cockpit_maintenance.close()
             if composition.cockpit_sandbox is not None:
                 try:
                     await composition.cockpit_sandbox.close()

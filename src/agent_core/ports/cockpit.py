@@ -226,6 +226,13 @@ class WidgetPathRefusedError(Exception):
     """A write named a path outside one widget's directory."""
 
 
+class WidgetRepositoryUnavailableError(Exception):
+    """The remote did not answer with an outcome; a write may or may not have landed.
+
+    Callers retry later and reconcile a write by its revision trailer first.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class WidgetCommit:
     sha: str
@@ -275,10 +282,12 @@ class BuildScreen:
     """What the privacy screen matches: the principal's known names and settings values.
 
     It reaches only the build sandbox and never a package, a diagnostic or a log.
+    `commit_message` is the message the outbox will write, screened with the files.
     """
 
     names: tuple[str, ...] = ()
     settings_values: tuple[str, ...] = ()
+    commit_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

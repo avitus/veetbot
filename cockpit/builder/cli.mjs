@@ -6,6 +6,7 @@
 // diagnostics. Exit 2: usage or internal error. The screen file carries the
 // principal's known names and private settings values; it never leaves the run.
 // --stdin reads {"files": {name: text}, "screen": {...}} instead of a directory,
+// where the screen may also carry the commitMessage the outbox will write,
 // so a sandboxed caller writes nothing to the workspace and the builder judges
 // the package's raw file names. --emit-bundle adds the bundle and manifest to
 // the report, for a sandboxed caller that reads only the command's output.
@@ -41,6 +42,9 @@ function readStdinPackage() {
   }
   if (typeof screen !== 'object' || Array.isArray(screen) || !strings(screen.names) || !strings(screen.settingsValues)) {
     usage('stdin screen names and settingsValues must be lists of strings');
+  }
+  if (screen.commitMessage !== undefined && typeof screen.commitMessage !== 'string') {
+    usage('stdin screen commitMessage must be text');
   }
   return { files: new Map(Object.entries(files)), screen, read: [] };
 }

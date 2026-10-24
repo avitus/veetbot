@@ -70,6 +70,17 @@ test('the privacy screen uses the principal context the server supplies', async 
   assert.deepEqual(screened.diagnostics.map((diagnostic) => diagnostic.rule), ['screen.setting']);
 });
 
+test('the privacy screen also checks the commit message the outbox will write', async () => {
+  const files = flight();
+  const message = 'cockpit: create flight-tracker\n\nCockpit-Widget: flight-tracker\nVeetbot-Revision: 00000000-0000-4000-8000-000000000001\n';
+  const clean = await buildWidget({ files, slug: 'flight-tracker', screen: { commitMessage: message } });
+  assert.equal(clean.ok, true, JSON.stringify(clean.diagnostics));
+  const screened = await buildWidget({ files, slug: 'flight-tracker', screen: { names: ['Tracker'], commitMessage: message } });
+  const commit = screened.diagnostics.filter((diagnostic) => diagnostic.file === 'commit message');
+  assert.deepEqual(commit.map((diagnostic) => diagnostic.rule), ['screen.name']);
+  assert.ok(commit.every((diagnostic) => !diagnostic.message.includes('Tracker')));
+});
+
 test('source checks run before anything is compiled', async () => {
   const result = await buildWidget({ files: changed({ 'widget.tsx': (text) => `import _ from 'lodash';\n${text}` }), slug: 'flight-tracker' });
   assert.ok(result.diagnostics.every((diagnostic) => !diagnostic.rule.startsWith('compile.') && !diagnostic.rule.startsWith('render.')));
@@ -132,7 +143,12 @@ test('the CLI builds a package and screen read from stdin, judging the raw file 
   assert.equal(screened.status, 1);
   assert.deepEqual(new Set(JSON.parse(screened.stdout).diagnostics.map((diagnostic) => diagnostic.rule)), new Set(['screen.name']));
 
-  for (const input of ['not json', JSON.stringify({ files: { 'widget.tsx': 1 }, screen: {} }), JSON.stringify({ files, screen: { names: 'x' } })]) {
+  for (const input of [
+    'not json',
+    JSON.stringify({ files: { 'widget.tsx': 1 }, screen: {} }),
+    JSON.stringify({ files, screen: { names: 'x' } }),
+    JSON.stringify({ files, screen: { commitMessage: 7 } }),
+  ]) {
     assert.equal(run(input).status, 2, input);
   }
   const slugless = spawnSync(process.execPath, [cli, 'build', '--stdin'], { encoding: 'utf8', input: '{}' });

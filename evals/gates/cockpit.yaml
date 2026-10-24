@@ -10,7 +10,7 @@
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**The builder rejects what it must.** A package that breaks the manifest schema, the file allowlist, a size cap, the import allowlist, a banned reference, the credential pattern, the fixture requirements or the render check is `rejected` with diagnostics, and no outbox entry, commit or event exists for it."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_cockpit_publication_runtime_m35.py::test_every_rejection_rule_leaves_nothing_published
 - id: gate.cockpit.builder_offline_under_runsc
   milestone: 35
   kind: case
@@ -22,37 +22,37 @@
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**The privacy screen blocks personal data.** Any email address, telephone number, owner or People display name, or current private settings value in any package file or the commit message rejects the revision, and the diagnostic never repeats the value."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_cockpit_publication_runtime_m35.py::test_personal_data_in_a_file_or_the_commit_message_is_never_published
 - id: gate.cockpit.commit_scope_and_no_force
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**Commits stay in scope and never force.** The adapter writes only under `cockpit/widgets/<slug>/` on the configured branch as a fast-forward, and refuses any other path, ref or non-fast-forward update before calling GitHub."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_cockpit_publication_m35.py::test_every_publication_write_stays_in_one_widget_on_the_branch_and_never_forces
 - id: gate.cockpit.commit_before_activate
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**Nothing activates before its commit.** A revision becomes live only after its commit sha is recorded; while GitHub is unavailable the outbox retries and the previous live revision keeps rendering."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_cockpit_publication_m35.py::test_a_widget_goes_live_only_after_its_commit_and_an_outage_keeps_the_last_live
 - id: gate.cockpit.ambiguous_commit_reconciles
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**An ambiguous commit reconciles once.** After a lost ref-update response the worker finds the revision's trailer on the branch rather than committing again, and a concurrent human commit to the same widget wins while the assistant's revision becomes `conflicted`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_cockpit_publication_m35.py::test_an_ambiguous_commit_reconciles_once_and_a_person_wins
 - id: gate.cockpit.invalid_import_keeps_live
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**An invalid import keeps the live widget.** The importer activates a valid human commit as an `owner_git` revision, and records and surfaces an invalid or out-of-scope one without replacing the live revision."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_cockpit_publication_m35.py::test_imports_activate_valid_human_commits_and_keep_the_live_widget_otherwise
 - id: gate.cockpit.delete_and_restore
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**Delete and restore round-trip.** Delete commits the directory's removal and removes the widget from every layout; restore commits the package again and reactivates it; revert is a new revision through the whole pipeline."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_cockpit_publication_m35.py::test_delete_restore_and_revert_round_trip_through_the_branch
 - id: gate.cockpit.untrusted_origin_escalates
   milestone: 35
   kind: case

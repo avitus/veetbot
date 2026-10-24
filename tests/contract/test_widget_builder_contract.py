@@ -51,7 +51,10 @@ FILES = {
     "widget.tsx": "export default function Weather() { return null; }",
     "fixtures/typical.json": "{}",
 }
-SCREEN = BuildScreen(names=("Example Person",), settings_values=("Example City",))
+MESSAGE = "cockpit: create weather\n\nCockpit-Widget: weather\nVeetbot-Revision: 0\n"
+SCREEN = BuildScreen(
+    names=("Example Person",), settings_values=("Example City",), commit_message=MESSAGE
+)
 BUNDLE = "(()=>{VeetbotRealm.register(function(){return null})})();"
 MANIFEST = {"slug": "weather", "kit_api": 1, "sizes": ["md"]}
 
@@ -129,7 +132,11 @@ async def test_a_built_package_returns_its_verified_bundle_and_manifest() -> Non
     assert command.timeout_seconds == 120
     assert json.loads(command.stdin or b"") == {
         "files": FILES,
-        "screen": {"names": ["Example Person"], "settingsValues": ["Example City"]},
+        "screen": {
+            "names": ["Example Person"],
+            "settingsValues": ["Example City"],
+            "commitMessage": MESSAGE,
+        },
     }
 
 

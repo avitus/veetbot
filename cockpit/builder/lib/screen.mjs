@@ -40,16 +40,18 @@ function hasPhone(text) {
 }
 
 /**
- * Screen every file of a package.
+ * Screen every file of a package, and the commit message the outbox will write.
  * @param {Map<string, string>} files
- * @param {{names?: string[], settingsValues?: unknown[]}} context the principal's
- *   known People and contact names and its current private settings values
+ * @param {{names?: string[], settingsValues?: unknown[], commitMessage?: string}} context the
+ *   principal's known People and contact names, its current private settings values, and
+ *   the commit message, reported as the file `commit message`
  */
-export function screenFiles(files, { names = [], settingsValues = [] } = {}) {
+export function screenFiles(files, { names = [], settingsValues = [], commitMessage } = {}) {
   const namePatterns = names.filter(screenable).map((name) => termPattern(name.trim()));
   const settingPatterns = settingsValues.filter(screenable).map((value) => termPattern(/** @type {string} */ (value).trim()));
   const diagnostics = [];
-  for (const [file, text] of files) {
+  const screened = commitMessage === undefined ? files : new Map([...files, ['commit message', commitMessage]]);
+  for (const [file, text] of screened) {
     const found = (rule, message) => diagnostics.push({ rule, file, message: `${file} ${message}` });
     if (CREDENTIAL.test(text)) found('screen.credential', 'contains credential-shaped text; rename the identifier');
     if (hasPersonalEmail(text)) found('screen.email', 'contains an email address outside the reserved example domains');

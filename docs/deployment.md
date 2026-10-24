@@ -1567,6 +1567,58 @@ rows stay. Do not downgrade the migration to roll back code: its
 `downgrade()` refuses while either table holds a row.
 
 
+## Cockpit widget publication (ADR-0240)
+
+Cockpit stays off until its routes, tools and native mode land. Nothing below
+is needed while `AGENT_COCKPIT_ENABLED=0`; every release still builds the
+builder image and runs its canary. The publication path
+([Cockpit](plan/cockpit.md)) commits widgets to the public `cockpit/widgets`
+branch through a GitHub App, and only the maintenance unit holds the App's key.
+
+**The App.** Create a GitHub App owned by the repository owner. Grant it one
+repository permission, **Contents: Read and write**, and nothing else. Install
+it on `avitus/veetbot` only, then note the App id and the installation id.
+
+**Rulesets.** On the repository, add three rulesets:
+
+- only admins may create, update or delete any branch except
+  `cockpit/widgets`, and any tag;
+- nobody may force-push or delete `cockpit/widgets`;
+- no CircleCI workflow and no CodeRabbit review applies to `cockpit/widgets`.
+
+**The key.** Generate a private key for the App and install it as
+`/etc/veetbot/secrets/cockpit-github-app.pem`, owned by root with mode `0400`.
+The maintenance unit loads it with `LoadCredential=cockpit-github-app:…` and
+points `AGENT_COCKPIT_GITHUB_KEY_FILE` at it. An empty `SetCredential` default
+lets the unit start without the file.
+
+**Settings.** In `/etc/veetbot/veetbot.env`, set
+`AGENT_COCKPIT_GITHUB_REPOSITORY=avitus/veetbot` and the App and installation
+ids in `AGENT_COCKPIT_GITHUB_APP_ID` and
+`AGENT_COCKPIT_GITHUB_INSTALLATION_ID`. Keep
+`AGENT_COCKPIT_BUILDER_IMAGE=veetbot-cockpit-builder:production`. With the
+flag on, the maintenance unit refuses to start until all of these and a
+private, non-empty key are present.
+
+**A stuck outbox.** Accepted widgets wait in `cockpit_commit_outbox`. Each row
+records its attempts, its next attempt and its last error, and retries back off
+to fifteen minutes. Read the rows, then check GitHub's status and the App
+installation. A row that recovers needs nothing: each attempt first looks for
+its own commit on the branch, so a retry never commits twice.
+
+**A rejected import.** A person's commit that fails the builder is recorded in
+`cockpit_import_failures` and leaves the live widget rendering. Fix it with a
+corrected commit to `cockpit/widgets`.
+
+**Rotating the key.** In the App's settings:
+
+1. Generate a new private key.
+2. Install it over the old file with the same owner and mode.
+3. Restart `veetbot-maintenance`.
+4. Delete the old key in the App's settings.
+
+Installation tokens last an hour and are minted again as needed.
+
 ## Owner-reviewed dreaming rollout (ADR-0174)
 
 Deploy the reviewed-dreaming build and run its normal migration to the current

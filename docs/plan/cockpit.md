@@ -329,7 +329,10 @@ importer, release preflight or a developer's checkout. In order:
    - email addresses and telephone numbers;
    - the owner's name and the display names of People records and known
      contacts (multi-token names, or single tokens of four or more
-     characters, matched case-insensitively on word boundaries);
+     characters, matched case-insensitively on word boundaries). The owner's
+     name is the calling configuration's `public_name` when calling is
+     configured. People contribute every person's display name and every
+     `name` identifier, in any state;
    - every current private settings string value of four or more characters,
      across all of the principal's widgets.
 
@@ -419,6 +422,13 @@ tokens with the existing `cryptography` dependency and calls the REST API
 through the existing HTTP client. The execution service, the builder image,
 the API process and every sandbox stay credential-free.
 
+The maintenance unit loads the key as `cockpit-github-app` and names it in
+`AGENT_COCKPIT_GITHUB_KEY_FILE`. An empty `SetCredential` default keeps the
+unit starting before the owner installs the key. With the flag on, the
+maintenance role refuses to build its worker until the repository, App id,
+installation id and a private, non-empty key are all present. The adapter only
+ever touches a branch under `cockpit/`.
+
 ### Writing
 
 The outbox worker in the maintenance role takes entries in order per widget.
@@ -448,6 +458,27 @@ When the commit is recorded, the revision becomes `committed`. The
 application then makes it `live` and supersedes the previous live revision in
 one transaction, and emits `widget.revised` or `widget.deleted`.
 
+Acceptance and the outbox derive the commit message the same way, so the
+message the screen checked is the message committed. The verb depends on the
+change:
+
+- `create`, when no live commit is being changed;
+- `update`, when one is;
+- `restore`, for a deleted widget's last live package;
+- `revert`, for an earlier revision of a live widget.
+
+Restore and revert revisions have source `revert`. A delete carries a fresh
+operation id in its `Veetbot-Revision` trailer, never a revision id, so finding
+it on the branch cannot mistake the widget's original commit for the removal.
+
+An update names the widget's newest accepted revision as `expected_revision`:
+the one waiting for its commit, or else the live one. An accepted change is
+therefore never silently overwritten before it lands.
+
+The rate limits and the importer's poll interval are the knobs of
+`cockpit/profiles.yaml` so far; the other knobs join it with the steps that
+read them.
+
 **Commit before activate** holds without exception. During a GitHub outage
 the entry retries with backoff and the previous live revision keeps rendering
 from PostgreSQL.
@@ -459,6 +490,12 @@ from PostgreSQL.
 - **A human changed the same widget.** If the new commits since the expected
   parent touched the same widget directory, the person's commit wins. The
   revision becomes `conflicted` and the importer takes the person's version.
+  The expected parent is the commit of the live revision the change was based
+  on. For a new widget it is the importer's cursor, after which every commit
+  is unimported. A person's version that the importer made live after the
+  change was queued also wins. A commit counts as the platform's only when its
+  trailer names one of the principal's own revisions or a commit the outbox
+  recorded, so a forged trailer does not hide a person's change.
 - **Lost response.** If the ref update's response is lost, the worker reads
   the head and its ancestry for the revision's `Veetbot-Revision` trailer
   before retrying, so a retry never commits twice. The write tool is
@@ -474,6 +511,10 @@ At most twelve commits per widget per hour and sixty per principal per hour
 The importer polls the branch head (knob, default sixty seconds). For each
 commit that does not carry a `Veetbot-Revision` trailer this deployment
 issued, it reads the changed widget directories and runs the builder on each.
+Each commit's effects and its import record land in one transaction, and the
+importer resumes after the last recorded commit, so a commit is never imported
+twice. The importer screens a person's files but not their commit message,
+which is theirs and already public.
 
 - A valid package becomes a `owner_git` revision, then `committed`, then
   `live`.
@@ -822,10 +863,17 @@ contract suite.
 ### Configuration
 
 - **Flag.** `AGENT_COCKPIT_ENABLED`, exactly `0` or `1`, default `0`.
-- **Settings.** `AGENT_COCKPIT_BUILDER_IMAGE`, the repository, the branch and
-  the App identifiers, plus a `LoadCredential` name for the key. The
-  maintenance role refuses to start the outbox or the importer without the
-  credential.
+- **Settings.** The settings are:
+  - `AGENT_COCKPIT_BUILDER_IMAGE`;
+  - `AGENT_COCKPIT_GITHUB_REPOSITORY`;
+  - `AGENT_COCKPIT_GITHUB_BRANCH`, default `cockpit/widgets`;
+  - `AGENT_COCKPIT_GITHUB_APP_ID`;
+  - `AGENT_COCKPIT_GITHUB_INSTALLATION_ID`;
+  - `AGENT_COCKPIT_GITHUB_KEY_FILE`, which the maintenance unit points at its
+    `cockpit-github-app` credential.
+
+  The maintenance role refuses to start the outbox or the importer without
+  the credential.
 - **Tuning document.** The shipped configuration root gains
   `cockpit/profiles.yaml`, beside `folders/profiles.yaml`. This is distinct
   from the repository's `cockpit/` workspace. Its knobs:
@@ -1052,6 +1100,26 @@ Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
    should an LLM-free collector have for sub-minute external data?
 3. Should a widget be able to request a native share or copy action on its
    own displayed text, given that intents are navigation-only today?
+
+## Implementation checkpoint: 2026-10-23
+
+Build step 3 landed the builder image, its own sandbox manager, the image
+allowlist, the build reaper lease and the release's runsc canary. Build step 5
+landed the publication path:
+
+- the GitHub App adapter, which passes the repository contract suite against
+  an in-memory GitHub remote;
+- the commit outbox with lost-response reconciliation and person-wins
+  conflicts;
+- the branch importer;
+- delete, restore and revert;
+- the privacy screen's server-supplied names, settings and commit message;
+- the maintenance role's credential wiring.
+
+Gates 2 and 4 are bound to sandbox tests that build in the real builder image.
+Gates 5 to 9 are bound to the publication path over the GitHub adapter and
+the in-memory remote. Gate 3 awaits the first production release's canary.
+Routes, tools and feeds are the next steps.
 
 ## Implementation checkpoint: 2026-10-22
 

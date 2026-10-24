@@ -144,10 +144,13 @@ class SandboxWidgetBuilder:
         # The slug becomes an argument; anything else could read as an option.
         if not is_widget_slug(slug):
             raise ValueError("the package slug is not a widget slug")
-        request = {
-            "files": dict(files),
-            "screen": {"names": list(screen.names), "settingsValues": list(screen.settings_values)},
+        screened: dict[str, object] = {
+            "names": list(screen.names),
+            "settingsValues": list(screen.settings_values),
         }
+        if screen.commit_message is not None:
+            screened["commitMessage"] = screen.commit_message
+        request = {"files": dict(files), "screen": screened}
         command = ExecutionCommand(
             argv=(*BUILDER_ARGV, slug, "--emit-bundle"),
             working_directory=_WORKSPACE_ROOT,
