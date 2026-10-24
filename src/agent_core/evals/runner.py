@@ -25,6 +25,7 @@ from agent_core.domain.records import RecordCadence, RecordComponent, RecordPrec
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.domain.skills import AuthoringContext, SkillSource
 from agent_core.evals.cases import EvalCase, EvalExpected, load_cases
+from agent_core.evals.cockpit import CommittedWidget, ManifestWidgetBuilder, drain_cockpit_outbox
 from agent_core.evals.fixtures import (
     resolve_mcp_fixture,
     resolve_model_fixture,
@@ -43,9 +44,15 @@ class EvalResult:
     arm_name: str | None = None
     arm_results: tuple[EvalResult, ...] = ()
     memories: tuple[MemoryRecord, ...] = ()
+    widgets: tuple[CommittedWidget, ...] = ()
 
 
-def _settings(*, delegation_enabled: bool = False, records_enabled: bool = False) -> Settings:
+def _settings(
+    *,
+    delegation_enabled: bool = False,
+    records_enabled: bool = False,
+    cockpit_enabled: bool = False,
+) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://localhost/eval",
         deployment_mode=DeploymentMode.DEVELOPMENT,
@@ -57,6 +64,7 @@ def _settings(*, delegation_enabled: bool = False, records_enabled: bool = False
         interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
         delegation_enabled=delegation_enabled,
         records_enabled=records_enabled,
+        cockpit_enabled=cockpit_enabled,
     )
 
 
@@ -183,6 +191,17 @@ def assert_expected(result: EvalResult, expected: EvalExpected | None = None) ->
     leaked = [marker for marker in expected.absent_strings if marker in persisted_and_visible]
     if leaked:
         raise EvalExpectationError(f"forbidden strings were observed: {leaked}")
+    committed = {
+        widget.slug
+        for widget in result.widgets
+        if widget.state == "live"
+        and widget.commit_sha is not None
+        and widget.files
+        and dict(widget.branch_files) == dict(widget.files)
+    }
+    missing_widgets = set(expected.committed_widgets) - committed
+    if missing_widgets:
+        raise EvalExpectationError(f"widgets were not committed live: {sorted(missing_widgets)}")
 
 
 async def _run_single(
@@ -227,7 +246,12 @@ async def _run_single(
             # every other case keeps today's composition.
             records_enabled=case.session is not None
             and case.session.records_append_turn is not None,
+            cockpit_enabled=case.fixtures.cockpit,
         ),
+        cockpit_builder_override=(
+            ManifestWidgetBuilder(fixture_root.parents[2]) if case.fixtures.cockpit else None
+        ),
+        cockpit_local_branch=case.fixtures.cockpit,
         script=script,
         fixed_clock_at=case.clock.start,
         sequential_ids=True,
@@ -362,6 +386,16 @@ async def _run_single(
                     event_reader_principal,
                 )
         memories = tuple(await composition.memory.list_memories())
+        widgets = (
+            await drain_cockpit_outbox(
+                uow_factory=composition.uow_factory,
+                repository=composition.cockpit_local_branch,
+                worker=composition.cockpit_local_outbox,
+                principal=principal,
+            )
+            if case.fixtures.cockpit
+            else ()
+        )
     result = EvalResult(
         case=case,
         run=run,
@@ -370,6 +404,7 @@ async def _run_single(
         runs=tuple(completed_runs),
         arm_name=arm_name,
         memories=memories,
+        widgets=widgets,
     )
     assert_expected(result, expected)
     return result

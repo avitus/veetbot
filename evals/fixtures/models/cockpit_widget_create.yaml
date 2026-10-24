@@ -1,0 +1,120 @@
+turns:
+- tool_calls:
+  - name: cockpit.read
+    arguments:
+      operation: describe_kit
+    call_id: cockpit-kit
+  stop_reason: tool_use
+- tool_calls:
+  - name: cockpit.widget.write
+    arguments:
+      operation: create
+      slug: approvals-waiting
+      files:
+        fixtures/empty.json: |
+          {
+            "now": "2026-10-22T18:00:00Z",
+            "settings": {},
+            "feeds": {
+              "veetbot.approvals.pending": {
+                "observedAt": "2026-10-22T17:59:54Z",
+                "expectedIntervalSec": 30,
+                "data": { "count": 0, "oldestMinutes": null, "items": [] }
+              }
+            }
+          }
+        fixtures/stale.json: |
+          {
+            "now": "2026-10-22T18:00:00Z",
+            "settings": {},
+            "feeds": {
+              "veetbot.approvals.pending": {
+                "observedAt": "2026-10-22T17:40:00Z",
+                "expectedIntervalSec": 30,
+                "data": {
+                  "count": 1,
+                  "oldestMinutes": 38,
+                  "items": [{ "kind": "Reserve now", "summary": "Weekend cabin · booking page", "ageMinutes": 38 }]
+                }
+              }
+            }
+          }
+        fixtures/typical.json: |
+          {
+            "now": "2026-10-22T18:00:00Z",
+            "settings": {},
+            "feeds": {
+              "veetbot.approvals.pending": {
+                "observedAt": "2026-10-22T17:59:54Z",
+                "expectedIntervalSec": 30,
+                "data": {
+                  "count": 2,
+                  "oldestMinutes": 18,
+                  "items": [
+                    { "kind": "Reserve now", "summary": "Weekend cabin · booking page", "ageMinutes": 18 },
+                    { "kind": "Send a text", "summary": "Move the appointment to Tuesday", "ageMinutes": 4 }
+                  ]
+                }
+              }
+            }
+          }
+        widget.json: |
+          {
+            "schema": 1,
+            "slug": "approvals-waiting",
+            "title": "Approvals",
+            "purpose": "Shows how many approvals are waiting on the owner and the oldest of them.",
+            "kit_api": 1,
+            "sizes": ["sm", "md"],
+            "feeds": [{ "id": "veetbot.approvals.pending" }],
+            "settings": { "type": "object", "additionalProperties": false, "properties": {} }
+          }
+        widget.tsx: |
+          import { List, Metric, Row, Split, Tile } from '@veetbot/cockpit-kit';
+          import type { WidgetProps } from '@veetbot/cockpit-kit';
+
+          interface Approval {
+            kind: string;
+            summary: string;
+            ageMinutes: number;
+          }
+
+          interface Pending {
+            count: number;
+            oldestMinutes: number | null;
+            items: Approval[];
+          }
+
+          export default function ApprovalsWaiting({ feeds, size }: WidgetProps) {
+            const feed = feeds['veetbot.approvals.pending'];
+            const pending = feed?.data as Pending | null | undefined;
+            const count = pending?.count ?? 0;
+            const figure = (
+              <Metric
+                value={pending ? count : null}
+                size="l"
+                tone={count > 0 ? 'attention' : 'default'}
+                label={pending?.oldestMinutes != null ? `Oldest ${pending.oldestMinutes} min` : 'Nothing waiting'}
+              />
+            );
+            return (
+              <Tile title="Approvals" freshness={feed} attention={count > 0 ? `${count} waiting on you` : null}>
+                {size === 'sm' || !pending || count === 0 ? (
+                  figure
+                ) : (
+                  <Split>
+                    {figure}
+                    <List more={Math.max(0, count - pending.items.length)}>
+                      {pending.items.map((item, index) => (
+                        <Row key={index} marker="attention" title={item.kind} detail={item.summary} meta={`${item.ageMinutes} min`} />
+                      ))}
+                    </List>
+                  </Split>
+                )}
+              </Tile>
+            );
+          }
+    call_id: cockpit-write
+  stop_reason: tool_use
+- text: The Approvals widget is published; it shows on your Cockpit once its commit lands.
+  stop_reason: end_turn

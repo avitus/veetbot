@@ -73,8 +73,11 @@ WriteProbe = Callable[[str], None]
 # A child run seeds at USER trust, so anything a child may call is reachable
 # from whatever authored the brief. `device.sms.send` composes a text on the
 # owner's phone; drafting a reply is a triage-session behavior, never a
-# child-run behavior (ADR-0083).
-FORBIDDEN_CHILD_TOOLS = frozenset({"delegate.run", "skill.manage", "device.sms.send"})
+# child-run behavior (ADR-0083). `cockpit.widget.write` commits to a public
+# branch, which only the owner's own chat does (ADR-0240).
+FORBIDDEN_CHILD_TOOLS = frozenset(
+    {"delegate.run", "skill.manage", "device.sms.send", "cockpit.widget.write"}
+)
 # json.dumps escapes neither < nor >, so a brief naming the envelope tag could
 # read to the child model as closing the untrusted-data boundary.
 BRIEF_ENVELOPE_DELIMITER = "delegation_brief"

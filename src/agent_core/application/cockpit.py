@@ -57,6 +57,7 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 REVISION_EVENT = "cockpit.revision"
 COMMIT_EVENT = "cockpit.commit"
 IMPORT_EVENT = "cockpit.import"
+REQUEST_EVENT = "cockpit.request"
 _HOUR = timedelta(hours=1)
 # Every queued entry, so a later entry never overtakes an earlier one for its widget.
 _QUEUE_HORIZON = timedelta(days=3650)
@@ -84,6 +85,19 @@ def _commit_key(principal: Principal, revision_id: UUID) -> str:
 
 def _import_key(principal: Principal, commit_sha: str) -> str:
     return f"{IMPORT_EVENT}:{principal.tenant_id}:{principal.principal_id}:{commit_sha}"
+
+
+def _request_key(principal: Principal, request_key: str) -> str:
+    return f"{REQUEST_EVENT}:{principal.tenant_id}:{principal.principal_id}:{request_key}"
+
+
+@dataclass(frozen=True, slots=True)
+class CockpitRequest:
+    """What one change request already did: the revision it recorded, or the removal it queued."""
+
+    slug: str
+    operation: OutboxOperation
+    revision_id: UUID
 
 
 def _owner(principal: Principal) -> dict[str, str]:
@@ -285,7 +299,7 @@ class CockpitPublication:
         if total >= limits.commits_per_principal_per_hour:
             raise RateLimitedError("cockpit_principal_rate", "the hour's widget commits are used")
 
-    async def _screen(self, principal: Principal, message: str) -> BuildScreen:
+    async def _screen(self, principal: Principal, message: str | None) -> BuildScreen:
         async with self._uow_factory() as uow:
             return BuildScreen(
                 names=await screen_names(uow, principal, self._owner_names),
@@ -304,6 +318,7 @@ class CockpitPublication:
         expected_head: UUID | None,
         expected_parent_sha: str | None,
         origin_run_id: UUID | None,
+        request_key: str | None,
     ) -> WidgetRevision:
         revision_id = self._ids.new_id()
         message = widget_commit_message(operation, slug, revision_id)
@@ -340,6 +355,9 @@ class CockpitPublication:
                 state=revision.state.value,
                 rules=sorted({diagnostic.rule for diagnostic in revision.diagnostics}),
             )
+            await self._record_request(
+                uow, principal, request_key, slug, OutboxOperation.WRITE, revision_id
+            )
             if revision.state is RevisionState.PENDING_COMMIT:
                 await uow.cockpit_outbox.enqueue(
                     CommitOutboxEntry(
@@ -354,6 +372,56 @@ class CockpitPublication:
                     )
                 )
             return revision
+
+    async def _record_request(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        request_key: str | None,
+        slug: str,
+        operation: OutboxOperation,
+        revision_id: UUID,
+    ) -> None:
+        if request_key is None:
+            return
+        await self._events.record(
+            uow,
+            principal,
+            REQUEST_EVENT,
+            key=_request_key(principal, request_key),
+            slug=slug,
+            operation=operation.value,
+            revision_id=str(revision_id),
+        )
+
+    async def replayed(self, principal: Principal, request_key: str) -> CockpitRequest | None:
+        """What an earlier request with this key did, so a replay never changes anything twice."""
+
+        async with self._uow_factory() as uow:
+            event = await uow.process_events.get_by_derivation(_request_key(principal, request_key))
+        if event is None:
+            return None
+        return CockpitRequest(
+            slug=str(event.payload["slug"]),
+            operation=OutboxOperation(event.payload["operation"]),
+            revision_id=UUID(str(event.payload["revision_id"])),
+        )
+
+    async def check(self, principal: Principal, slug: str, files: Mapping[str, str]) -> WidgetBuild:
+        """Build and screen a package exactly as a write would, recording nothing."""
+
+        if not is_widget_slug(slug):
+            raise ValueError("a widget slug follows the manifest grammar")
+        return await self._builder.build(
+            principal, slug, files, screen=await self._screen(principal, None)
+        )
+
+    async def head_revision(self, principal: Principal, slug: str) -> WidgetRevision | None:
+        """The revision an update names as `expected_revision`; None for a new or deleted widget."""
+
+        async with self._uow_factory() as uow:
+            head = await self._head(uow, principal, await self._widget(uow, principal, slug))
+            return None if head is None else await uow.cockpit_widgets.get_revision(principal, head)
 
     @staticmethod
     def _revision(
@@ -407,6 +475,7 @@ class CockpitPublication:
         *,
         expected_revision: UUID | None,
         origin_run_id: UUID | None = None,
+        request_key: str | None = None,
     ) -> WidgetRevision:
         """Create a widget (`expected_revision` None) or update its newest revision."""
 
@@ -428,10 +497,15 @@ class CockpitPublication:
             expected_head=head,
             expected_parent_sha=parent,
             origin_run_id=origin_run_id,
+            request_key=request_key,
         )
 
     async def _republish(
-        self, principal: Principal, widget: Widget, revision_id: UUID
+        self,
+        principal: Principal,
+        widget: Widget,
+        revision_id: UUID,
+        request_key: str | None = None,
     ) -> WidgetRevision:
         slug = widget.slug
         async with self._uow_factory() as uow:
@@ -450,6 +524,7 @@ class CockpitPublication:
             expected_head=head,
             expected_parent_sha=parent,
             origin_run_id=None,
+            request_key=request_key,
         )
 
     async def revert(self, principal: Principal, slug: str, revision_id: UUID) -> WidgetRevision:
@@ -461,16 +536,20 @@ class CockpitPublication:
             raise ConflictError(f"{slug} is deleted; restore it first", reason="widget_deleted")
         return await self._republish(principal, widget, revision_id)
 
-    async def restore(self, principal: Principal, slug: str) -> WidgetRevision:
+    async def restore(
+        self, principal: Principal, slug: str, *, request_key: str | None = None
+    ) -> WidgetRevision:
         """Commit a deleted widget's last live package again and reactivate it."""
 
         async with self._uow_factory() as uow:
             widget = await uow.cockpit_widgets.get_widget(principal, slug)
         if widget.state is not WidgetState.DELETED or widget.live_revision_id is None:
             raise ConflictError(f"{slug} is not deleted", reason="widget_not_deleted")
-        return await self._republish(principal, widget, widget.live_revision_id)
+        return await self._republish(principal, widget, widget.live_revision_id, request_key)
 
-    async def delete(self, principal: Principal, slug: str) -> CommitOutboxEntry:
+    async def delete(
+        self, principal: Principal, slug: str, *, request_key: str | None = None
+    ) -> CommitOutboxEntry:
         """Queue the directory's removal; the widget is deleted once it is committed."""
 
         now = self._clock.now()
@@ -479,6 +558,9 @@ class CockpitPublication:
             if widget.state is WidgetState.DELETED:
                 raise ConflictError(f"{slug} is already deleted", reason="widget_deleted")
             operation_id = self._ids.new_id()
+            await self._record_request(
+                uow, principal, request_key, slug, OutboxOperation.REMOVE, operation_id
+            )
             return await uow.cockpit_outbox.enqueue(
                 CommitOutboxEntry(
                     tenant_id=principal.tenant_id,

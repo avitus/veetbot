@@ -597,11 +597,31 @@ configuration, so the thirty-item definition roster is untouched.
 
 | Tool | Operations | Side effect | Default decision |
 | --- | --- | --- | --- |
-| `cockpit.read` | list widgets, read a widget (files, revisions, state, import failures), list and read feeds, get layouts, describe the kit | `none` | allow |
-| `cockpit.check` | validate a package; preview its fixtures as a PNG | `code_execution` (isolated) | allow |
+| `cockpit.read` | describe the kit, list widgets, read a widget (state, settings schema, file sizes, recent revisions, import failures), page a widget's file, list and read feeds, get layouts | `none` | allow |
+| `cockpit.check` | validate a package; preview its fixtures as a PNG | `none`, built in the builder's own isolated sandbox | allow |
 | `cockpit.widget.write` | create, update (`expected_revision`), delete, restore | `publication` | allow by exact-name `tool_rules` entry |
 | `cockpit.configure` | set a widget's private settings; set a device class's layout | `none` | allow |
 | `cockpit.feed.publish` | publish a snapshot (and schema) to `agent.<slug>` | `none` | allow |
+
+**`cockpit.check` is classified `none`, not `code_execution`.** Its build
+runs in the builder's own offline sandbox, exactly as a write's does, and it
+runs no command the model chose. A `sandbox` target would label its verdict
+`external_untrusted`, which taints the turn. The verdict is the one
+`cockpit.widget.write` returns with internal trust, so that label would force
+every check-then-write into an approval for content the model wrote itself.
+
+**Every answer fits the inline budget.** A tool result reaches the model
+whole only up to `tools/limits.yaml`'s `output.inline_maximum_bytes` (4 KiB),
+so `cockpit.read` answers in pieces:
+
+- `describe_kit` gives the rules and an index of the kit's primitives, then
+  up to four primitives' props and examples by name, or the helpers or the
+  shared types;
+- `read_widget` gives file sizes rather than files;
+- `read_file` pages one file of the head revision from a line;
+- `read_feed` returns at most ten earlier snapshots.
+
+Builder diagnostics are cut to the first ten, each at most 300 characters.
 
 **`cockpit.widget.write`** has several further rules:
 
@@ -624,6 +644,13 @@ configuration, so the thirty-item definition roster is untouched.
   default thirty) for the outbox. It returns the final state when the outbox
   finishes in time, and `pending_commit` with the revision otherwise. A
   rejected package returns its diagnostics.
+- **Replay.** The tool is conditionally idempotent. The accepted revision, or
+  the queued removal, records the call's idempotency key in the same
+  transaction, so a replay returns the first outcome and changes nothing.
+- **Refused by name too.** Withholding the tool from a session's plan does
+  not stop a call by name. So the tool itself refuses any run that is not
+  interactive and any session that carries a schedule, a run kind, an
+  operational email marker or a purpose.
 - **Approval view.** When an escalation produces an approval, the approval
   view shows the file diff and the preview image.
 
@@ -631,14 +658,24 @@ configuration, so the thirty-item definition roster is untouched.
 provenance:
 
 - assistant-written and owner-git revisions are labelled as stored owner
-  content;
-- feed data keeps its own label.
+  content (`internal_tool`), which leaves the turn's origin as it was;
+- feed data is `external_untrusted`. An assistant feed holds what a run read.
+  A platform feed's rendering trust is `platform`, but its projections quote
+  mail, callers and people, so reading one is untrusted too.
 
 Reading a widget before updating it therefore does not force every later turn
 into approval.
 
 **Feed publishing** is available in scheduled runs: the schedule principal's
 scopes gain `cockpit.write`. Widget writes stay interactive only.
+
+**Feed checks.** A feed's schema must be self-contained JSON Schema (draft
+2020-12) that names no location outside itself, so checking data never
+retrieves anything. Data is checked against it unless the snapshot reports a
+failed refresh. An observation more than a minute ahead of the server's clock
+is refused. Each publish keeps at most `feeds.history_max` snapshots (knob,
+default 288, the deepest history a manifest may declare) and appends one
+`feed.updated` stream event.
 
 ## The routes and the stream
 
@@ -923,7 +960,10 @@ contract suite.
   - event retention;
   - settings purge window.
 
-  These knobs join the shipped knob census when the implementation lands.
+  These knobs join the shipped knob census as each build step reads them.
+  Seven are in it now: the two commit rate limits, the import poll interval
+  and the commit wait under `publication`; the stream lifetime and event
+  retention under `stream`; and `feeds.history_max`.
 
 ### Release
 
@@ -1136,6 +1176,27 @@ Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
    should an LLM-free collector have for sub-minute external data?
 3. Should a widget be able to request a native share or copy action on its
    own displayed text, given that intents are navigation-only today?
+
+## Implementation checkpoint: 2026-10-24
+
+Build step 7 landed the five tools behind the flag as deferred index entries,
+the `cockpit` builtin domain, the session filter, the write tool's refusal
+outside interactive chat, and the delegated-child forbid. It also landed the
+diff approval view, `describe_kit` over a catalogue generated from the kit's
+source, the commit-wait and feed-history knobs, and the evaluation in which a
+chat request yields a valid committed widget.
+
+The evaluation runs the `approvals-waiting` reference package through the
+real publication path with a manifest-checking builder. A gate test holds the
+package identical to the reference widget the workspace's builder tests build.
+
+Three things remain:
+
+- The exact-name `tool_rules` entry is not in the shipped profile. Until it
+  is, the publication row asks the owner, and the evaluation approves once.
+- Gate 10 stays pending until that entry lands.
+- Feed publishing from scheduled runs waits for `schedule.create` to request
+  `cockpit.write`.
 
 ## Implementation checkpoint: 2026-10-23
 

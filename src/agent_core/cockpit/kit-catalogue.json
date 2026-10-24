@@ -1,0 +1,599 @@
+{
+  "kit_api": 1,
+  "rules": [
+    "Default-export one function component that takes {feeds, settings, size, theme}.",
+    "Import only from 'react' and '@veetbot/cockpit-kit'.",
+    "Render through kit primitives and kit tokens; never write colour literals.",
+    "No network, storage, timers that poll, eval, dynamic import, parent, top or opener.",
+    "Read time with useNow(); fixtures freeze it, so rendering is deterministic.",
+    "Name nothing token, secret, password, bearer or api_key followed by ':' or '=': the credential pattern rejects it.",
+    "Packages are generic and public: personal values belong in private settings and feeds, never in code or fixtures.",
+    "Declare every feed the widget reads, with the history depth it needs."
+  ],
+  "primitives": [
+    {
+      "name": "FreshnessIndicator",
+      "description": "How old a feed is, in words; amber once it is stale.",
+      "props": [
+        {
+          "name": "freshness",
+          "type": "FeedFreshness",
+          "optional": true
+        },
+        {
+          "name": "variant",
+          "type": "'short' | 'long'",
+          "optional": true,
+          "description": "Short form for tile headers (\"12 s\"); long form for panels (\"Updated 12 s ago\").",
+          "default": "'short'"
+        }
+      ],
+      "example": "<FreshnessIndicator freshness={{ observedAt: 1761156000000, expectedIntervalSec: 300 }} variant=\"long\" />"
+    },
+    {
+      "name": "Tile",
+      "description": "The frame every widget renders in: a title, its feed's freshness, and the body.",
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "icon",
+          "type": "ReactNode",
+          "optional": true
+        },
+        {
+          "name": "size",
+          "type": "TileSize",
+          "optional": true
+        },
+        {
+          "name": "freshness",
+          "type": "FeedFreshness",
+          "optional": true
+        },
+        {
+          "name": "attention",
+          "type": "string | null",
+          "optional": true,
+          "description": "Amber: something is waiting on the owner. The string is the label (\"2 waiting on you\")."
+        },
+        {
+          "name": "empty",
+          "type": "boolean",
+          "optional": true,
+          "description": "Explicit empty: the feed is fresh and there is nothing to show."
+        },
+        {
+          "name": "footer",
+          "type": "ReactNode",
+          "optional": true
+        },
+        {
+          "name": "hideNotice",
+          "type": "boolean",
+          "optional": true,
+          "description": "Hide the automatic stale/error notice (for very small tiles)."
+        },
+        {
+          "name": "selected",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onOpen",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "optional": true
+        }
+      ],
+      "example": "<Tile title=\"Weather\" freshness={{ observedAt: 1761156000000, expectedIntervalSec: 300 }}>\n  <Metric value={64} unit=\"°\" label=\"Light rain\" />\n</Tile>"
+    },
+    {
+      "name": "Metric",
+      "description": "One headline figure with an optional unit and label.",
+      "props": [
+        {
+          "name": "value",
+          "type": "string | number | null",
+          "optional": false
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "size",
+          "type": "'xl' | 'l' | 'm' | 's'",
+          "optional": true,
+          "default": "'l'"
+        },
+        {
+          "name": "tone",
+          "type": "'default' | 'attention' | 'muted'",
+          "optional": true,
+          "default": "'default'"
+        },
+        {
+          "name": "emptyLabel",
+          "type": "string",
+          "optional": true,
+          "description": "Shown when value is null.",
+          "default": "'No reading yet'"
+        }
+      ],
+      "example": "<Metric value={64} unit=\"°\" label=\"Light rain\" size=\"xl\" />"
+    },
+    {
+      "name": "Delta",
+      "description": "A signed change, formatted; weight marks emphasis, never colour.",
+      "props": [
+        {
+          "name": "value",
+          "type": "number | null",
+          "optional": false
+        },
+        {
+          "name": "format",
+          "type": "'percent' | 'number' | 'points'",
+          "optional": true,
+          "default": "'percent'"
+        },
+        {
+          "name": "precision",
+          "type": "number",
+          "optional": true,
+          "default": "2"
+        },
+        {
+          "name": "period",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "emphasis",
+          "type": "boolean",
+          "optional": true,
+          "description": "Weight, never colour: a fall is not an alarm."
+        }
+      ],
+      "example": "<Delta value={0.012} format=\"percent\" period=\"today\" />"
+    },
+    {
+      "name": "Sparkline",
+      "description": "A small line of recent values.",
+      "props": [
+        {
+          "name": "values",
+          "type": "number[]",
+          "optional": false
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true,
+          "default": "40"
+        },
+        {
+          "name": "area",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "baseline",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "ariaLabel",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "example": "<Sparkline values={[58, 59, 61, 62, 64]} height={36} />"
+    },
+    {
+      "name": "Bars",
+      "description": "Labelled bars, vertical or horizontal.",
+      "props": [
+        {
+          "name": "data",
+          "type": "BarDatum[]",
+          "optional": false
+        },
+        {
+          "name": "orientation",
+          "type": "'vertical' | 'horizontal'",
+          "optional": true,
+          "default": "'vertical'"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true,
+          "default": "56"
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "showLabels",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "ariaLabel",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "example": "<Bars data={[{ label: 'Mon', value: 3 }, { label: 'Tue', value: 5, tone: 'highlight' }]} />"
+    },
+    {
+      "name": "Gauge",
+      "description": "A value on an arc between a minimum and a maximum.",
+      "props": [
+        {
+          "name": "value",
+          "type": "number | null",
+          "optional": false
+        },
+        {
+          "name": "min",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "optional": true,
+          "default": "100"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "valueLabel",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "tone",
+          "type": "'default' | 'attention' | 'error'",
+          "optional": true,
+          "default": "'default'"
+        },
+        {
+          "name": "mark",
+          "type": "number",
+          "optional": true,
+          "description": "Optional marker on the arc, e.g. the owner's threshold."
+        }
+      ],
+      "example": "<Gauge value={72} max={100} label=\"Battery\" mark={20} />"
+    },
+    {
+      "name": "Countdown",
+      "description": "Time until (or since) an instant, in words or as a clock.",
+      "props": [
+        {
+          "name": "target",
+          "type": "number | null",
+          "optional": false
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "size",
+          "type": "'l' | 'm' | 's'",
+          "optional": true,
+          "default": "'m'"
+        },
+        {
+          "name": "soonWithinSec",
+          "type": "number",
+          "optional": true,
+          "description": "Within this many seconds the figure turns teal.",
+          "default": "900"
+        },
+        {
+          "name": "format",
+          "type": "'relative' | 'clock'",
+          "optional": true,
+          "description": "Use h:mm:ss under an hour instead of words.",
+          "default": "'relative'"
+        },
+        {
+          "name": "tone",
+          "type": "'default' | 'attention'",
+          "optional": true,
+          "default": "'default'"
+        },
+        {
+          "name": "pastLabel",
+          "type": "string",
+          "optional": true,
+          "default": "'ago'"
+        }
+      ],
+      "example": "<Countdown target={1761158520000} label=\"Until rain\" size=\"s\" />"
+    },
+    {
+      "name": "StatusPill",
+      "description": "A short status label; the attention tone is amber.",
+      "props": [
+        {
+          "name": "tone",
+          "type": "PillTone",
+          "optional": true,
+          "default": "'neutral'"
+        },
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "optional": false
+        }
+      ],
+      "example": "<StatusPill tone=\"attention\">2 waiting</StatusPill>"
+    },
+    {
+      "name": "Row",
+      "description": "One line of a list: a title, optional detail, a value and a marker.",
+      "props": [
+        {
+          "name": "title",
+          "type": "ReactNode",
+          "optional": false
+        },
+        {
+          "name": "detail",
+          "type": "ReactNode",
+          "optional": true
+        },
+        {
+          "name": "value",
+          "type": "ReactNode",
+          "optional": true
+        },
+        {
+          "name": "meta",
+          "type": "ReactNode",
+          "optional": true
+        },
+        {
+          "name": "marker",
+          "type": "RowMarker",
+          "optional": true,
+          "default": "'none'"
+        },
+        {
+          "name": "icon",
+          "type": "ReactNode",
+          "optional": true
+        }
+      ],
+      "example": "<Row title=\"Flight EX 100\" detail=\"Gate B12\" value=\"On time\" marker=\"ok\" />"
+    },
+    {
+      "name": "List",
+      "description": "Rows that would be cut by the tile's edge fold into \"+N more\": a tile never shows half a row.",
+      "props": [
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "optional": true
+        },
+        {
+          "name": "more",
+          "type": "number",
+          "optional": true,
+          "description": "Rows the feed holds beyond the ones passed in: rendered as \"+N more\".",
+          "default": "0"
+        },
+        {
+          "name": "empty",
+          "type": "{ title: string; detail?: string } | null",
+          "optional": true
+        },
+        {
+          "name": "ariaLabel",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "example": "<List more={2}>\n  <Row title=\"Pay rent\" value=\"Today\" marker=\"attention\" />\n</List>"
+    },
+    {
+      "name": "Timeline",
+      "description": "Steps in order, each done, now, next, failed or needing attention.",
+      "props": [
+        {
+          "name": "items",
+          "type": "TimelineItem[]",
+          "optional": false
+        },
+        {
+          "name": "ariaLabel",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "example": "<Timeline items={[{ id: '1', time: '09:00', title: 'Boarding', state: 'done' }, { id: '2', time: '09:40', title: 'Departure', state: 'next' }]} />"
+    },
+    {
+      "name": "EmptyState",
+      "description": "A fresh feed with nothing to show.",
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "detail",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "icon",
+          "type": "ReactNode",
+          "optional": true
+        }
+      ],
+      "example": "<EmptyState title=\"Nothing waiting\" detail=\"Approvals appear here.\" />"
+    },
+    {
+      "name": "StaleNotice",
+      "description": "The notice a Tile shows when its feed is stale.",
+      "props": [
+        {
+          "name": "freshness",
+          "type": "FeedFreshness",
+          "optional": true
+        }
+      ],
+      "example": "<StaleNotice freshness={{ observedAt: 1761156000000, expectedIntervalSec: 300 }} />"
+    },
+    {
+      "name": "ErrorNotice",
+      "description": "The notice a Tile shows when its feed reports an error.",
+      "props": [
+        {
+          "name": "message",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "freshness",
+          "type": "FeedFreshness",
+          "optional": true
+        }
+      ],
+      "example": "<ErrorNotice message=\"The feed is unavailable\" />"
+    },
+    {
+      "name": "PendingState",
+      "description": "Placeholder lines while a declared feed has no snapshot yet.",
+      "props": [
+        {
+          "name": "lines",
+          "type": "number",
+          "optional": true,
+          "default": "3"
+        }
+      ],
+      "example": "<PendingState lines={2} />"
+    },
+    {
+      "name": "Split",
+      "description": "A figure beside its detail: the approvals, people and schedule bodies on the boards.",
+      "props": [
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "optional": true
+        }
+      ],
+      "example": "<Split>\n  <Metric value={2} label=\"waiting\" />\n  <List><Row title=\"Send the invoice\" /></List>\n</Split>"
+    },
+    {
+      "name": "Headline",
+      "description": "A headline figure with a chart filling the rest of the line.",
+      "props": [
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "optional": true
+        }
+      ],
+      "example": "<Headline>\n  <Metric value={64} unit=\"°\" />\n  <Sparkline values={[58, 61, 64]} />\n</Headline>"
+    },
+    {
+      "name": "Between",
+      "description": "Two items pushed to either edge, such as a figure and its status pill.",
+      "props": [
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "optional": true
+        }
+      ],
+      "example": "<Between>\n  <Metric value={3} size=\"m\" />\n  <StatusPill tone=\"ok\">Up to date</StatusPill>\n</Between>"
+    }
+  ],
+  "helpers": [
+    {
+      "name": "useNow",
+      "signature": "useNow(): number"
+    },
+    {
+      "name": "freshnessLevel",
+      "signature": "freshnessLevel(f: FeedFreshness | undefined, now: number): FreshnessLevel"
+    },
+    {
+      "name": "ageSeconds",
+      "signature": "ageSeconds(f: FeedFreshness | undefined, now: number): number | null"
+    },
+    {
+      "name": "formatAge",
+      "signature": "formatAge(sec: number): string"
+    },
+    {
+      "name": "formatInterval",
+      "signature": "formatInterval(sec: number): string"
+    },
+    {
+      "name": "formatClock",
+      "signature": "formatClock(ms: number): string"
+    },
+    {
+      "name": "useFreshness",
+      "signature": "useFreshness(): FreshnessScopeValue"
+    },
+    {
+      "name": "freshnessText",
+      "signature": "freshnessText(f: FeedFreshness | undefined, now: number, variant: 'short' | 'long' = 'short'): string"
+    },
+    {
+      "name": "formatCountdown",
+      "signature": "formatCountdown(sec: number, format: 'relative' | 'clock'): string"
+    }
+  ],
+  "types": {
+    "BarDatum": "{ label: string; value: number; tone?: 'default' | 'highlight' | 'attention' | 'error'; display?: string }",
+    "CockpitPlatform": "'mac' | 'ipad' | 'iphone'",
+    "CockpitTheme": "'light' | 'dark' | 'night'",
+    "CockpitWidget": "(props: WidgetProps) => ReactNode",
+    "FeedFreshness": "{ observedAt: number | null; expectedIntervalSec: number; error?: string | null }",
+    "FeedView": "{ data: T | null; history: { observedAt: number; data: T }[] }",
+    "FreshnessLevel": "'live' | 'aging' | 'stale' | 'error' | 'pending'",
+    "PillTone": "'ok' | 'neutral' | 'attention' | 'error' | 'stale'",
+    "RowMarker": "'none' | 'ok' | 'neutral' | 'attention' | 'error' | 'stale'",
+    "TileSize": "'sm' | 'md' | 'tall' | 'lg' | 'wide'",
+    "TimelineItem": "{ id: string; time: string; title: string; detail?: string; state: 'done' | 'now' | 'next' | 'failed' | 'attention' }",
+    "WidgetProps": "{ feeds: Record<string, FeedView | undefined>; settings: WidgetSettings; size: TileSize; theme: CockpitTheme }",
+    "WidgetSettings": "Record<string, string | number | boolean>"
+  }
+}

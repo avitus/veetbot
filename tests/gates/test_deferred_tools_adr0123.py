@@ -37,6 +37,7 @@ from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, Script
 from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunStatus
 from agent_core.mcp.configuration import email_server_configs
+from agent_core.tools.cockpit import COCKPIT_TOOL_NAMES
 from bland_mcp.client import BlandClient
 from bland_mcp.server import create_server as create_bland_server
 from tests.contract.test_bland_client_contract import CALL_ID, KEY, NUMBER
@@ -172,12 +173,16 @@ async def _session_events(app: Composition, session_id: Any) -> list[EventEnvelo
 
 
 async def _plan_for_one_turn(
-    tmp_path: Path, *, enabled_tools: list[str] | None = None
+    tmp_path: Path,
+    *,
+    enabled_tools: list[str] | None = None,
+    extra_environment: Mapping[str, str] = MappingProxyType({}),
 ) -> ContextPlan:
     _factory, context = await _production(
         tmp_path,
         [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)],
         enabled_tools=enabled_tools,
+        extra_environment=extra_environment,
     )
     async with context as app:
         session_id = await app.sessions.create()
@@ -217,6 +222,22 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     }
     assert START_CALL in writes
     assert writes <= deferred
+
+
+async def test_the_cockpit_tools_are_index_entries_and_leave_the_definitions_alone(
+    tmp_path: Path,
+) -> None:
+    """docs/plan/cockpit.md, the tools: the thirty-item definition roster is untouched."""
+
+    default = await _plan_for_one_turn(tmp_path / "default")
+    cockpit = await _plan_for_one_turn(
+        tmp_path / "cockpit", extra_environment={"AGENT_COCKPIT_ENABLED": "1"}
+    )
+    assert cockpit.tool_names == default.tool_names
+    assert cockpit.skipped_tool_names == ()
+    assert set(cockpit.deferred_tool_names) - set(default.deferred_tool_names) == set(
+        COCKPIT_TOOL_NAMES
+    )
 
 
 async def test_the_production_plan_renders_its_prefix_again_from_jsonb(tmp_path: Path) -> None:

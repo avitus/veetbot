@@ -26,6 +26,8 @@ FEED_ID_MAX_LENGTH = 64
 FEED_SCHEMA_MAX_BYTES = 8 * 1024
 FEED_SNAPSHOT_MAX_BYTES = 64 * 1024
 FEED_ERROR_MAX_CHARS = 200
+# The deepest history a manifest may declare, and so the most any feed stores.
+FEED_HISTORY_MAX = 288
 WIDGET_FILE_MAX_BYTES = 64 * 1024
 WIDGET_PACKAGE_MAX_BYTES = 256 * 1024
 WIDGET_PACKAGE_MAX_FILES = 12
@@ -34,7 +36,8 @@ WIDGET_SETTINGS_MAX_KEYS = 16
 WIDGET_SETTINGS_MAX_CHARS = 200
 LAYOUT_MAX_PLACEMENTS = 64
 EVENT_SUBJECT_MAX_CHARS = 64
-_WIDGET_FILE = re.compile(r"^(widget\.json|widget\.tsx|fixtures/[a-z0-9][a-z0-9-]{0,31}\.json)$")
+WIDGET_FILE_PATTERN = r"^(widget\.json|widget\.tsx|fixtures/[a-z0-9][a-z0-9-]{0,31}\.json)$"
+_WIDGET_FILE = re.compile(WIDGET_FILE_PATTERN)
 _SETTING_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -43,6 +46,8 @@ _TRAILER = re.compile(r"^(Cockpit-Widget|Veetbot-Revision): (\S+)$")
 type CommitOperation = Literal["create", "update", "delete", "restore", "revert"]
 # A feed's JSON Schema document, as the assistant declared it.
 type FeedSchemaDocument = dict[str, JsonValue]
+# A feed snapshot's JSON value, checked against its feed's schema.
+type FeedData = JsonValue
 _COMMIT_OPERATIONS = frozenset({"create", "update", "delete", "restore", "revert"})
 
 

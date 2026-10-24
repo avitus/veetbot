@@ -501,8 +501,10 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "publication.commits_per_widget_per_hour",
             "publication.commits_per_principal_per_hour",
             "publication.import_interval_seconds",
+            "publication.commit_wait_seconds",
             "stream.max_seconds",
             "stream.event_retention_seconds",
+            "feeds.history_max",
         ),
     }
 )

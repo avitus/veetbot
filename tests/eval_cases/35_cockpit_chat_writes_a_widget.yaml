@@ -1,0 +1,19 @@
+name: cockpit_chat_writes_a_widget
+milestone: 35
+tags: [cockpit, publication, approval]
+input: {text: "Make me a Cockpit widget that shows how many approvals are waiting on me."}
+model_fixture: cockpit_widget_create
+# The publication row asks until the exact-name tool_rules entry lands
+# (docs/plan/cockpit.md, the tools); the owner approves once.
+approval_resolution: approve_once
+fixtures:
+  tools: [cockpit.read, cockpit.widget.write]
+  cockpit: true
+expected:
+  terminal_status: COMPLETED
+  final_text: The Approvals widget is published; it shows on your Cockpit once its commit lands.
+  model_calls: 3
+  tool_started_count: 2
+  pending_approvals: 0
+  event_order: [tool.call.started, approval.requested, approval.resolved, tool.call.started, run.completed]
+  committed_widgets: [approvals-waiting]

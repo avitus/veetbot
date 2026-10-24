@@ -153,6 +153,12 @@ export function freshnessText(f: FeedFreshness | undefined, now: number, variant
   }
 }
 
+/**
+ * How old a feed is, in words; amber once it is stale.
+ *
+ * @example
+ * <FreshnessIndicator freshness={{ observedAt: 1761156000000, expectedIntervalSec: 300 }} variant="long" />
+ */
 export function FreshnessIndicator({ freshness, variant = 'short' }: FreshnessIndicatorProps) {
   const now = useNow();
   const level = freshnessLevel(freshness, now);
@@ -206,6 +212,14 @@ export interface TileProps {
   children?: ReactNode;
 }
 
+/**
+ * The frame every widget renders in: a title, its feed's freshness, and the body.
+ *
+ * @example
+ * <Tile title="Weather" freshness={{ observedAt: 1761156000000, expectedIntervalSec: 300 }}>
+ *   <Metric value={64} unit="°" label="Light rain" />
+ * </Tile>
+ */
 export function Tile({ title, icon, size: sizeProp, freshness, attention, empty, footer, hideNotice, selected: selectedProp, onOpen: onOpenProp, className, style, children }: TileProps) {
   const host = useContext(TileHostContext);
   const size = sizeProp ?? host.size ?? 'sm';
@@ -273,6 +287,12 @@ export interface MetricProps {
   emptyLabel?: string;
 }
 
+/**
+ * One headline figure with an optional unit and label.
+ *
+ * @example
+ * <Metric value={64} unit="°" label="Light rain" size="xl" />
+ */
 export function Metric({ value, unit, label, size = 'l', tone = 'default', emptyLabel = 'No reading yet' }: MetricProps) {
   const { dim } = useFreshness();
   const empty = value == null;
@@ -302,6 +322,12 @@ export interface DeltaProps {
   emphasis?: boolean;
 }
 
+/**
+ * A signed change, formatted; weight marks emphasis, never colour.
+ *
+ * @example
+ * <Delta value={0.012} format="percent" period="today" />
+ */
 export function Delta({ value, format = 'percent', precision = 2, period, emphasis }: DeltaProps) {
   const { dim } = useFreshness();
   if (value == null) {
@@ -340,6 +366,12 @@ export interface SparklineProps {
   ariaLabel?: string;
 }
 
+/**
+ * A small line of recent values.
+ *
+ * @example
+ * <Sparkline values={[58, 59, 61, 62, 64]} height={36} />
+ */
 export function Sparkline({ values, height = 40, area = true, baseline, ariaLabel }: SparklineProps) {
   const { dim } = useFreshness();
   if (values.length < 2) {
@@ -388,6 +420,12 @@ export interface BarsProps {
   ariaLabel?: string;
 }
 
+/**
+ * Labelled bars, vertical or horizontal.
+ *
+ * @example
+ * <Bars data={[{ label: 'Mon', value: 3 }, { label: 'Tue', value: 5, tone: 'highlight' }]} />
+ */
 export function Bars({ data, orientation = 'vertical', height = 56, max, showLabels = true, ariaLabel }: BarsProps) {
   const { dim } = useFreshness();
   const top = max ?? Math.max(1, ...data.map(d => d.value));
@@ -447,6 +485,12 @@ export interface GaugeProps {
   mark?: number;
 }
 
+/**
+ * A value on an arc between a minimum and a maximum.
+ *
+ * @example
+ * <Gauge value={72} max={100} label="Battery" mark={20} />
+ */
 export function Gauge({ value, min = 0, max = 100, label, valueLabel, tone = 'default', mark }: GaugeProps) {
   const { dim } = useFreshness();
   const r = 42;
@@ -502,6 +546,12 @@ export function formatCountdown(sec: number, format: 'relative' | 'clock'): stri
   return `${Math.floor(h / 24)} d`;
 }
 
+/**
+ * Time until (or since) an instant, in words or as a clock.
+ *
+ * @example
+ * <Countdown target={1761158520000} label="Until rain" size="s" />
+ */
 export function Countdown({ target, label, size = 'm', soonWithinSec = 900, format = 'relative', tone = 'default', pastLabel = 'ago' }: CountdownProps) {
   const now = useNow();
   const { dim } = useFreshness();
@@ -530,6 +580,12 @@ export function Countdown({ target, label, size = 'm', soonWithinSec = 900, form
 
 export type PillTone = 'ok' | 'neutral' | 'attention' | 'error' | 'stale';
 
+/**
+ * A short status label; the attention tone is amber.
+ *
+ * @example
+ * <StatusPill tone="attention">2 waiting</StatusPill>
+ */
 export function StatusPill({ tone = 'neutral', children }: { tone?: PillTone; children: ReactNode }) {
   return (
     <span className="ck-pill" data-tone={tone}>
@@ -551,6 +607,12 @@ export interface RowProps {
   icon?: ReactNode;
 }
 
+/**
+ * One line of a list: a title, optional detail, a value and a marker.
+ *
+ * @example
+ * <Row title="Flight EX 100" detail="Gate B12" value="On time" marker="ok" />
+ */
 export function Row({ title, detail, value, meta, marker = 'none', icon }: RowProps) {
   const { dim } = useFreshness();
   const shown = dim && marker === 'attention' ? 'attention-stale' : dim && marker !== 'none' && marker !== 'error' ? 'stale' : marker;
@@ -581,7 +643,14 @@ export interface ListProps {
 
 const MORE_LINE = 24;
 
-/** Rows that would be cut by the tile's edge fold into "+N more": a tile never shows half a row. */
+/**
+ * Rows that would be cut by the tile's edge fold into "+N more": a tile never shows half a row.
+ *
+ * @example
+ * <List more={2}>
+ *   <Row title="Pay rent" value="Today" marker="attention" />
+ * </List>
+ */
 export function List({ children, more = 0, empty, ariaLabel }: ListProps) {
   const { dim } = useFreshness();
   const ref = useRef<HTMLUListElement>(null);
@@ -632,6 +701,12 @@ export interface TimelineItem {
   state: 'done' | 'now' | 'next' | 'failed' | 'attention';
 }
 
+/**
+ * Steps in order, each done, now, next, failed or needing attention.
+ *
+ * @example
+ * <Timeline items={[{ id: '1', time: '09:00', title: 'Boarding', state: 'done' }, { id: '2', time: '09:40', title: 'Departure', state: 'next' }]} />
+ */
 export function Timeline({ items, ariaLabel }: { items: TimelineItem[]; ariaLabel?: string }) {
   const { dim } = useFreshness();
   if (items.length === 0) return <EmptyState title="Nothing on the timeline" />;
@@ -655,6 +730,12 @@ export function Timeline({ items, ariaLabel }: { items: TimelineItem[]; ariaLabe
 
 /* ---------- Empty, stale, error, pending ---------- */
 
+/**
+ * A fresh feed with nothing to show.
+ *
+ * @example
+ * <EmptyState title="Nothing waiting" detail="Approvals appear here." />
+ */
 export function EmptyState({ title, detail, icon }: { title: string; detail?: string; icon?: ReactNode }) {
   return (
     <div className="ck-empty">
@@ -669,6 +750,12 @@ export function EmptyState({ title, detail, icon }: { title: string; detail?: st
   );
 }
 
+/**
+ * The notice a Tile shows when its feed is stale.
+ *
+ * @example
+ * <StaleNotice freshness={{ observedAt: 1761156000000, expectedIntervalSec: 300 }} />
+ */
 export function StaleNotice({ freshness }: { freshness?: FeedFreshness }) {
   const now = useNow();
   const age = ageSeconds(freshness, now);
@@ -683,6 +770,12 @@ export function StaleNotice({ freshness }: { freshness?: FeedFreshness }) {
   );
 }
 
+/**
+ * The notice a Tile shows when its feed reports an error.
+ *
+ * @example
+ * <ErrorNotice message="The feed is unavailable" />
+ */
 export function ErrorNotice({ message, freshness }: { message: string; freshness?: FeedFreshness }) {
   return (
     <p className="ck-notice" data-kind="error" style={{ margin: 0 }}>
@@ -695,6 +788,12 @@ export function ErrorNotice({ message, freshness }: { message: string; freshness
   );
 }
 
+/**
+ * Placeholder lines while a declared feed has no snapshot yet.
+ *
+ * @example
+ * <PendingState lines={2} />
+ */
 export function PendingState({ lines = 3 }: { lines?: number }) {
   return (
     <div className="ck-pending" aria-label="Waiting for the first update" role="status">
@@ -707,17 +806,41 @@ export function PendingState({ lines = 3 }: { lines?: number }) {
 
 /* ---------- Layout ---------- */
 
-/** A figure beside its detail: the approvals, people and schedule bodies on the boards. */
+/**
+ * A figure beside its detail: the approvals, people and schedule bodies on the boards.
+ *
+ * @example
+ * <Split>
+ *   <Metric value={2} label="waiting" />
+ *   <List><Row title="Send the invoice" /></List>
+ * </Split>
+ */
 export function Split({ children }: { children?: ReactNode }) {
   return <div className="ck-split">{children}</div>;
 }
 
-/** A headline figure with a chart filling the rest of the line. */
+/**
+ * A headline figure with a chart filling the rest of the line.
+ *
+ * @example
+ * <Headline>
+ *   <Metric value={64} unit="°" />
+ *   <Sparkline values={[58, 61, 64]} />
+ * </Headline>
+ */
 export function Headline({ children }: { children?: ReactNode }) {
   return <div className="ck-headline">{children}</div>;
 }
 
-/** Two items pushed to either edge, such as a figure and its status pill. */
+/**
+ * Two items pushed to either edge, such as a figure and its status pill.
+ *
+ * @example
+ * <Between>
+ *   <Metric value={3} size="m" />
+ *   <StatusPill tone="ok">Up to date</StatusPill>
+ * </Between>
+ */
 export function Between({ children }: { children?: ReactNode }) {
   return <div className="ck-between">{children}</div>;
 }

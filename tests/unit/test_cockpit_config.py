@@ -119,7 +119,16 @@ def test_the_shipped_cockpit_profiles_match_the_defaults() -> None:
         publication.commits_per_widget_per_hour,
         publication.commits_per_principal_per_hour,
         publication.import_interval_seconds,
-    ) == (12, 60, 60)
+        publication.commit_wait_seconds,
+    ) == (12, 60, 60, 30)
+    assert CockpitProfiles().feeds.history_max == 288
+
+
+def test_feed_history_cannot_exceed_what_a_manifest_may_declare() -> None:
+    from agent_core.cockpit.profiles import CockpitProfiles
+
+    with pytest.raises(ConfigurationError, match="history_max"):
+        CockpitProfiles.from_document({"schema_version": 1, "feeds": {"history_max": 289}})
 
 
 def test_an_invalid_cockpit_profile_names_the_file() -> None:

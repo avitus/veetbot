@@ -220,6 +220,67 @@ TOOL_MESSAGES: dict[str, str] = {
         "An argument has an invalid shape or value; check the observed time or window "
         "edge format and the component names."
     ),
+    "cockpit.not_found": (
+        "No such Cockpit widget or feed. Call cockpit.read with list_widgets or list_feeds."
+    ),
+    "cockpit.kit_unknown": (
+        "The kit has no primitive by that name. Call cockpit.read describe_kit for the list."
+    ),
+    "cockpit.revision_changed": (
+        "The widget is not at the revision named: it exists already or changed since it "
+        "was read. Call cockpit.read read_widget and pass its head_revision_id as "
+        "expected_revision to update it."
+    ),
+    "cockpit.expected_revision_required": (
+        "An update names the widget's head_revision_id as expected_revision; call "
+        "cockpit.read read_widget for it."
+    ),
+    "cockpit.widget_deleted": (
+        "That widget is deleted. Restore it with the restore operation, or use another slug."
+    ),
+    "cockpit.widget_not_deleted": "Only a deleted widget can be restored.",
+    "cockpit.layout_changed": (
+        "The layout changed since it was read. Call cockpit.read get_layouts and pass its "
+        "revision as expected_revision."
+    ),
+    "cockpit.conflict": "The Cockpit change conflicts with the widget's current state.",
+    "cockpit.write_interactive_only": (
+        "Widgets are written only in the owner's interactive chat, never from a scheduled, "
+        "delegated or email task. Feeds can be published here instead."
+    ),
+    "cockpit.rate_limited": ("Not written. The hour's widget commits are used; try again later."),
+    "cockpit.build_unavailable": (
+        "The widget builder reached no verdict and nothing was recorded. Try again shortly."
+    ),
+    "cockpit.preview_unavailable": (
+        "Preview images are not available in this deployment yet; use the validate operation."
+    ),
+    "cockpit.settings_invalid": (
+        "The settings do not fit the widget's settings schema, or the widget is not live. "
+        "Call cockpit.read read_widget for its settings_schema."
+    ),
+    "cockpit.layout_invalid": (
+        "The layout names a widget that is not live, places one twice, or uses a size its "
+        "manifest does not offer. Call cockpit.read read_widget for the widget's sizes."
+    ),
+    "cockpit.feed_schema_required": "A new feed's first publish carries its JSON Schema.",
+    "cockpit.feed_schema_invalid": (
+        "The schema is not a self-contained JSON Schema (draft 2020-12, referring to "
+        "nothing outside itself)."
+    ),
+    "cockpit.feed_data_invalid": (
+        "The data does not fit the feed's schema. Call cockpit.read read_feed for the schema, "
+        "or publish with a new schema."
+    ),
+    "cockpit.feed_observed_in_future": (
+        "The observed time is later than now; omit observed_at to use the current time."
+    ),
+    "cockpit.feed_invalid": (
+        "The snapshot is out of bounds: the data holds at most 64 KiB and the schema 8 KiB."
+    ),
+    "cockpit.invalid_arguments": (
+        "An argument is missing or has an invalid shape for that operation."
+    ),
 }
 
 

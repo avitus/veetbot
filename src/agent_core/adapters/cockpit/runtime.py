@@ -1,4 +1,4 @@
-"""Cockpit runtime assets and settings schemas from their files (docs/plan/cockpit.md)."""
+"""Cockpit runtime assets from their files, and the JSON Schema check (docs/plan/cockpit.md)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from agent_core.domain.cockpit import is_bundle_digest
 from agent_core.ports.cockpit import CockpitAsset, CockpitRuntimeManifest
 
+_REFERENCE_KEYWORDS = frozenset({"$ref", "$dynamicRef"})
 _CONTENT_TYPES = {
     "js": "text/javascript; charset=utf-8",
     "css": "text/css; charset=utf-8",
@@ -49,8 +50,39 @@ class FileCockpitRuntime:
         return None
 
 
-class JsonSchemaSettingsCheck:
-    def violations(self, schema: Mapping[str, Any], values: Mapping[str, Any]) -> list[str]:
+def _outside_references(node: object) -> bool:
+    """Whether a schema names anything but a location inside itself."""
+
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in _REFERENCE_KEYWORDS and not (
+                isinstance(value, str) and value.startswith("#")
+            ):
+                return True
+            if _outside_references(value):
+                return True
+    elif isinstance(node, list):
+        return any(_outside_references(item) for item in node)
+    return False
+
+
+class Draft202012SchemaCheck:
+    """JSON Schema draft 2020-12, confined to the schema itself: nothing is ever retrieved."""
+
+    def schema_violations(self, schema: Mapping[str, Any]) -> list[str]:
+        if _outside_references(dict(schema)):
+            return ["a schema refers only to locations inside itself"]
         return sorted(
-            error.message for error in Draft202012Validator(dict(schema)).iter_errors(dict(values))
+            error.message
+            for error in Draft202012Validator(Draft202012Validator.META_SCHEMA).iter_errors(
+                dict(schema)
+            )
+        )
+
+    def violations(self, schema: Mapping[str, Any], instance: object) -> list[str]:
+        problems = self.schema_violations(schema)
+        if problems:
+            return [f"the schema is invalid: {problems[0]}"]
+        return sorted(
+            error.message for error in Draft202012Validator(dict(schema)).iter_errors(instance)
         )
