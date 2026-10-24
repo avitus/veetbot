@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Static charts and diagrams — ADR-0243:** The owner authorized an independent
+  extension on 2026-10-24: offline rendering in the existing Python sandbox,
+  PNG previews, optional SVG/PDF downloads, chart CSV and editable diagram source.
+  Existing artifact delivery and sandbox authority remain unchanged. Implementation
+  and focused sandbox/artifact/PNG-decoder checks are complete (ADR-0243);
+  production delivery is pending. No milestone or gate moves.
+
 - **Milestone 35 — Cockpit mode and agent-authored widgets:** authorized by the
   owner on 2026-10-22 as an independent parallel workstream under ADR-0240.
   [Cockpit](cockpit.md) declares twenty-three gates for a third client mode

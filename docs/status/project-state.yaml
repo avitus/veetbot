@@ -5,6 +5,10 @@
 # 2026-10-21; PR 181 delivered it on 2026-10-22. The owner-reported deferred-format
 # repair is authorized and awaits release; so does the 2026-10-22 owner-named site
 # repair (scheme-less names, www. and bare domain as one host). No milestone or gate moves.
+# ADR-0243: Owner authorized static charts and diagrams on 2026-10-24,
+# with PNG previews, optional SVG/PDF and chart CSV through existing artifacts.
+# Implemented with focused sandbox/artifact/PNG-decoder evidence in ADR-0243.
+# Production delivery is pending; no milestone moves.
 schema_version: 1
 
 project:

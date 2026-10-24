@@ -74,10 +74,10 @@ class SandboxRunCommandTool:
         name="sandbox.run_command",
         version="1.0.0",
         description=(
-            "Run an argument vector in an isolated disposable workspace. Network is off by "
-            "default. The workspace is discarded when the run finishes or pauses; use "
-            "artifact.export to give the user a file it made. "
-            "Large output is truncated and retained as an artifact."
+            "Run argv in an isolated workspace; network is off by default. The workspace is "
+            "discarded at run end/pause: export files with artifact.export. Large output is "
+            "truncated and saved as an artifact. For charts/diagrams, read "
+            "/opt/agent/visualization-guide.md via this tool."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
