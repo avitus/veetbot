@@ -410,8 +410,8 @@ def main() -> int:
     parser.add_argument("spec", help="Workspace JSON file; see /opt/agent/visualization-guide.md")
     args = parser.parse_args()
     try:
-        workspace = Path.cwd().resolve()
-        source = (workspace / args.spec).resolve()
+        workspace = Path("/workspace").resolve()
+        source = (Path.cwd() / args.spec).resolve()
         _require(source.is_relative_to(workspace), "The specification must be in the workspace.")
         with source.open("rb") as stream:
             data = stream.read(MAX_INPUT_BYTES + 1)

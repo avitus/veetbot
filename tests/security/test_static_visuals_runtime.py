@@ -80,16 +80,19 @@ async def test_sandbox_offers_offline_plotting_and_graph_layout(
 async def _render(
     manager: SandboxManager,
     spec: dict[str, Any],
+    working_directory: str = ".",
 ) -> dict[str, bytes]:
     workspace = manager.for_run("tenant-a", RUN_ID, 1)
-    await workspace.write("spec.json", json.dumps(spec).encode())
+    await workspace.write(
+        str(PurePosixPath(working_directory) / "spec.json"), json.dumps(spec).encode()
+    )
     result = await manager.execute_for(
         "tenant-a",
         RUN_ID,
         1,
         ExecutionCommand(
             ("python", "-m", "agent_core.execution.visuals", "spec.json"),
-            PurePosixPath("."),
+            PurePosixPath(working_directory),
             90,
             None,
             32768,
@@ -252,12 +255,14 @@ pyplot.close(fig)
 
 
 @pytest.mark.parametrize("spec", [CHART, DIAGRAM], ids=["chart", "diagram"])
+@pytest.mark.parametrize("working_directory", [".", "reports"])
 async def test_rendered_downloads_preserve_bytes_and_owner_boundary(
     visual_sandbox: SandboxManager,
     tmp_path: Path,
     spec: dict[str, Any],
+    working_directory: str,
 ) -> None:
-    files = await _render(visual_sandbox, {**spec, "formats": ["svg", "pdf"]})
+    files = await _render(visual_sandbox, {**spec, "formats": ["svg", "pdf"]}, working_directory)
     workspace = visual_sandbox.for_run("tenant-a", RUN_ID, 1)
     entries = await workspace.listdir("", recursive=True)
     async with build(settings=_settings(tmp_path), sequential_ids=True) as composition:

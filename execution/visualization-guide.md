@@ -22,6 +22,9 @@ Add `"formats": ["svg", "pdf"]` for optional vector downloads. There is no need
 to list PNG; it is always included. The Apple viewer previews PNG; SVG and PDF
 are downloads. Each successful render uses a fresh directory and prints its
 paths, so always use the returned paths rather than guessing filenames.
+The input filename is relative to the command's working directory. Output paths
+are always relative to `/workspace`, including when the command runs in a
+subdirectory; pass them directly to `artifact.export`.
 
 ## Charts
 
