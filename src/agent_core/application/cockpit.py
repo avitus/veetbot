@@ -14,6 +14,7 @@ revision or recorded commit of the principal; anything else is a person's.
 from __future__ import annotations
 
 import builtins
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -60,6 +61,8 @@ _HOUR = timedelta(hours=1)
 # Every queued entry, so a later entry never overtakes an earlier one for its widget.
 _QUEUE_HORIZON = timedelta(days=3650)
 _PEOPLE_PAGE = 100
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,6 +533,16 @@ class CommitOutboxWorker:
                 settled += await self._attempt(entry)
             except WidgetRepositoryUnavailableError as error:
                 await self._reschedule(entry, str(error))
+                blocked.add(entry.slug)
+            except Exception as error:
+                # A refused path, a lost revision or an unexpected GitHub answer
+                # is this entry's problem: it retries with backoff behind the
+                # same widget, and every other widget's entry still commits.
+                logger.exception(
+                    "cockpit_outbox_entry_failed",
+                    extra={"revision_id": str(entry.revision_id), "slug": entry.slug},
+                )
+                await self._reschedule(entry, f"{type(error).__name__}: {error}")
                 blocked.add(entry.slug)
         return settled
 

@@ -481,7 +481,9 @@ read them.
 
 **Commit before activate** holds without exception. During a GitHub outage
 the entry retries with backoff and the previous live revision keeps rendering
-from PostgreSQL.
+from PostgreSQL. Any other failure of one entry is handled the same way: the
+entry is logged and rescheduled with backoff, later entries for its widget wait
+behind it, and the other widgets' entries in the same pass still commit.
 
 ### Ambiguity and conflict
 

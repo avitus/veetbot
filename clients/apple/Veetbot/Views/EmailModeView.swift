@@ -376,11 +376,13 @@ public struct EmailModeView: View {
                 mailboxSidebar
                     .frame(width: shownSidebar - 1)
                     .frame(maxHeight: .infinity)
+                // The drag starts from the width on screen: a narrow window may
+                // squeeze the sidebar below the width the owner stored.
                 MacColumnDivider(
-                    edge: .trailing, width: sidebar, label: "Sidebar width", identifier: "email.sidebar.resize",
+                    edge: .trailing, width: shownSidebar - 1, label: "Sidebar width", identifier: "email.sidebar.resize",
                     resize: { width, remember in
                         let next = EmailColumnLayout.sidebarDrag(
-                            to: width, from: sidebar, available: available, inbox: inbox)
+                            to: width, from: shownSidebar - 1, available: available, inbox: inbox)
                         if remember {
                             sidebarStore.remember(next)
                             draggedSidebarWidth = nil
