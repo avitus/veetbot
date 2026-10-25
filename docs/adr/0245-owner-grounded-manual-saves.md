@@ -41,7 +41,10 @@ although nothing had been asked.
    provenance. The sixteen-character verbatim rule remains as it was. A
    message the owner did not author grounds nothing. The rule only raises and
    the turn's origin taint stands; the governed service's trust check is
-   unchanged and refuses the write a second time if a label were wrong.
+   unchanged: it refuses an external or knowledge label and checks the source
+   events and the owner's earlier deletions, but it trusts a USER label and
+   never compares the statement with the owner's wording, so grounding is the
+   only check of a paraphrase's provenance.
 2. The outcome is the same whether the save is proposed in the step that
    read the web or a later one.
 3. After a tainted turn, an ungrounded statement is refused with the closed

@@ -612,8 +612,11 @@ the owner just said is therefore an owner save whether it is proposed in the
 step that read the web or a later one, while a statement that carries a web
 page's words is not. A message the owner did not author (device-ingested,
 surface) grounds nothing. The rule still only raises: it cannot lower a label,
-and the turn's origin taint stands; the governed service's trust check refuses
-the write a second time if the label were ever wrong. The tool reports an
+and the turn's origin taint stands; the governed service then checks the label
+it is given (refusing an external or knowledge origin), the source events and
+the owner's earlier deletions, but it never compares the statement with the
+owner's wording, so a statement grounding wrongly raises to USER passes it:
+grounding is the only check of a paraphrase's provenance. The tool reports an
 ungrounded statement after a tainted turn as
 `tool.memory.statement_not_owner_grounded`, a closed reason with corrective
 guidance.
