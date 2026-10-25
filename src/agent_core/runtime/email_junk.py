@@ -11,12 +11,13 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailThread
 from agent_core.domain.email_junk import (
     JUNK_MODEL,
-    JUNK_PILOT_POLICY,
     JUNK_POLICY,
     JUNK_RESERVATION,
     JUNK_THRESHOLD,
     EmailJunkMode,
+    JunkAuthorization,
     JunkPilot,
+    JunkStandingAuthorization,
     junk_fingerprint,
     junk_pilot_capacity,
     junk_pilot_keys,
@@ -41,15 +42,17 @@ class EmailJunkFilter:
         *,
         admitted: bool = False,
         evidence_digest: str = "none",
-        pilot: JunkPilot | None = None,
+        pilot: JunkAuthorization | None = None,
     ) -> None:
         """Downgrade unadmitted filtering to observation and bind the cache revision."""
         self.provider = provider
         self.mode = mode if mode != EmailJunkMode.FILTER or admitted else EmailJunkMode.SHADOW
-        self.pilot = pilot if mode == EmailJunkMode.PILOT else None
-        if mode == EmailJunkMode.PILOT and pilot is None:
+        scoped = mode in {EmailJunkMode.PILOT, EmailJunkMode.OWNER_FILTER}
+        expected = JunkPilot if mode == EmailJunkMode.PILOT else JunkStandingAuthorization
+        self.pilot = pilot if scoped and isinstance(pilot, expected) else None
+        if scoped and self.pilot is None:
             self.mode = EmailJunkMode.OFF
-        policy = JUNK_PILOT_POLICY if self.pilot is not None else JUNK_POLICY
+        policy = self.pilot.policy if self.pilot is not None else JUNK_POLICY
         self.revision = f"{policy}:{self.mode.value}:{evidence_digest}"
 
     @property
@@ -73,7 +76,7 @@ class EmailJunkFilter:
             and receipt.get("policy") == JUNK_POLICY
         ):
             return False
-        if self.mode == EmailJunkMode.PILOT:
+        if self.mode in {EmailJunkMode.PILOT, EmailJunkMode.OWNER_FILTER}:
             return bool(
                 self.pilot is not None
                 and principal is not None

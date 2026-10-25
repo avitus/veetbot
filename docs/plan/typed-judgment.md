@@ -337,3 +337,7 @@ The explicitly approved [ADR-0204 pilot](../adr/0204-owner-reviewed-email-junk-p
 retains those questions, request bounds and accounting, but permits the reviewed
 raw choice under its separate owner/account, seven-day and daily-cap admission.
 It does not change other consumers or the general calibrated filter.
+
+[ADR-0244](../adr/0244-standing-owner-email-junk-filter.md) retains that same
+consumer contract with a separate standing owner/work authorization after the
+complete pilot review. It preserves the daily cap and all request protections.
