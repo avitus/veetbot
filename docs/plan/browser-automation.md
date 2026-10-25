@@ -169,7 +169,8 @@ owner a Connect or Switch button that connects it and continues the request.
 An unconnected chat with no match carries `website=none` and the place to
 connect one, Website Access in that chat. The row never names a profile ID and
 sits outside the frozen prefix. Matching reads only the message's typed text:
-a host or registrable domain; one to three words that join to the domain's
+a host or registrable domain, approximated without the public suffix list,
+which stays inside the isolated service; one to three words that join to the domain's
 first label (four characters or more, hyphens removed) or to a first host
 label of seven or more letters other than `www`; or one word of five or more
 letters that begins a domain label of five or more. At most three profiles are

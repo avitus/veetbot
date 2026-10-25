@@ -12,7 +12,11 @@
   principal actor, so existing owner-authority checks hold, and an `origin`
   of kind `browser_offer`. Memory formation reads it like any owner message;
   its fixed text names only the website's host. "Not now" hides an offer on
-  that device; the server offer still closes by the rules in decision 4
+  that device; the server offer still closes by the rules in decision 4. The
+  public suffix list stays inside the isolated browser service (ADR-0128), so
+  the registrable domain is approximated: the last two labels, or three
+  under a two-letter country code whose second level is `ac`, `co`, `com`,
+  `edu`, `gov`, `net` or `org`
 - Amends: ADR-0130, ADR-0172
 - Related: ADR-0094, ADR-0128, ADR-0129, ADR-0141, ADR-0164
 - Scope: The existing browser capability (the Milestone 10 browser tranche).
@@ -65,8 +69,8 @@ that inherited the default X or shopping profile still lacks the portal.
    earlier messages, memory, tool results, page text, scheduled instructions,
    delegated input, or messages from inbound surfaces (Telegram, WhatsApp, SMS).
    The matcher is deterministic and runs before the model:
-   - Each allowed origin yields its host, its registrable domain (using the
-     public suffix list), the leading label of that domain with hyphens
+   - Each allowed origin yields its host, its registrable domain, the
+     leading label of that domain with hyphens
      removed (`examplehealth` for `example-health.org`), and the host's first
      label when it is not `www`.
    - The message matches a profile when it contains the host or the

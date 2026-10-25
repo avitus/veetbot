@@ -66,6 +66,14 @@ def test_a_five_letter_word_that_begins_the_domain_label_matches() -> None:
     assert match_websites("an exam is due", OWNED) == ()
 
 
+def test_a_country_second_level_domain_keeps_its_name_label() -> None:
+    owned = (OwnedWebsite(PORTAL, ("https://portal.example-clinic.co.uk",)),)
+
+    assert match_websites("check example-clinic.co.uk", owned) == (PORTAL,)
+    assert match_websites("Log in to Example Clinic", owned) == (PORTAL,)
+    assert match_websites("the co is busy", owned) == ()
+
+
 def test_a_short_label_matches_only_by_host_or_domain() -> None:
     assert match_websites("x marks the spot", OWNED) == ()
     assert match_websites("my BMW stalls", OWNED) == ()

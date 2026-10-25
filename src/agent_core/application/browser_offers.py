@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from publicsuffixlist import PublicSuffixList
-
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import WEBSITE_OFFER_STATE_KEY, BrowserProfileStatus
 from agent_core.domain.errors import NotFoundError
@@ -17,9 +15,10 @@ from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY, Ses
 from agent_core.domain.views import WebsiteOfferProfileView, WebsiteOfferView
 from agent_core.ports.persistence import RepositoryUnitOfWork
 
-# Loaded once from the list bundled with the pinned package; never the network.
-_PUBLIC_SUFFIXES = PublicSuffixList(only_icann=False)
 _WORD = re.compile(r"[a-z0-9]+")
+# The public suffix list stays inside the isolated browser service (ADR-0128),
+# so the registrable domain is approximated: a match only chooses a card.
+_SECOND_LEVEL_LABELS = frozenset({"ac", "co", "com", "edu", "gov", "net", "org"})
 
 MAXIMUM_OFFERED_WEBSITES = 3
 _MAXIMUM_JOINED_WORDS = 3
@@ -43,11 +42,20 @@ class _Names:
     host_label: str | None
 
 
+def _registrable_domain(host: str) -> str | None:
+    labels = host.split(".")
+    if len(labels) < 2 or all(label.isdigit() for label in labels):
+        return None
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SECOND_LEVEL_LABELS:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
 def _names(origin: str) -> _Names:
     host = (urlsplit(origin).hostname or "").lower()
     if not host:
         return _Names((), None, None)
-    domain = _PUBLIC_SUFFIXES.privatesuffix(host)
+    domain = _registrable_domain(host)
     literals = (host,) if domain is None or domain == host else (host, domain)
     label = None if domain is None else domain.split(".")[0].replace("-", "")
     first = host.split(".")[0].replace("-", "")
