@@ -662,7 +662,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:1152-1154`). The gateway translates those hints into
+(`context-engine.md:1163-1165`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -751,7 +751,7 @@ they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:1126-1128` and the
+The cached-prefix ratio is defined in `context-engine.md:1137-1139` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
