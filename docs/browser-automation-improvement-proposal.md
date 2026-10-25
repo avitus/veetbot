@@ -129,6 +129,30 @@ with insufficient evidence. Its six-post requirement and collection limits remai
 unchanged. Further improvements must address observed collection failures without
 lowering the evidence threshold. Comparative benchmarks remain deferred.
 
+### Production diagnosis — 2026-10-24
+
+A read-only seven-day audit against deployed revision `d8013cce` found 21 runs
+with 469 browser calls: 465 succeeded, three observations reported unavailable
+profiles before the empty-page repair, and one action could not find its target.
+Six of the seven daily feed collections met the existing six-post threshold;
+the oldest stopped honestly at five. Browser-containing runs also recorded 66
+approval requests. These counts do not establish that every approval was unnecessary.
+
+The latest failed research run had successful browser calls but spent about
+78 seconds assembling its final request, ending with an automatic memory recall.
+The final model request began with about four seconds remaining; its 22-second
+answer arrived after the five-minute run deadline and the run failed. The context
+builder now bounds optional base/delta retrieval under one ten-second allowance,
+clamped to the remaining run deadline, while retaining completed browser evidence
+and mandatory corrections. Regression coverage models that timing failure and
+requires an answer without browser replay or another user interruption. This
+does not extend the run deadline or guarantee that every slow dependency can finish.
+
+Two recent carousel approvals classified words within item titles as named
+consequences. That remains a follow-up requiring a reviewed way to distinguish
+navigation from consequential actions; this repair does not relax the classifier.
+Deployment and post-release acceptance remain separate from local verification.
+
 ## 1. Product outcome and priorities
 
 A user should be able to connect a website, describe a task, understand the
