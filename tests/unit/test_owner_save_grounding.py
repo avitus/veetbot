@@ -141,3 +141,65 @@ def test_agent_instructions_keep_derived_plans_out_of_memory_and_unrequested_fai
 @pytest.mark.parametrize("statement", ["", "roses", "the and of"])
 def test_statements_below_the_minimum_are_never_grounded(statement: str) -> None:
     assert not owner_grounded_statement(statement, _checkpoint())
+
+
+QUIET_WEB = "Weather today is mild with light wind."
+
+
+@pytest.mark.parametrize(
+    ("owner", "statement"),
+    [
+        # An introduced negation reverses what the owner said.
+        (
+            "Remember that I eat pork every Sunday at lunch.",
+            "I do not eat pork every Sunday at lunch.",
+        ),
+        (
+            "Remember that I eat pork every Sunday at lunch.",
+            "I never eat pork every Sunday at lunch.",
+        ),
+        # A changed modal turns a possibility into a commitment, or the reverse.
+        (
+            "Remember that I may transfer funds to savings next month.",
+            "I will transfer funds to savings next month.",
+        ),
+        (
+            "Remember that I must renew the passport before March.",
+            "I might renew the passport before March.",
+        ),
+        # Dropping a negation or a hedge changes the meaning just as much.
+        ("Remember that I never eat pork on Sundays.", "I eat pork on Sundays."),
+        ("Remember that I might move to Lisbon next year.", "Andy moves to Lisbon next year."),
+        ("Remember that I don't drink coffee after noon.", "Andy drinks coffee after noon."),
+        ("Remember that I have no siblings in Portugal.", "Andy has siblings in Portugal."),
+    ],
+)
+def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
+    owner: str, statement: str
+) -> None:
+    """Content-word overlap is not provenance when the polarity or modality moved."""
+
+    assert not owner_grounded_statement(statement, _checkpoint(owner=owner, web=QUIET_WEB))
+
+
+@pytest.mark.parametrize(
+    ("owner", "statement"),
+    [
+        ("Remember that I never eat pork on Sundays.", "Andy never eats pork on Sundays."),
+        (
+            "Remember that I may transfer funds to savings next month.",
+            "Andy may transfer funds to savings next month.",
+        ),
+        (
+            "Could you remember that I don't drink coffee after noon? Also find decaf brands.",
+            "Andy does not drink coffee after noon.",
+        ),
+        ("Don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
+    ],
+)
+def test_a_statement_that_keeps_negation_and_modality_stays_grounded(
+    owner: str, statement: str
+) -> None:
+    """Request framing ("could you", "don't forget") is not part of what is restated."""
+
+    assert owner_grounded_statement(statement, _checkpoint(owner=owner, web=QUIET_WEB))

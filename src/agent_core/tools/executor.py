@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
@@ -454,12 +455,64 @@ OWNER_GROUNDING_FREE_WORDS = 3
 OWNER_GROUNDING_MINIMUM_WORDS = 2
 
 
+# Words that carry a statement's polarity or modality. Recall ranking drops the
+# modals as function words, so provenance judges these on their own: a save may
+# neither introduce one the owner did not say nor drop one from the sentence it
+# restates ("I may transfer funds" never grounds "I will transfer funds").
+_NEGATIONS = frozenset(
+    {"not", "no", "never", "none", "nothing", "nobody", "nowhere", "neither", "nor", "without"}
+)
+_MODALITY = frozenset(
+    {
+        "can",
+        "could",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "should",
+        "will",
+        "would",
+        "ought",
+        "maybe",
+        "perhaps",
+        "probably",
+        "possibly",
+    }
+)
+_MEANING_MARKERS = _NEGATIONS | _MODALITY
+_CONTRACTIONS = (
+    (re.compile(r"\bcan't\b"), "can not"),
+    (re.compile(r"\bwon't\b"), "will not"),
+    (re.compile(r"\bshan't\b"), "shall not"),
+    (re.compile(r"\bcannot\b"), "can not"),
+    (re.compile(r"n't\b"), " not"),
+    (re.compile(r"'ll\b"), " will"),
+)
+# How a request is put ("could you remember", "don't forget that") is not part
+# of what the owner states.
+_REQUEST_FRAMING = re.compile(r"\b(?:can|could|would|will)\s+you\b|\b(?:do\s+not|never)\s+forget\b")
+_SENTENCE_BREAK = re.compile(r"[.!?;\n]+")
+_WORD = re.compile(r"[^\W\d_]+")
+
+
+def _grounding_text(text: str) -> str:
+    text = text.casefold().replace("\u2019", "'")
+    for pattern, replacement in _CONTRACTIONS:
+        text = pattern.sub(replacement, text)
+    return _REQUEST_FRAMING.sub(" ", text)
+
+
 def _content_lexemes(text: str) -> set[str]:
     return {
         token
-        for token in lexical_tokens(text)
+        for token in lexical_tokens(_grounding_text(text))
         if len(token) >= MINIMUM_LEXICAL_TERM_LENGTH and token not in _RECALL_FUNCTION_WORDS
     }
+
+
+def _meaning_markers(text: str) -> set[str]:
+    return set(_WORD.findall(_grounding_text(text))) & _MEANING_MARKERS
 
 
 def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
@@ -469,10 +522,12 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     statement's content words are split three ways: covered by the owner's
     message, found only in an external or knowledge tool result of this turn,
     or in neither (the model's own phrasing). Grounded means no word came only
-    from external content, most of the words are the owner's, and the model's
-    phrasing stays within a few words. The outcome is the same whether the
-    save is proposed in the step that read the web or a later one: the turn's
-    taint still marks the origin; only the statement's own provenance lifts it.
+    from external content, most of the words are the owner's, the model's
+    phrasing stays within a few words, and the negations and modals match: none
+    the owner did not say, none dropped from an owner sentence it restates. The
+    outcome is the same whether the save is proposed in the step that read the
+    web or a later one: the turn's taint still marks the origin; only the
+    statement's own provenance lifts it.
     """
 
     user_texts: list[str] = []
@@ -498,11 +553,18 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     covered = words & owner_words
     tainted = (words - owner_words) & external_words
     free = words - owner_words - external_words
+    stated = _meaning_markers(statement)
+    restated: set[str] = set()
+    for sentence in _SENTENCE_BREAK.split(" ".join(user_texts)):
+        if _content_lexemes(sentence) & covered:
+            restated |= _meaning_markers(sentence)
     return (
         not tainted
         and len(covered)
         >= max(OWNER_GROUNDING_MINIMUM_WORDS, math.ceil(OWNER_GROUNDING_COVERAGE * len(words)))
         and len(free) <= OWNER_GROUNDING_FREE_WORDS
+        and stated <= _meaning_markers(" ".join(user_texts))
+        and restated <= stated
     )
 
 

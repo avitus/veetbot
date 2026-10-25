@@ -594,8 +594,13 @@ owner message and everything after it; the statement's content words are
 split into those the owner's message contains, those found only in an
 external or knowledge tool result of the turn, and those in neither; the
 statement is grounded when no word came only from external content, at least
-sixty percent of its words (and at least two) are the owner's, and at most
-three are the model's own phrasing. A paraphrase of what the owner just said
+sixty percent of its words (and at least two) are the owner's, at most
+three are the model's own phrasing, and its negations and modals match the
+owner's: it introduces none the owner's message lacks and drops none from an
+owner sentence it restates, with request framing such as "could you" or
+"don't forget" set aside. Overlap of content words is not provenance when
+the polarity or modality moved, so "I may transfer funds" never grounds "I
+will transfer funds". A paraphrase of what the owner just said
 is therefore an owner save whether it is proposed in the step that read the
 web or a later one, while a statement that carries a web page's words is not.
 A message the owner did not author (device-ingested, surface) grounds

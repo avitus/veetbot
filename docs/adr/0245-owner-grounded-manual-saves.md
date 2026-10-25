@@ -28,7 +28,12 @@ although nothing had been asked.
    and everything after it), the statement's content words are the owner's
    own, none came only from an external or knowledge tool result of that
    turn, at least sixty percent of them (and at least two) appear in the
-   owner's message, and at most three are the model's own phrasing. The
+   owner's message, at most three are the model's own phrasing, and its
+   negations and modals match the owner's: it introduces none the owner's
+   message lacks and drops none from an owner sentence it restates (request
+   framing such as "could you" or "don't forget" set aside). These marker
+   words are judged apart from recall's function-word list, which drops the
+   modals, so ranking changes cannot relax provenance. The
    sixteen-character verbatim rule remains as it was. A message the owner did
    not author grounds nothing. The rule only raises and the turn's origin
    taint stands; the governed service's trust check is unchanged and refuses
