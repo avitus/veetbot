@@ -45,8 +45,13 @@ although nothing had been asked.
    events and the owner's earlier deletions, but it trusts a USER label and
    never compares the statement with the owner's wording, so grounding is the
    only check of a paraphrase's provenance.
-2. The outcome is the same whether the save is proposed in the step that
-   read the web or a later one.
+2. For a paraphrase of the owner's own words the outcome is the same whether
+   the save is proposed in the same step as the web read or a later one. A
+   statement proposed in the same step is judged on the conversation as it
+   then stands, before the read's result exists, so that result's words cannot
+   be told apart as external; the model has not seen them either. From the
+   next step on, a word found only in an external result, and not in the
+   owner's message, refuses the statement; a word in both does not.
 3. After a tainted turn, an ungrounded statement is refused with the closed
    reason `tool.memory.statement_not_owner_grounded` and guidance to save
    only what the owner stated and to keep derived plans in the reply or an

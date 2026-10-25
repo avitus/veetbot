@@ -609,15 +609,19 @@ anywhere else, and anywhere in the statement, those words count. Overlap of
 content words is not provenance when the polarity or modality moved, so "I may
 transfer funds" never grounds "I will transfer funds". A paraphrase of what
 the owner just said is therefore an owner save whether it is proposed in the
-step that read the web or a later one, while a statement that carries a web
-page's words is not. A message the owner did not author (device-ingested,
-surface) grounds nothing. The rule still only raises: it cannot lower a label,
-and the turn's origin taint stands; the governed service then checks the label
-it is given (refusing an external or knowledge origin), the source events and
-the owner's earlier deletions, but it never compares the statement with the
-owner's wording, so a statement grounding wrongly raises to USER passes it:
-grounding is the only check of a paraphrase's provenance. The tool reports an
-ungrounded statement after a tainted turn as
+same step as a web read or a later one, while a statement carrying a word
+found only in an external result, not in the owner's message, is not. A
+statement proposed in the same step as the read is judged on the conversation
+as it then stands: the read's words cannot be told apart as external there,
+but the model has not seen them either; from the next step on, a word found
+only in that result refuses the statement. A message the owner did not author
+(device-ingested, surface) grounds nothing. The rule still only raises: it
+cannot lower a label, and the turn's origin taint stands; the governed service
+then checks the label it is given (refusing an external or knowledge origin),
+the source events and the owner's earlier deletions, but it never compares the
+statement with the owner's wording, so a statement grounding wrongly raises to
+USER passes it: grounding is the only check of a paraphrase's provenance. The
+tool reports an ungrounded statement after a tainted turn as
 `tool.memory.statement_not_owner_grounded`, a closed reason with corrective
 guidance.
 

@@ -82,18 +82,7 @@ class MemoryRememberTool:
         self._service = service
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
-        statement_trust = context.origin_trust
-        if statement_trust not in {TrustLevel.USER, TrustLevel.MEMORY}:
-            statement_trust = context.argument_trust.get("statement", statement_trust)
-            if statement_trust is not TrustLevel.USER:
-                # The turn read external content and the statement is not the
-                # owner's own words (executor.owner_grounded_statement). The
-                # executor turns this into the closed reason
-                # tool.memory.statement_not_owner_grounded; the governed
-                # service's own trust check stands behind it.
-                raise ToolStatementNotGroundedError(
-                    "statement is not grounded in the owner's current message"
-                )
+        statement_trust = _statement_trust(context)
         belief_type = BeliefType(str(arguments.get("belief_type", BeliefType.FACT.value)))
         portability = (
             None
@@ -127,6 +116,24 @@ class MemoryRememberTool:
             content=[TextPart(text=f"Remembered as [m:{str(belief.id)[:8]}].")],
             structured=structured,
         )
+
+
+def _statement_trust(context: ToolExecutionContext) -> TrustLevel:
+    """The trust a statement is saved at: the turn's, or after a tainted turn its own."""
+
+    statement_trust = context.origin_trust
+    if statement_trust not in {TrustLevel.USER, TrustLevel.MEMORY}:
+        statement_trust = context.argument_trust.get("statement", statement_trust)
+        if statement_trust is not TrustLevel.USER:
+            # The turn read external content and the statement is not the
+            # owner's own words (executor.owner_grounded_statement). The
+            # executor turns this into the closed reason
+            # tool.memory.statement_not_owner_grounded; the governed
+            # service's own trust check stands behind it.
+            raise ToolStatementNotGroundedError(
+                "statement is not grounded in the owner's current message"
+            )
+    return statement_trust
 
 
 class LegacyMemoryRememberTool(MemoryRememberTool):
@@ -164,7 +171,7 @@ class PeopleMemoryRememberTool(MemoryRememberTool):
             session_id=context.session_id,
             run_id=context.run_id,
             principal=context.principal,
-            origin_trust=context.origin_trust,
+            origin_trust=_statement_trust(context),
         )
         return ToolResult(
             ok=True,

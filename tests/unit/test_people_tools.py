@@ -231,3 +231,36 @@ async def test_people_tools_report_a_non_person_id_as_a_tool_failure() -> None:
         assert result.failure.kind is ToolFailureKind.NOT_FOUND
         assert result.failure.reason_code == "people.not_found"
     assert "people.search" in message_for("people.not_found")
+
+
+async def test_a_person_linked_save_after_a_web_read_takes_the_grounded_statement_trust() -> None:
+    """ADR-0245 covers memory.remember with person_refs as it covers the plain save."""
+
+    from types import SimpleNamespace
+
+    from agent_core.domain.errors import ToolStatementNotGroundedError
+    from agent_core.tools.memory_remember import PeopleMemoryRememberTool
+
+    seen: list[TrustLevel] = []
+
+    class Service:
+        async def remember_people(self, parsed, *, session_id, run_id, principal, origin_trust):  # type: ignore[no-untyped-def]
+            seen.append(origin_trust)
+            return SimpleNamespace(id=uuid4(), status=SimpleNamespace(value="active"))
+
+    tool = PeopleMemoryRememberTool(Service())  # type: ignore[arg-type]
+    arguments = {
+        "statement": "Maya likes jasmine tea.",
+        "subject": "Maya",
+        "scope": "user",
+        "person_refs": [{"person_id": str(uuid4()), "expected_revision": 1}],
+    }
+    tainted = replace(tool_context(), origin_trust=TrustLevel.EXTERNAL_UNTRUSTED)
+    grounded = replace(tainted, argument_trust={"statement": TrustLevel.USER})
+    assert (await tool.execute(arguments, grounded)).ok
+    ungrounded = replace(tainted, argument_trust={"statement": TrustLevel.EXTERNAL_UNTRUSTED})
+    with pytest.raises(ToolStatementNotGroundedError):
+        await tool.execute(arguments, ungrounded)
+    remembered = replace(tool_context(), origin_trust=TrustLevel.MEMORY)
+    assert (await tool.execute(arguments, remembered)).ok
+    assert seen == [TrustLevel.USER, TrustLevel.MEMORY]
