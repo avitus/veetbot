@@ -618,7 +618,8 @@ so `cockpit.read` answers in pieces:
   up to four primitives' props and examples by name, or the helpers or the
   shared types;
 - `read_widget` gives file sizes rather than files;
-- `read_file` pages one file of the head revision from a line;
+- `read_file` pages one file of the head revision from a line, and a line
+  longer than a page from a byte offset on a character boundary;
 - `read_feed` returns at most ten earlier snapshots.
 
 Builder diagnostics are cut to the first ten, each at most 300 characters.
@@ -641,8 +642,8 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
   the compiled policy version, so it is regenerated once there, on the new
   version, rather than at each profile change before then.
 - **Where it is offered.** Session-environment filtering withholds the tool
-  from scheduled, delegated, operational and email-task sessions. Widget
-  writes happen in interactive chat with the owner.
+  from scheduled, delegated, operational, email-task and device-triage
+  sessions. Widget writes happen in interactive chat with the owner.
 - **Waiting and results.** The tool waits up to `commit_wait_seconds` (knob,
   default thirty) for the outbox. It returns the final state when the outbox
   finishes in time, and `pending_commit` with the revision otherwise. A
@@ -673,8 +674,9 @@ into approval.
 scopes gain `cockpit.write`. Widget writes stay interactive only.
 
 **Feed checks.** A feed's schema must be self-contained JSON Schema (draft
-2020-12) that names no location outside itself, so checking data never
-retrieves anything. Data is checked against it unless the snapshot reports a
+2020-12) that names no location outside itself, and each of its references
+must resolve inside it, so checking data never retrieves anything and never
+fails on a dangling reference. Data is checked against it unless the snapshot reports a
 failed refresh. An observation more than a minute ahead of the server's clock
 is refused. Each publish keeps at most `feeds.history_max` snapshots (knob,
 default 288, the deepest history a manifest may declare) and appends one
@@ -1047,8 +1049,8 @@ and a runbook covering:
 10. **Untrusted turns escalate and other runs cannot write.** The write tool
     is allowed for owner-origin turns, escalates to approval for an untrusted
     origin or argument, remains subject to the credential-to-egress hardline
-    rule, and is not offered in scheduled, delegated, operational or
-    email-task sessions. Registered as
+    rule, and is not offered in scheduled, delegated, operational,
+    email-task or device-triage sessions. Registered as
     `gate.cockpit.untrusted_origin_escalates`, case. **M35.**
 11. **A widget sees only what it declares.** The host delivers a widget only
     its manifest's feeds at no more than the declared history, only its own

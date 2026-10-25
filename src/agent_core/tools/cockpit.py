@@ -48,6 +48,7 @@ from agent_core.domain.errors import (
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.sessions import (
+    SESSION_DEVICE_TRIAGE_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
     SESSION_RUN_KIND_METADATA_KEY,
@@ -100,6 +101,7 @@ _NOT_CHAT = (
     SESSION_RUN_KIND_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
+    SESSION_DEVICE_TRIAGE_METADATA_KEY,
 )
 _INTERACTIVE = "interactive"
 _COMMIT_POLL_SECONDS = 1.0
@@ -273,7 +275,8 @@ class CockpitReadTool(_CockpitTool):
         "name up to four in `primitives` for their props and examples, or a `section` "
         "(helpers, types). list_widgets and read_widget give state, settings schema, file "
         "sizes, recent revisions and head_revision_id, which an update names as "
-        "expected_revision; read_file pages one file of the head revision from start_line. "
+        "expected_revision; read_file pages one file of the head revision from start_line, "
+        "and within a line longer than a page from start_byte, as each page's `next` says. "
         "list_feeds, read_feed (with up to ten earlier snapshots) and get_layouts read the "
         "rest. Read the kit before writing a widget.",
         {
@@ -301,6 +304,7 @@ class CockpitReadTool(_CockpitTool):
                 "slug": _SLUG,
                 "file": {"type": "string", "pattern": WIDGET_FILE_PATTERN},
                 "start_line": {"type": "integer", "minimum": 1},
+                "start_byte": {"type": "integer", "minimum": 0},
                 "feed": {"type": "string", "minLength": 1, "maxLength": 64},
                 "history": {"type": "integer", "minimum": 0, "maximum": _FEED_HISTORY_READ},
             },
@@ -333,6 +337,7 @@ class CockpitReadTool(_CockpitTool):
                 str(arguments["slug"]),
                 str(arguments["file"]),
                 int(arguments.get("start_line", 1)),
+                int(arguments.get("start_byte", 0)),
             )
         if operation == "list_feeds":
             feeds = await self._toolset.feeds.list_feeds(principal)
@@ -467,7 +472,7 @@ class CockpitReadTool(_CockpitTool):
         )
 
     async def _read_file(
-        self, principal: Principal, slug: str, name: str, start_line: int
+        self, principal: Principal, slug: str, name: str, start_line: int, start_byte: int
     ) -> ToolResult:
         async with self._toolset.uow_factory() as uow:
             widget = await uow.cockpit_widgets.get_widget(principal, slug)
@@ -475,30 +480,56 @@ class CockpitReadTool(_CockpitTool):
         if shown is None or name not in shown.files:
             raise NotFoundError(f"{slug} has no file {name}")
         lines = shown.files[name].splitlines(keepends=True)
+        first = lines[start_line - 1].encode("utf-8") if start_line <= len(lines) else b""
+        if start_byte and not (start_byte < len(first) and first[start_byte] & 0xC0 != 0x80):
+            return _invalid(
+                f"start_byte {start_byte} does not begin a character of line {start_line}"
+            )
         page: list[str] = []
         used = 0
-        for line in lines[start_line - 1 :]:
-            size = len(line.encode("utf-8"))
-            if page and used + size > _FILE_PAGE_BYTES:
+        following: dict[str, int] | None = None
+        for number in range(start_line, len(lines) + 1):
+            offset = start_byte if number == start_line else 0
+            data = lines[number - 1].encode("utf-8")[offset:]
+            if used + len(data) <= _FILE_PAGE_BYTES:
+                page.append(data.decode("utf-8"))
+                used += len(data)
+                continue
+            if page:
+                following = {"start_line": number}
                 break
-            page.append(line[:_FILE_PAGE_BYTES])
-            used += size
+            # A line longer than a whole page is cut at a character boundary and
+            # continues from that byte, so every byte of the file can be read.
+            cut = _FILE_PAGE_BYTES
+            while data[cut] & 0xC0 == 0x80:
+                cut -= 1
+            page.append(data[:cut].decode("utf-8"))
+            following = {"start_line": number, "start_byte": offset + cut}
+            break
         end_line = start_line + len(page) - 1
         body = {
             "slug": slug,
             "file": name,
             "revision_id": str(shown.id),
             "start_line": start_line,
+            "start_byte": start_byte,
             "end_line": end_line,
             "total_lines": len(lines),
             "content": "".join(page),
+            "next": following,
         }
-        more = end_line < len(lines)
-        return _ok(
-            f"{name} lines {start_line}-{end_line} of {len(lines)}"
-            + (f"; continue at start_line {end_line + 1}." if more else "."),
-            body,
-        )
+        span = f"{name} lines {start_line}-{end_line} of {len(lines)}"
+        if start_byte:
+            span += f" (line {start_line} from byte {start_byte})"
+        if following is None:
+            return _ok(f"{span}.", body)
+        if "start_byte" in following:
+            return _ok(
+                f"{span}; line {end_line} continues past this page: continue at start_line "
+                f"{end_line}, start_byte {following['start_byte']}.",
+                body,
+            )
+        return _ok(f"{span}; continue at start_line {following['start_line']}.", body)
 
     async def _read_feed(self, principal: Principal, feed_id: str, history: int) -> ToolResult:
         reading = await self._toolset.feeds.read(principal, feed_id, history=history)

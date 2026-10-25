@@ -25,6 +25,7 @@ from agent_core.application.cockpit_feeds import CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.cockpit.catalogue import load_kit_catalogue
 from agent_core.domain.cockpit import CockpitEventKind
+from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, SideEffectClass, TrustLevel
 from agent_core.domain.tool_output import content_bytes
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
@@ -391,6 +392,52 @@ async def test_every_read_of_a_reference_widget_fits_the_inline_budget(tmp_path:
         assert "".join(pages) == long_source
 
 
+async def test_a_line_longer_than_a_page_is_paged_by_byte_offset(tmp_path: Path) -> None:
+    """A long line (minified data, a long expression) is read whole, a page at a time."""
+
+    long_line = "const data = [" + "é→x," * 1_500 + "];\n"
+    source = "// head\n" + long_line + "// tail\n"
+    assert len(long_line.encode("utf-8")) > 3 * 3_000
+    async with harness(tmp_path) as h:
+        files = {**package(), "widget.tsx": source}
+        await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": files}
+        )
+        pages: list[str] = []
+        position: dict[str, int] = {"start_line": 1}
+        while True:
+            page = await h.call(
+                "cockpit.read",
+                {"operation": "read_file", "slug": "weather", "file": "widget.tsx", **position},
+            )
+            assert page.ok and page.structured is not None, page.failure
+            assert len(content_bytes(page.content)) <= 4096
+            assert len(page.structured["content"].encode("utf-8")) <= 3_000
+            pages.append(page.structured["content"])
+            following = page.structured["next"]
+            if following is None:
+                break
+            if "start_byte" in following:
+                sentence = page.content[0]
+                assert isinstance(sentence, TextPart)
+                assert f"start_byte {following['start_byte']}" in sentence.text
+            position = following
+        assert "".join(pages) == source
+        assert len(pages) >= 4
+        inside_a_character = await h.call(
+            "cockpit.read",
+            {
+                "operation": "read_file",
+                "slug": "weather",
+                "file": "widget.tsx",
+                "start_line": 2,
+                "start_byte": len("const data = [é".encode()) - 1,
+            },
+        )
+        assert inside_a_character.failure is not None
+        assert inside_a_character.failure.reason_code == "cockpit.invalid_arguments"
+
+
 async def test_feed_publish_registers_checks_and_labels_the_feed_untrusted(tmp_path: Path) -> None:
     async with harness(tmp_path) as h:
         schema = {
@@ -543,6 +590,7 @@ async def test_a_replayed_write_returns_the_first_outcome(tmp_path: Path) -> Non
         {"run_kind": "email_task"},
         {"email_operational": True},
         {"purpose": "memory_formation"},
+        {"device_triage": {"device_id": "00000000-0000-0000-0000-000000000002", "channel": "sms"}},
     ],
 )
 def test_widget_writes_are_withheld_outside_interactive_chat(metadata: dict[str, Any]) -> None:

@@ -65,3 +65,18 @@ def test_a_schema_that_refers_outside_itself_is_refused() -> None:
     ):
         assert check.schema_violations(schema), schema
         assert check.violations(schema, {"a": 1}), schema
+
+
+def test_a_reference_that_resolves_nowhere_in_the_schema_is_refused() -> None:
+    check = Draft202012SchemaCheck()
+    anchored = {"$defs": {"n": {"$anchor": "num", "type": "number"}}, "$ref": "#num"}
+    assert check.schema_violations(anchored) == []
+    assert check.violations(anchored, 2) == []
+    for schema in (
+        {"$ref": "#/$defs/missing"},
+        {"properties": {"a": {"$ref": "#/$defs/nope"}}},
+        {"$defs": {"n": {"type": "number"}}, "items": {"$ref": "#/$defs/m"}},
+        {"$dynamicRef": "#nowhere"},
+    ):
+        assert check.schema_violations(schema), schema
+        assert check.violations(schema, {"a": [1]}), schema
