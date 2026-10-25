@@ -17,9 +17,13 @@ turns:
             "settings": {},
             "feeds": {
               "veetbot.approvals.pending": {
-                "observedAt": "2026-10-22T17:59:54Z",
-                "expectedIntervalSec": 30,
-                "data": { "count": 0, "oldestMinutes": null, "items": [] }
+                "observedAt": "2026-10-22T17:58:30Z",
+                "expectedIntervalSec": 300,
+                "data": {
+                  "count": 0,
+                  "oldestAt": null,
+                  "items": []
+                }
               }
             }
           }
@@ -29,12 +33,20 @@ turns:
             "settings": {},
             "feeds": {
               "veetbot.approvals.pending": {
-                "observedAt": "2026-10-22T17:40:00Z",
-                "expectedIntervalSec": 30,
+                "observedAt": "2026-10-22T17:00:00Z",
+                "expectedIntervalSec": 300,
                 "data": {
                   "count": 1,
-                  "oldestMinutes": 38,
-                  "items": [{ "kind": "Reserve now", "summary": "Weekend cabin · booking page", "ageMinutes": 38 }]
+                  "oldestAt": "2026-10-22T16:52:00Z",
+                  "items": [
+                    {
+                      "kind": "Website",
+                      "summary": "Reserve the weekend cabin on its booking page",
+                      "requestedAt": "2026-10-22T16:52:00Z",
+                      "expiresAt": "2026-10-23T16:52:00Z",
+                      "risk": "high"
+                    }
+                  ]
                 }
               }
             }
@@ -45,14 +57,26 @@ turns:
             "settings": {},
             "feeds": {
               "veetbot.approvals.pending": {
-                "observedAt": "2026-10-22T17:59:54Z",
-                "expectedIntervalSec": 30,
+                "observedAt": "2026-10-22T17:58:30Z",
+                "expectedIntervalSec": 300,
                 "data": {
                   "count": 2,
-                  "oldestMinutes": 18,
+                  "oldestAt": "2026-10-22T17:42:00Z",
                   "items": [
-                    { "kind": "Reserve now", "summary": "Weekend cabin · booking page", "ageMinutes": 18 },
-                    { "kind": "Send a text", "summary": "Move the appointment to Tuesday", "ageMinutes": 4 }
+                    {
+                      "kind": "Website",
+                      "summary": "Reserve the weekend cabin on its booking page",
+                      "requestedAt": "2026-10-22T17:42:00Z",
+                      "expiresAt": "2026-10-23T17:42:00Z",
+                      "risk": "high"
+                    },
+                    {
+                      "kind": "Text message",
+                      "summary": "Move the appointment to Tuesday",
+                      "requestedAt": "2026-10-22T17:56:00Z",
+                      "expiresAt": "2026-10-23T17:56:00Z",
+                      "risk": "medium"
+                    }
                   ]
                 }
               }
@@ -70,31 +94,35 @@ turns:
             "settings": { "type": "object", "additionalProperties": false, "properties": {} }
           }
         widget.tsx: |
-          import { List, Metric, Row, Split, Tile } from '@veetbot/cockpit-kit';
+          import { List, Metric, Row, Split, Tile, useNow } from '@veetbot/cockpit-kit';
           import type { WidgetProps } from '@veetbot/cockpit-kit';
 
           interface Approval {
             kind: string;
             summary: string;
-            ageMinutes: number;
+            requestedAt: string;
+            expiresAt: string;
+            risk: string;
           }
 
           interface Pending {
             count: number;
-            oldestMinutes: number | null;
+            oldestAt: string | null;
             items: Approval[];
           }
 
           export default function ApprovalsWaiting({ feeds, size }: WidgetProps) {
+            const now = useNow();
             const feed = feeds['veetbot.approvals.pending'];
             const pending = feed?.data as Pending | null | undefined;
             const count = pending?.count ?? 0;
+            const minutes = (at: string) => Math.max(0, Math.round((now - Date.parse(at)) / 60_000));
             const figure = (
               <Metric
                 value={pending ? count : null}
                 size="l"
                 tone={count > 0 ? 'attention' : 'default'}
-                label={pending?.oldestMinutes != null ? `Oldest ${pending.oldestMinutes} min` : 'Nothing waiting'}
+                label={pending?.oldestAt != null ? `Oldest ${minutes(pending.oldestAt)} min` : 'Nothing waiting'}
               />
             );
             return (
@@ -106,7 +134,7 @@ turns:
                     {figure}
                     <List more={Math.max(0, count - pending.items.length)}>
                       {pending.items.map((item, index) => (
-                        <Row key={index} marker="attention" title={item.kind} detail={item.summary} meta={`${item.ageMinutes} min`} />
+                        <Row key={index} marker="attention" title={item.kind} detail={item.summary} meta={`${minutes(item.requestedAt)} min`} />
                       ))}
                     </List>
                   </Split>

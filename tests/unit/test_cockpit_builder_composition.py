@@ -69,6 +69,8 @@ async def test_off_means_no_publication_and_no_cockpit_maintenance() -> None:
         worker = composition.maintenance_factory()
         assert worker._sweep_cockpit_outbox is None  # type: ignore[attr-defined]
         assert worker._sweep_cockpit_import is None  # type: ignore[attr-defined]
+        assert worker._sweep_cockpit_feeds is None  # type: ignore[attr-defined]
+        assert worker._sweep_cockpit_feed_history is None  # type: ignore[attr-defined]
 
 
 async def test_the_maintenance_role_refuses_cockpit_without_the_github_app() -> None:
@@ -98,6 +100,9 @@ async def test_the_maintenance_role_commits_and_imports_with_the_github_app(
         assert worker._sweep_cockpit_outbox is not None  # type: ignore[attr-defined]
         assert worker._sweep_cockpit_import is not None  # type: ignore[attr-defined]
         assert worker._sweep_cockpit_events is not None  # type: ignore[attr-defined]
+        assert worker._sweep_cockpit_feeds is not None  # type: ignore[attr-defined]
+        assert worker._sweep_cockpit_feed_history is not None  # type: ignore[attr-defined]
+        assert worker._cockpit_feed_interval.total_seconds() == 30  # type: ignore[attr-defined]
     key.chmod(0o644)
     async with build(settings=settings, storage="memory") as composition:
         with pytest.raises(ConfigurationError, match="private"):

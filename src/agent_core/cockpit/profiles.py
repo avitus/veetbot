@@ -49,9 +49,18 @@ class CockpitStreamProfile(_ProfileModel):
 
 
 class CockpitFeedsProfile(_ProfileModel):
-    """How many snapshots each feed keeps."""
+    """How much history each feed keeps, and the platform projector's two timers."""
 
     history_max: int = Field(default=FEED_HISTORY_MAX, ge=1, le=FEED_HISTORY_MAX)
+    history_days: int = Field(default=7, ge=1, le=365)
+    projection_interval_seconds: int = Field(default=30, ge=5)
+    refresh_seconds: int = Field(default=300, ge=5)
+
+    @model_validator(mode="after")
+    def refresh_covers_a_projection(self) -> CockpitFeedsProfile:
+        if self.refresh_seconds < self.projection_interval_seconds:
+            raise ValueError("refresh_seconds must be at least projection_interval_seconds")
+        return self
 
 
 class CockpitProfiles(_ProfileModel):

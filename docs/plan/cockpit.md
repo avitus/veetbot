@@ -542,18 +542,38 @@ which is theirs and already public.
 
 ### Platform feeds
 
-The maintenance role projects these on a short timer (knob, default thirty
-seconds). It publishes only when the content hash changes, and each is
-present only when its source feature is enabled.
+The maintenance role projects these on a short timer
+(`feeds.projection_interval_seconds`, default thirty seconds). Each is present
+only when its source feature is enabled.
 
-| Feed | Source | Contents |
+- **When it publishes.** A feed is published when its content changes. Its
+  unchanged content is republished once `feeds.refresh_seconds` (default five
+  minutes) has passed, and that period is the feed's expected interval. A quiet
+  feed so stays honestly live, and a stopped projector shows as stale.
+- **Times are absolute.** Every time is an ISO 8601 instant, never an age, so
+  unchanged state projects to unchanged content. Widgets compute ages with
+  the kit's clock.
+- **Failures.** A source that fails publishes one error snapshot, worded by
+  the platform ("The platform could not read this source."), and the others
+  still publish. The reason is logged, never stored in the feed.
+- **What each reads.** Each source reads as the owner, through the same
+  repositories its routes read, and leaves out another principal's rows. The
+  pending approvals feed also drops expired requests. The calls feed drops
+  erased calls and those past the thirty-day retention. The people feed reads
+  at the sensitive ceiling and drops names the people service would not show.
+
+| Feed | Source | Data |
 | --- | --- | --- |
-| `veetbot.approvals.pending` | approvals | count and up to ten pending approvals with kind and age |
-| `veetbot.email.priority` | Email mode | up to five priority threads: correspondent, subject, state |
-| `veetbot.schedules.health` | schedules | next occurrences, recent failures, paused schedules |
-| `veetbot.calls.recent` | calling | recent calls with status and outcome summary |
-| `veetbot.people.recent` | People | people most recently in touch, with interaction kind |
-| `veetbot.runs.activity` | runs | running, waiting and recently failed runs |
+| `veetbot.approvals.pending` | approvals, always | `count`; `oldestAt`; up to ten items, oldest first: `kind` (a platform label), `summary` (the server-authored action summary), `requestedAt`, `expiresAt`, `risk` |
+| `veetbot.email.priority` | Email mode | `count`; up to five threads ranked as the priority view ranks them: `correspondent`, `subject`, `state` (`needs_reply`, `drafted` or `fyi`), `updatedAt` |
+| `veetbot.schedules.health` | the schedule API | `onTime`, `total`, `failed` and `paused` counts for the last day; up to twelve timeline items (`id`, `time` on the schedule's own clock, `title`, `detail`, `state`, `at`): the day's runs, each active schedule's next run, then paused schedules |
+| `veetbot.calls.recent` | calling | up to five newest calls: `direction`, `counterparty`, `status`, `summary`, `startedAt`, `durationMinutes` |
+| `veetbot.people.recent` | People | up to five people most recently in touch: `name`, `lastAt`, and the last interaction's `kind` and `channel` |
+| `veetbot.runs.activity` | runs, always | `running`, `waiting` and `failed` counts; up to eight conversations whose latest run is running, waiting, or failed in the last day: `title`, `state`, `since` |
+
+The schedule items are the kit's `TimelineItem`, so a widget passes them to
+`Timeline` directly. Each schema is closed, and the reference widgets'
+fixtures are checked against it.
 
 ### Assistant feeds
 
@@ -670,8 +690,11 @@ provenance:
 Reading a widget before updating it therefore does not force every later turn
 into approval.
 
-**Feed publishing** is available in scheduled runs: the schedule principal's
-scopes gain `cockpit.write`. Widget writes stay interactive only.
+**Feed publishing** is available in scheduled runs. A Cockpit deployment
+registers `schedule.create` 1.5.0, whose `publish_cockpit_feed=true` asks for
+`cockpit.read` and `cockpit.write` for that schedule's runs and no others.
+Version 1.4.0 stays registered for pinned runs, and a deployment without the
+flag offers 1.4.0 unchanged. Widget writes stay interactive only.
 
 **Feed checks.** A feed's schema must be self-contained JSON Schema (draft
 2020-12) that names no location outside itself, and each of its references
@@ -966,9 +989,11 @@ contract suite.
   - settings purge window.
 
   These knobs join the shipped knob census as each build step reads them.
-  Seven are in it now: the two commit rate limits, the import poll interval
-  and the commit wait under `publication`; the stream lifetime and event
-  retention under `stream`; and `feeds.history_max`.
+  Ten are in it now: the two commit rate limits, the import poll interval and
+  the commit wait under `publication`; the stream lifetime and event retention
+  under `stream`; and `feeds.history_max`, `feeds.history_days`,
+  `feeds.projection_interval_seconds` and `feeds.refresh_seconds`. Feed
+  history older than `history_days` is pruned on the import timer.
 
 ### Release
 
@@ -1140,7 +1165,7 @@ and a runbook covering:
 7. **The tools, session-environment filtering, approval views and
    `kit.describe`, plus an evaluation in which a chat request yields a valid
    committed widget.** Gate 11.
-8. **The platform feed projector.**
+8. **The platform feed projector, and feed publishing from scheduled runs.**
 9. **The `ClientMode` refactor, as a pure refactor.**
 10. **The native Cockpit mode.** The web view sandbox, the stream, the Mac
     panel and iPad keep-awake. Gates 16 (hosted half) through 22.
@@ -1197,14 +1222,21 @@ The evaluation runs the `approvals-waiting` reference package through the
 real publication path with a manifest-checking builder. A gate test holds the
 package identical to the reference widget the workspace's builder tests build.
 
-Two things remain:
+The exact-name `tool_rules` entry is not in the shipped profile. The owner
+deferred it to activation on 2026-10-24, where the formation release evidence
+is regenerated once. Until then the publication row asks the owner, the
+evaluation approves once, and gate 10 stays pending.
 
-- The exact-name `tool_rules` entry is not in the shipped profile. The owner
-  deferred it to activation on 2026-10-24, where the formation release
-  evidence is regenerated once. Until then the publication row asks the
-  owner, the evaluation approves once, and gate 10 stays pending.
-- Feed publishing from scheduled runs waits for `schedule.create` to request
-  `cockpit.write`.
+Build step 8 landed the same day:
+
+- the platform feed projector with its six sources, on the maintenance role's
+  timer behind the flag;
+- feed history pruning on the import timer;
+- `schedule.create` 1.5.0's `publish_cockpit_feed` in Cockpit deployments;
+- three more knobs.
+
+The two platform-feed reference widgets now read the projected shapes:
+absolute times, and the schedule items' `at` and `paused` count.
 
 ## Implementation checkpoint: 2026-10-23
 

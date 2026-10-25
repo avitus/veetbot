@@ -3,14 +3,26 @@
   "settings": {},
   "feeds": {
     "veetbot.approvals.pending": {
-      "observedAt": "2026-10-22T17:59:54Z",
-      "expectedIntervalSec": 30,
+      "observedAt": "2026-10-22T17:58:30Z",
+      "expectedIntervalSec": 300,
       "data": {
         "count": 2,
-        "oldestMinutes": 18,
+        "oldestAt": "2026-10-22T17:42:00Z",
         "items": [
-          { "kind": "Reserve now", "summary": "Weekend cabin · booking page", "ageMinutes": 18 },
-          { "kind": "Send a text", "summary": "Move the appointment to Tuesday", "ageMinutes": 4 }
+          {
+            "kind": "Website",
+            "summary": "Reserve the weekend cabin on its booking page",
+            "requestedAt": "2026-10-22T17:42:00Z",
+            "expiresAt": "2026-10-23T17:42:00Z",
+            "risk": "high"
+          },
+          {
+            "kind": "Text message",
+            "summary": "Move the appointment to Tuesday",
+            "requestedAt": "2026-10-22T17:56:00Z",
+            "expiresAt": "2026-10-23T17:56:00Z",
+            "risk": "medium"
+          }
         ]
       }
     }

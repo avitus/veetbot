@@ -1217,15 +1217,16 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_214_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_217_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 214
+    assert len(qualified_paths) == 217
     # Milestone 35 adds Cockpit's commit rate limits, the importer's poll interval, the
-    # stream's lifetime and retention, the write tool's commit wait and the feed history.
+    # stream's lifetime and retention, the write tool's commit wait, the feed history and
+    # the platform projector's two timers.
     assert {
         "cockpit/profiles.yaml:publication.commits_per_widget_per_hour",
         "cockpit/profiles.yaml:publication.commits_per_principal_per_hour",
@@ -1234,6 +1235,9 @@ def test_all_214_versioned_knobs_are_present_and_non_null() -> None:
         "cockpit/profiles.yaml:stream.event_retention_seconds",
         "cockpit/profiles.yaml:publication.commit_wait_seconds",
         "cockpit/profiles.yaml:feeds.history_max",
+        "cockpit/profiles.yaml:feeds.history_days",
+        "cockpit/profiles.yaml:feeds.projection_interval_seconds",
+        "cockpit/profiles.yaml:feeds.refresh_seconds",
     } <= qualified_paths
     # Owner records add the catalog's two class caps.
     assert {

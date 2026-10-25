@@ -3,9 +3,13 @@
   "settings": {},
   "feeds": {
     "veetbot.approvals.pending": {
-      "observedAt": "2026-10-22T17:59:54Z",
-      "expectedIntervalSec": 30,
-      "data": { "count": 0, "oldestMinutes": null, "items": [] }
+      "observedAt": "2026-10-22T17:58:30Z",
+      "expectedIntervalSec": 300,
+      "data": {
+        "count": 0,
+        "oldestAt": null,
+        "items": []
+      }
     }
   }
 }

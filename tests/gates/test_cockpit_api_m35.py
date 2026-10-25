@@ -212,6 +212,8 @@ async def test_off_means_every_cockpit_route_is_absent() -> None:
         assert worker._sweep_cockpit_outbox is None  # type: ignore[attr-defined]
         assert worker._sweep_cockpit_import is None  # type: ignore[attr-defined]
         assert worker._sweep_cockpit_events is None  # type: ignore[attr-defined]
+        assert worker._sweep_cockpit_feeds is None  # type: ignore[attr-defined]
+        assert worker._sweep_cockpit_feed_history is None  # type: ignore[attr-defined]
         registry: Any = composition.tool_pipeline._registry
         assert not [name for name in registry._latest if name.startswith("cockpit.")]
 
