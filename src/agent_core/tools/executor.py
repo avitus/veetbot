@@ -531,6 +531,25 @@ def _meaning_markers(text: str) -> Counter[str]:
     )
 
 
+def _anchored_markers(text: str, covered: set[str]) -> Counter[tuple[str, str | None]]:
+    """Each negation and modal paired with the first covered word after it, which it qualifies."""
+
+    words = _WORD.findall(_grounding_text(text))
+    anchored: Counter[tuple[str, str | None]] = Counter()
+    for index, word in enumerate(words):
+        if word in _MEANING_MARKERS:
+            anchor = next(
+                (
+                    later
+                    for later in words[index + 1 :]
+                    if later in covered and later not in _MEANING_MARKERS
+                ),
+                None,
+            )
+            anchored[(word, anchor)] += 1
+    return anchored
+
+
 def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     """Whether a manual save restates the owner's current message, not what the turn read.
 
@@ -539,9 +558,10 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     message, found only in an external or knowledge tool result of this turn,
     or in neither (the model's own phrasing). Grounded means no word came only
     from external content, most of the words are the owner's, the model's
-    phrasing stays within a few words, and its negations and modals, counted,
-    are exactly those of the one owner sentence it restates: none added, none
-    dropped, none attributed when its words reach several sentences. The
+    phrasing stays within a few words, and its negations and modals, counted and
+    each with the covered word it qualifies, are exactly those of the one owner
+    sentence it restates: none added, dropped or moved, none attributed when its
+    words reach several sentences. The
     outcome is the same whether the save is proposed in the step that read the
     web or a later one: the turn's taint still marks the origin; only the
     statement's own provenance lifts it.
@@ -574,14 +594,16 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     # words (marker words never link one in). A negation or modal is attributed
     # only when exactly one such sentence exists: with two, a shared word ("grow")
     # leaves it ambiguous which fact the marker qualifies, and nothing is raised.
-    stated = _meaning_markers(statement)
+    # Each marker is compared with the covered word it qualifies, so moving a
+    # negation onto another fact of the same sentence is a change, not a match.
+    stated = _anchored_markers(statement, covered)
     candidates = [
-        _meaning_markers(sentence)
+        sentence
         for sentence in _owner_sentences(" ".join(user_texts))
         if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered
     ]
-    markers_match = not (stated or any(candidates)) or (
-        len(candidates) == 1 and candidates[0] == stated
+    markers_match = not (stated or any(_meaning_markers(c) for c in candidates)) or (
+        len(candidates) == 1 and _anchored_markers(candidates[0], covered) == stated
     )
     return (
         not tainted

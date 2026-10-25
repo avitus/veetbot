@@ -210,6 +210,16 @@ QUIET_WEB = "Weather today is mild with light wind."
             "Remember that I never eat pork. I never drink wine.",
             "I never eat pork and never drink wine.",
         ),
+        # A marker qualifies the words after it: moving it within the sentence moves it
+        # onto another fact.
+        (
+            "Remember that I never eat pork and I drink wine every Sunday.",
+            "I eat pork and I never drink wine every Sunday.",
+        ),
+        (
+            "Remember that I may sell the car and I will keep the bike.",
+            "I will sell the car and I may keep the bike.",
+        ),
     ],
 )
 def test_a_statement_that_changes_negation_or_modality_is_not_grounded(

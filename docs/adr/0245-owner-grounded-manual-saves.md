@@ -29,9 +29,10 @@ although nothing had been asked.
    own, none came only from an external or knowledge tool result of that
    turn, at least sixty percent of them (and at least two) appear in the
    owner's message, at most three are the model's own phrasing, and its
-   negations and modals, counted, are exactly those of the one owner
-   sentence it restates: none added, none dropped, and none attributed when
-   its words reach several owner sentences (request framing such as "could you" or "don't forget" is set
+   negations and modals, counted and each paired with the covered word it
+   qualifies, are exactly those of the one owner sentence it restates: none
+   added, dropped or moved, and none attributed when its words reach several
+   owner sentences (request framing such as "could you" or "don't forget" is set
    aside only where it opens an owner sentence). These marker
    words are judged apart from recall's function-word list, which drops the
    modals, so ranking changes cannot relax provenance. The
@@ -61,10 +62,12 @@ statement that quotes it, and only the test for "the owner said this" moves
 from verbatim bytes to grounding in the owner's words. The remaining exposure
 is the one the verbatim rule already carried, a statement assembled only from
 the owner's own words, plus the model's few words of phrasing: a free word can
-itself reverse a fact ("hate" for "like", "quit eating"). Negations and modals
-are matched because recall's function-word list hides them; no word list
-captures every reversal, so the free-word allowance is the trade-off this ADR
-accepts. The grounding thresholds are code constants in the executor; moving
+itself reverse a fact ("hate" for "like", "quit eating"), and word overlap
+cannot see order or roles ("I owe Sam" against "Sam owes me"). Negations and
+modals are matched because recall's function-word list hides them; no word
+list proves two sentences mean the same, so the free-word allowance and the
+overlap test are the trade-off this ADR accepts, and requiring the owner's
+exact words or an explicit confirmation instead would be a new decision. The grounding thresholds are code constants in the executor; moving
 them is a security change that needs this ADR revisited.
 
 Red-first coverage: the owner recall probe contract (verbatim, paraphrase,
