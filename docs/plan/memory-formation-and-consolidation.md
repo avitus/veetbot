@@ -198,7 +198,15 @@ the project it was learned in, and is defined in
   `tool.memory.manual_trust_rejected` for `memory.remember`, distinguishing the
   failed manual save from pending background formation (`tool.trust_rejected`
   remains the generic refusal), so the model does
-  not retry the same unsafe write as though its JSON shape were wrong.
+  not retry the same unsafe write as though its JSON shape were wrong. After a
+  turn that read the web or a document, a `memory.remember` statement is an
+  owner save when it is owner-grounded in the owner's current message
+  ([tool-system.md](tool-system.md), ADR-0245): a paraphrase of what the owner
+  just asked to remember commits whatever step proposes it, and a statement
+  that carries the external content's own words is refused as
+  `tool.memory.statement_not_owner_grounded` with guidance to keep derived
+  plans in the reply or an artifact. The agent instructions say the same and
+  forbid reporting a save, or a failed save, the owner never asked for.
 - **Recorded elsewhere (Milestone 34).** A reading the owner logged as a
   record never becomes a belief. Formation collects the
   `records.entry.appended` events among the segment's extraction events, and

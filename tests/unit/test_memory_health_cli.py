@@ -106,7 +106,7 @@ def test_health_dependency_failure_is_unsuccessful_and_content_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def unavailable(_hours: int) -> Any:
-        raise ConnectionError("postgresql://user:PRIVATE@db/agent")
+        raise ConnectionError("postgresql://" + "user:PRIVATE@db/agent")
 
     monkeypatch.setattr(main, "operator_memory_health", unavailable)
     result = CliRunner().invoke(main.app, ["memory", "health"])

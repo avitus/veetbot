@@ -588,6 +588,23 @@ value, after canonicalization, appears verbatim as a span of at least sixteen
 characters in a `USER`-labeled context item of the same session. Numbers,
 booleans, and short strings are never raised.
 
+One argument has a second way up. The `statement` of `memory.remember` is
+raised when it is **owner-grounded** (ADR-0245): the active turn is the newest
+owner message and everything after it; the statement's content words are
+split into those the owner's message contains, those found only in an
+external or knowledge tool result of the turn, and those in neither; the
+statement is grounded when no word came only from external content, at least
+sixty percent of its words (and at least two) are the owner's, and at most
+three are the model's own phrasing. A paraphrase of what the owner just said
+is therefore an owner save whether it is proposed in the step that read the
+web or a later one, while a statement that carries a web page's words is not.
+A message the owner did not author (device-ingested, surface) grounds
+nothing. The rule still only raises: it cannot lower a label, and the turn's
+origin taint stands; the governed service's trust check refuses the write a
+second time if the label were ever wrong. The tool reports an ungrounded
+statement after a tainted turn as `tool.memory.statement_not_owner_grounded`,
+a closed reason with corrective guidance.
+
 The direction is the whole design. Raising on a match can only be wrong by
 failing to raise, which costs an unnecessary approval. Lowering on a match —
 the intuitive version, where an argument that matches untrusted content gets
@@ -2087,7 +2104,11 @@ evidence that the surface is the same one.
    `USER`-labelled context: equality shows two values are equal, not that one
    came from the other, and untrusted content can quote a string it can see.
    Where an untrusted item contributed to a field, the lower label stands.
-   `origin_trust` is the minimum label over the request's context items.
+   `origin_trust` is the minimum label over the request's context items. The
+   two documented raises (the sixteen-character verbatim span, and the
+   owner-grounded `memory.remember` statement of ADR-0245) are the whole
+   exception: both only ever raise, and a word that an external item of the
+   turn supplied keeps the statement down.
 10. Large output is excerpted head-and-tail and artifactized. It is never
     summarized, because a summarizer over untrusted output launders it.
 11. All four non-success outcomes share one six-field shape with a stable

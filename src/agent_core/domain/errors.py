@@ -164,6 +164,10 @@ class ToolTrustRejectedError(ToolValidationError):
     """A tool rejected content because its provenance trust was insufficient."""
 
 
+class ToolStatementNotGroundedError(ToolTrustRejectedError):
+    """A manual save's statement is not grounded in the owner's current message (ADR-0245)."""
+
+
 class ToolNotFoundError(AgentCoreError):
     """A requested tool is not registered."""
 

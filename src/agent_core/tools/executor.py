@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
@@ -44,6 +45,7 @@ from agent_core.domain.errors import (
     DelegationValidationError,
     NotFoundError,
     RunCancelledError,
+    ToolStatementNotGroundedError,
     ToolTrustRejectedError,
     ToolValidationError,
     UserInputRequiredError,
@@ -51,6 +53,11 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, NewEvent
 from agent_core.domain.failures import log_context, log_failure
+from agent_core.domain.memory import (
+    _RECALL_FUNCTION_WORDS,
+    MINIMUM_LEXICAL_TERM_LENGTH,
+    lexical_tokens,
+)
 from agent_core.domain.messages import (
     ContentPart,
     FileReferencePart,
@@ -406,8 +413,15 @@ def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive")
     return origin_trust
 
 
-def _argument_trust(arguments: dict[str, Any], checkpoint: RunCheckpoint) -> dict[str, TrustLevel]:
-    """Raise long verbatim values only when the active user message supplied them."""
+def _argument_trust(
+    arguments: dict[str, Any], checkpoint: RunCheckpoint, *, tool_name: str | None = None
+) -> dict[str, TrustLevel]:
+    """Raise long verbatim values only when the active user message supplied them.
+
+    A `memory.remember` statement is also raised when it is owner-grounded:
+    its content words come from the owner's current message rather than from
+    anything external the turn read (`owner_grounded_statement`).
+    """
 
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
     current_user = next(
@@ -424,7 +438,72 @@ def _argument_trust(arguments: dict[str, Any], checkpoint: RunCheckpoint) -> dic
     for name, value in arguments.items():
         if isinstance(value, str) and len(value) >= 16 and any(value in text for text in user_text):
             trust[name] = TrustLevel.USER
+    if tool_name == MEMORY_REMEMBER_TOOL_NAME and trust.get("statement") is not TrustLevel.USER:
+        statement = arguments.get("statement")
+        if isinstance(statement, str) and owner_grounded_statement(statement, checkpoint):
+            trust["statement"] = TrustLevel.USER
     return trust
+
+
+MEMORY_REMEMBER_TOOL_NAME = "memory.remember"
+# How much of a statement must be the owner's own words, how many words of the
+# model's own phrasing ("Andy wants", "added") it may carry, and the smallest
+# statement the rule judges at all.
+OWNER_GROUNDING_COVERAGE = 0.6
+OWNER_GROUNDING_FREE_WORDS = 3
+OWNER_GROUNDING_MINIMUM_WORDS = 2
+
+
+def _content_lexemes(text: str) -> set[str]:
+    return {
+        token
+        for token in lexical_tokens(text)
+        if len(token) >= MINIMUM_LEXICAL_TERM_LENGTH and token not in _RECALL_FUNCTION_WORDS
+    }
+
+
+def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
+    """Whether a manual save restates the owner's current message, not what the turn read.
+
+    The active turn is the newest owner message and everything after it. The
+    statement's content words are split three ways: covered by the owner's
+    message, found only in an external or knowledge tool result of this turn,
+    or in neither (the model's own phrasing). Grounded means no word came only
+    from external content, most of the words are the owner's, and the model's
+    phrasing stays within a few words. The outcome is the same whether the
+    save is proposed in the step that read the web or a later one: the turn's
+    taint still marks the origin; only the statement's own provenance lifts it.
+    """
+
+    user_texts: list[str] = []
+    external_texts: list[str] = []
+    for item in reversed(checkpoint.conversation):
+        if isinstance(item, UserMessage):
+            if item.trust is not TrustLevel.USER:
+                return False
+            user_texts.extend(part.text for part in item.content if isinstance(part, TextPart))
+            break
+        if isinstance(item, ToolResultItem) and item.trust in {
+            TrustLevel.EXTERNAL_UNTRUSTED,
+            TrustLevel.KNOWLEDGE,
+        }:
+            external_texts.extend(part.text for part in item.content if isinstance(part, TextPart))
+    else:
+        return False
+    words = _content_lexemes(statement)
+    if len(words) < OWNER_GROUNDING_MINIMUM_WORDS:
+        return False
+    owner_words = _content_lexemes(" ".join(user_texts))
+    external_words = _content_lexemes(" ".join(external_texts))
+    covered = words & owner_words
+    tainted = (words - owner_words) & external_words
+    free = words - owner_words - external_words
+    return (
+        not tainted
+        and len(covered)
+        >= max(OWNER_GROUNDING_MINIMUM_WORDS, math.ceil(OWNER_GROUNDING_COVERAGE * len(words)))
+        and len(free) <= OWNER_GROUNDING_FREE_WORDS
+    )
 
 
 async def authorize_tool_invocation(
@@ -1317,7 +1396,7 @@ class ToolPipeline:
             loaded_skills=tuple(body.model_dump(mode="json") for body in checkpoint.loaded_skills),
             available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),
             origin_trust=invocation.origin_trust,
-            argument_trust=_argument_trust(arguments, checkpoint),
+            argument_trust=_argument_trust(arguments, checkpoint, tool_name=tool.spec.name),
             run_kind=run.kind.value,
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
@@ -1353,14 +1432,16 @@ class ToolPipeline:
                             if result.failure is not None:
                                 phase.outcome = "failed"
                                 phase.failure = browser_failure_category(result.failure.reason_code)
-                    except ToolTrustRejectedError:
+                    except ToolTrustRejectedError as trust_error:
                         result = ToolResult(
                             ok=False,
                             content=[],
                             failure=ToolFailure(
                                 kind=ToolFailureKind.INVALID_ARGUMENTS,
                                 reason_code=(
-                                    "tool.memory.manual_trust_rejected"
+                                    "tool.memory.statement_not_owner_grounded"
+                                    if isinstance(trust_error, ToolStatementNotGroundedError)
+                                    else "tool.memory.manual_trust_rejected"
                                     if tool.spec.name == "memory.remember"
                                     else "tool.trust_rejected"
                                 ),
@@ -1677,7 +1758,7 @@ class ToolPipeline:
             required_scopes=set(tool.spec.required_scopes),
             arguments=arguments,
             normalized_arguments_hash=arguments_hash,
-            argument_trust=_argument_trust(arguments, checkpoint),
+            argument_trust=_argument_trust(arguments, checkpoint, tool_name=tool.spec.name),
             origin_trust=invocation.origin_trust,
             newest_user_trust=_active_turn_facts(checkpoint).newest_user_trust,
             target=ExecutionTarget(

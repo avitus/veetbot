@@ -88,6 +88,9 @@ class WriteProbe(BaseModel):
     subject: str = Field(min_length=1)
     scope: str = "general"
     web_results: bool = True
+    # Propose the save in the same model step as the web read rather than the
+    # one after it; the outcome must not depend on that order.
+    same_step: bool = False
 
 
 class Probe(BaseModel):

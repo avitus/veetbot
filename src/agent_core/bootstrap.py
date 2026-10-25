@@ -1064,7 +1064,10 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "observations and uncertain relationships tentative; text-only reads do not inspect photos. "
     "Report only confirmed memory tool outcomes. A failed manual save is separate from "
     "background formation of owner-stated facts after the reply; do not claim that nothing "
-    "was remembered or that pending formation succeeded."
+    "was remembered or that pending formation succeeded. Save with memory.remember only what "
+    "the owner stated, in their words, when they asked to remember it; a plan, schedule or "
+    "calendar you derived from web or document content belongs in the reply or an artifact, "
+    "never in memory. Never mention a save, or a failed save, the owner did not ask for."
 )
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}

@@ -289,3 +289,4 @@ implementation without one.
 - [ADR-0243: Static charts and diagrams in the existing sandbox](0243-static-charts-and-diagrams.md)
 
 - [ADR-0244: Represent a separately authorized recall restart](0244-bounded-owner-recall-restart.md)
+- [ADR-0245: Owner-grounded manual saves after external reads](0245-owner-grounded-manual-saves.md)

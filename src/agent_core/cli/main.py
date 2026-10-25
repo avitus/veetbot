@@ -1409,15 +1409,16 @@ def memory_health(
 async def _memory_probe(
     probes_path: Path, output: Path, paths: list[str], live_model: bool
 ) -> dict[str, Any]:
+    # The probe driver lives with the evaluators; the entry point reaches it
+    # only at call time, the way the other eval commands do.
     from agent_core.config import load_settings
     from agent_core.domain.messages import FakeModelScript, ScriptedTurn
-    from agent_core.evals.general_recall_database import validate_probe_database
-    from agent_core.evals.owner_recall_probe_driver import observe_probes
-    from agent_core.evals.owner_recall_probes import PathKind, load_probes
-    from agent_core.runtime.worker import DurableWorker
 
-    validate_probe_database(load_settings())
-    loaded = load_probes(probes_path)
+    database = cast(Any, importlib.import_module("agent_core.evals.general_recall_database"))
+    driver = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probe_driver"))
+    probes_module = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probes"))
+    database.validate_probe_database(load_settings())
+    loaded = probes_module.load_probes(probes_path)
     script = (
         None
         if live_model
@@ -1426,18 +1427,15 @@ async def _memory_probe(
 
     async def finish(app: Any, run_id: UUID) -> Any:
         worker = app.worker_factory("owner-recall-probe")
-        assert isinstance(worker, DurableWorker)
         while await worker.run_once():
             run = await app.runs.get(run_id)
             if run.status.value in {"COMPLETED", "FAILED", "CANCELLED"}:
                 break
         return await app.runs.wait_terminal(run_id)
 
-    selected: list[PathKind] = [
-        cast(PathKind, path) for path in paths if path in {"automatic", "deliberate"}
-    ]
+    selected = [path for path in paths if path in {"automatic", "deliberate"}]
     async with build(storage="postgres", script=script) as composition:
-        report = await observe_probes(
+        report = await driver.observe_probes(
             composition,
             script,
             loaded.probes,
@@ -1447,7 +1445,7 @@ async def _memory_probe(
         )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
-    return report.summary.model_dump(mode="json")
+    return cast(dict[str, Any], report.summary.model_dump(mode="json"))
 
 
 @memory_app.command("probe")

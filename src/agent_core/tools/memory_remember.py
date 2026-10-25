@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent_core.domain.errors import ToolStatementNotGroundedError
 from agent_core.domain.memory import BeliefType, MemoryAuthority, Portability, Sensitivity
 from agent_core.domain.messages import TextPart
 from agent_core.domain.people_tools import RememberPeopleArgs
@@ -84,6 +85,15 @@ class MemoryRememberTool:
         statement_trust = context.origin_trust
         if statement_trust not in {TrustLevel.USER, TrustLevel.MEMORY}:
             statement_trust = context.argument_trust.get("statement", statement_trust)
+            if statement_trust is not TrustLevel.USER:
+                # The turn read external content and the statement is not the
+                # owner's own words (executor.owner_grounded_statement). The
+                # executor turns this into the closed reason
+                # tool.memory.statement_not_owner_grounded; the governed
+                # service's own trust check stands behind it.
+                raise ToolStatementNotGroundedError(
+                    "statement is not grounded in the owner's current message"
+                )
         belief_type = BeliefType(str(arguments.get("belief_type", BeliefType.FACT.value)))
         portability = (
             None

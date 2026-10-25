@@ -146,7 +146,15 @@ def assert_delivery_report(report: ProbeReport, car: MemoryRecord) -> None:
     assert "Aster S8" not in report.model_dump_json()
 
 
-def write_probes() -> tuple[Probe, Probe]:
+WEB_DERIVED_STATEMENT = (
+    "Prune roses in late winter and hydrangeas after flowering; hibiscus and azaleas "
+    "follow the calendar."
+)
+
+
+def write_probes() -> tuple[Probe, ...]:
+    """Four saves after web results: verbatim, paraphrase, same-step paraphrase, web-derived."""
+
     verbatim = Probe(
         id="verbatim",
         incident="garden-calendar-save",
@@ -158,13 +166,24 @@ def write_probes() -> tuple[Probe, Probe]:
         ),
     )
     assert verbatim.write is not None
-    paraphrase = verbatim.model_copy(
-        update={
-            "id": "paraphrase",
-            "write": verbatim.write.model_copy(update={"statement": PARAPHRASED_STATEMENT}),
-        }
+
+    def variant(probe_id: str, statement: str, *, same_step: bool = False) -> Probe:
+        assert verbatim.write is not None
+        return verbatim.model_copy(
+            update={
+                "id": probe_id,
+                "write": verbatim.write.model_copy(
+                    update={"statement": statement, "same_step": same_step}
+                ),
+            }
+        )
+
+    return (
+        verbatim,
+        variant("paraphrase", PARAPHRASED_STATEMENT),
+        variant("same-step", PARAPHRASED_STATEMENT, same_step=True),
+        variant("web-derived", WEB_DERIVED_STATEMENT),
     )
-    return verbatim, paraphrase
 
 
 async def save_case(
@@ -172,15 +191,20 @@ async def save_case(
 ) -> ProbeReport:
     """The Saved stage after web results.
 
-    A verbatim owner span commits; a paraphrase reports its refusal reason.
+    A verbatim owner span and an owner paraphrase commit, in the step after the
+    web read or the same step; a statement carrying the web result's own words
+    is refused with the closed owner-grounding reason.
     """
 
     report = await observe_probes(app, script, write_probes(), finish=finish)
-    assert len(web.searches) == 2
+    assert len(web.searches) == 4
     saves = {observation.probe_id: observation.save for observation in report.probes}
-    assert saves["verbatim"] is not None and saves["verbatim"].status == "committed"
-    assert saves["verbatim"].belief_id is not None
-    assert saves["paraphrase"] is not None
-    assert saves["paraphrase"].status == "save_refused:tool.memory.manual_trust_rejected"
-    assert report.summary.saves_refused == 1 and report.summary.saves_committed == 1
+    for probe_id in ("verbatim", "paraphrase", "same-step"):
+        save = saves[probe_id]
+        assert save is not None and save.status == "committed", (probe_id, save)
+        assert save.belief_id is not None
+    refused = saves["web-derived"]
+    assert refused is not None
+    assert refused.status == "save_refused:tool.memory.statement_not_owner_grounded"
+    assert report.summary.saves_committed == 3 and report.summary.saves_refused == 1
     return report

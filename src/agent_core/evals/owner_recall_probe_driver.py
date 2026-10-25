@@ -1,5 +1,8 @@
 """Replay owner recall probes through the composed production run loop.
 
+`app` is the composed application (`agent_core.bootstrap.Composition`); the
+driver takes it duck-typed so the evaluators never import the composition root.
+
 Each probe path is one real run: a session, an owner message submitted
 through `RunService.submit`, context assembly, recall, the model request and
 the completion hooks, observed exactly as production performs them. The
@@ -14,13 +17,12 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from agent_core.bootstrap import Composition
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.memory import (
     MemoryRecord,
@@ -47,14 +49,14 @@ from agent_core.evals.owner_recall_probes import (
 
 _SHORT_ID = re.compile(r"\[m:([0-9a-f]{8})\]")
 SCRIPTED_ANSWER = "Answered from the delivered evidence."
-Finish = Callable[[Composition, UUID], Awaitable[Run]]
+Finish = Callable[[Any, UUID], Awaitable[Run]]
 
 
-async def _wait(app: Composition, run_id: UUID) -> Run:
-    return await app.runs.wait_terminal(run_id)
+async def _wait(app: Any, run_id: UUID) -> Run:
+    return cast(Run, await app.runs.wait_terminal(run_id))
 
 
-def _rewind(app: Composition, script: FakeModelScript | None, turns: list[ScriptedTurn]) -> None:
+def _rewind(app: Any, script: FakeModelScript | None, turns: list[ScriptedTurn]) -> None:
     """Give the scripted provider this run's turns from the top."""
 
     if script is None:
@@ -67,7 +69,7 @@ def _rewind(app: Composition, script: FakeModelScript | None, turns: list[Script
 
 
 async def observe_probes(
-    app: Composition,
+    app: Any,
     script: FakeModelScript | None,
     probes: Sequence[Probe],
     *,
@@ -87,11 +89,11 @@ async def observe_probes(
     original = retriever.recall
 
     async def recording(*args: Any, **kwargs: Any) -> RecallResult:
-        result = await original(*args, **kwargs)
+        result = cast(RecallResult, await original(*args, **kwargs))
         captured.append(result)
         return result
 
-    retriever.recall = recording  # type: ignore[method-assign]
+    retriever.recall = recording
     observations: list[ProbeObservation] = []
     try:
         for probe in probes:
@@ -115,10 +117,10 @@ async def observe_probes(
                 )
             )
     finally:
-        retriever.recall = original  # type: ignore[method-assign]
+        retriever.recall = original
     live = await app.memory.list_memories(limit=200)
     return ProbeReport(
-        generated_at=now or datetime.now(UTC),
+        generated_at=now or app.clock.now(),
         probe_digest=probe_digest,
         live_model=script is None,
         implementation=_implementation(),
@@ -155,7 +157,7 @@ def _script_turns(probe: Probe, path: PathKind) -> list[ScriptedTurn]:
 
 
 async def _observe_path(
-    app: Composition,
+    app: Any,
     script: FakeModelScript | None,
     probe: Probe,
     path: PathKind,
@@ -259,7 +261,7 @@ async def _observe_path(
     )
 
 
-async def _belief_for_short_id(app: Composition, match: re.Match[str] | None) -> UUID | None:
+async def _belief_for_short_id(app: Any, match: re.Match[str] | None) -> UUID | None:
     """The remember tool answers with the renderer's short form, never a full identifier."""
 
     if match is None:
@@ -267,17 +269,17 @@ async def _belief_for_short_id(app: Composition, match: re.Match[str] | None) ->
     short = match.group(1)
     for record in await app.memory.list_memories(include_inactive=True, limit=200):
         if str(record.id).startswith(short):
-            return record.id
+            return cast(UUID, record.id)
     return None
 
 
 async def _resolve(
-    app: Composition, belief_id: UUID | None, statement_contains: str | None
+    app: Any, belief_id: UUID | None, statement_contains: str | None
 ) -> MemoryRecord | None:
     if belief_id is not None:
         async with app.uow_factory() as uow:
             try:
-                return await uow.memories.get(belief_id, app.principal)
+                return cast(MemoryRecord, await uow.memories.get(belief_id, app.principal))
             except NotFoundError:
                 return None
     assert statement_contains is not None
@@ -293,7 +295,9 @@ async def _resolve(
         if record.status in {MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL}
     ]
     chosen = live or matches
-    return max(chosen, key=lambda record: record.store_position) if chosen else None
+    if not chosen:
+        return None
+    return cast(MemoryRecord, max(chosen, key=lambda record: record.store_position))
 
 
 def _locate(
@@ -318,42 +322,35 @@ def _locate(
 
 
 async def _observe_save(
-    app: Composition, script: FakeModelScript | None, probe: Probe, finish: Finish
+    app: Any, script: FakeModelScript | None, probe: Probe, finish: Finish
 ) -> SaveObservation:
     assert probe.write is not None
     write = probe.write
     remember_call = f"probe-{probe.id}-remember"
     if script is not None:
-        turns: list[ScriptedTurn] = []
-        if write.web_results:
-            turns.append(
-                ScriptedTurn(
-                    tool_calls=[
-                        ScriptedToolCall(
-                            name="web.search",
-                            arguments={"query": probe.question[:200], "max_results": 3},
-                            call_id=f"probe-{probe.id}-web",
-                        )
-                    ],
-                    stop_reason=StopReason.TOOL_USE,
-                )
-            )
-        turns.append(
-            ScriptedTurn(
-                tool_calls=[
-                    ScriptedToolCall(
-                        name="memory.remember",
-                        arguments={
-                            "statement": write.statement,
-                            "subject": write.subject,
-                            "scope": write.scope,
-                        },
-                        call_id=remember_call,
-                    )
-                ],
-                stop_reason=StopReason.TOOL_USE,
-            )
+        search = ScriptedToolCall(
+            name="web.search",
+            arguments={"query": probe.question[:200], "max_results": 3},
+            call_id=f"probe-{probe.id}-web",
         )
+        remember = ScriptedToolCall(
+            name="memory.remember",
+            arguments={
+                "statement": write.statement,
+                "subject": write.subject,
+                "scope": write.scope,
+            },
+            call_id=remember_call,
+        )
+        turns: list[ScriptedTurn] = []
+        if write.web_results and write.same_step:
+            turns.append(
+                ScriptedTurn(tool_calls=[search, remember], stop_reason=StopReason.TOOL_USE)
+            )
+        else:
+            if write.web_results:
+                turns.append(ScriptedTurn(tool_calls=[search], stop_reason=StopReason.TOOL_USE))
+            turns.append(ScriptedTurn(tool_calls=[remember], stop_reason=StopReason.TOOL_USE))
         turns.append(ScriptedTurn(text=SCRIPTED_ANSWER))
         _rewind(app, script, turns)
     session_id = await app.sessions.create()
