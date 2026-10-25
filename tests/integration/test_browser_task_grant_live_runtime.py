@@ -49,9 +49,6 @@ PROFILE_ID = UUID("00000000-0000-4000-8000-0000000000e1")
 RUN_ID = UUID("00000000-0000-4000-8000-0000000000e2")
 OWNER = Principal(tenant_id="tenant-a", principal_id="owner")
 SERVICE_AUTH = "synthetic-live-grant-service-auth"
-# The page changes this long after it loads: past the two-second settle bound,
-# so the worker's observation shows the page before the change.
-LATE_CHANGE_MILLISECONDS = 2_600
 
 
 @pytest.fixture(autouse=True)
@@ -72,17 +69,39 @@ class LessonSite:
     """Lesson pages whose controls report every click they receive."""
 
     clicks: list[str] = field(default_factory=list)
+    changes_requested: dict[str, asyncio.Event] = field(
+        default_factory=lambda: {name: asyncio.Event() for name in ("moving", "renaming")}
+    )
+    changes_completed: dict[str, asyncio.Event] = field(
+        default_factory=lambda: {name: asyncio.Event() for name in ("moving", "renaming")}
+    )
 
     def app(self) -> Starlette:
         return Starlette(
             routes=[
                 Route("/lesson/record", self.record, methods=["POST"]),
+                Route("/lesson/change/{name}", self.wait_for_change),
+                Route("/lesson/changed/{name}", self.changed, methods=["POST"]),
                 Route("/lesson/start", self.start),
                 Route("/lesson/moving", self.moving),
                 Route("/lesson/renaming", self.renaming),
                 Route("/lesson/hidden", self.hidden),
             ]
         )
+
+    async def wait_for_change(self, request: Request) -> Response:
+        await self.changes_requested[request.path_params["name"]].wait()
+        return Response(status_code=204)
+
+    async def changed(self, request: Request) -> Response:
+        self.changes_completed[request.path_params["name"]].set()
+        return Response(status_code=204)
+
+    async def change_after_observation(self, name: str) -> None:
+        """Require the page to acknowledge its mutation before dispatching an act."""
+        self.changes_requested[name].set()
+        async with asyncio.timeout(10):
+            await self.changes_completed[name].wait()
 
     async def record(self, request: Request) -> Response:
         self.clicks.append((await request.body()).decode())
@@ -97,8 +116,9 @@ class LessonSite:
         return _page(
             "<button onclick=\"record('moving')\">Continue</button>",
             script=(
-                "setTimeout(()=>history.pushState({},'','/lesson/settings'),"
-                f"{LATE_CHANGE_MILLISECONDS});"
+                "fetch('/lesson/change/moving').then(()=>{"
+                "history.pushState({},'','/lesson/settings');"
+                "return fetch('/lesson/changed/moving',{method:'POST'});});"
             ),
         )
 
@@ -107,8 +127,9 @@ class LessonSite:
         return _page(
             "<button id='b' onclick=\"record('renaming')\">Continue</button>",
             script=(
-                "setTimeout(()=>{document.getElementById('b').textContent='Buy now';},"
-                f"{LATE_CHANGE_MILLISECONDS});"
+                "fetch('/lesson/change/renaming').then(()=>{"
+                "document.getElementById('b').textContent='Buy now';"
+                "return fetch('/lesson/changed/renaming',{method:'POST'});});"
             ),
         )
 
@@ -252,14 +273,6 @@ async def leased_service(site: LocalHttpsSite, root: Path) -> AsyncIterator[Leas
             )
 
 
-async def _after_the_late_change(started: float) -> None:
-    remaining = (
-        LATE_CHANGE_MILLISECONDS / 1000 + 0.4 - (asyncio.get_running_loop().time() - started)
-    )
-    if remaining > 0:
-        await asyncio.sleep(remaining)
-
-
 def _assert_refused(response: httpx.Response) -> None:
     assert response.status_code == 409, response.text
     assert response.json()["error"] == {
@@ -289,14 +302,12 @@ async def test_the_live_page_decides_whether_a_task_grant_covers_an_act(
         covered = await service.click(start, "Continue", sequence=1, constrained=True)
         clicks_after_covered = list(lessons.clicks)
 
-        started = asyncio.get_running_loop().time()
         moving = await service.navigate("/lesson/moving")
-        await _after_the_late_change(started)
+        await lessons.change_after_observation("moving")
         moved = await service.click(moving, "Continue", sequence=2, constrained=True)
 
-        started = asyncio.get_running_loop().time()
         renaming = await service.navigate("/lesson/renaming")
-        await _after_the_late_change(started)
+        await lessons.change_after_observation("renaming")
         renamed = await service.click(renaming, "Continue", sequence=2, constrained=True)
 
         hidden = await service.navigate("/lesson/hidden")
