@@ -386,9 +386,15 @@ The prepared-response validator requires exactly the remaining clause verdicts,
 rejects invented verdicts for excluded candidates, and carries local rejections
 unchanged into the review. It checks the serialized request digest and its exact
 offered operation projection, so altered claims or exclusions cannot reuse a reply.
-The complete second request must fit all token/byte limits and the caller's
-remaining slice headroom. A request too large for all candidates retains valid
-bounded siblings. Even a no-change proposal needs a matching verification envelope.
+Before sizing the second request, retain only the union of the admitted operations'
+declared source inputs in each group, with every original excerpt and complete text
+part for those inputs. Clause citations cannot discard uncited qualifying evidence.
+Revalidate the entire offered group against its original snapshot first; narrowing
+the export cannot rescue changed or newly refused sources. Add each candidate's
+complete input set only if that candidate fits; excluded candidates cannot consume
+space needed by valid siblings. The complete second request must fit all token/byte
+limits and the caller's remaining slice headroom. A request too large for all
+candidates retains valid bounded siblings. Even a no-change proposal needs a matching verification envelope.
 
 `ReconsolidationRequestAdmission` is the worker-facing preparation/reservation
 service. For each request it holds the memory owner and People guards, reads current
