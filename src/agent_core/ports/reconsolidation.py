@@ -349,7 +349,7 @@ class ReconsolidationStore(Protocol):
     ) -> ReconsolidationJob: ...
 
     async def claim_group(
-        self, principal: Principal, token: UUID, now: datetime
+        self, principal: Principal, token: UUID, now: datetime, *, prefer_unattempted: bool = False
     ) -> ReconsolidationGroup | None: ...
 
     async def finish_group(

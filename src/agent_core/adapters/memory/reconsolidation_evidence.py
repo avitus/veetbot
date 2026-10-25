@@ -74,11 +74,23 @@ class ReconsolidationEvidence:
         snapshots = await self.sources(principal, originals)
         if snapshots is None or any(not source_admissible(s, principal, now) for s in snapshots):
             return None
+        excerpts = await self._original_excerpts(principal, snapshots, now)
+        if excerpts is None:
+            return None
+        return ReconsolidationInput(group=group, sources=snapshots, excerpts=excerpts).model_copy(
+            deep=True
+        )
+
+    async def _original_excerpts(
+        self, principal: Principal, snapshots: tuple[MergeSource, ...], now: datetime
+    ) -> tuple[OriginalExcerpt, ...] | None:
+        """Apply identical complete-source bounds during selection and preparation."""
         excerpts: list[OriginalExcerpt] = []
         leaves = sorted(
             {
                 (record.source_session_id, sequence)
-                for record, _ in originals
+                for snapshot in snapshots
+                for record in (snapshot.record,)
                 for sequence in record.source_event_ids
             }
         )
@@ -91,6 +103,7 @@ class ReconsolidationEvidence:
                 not events
                 or events[0].sequence != sequence
                 or not _owner_event(events[0], principal)
+                or events[0].created_at > now
             ):
                 return None
             event = events[0]
@@ -129,9 +142,7 @@ class ReconsolidationEvidence:
             for source in snapshots
         ):
             return None
-        return ReconsolidationInput(
-            group=group, sources=snapshots, excerpts=tuple(excerpts)
-        ).model_copy(deep=True)
+        return tuple(excerpts)
 
     async def plan(
         self,
@@ -165,7 +176,11 @@ class ReconsolidationEvidence:
         selected = []
         for original in originals:
             snapshots = await self._source_snapshots(principal, (original,))
-            if snapshots is not None and source_admissible(snapshots[0], principal, now):
+            if (
+                snapshots is not None
+                and source_admissible(snapshots[0], principal, now)
+                and await self._original_excerpts(principal, snapshots, now) is not None
+            ):
                 selected.append(original[1])
         return tuple(selected)
 

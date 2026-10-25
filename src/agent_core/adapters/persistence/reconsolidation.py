@@ -1883,7 +1883,7 @@ class PostgresReconsolidationStore:
         return job
 
     async def claim_group(
-        self, principal: Principal, token: UUID, now: datetime
+        self, principal: Principal, token: UUID, now: datetime, *, prefer_unattempted: bool = False
     ) -> ReconsolidationGroup | None:
         job = await self._job(principal, token, now)
         if now >= job.slice_started_at + timedelta(seconds=120):
@@ -1898,7 +1898,13 @@ class PostgresReconsolidationStore:
                     ReconsolidationGroupRow.principal_id == principal.principal_id,
                     ReconsolidationGroupRow.state == "pending",
                 )
-                .order_by(ReconsolidationGroupRow.created_at, ReconsolidationGroupRow.id)
+                .order_by(
+                    (ReconsolidationGroupRow.attempts > 0)
+                    if prefer_unattempted and job.claimed_groups == 0
+                    else ReconsolidationGroupRow.created_at,
+                    ReconsolidationGroupRow.created_at,
+                    ReconsolidationGroupRow.id,
+                )
                 .limit(256)
             )
         ).all()

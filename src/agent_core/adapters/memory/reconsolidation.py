@@ -1455,7 +1455,7 @@ class InMemoryReconsolidationStore:
             return job
 
     async def claim_group(
-        self, principal: Principal, token: UUID, now: datetime
+        self, principal: Principal, token: UUID, now: datetime, *, prefer_unattempted: bool = False
     ) -> ReconsolidationGroup | None:
         async with self._transaction.owner((principal.tenant_id, principal.principal_id)):
             job = self._job(principal, token, now)
@@ -1463,7 +1463,16 @@ class InMemoryReconsolidationStore:
                 raise ConflictError("reconsolidation slice deadline reached")
             if job.claimed_groups >= 4:
                 return None
-            for group in sorted(self._groups.values(), key=lambda g: (g.created_at, str(g.id))):
+            # Reserve the first claim for unattempted work; remaining claims stay
+            # oldest-first so fresh work and bounded retries both make progress.
+            for group in sorted(
+                self._groups.values(),
+                key=lambda g: (
+                    prefer_unattempted and job.claimed_groups == 0 and g.attempts > 0,
+                    g.created_at,
+                    str(g.id),
+                ),
+            ):
                 if (group.tenant_id, group.principal_id) != (
                     principal.tenant_id,
                     principal.principal_id,

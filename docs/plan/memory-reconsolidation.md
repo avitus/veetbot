@@ -283,7 +283,11 @@ neighbors. It creates at most four groups; overflow anchors receive a durable
 `not_selected` receipt, not an unbounded queue. The next generation rotates the
 start key used for equal-ranked grouping. Pending model work is capped at 256
 groups per owner; when full, pause selection without losing the unscanned cursor.
-Within that cap select oldest groups first. Report scan coverage separately from
+Within that cap select oldest groups first. Supervised daily previews reserve
+the first of their four claims for the oldest unattempted group, when present;
+the remaining claims retain oldest-first order. This gives new admissible work
+an opportunity without changing retry counts or the four-claim bound. Other
+callers retain oldest-first ordering. Report scan coverage separately from
 unselected/deferred/model-processed groups: budget exhaustion is not completion.
 
 For an anchor, query eligible original direct memories across sessions using
@@ -325,7 +329,14 @@ through the maintenance repository under the owner and People locks. It admits
 only authenticated owner `user.message.created` text, retaining each entire string
 or text part, its timestamp and stable event/part identity. Shared copies of one
 event remain one evidence identity. Every required part must fit: at most thirty-two
-parts per event/source and 256 excerpts per group. Missing, changed, excluded,
+parts per event/source and 256 excerpts per group. Selection checks these same
+complete-excerpt bounds independently for each candidate before fixing group
+membership. An unsupported neighbor cannot block an independently supported pair.
+The authenticated original event timestamps govern provider evidence validation
+and the request's evidence time. Historical memory rows may cache extraction time
+in `last_evidence_at`; they remain unchanged. The resolved source timestamp must
+match the complete excerpts exactly, so cached metadata cannot refresh evidence.
+Missing, changed, excluded,
 rejected or oversized support defers the group without truncation. Attachments,
 assistant/tool/scheduled content and arbitrary history do not become evidence.
 
