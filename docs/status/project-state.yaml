@@ -5,6 +5,10 @@
 # 2026-10-21; PR 181 delivered it on 2026-10-22. The owner-reported deferred-format
 # repair is authorized and awaits release; so does the 2026-10-22 owner-named site
 # repair (scheme-less names, www. and bare domain as one host). No milestone or gate moves.
+# ADR-0243: Owner authorized static charts and diagrams on 2026-10-24,
+# with PNG previews, optional SVG/PDF and chart CSV through existing artifacts.
+# Implemented with focused sandbox/artifact/PNG-decoder evidence in ADR-0243.
+# Production delivery is pending; no milestone moves.
 schema_version: 1
 
 project:
@@ -331,6 +335,18 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Supervised source-clock and retry fairness repair (2026-10-24)
+      outcome: implemented_pending_delivery
+      detail: >-
+        Production metadata recovery completed on October 23 with all 469 proofs
+        validated and originals unchanged. The next daily run exposed historical
+        extraction-time metadata rejected as missing source evidence. Provider
+        preparation now uses resolved original event timestamps; selection applies
+        complete-excerpt bounds before grouping. Supervised daily previews reserve
+        one of four claims for unattempted work and retain oldest-first retries for
+        the remaining claims. Shared in-memory/PostgreSQL regression coverage must
+        demonstrate a reviewable proposal behind four failed groups, unchanged
+        originals and privacy boundaries, and the same two-call daily limit.
     - check: Owner-authorized verified legacy recovery (2026-10-22, ADR-0241)
       outcome: implemented_pending_production_recovery
       detail: >-

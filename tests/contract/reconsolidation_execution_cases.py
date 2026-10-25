@@ -586,3 +586,14 @@ async def execution_review_fits_verifier_to_remaining_budget(factory: Factory) -
 
 
 EXECUTION_SCENARIOS.append(execution_review_fits_verifier_to_remaining_budget)
+
+
+async def legacy_backlog_reaches_review(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import (
+        legacy_clocks_and_failed_backlog_reach_review,
+    )
+
+    await legacy_clocks_and_failed_backlog_reach_review(factory)
+
+
+EXECUTION_SCENARIOS.append(legacy_backlog_reaches_review)

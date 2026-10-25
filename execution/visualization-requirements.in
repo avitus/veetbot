@@ -1,0 +1,2 @@
+# Sandbox-only plotting dependencies; never install into the API or worker.
+matplotlib==3.11.2

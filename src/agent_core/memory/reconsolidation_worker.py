@@ -159,7 +159,10 @@ class ReconsolidationPass(ReconsolidationInventoryPass):
         async with self._uow_factory() as uow:
             for _ in range(4):
                 group = await uow.reconsolidation.claim_group(
-                    self._principal, lease.lease_token, self._clock.now()
+                    self._principal,
+                    lease.lease_token,
+                    self._clock.now(),
+                    prefer_unattempted=self._owner_review,
                 )
                 if group is None:
                     break

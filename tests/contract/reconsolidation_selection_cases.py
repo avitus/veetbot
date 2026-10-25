@@ -396,3 +396,95 @@ async def shared_refused_original_preserves_independent_review(factory: Factory)
         assert "egress_denied" in runs[0].deferrals
         for original in originals:
             assert await uow.memories.get(original.id, principal()) == original
+
+
+async def legacy_clocks_and_failed_backlog_reach_review(factory: Factory) -> None:
+    """Four failed old groups cannot consume every claim ahead of valid new work."""
+    originals = []
+    async with factory() as uow:
+        for index in range(10):
+            await uow.events.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=principal().principal_id,
+                    payload={"content": "x" * 2049 if index < 8 else memory().statement},
+                )
+            )
+            record = memory(belief_id=701 + index).model_copy(
+                update={
+                    "store_position": await uow.memories.next_position(),
+                    "source_event_ids": [index + 1],
+                    "last_evidence_at": NOW + timedelta(seconds=45),
+                    "created_at": NOW + timedelta(seconds=45),
+                }
+            )
+            await uow.memories.upsert_belief(record)
+            originals.append(record)
+        lease = await uow.reconsolidation.claim_due(principal(), NOW, "old-worker")
+        assert lease is not None
+        page = await uow.reconsolidation.inventory(principal(), lease.lease_token, NOW)
+        versions = {v.belief_id: v for v in page.sources}
+        groups = tuple(tuple(versions[r.id] for r in originals[i : i + 2]) for i in range(0, 8, 2))
+        old = await uow.reconsolidation.checkpoint(
+            principal(), lease.lease_token, page, groups, NOW
+        )
+        claimed = []
+        for _ in range(4):
+            group = await uow.reconsolidation.claim_group(principal(), lease.lease_token, NOW)
+            assert group is not None
+            claimed.append(group)
+        assert len({g.id for g in claimed}) == 4
+        for group in claimed:
+            await uow.reconsolidation.finish_group(
+                principal(), lease.lease_token, group.id, "retry", NOW
+            )
+        await uow.reconsolidation.release(principal(), lease.lease_token, NOW)
+    tracked = TrackedFactory(factory)
+    provider = MergeProvider(tracked)
+    worker = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        FixedClock(NOW + timedelta(days=1)),
+        principal(),
+        worker_id="repaired-worker",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=policy,
+        owner_review=True,
+    )
+    await worker.run_once()
+    assert len(provider.requests) == 2, "Valid fresh work must reach proposal and verification"
+    message = provider.requests[0].conversation[1]
+    assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+    payload = json.loads(message.content[0].text)
+    assert {s["belief_id"] for g in payload["groups"] for s in g["sources"]} == {
+        str(r.id) for r in originals[8:]
+    }
+    async with factory() as uow:
+        run = (await uow.reconsolidation.dreaming_runs(principal(), NOW + timedelta(days=1)))[0]
+        assert run.outcome == "proposed" and run.proposals == 1
+        operations = await uow.reconsolidation.operation_page(
+            principal(), kind=None, state=None, before=None, limit=10
+        )
+        assert len(operations) == 1
+        from agent_core.domain.memory import Sensitivity
+
+        view = await uow.reconsolidation.get_operation(
+            principal(), operations[0].id, NOW + timedelta(days=1), ceiling=Sensitivity.INTERNAL
+        )
+        assert view is not None and view.state == "proposed" and view.content is not None
+        assert {s.belief_id for s in view.sources} == {r.id for r in originals[8:]}
+        assert all(s.statement and not s.omitted for s in view.sources)
+        assert run.provider_calls == 2
+        assert "source_unavailable" in run.deferrals
+        for original in originals:
+            assert await uow.memories.get(original.id, principal()) == original
+        assert not await uow.reconsolidation.active_merges(
+            principal(), tuple(r.id for r in originals), NOW + timedelta(days=1)
+        )
+    assert await worker.run_once() == 0
+    assert len(old) == 4 and len(provider.requests) == 2

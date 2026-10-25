@@ -513,3 +513,42 @@ def test_scope_identifiers_and_credential_handles_are_not_provider_text() -> Non
     assert "PRIVATE_PROJECT_DIRECTORY" not in prepared.serialized_request
     assert "PRIVATE_CREDENTIAL_HANDLE" not in prepared.serialized_request
     assert principal().principal_id not in prepared.serialized_request
+
+
+@pytest.mark.parametrize("offset", [-45, 45])
+def test_authenticated_evidence_clock_overrides_cached_memory_clock(offset: int) -> None:
+    value = selected()
+    sources = tuple(
+        item.model_copy(
+            update={
+                "original_evidence_at": NOW,
+                "record": item.record.model_copy(
+                    update={
+                        "last_evidence_at": NOW + timedelta(seconds=offset),
+                        "created_at": NOW + timedelta(seconds=offset),
+                    }
+                ),
+            }
+        )
+        for item in value.sources
+    )
+    value = value.model_copy(update={"sources": sources})
+    before = value.model_dump_json()
+    result = build(value)
+    assert result.prepared is not None, (
+        "Authenticated original timestamps must admit legacy memories"
+    )
+    message = result.prepared.request.conversation[1]
+    assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+    payload = json.loads(message.content[0].text)
+    assert {s["last_evidence_at"] for s in payload["groups"][0]["sources"]} == {NOW.isoformat()}
+    assert value.model_dump_json() == before
+    forged = value.model_copy(
+        update={
+            "sources": tuple(
+                s.model_copy(update={"original_evidence_at": NOW - timedelta(seconds=1)})
+                for s in sources
+            )
+        }
+    )
+    assert build(forged).deferred[0].reason == "source_unavailable"

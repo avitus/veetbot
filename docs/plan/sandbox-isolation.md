@@ -1035,6 +1035,46 @@ three things it cannot infer:
    result. The model does not need to re-run the command to see the
    rest.
 
+## Static charts and diagrams (ADR-0243)
+
+The platform-owned sandbox image includes Matplotlib, Graphviz and fonts.
+Python plotting dependencies have a separate hash-locked requirements file;
+they are absent from the API and worker dependency set. Image build installs
+dependencies; model calls never install packages or enable network access.
+
+`python -m agent_core.execution.visuals SPEC.json` runs a bundled helper inside
+the normal sandbox. Its guide is `/opt/agent/visualization-guide.md`. It accepts
+line, bar, scatter, histogram, heatmap and pie charts, and directed node-and-edge
+diagrams. Charts require named columns and rectangular rows; numbers must be
+finite, missing numeric cells are explicit nulls, and no sorting, aggregation,
+interpolation or zero-filling is implicit. Duplicate heatmap cells are refused.
+Diagrams use literal node/edge labels and fixed shapes; arbitrary DOT attributes,
+HTML labels, external images and URLs are not accepted by the helper.
+
+Input is capped at 1 MiB, 10,000 rows, twelve columns and eight plotted series;
+bar/pie charts have at most fifty rows, heatmaps at most fifty categories per
+axis, and diagrams sixty nodes and 120 edges. Labels and image dimensions are
+bounded. The enclosing execution deadline and resource limits remain authoritative.
+Invalid input produces a nonzero exit with an actionable error and no output
+directory. A renderer failure removes staged outputs; only a complete set is
+published into a fresh workspace directory. Repeated renders never overwrite
+previous output. The helper's result lists workspace-relative paths, media types
+and sizes, not artifact IDs or an attachment claim.
+
+Every render contains PNG and its JSON specification. Charts also contain CSV
+with the supplied columns, rows and order preserved; a null becomes an empty
+CSV cell. Text fields are quoted, and formula-triggering headers or text cells
+receive a leading apostrophe (ASCII or full-width `=`, `+`, `-`, or `@`, including
+after leading whitespace, or a leading line break). Numeric values and plotted
+labels stay unchanged. The JSON specification retains the original values;
+the agent explains the CSV encoding and uses JSON for exact reuse. Diagrams
+contain editable DOT source. SVG and PDF are optional. The
+agent exports the PNG and CSV or DOT, the requested vectors, and the source
+specification through ordinary `artifact.export` calls. The existing Apple image
+viewer previews PNG and downloads all formats; it need not execute SVG or HTML.
+Labels, units, sources and missing data must be explained using observed inputs;
+image-generation tools are not used to produce numerical charts or exact diagrams.
+
 ## Artifacts
 
 Section 18.4 fixes four rules: store outside the source tree, use

@@ -130,9 +130,8 @@ def _source_failure(
                 if e.session_id == source.record.source_session_id
                 and e.event_sequence in source.record.source_event_ids
             ]
-            if (
-                not 1 <= len(support) <= 32
-                or max(e.occurred_at for e in support) != source.record.last_evidence_at
+            if not 1 <= len(support) <= 32 or max(e.occurred_at for e in support) != (
+                source.original_evidence_at or source.record.last_evidence_at
             ):
                 return "source_unavailable"
     except (ValueError, UnicodeError):
@@ -264,6 +263,13 @@ def _payload(
                 "last_evidence_at",
             },
         )
+        # The resolved original event is the evidence clock. Historical records
+        # may cache extraction time here; never rewrite or refresh the original.
+        if (
+            source.original_evidence_at is not None
+            and source.original_evidence_at != record.last_evidence_at
+        ):
+            fields["last_evidence_at"] = source.original_evidence_at.isoformat()
         fields.update(
             {
                 "belief_id": fields.pop("id"),
