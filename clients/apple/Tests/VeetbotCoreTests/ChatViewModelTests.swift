@@ -1875,6 +1875,8 @@ import UserNotifications
         let sourceRunID = UUID()
         let lock = NSLock()
         var status = "ready"
+        /// The profile list's status when it differs from the offer's.
+        var listedStatus: String?
         /// Whether the source run's stream carries the offer (ADR-0251).
         var offered = true
 
@@ -1910,7 +1912,7 @@ import UserNotifications
         }
 
         var profilesBody: String {
-            #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://mychart.example-health.org"],"status":"\#(status)","generation":7,"created_at":"2026-10-21T05:04:11Z","updated_at":"2026-10-21T17:04:59Z","last_used_at":null}],"next_cursor":null}"#
+            #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://mychart.example-health.org"],"status":"\#(listedStatus ?? status)","generation":7,"created_at":"2026-10-21T05:04:11Z","updated_at":"2026-10-21T17:04:59Z","last_used_at":null}],"next_cursor":null}"#
         }
 
         /// Answers a request as (status, body, extra headers), or nil for a 404.
@@ -2049,6 +2051,22 @@ import UserNotifications
 
         #expect(model.deviceSignInRequest?.profileID == server.profileID)
         #expect(server.connections.isEmpty)
+    }
+
+    @Test
+    func testAnAbandonedSignInLeavesNoOfferOnALaterConnection() async throws {
+        var server = WebsiteOfferServer()
+        server.status = "needs_user"
+        server.listedStatus = "ready"
+        let model = try await websiteOfferModel(server)
+        let website = try #require(model.websiteOffer?.websites.first)
+        await model.acceptWebsiteOffer(website)
+        #expect(model.deviceSignInRequest?.profileID == server.profileID)
+
+        await model.connectWebsiteToSelectedChat(server.profileID)
+
+        let request = try #require(server.connections.first)
+        #expect(try requestJSONObject(request)["offer_id"] == nil)
     }
 
     @Test

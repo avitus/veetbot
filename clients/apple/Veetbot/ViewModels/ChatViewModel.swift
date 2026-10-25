@@ -1018,6 +1018,7 @@ public final class ChatViewModel: ObservableObject {
         activeTaskGrant = nil
         connectedWebsiteProfileID = nil
         websiteOffer = nil
+        pendingWebsiteOffer = nil
         runState.reset()
     }
 
@@ -2588,6 +2589,8 @@ public final class ChatViewModel: ObservableObject {
     public func connectWebsiteToSelectedChat(_ profileID: UUID) async {
         guard browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready })
         else { return }
+        // A plain connection never accepts an offer an abandoned sign-in left.
+        pendingWebsiteOffer = nil
         await connectWebsiteToConversation(profileID, sessionID: selectedSessionID)
     }
 
