@@ -287,3 +287,5 @@ implementation without one.
 - [ADR-0241: Verified legacy attribution recovery for dreaming](0241-verified-legacy-dreaming-recovery.md)
 - [ADR-0242: Tool-result truncation moves in blocks to keep the body cached](0242-block-quantized-tool-result-truncation.md)
 - [ADR-0243: Static charts and diagrams in the existing sandbox](0243-static-charts-and-diagrams.md)
+
+- [ADR-0244: Represent a separately authorized recall restart](0244-bounded-owner-recall-restart.md)

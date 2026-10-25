@@ -378,4 +378,5 @@ nav:
       - "0241 — Verified legacy dreaming recovery": adr/0241-verified-legacy-dreaming-recovery.md
       - 'ADR-0242: Tool-result truncation moves in blocks to keep the body cached': adr/0242-block-quantized-tool-result-truncation.md
       - 'ADR-0243: Static charts and diagrams': adr/0243-static-charts-and-diagrams.md
+      - 'ADR-0244: Bounded owner recall restart': adr/0244-bounded-owner-recall-restart.md
   - Changelog: changelog.md

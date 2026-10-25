@@ -26,6 +26,10 @@ from agent_core.memory.general_recall_evidence import (
     _stage,
     _unique_object,
 )
+from agent_core.memory.production_recall_restart import (
+    ProductionRecallRestart,
+    validate_restart_window,
+)
 from agent_core.memory.production_recall_trial import ProductionRecallTrial, validate_trial_window
 from agent_core.memory.recall_release_binding import (
     InputFile,
@@ -105,7 +109,10 @@ class CompatibilityAssessment(ReleaseValue):
 
 class BoundedRecallEvidence(ReleaseValue):
     version: Literal[
-        "recall-bounded-evidence@1", "recall-bounded-evidence@2", "recall-bounded-evidence@3"
+        "recall-bounded-evidence@1",
+        "recall-bounded-evidence@2",
+        "recall-bounded-evidence@3",
+        "recall-bounded-evidence@4",
     ]
     bundle: CheckpointReleaseBundle
     operational_gate_report: str | None = Field(default=None, max_length=2 * 1024 * 1024)
@@ -114,6 +121,7 @@ class BoundedRecallEvidence(ReleaseValue):
         BoundedHumanReview | ScopedHumanReview | None, Field(discriminator="version")
     ] = None
     production_trial: ProductionRecallTrial | None = None
+    production_restart: ProductionRecallRestart | None = None
     scope_proposal: str | None = Field(default=None, max_length=2 * 1024 * 1024)
     owner_authorization_sha256: Digest
     provenance_verification_sha256: Digest
@@ -124,7 +132,10 @@ class BoundedRecallEvidence(ReleaseValue):
 
 class BoundedRecallManifest(ReleaseValue):
     version: Literal[
-        "recall-bounded-admission@1", "recall-bounded-admission@2", "recall-bounded-admission@3"
+        "recall-bounded-admission@1",
+        "recall-bounded-admission@2",
+        "recall-bounded-admission@3",
+        "recall-bounded-admission@4",
     ]
     deployment_build_ref: str = Field(pattern=r"^[a-f0-9]{40}$")
     evidence_sha256: Digest
@@ -215,7 +226,12 @@ def validate_bounded_evidence(
         "original measured inputs changed",
     )
     observed = b"".join(r.model_dump_json().encode() + b"\n" for r in bundle.observations)
-    if evidence.version == "recall-bounded-evidence@3":
+    _require(
+        (evidence.production_restart is not None)
+        == (evidence.version == "recall-bounded-evidence@4"),
+        "only version-four evidence requires a separate restart decision",
+    )
+    if evidence.version in ("recall-bounded-evidence@3", "recall-bounded-evidence@4"):
         trial = evidence.production_trial
         _require(
             trial is not None and evidence.human_review is None and evidence.scope_proposal is None,
@@ -378,7 +394,21 @@ def bind_bounded_recall(
         "bounded target input mismatch",
     )
     validate_bounded_evidence(facts, binding.target_inputs, clock)
-    if facts.production_trial is not None:
+    active_since = binding.activated_at
+    if facts.production_restart is not None:
+        assert facts.production_trial is not None
+        validate_restart_window(
+            facts.production_trial,
+            facts.production_restart,
+            binding.activated_at,
+            binding.expires_at,
+            binding.target_inputs.digest,
+            binding.rollback_build_ref,
+            principal,
+            clock,
+        )
+        active_since = facts.production_restart.restarted_at
+    elif facts.production_trial is not None:
         validate_trial_window(
             facts.production_trial, binding.activated_at, binding.expires_at, principal, clock
         )
@@ -394,7 +424,7 @@ def bind_bounded_recall(
         if not revoked:
             try:
                 revoked = (
-                    not binding.activated_at <= clock.now() < binding.expires_at
+                    not active_since <= clock.now() < binding.expires_at
                     or _read_bounded(manifest) != raw_manifest
                     or _read_bounded(evidence) != raw_evidence
                     or input_stamps(root) != stamps
