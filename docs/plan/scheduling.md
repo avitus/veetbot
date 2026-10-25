@@ -184,6 +184,15 @@ materializer repeats that check before creating a run, so a missing or
 inconsistent version produces a configuration failure rather than silently
 changing behavior.
 
+A newer agent version reaches a schedule only through an explicit
+full-definition update (`PATCH /v1/schedules/{schedule_id}` with the expected
+revision). That update may name another version of the same agent; it is
+validated like a create, including the policy-profile match, and writes
+revision N+1. Only later occurrences use the new version, and past
+occurrences keep theirs (hard gate 9). Conversational `schedule.update`
+preserves the pins and cannot move them, and nothing moves a schedule when a
+deploy registers a new default agent version.
+
 Scheduled runs require finite bounds. `run_timeout_seconds`, `max_steps`,
 `max_model_calls`, `max_tool_calls`, and `max_cost` must all be present and
 positive. At materialization, `deadline_at` is the materialization time plus

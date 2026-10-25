@@ -16,7 +16,7 @@ from agent_core.adapters.schedule_admission import AllowScheduleAdmissionControl
 from agent_core.application.schedule_service import ScheduleService
 from agent_core.bootstrap import build
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.errors import ConflictError, ScheduleValidationError
+from agent_core.domain.errors import ConflictError, NotFoundError, ScheduleValidationError
 from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.domain.schedules import (
     DailyCadence,
@@ -329,3 +329,82 @@ async def test_revision_updates_only_future_occurrences_and_cancel_leaves_run_un
                 len(await uow.schedule_occurrences.list(created.schedule.id, principal, limit=10))
                 == 2
             )
+
+
+async def test_an_update_can_repin_the_agent_version_for_future_occurrences_only() -> None:
+    """A full-definition update moves the pinned agent version for later occurrences only.
+
+    scheduling.md checks the pinned version and its policy profile "at create
+    and update time"; the conversational patch preserves them, so this is the
+    explicit path that moves a schedule onto a newer agent version.
+    """
+
+    principal = _principal()
+    async with build(
+        settings=memory_settings(),
+        storage="memory",
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+        newer = _agent().model_copy(
+            update={"version": "2.0.0", "instructions": "Follow the newer instruction text."}
+        )
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(_agent())
+            await uow.agents.put(newer)
+        service = ScheduleService(
+            uow_factory=composition.uow_factory,
+            clock=composition.clock,
+            ids=composition.ids,
+            limits=_limits(),
+        )
+        materializer = ScheduleMaterializer(
+            uow_factory=composition.uow_factory,
+            principals=StaticSchedulePrincipalDirectory(principal),
+            admission=AllowScheduleAdmissionController(),
+            clock=composition.clock,
+            ids=composition.ids,
+            seed_checkpoint=DurableCheckpointSeeder(composition.clock),
+        )
+        created = await service.create(principal, _definition(), "repin-test")
+        schedule_id = created.schedule.id
+        first = await materializer.materialize(schedule_id)
+        assert first is not None and first.run_id is not None
+
+        with pytest.raises(NotFoundError):
+            await service.update(
+                principal, schedule_id, 1, _definition().model_copy(update={"agent_version": "9"})
+            )
+        with pytest.raises(ScheduleValidationError) as mismatch:
+            await service.update(
+                principal,
+                schedule_id,
+                1,
+                _definition().model_copy(
+                    update={"agent_version": "2.0.0", "policy_profile": "other"}
+                ),
+            )
+        assert mismatch.value.reason == "schedule.policy_profile_mismatch"
+
+        repinned = await service.update(
+            principal, schedule_id, 1, _definition().model_copy(update={"agent_version": "2.0.0"})
+        )
+        assert (repinned.revision.revision, repinned.revision.agent_version) == (2, "2.0.0")
+        assert repinned.schedule.next_fire_at is not None
+        async with composition.uow_factory() as uow:
+            await uow.runs.transition(first.run_id, RunStatus.QUEUED, RunStatus.RUNNING)
+            await uow.runs.transition(first.run_id, RunStatus.RUNNING, RunStatus.COMPLETED)
+        clock = composition.clock
+        assert isinstance(clock, FixedClock)
+        clock.advance(repinned.schedule.next_fire_at - NOW)
+        second = await materializer.materialize(schedule_id)
+        assert second is not None and second.run_id is not None and second.session_id is not None
+        assert second.schedule_revision == 2
+        async with composition.uow_factory() as uow:
+            first_run = await uow.runs.get(first.run_id, principal)
+            second_run = await uow.runs.get(second.run_id, principal)
+            second_session = await uow.sessions.get(second.session_id, principal)
+            original = await uow.schedules.get_revision(schedule_id, 1, principal)
+        assert first_run.agent_version == original.agent_version == "1.0.0"
+        assert second_run.agent_version == second_session.agent_version == "2.0.0"
