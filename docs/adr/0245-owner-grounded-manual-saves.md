@@ -26,16 +26,16 @@ although nothing had been asked.
 1. A `memory.remember` statement is raised to `USER` trust when it is
    owner-grounded: within the active turn (the newest owner-authored message
    and everything after it), the statement's content words are the owner's
-   own, none came only from an external or knowledge tool result of that
-   turn, at least sixty percent of them (and at least two) appear in the
-   owner's message, at most three are the model's own phrasing, and its
-   negations and modals, counted and each paired with the covered word it
-   qualifies, are exactly those of the one owner sentence it restates: none
-   added, dropped or moved, and none attributed when its words reach several
-   owner sentences (request framing such as "could you" or "don't forget" is set
-   aside only where it opens an owner sentence). These marker
-   words are judged apart from recall's function-word list, which drops the
-   modals, so ranking changes cannot relax provenance. The
+   own, none came only from an external or knowledge tool result of that turn,
+   at least sixty percent of them (and at least two) appear in the owner's
+   message, at most three are the model's own phrasing, and its negations,
+   modals and frequency words, counted and each paired with the covered words
+   it reaches in its clause, are exactly those of the one owner sentence it
+   restates: none added, dropped or moved, and none attributed when its words
+   reach several owner sentences (request framing such as "could you" or
+   "don't forget" is set aside only where it opens an owner sentence). These
+   marker words are judged apart from recall's function-word list, which drops
+   the modals, so ranking changes cannot relax provenance. The
    sixteen-character verbatim rule remains as it was. A message the owner did
    not author grounds nothing. The rule only raises and the turn's origin
    taint stands; the governed service's trust check is unchanged and refuses

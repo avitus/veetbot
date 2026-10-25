@@ -455,10 +455,10 @@ OWNER_GROUNDING_FREE_WORDS = 3
 OWNER_GROUNDING_MINIMUM_WORDS = 2
 
 
-# Words that carry a statement's polarity or modality. Recall ranking drops the
-# modals as function words, so provenance judges these on their own: a save may
-# neither introduce one the owner did not say nor drop one from the sentence it
-# restates ("I may transfer funds" never grounds "I will transfer funds").
+# Words that carry a statement's polarity, modality or frequency. Recall ranking
+# drops the modals as function words, so provenance judges these on their own: a
+# save may neither introduce one the owner did not say nor drop one from the
+# sentence it restates ("I may transfer funds" never grounds "I will transfer funds").
 _NEGATIONS = frozenset(
     {"not", "no", "never", "none", "nothing", "nobody", "nowhere", "neither", "nor", "without"}
 )
@@ -480,7 +480,23 @@ _MODALITY = frozenset(
         "possibly",
     }
 )
-_MEANING_MARKERS = _NEGATIONS | _MODALITY
+# How often, or how exclusively, a fact holds qualifies it as a negation does.
+_FREQUENCY = frozenset(
+    {
+        "always",
+        "usually",
+        "often",
+        "sometimes",
+        "occasionally",
+        "rarely",
+        "seldom",
+        "hardly",
+        "barely",
+        "scarcely",
+        "only",
+    }
+)
+_MEANING_MARKERS = _NEGATIONS | _MODALITY | _FREQUENCY
 _CONTRACTIONS = (
     (re.compile(r"\bcan't\b"), "can not"),
     (re.compile(r"\bwon't\b"), "will not"),
@@ -531,23 +547,30 @@ def _meaning_markers(text: str) -> Counter[str]:
     )
 
 
-def _anchored_markers(text: str, covered: set[str]) -> Counter[tuple[str, str | None]]:
-    """Each negation and modal paired with the first covered word after it, which it qualifies."""
+# Where a marker's reach ends: punctuation inside a sentence, or a word that
+# joins one clause to the next.
+_CLAUSE_TOKEN = re.compile(r"[^\W\d_]+|[,:\u2013\u2014]")
+_CLAUSE_JOINERS = frozenset(
+    {"and", "but", "or", "nor", "while", "whereas", "although", "though", "because", "yet"}
+)
 
-    words = _WORD.findall(_grounding_text(text))
-    anchored: Counter[tuple[str, str | None]] = Counter()
-    for index, word in enumerate(words):
-        if word in _MEANING_MARKERS:
-            anchor = next(
-                (
-                    later
-                    for later in words[index + 1 :]
-                    if later in covered and later not in _MEANING_MARKERS
-                ),
-                None,
-            )
-            anchored[(word, anchor)] += 1
-    return anchored
+
+def _scoped_markers(text: str, covered: set[str]) -> Counter[tuple[str, frozenset[str]]]:
+    """Each negation and modal paired with the covered words it reaches in its clause."""
+
+    tokens = _CLAUSE_TOKEN.findall(_grounding_text(text))
+    scoped: Counter[tuple[str, frozenset[str]]] = Counter()
+    for index, token in enumerate(tokens):
+        if token not in _MEANING_MARKERS:
+            continue
+        reach: set[str] = set()
+        for later in tokens[index + 1 :]:
+            if not later.isalpha() or later in _CLAUSE_JOINERS:
+                break
+            if later in covered and later not in _MEANING_MARKERS:
+                reach.add(later)
+        scoped[(token, frozenset(reach))] += 1
+    return scoped
 
 
 def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
@@ -559,12 +582,12 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     or in neither (the model's own phrasing). Grounded means no word came only
     from external content, most of the words are the owner's, the model's
     phrasing stays within a few words, and its negations and modals, counted and
-    each with the covered word it qualifies, are exactly those of the one owner
-    sentence it restates: none added, dropped or moved, none attributed when its
-    words reach several sentences. The
-    outcome is the same whether the save is proposed in the step that read the
-    web or a later one: the turn's taint still marks the origin; only the
-    statement's own provenance lifts it.
+    each with the covered words it reaches in its clause, are exactly those of
+    the one owner sentence it restates: none added, dropped or moved, none
+    attributed when its words reach several sentences. The outcome is the same
+    whether the save is proposed in the step that read the web or a later one:
+    the turn's taint still marks the origin; only the statement's own
+    provenance lifts it.
     """
 
     user_texts: list[str] = []
@@ -594,16 +617,16 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     # words (marker words never link one in). A negation or modal is attributed
     # only when exactly one such sentence exists: with two, a shared word ("grow")
     # leaves it ambiguous which fact the marker qualifies, and nothing is raised.
-    # Each marker is compared with the covered word it qualifies, so moving a
-    # negation onto another fact of the same sentence is a change, not a match.
-    stated = _anchored_markers(statement, covered)
+    # Each marker is compared with the covered words it reaches in its clause, so
+    # moving a negation onto another fact of the same sentence is a change.
+    stated = _scoped_markers(statement, covered)
     candidates = [
         sentence
         for sentence in _owner_sentences(" ".join(user_texts))
         if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered
     ]
     markers_match = not (stated or any(_meaning_markers(c) for c in candidates)) or (
-        len(candidates) == 1 and _anchored_markers(candidates[0], covered) == stated
+        len(candidates) == 1 and _scoped_markers(candidates[0], covered) == stated
     )
     return (
         not tainted

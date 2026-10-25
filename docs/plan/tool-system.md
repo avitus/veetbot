@@ -595,10 +595,12 @@ split into those the owner's message contains, those found only in an
 external or knowledge tool result of the turn, and those in neither; the
 statement is grounded when no word came only from external content, at least
 sixty percent of its words (and at least two) are the owner's, at most
-three are the model's own phrasing, and its negations and modals, counted
-and each paired with the covered word it qualifies (the first one after it),
-are exactly those of the owner sentence it restates: none added, none
-dropped (one of two negations included), none moved onto another fact. Where a negation or modal is
+three are the model's own phrasing, and its negations, modals and frequency
+words ("always", "rarely", "only"), counted and each paired with the covered
+words it reaches (those after it up to the
+end of its clause: a comma, colon, dash, or a joining word such as "and" or
+"but"), are exactly those of the owner sentence it restates: none added,
+none dropped (one of two negations included), none moved onto another fact. Where a negation or modal is
 involved, the statement's other covered words must reach exactly one owner
 sentence; when a shared word reaches several, which fact the marker
 qualifies is ambiguous and nothing is raised. Request framing such as "could you" or "don't forget"

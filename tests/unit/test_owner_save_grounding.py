@@ -220,6 +220,23 @@ QUIET_WEB = "Weather today is mild with light wind."
             "Remember that I may sell the car and I will keep the bike.",
             "I will sell the car and I may keep the bike.",
         ),
+        # A shared verb is not the whole fact: the marker's scope runs to the end of
+        # its clause.
+        (
+            "Remember that I never grow roses, but I grow tulips.",
+            "I never grow tulips, but I grow roses.",
+        ),
+        (
+            "Remember that I never grow roses in pots, but I grow roses in beds.",
+            "I never grow roses in beds, but I grow roses in pots.",
+        ),
+        # Frequency and limitation qualify a fact as a negation does.
+        ("Remember that I rarely eat pork at home.", "I eat pork at home."),
+        ("Remember that I eat pork at home on Sundays.", "I only eat pork at home on Sundays."),
+        (
+            "Remember that I always take the train to work.",
+            "I sometimes take the train to work.",
+        ),
     ],
 )
 def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
@@ -246,6 +263,7 @@ def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
         ("Please, don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
         # Each fact restated on its own keeps its owner sentence's negation.
         ("Remember that I never eat pork. I never drink wine.", "I never drink wine."),
+        ("Remember that I always take the train to work.", "Andy always takes the train to work."),
     ],
 )
 def test_a_statement_that_keeps_negation_and_modality_stays_grounded(
