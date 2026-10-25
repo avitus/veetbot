@@ -34,6 +34,7 @@ from agent_core.context.rendering import (
 )
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.browser import WEBSITE_OFFER_STATE_KEY
 from agent_core.domain.cache import session_cache_key
 from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure, WorkingState
 from agent_core.domain.errors import ContextOverflow
@@ -472,6 +473,7 @@ class BudgetedContextBuilder:
         working_items = working_state_items(state)
         working_tokens = self._estimator.estimate(envelope_items(working_items), plan.model_id)
         working_state_over_cap = working_tokens > plan.budget.working_state_tokens
+        website_offer = _website_offer_field(checkpoint.working_state.get(WEBSITE_OFFER_STATE_KEY))
         runtime_item = UserMessage(
             content=[
                 TextPart(
@@ -481,6 +483,7 @@ class BudgetedContextBuilder:
                         f"tenant={run.tenant_id}; "
                         f"scopes={','.join(sorted(principal.scopes))}"
                         f"{_browser_origins_field(plan.browser_origins)}"
+                        f"{website_offer}"
                     )
                 )
             ],
@@ -1078,6 +1081,36 @@ class BudgetedContextBuilder:
 
 # ADR-0130: the runtime metadata row names at most this many browser origins.
 MAXIMUM_RENDERED_BROWSER_ORIGINS = 16
+
+
+def _website_offer_field(raw: object) -> str:
+    """ADR-0251: what a chat without the named website can do about it.
+
+    Facts only, from the admitted checkpoint; never a profile ID.
+    """
+
+    if not isinstance(raw, dict):
+        return ""
+    offered = [origin for origin in raw.get("offered", ()) if isinstance(origin, str)]
+    connected = raw.get("connected")
+    if not offered:
+        if connected is not None:
+            return ""
+        return (
+            "; website=none (no saved website login is connected to this chat; "
+            "the owner connects one from Website Access in this chat)"
+        )
+    shown = ",".join(offered[:MAXIMUM_RENDERED_BROWSER_ORIGINS])
+    if isinstance(connected, str):
+        where = f"this chat is connected to {connected} instead"
+        button = "a Switch button that moves this chat to it"
+    else:
+        where = "not connected to this chat"
+        button = "a Connect button that connects it to this chat"
+    return (
+        f"; website_offer={shown} (a saved website login the owner named; {where}; "
+        f"the app shows the owner {button} and continues this request)"
+    )
 
 
 def _browser_origins_field(origins: tuple[str, ...]) -> str:

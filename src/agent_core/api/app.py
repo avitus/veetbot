@@ -330,6 +330,8 @@ class MessageRequest(BaseModel):
 class ConnectBrowserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     browser_profile_id: UUID
+    # ADR-0251: accepting an open offer also continues the owner's request.
+    offer_id: UUID | None = None
 
 
 class OwnerMessageRequest(MessageRequest):
@@ -832,9 +834,21 @@ def create_app(
         authenticated: Annotated[Principal, secured("session.write")],
     ) -> dict[str, object]:
         resumed = await services.runs.connect_browser(
-            authenticated, session_id, body.browser_profile_id
+            authenticated, session_id, body.browser_profile_id, offer_id=body.offer_id
         )
         return {"run_id": str(resumed.run_id) if resumed else None}
+
+    @app.get(
+        "/v1/sessions/{session_id}/website-offer",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def read_session_website_offer(
+        session_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> dict[str, object]:
+        """ADR-0251: the open offer to connect a website the owner named."""
+        offer = await services.runs.website_offer(authenticated, session_id)
+        return {"offer": None if offer is None else offer.model_dump(mode="json")}
 
     @app.get(
         "/v1/sessions/{session_id}/messages",

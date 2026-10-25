@@ -121,6 +121,7 @@ from agent_core.domain.views import (
     StreamFrame,
     SubmitResult,
     TestNotificationResult,
+    WebsiteOfferView,
 )
 from agent_core.ports.cockpit import CockpitAsset
 
@@ -155,8 +156,17 @@ class SessionService(Protocol):
 
 class RunService(Protocol):
     async def connect_browser(
-        self, principal: Principal, session_id: UUID, profile_id: UUID
+        self,
+        principal: Principal,
+        session_id: UUID,
+        profile_id: UUID,
+        *,
+        offer_id: UUID | None = None,
     ) -> SubmitResult | None: ...
+
+    async def website_offer(
+        self, principal: Principal, session_id: UUID
+    ) -> WebsiteOfferView | None: ...
 
     async def submit(
         self,

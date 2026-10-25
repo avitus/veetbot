@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.browser import BrowserProfileStatus
 from agent_core.domain.browser_task_grants import BrowserTaskGrantOffer, TaskGrantNotCovered
 from agent_core.domain.devices import (
     DeviceInvocationStatus,
@@ -128,6 +129,22 @@ class SessionMessageView(BaseModel):
     sequence: int = Field(ge=1)
     role: Literal["user", "assistant"]
     content: list[ContentBlock] = Field(min_length=1)
+
+
+class WebsiteOfferProfileView(BaseModel):
+    profile_id: UUID
+    origins: list[str] = Field(min_length=1)
+    status: BrowserProfileStatus
+
+
+class WebsiteOfferView(BaseModel):
+    """ADR-0251: an open offer to connect a website the owner named."""
+
+    offer_id: UUID
+    source_sequence: int = Field(ge=1)
+    connected_origin: str | None
+    websites: list[WebsiteOfferProfileView] = Field(min_length=1)
+    expires_at: datetime
 
 
 class SubmitResult(BaseModel):

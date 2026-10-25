@@ -5100,6 +5100,7 @@ async def _compose(
             resolve_open_question=working_state.resolve_question,
             trajectory_export_enabled=trajectory_export_enabled,
             live_events=live_events,
+            offers_websites=isinstance(browser_provider, SessionBoundHostedBrowserProvider),
         )
         browser_continuation = BrowserContinuationService(
             uow_factory=uow_factory,
