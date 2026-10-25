@@ -401,6 +401,28 @@ async def test_a_busy_day_drops_the_oldest_runs_not_what_is_running_or_next() ->
     ]
 
 
+async def test_a_running_occurrence_survives_a_full_page_of_upcoming_runs() -> None:
+    """Twelve upcoming runs must not crowd out what is running right now."""
+    schedules = [_schedule(n, next_at=NOW + timedelta(minutes=10 * n)) for n in range(1, 13)]
+    schedules.append(_schedule(13, next_at=None))
+    revisions = {_id(n): _revision(n, f"Job {n}") for n in range(1, 14)}
+    occurrences = [_occurrence(150, 13, hours_ago=0.25, run=250)]
+    uow = SimpleNamespace(
+        schedules=FakeSchedules(schedules, revisions),
+        schedule_occurrences=FakeOccurrences(occurrences),
+        runs=FakeRuns(runs={_id(250): _run(250, RunStatus.RUNNING)}),
+    )
+    source = SchedulesSource()
+    data = await source.read(uow, OWNER, NOW)
+    _fits(source, data)
+    states = [item["state"] for item in data["items"]]
+    assert len(states) == 12
+    assert states[0] == "now"
+    assert data["items"][0]["id"] == str(_id(150))
+    # The latest upcoming run gives way; the eleven soonest remain, in order.
+    assert [item["id"] for item in data["items"][1:]] == [f"next-{_id(n)}" for n in range(1, 12)]
+
+
 # Calls -------------------------------------------------------------------
 
 

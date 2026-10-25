@@ -385,11 +385,17 @@ class SchedulesSource:
                     )
                 )
         dated.sort(key=lambda pair: (pair[0], pair[1]["id"]))
-        # A busy day drops its oldest runs first, never what is next or paused.
+        # Paused and running items always show. Upcoming runs fill what is left,
+        # soonest first, and a busy day drops its oldest settled runs first.
         past = [item for at, item in dated if at <= now]
         upcoming = [item for at, item in dated if at > now]
-        kept = max(0, _SCHEDULE_ITEMS - len(upcoming) - len(paused))
-        items = past[len(past) - kept :] + upcoming + paused
+        running = [item for item in past if item["state"] == "now"]
+        room = max(0, _SCHEDULE_ITEMS - len(paused) - len(running))
+        upcoming = upcoming[:room]
+        settled = [item for item in past if item["state"] != "now"]
+        kept = max(0, room - len(upcoming))
+        retained = {id(item) for item in (*running, *settled[len(settled) - kept :])}
+        items = [item for item in past if id(item) in retained] + upcoming + paused
         return {**counts, "paused": len(paused), "items": items[:_SCHEDULE_ITEMS]}
 
     @staticmethod
