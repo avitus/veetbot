@@ -7,7 +7,7 @@ from datetime import datetime
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailRecord, EmailThread
 from agent_core.domain.email_junk import (
-    JunkPilot,
+    JunkAuthorization,
     JunkPilotUnavailableError,
     PilotAdmission,
     PilotDay,
@@ -21,7 +21,7 @@ async def admit_pilot(
     store: EmailStore,
     principal: Principal,
     thread: EmailThread,
-    pilot: JunkPilot,
+    pilot: JunkAuthorization,
     now: datetime,
 ) -> None:
     """Commit a new slot in the same locked transaction as the bypass assessment."""

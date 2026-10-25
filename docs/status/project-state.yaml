@@ -2317,6 +2317,7 @@ milestones:
       - USD 20 per UTC day and USD 200 per rolling thirty days for aggregate automatic email work
       - a default-off Jev junk first pass, with shadow evaluation and independently reviewed calibration before bypass (ADR-0203, authorized 2026-10-14)
       - a separate seven-day owner-reviewed work-account Jev pilot, capped at fifty new bypasses per UTC day; implementation and production activation explicitly approved 2026-10-14 (ADR-0204)
+      - standing owner-reviewed work-account junk filtering authorized 2026-10-24 after 198 confirmed bypasses; same protections and daily cap, no calendar expiry (ADR-0244)
       - an offline, non-activating importance replay comparing the production assessor with a typed-judgment arm (ADR-0110); it cannot satisfy or waive a Milestone 26 gate
     deferred_scope:
       - unattended monitoring, Gmail push, scheduled digests and interval scheduling

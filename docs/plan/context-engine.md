@@ -934,8 +934,8 @@ Only an explicit complete dependency revision permits completed-result reuse;
 missing or failed revision validation discards retained evidence and reads again.
 The bounded semantic cache retains query vectors, never recalled source content.
 
-Automatic base and delta retrieval share a ten-second monotonic time allowance
-per assembly, shortened to the run's remaining deadline. This outer bound also
+Session-scope lookup and automatic base/delta recall share a ten-second monotonic
+allowance per assembly, shortened to the run's remaining deadline. This bound also
 applies when optional semantic preparation is disabled; it never renews or
 replaces a stricter runtime search permit. A timed-out read is cancelled and
 awaited, not detached or retried. Base timeout supplies a fixed limitation marker

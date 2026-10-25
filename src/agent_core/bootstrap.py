@@ -4598,7 +4598,13 @@ async def _compose(
             policy_version=ruleset.policy_version,
         )
 
-        from agent_core.domain.email_junk import EmailJunkMode, JunkCalibration, JunkPilot
+        from agent_core.domain.email_junk import (
+            EmailJunkMode,
+            JunkAuthorization,
+            JunkCalibration,
+            JunkPilot,
+            JunkStandingAuthorization,
+        )
         from agent_core.runtime.email_junk import EmailJunkFilter
 
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
@@ -4625,17 +4631,26 @@ async def _compose(
                 # checking current authority; disabled mode grants no new write.
             junk_admitted = False
             junk_digest = "none"
-            junk_pilot = None
+            junk_pilot: JunkAuthorization | None = None
             if (
-                settings.email_junk_filter_mode in {EmailJunkMode.FILTER, EmailJunkMode.PILOT}
+                settings.email_junk_filter_mode
+                in {EmailJunkMode.FILTER, EmailJunkMode.PILOT, EmailJunkMode.OWNER_FILTER}
                 and settings.email_junk_filter_evidence
             ):
                 try:
                     with settings.email_junk_filter_evidence.open("rb") as evidence_file:
                         raw_junk_evidence = evidence_file.read(2_000_001)
                     if len(raw_junk_evidence) <= 2_000_000:
-                        if settings.email_junk_filter_mode == EmailJunkMode.PILOT:
-                            candidate = JunkPilot.model_validate_json(raw_junk_evidence)
+                        if settings.email_junk_filter_mode in {
+                            EmailJunkMode.PILOT,
+                            EmailJunkMode.OWNER_FILTER,
+                        }:
+                            packet_type = (
+                                JunkPilot
+                                if settings.email_junk_filter_mode == EmailJunkMode.PILOT
+                                else JunkStandingAuthorization
+                            )
+                            candidate = packet_type.model_validate_json(raw_junk_evidence)
                             if candidate.admitted(context.principal, "work", context.clock.now()):
                                 junk_pilot = candidate
                         else:

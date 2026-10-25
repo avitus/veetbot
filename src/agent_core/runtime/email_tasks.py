@@ -37,7 +37,7 @@ from agent_core.domain.email import (
     body_cutoff,
     retained_thread,
 )
-from agent_core.domain.email_junk import JUNK_PILOT_POLICY, JunkPilotUnavailableError, junk_request
+from agent_core.domain.email_junk import JunkPilotUnavailableError, junk_request
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
 from agent_core.domain.email_semantics import (
     EmailSemanticFact,
@@ -1641,7 +1641,9 @@ class _TaskIO:
                         "grounded": False,
                         "junk_screen": receipt,
                         "junk_bypassed": True,
-                        "junk_pilot_policy": JUNK_PILOT_POLICY if self.junk_filter.pilot else None,
+                        "junk_pilot_policy": (
+                            self.junk_filter.pilot.policy if self.junk_filter.pilot else None
+                        ),
                         "junk_filter_revision": self.junk_filter.revision,
                         "assessment_context": learning.get("assessment_context"),
                         "profile_revision": int(str(learning.get("profile_revision", 0))),

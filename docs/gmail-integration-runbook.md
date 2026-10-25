@@ -908,3 +908,34 @@ rotation restores full assessments on subsequent refreshes. Set mode `off` and
 restart the same roles for immediate operator revocation. Do not renew or widen
 the pilot without new owner-reviewed evidence and authorization. This pilot
 neither completes Milestone 26 nor establishes general-rollout readiness.
+
+### Standing work-account filtering (ADR-0244)
+
+After the owner reviewed all 198 pilot bypasses as junk and explicitly authorized
+permanent production on October 24, `owner_filter` provides a separate standing
+permission. It preserves the same work-account scope, protections, raw-choice
+rule and fifty-new-bypasses-per-UTC-day cap, without a calendar expiry. It does
+not activate the general calibrated filter or establish recall/retained-mail quality.
+
+Build a private content-free `JunkStandingAuthorization` packet with `policy:
+JUNK_STANDING_POLICY`, `model: JUNK_MODEL`, the approved `tenant_id`,
+`principal_id`, `account_id: work`, aware `authorized_at`, and `sample:
+owner_reviewed_complete_pilot`. `initial_observations` contains the original
+selected-inbox labels; `bypass_observations` contains the independently reviewed
+pilot bypasses. Each uses the pilot's fingerprint/category/label/source shape.
+At least 43 initial classifications (twenty junk nominations, seven legitimate
+keeps, no false positives) and 198 unique correct bypasses are required. Never
+invent labels or replace these cohorts with model-generated agreement.
+
+After the reviewed release is deployed, validate the packet with
+`JunkStandingAuthorization.model_validate_json` and
+`admitted(principal, "work", now)` from that release. Install it outside the
+repository with operator/service-only read permissions, retain the expired pilot
+packet, and set `AGENT_EMAIL_JUNK_FILTER_MODE=owner_filter` with
+`AGENT_EMAIL_JUNK_FILTER_EVIDENCE` pointing to the standing packet. Restart and
+verify the same four roles listed above. Verify a bounded refresh and unchanged
+shared `junk_pilot_day`/`junk_pilot_admission` accounting; switching mode never
+resets the cap. Missing, malformed, future-dated or policy/model-mismatched
+permission stops new calls. A model/question change requires newly reviewed
+matching evidence. Roll back with `off` and restart the four roles; cached mail
+returns to ordinary assessment through subsequent bounded refreshes.

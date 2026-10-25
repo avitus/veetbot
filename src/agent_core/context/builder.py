@@ -881,9 +881,12 @@ class BudgetedContextBuilder:
         try:
             # Recall is scoped to the session's project: a belief learned in
             # another one is carried in and demoted, never silently local.
-            scope = (
-                None if self._session_scope is None else await self._session_scope(run.session_id)
-            )
+            async with asyncio.timeout_at(deadline):
+                scope = (
+                    None
+                    if self._session_scope is None
+                    else await self._session_scope(run.session_id)
+                )
             queries = [
                 bounded
                 for query in self._query_former.form(run, state, message, current_scope=scope)

@@ -135,6 +135,35 @@ async def test_caller_cancellation_is_not_a_recall_timeout() -> None:
     assert not retriever.correction_calls
 
 
+async def test_slow_scope_lookup_shares_recall_deadline_and_keeps_corrections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import UUID
+
+    monkeypatch.setattr(context_builder, "AUTOMATIC_RECALL_SECONDS", 0.01)
+    stopped = False
+
+    async def slow_scope(session_id: UUID) -> str:
+        nonlocal stopped
+        try:
+            await asyncio.sleep(0.06)
+        except asyncio.CancelledError:
+            stopped = True
+            raise
+        return "project-a"
+
+    retriever = _Retriever()
+    builder = _builder(retriever)
+    builder._session_scope = slow_scope
+    request = await builder.build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+    assert stopped, "the optional scope lookup outlived the shared recall allowance"
+    assert not retriever.queries
+    assert _correction_line() in request.model_dump_json()
+    assert "time allowance" in request.model_dump_json()
+
+
 async def test_browser_run_answers_after_slow_recall_without_replaying_or_prompting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
