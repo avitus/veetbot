@@ -1794,3 +1794,26 @@ This monitor cannot deliver when PostgreSQL, the host or the notification path
 is down. Retain an independent external uptime/dead-man channel and complete
 Milestone 15's backup/restore and host-hardening work. Deployment and activation
 are separate from branch implementation; neither is implied by passing tests.
+
+### Recall health and owner recall probes
+
+`agent memory health --hours 336 --json`, run from the protected owner operator
+environment like the reliability report, reads only the database and prints
+content-free recall aggregates: runs with delivered recall and with citations,
+returned and dropped-for-budget items by class, recall latency, store
+composition, lifecycle events by authority, and semantic index coverage. Read it
+before and after a retrieval change and after a deploy; a citation rate of zero
+with delivered runs above zero means the model is not emitting the citation
+form, and a dropped-for-budget share dominated by one class names the ranking
+lever to look at.
+
+`agent memory probe --probes PATH --output PATH [--paths automatic,deliberate]
+[--live-model]` replays incident probes through the run loop. It refuses
+production and any database not named `veetbot_recall_probe_<name>`: restore an
+owner-authorized `pg_dump --no-owner` of production into such a clone first.
+The owner-private probe file lives at
+`/etc/veetbot/recall/probes/owner-probes.v1.jsonl`, root-owned and mode `0600`,
+never in Git; the report it writes holds identifiers, stages, ranks and
+latencies only. Without `--live-model` the answer is scripted, so the Used stage
+and answer correctness are not judged; with it the configured model answers and
+costs apply.

@@ -45,6 +45,11 @@ class FakeModelProvider:
         self.attempts: list[ModelAttempt] = []
         self.requests: list[ModelRequest] = []
 
+    def rewind(self) -> None:
+        """Start the script over for the next run; recorded attempts and requests stay."""
+
+        self._index = 0
+
     async def stream(
         self,
         request: ModelRequest,

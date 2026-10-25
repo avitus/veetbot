@@ -162,6 +162,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryTrajectoryProjectionRepository,
     InMemoryUsageRepository,
 )
+from agent_core.adapters.persistence.memory_health_report import memory_health_report
 from agent_core.adapters.persistence.memory_repositories import (
     PostgresIntegratedEpisodeStore,
     PostgresKnowledgeStore,
@@ -612,6 +613,7 @@ from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
 from agent_core.observability.logging import configure_logging
+from agent_core.observability.memory_health import MemoryHealthReport
 from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.reliability import ReliabilityReport, ReliabilityThresholds
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
@@ -1301,6 +1303,33 @@ def system_clock() -> Clock:
 def random_ids() -> IdFactory:
     """Supply opaque identities to offline commands without a full composition."""
     return RandomIdFactory()
+
+
+async def operator_memory_health(hours: int) -> MemoryHealthReport:
+    """Observe only the database: recall traces, usage events and the store."""
+
+    if not 1 <= hours <= 2160:
+        raise ValueError("Recall health windows must be between one hour and ninety days.")
+    settings = load_settings()
+    principal = Principal(
+        tenant_id="local" if settings.auth_mode.value == "dev" else settings.auth_tenant_id,
+        principal_id=(
+            "local-user" if settings.auth_mode.value == "dev" else settings.auth_principal_id
+        ),
+    )
+    engine = create_engine(settings.database_url)
+    try:
+        async with asyncio.timeout(60):
+            await assert_schema_revision(engine)
+            until = system_clock().now()
+            return await memory_health_report(
+                create_session_factory(engine),
+                until - timedelta(hours=hours),
+                until,
+                principal=principal,
+            )
+    finally:
+        await engine.dispose()
 
 
 async def operator_reliability(

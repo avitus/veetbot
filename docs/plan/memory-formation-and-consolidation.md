@@ -275,7 +275,7 @@ same-source shortcut is decided over every related belief before any of them is
 acted on, and re-consolidating a conflicted session is a no-op like any other
 replay. The rule and what a
 conflict then commits are stated in
-[memory-evaluation-and-lifecycle.md:923-948](memory-evaluation-and-lifecycle.md:923-948).
+[memory-evaluation-and-lifecycle.md:957-982](memory-evaluation-and-lifecycle.md:957-982).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".

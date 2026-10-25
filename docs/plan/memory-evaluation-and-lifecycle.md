@@ -844,6 +844,40 @@ The hook runs in `complete_run_resources`, after the formation flag, only for a
 completed run with a final message, in its own error boundary, over sequential
 units of work with no external call inside a transaction.
 
+## Recall health report
+
+`agent memory health --hours N [--json]` answers "is recall delivering what
+the store holds?" from the database alone, the way `agent run reliability`
+reports run outcomes: one read-only, repeatable-read transaction with a
+ten-second statement bound, scoped to the authenticated owner, over a window
+of at most ninety days. It reads recall traces, the `memory.recalled`,
+`memory.delivered` and `memory.cited` events, the lifecycle events, the
+memory rows and the semantic index tables, and reports counts, shares and
+latencies only: no statement, query or identifier leaves the database.
+
+The report's primary signals are what reached the model and what did not:
+runs with recall, runs with a delivered block, returned and dropped-for-budget
+items by class (flagged, provisional, source-learned, owner-authority), p50
+and p95 recall latency and traces over one second, the store's composition
+(live, active, provisional, flagged, owner-authority, never used, with
+versioned counters), lifecycle events in the window by authority with the
+lowest confidence they touched, and the share of live beliefs the semantic
+index covers at their current revision with the newest index job's
+generation, state and failed-page count. Citation figures — runs with a
+citation, citations, charges, ambiguous identifiers — are diagnostics of the
+usage loop, never a quality gate: a correct answer may need no citation and a
+wrong one may cite perfectly.
+
+Owner recall probes (`agent memory probe`, `owner-recall-probes@1`) are the
+other half of the picture: fabricated or owner-private analogues of real
+incidents replayed through the composed run loop against a database clone,
+reporting per expected belief the furthest stage it reached — Saved, Stored,
+Eligible, Candidate, Ranked, Packed, Delivered, Used — and the primary
+outcomes of expected evidence delivered, facts missed, wrong or outdated
+recall and refused owner saves. Probe files are never the frozen Milestone 16
+or 33 controls, their reports are not activation or release evidence, and the
+driver refuses production and any database not named for the purpose.
+
 ## The recall delta and correction lines
 
 The snapshot is frozen at session open, so a belief formed or corrected later
@@ -1016,7 +1050,12 @@ Track:
   license, sample, and local-file digest that produced it;
 - decay sweeps, beliefs decayed and retired, and citations recorded;
 - conflicts committed and confirmations requested;
-- trace operator-tier expiries.
+- trace operator-tier expiries;
+- the recall health report's shares: runs with delivered recall, runs with a
+  citation, beliefs charged for non-use, returned and dropped-for-budget
+  items by class (flagged, provisional, source-learned, owner-authority),
+  never-used live beliefs, and live beliefs the semantic index covers at
+  their current revision.
 
 Metrics carry no belief statement, no secret, and no local dataset path.
 
