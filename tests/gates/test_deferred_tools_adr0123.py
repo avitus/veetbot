@@ -49,6 +49,7 @@ from tests.gates.test_email_m18 import (
     _generated_gmail_discovery,
 )
 from tests.gates.test_email_unsubscribe_m31 import Transport
+from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 from tests.unit.test_deferred_tool_index import jsonb_key_order
 from tests.unit.test_svp_composition import _discovery as _svp_discovery
 from tests.unit.test_web_tools import FakeWebProvider
@@ -75,6 +76,21 @@ DISCOVERED_READS = frozenset(
     }
 )
 START_CALL = "mcp.bland_call.start_call"
+# Production's flags that the roster above leaves off, because each moves its
+# assertions: the hosted website browser, media generation, records and the Cockpit.
+WEBSITE_AND_LATER_FLAGS = MappingProxyType(
+    {
+        "BROWSER_PROVIDER": "hosted",
+        "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+        "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        "TENSORSCALE_API_KEY": "synthetic-media-credential",
+        "AGENT_RECORDS_ENABLED": "1",
+        "AGENT_COCKPIT_ENABLED": "1",
+    }
+)
+RECORDS_TOOLS = frozenset(
+    f"records.{tool}" for tool in ("list", "query", "append", "create_series", "delete")
+)
 SVP_READS = frozenset(
     f"mcp.svp_read.{tool}" for tool in ("list_operations", "describe_operation", "call_operation")
 )
@@ -238,6 +254,34 @@ async def test_the_cockpit_tools_are_index_entries_and_leave_the_definitions_alo
     assert set(cockpit.deferred_tool_names) - set(default.deferred_tool_names) == set(
         COCKPIT_TOOL_NAMES
     )
+
+
+async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path: Path) -> None:
+    """Production, 2026-10-25: once the Cockpit was on, a chat bound to a website
+    profile failed before its first step, its definitions over the token cap."""
+
+    _factory, context = await _production(
+        tmp_path,
+        [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)],
+        extra_environment=WEBSITE_AND_LATER_FLAGS,
+    )
+    async with context as app:
+        await seed_browser_authority(app)
+        created = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await app.runs.submit("Make me a Cockpit widget.", created.id)
+        terminal = await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=30)
+        plan = await app.executor._context_planner.current(created.id)
+
+    assert terminal.status is RunStatus.COMPLETED, terminal.failure
+    assert plan is not None
+    # ADR-0130: the bound chat still defines its browser tools.
+    assert set(plan.tool_names) >= {"browser.navigate", "browser.observe", "browser.act"}
+    # The configured tools past the token cap wait in the index (ADR-0123, 2026-10-25).
+    advertised = {*plan.tool_names, *plan.deferred_tool_names}
+    assert advertised >= {*COCKPIT_TOOL_NAMES, *RECORDS_TOOLS}
+    assert "records.append" in plan.deferred_tool_names
 
 
 async def test_the_production_plan_renders_its_prefix_again_from_jsonb(tmp_path: Path) -> None:

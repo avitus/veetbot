@@ -609,7 +609,13 @@ class EventContextPlanner:
                 if len(selected_tools) >= maximum_tools:
                     overflow.append(tool)
                     continue
-                if tool.name not in configured_order:
+                # With tool.call, a configured definition past the token cap waits
+                # in the index like one past the item cap, so one more enabled
+                # tool cannot fail every chat. Required tools never move.
+                token_checked = tool.name not in configured_order or (
+                    control is not None and tool.name not in required_names
+                )
+                if token_checked:
                     proposed = sorted([*selected_tools, tool], key=lambda item: item.name)
                     proposed_prefix = build_prefix(agent, proposed)
                     token_count = self._estimator.estimate(
@@ -618,8 +624,9 @@ class EventContextPlanner:
                     if token_count > maximum_tool_tokens:
                         overflow.append(tool)
                         continue
-                # Explicit capabilities still fail at plan time if they cannot fit.
-                # Discovery fills only the remaining item and token capacity.
+                # Without tool.call, explicit capabilities still fail at plan time
+                # if they cannot fit, as do required ones. Discovery fills only the
+                # remaining item and token capacity.
                 selected_tools.append(tool)
             return selected_tools, overflow
 
