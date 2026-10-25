@@ -2,7 +2,7 @@
 
 - Status: Accepted by the owner on 2026-10-25 with both recommended choices (a
   card, never automatic connection; an offer expires at the next owner message
-  or 24 hours after its source message); implementation pending
+  or 24 hours after its source message); implemented 2026-10-25, delivery pending
 - Date: 2026-10-25
 - Amended: 2026-10-25, with the implementation. The source run's row states
   facts only, matching the existing "data only" runtime row: the login is
