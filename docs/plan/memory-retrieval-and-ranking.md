@@ -520,9 +520,14 @@ Rendering rules exist to protect the cache and the trust boundary:
   counters. The only timestamp is the fixed `as_of`. A snapshot for the same belief set
   must render byte-identically or the cache breaks.
 - **Framing lives in the stable prefix, not in the block.** The instruction that these
-  are recollections which may be stale, that the current turn outranks them, and that
-  the model should cite an id when it relies on one, is platform text in the cached
-  prefix. Only the data varies.
+  are recollections, that a line marked user or affirmed is the owner's own statement
+  to use directly and never to ask the owner to restate, that a tentative or
+  hypothesis line carries exactly the uncertainty its marker states, that a
+  recollection yields to the current conversation only where the owner contradicts
+  it, and that the model should cite an id when it relies on one, is platform text in
+  the cached prefix: the framing row of Region A since `context-builder@14`
+  ([context-engine.md](context-engine.md)). Only the data varies. Until that row
+  carried the instruction, production recorded no citation at all.
 - **Carried beliefs are attributed.** A belief recalled outside its origin project
   renders with `(learned in <project>)`. Attribution is part of the data, not a
   footnote — an unattributed carried belief is a false-transfer bug.
@@ -543,8 +548,15 @@ Retrieval then feeds back into formation, in both directions:
   that the belief remains true. Milestone 21 supersedes the earlier single
   reinforcement-clock behavior through
   [adaptive memory distillation](adaptive-memory-distillation.md).
-- **Retrieved-but-never-used** lowers `utility`, so a belief that keeps winning the
-  ranking without ever mattering stops winning it.
+- **Delivered-but-never-used** lowers `utility`, so a belief that keeps winning the
+  ranking without ever mattering stops winning it. Delivered, not returned: the
+  runtime records which recall blocks reached each model request
+  (`memory.delivered`), and only beliefs in those blocks take the charge. A block
+  the builder dropped under pressure and the frozen snapshot in the prefix were
+  never an offer the answer declined. Each delivered belief also gains one
+  `delivered_count` and each cited belief one `cited_count` under
+  `usage-accounting@2`; lifecycle reads those counters, never the legacy `utility`
+  ([memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)).
 - **Recall misses are a formation signal.** A subject that is repeatedly queried and
   repeatedly returns nothing above the floor is queued as a targeted re-derivation
   hint for the formation loop (formation stage 8). The read path tells the write path

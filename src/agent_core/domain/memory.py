@@ -15,6 +15,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    NonNegativeInt,
     PositiveInt,
     field_validator,
     model_validator,
@@ -24,6 +25,12 @@ from agent_core.domain.events import EventEnvelope, ProcessEvent
 from agent_core.domain.memory_sources import RecalledSource, SourceRecoveryObservation
 from agent_core.domain.messages import ReasoningEffort
 from agent_core.domain.people_extraction import InteractionEvidence, PeopleClaim
+
+# The exposure-accounting version stamped on a belief the first time its
+# delivery or citation counters move. Counters under an older or absent version
+# are not evidence of non-use: legacy utility was charged for ambient snapshot
+# members on every run and never reset.
+USAGE_ACCOUNTING_VERSION = "usage-accounting@2"
 
 
 class MemoryStatus(StrEnum):
@@ -685,6 +692,13 @@ class MemoryRecord(BaseModel):
     consolidation_policy_version: str = Field(min_length=1)
     authority: MemoryAuthority
     utility: float = Field(default=0, ge=-1, le=1)
+    # Versioned exposure counters (usage-accounting@2): one delivery per run in
+    # which the belief reached the model request, one citation per run whose
+    # answer used it. Legacy `utility` keeps feeding the ranking; lifecycle
+    # decisions read these, which start at the accounting version's deploy.
+    delivered_count: NonNegativeInt = 0
+    cited_count: NonNegativeInt = 0
+    usage_accounting_version: str | None = None
     store_position: PositiveInt
     created_at: datetime
     updated_at: datetime

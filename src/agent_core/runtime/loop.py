@@ -1063,6 +1063,23 @@ async def _invoke_model(
                 ),
             },
         )
+        if attempt_request.recall_ranking is not None and attempt_request.recall_ranking.blocks:
+            # The recall blocks that survived budgeting and reached this model
+            # request are the only recollections the answer can be charged
+            # for ignoring: the usage feedback reads this, never a trace's
+            # returned set, which a dropped block or the prefix snapshot can
+            # hold without the model ever seeing it.
+            await _append_event(
+                context,
+                "memory.delivered",
+                {
+                    "attempt_id": str(attempt.attempt_id),
+                    "step_number": step.step_number,
+                    "trace_ids": [
+                        str(block.trace_id) for block in attempt_request.recall_ranking.blocks
+                    ],
+                },
+            )
         expected_sequence = 0
         terminal: ModelCompletedEvent | ModelFailedEvent | None = None
         if context.uow_factory.is_open():

@@ -112,7 +112,7 @@ the prose: an affirmed entry knows its belief, an owner-typed entry knows it
 was typed, and no flat-string representation could carry either.
 
 Every entry carries `USER` authority in the sense the lifecycle design ranks
-it (memory-evaluation-and-lifecycle.md:918): owner-typed text by authorship,
+it (memory-evaluation-and-lifecycle.md:928): owner-typed text by authorship,
 affirmed text because affirmation is a direct owner statement about the
 belief. Writes are guarded by `expected_version`: a write naming any version
 but the current head is a `conflict` and changes nothing.

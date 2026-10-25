@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:868), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:880), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:814-816).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:323-325), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:910-913),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:922-925),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:905), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:917), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:841) are
 all written down, and none of them runs.
 
@@ -822,10 +822,20 @@ arm would otherwise credit whatever it recalled. A cited belief's `utility`
 rises by
 `usage.cited_utility_delta` to a ceiling of 1 and its `last_used_at`
 moves to now; `last_evidence_at` and the compatibility-only
-`last_reinforced_at` do not move. A returned-but-uncited belief's `utility` falls by
-`usage.uncited_utility_delta` to a floor of -1. Neither ever touches
+`last_reinforced_at` do not move. A delivered-but-uncited belief's `utility` falls by
+`usage.uncited_utility_delta` to a floor of -1, where delivered means the runtime
+recorded the trace's block in a model request of that run (`memory.delivered`,
+appended beside `model.request.started` with the delivered trace identifiers): a
+block the context builder dropped under pressure and the frozen prefix snapshot
+were never an offer the answer declined, so their members are never charged. A run
+with no delivery record charges nothing and still credits its citations. Each
+delivered belief gains one `delivered_count` and each cited belief one
+`cited_count`, both stamped `usage_accounting_version = usage-accounting@2` the
+first time they move; lifecycle decisions read these counters, never the legacy
+`utility`, which two months of per-run snapshot charges depressed and no wait can
+reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:910-913): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:922-925): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.

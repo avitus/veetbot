@@ -861,6 +861,16 @@ async def test_usage_feedback_marks_cited_and_never_raises_confidence(tmp_path: 
         citations = [event for event in events if event.event_type == "memory.cited"]
         assert [event.payload["cited"] for event in citations] == [[str(cited.id)]]
         assert citations[0].payload["uncited"] == [str(uncited.id)]
+        # The charge is for a recollection the model was actually shown: the
+        # runtime recorded which recall blocks reached the model request, and
+        # the citation event names those traces as the delivered set.
+        delivered = [event for event in events if event.event_type == "memory.delivered"]
+        assert delivered and delivered[0].run_id == run_id
+        assert set(citations[0].payload["delivered"]) == {
+            trace_id for event in delivered for trace_id in event.payload["trace_ids"]
+        }
+        assert beliefs[cited.id].delivered_count == 1 and beliefs[cited.id].cited_count == 1
+        assert beliefs[uncited.id].delivered_count == 1 and beliefs[uncited.id].cited_count == 0
 
         # The re-entrant completion path re-enters the hook with the same run.
         repeated = await composition.memory.record_usage(
