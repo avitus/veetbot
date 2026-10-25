@@ -636,7 +636,10 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
 - **Policy version.** The profile edit moves the content-addressed policy
   version. Pending approvals revalidate under the existing rule, and the step
   that makes the edit updates the pinned shipped version and names any
-  version-bound evidence it affects.
+  version-bound evidence it affects. The owner placed the edit in activation
+  on 2026-10-24. Provider-assisted formation's release evidence is bound to
+  the compiled policy version, so it is regenerated once there, on the new
+  version, rather than at each profile change before then.
 - **Where it is offered.** Session-environment filtering withholds the tool
   from scheduled, delegated, operational and email-task sessions. Widget
   writes happen in interactive chat with the owner.
@@ -1132,16 +1135,18 @@ and a runbook covering:
    privacy screen.** Gates 4 through 9.
 6. **The routes, the scopes, the flag, the cockpit channel and the stream.**
    Gates 14 and 15.
-7. **The tools, the `tool_rules` entry, session-environment filtering,
-   approval views and `kit.describe`, plus an evaluation in which a chat
-   request yields a valid committed widget.** Gates 10 and 11.
+7. **The tools, session-environment filtering, approval views and
+   `kit.describe`, plus an evaluation in which a chat request yields a valid
+   committed widget.** Gate 11.
 8. **The platform feed projector.**
 9. **The `ClientMode` refactor, as a pure refactor.**
 10. **The native Cockpit mode.** The web view sandbox, the stream, the Mac
     panel and iPad keep-awake. Gates 16 (hosted half) through 22.
 11. **Preview rendering.**
 12. **Activation.** The owner sets up the App, the rulesets, the credential
-    and the flag, and the assistant authors the seed widgets. Gate 23.
+    and the flag. The `tool_rules` entry lands with one regeneration of the
+    formation release evidence on the new policy version. The assistant
+    authors the seed widgets. Gates 10 and 23.
 
 Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
 
@@ -1190,11 +1195,12 @@ The evaluation runs the `approvals-waiting` reference package through the
 real publication path with a manifest-checking builder. A gate test holds the
 package identical to the reference widget the workspace's builder tests build.
 
-Three things remain:
+Two things remain:
 
-- The exact-name `tool_rules` entry is not in the shipped profile. Until it
-  is, the publication row asks the owner, and the evaluation approves once.
-- Gate 10 stays pending until that entry lands.
+- The exact-name `tool_rules` entry is not in the shipped profile. The owner
+  deferred it to activation on 2026-10-24, where the formation release
+  evidence is regenerated once. Until then the publication row asks the
+  owner, the evaluation approves once, and gate 10 stays pending.
 - Feed publishing from scheduled runs waits for `schedule.create` to request
   `cockpit.write`.
 

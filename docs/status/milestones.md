@@ -392,10 +392,9 @@ at the top of each Mac left pane, and Cockpit shows its unavailable state.
 Every other gate is pending.
 
 - [ ] Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image
-- [ ] Build step 7's policy rule: the exact-name tool_rules entry for cockpit.widget.write, which moves the policy version (the owner's decision); gate 10 waits for it
 - [ ] Build step 8: the platform feeds, and feed publishing from scheduled runs
 - [ ] Build steps 10 and 11: the native Cockpit mode (the Apple client shows only its unavailable state behind the three-mode switch) and preview rendering
-- [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the assistant's seed widgets; hosted CI, review and production delivery
+- [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; hosted CI, review and production delivery
 
 ## Outside a milestone
 
