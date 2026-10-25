@@ -9,6 +9,10 @@
 # with PNG previews, optional SVG/PDF and chart CSV through existing artifacts.
 # Implemented with focused sandbox/artifact/PNG-decoder evidence in ADR-0243.
 # Production delivery is pending; no milestone moves.
+# ADR-0251: Owner accepted on 2026-10-25 an app-offered card that connects an
+# unconnected chat to an owned website the owner names; a match never connects
+# by itself, and an offer expires at the next owner message or after 24 hours.
+# Implementation is pending; no milestone, gate or policy profile moves.
 schema_version: 1
 
 project:
