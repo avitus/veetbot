@@ -37,7 +37,13 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.cache import session_cache_key
 from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure, WorkingState
 from agent_core.domain.errors import ContextOverflow
-from agent_core.domain.memory import MemoryCorrection, RecallProfile, Sensitivity
+from agent_core.domain.memory import (
+    MemoryCorrection,
+    RecallProfile,
+    RecallQuery,
+    RecallResult,
+    Sensitivity,
+)
 from agent_core.domain.messages import (
     CacheBreakpoint,
     CacheHints,
@@ -74,6 +80,10 @@ TOOL_RESULT_TRUNCATION_BLOCKS = 4
 CATALOG_MAX_SERIES = 16
 CATALOG_ZONE = ZoneInfo("UTC")
 RECALL_CACHE_CAPACITY = 1_024
+AUTOMATIC_RECALL_SECONDS = 10.0
+RECALL_TIMED_OUT = (
+    "Automatic memory recall exceeded its time allowance. This does not mean no memory exists."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -848,6 +858,26 @@ class BudgetedContextBuilder:
 
         assert self._memory_retriever is not None
         assert self._query_former is not None
+        seconds = AUTOMATIC_RECALL_SECONDS
+        if run.deadline_at is not None:
+            seconds = min(seconds, max(0, (run.deadline_at - self._clock.now()).total_seconds()))
+        deadline = asyncio.get_running_loop().time() + seconds
+
+        async def recall(query: RecallQuery) -> RecallResult:
+            # Base and delta share one monotonic allowance, including time spent
+            # between them. Mandatory snapshot corrections are not optional reads.
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError
+            assert self._memory_retriever is not None
+            async with asyncio.timeout_at(deadline):
+                return await self._memory_retriever.recall(
+                    query,
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    turn_id=run.id,
+                    moment="in_turn",
+                )
+
         try:
             # Recall is scoped to the session's project: a belief learned in
             # another one is carried in and demoted, never silently local.
@@ -868,14 +898,11 @@ class BudgetedContextBuilder:
                     )
                 )
                 return _RecallBundle(corrections=tuple(exhausted_corrections))
-            base = await self._memory_retriever.recall(
-                queries[0],
-                session_id=run.session_id,
-                run_id=run.id,
-                turn_id=run.id,
-                moment="in_turn",
+            base = await recall(queries[0])
+        except (RecallBudgetExceededError, TimeoutError) as error:
+            limitation = (
+                EXHAUSTED if isinstance(error, RecallBudgetExceededError) else RECALL_TIMED_OUT
             )
-        except RecallBudgetExceededError:
             # Optional search exhaustion cannot hide mandatory frozen corrections.
             try:
                 exhausted_corrections = (
@@ -890,8 +917,8 @@ class BudgetedContextBuilder:
                     "context_memory_recall_failed",
                     extra={"run_id": str(run.id), "error_class": type(exc).__name__},
                 )
-                return _RecallBundle(base=EXHAUSTED)
-            return _RecallBundle(base=EXHAUSTED, corrections=tuple(exhausted_corrections))
+                return _RecallBundle(base=limitation)
+            return _RecallBundle(base=limitation, corrections=tuple(exhausted_corrections))
         except Exception as exc:
             logger.warning(
                 "context_memory_recall_failed",
@@ -930,7 +957,7 @@ class BudgetedContextBuilder:
             delta = (
                 None
                 if remaining <= 0 or remaining_items <= 0
-                else await self._memory_retriever.recall(
+                else await recall(
                     queries[0].model_copy(
                         update={
                             "profile": RecallProfile.CORE,
@@ -944,10 +971,6 @@ class BudgetedContextBuilder:
                             "exclude_ids": tuple(sorted(set(queries[0].exclude_ids) | carried)),
                         }
                     ),
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    turn_id=run.id,
-                    moment="in_turn",
                 )
             )
         except Exception as exc:
