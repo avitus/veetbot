@@ -5122,3 +5122,13 @@ using the selected 43-case owner review and valid raw spam/bulk choices. It is
 limited to fifty new bypasses per UTC day, preserves all pre-egress protections,
 and stops on expiry or invalid evidence. This bounded exception does not change
 the general filter's calibration or thresholds, or establish general readiness.
+
+[ADR-0244](../adr/0244-standing-owner-email-junk-filter.md), authorized on
+2026-10-24 after the owner confirmed all 198 pilot bypasses as junk, adds a
+separate `owner_filter` mode with standing work-account authorization. Its private
+packet requires the original selected-inbox review and at least 198 independently
+owner-reviewed, correct pilot bypasses, bound to the exact policy/model and owner.
+It has no calendar expiry and retains the fifty-new-conversations-per-UTC-day cap,
+shared durable admissions, raw-choice rule, protections and off switch. Invalid
+evidence disables calls. The general calibrated filter and time-limited pilot
+remain unchanged; reviewed bypass precision does not measure recall.

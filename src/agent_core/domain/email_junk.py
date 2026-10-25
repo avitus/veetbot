@@ -97,6 +97,7 @@ class EmailJunkMode(StrEnum):
     SHADOW = "shadow"
     FILTER = "filter"
     PILOT = "pilot"
+    OWNER_FILTER = "owner_filter"
 
 
 JUNK_PILOT_DAILY_LIMIT = 50
@@ -179,6 +180,51 @@ class JunkPilot(BaseModel):
             and all(r.label == "junk" for r in predicted)
             and sum(r.label == "keep" and r.category == "keep" for r in rows) >= 7
         )
+
+
+JUNK_STANDING_POLICY = hashlib.sha256(
+    f"email-junk-standing@1:{JUNK_PILOT_POLICY}:198-reviewed-bypasses:no-expiry".encode()
+).hexdigest()
+
+
+class JunkStandingAuthorization(BaseModel):
+    """Standing owner/work permission after the complete pilot review (ADR-0244)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    policy: str
+    model: str
+    tenant_id: str = Field(min_length=1)
+    principal_id: str = Field(min_length=1)
+    account_id: Literal["work"]
+    authorized_at: AwareDatetime
+    sample: Literal["owner_reviewed_complete_pilot"]
+    initial_observations: tuple[JunkPilotObservation, ...] = Field(max_length=10_000)
+    bypass_observations: tuple[JunkPilotObservation, ...] = Field(max_length=10_000)
+
+    def admitted(self, principal: Principal, account_id: str, now: datetime) -> bool:
+        """Require unchanged scope, exact policy/model and both independent review cohorts."""
+        initial = self.initial_observations
+        predicted = [r for r in initial if r.category != "keep"]
+        bypasses = self.bypass_observations
+        return (
+            self.policy == JUNK_STANDING_POLICY
+            and self.model == JUNK_MODEL
+            and self.tenant_id == principal.tenant_id
+            and self.principal_id == principal.principal_id
+            and self.account_id == account_id
+            and self.authorized_at <= now
+            and len(initial) >= 43
+            and len({r.fingerprint for r in initial}) == len(initial)
+            and len(predicted) >= 20
+            and all(r.label == "junk" for r in predicted)
+            and sum(r.label == "keep" and r.category == "keep" for r in initial) >= 7
+            and len(bypasses) >= 198
+            and len({r.fingerprint for r in bypasses}) == len(bypasses)
+            and all(r.category in {"spam", "bulk"} and r.label == "junk" for r in bypasses)
+        )
+
+
+JunkAuthorization = JunkPilot | JunkStandingAuthorization
 
 
 class JunkObservation(BaseModel):

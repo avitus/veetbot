@@ -59,7 +59,7 @@ from agent_core.domain.email import (
     feedback_matches,
     retained_thread,
 )
-from agent_core.domain.email_junk import JunkPilot, JunkPilotUnavailableError
+from agent_core.domain.email_junk import JunkAuthorization, JunkPilotUnavailableError
 from agent_core.domain.email_semantics import thread_source_key
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -2640,7 +2640,7 @@ class EmailExperienceService:
         *,
         run: Run | None = None,
         lease: WorkerLease | None = None,
-        junk_pilot: JunkPilot | None = None,
+        junk_pilot: JunkAuthorization | None = None,
     ) -> EmailThread:
         """Validate and save features against the current source and owner-profile revisions."""
         async with self.uow_factory() as uow, uow.email.lock(principal):
