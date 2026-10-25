@@ -28,18 +28,20 @@ although nothing had been asked.
    and everything after it), the statement's content words are the owner's
    own, none came only from an external or knowledge tool result of that turn,
    at least sixty percent of them (and at least two) appear in the owner's
-   message, at most three are the model's own phrasing, and its negations,
-   modals and frequency words, counted and each paired with the covered words
-   it reaches in its clause, are exactly those of the one owner sentence it
-   restates: none added, dropped or moved, and none attributed when its words
-   reach several owner sentences (request framing such as "could you" or
-   "don't forget" is set aside only where it opens an owner sentence). These
-   marker words are judged apart from recall's function-word list, which drops
-   the modals, so ranking changes cannot relax provenance. The
-   sixteen-character verbatim rule remains as it was. A message the owner did
-   not author grounds nothing. The rule only raises and the turn's origin
-   taint stands; the governed service's trust check is unchanged and refuses
-   the write a second time if a label were wrong.
+   message, at most three are the model's own phrasing, and, where a negation,
+   modal or frequency word is involved, it restates exactly one owner sentence
+   and keeps that sentence's frame, its covered words, markers and clause
+   joins in the same order, with none of the model's own words after a marker
+   beyond plain inflections of the owner's: no marker added, dropped or moved,
+   no object swapped between clauses, no "and" turned into "or", and none
+   attributed when its words reach several owner sentences (request framing
+   such as "could you" or "don't forget" is set aside only where it opens an
+   owner sentence). These marker words are judged apart from recall's
+   function-word list, which drops the modals, so ranking changes cannot relax
+   provenance. The sixteen-character verbatim rule remains as it was. A
+   message the owner did not author grounds nothing. The rule only raises and
+   the turn's origin taint stands; the governed service's trust check is
+   unchanged and refuses the write a second time if a label were wrong.
 2. The outcome is the same whether the save is proposed in the step that
    read the web or a later one.
 3. After a tainted turn, an ungrounded statement is refused with the closed
@@ -62,7 +64,8 @@ statement that quotes it, and only the test for "the owner said this" moves
 from verbatim bytes to grounding in the owner's words. The remaining exposure
 is the one the verbatim rule already carried, a statement assembled only from
 the owner's own words, plus the model's few words of phrasing: a free word can
-itself reverse a fact ("hate" for "like", "quit eating"), and word overlap
+itself reverse a fact where no marker is involved ("hate" for "like", "quit
+eating"), and word overlap
 cannot see order or roles ("I owe Sam" against "Sam owes me"). Negations and
 modals are matched because recall's function-word list hides them; no word
 list proves two sentences mean the same, so the free-word allowance and the

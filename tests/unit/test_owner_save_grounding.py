@@ -230,6 +230,13 @@ QUIET_WEB = "Weather today is mild with light wind."
             "Remember that I never grow roses in pots, but I grow roses in beds.",
             "I never grow roses in beds, but I grow roses in pots.",
         ),
+        # A negation reaches across a coordination: "or" under it negates both sides,
+        # and which joiner links the clauses is part of the fact.
+        ("Remember that I never eat pork but I eat beef.", "I never eat pork or beef."),
+        ("Remember that I never eat pork and I eat beef.", "I never eat pork or eat beef."),
+        # A word of the model's own after a marker falls under it and extends the fact.
+        ("Remember that I never eat pork.", "I never eat pork or beef."),
+        ("Remember that I rarely eat pork at home.", "I rarely eat pork at home or abroad."),
         # Frequency and limitation qualify a fact as a negation does.
         ("Remember that I rarely eat pork at home.", "I eat pork at home."),
         ("Remember that I eat pork at home on Sundays.", "I only eat pork at home on Sundays."),
@@ -264,6 +271,7 @@ def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
         # Each fact restated on its own keeps its owner sentence's negation.
         ("Remember that I never eat pork. I never drink wine.", "I never drink wine."),
         ("Remember that I always take the train to work.", "Andy always takes the train to work."),
+        ("Remember that I never eat pork, and I eat beef.", "I never eat pork and I eat beef."),
     ],
 )
 def test_a_statement_that_keeps_negation_and_modality_stays_grounded(

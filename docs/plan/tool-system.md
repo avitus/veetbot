@@ -590,32 +590,33 @@ booleans, and short strings are never raised.
 
 One argument has a second way up. The `statement` of `memory.remember` is
 raised when it is **owner-grounded** (ADR-0245): the active turn is the newest
-owner message and everything after it; the statement's content words are
-split into those the owner's message contains, those found only in an
-external or knowledge tool result of the turn, and those in neither; the
-statement is grounded when no word came only from external content, at least
-sixty percent of its words (and at least two) are the owner's, at most
-three are the model's own phrasing, and its negations, modals and frequency
-words ("always", "rarely", "only"), counted and each paired with the covered
-words it reaches (those after it up to the
-end of its clause: a comma, colon, dash, or a joining word such as "and" or
-"but"), are exactly those of the owner sentence it restates: none added,
-none dropped (one of two negations included), none moved onto another fact. Where a negation or modal is
-involved, the statement's other covered words must reach exactly one owner
-sentence; when a shared word reaches several, which fact the marker
-qualifies is ambiguous and nothing is raised. Request framing such as "could you" or "don't forget"
-opening an owner sentence is set aside; anywhere else, and anywhere in the
-statement, those words count. Overlap of content words is not provenance when
-the polarity or modality moved, so "I may transfer funds" never grounds "I
-will transfer funds". A paraphrase of what the owner just said
-is therefore an owner save whether it is proposed in the step that read the
-web or a later one, while a statement that carries a web page's words is not.
-A message the owner did not author (device-ingested, surface) grounds
-nothing. The rule still only raises: it cannot lower a label, and the turn's
-origin taint stands; the governed service's trust check refuses the write a
-second time if the label were ever wrong. The tool reports an ungrounded
-statement after a tainted turn as `tool.memory.statement_not_owner_grounded`,
-a closed reason with corrective guidance.
+owner message and everything after it; the statement's content words are split
+into those the owner's message contains, those found only in an external or
+knowledge tool result of the turn, and those in neither; the statement is
+grounded when no word came only from external content, at least sixty percent
+of its words (and at least two) are the owner's, at most three are the model's
+own phrasing, and, where a negation, modal or frequency word ("always",
+"rarely", "only") is involved, the statement must restate exactly one owner
+sentence and keep its frame: the covered words, markers and clause joins
+("and", "or", "but", a comma) in the same order, with no word of the model's
+own after a marker other than a plain inflection of an owner word ("eats" for
+"eat"). A marker added, dropped, moved onto another fact or carried over from
+another sentence, an object swapped between clauses, or "and" turned into "or"
+changes the frame; when a shared word reaches several owner sentences, which
+fact the marker qualifies is ambiguous and nothing is raised. Request framing
+such as "could you" or "don't forget" opening an owner sentence is set aside;
+anywhere else, and anywhere in the statement, those words count. Overlap of
+content words is not provenance when the polarity or modality moved, so "I may
+transfer funds" never grounds "I will transfer funds". A paraphrase of what
+the owner just said is therefore an owner save whether it is proposed in the
+step that read the web or a later one, while a statement that carries a web
+page's words is not. A message the owner did not author (device-ingested,
+surface) grounds nothing. The rule still only raises: it cannot lower a label,
+and the turn's origin taint stands; the governed service's trust check refuses
+the write a second time if the label were ever wrong. The tool reports an
+ungrounded statement after a tainted turn as
+`tool.memory.statement_not_owner_grounded`, a closed reason with corrective
+guidance.
 
 The direction is the whole design. Raising on a match can only be wrong by
 failing to raise, which costs an unnecessary approval. Lowering on a match —

@@ -555,22 +555,62 @@ _CLAUSE_JOINERS = frozenset(
 )
 
 
-def _scoped_markers(text: str, covered: set[str]) -> Counter[tuple[str, frozenset[str]]]:
-    """Each negation and modal paired with the covered words it reaches in its clause."""
+def _stem(word: str) -> str:
+    """A plain inflection's base, enough to tell "eats" or "takes" from a new word."""
 
-    tokens = _CLAUSE_TOKEN.findall(_grounding_text(text))
-    scoped: Counter[tuple[str, frozenset[str]]] = Counter()
-    for index, token in enumerate(tokens):
-        if token not in _MEANING_MARKERS:
-            continue
-        reach: set[str] = set()
-        for later in tokens[index + 1 :]:
-            if not later.isalpha() or later in _CLAUSE_JOINERS:
-                break
-            if later in covered and later not in _MEANING_MARKERS:
-                reach.add(later)
-        scoped[(token, frozenset(reach))] += 1
-    return scoped
+    for suffix in ("ing", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) > len(suffix) + 2:
+            word = word[: -len(suffix)]
+            break
+    return word[:-1] if word.endswith("e") and len(word) > 3 else word
+
+
+def _phrased_under_a_marker(statement: str, owner_words: set[str]) -> bool:
+    """Whether a word of the model's own follows a marker and so falls under it."""
+
+    owner_stems = {_stem(word) for word in owner_words}
+    seen_marker = False
+    for token in _WORD.findall(_grounding_text(statement)):
+        if token in _MEANING_MARKERS:
+            seen_marker = True
+        elif (
+            seen_marker
+            and len(token) >= MINIMUM_LEXICAL_TERM_LENGTH
+            and token not in _RECALL_FUNCTION_WORDS
+            and token not in _CLAUSE_JOINERS
+            and token not in owner_words
+            and _stem(token) not in owner_stems
+        ):
+            return True
+    return False
+
+
+def _is_join(token: str) -> bool:
+    return token in _CLAUSE_JOINERS or not token.isalpha()
+
+
+def _marker_frame(text: str, covered: set[str]) -> tuple[str, ...]:
+    """A text's covered words, markers and clause joins, in order.
+
+    Words outside `covered` (inflections, function words, phrasing) drop out,
+    so a paraphrase keeps the frame of what it restates, while a marker moved,
+    added or dropped, an object swapped between clauses, or "and" turned into
+    "or" changes it. Adjacent joins collapse to the joining word (", and" is
+    "and"), and leading or trailing joins are trimmed.
+    """
+
+    frame: list[str] = []
+    for token in _CLAUSE_TOKEN.findall(_grounding_text(text)):
+        if token in _MEANING_MARKERS or (token in covered and not _is_join(token)):
+            frame.append(token)
+        elif _is_join(token) and frame:
+            if not _is_join(frame[-1]):
+                frame.append(token)
+            elif token.isalpha():
+                frame[-1] = token
+    while frame and _is_join(frame[-1]):
+        frame.pop()
+    return tuple(frame)
 
 
 def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
@@ -581,10 +621,12 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     message, found only in an external or knowledge tool result of this turn,
     or in neither (the model's own phrasing). Grounded means no word came only
     from external content, most of the words are the owner's, the model's
-    phrasing stays within a few words, and its negations and modals, counted and
-    each with the covered words it reaches in its clause, are exactly those of
-    the one owner sentence it restates: none added, dropped or moved, none
-    attributed when its words reach several sentences. The outcome is the same
+    phrasing stays within a few words, and, where a negation, modal or
+    frequency word is involved, its covered words, markers and clause joins run
+    in the same order as in the one owner sentence it restates, with none of
+    the model's own words after a marker: no marker added, dropped or moved,
+    none attributed when its words reach several sentences. The outcome is the
+    same
     whether the save is proposed in the step that read the web or a later one:
     the turn's taint still marks the origin; only the statement's own
     provenance lifts it.
@@ -617,16 +659,21 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     # words (marker words never link one in). A negation or modal is attributed
     # only when exactly one such sentence exists: with two, a shared word ("grow")
     # leaves it ambiguous which fact the marker qualifies, and nothing is raised.
-    # Each marker is compared with the covered words it reaches in its clause, so
-    # moving a negation onto another fact of the same sentence is a change.
-    stated = _scoped_markers(statement, covered)
+    # Where a marker is involved, the statement's frame (covered words, markers
+    # and clause joins, in order) must be the one owner sentence's frame.
     candidates = [
         sentence
         for sentence in _owner_sentences(" ".join(user_texts))
         if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered
     ]
-    markers_match = not (stated or any(_meaning_markers(c) for c in candidates)) or (
-        len(candidates) == 1 and _scoped_markers(candidates[0], covered) == stated
+    # The model's own words stay in front of any marker ("Andy never ..."): one
+    # after it falls under the marker and would extend the owner's fact.
+    markers_match = not (
+        _meaning_markers(statement) or any(_meaning_markers(c) for c in candidates)
+    ) or (
+        len(candidates) == 1
+        and _marker_frame(candidates[0], covered) == _marker_frame(statement, covered)
+        and not _phrased_under_a_marker(statement, owner_words)
     )
     return (
         not tainted
