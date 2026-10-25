@@ -353,7 +353,7 @@ async def test_same_turn_memory_write_after_web_fetch_is_trust_rejected() -> Non
     remember = by_name["memory.remember"]
     assert remember.status is not ToolInvocationStatus.SUCCEEDED
     assert remember.outcome is not None
-    assert "trust" in remember.outcome.reason_code
+    assert remember.outcome.reason_code == "tool.memory.statement_not_owner_grounded"
     assert memories == []
 
 

@@ -353,7 +353,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 212 knobs live, at the values the
+    module that owns it. This is where all 214 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -431,7 +431,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 212. Schema versions, profile names, rule identifiers,
+and asserts the total is 214. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -445,8 +445,8 @@ or invariants rather than knobs and are not counted.
 | `memory/profiles.yaml` | 44 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
-| `cockpit/profiles.yaml` | 5 |
-| **Total** | **212** |
+| `cockpit/profiles.yaml` | 7 |
+| **Total** | **214** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -484,6 +484,8 @@ reads ([cockpit.md](cockpit.md#configuration)): the commits per widget and per
 principal in an hour (12 and 60) and the importer's poll interval (60
 seconds). That takes the inventory to 210. Build step 6 adds the stream's
 lifetime (600 seconds) and its event retention (one day), taking it to 212.
+Build step 7 adds the write tool's commit wait (30 seconds) and the history
+each feed keeps (288 snapshots), taking it to 214.
 The Cockpit flag, the builder image and the GitHub App settings are
 environment keys.
 
@@ -1351,7 +1353,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 212 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 214 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default

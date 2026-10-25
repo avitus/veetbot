@@ -347,6 +347,9 @@ class RunExecutor:
         self._compactor = compactor
         self._token_estimator = token_estimator
         self._model_provider = model_provider
+        # Diagnostics that script several runs through one composition rewind
+        # a scripted provider between them; nothing else reads this handle.
+        self.model_provider = model_provider
         self._resolved_model = resolved_model
         self._model_router = model_router
         self._model_providers = dict(model_providers or {})

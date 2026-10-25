@@ -36,6 +36,7 @@ from agent_core.bootstrap import (
     build_notification_worker,
     build_schedule_worker,
     build_surface_worker,
+    operator_memory_health,
     operator_reliability,
     serve_execution_service,
 )
@@ -82,6 +83,7 @@ from agent_core.domain.views import (
     TextContentBlock,
 )
 from agent_core.observability.latency import ChatLatencyReport, render_latency_report
+from agent_core.observability.memory_health import render_memory_health_report
 from agent_core.observability.reliability import (
     ReliabilityReport,
     ReliabilityThresholds,
@@ -1380,6 +1382,98 @@ def memory_diagnose(
         raise typer.Exit(1) from exc
     payload = diagnosis if isinstance(diagnosis, dict) else diagnosis.model_dump(mode="json")
     typer.echo(json.dumps(payload, default=str))
+
+
+async def _memory_health(hours: int) -> Any:
+    return await operator_memory_health(hours)
+
+
+@memory_app.command("health")
+def memory_health(
+    hours: Annotated[int, typer.Option("--hours", min=1, max=2160)] = 336,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Report recall health from traces, usage events and the store; no belief text."""
+
+    try:
+        report = asyncio.run(_memory_health(hours))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except Exception as exc:
+        typer.echo(f"recall health unavailable: {type(exc).__name__}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(report.model_dump_json() if json_output else render_memory_health_report(report))
+
+
+async def _memory_probe(
+    probes_path: Path, output: Path, paths: list[str], live_model: bool
+) -> dict[str, Any]:
+    # The probe driver lives with the evaluators; the entry point reaches it
+    # only at call time, the way the other eval commands do.
+    from agent_core.config import load_settings
+    from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+
+    database = cast(Any, importlib.import_module("agent_core.evals.general_recall_database"))
+    driver = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probe_driver"))
+    probes_module = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probes"))
+    database.validate_probe_database(load_settings())
+    loaded = probes_module.load_probes(probes_path)
+    script = (
+        None
+        if live_model
+        else FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    )
+
+    async def finish(app: Any, run_id: UUID) -> Any:
+        worker = app.worker_factory("owner-recall-probe")
+        while await worker.run_once():
+            run = await app.runs.get(run_id)
+            if run.status.value in {"COMPLETED", "FAILED", "CANCELLED"}:
+                break
+        return await app.runs.wait_terminal(run_id)
+
+    selected = [path for path in paths if path in {"automatic", "deliberate"}]
+    async with build(storage="postgres", script=script) as composition:
+        report = await driver.observe_probes(
+            composition,
+            script,
+            loaded.probes,
+            finish=finish,
+            paths=selected or None,
+            probe_digest=loaded.digest,
+        )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    return cast(dict[str, Any], report.summary.model_dump(mode="json"))
+
+
+@memory_app.command("probe")
+def memory_probe(
+    probes: Annotated[
+        Path, typer.Option("--probes", help="JSONL probe file (never a frozen control).")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="Where to write the content-free report.")
+    ],
+    paths: Annotated[
+        str, typer.Option("--paths", help="Comma-separated: automatic,deliberate.")
+    ] = "automatic,deliberate",
+    live_model: Annotated[
+        bool,
+        typer.Option("--live-model", help="Use the configured model instead of a scripted answer."),
+    ] = False,
+) -> None:
+    """Replay owner recall probes through the run loop against a probe clone."""
+
+    try:
+        summary = asyncio.run(
+            _memory_probe(probes, output, [item.strip() for item in paths.split(",")], live_model)
+        )
+    except (ConfigurationError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    typer.echo(json.dumps(summary))
 
 
 async def _memory_replay(session_id: UUID) -> Any:

@@ -33,7 +33,14 @@ PLATFORM_FRAMING = (
     "A records catalog, when present, lists the owner's numeric series with their last "
     "entries; it holds names and dates, never values. A series marked due may be mentioned "
     "once per session, never while the owner is mid-task, and the catalog is not a request "
-    "to log."
+    "to log. "
+    "Memory envelopes hold recollections; each line begins with an identifier of the form "
+    "[m:xxxxxxxx]. A line marked user or affirmed is the owner's own statement: use it "
+    "directly, and never ask the owner to restate it. A line marked tentative or hypothesis "
+    "carries exactly the uncertainty its marker states. A recollection yields to the current "
+    "conversation only where the owner contradicts it. When your reply relies on a "
+    "recollection, repeat its identifier verbatim beside the fact it supports; cite only "
+    "identifiers that were shown to you, and only recollections you actually used."
 )
 DEFERRED_INDEX_NOTE = (
     "Deferred tool index. These tools are available in this conversation without "

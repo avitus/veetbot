@@ -746,6 +746,20 @@ The [trial guide](../recall-production-trial.md) describes the conversational
 review and privacy-preserving operator workflow. Neither approval of the trial
 nor these mechanics establishes actual production quality.
 
+[ADR-0246](../adr/0246-bounded-owner-recall-restart.md) represents ADR-0223's
+separate restart-after-lapse decision in version-four evidence and admission.
+It preserves the original trial and binds a distinct human restart instruction,
+prior evidence/trial hashes, previous expiry, fresh assessment and withdrawal
+receipt, exact current inputs and compatible rollback. The decision follows the
+previous expiry and precedes restart; the new review window begins at restart.
+Expiry is 24 hours after restart or the latest timely check-in, capped at
+seven days after the original start. Prior runs and responses cannot be
+reused. A recorded stop or serious incident is not cleared by this mechanism.
+Only one restart phase is represented; it cannot be silently replaced after
+another lapse. Operator verification of the retained receipts, final release
+gates and a separate actual owner decision remain required before installation.
+Preparation alone grants no activation, and legacy formats retain their rules.
+
 ## Hard gates
 
 1. **M33.** **Corpus independence** — at least 400 independent scenarios span eight families,

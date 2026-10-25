@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from agent_core.config import ConfigurationError
+from agent_core.domain.cockpit import FEED_HISTORY_MAX
 
 COCKPIT_PROFILE_DOCUMENT = "cockpit/profiles.yaml"
 
@@ -29,6 +30,7 @@ class CockpitPublicationProfile(_ProfileModel):
     commits_per_widget_per_hour: int = Field(default=12, ge=1)
     commits_per_principal_per_hour: int = Field(default=60, ge=1)
     import_interval_seconds: int = Field(default=60, ge=10)
+    commit_wait_seconds: int = Field(default=30, ge=0, le=120)
 
     @model_validator(mode="after")
     def principal_covers_one_widget(self) -> CockpitPublicationProfile:
@@ -46,12 +48,19 @@ class CockpitStreamProfile(_ProfileModel):
     event_retention_seconds: int = Field(default=86_400, ge=60)
 
 
+class CockpitFeedsProfile(_ProfileModel):
+    """How many snapshots each feed keeps."""
+
+    history_max: int = Field(default=FEED_HISTORY_MAX, ge=1, le=FEED_HISTORY_MAX)
+
+
 class CockpitProfiles(_ProfileModel):
     """The whole `cockpit/profiles.yaml` document."""
 
     schema_version: Literal[1] = 1
     publication: CockpitPublicationProfile = Field(default_factory=CockpitPublicationProfile)
     stream: CockpitStreamProfile = Field(default_factory=CockpitStreamProfile)
+    feeds: CockpitFeedsProfile = Field(default_factory=CockpitFeedsProfile)
 
     @classmethod
     def from_document(cls, document: Mapping[str, object]) -> CockpitProfiles:

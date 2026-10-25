@@ -45,7 +45,8 @@ the old case-review export or reuse the version-one assembly helper.
 
 Record the fixed start, seven-day end, first 24-hour deadline, admitted source
 and owner, and the next check-in time in the operator checkpoint. The existing
-15-minute monitor should prepare one check-in about one hour before each expiry,
+monitor should prepare one check-in before each expiry, with enough time for an
+owner response at its configured cadence,
 with a final trial assessment before the seventh day ends. Deduplicate notices.
 Never remind on every monitor tick or renew because the owner has not replied.
 
@@ -78,3 +79,36 @@ fail, leave semantic recall withdrawn and report the concrete problem.
 
 This process establishes supervised owner feedback, not benchmark success or
 permission for scheduled/delegated recall or unattended reconsolidation.
+
+## Restart after a lapse
+
+Preparation does not authorize activation. Follow
+[ADR-0246](adr/0246-bounded-owner-recall-restart.md) only after a separate explicit
+owner restart decision and a fresh assessment. Do not turn a late response into
+a timely renewal, infer answer-quality approval from normal-use confirmation,
+or change the original start or seven-day end.
+
+Prepare version-four evidence with the unchanged original trial and one
+`production_restart` object. Retain the original evidence and withdrawal
+receipt privately, recording their hashes. Hash the original trial using its
+validated `ProductionRecallTrial.model_dump_json()` bytes. Bind the new owner's
+response reference/hash and instruction, actual decision and restart times,
+previous expiry, fresh assessment hash, current target-input digest and verified
+rollback build. The decision must follow the previous expiry and precede or
+coincide with restart. A recorded stop or serious incident is not cleared by
+this mechanism.
+
+The manifest keeps the original `activated_at`; its expiry is the earlier of
+24 hours after restart and the original seven-day end. Inventory for the new
+phase begins at restart. Preserve unfinished historical review and the inactive
+interval separately. Genuine subsequent check-ins go in the restart object and
+follow the same selection, provenance, privacy and timely-response rules above.
+Do not replace an earlier restart phase to conceal another lapse.
+
+Before installation, verify final-head GitHub review, hosted CI and delivery,
+exact deployed source/configuration/overlay/schema compatibility, local encoder
+identity and cost cap, sparse fallback and owner-only behavior, root-controlled
+ACLs, expiry/withdrawal and a compatible application/docs/website rollback.
+Keep the historical withdrawn manifest and evidence intact; use a new admission
+location with independently verified readback. Until both these checks and the
+separate owner decision are complete, semantic recall stays withdrawn.

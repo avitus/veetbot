@@ -89,12 +89,20 @@ async def test_merge_citations_credit_only_the_rendered_original_and_refuse_ambi
     async with factory() as uow:
         used = await uow.memories.get(original.id, principal())
         assert used.utility > original.utility
+        # A citation moves utility, the usage clock and the usage-accounting@2
+        # counters (delivered_count stays: no memory.delivered event was
+        # recorded here) and nothing else on the rendered original.
+        assert used.cited_count == original.cited_count + 1
+        assert used.delivered_count == original.delivered_count
+        assert used.usage_accounting_version == "usage-accounting@2"
         assert (
             used.model_copy(
                 update={
                     "utility": original.utility,
                     "last_used_at": original.last_used_at,
                     "updated_at": original.updated_at,
+                    "cited_count": original.cited_count,
+                    "usage_accounting_version": original.usage_accounting_version,
                 }
             )
             == original

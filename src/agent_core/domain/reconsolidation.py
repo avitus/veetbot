@@ -27,7 +27,18 @@ from agent_core.domain.memory import (
 POLICY: Literal["reconsolidation@1"] = "reconsolidation@1"
 SLICE_USD = Decimal("0.25")
 DAY_USD = Decimal("2")
-CONTENT_EXCLUDES = {"utility", "last_used_at", "store_position", "updated_at"}
+# Usage is not content: the ranking utility, the usage clock and the
+# usage-accounting@2 exposure counters move on delivery and citation without
+# advancing a content revision, re-embedding a vector or unsettling a merge.
+CONTENT_EXCLUDES = {
+    "utility",
+    "last_used_at",
+    "store_position",
+    "updated_at",
+    "delivered_count",
+    "cited_count",
+    "usage_accounting_version",
+}
 
 
 def content_signature(record: MemoryRecord) -> str:

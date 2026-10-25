@@ -54,7 +54,7 @@ from agent_core.domain.views import PersistedStreamFrame, StreamFrame, Transient
 from agent_core.ports.cockpit import (
     CockpitAsset,
     CockpitRuntimeAssets,
-    SettingsSchemaCheck,
+    JsonSchemaCheck,
     WidgetBuildFailedError,
 )
 from agent_core.ports.determinism import Clock
@@ -87,7 +87,7 @@ class CockpitBoard:
         live_events: LiveEventBroadcaster,
         publication: CockpitPublication,
         runtime: CockpitRuntimeAssets,
-        settings_schema: SettingsSchemaCheck,
+        settings_schema: JsonSchemaCheck,
         stream_max_seconds: int,
         repository: str | None = None,
     ) -> None:

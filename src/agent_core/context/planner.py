@@ -54,7 +54,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@13"
+BUILDER_VERSION = "context-builder@14"
 # Plans from these builders carry no deferred tools, so their builder version
 # alone does not rotate them (ADR-0123). Since context-builder@13 added the
 # records catalog sentence to the framing row they no longer render the same

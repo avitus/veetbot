@@ -49,12 +49,13 @@ from agent_core.adapters.browser.unavailable import (
     UnavailableBrowserProfileControlPlane,
 )
 from agent_core.adapters.cockpit.builder import SandboxWidgetBuilder, cockpit_build_sandbox
+from agent_core.adapters.cockpit.git import FakeWidgetRepository
 from agent_core.adapters.cockpit.github import (
     GitHubAppTokens,
     GitHubWidgetRepository,
     load_app_private_key,
 )
-from agent_core.adapters.cockpit.runtime import FileCockpitRuntime, JsonSchemaSettingsCheck
+from agent_core.adapters.cockpit.runtime import Draft202012SchemaCheck, FileCockpitRuntime
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -161,6 +162,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryTrajectoryProjectionRepository,
     InMemoryUsageRepository,
 )
+from agent_core.adapters.persistence.memory_health_report import memory_health_report
 from agent_core.adapters.persistence.memory_repositories import (
     PostgresIntegratedEpisodeStore,
     PostgresKnowledgeStore,
@@ -313,6 +315,7 @@ from agent_core.application.cockpit import (
     CockpitPublicationLimits,
     CommitOutboxWorker,
 )
+from agent_core.application.cockpit_feeds import CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard, CockpitRetention
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_ingest import DeviceMessageIngestService
@@ -418,6 +421,7 @@ from agent_core.application.trajectory_service import (
     TrajectoryExportService,
     TrajectoryRedactor,
 )
+from agent_core.cockpit.catalogue import load_kit_catalogue
 from agent_core.cockpit.profiles import CockpitProfiles
 from agent_core.config import (
     MEMORY_DISTILLATION_CORPUS_PATH,
@@ -609,6 +613,7 @@ from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.observability.latency import ChatLatencyReport
 from agent_core.observability.logging import configure_logging
+from agent_core.observability.memory_health import MemoryHealthReport
 from agent_core.observability.policy import AdvisoryMetrics
 from agent_core.observability.reliability import ReliabilityReport, ReliabilityThresholds
 from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
@@ -630,7 +635,7 @@ from agent_core.ports.browser_sessions import (
     BrowserSessionControlPlane,
 )
 from agent_core.ports.browser_upload import BrowserImageUploader
-from agent_core.ports.cockpit import WidgetBuilder
+from agent_core.ports.cockpit import WidgetBuilder, WidgetRepository
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
@@ -690,6 +695,13 @@ from agent_core.tools.browser_observe import (
 )
 from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
+from agent_core.tools.cockpit import (
+    COCKPIT_TOOL_NAMES,
+    CockpitToolset,
+    cockpit_tools,
+    offers_widget_writes,
+)
+from agent_core.tools.cockpit import WIDGET_WRITE_TOOL as COCKPIT_WIDGET_WRITE_TOOL
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
@@ -989,6 +1001,9 @@ class Composition:
     cockpit_sandbox: SandboxManager | None = None
     cockpit_publication: CockpitPublication | None = None
     cockpit_maintenance: _CockpitMaintenance | None = None
+    # An evaluation's in-memory widget branch and the outbox that commits to it.
+    cockpit_local_branch: WidgetRepository | None = None
+    cockpit_local_outbox: CommitOutboxWorker | None = None
     # Read-only Chat latency aggregates; only PostgreSQL keeps the event log (ADR-0131).
     latency_report: Callable[[datetime], Awaitable[ChatLatencyReport]] | None = None
     reliability_report: Callable[[datetime, datetime], Awaitable[ReliabilityReport]] | None = None
@@ -1049,7 +1064,10 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "observations and uncertain relationships tentative; text-only reads do not inspect photos. "
     "Report only confirmed memory tool outcomes. A failed manual save is separate from "
     "background formation of owner-stated facts after the reply; do not claim that nothing "
-    "was remembered or that pending formation succeeded."
+    "was remembered or that pending formation succeeded. Save with memory.remember only what "
+    "the owner stated, in their words, when they asked to remember it; a plan, schedule or "
+    "calendar you derived from web or document content belongs in the reply or an artifact, "
+    "never in memory. Never mention a save, or a failed save, the owner did not ask for."
 )
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}
@@ -1058,15 +1076,19 @@ _BROWSER_TOOL_NAMES = frozenset(
 
 def _session_tool_filter(
     browser_provider: BrowserProvider | None,
-) -> Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]] | None:
-    if not isinstance(browser_provider, SessionBoundHostedBrowserProvider):
-        return None
+) -> Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]:
+    session_bound = isinstance(browser_provider, SessionBoundHostedBrowserProvider)
 
     def filter_tools(session: Session, tools: Sequence[ToolSpec]) -> list[ToolSpec]:
-        selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
-        if isinstance(selected_profile, str) and selected_profile:
-            return list(tools)
-        return [tool for tool in tools if tool.name not in _BROWSER_TOOL_NAMES]
+        kept = list(tools)
+        if session_bound:
+            selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+            if not (isinstance(selected_profile, str) and selected_profile):
+                kept = [tool for tool in kept if tool.name not in _BROWSER_TOOL_NAMES]
+        # Widgets are written only in the owner's interactive chat (docs/plan/cockpit.md).
+        if not offers_widget_writes(session.metadata):
+            kept = [tool for tool in kept if tool.name != COCKPIT_WIDGET_WRITE_TOOL]
+        return kept
 
     return filter_tools
 
@@ -1284,6 +1306,33 @@ def system_clock() -> Clock:
 def random_ids() -> IdFactory:
     """Supply opaque identities to offline commands without a full composition."""
     return RandomIdFactory()
+
+
+async def operator_memory_health(hours: int) -> MemoryHealthReport:
+    """Observe only the database: recall traces, usage events and the store."""
+
+    if not 1 <= hours <= 2160:
+        raise ValueError("Recall health windows must be between one hour and ninety days.")
+    settings = load_settings()
+    principal = Principal(
+        tenant_id="local" if settings.auth_mode.value == "dev" else settings.auth_tenant_id,
+        principal_id=(
+            "local-user" if settings.auth_mode.value == "dev" else settings.auth_principal_id
+        ),
+    )
+    engine = create_engine(settings.database_url)
+    try:
+        async with asyncio.timeout(60):
+            await assert_schema_revision(engine)
+            until = system_clock().now()
+            return await memory_health_report(
+                create_session_factory(engine),
+                until - timedelta(hours=hours),
+                until,
+                principal=principal,
+            )
+    finally:
+        await engine.dispose()
 
 
 async def operator_reliability(
@@ -2790,6 +2839,8 @@ async def _compose(
     device_ingest_daily_cap: int,
     surface_limits: SurfaceLimits,
     recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
+    cockpit_builder_override: WidgetBuilder | None = None,
+    cockpit_local_branch: bool = False,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -2938,12 +2989,16 @@ async def _compose(
             )
     else:
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
-    cockpit_builder = (
-        SandboxWidgetBuilder(cockpit_sandbox, ids) if cockpit_sandbox is not None else None
-    )
+    cockpit_builder: WidgetBuilder | None = None
+    if cockpit_sandbox is not None:
+        # An evaluation judges the agent's package without the builder image.
+        cockpit_builder = cockpit_builder_override or SandboxWidgetBuilder(cockpit_sandbox, ids)
     cockpit_publication: CockpitPublication | None = None
     cockpit_service: CockpitBoard | None = None
     cockpit_maintenance: _CockpitMaintenance | None = None
+    cockpit_toolset: CockpitToolset | None = None
+    local_branch: FakeWidgetRepository | None = None
+    local_outbox: CommitOutboxWorker | None = None
     if cockpit_builder is not None:
         cockpit_profiles = CockpitProfiles.from_document(
             load_config_document(settings, "cockpit/profiles.yaml")
@@ -2975,10 +3030,33 @@ async def _compose(
             live_events=live_events,
             publication=cockpit_publication,
             runtime=FileCockpitRuntime(settings.artifact_root / "cockpit-runtime"),
-            settings_schema=JsonSchemaSettingsCheck(),
+            settings_schema=Draft202012SchemaCheck(),
             stream_max_seconds=cockpit_profiles.stream.max_seconds,
             repository=settings.cockpit_github_repository,
         )
+        cockpit_toolset = CockpitToolset(
+            uow_factory=uow_factory,
+            clock=clock,
+            board=cockpit_service,
+            publication=cockpit_publication,
+            feeds=CockpitFeeds(
+                uow_factory=uow_factory,
+                clock=clock,
+                schema_check=Draft202012SchemaCheck(),
+                history_max=cockpit_profiles.feeds.history_max,
+            ),
+            catalogue=load_kit_catalogue(),
+            commit_wait_seconds=cockpit_profiles.publication.commit_wait_seconds,
+        )
+        if cockpit_local_branch:
+            local_branch = FakeWidgetRepository()
+            local_outbox = CommitOutboxWorker(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                repository=local_branch,
+                principal=principal,
+            )
         cockpit_maintenance = _CockpitMaintenance(
             settings,
             uow_factory=uow_factory,
@@ -3979,6 +4057,9 @@ async def _compose(
         registry.register(RecordsAppendTool(records_service, records_zone))
         registry.register(RecordsQueryTool(records_service, records_zone))
         registry.register(RecordsDeleteTool(records_service, records_zone))
+    if cockpit_toolset is not None:
+        for cockpit_tool in cockpit_tools(cockpit_toolset):
+            registry.register(cockpit_tool)
     registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None
     try:
@@ -5434,6 +5515,8 @@ async def _compose(
                 cockpit_sandbox=cockpit_sandbox,
                 cockpit_publication=cockpit_publication,
                 cockpit_maintenance=cockpit_maintenance,
+                cockpit_local_branch=local_branch,
+                cockpit_local_outbox=local_outbox,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
                 skill_reviews=skill_reviews,
@@ -5861,6 +5944,8 @@ async def build(
     judgment_provider_override: JudgmentProvider | None = None,
     browser_provider_override: BrowserProvider | None = None,
     device_channel_override: DeviceChannel | None = None,
+    cockpit_builder_override: WidgetBuilder | None = None,
+    cockpit_local_branch: bool = False,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
@@ -6204,6 +6289,7 @@ async def build(
             else []
         ),
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
+        *(COCKPIT_TOOL_NAMES if effective_settings.cockpit_enabled else ()),
         *(
             [DEVICE_SMS_SEND_TOOL_NAME]
             if effective_settings.device_channel_enabled
@@ -6229,6 +6315,8 @@ async def build(
             SCHEDULE_CANCEL_TOOL_NAME,
             SUBSCRIPTIONS_TOOL_NAME,
             UNSUBSCRIBE_TOOL_NAME,
+            # The Cockpit is a mode of its own; its tools never take a definition slot.
+            *COCKPIT_TOOL_NAMES,
         )
         if name in default_enabled_tools
     ]
@@ -6571,6 +6659,8 @@ async def build(
             device_ingest_daily_cap=int(device_config["ingest_daily_cap"]),
             surface_limits=surface_limits,
             recall_capture=recall_capture,
+            cockpit_builder_override=cockpit_builder_override,
+            cockpit_local_branch=cockpit_local_branch,
         )
         composition = replace(
             composition,

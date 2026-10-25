@@ -46,6 +46,9 @@ class EvalFixtures(StrictModel):
     skills: list[str] = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)
     run_limits: EvalRunLimits = Field(default_factory=EvalRunLimits)
+    # Cockpit: the flag is on, the package builder judges files and the manifest, and
+    # the outbox commits to an in-memory branch once the runs finish (Milestone 35).
+    cockpit: bool = False
 
 
 class EvalSession(StrictModel):
@@ -89,6 +92,8 @@ class EvalExpected(StrictModel):
     distinct_prefixes: int | None = Field(default=None, ge=1)
     minimum_compactions: int | None = Field(default=None, ge=0)
     absent_strings: list[str] = Field(default_factory=list)
+    # Widget slugs that end live with their package committed to the branch.
+    committed_widgets: list[str] = Field(default_factory=list)
 
 
 class EvalArm(StrictModel):
@@ -115,7 +120,7 @@ class EvalDelta(StrictModel):
 
 class EvalCase(StrictModel):
     name: str
-    milestone: int = Field(ge=1, le=13)
+    milestone: int = Field(ge=1, le=35)
     source: Literal["authored", "trajectory"] = "authored"
     source_export_id: UUID | None = None
     tags: list[str] = Field(default_factory=list)

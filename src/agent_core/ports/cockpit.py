@@ -348,9 +348,17 @@ class CockpitRuntimeAssets(Protocol):
     def asset(self, sha256: str) -> CockpitAsset | None: ...
 
 
-class SettingsSchemaCheck(Protocol):
-    """A widget manifest's settings JSON Schema, applied to the owner's values."""
+class JsonSchemaCheck(Protocol):
+    """A JSON Schema applied to a widget's settings or a feed's data.
 
-    def violations(self, schema: Mapping[str, Any], values: Mapping[str, Any]) -> list[str]:
-        """Human-readable reasons the values do not fit, empty when they do."""
+    A schema that names any location outside itself is invalid, so applying
+    one never retrieves anything.
+    """
+
+    def schema_violations(self, schema: Mapping[str, Any]) -> list[str]:
+        """Why the document is not a self-contained JSON Schema, empty when it is."""
+        ...
+
+    def violations(self, schema: Mapping[str, Any], instance: object) -> list[str]:
+        """Human-readable reasons the instance does not fit, empty when it does."""
         ...

@@ -29,6 +29,7 @@ from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     MEMORY_SUBJECT_MAX_LENGTH,
     SENSITIVITY_ORDER,
+    USAGE_ACCOUNTING_VERSION,
     BeliefRejection,
     BeliefType,
     ConsolidationResult,
@@ -4527,9 +4528,18 @@ class GovernedMemoryService:
         what the run's traces actually returned: an identifier the recall never
         offered is an invention and moves nothing, and one that fits two of the
         returned beliefs is evidence about neither. A cited belief gains utility
-        and a fresh usage instant without refreshing evidence; a belief returned
-        and never used loses utility, so it stops winning the ranking it kept
-        winning for nothing.
+        and a fresh usage instant without refreshing evidence; a belief the
+        model was shown and never used loses utility, so it stops winning the
+        ranking it kept winning for nothing.
+
+        Shown means delivered: the runtime records which recall blocks reached
+        each model request (`memory.delivered`), and only beliefs those traces
+        returned take the uncited charge. A block the context builder dropped
+        under pressure and the frozen prefix snapshot were never an offer the
+        answer declined, so their members are neither charged nor counted as
+        delivered. Each delivered belief gains one delivery on its versioned
+        counters and each cited belief one citation; those counters, not the
+        legacy utility, are what a later lifecycle decision reads.
 
         Confidence is never touched in either direction
         (memory-retrieval-and-ranking.md:793): a wrong belief that happens to
@@ -4591,19 +4601,28 @@ class GovernedMemoryService:
                 ]
                 if fresh:
                     await uow.traces.mark_cited(trace.id, self._principal, fresh)
+            # The runtime names the traces whose blocks reached a model request
+            # of this run. Without that record nothing was shown, so nothing
+            # is charged; a citation is still credited, since the answer
+            # could only have copied an identifier it was shown somewhere.
+            delivered_trace_ids = {
+                UUID(trace_id)
+                for event in await uow.events.list_after(
+                    session_id, 0, self._principal, run_id=run_id
+                )
+                if event.event_type == "memory.delivered"
+                for trace_id in event.payload.get("trace_ids", [])
+            }
+            delivered_traces = [trace for trace in traces if trace.id in delivered_trace_ids]
+            delivered: set[UUID] = set()
+            for trace in delivered_traces:
+                delivered.update(trace.returned)
             # A belief the answer cited is never also charged for going unused,
             # however many of the run's traces returned it, and neither is one
             # an ambiguous citation may have meant.
-            uncited = returned - cited - ambiguous
-            moved_cited = await self._move_utility(
-                uow, sorted(cited, key=str), self._usage.cited_utility_delta, instant, cited=True
-            )
-            moved_uncited = await self._move_utility(
-                uow,
-                sorted(uncited, key=str),
-                self._usage.uncited_utility_delta,
-                instant,
-                cited=False,
+            uncited = delivered - cited - ambiguous
+            moved_cited, moved_uncited = await self._apply_usage(
+                uow, delivered=delivered, cited=cited, uncited=uncited, instant=instant
             )
             await uow.events.append(
                 NewEvent(
@@ -4614,6 +4633,7 @@ class GovernedMemoryService:
                     actor_id=self._principal.principal_id,
                     payload={
                         "trace_ids": [str(trace.id) for trace in traces],
+                        "delivered": [str(trace.id) for trace in delivered_traces],
                         "cited": [str(belief_id) for belief_id in sorted(cited, key=str)],
                         "uncited": [str(belief_id) for belief_id in sorted(uncited, key=str)],
                         "ambiguous": len(unresolved),
@@ -4628,6 +4648,89 @@ class GovernedMemoryService:
             ambiguous=len(unresolved),
         )
 
+    async def _apply_usage(
+        self,
+        uow: RepositoryUnitOfWork,
+        *,
+        delivered: set[UUID],
+        cited: set[UUID],
+        uncited: set[UUID],
+        instant: datetime,
+        cited_delta: float | None = None,
+        uncited_delta: float | None = None,
+    ) -> tuple[int, int]:
+        """Move utility and the exposure counters of each belief in one write.
+
+        A citation adds the cited delta and moves `last_used_at`, never
+        `last_evidence_at` or the legacy `last_reinforced_at`: retrieval is
+        evidence that a belief was useful, not evidence that it remains true,
+        so a belief cannot perpetuate itself by winning recall. A delivered and
+        uncited belief takes the uncited delta. Utility stays within [-1, 1].
+
+        Every delivered belief gains one delivery and every cited belief one
+        citation on the versioned counters, which are stamped with the
+        accounting version the first time they move. The returned pair counts
+        beliefs whose utility actually changed, so a belief already at the
+        ceiling or the floor is written for its counters but not counted.
+
+        Neither side takes a fresh store position. The recall delta reads a
+        position above the session's snapshot watermark as a belief formed or
+        corrected since the snapshot, so republishing a belief to the next turn
+        for having been read would report a change that never happened.
+        """
+
+        if cited_delta is None:
+            cited_delta = self._usage.cited_utility_delta
+        if uncited_delta is None:
+            uncited_delta = self._usage.uncited_utility_delta
+        moved_cited = moved_uncited = 0
+        for belief_id in sorted(delivered | cited, key=str):
+            is_cited = belief_id in cited
+            is_uncited = belief_id in uncited
+            try:
+                record = await uow.memories.get(belief_id, self._principal)
+            except NotFoundError:
+                # Derived UUIDs credit only their still-valid projection. Deleted
+                # originals and invalid summaries receive no feedback.
+                if is_cited or is_uncited:
+                    delta = cited_delta if is_cited else uncited_delta
+                    moved = int(
+                        await uow.reconsolidation.update_summary_usage(
+                            self._principal, belief_id, delta, instant, cited=is_cited
+                        )
+                    )
+                    if is_cited:
+                        moved_cited += moved
+                    else:
+                        moved_uncited += moved
+                continue
+            update: dict[str, object] = {}
+            if is_cited:
+                update.update(
+                    {
+                        "utility": min(1.0, max(-1.0, record.utility + cited_delta)),
+                        "last_used_at": instant,
+                        "updated_at": instant,
+                        "cited_count": record.cited_count + 1,
+                    }
+                )
+            elif is_uncited:
+                update["utility"] = min(1.0, max(-1.0, record.utility + uncited_delta))
+            if belief_id in delivered:
+                update["delivered_count"] = record.delivered_count + 1
+            if "delivered_count" in update or "cited_count" in update:
+                update["usage_accounting_version"] = USAGE_ACCOUNTING_VERSION
+            updated = record.model_copy(update=update, deep=True)
+            if updated == record:
+                continue
+            await uow.memories.reinforce(updated)
+            if updated.utility != record.utility:
+                if is_cited:
+                    moved_cited += 1
+                else:
+                    moved_uncited += 1
+        return moved_cited, moved_uncited
+
     async def _move_utility(
         self,
         uow: RepositoryUnitOfWork,
@@ -4637,42 +4740,24 @@ class GovernedMemoryService:
         *,
         cited: bool,
     ) -> int:
-        """Add one signed usage delta to each belief, bounded by [-1, 1].
+        """Add one signed usage delta to each belief, as one side of the feedback.
 
-        A citation moves `last_used_at`, never `last_evidence_at` or the legacy
-        `last_reinforced_at`. Retrieval is evidence that a belief was useful,
-        not evidence that it remains true, so a belief cannot perpetuate itself
-        by winning recall.
-
-        Neither side takes a fresh store position. The recall delta reads a
-        position above the session's snapshot watermark as a belief formed or
-        corrected since the snapshot, so republishing a belief to the next turn
-        for having been read would report a change that never happened. A move
-        the clamp flattens to nothing is not written at all.
+        The usage hook applies both sides at once through `_apply_usage`; this
+        keeps the single-sided form the lifecycle gates exercise, with the same
+        counters and clock rules.
         """
 
-        moved = 0
-        for belief_id in belief_ids:
-            try:
-                record = await uow.memories.get(belief_id, self._principal)
-            except NotFoundError:
-                # Derived UUIDs credit only their still-valid projection. Deleted
-                # originals and invalid summaries receive no feedback.
-                moved += int(
-                    await uow.reconsolidation.update_summary_usage(
-                        self._principal, belief_id, delta, instant, cited=cited
-                    )
-                )
-                continue
-            update: dict[str, object] = {"utility": min(1.0, max(-1.0, record.utility + delta))}
-            if cited:
-                update.update({"last_used_at": instant, "updated_at": instant})
-            updated = record.model_copy(update=update, deep=True)
-            if updated == record:
-                continue
-            await uow.memories.reinforce(updated)
-            moved += 1
-        return moved
+        ids = set(belief_ids)
+        moved_cited, moved_uncited = await self._apply_usage(
+            uow,
+            delivered=ids,
+            cited=ids if cited else set(),
+            uncited=set() if cited else ids,
+            instant=instant,
+            cited_delta=delta if cited else None,
+            uncited_delta=None if cited else delta,
+        )
+        return moved_cited if cited else moved_uncited
 
     async def expire_traces(
         self, now: datetime | None = None, *, limit: int = TRACE_EXPIRY_SWEEP_LIMIT

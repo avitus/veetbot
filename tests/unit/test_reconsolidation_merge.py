@@ -603,3 +603,26 @@ def test_plan_owns_immutable_leaf_identities() -> None:
     assert revalidate_merge(current, principal(), (first, second), now=NOW).state == "invalidated"
     with pytest.raises(ValidationError):
         plan.canonical_id = second.record.id
+
+
+def test_content_signature_ignores_usage_accounting() -> None:
+    """Delivery and citation counters are usage, not content: they must not
+    advance a content revision, re-embed a vector or unsettle a merge."""
+    from agent_core.domain.memory import USAGE_ACCOUNTING_VERSION
+    from agent_core.domain.reconsolidation import content_signature
+
+    record = memory()
+    used = record.model_copy(
+        update={
+            "utility": 0.4,
+            "last_used_at": NOW,
+            "updated_at": NOW,
+            "delivered_count": 5,
+            "cited_count": 2,
+            "usage_accounting_version": USAGE_ACCOUNTING_VERSION,
+        }
+    )
+    assert content_signature(used) == content_signature(record)
+    assert content_signature(record.model_copy(update={"statement": "changed"})) != (
+        content_signature(record)
+    )

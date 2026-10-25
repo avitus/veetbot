@@ -358,6 +358,7 @@ The first segment is the **domain**, and domains are partitioned:
 | `email` | builtin, cached Email experience | build time, Email mode or unsubscribe flag |
 | `people` | builtin, People memory | build time, People flag |
 | `records` | builtin, owner records | build time, records flag |
+| `cockpit` | builtin, Cockpit widgets and feeds | build time, Cockpit flag |
 | `image` `video` | builtin, generated media | build time, TensorScale credential (ADR-0140) |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
@@ -586,6 +587,43 @@ because the model produced them and ADR-0002 labels model output
 value, after canonicalization, appears verbatim as a span of at least sixteen
 characters in a `USER`-labeled context item of the same session. Numbers,
 booleans, and short strings are never raised.
+
+One argument has a second way up. The `statement` of `memory.remember` is
+raised when it is **owner-grounded** (ADR-0245): the active turn is the newest
+owner message and everything after it; the statement's content words are split
+into those the owner's message contains, those found only in an external or
+knowledge tool result of the turn, and those in neither; the statement is
+grounded when no word came only from external content, at least sixty percent
+of its words (and at least two) are the owner's, at most three are the model's
+own phrasing, and, where a negation, modal or frequency word ("always",
+"rarely", "only") is involved, the statement must restate exactly one owner
+sentence and keep its frame: the covered words, markers and clause joins
+("and", "or", "but", a comma) in the same order, with no word of the model's
+own after a marker other than a plain inflection of an owner word ("eats" for
+"eat"). A marker added, dropped, moved onto another fact or carried over from
+another sentence, an object swapped between clauses, or "and" turned into "or"
+changes the frame; when a shared word reaches several owner sentences, which
+fact the marker qualifies is ambiguous and nothing is raised. Request framing
+such as "could you" or "don't forget" opening an owner sentence is set aside;
+anywhere else, and anywhere in the statement, those words count. Overlap of
+content words is not provenance when the polarity or modality moved, so "I may
+transfer funds" never grounds "I will transfer funds". A paraphrase of what
+the owner just said is therefore an owner save whether it is proposed in the
+same step as a web read or a later one, while a statement carrying a word
+found only in an external result, not in the owner's message, is not. A
+statement proposed in the same step as the read is judged on the conversation
+as it then stands: the read's words cannot be told apart as external there,
+but the model has not seen them either; from the next step on, a word found
+only in that result refuses the statement. A message the owner did not author
+(device-ingested, surface) grounds nothing. The rule still only raises: it
+cannot lower a label, and the turn's origin taint stands; the governed service
+then checks the label it is given (refusing an external or knowledge origin),
+the source events and the owner's earlier deletions, but it never compares the
+statement with the owner's wording, so a statement grounding wrongly raises to
+USER passes it: grounding is the only check of a paraphrase's provenance. The
+tool reports an ungrounded statement after a tainted turn as
+`tool.memory.statement_not_owner_grounded`, a closed reason with corrective
+guidance.
 
 The direction is the whole design. Raising on a match can only be wrong by
 failing to raise, which costs an unnecessary approval. Lowering on a match —
@@ -2086,7 +2124,11 @@ evidence that the surface is the same one.
    `USER`-labelled context: equality shows two values are equal, not that one
    came from the other, and untrusted content can quote a string it can see.
    Where an untrusted item contributed to a field, the lower label stands.
-   `origin_trust` is the minimum label over the request's context items.
+   `origin_trust` is the minimum label over the request's context items. The
+   two documented raises (the sixteen-character verbatim span, and the
+   owner-grounded `memory.remember` statement of ADR-0245) are the whole
+   exception: both only ever raise, and a word that an external item of the
+   turn supplied keeps the statement down.
 10. Large output is excerpted head-and-tail and artifactized. It is never
     summarized, because a summarizer over untrusted output launders it.
 11. All four non-success outcomes share one six-field shape with a stable

@@ -479,16 +479,18 @@ async def test_briefs_are_validated_before_anything_exists() -> None:
 
 
 async def test_forbidden_tools_are_withheld_from_children_the_parent_itself_holds() -> None:
-    """A child never inherits delegation, skill authoring, or the owner's device send.
+    """A child never inherits delegation, skill authoring, the owner's device send, or widgets.
 
     The parent's pinned set is the subset test's upper bound, so a forbidden
     tool is only truly forbidden when the parent holds it and the child still
     cannot ask for it. `device.sms.send` composes a text on the owner's phone;
     drafting a reply is a triage-session behavior, never a child-run behavior.
+    `cockpit.widget.write` commits to a public branch, which only the owner's
+    own chat does (docs/plan/cockpit.md, the tools).
     """
 
     materializer, _factory, parent, invocation = await _materializer_stack()
-    forbidden = ("delegate.run", "skill.manage", "device.sms.send")
+    forbidden = ("delegate.run", "skill.manage", "device.sms.send", "cockpit.widget.write")
     pinned = {
         **PINNED,
         **{name: _capability_spec(name) for name in forbidden},

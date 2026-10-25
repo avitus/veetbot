@@ -19,6 +19,8 @@ SESSION_EMAIL_OPERATIONAL_METADATA_KEY = "email_operational"
 SESSION_EMAIL_THREAD_ID_METADATA_KEY = "email_thread_id"
 SESSION_EMAIL_ACCOUNT_ID_METADATA_KEY = "email_account_id"
 SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY = "email_account_servers"
+# The standing session an inbound device message (SMS) is triaged in (M24).
+SESSION_DEVICE_TRIAGE_METADATA_KEY = "device_triage"
 SESSION_RESERVED_METADATA_KEYS = frozenset(
     {
         SESSION_BROWSER_PROFILE_METADATA_KEY,

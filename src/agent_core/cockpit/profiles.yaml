@@ -7,6 +7,9 @@ publication:
   commits_per_principal_per_hour: 60
   # How often the maintenance role polls the widget branch for human commits.
   import_interval_seconds: 60
+  # How long cockpit.widget.write waits for the outbox to commit a change
+  # before it reports pending_commit (docs/plan/cockpit.md, the tools).
+  commit_wait_seconds: 30
 stream:
   # A stream closes cleanly after this long, so a revoked token takes effect
   # on reconnect (docs/plan/cockpit.md, the stream).
@@ -14,3 +17,7 @@ stream:
   # How long stream events are kept; a client resuming from before this gets
   # stream.reset and refetches the snapshot.
   event_retention_seconds: 86400
+feeds:
+  # Snapshots kept per feed; a manifest declares at most this much history
+  # (docs/plan/cockpit.md, freshness and delivery).
+  history_max: 288

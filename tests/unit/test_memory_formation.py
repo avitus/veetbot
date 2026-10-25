@@ -1129,6 +1129,31 @@ async def _recall_turn(retriever: HybridMemoryRetriever, run_id: UUID) -> Recall
     )
 
 
+async def _deliver(factory: MemoryUnitOfWorkFactory, run_id: UUID, trace_ids: list[UUID]) -> None:
+    """Record, as the runtime does, which recall traces reached the model request."""
+
+    async with factory() as uow:
+        await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=run_id,
+                event_type="memory.delivered",
+                actor_type="runtime",
+                payload={"step_number": 1, "trace_ids": [str(trace_id) for trace_id in trace_ids]},
+            )
+        )
+
+
+async def _delivered_turn(
+    factory: MemoryUnitOfWorkFactory, retriever: HybridMemoryRetriever, run_id: UUID
+) -> RecallResult:
+    """Recall into one turn's trace and deliver that trace to the model."""
+
+    result = await _recall_turn(retriever, run_id)
+    await _deliver(factory, run_id, [result.trace_id])
+    return result
+
+
 async def test_record_usage_marks_cited_raises_utility_and_reinforcement_not_confidence() -> None:
     """A cited belief gains utility and a fresh reinforcement instant, never confidence.
 
@@ -1156,7 +1181,7 @@ async def test_record_usage_marks_cited_raises_utility_and_reinforcement_not_con
         belief_type=BeliefType.PREFERENCE,
     )
     run_id = UUID(int=9_101)
-    result = await _recall_turn(retriever, run_id)
+    result = await _delivered_turn(factory, retriever, run_id)
     assert {item.belief_id for item in result.items} == {cited.id, uncited.id}
 
     clock.advance(timedelta(days=1))
@@ -1209,7 +1234,7 @@ async def test_record_usage_lowers_utility_for_returned_but_uncited() -> None:
         subject="theme",
         belief_type=BeliefType.PREFERENCE,
     )
-    await _recall_turn(retriever, UUID(int=9_201))
+    await _delivered_turn(factory, retriever, UUID(int=9_201))
 
     feedback = await service.record_usage(
         session_id=SESSION_ID,
@@ -1233,7 +1258,7 @@ async def test_record_usage_lowers_utility_for_returned_but_uncited() -> None:
     )
     steps = []
     for run_id in (UUID(int=9_202), UUID(int=9_203)):
-        await _recall_turn(retriever, run_id)
+        await _delivered_turn(factory, retriever, run_id)
         steps.append(
             await steep.record_usage(
                 session_id=SESSION_ID, run_id=run_id, final_text="Still nothing to cite."
@@ -1247,12 +1272,19 @@ async def test_record_usage_lowers_utility_for_returned_but_uncited() -> None:
     # changed nothing, so it is not written and not counted.
     assert [(step.uncited, step.ambiguous) for step in steps] == [(2, 0), (0, 0)]
 
-    await _recall_turn(retriever, UUID(int=9_204))
+    await _delivered_turn(factory, retriever, UUID(int=9_204))
     inert = await steep.record_usage(
         session_id=SESSION_ID, run_id=UUID(int=9_204), final_text="Nothing again."
     )
     assert (inert.cited, inert.uncited) == (0, 0)
-    assert {belief.id: belief for belief in await service.list_memories()} == floored
+    # Utility stays at the floor; the delivery itself is still counted.
+    resting = {belief.id: belief for belief in await service.list_memories()}
+    assert {key: value.utility for key, value in resting.items()} == {
+        key: value.utility for key, value in floored.items()
+    }
+    assert {key: value.delivered_count for key, value in resting.items()} == {
+        key: value.delivered_count + 1 for key, value in floored.items()
+    }
 
 
 async def test_record_usage_is_idempotent_across_repeated_completion() -> None:
@@ -1280,7 +1312,7 @@ async def test_record_usage_is_idempotent_across_repeated_completion() -> None:
         belief_type=BeliefType.PREFERENCE,
     )
     run_id = UUID(int=9_301)
-    result = await _recall_turn(retriever, run_id)
+    result = await _delivered_turn(factory, retriever, run_id)
     final_text = f"As [m:{str(cited.id)[:8]}] says, briefly."
 
     first = await service.record_usage(session_id=SESSION_ID, run_id=run_id, final_text=final_text)
@@ -1320,7 +1352,7 @@ async def test_record_usage_parses_short_ids_from_final_text() -> None:
         belief_type=BeliefType.PREFERENCE,
     )
     run_id = UUID(int=9_401)
-    result = await _recall_turn(retriever, run_id)
+    result = await _delivered_turn(factory, retriever, run_id)
     shouted = str(uncited.id)[:8].upper()
     assert shouted != str(uncited.id)[:8]
 
@@ -1371,6 +1403,137 @@ async def test_record_usage_reads_the_session_snapshot_trace_too() -> None:
     assert (await service.get_recall_trace(snapshot.trace_id)).cited == [remembered.id]
 
 
+async def test_record_usage_charges_only_recollections_the_model_was_shown() -> None:
+    """Returned is not delivered: an undelivered recall block charges nobody.
+
+    The context builder can drop an in-turn recall block under budget
+    pressure, so a trace's returned set is not what the model read. Only the
+    traces the runtime recorded as delivered take the uncited charge; a run
+    with no delivery record charges nothing and credits a citation as before.
+    """
+
+    clock, factory, _stack, retriever = await formation_stack()
+    service = GovernedMemoryService(factory, clock, _citable_ids(), principal())
+    cited = await _form(
+        factory,
+        service,
+        "User prefers concise answers",
+        subject="answer style",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    uncited = await _form(
+        factory,
+        service,
+        "User prefers dark themes",
+        subject="theme",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    run_id = UUID(int=9_801)
+    result = await _recall_turn(retriever, run_id)
+    assert {item.belief_id for item in result.items} == {cited.id, uncited.id}
+
+    feedback = await service.record_usage(
+        session_id=SESSION_ID,
+        run_id=run_id,
+        final_text=f"Keeping it short, as [m:{str(cited.id)[:8]}] asks.",
+    )
+
+    assert (feedback.cited, feedback.uncited, feedback.traces) == (1, 0, 1)
+    assert (await service.get_memory(cited.id)).utility == pytest.approx(0.1)
+    assert (await service.get_memory(uncited.id)).utility == 0
+    async with factory() as uow:
+        events = await uow.events.list_after(SESSION_ID, 0, principal())
+    citation = next(event for event in events if event.event_type == "memory.cited")
+    assert citation.payload["uncited"] == []
+    assert citation.payload["delivered"] == []
+
+
+async def test_record_usage_never_charges_snapshot_members() -> None:
+    """The frozen snapshot is ambient context, not an offer the model declined.
+
+    Snapshot members ride in the prefix of every turn; charging them each run
+    for going uncited pinned every ambient belief at the utility floor within
+    twenty runs in production. A cited snapshot member is still credited.
+    """
+
+    clock, factory, _stack, retriever = await formation_stack()
+    service = GovernedMemoryService(factory, clock, _citable_ids(), principal())
+    cited = await _form(
+        factory,
+        service,
+        "User prefers concise answers",
+        subject="answer style",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    ambient = await _form(
+        factory,
+        service,
+        "User prefers dark themes",
+        subject="theme",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
+    assert {item.belief_id for item in snapshot.items} == {cited.id, ambient.id}
+
+    feedback = await service.record_usage(
+        session_id=SESSION_ID,
+        run_id=UUID(int=9_802),
+        final_text=f"The prefix already said [m:{str(cited.id)[:8]}].",
+        snapshot_trace_id=snapshot.trace_id,
+    )
+
+    assert (feedback.cited, feedback.uncited, feedback.traces) == (1, 0, 1)
+    assert (await service.get_memory(cited.id)).utility == pytest.approx(0.1)
+    assert (await service.get_memory(ambient.id)).utility == 0
+
+
+async def test_record_usage_counts_deliveries_and_citations_per_belief() -> None:
+    """Versioned exposure counters replace legacy utility as the non-use evidence.
+
+    Utility was depressed for two months by snapshot charges and cannot be
+    reset by waiting, so lifecycle decisions read counters that start at the
+    accounting version's deploy: one delivery per run a belief reached the
+    model, one citation per run the answer used it.
+    """
+
+    clock, factory, _stack, retriever = await formation_stack()
+    service = GovernedMemoryService(factory, clock, _citable_ids(), principal())
+    cited = await _form(
+        factory,
+        service,
+        "User prefers concise answers",
+        subject="answer style",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    uncited = await _form(
+        factory,
+        service,
+        "User prefers dark themes",
+        subject="theme",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    assert (cited.delivered_count, cited.cited_count, cited.usage_accounting_version) == (
+        0,
+        0,
+        None,
+    )
+    for run_id in (UUID(int=9_811), UUID(int=9_812)):
+        await _delivered_turn(factory, retriever, run_id)
+        await service.record_usage(
+            session_id=SESSION_ID,
+            run_id=run_id,
+            final_text=f"[m:{str(cited.id)[:8]}] again." if run_id.int == 9_811 else "Nothing.",
+        )
+
+    used = await service.get_memory(cited.id)
+    unused = await service.get_memory(uncited.id)
+    assert (used.delivered_count, used.cited_count) == (2, 1)
+    assert (unused.delivered_count, unused.cited_count) == (2, 0)
+    assert used.usage_accounting_version == unused.usage_accounting_version == "usage-accounting@2"
+    assert used.store_position == cited.store_position
+    assert unused.store_position == uncited.store_position
+
+
 async def test_record_usage_leaves_store_positions_where_it_found_them() -> None:
     """Usage moves utility, and a utility move is not news for the recall delta.
 
@@ -1397,7 +1560,7 @@ async def test_record_usage_leaves_store_positions_where_it_found_them() -> None
         belief_type=BeliefType.PREFERENCE,
     )
     run_id = UUID(int=9_601)
-    await _recall_turn(retriever, run_id)
+    await _delivered_turn(factory, retriever, run_id)
 
     clock.advance(timedelta(days=1))
     await service.record_usage(
@@ -1478,7 +1641,7 @@ async def test_record_usage_credits_nothing_for_an_ambiguous_short_identifier() 
     assert str(twin.id)[:8] == str(other_twin.id)[:8]
     assert str(distinct.id)[:8] != str(twin.id)[:8]
     run_id = UUID(int=9_701)
-    result = await _recall_turn(retriever, run_id)
+    result = await _delivered_turn(factory, retriever, run_id)
     assert {item.belief_id for item in result.items} == {twin.id, other_twin.id, distinct.id}
 
     feedback = await service.record_usage(

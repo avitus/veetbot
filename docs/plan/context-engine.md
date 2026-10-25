@@ -1263,3 +1263,29 @@ sentence is in every session's prefix whether or not the records flag is on,
 so a `context-builder@11` or `@12` plan no longer renders the same bytes: its
 stored prefix hash fails the planner's recheck and it re-plans once through
 the ordinary logged epoch rotation.
+
+## Memory citation framing
+
+Context builder identity advances to `context-builder@14` when row 0's
+platform framing gains the recollection sentences the retrieval design
+specifies for the cached prefix
+([memory-retrieval-and-ranking.md](memory-retrieval-and-ranking.md)): memory
+envelopes hold recollections whose lines begin with an identifier of the form
+`[m:xxxxxxxx]`; a line marked user or affirmed is the owner's own statement,
+used directly and never handed back to the owner to restate; a tentative or
+hypothesis line carries exactly the uncertainty its marker states; a
+recollection yields to the current conversation only where the owner
+contradicts it; a reply that relies on a recollection repeats its identifier
+verbatim beside the fact, citing only identifiers it was shown and only
+recollections it used. The placeholder is not hexadecimal, so a verbatim copy
+can never match the citation form the usage hook extracts. The sentences are
+platform text in every session, so every earlier plan re-plans once. The
+fifty-turn stability script runs 1,700 bytes of prompt padding per turn
+(`tests/eval_cases/28_fifty_turn_prefix.yaml`): at 1,800 the final turn sat
+129 tokens under the window and the longer framing tipped it into an
+overflow that no history compaction could relieve.
+
+Beside each `model.request.started`, the run loop appends `memory.delivered`
+naming the recall traces whose blocks are in that request's body. That is the
+delivered set the usage hook charges for non-use; a block dropped under
+pressure and the prefix snapshot are not in it.

@@ -597,11 +597,32 @@ configuration, so the thirty-item definition roster is untouched.
 
 | Tool | Operations | Side effect | Default decision |
 | --- | --- | --- | --- |
-| `cockpit.read` | list widgets, read a widget (files, revisions, state, import failures), list and read feeds, get layouts, describe the kit | `none` | allow |
-| `cockpit.check` | validate a package; preview its fixtures as a PNG | `code_execution` (isolated) | allow |
+| `cockpit.read` | describe the kit, list widgets, read a widget (state, settings schema, file sizes, recent revisions, import failures), page a widget's file, list and read feeds, get layouts | `none` | allow |
+| `cockpit.check` | validate a package; preview its fixtures as a PNG | `none`, built in the builder's own isolated sandbox | allow |
 | `cockpit.widget.write` | create, update (`expected_revision`), delete, restore | `publication` | allow by exact-name `tool_rules` entry |
 | `cockpit.configure` | set a widget's private settings; set a device class's layout | `none` | allow |
 | `cockpit.feed.publish` | publish a snapshot (and schema) to `agent.<slug>` | `none` | allow |
+
+**`cockpit.check` is classified `none`, not `code_execution`.** Its build
+runs in the builder's own offline sandbox, exactly as a write's does, and it
+runs no command the model chose. A `sandbox` target would label its verdict
+`external_untrusted`, which taints the turn. The verdict is the one
+`cockpit.widget.write` returns with internal trust, so that label would force
+every check-then-write into an approval for content the model wrote itself.
+
+**Every answer fits the inline budget.** A tool result reaches the model
+whole only up to `tools/limits.yaml`'s `output.inline_maximum_bytes` (4 KiB),
+so `cockpit.read` answers in pieces:
+
+- `describe_kit` gives the rules and an index of the kit's primitives, then
+  up to four primitives' props and examples by name, or the helpers or the
+  shared types;
+- `read_widget` gives file sizes rather than files;
+- `read_file` pages one file of the head revision from a line, and a line
+  longer than a page from a byte offset on a character boundary;
+- `read_feed` returns at most ten earlier snapshots.
+
+Builder diagnostics are cut to the first ten, each at most 300 characters.
 
 **`cockpit.widget.write`** has several further rules:
 
@@ -616,14 +637,24 @@ configuration, so the thirty-item definition roster is untouched.
 - **Policy version.** The profile edit moves the content-addressed policy
   version. Pending approvals revalidate under the existing rule, and the step
   that makes the edit updates the pinned shipped version and names any
-  version-bound evidence it affects.
+  version-bound evidence it affects. The owner placed the edit in activation
+  on 2026-10-24. Provider-assisted formation's release evidence is bound to
+  the compiled policy version, so it is regenerated once there, on the new
+  version, rather than at each profile change before then.
 - **Where it is offered.** Session-environment filtering withholds the tool
-  from scheduled, delegated, operational and email-task sessions. Widget
-  writes happen in interactive chat with the owner.
+  from scheduled, delegated, operational, email-task and device-triage
+  sessions. Widget writes happen in interactive chat with the owner.
 - **Waiting and results.** The tool waits up to `commit_wait_seconds` (knob,
   default thirty) for the outbox. It returns the final state when the outbox
   finishes in time, and `pending_commit` with the revision otherwise. A
   rejected package returns its diagnostics.
+- **Replay.** The tool is conditionally idempotent. The accepted revision, or
+  the queued removal, records the call's idempotency key in the same
+  transaction, so a replay returns the first outcome and changes nothing.
+- **Refused by name too.** Withholding the tool from a session's plan does
+  not stop a call by name. So the tool itself refuses any run that is not
+  interactive and any session that carries a schedule, a run kind, an
+  operational email marker or a purpose.
 - **Approval view.** When an escalation produces an approval, the approval
   view shows the file diff and the preview image.
 
@@ -631,14 +662,25 @@ configuration, so the thirty-item definition roster is untouched.
 provenance:
 
 - assistant-written and owner-git revisions are labelled as stored owner
-  content;
-- feed data keeps its own label.
+  content (`internal_tool`), which leaves the turn's origin as it was;
+- feed data is `external_untrusted`. An assistant feed holds what a run read.
+  A platform feed's rendering trust is `platform`, but its projections quote
+  mail, callers and people, so reading one is untrusted too.
 
 Reading a widget before updating it therefore does not force every later turn
 into approval.
 
 **Feed publishing** is available in scheduled runs: the schedule principal's
 scopes gain `cockpit.write`. Widget writes stay interactive only.
+
+**Feed checks.** A feed's schema must be self-contained JSON Schema (draft
+2020-12) that names no location outside itself, and each of its references
+must resolve inside it, so checking data never retrieves anything and never
+fails on a dangling reference. Data is checked against it unless the snapshot reports a
+failed refresh. An observation more than a minute ahead of the server's clock
+is refused. Each publish keeps at most `feeds.history_max` snapshots (knob,
+default 288, the deepest history a manifest may declare) and appends one
+`feed.updated` stream event.
 
 ## The routes and the stream
 
@@ -923,7 +965,10 @@ contract suite.
   - event retention;
   - settings purge window.
 
-  These knobs join the shipped knob census when the implementation lands.
+  These knobs join the shipped knob census as each build step reads them.
+  Seven are in it now: the two commit rate limits, the import poll interval
+  and the commit wait under `publication`; the stream lifetime and event
+  retention under `stream`; and `feeds.history_max`.
 
 ### Release
 
@@ -1004,8 +1049,8 @@ and a runbook covering:
 10. **Untrusted turns escalate and other runs cannot write.** The write tool
     is allowed for owner-origin turns, escalates to approval for an untrusted
     origin or argument, remains subject to the credential-to-egress hardline
-    rule, and is not offered in scheduled, delegated, operational or
-    email-task sessions. Registered as
+    rule, and is not offered in scheduled, delegated, operational,
+    email-task or device-triage sessions. Registered as
     `gate.cockpit.untrusted_origin_escalates`, case. **M35.**
 11. **A widget sees only what it declares.** The host delivers a widget only
     its manifest's feeds at no more than the declared history, only its own
@@ -1092,16 +1137,18 @@ and a runbook covering:
    privacy screen.** Gates 4 through 9.
 6. **The routes, the scopes, the flag, the cockpit channel and the stream.**
    Gates 14 and 15.
-7. **The tools, the `tool_rules` entry, session-environment filtering,
-   approval views and `kit.describe`, plus an evaluation in which a chat
-   request yields a valid committed widget.** Gates 10 and 11.
+7. **The tools, session-environment filtering, approval views and
+   `kit.describe`, plus an evaluation in which a chat request yields a valid
+   committed widget.** Gate 11.
 8. **The platform feed projector.**
 9. **The `ClientMode` refactor, as a pure refactor.**
 10. **The native Cockpit mode.** The web view sandbox, the stream, the Mac
     panel and iPad keep-awake. Gates 16 (hosted half) through 22.
 11. **Preview rendering.**
 12. **Activation.** The owner sets up the App, the rulesets, the credential
-    and the flag, and the assistant authors the seed widgets. Gate 23.
+    and the flag. The `tool_rules` entry lands with one regeneration of the
+    formation release evidence on the new policy version. The assistant
+    authors the seed widgets. Gates 10 and 23.
 
 Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
 
@@ -1136,6 +1183,28 @@ Steps 1, 2 (apart from the kit primitives) and 9 do not depend on one another.
    should an LLM-free collector have for sub-minute external data?
 3. Should a widget be able to request a native share or copy action on its
    own displayed text, given that intents are navigation-only today?
+
+## Implementation checkpoint: 2026-10-24
+
+Build step 7 landed the five tools behind the flag as deferred index entries,
+the `cockpit` builtin domain, the session filter, the write tool's refusal
+outside interactive chat, and the delegated-child forbid. It also landed the
+diff approval view, `describe_kit` over a catalogue generated from the kit's
+source, the commit-wait and feed-history knobs, and the evaluation in which a
+chat request yields a valid committed widget.
+
+The evaluation runs the `approvals-waiting` reference package through the
+real publication path with a manifest-checking builder. A gate test holds the
+package identical to the reference widget the workspace's builder tests build.
+
+Two things remain:
+
+- The exact-name `tool_rules` entry is not in the shipped profile. The owner
+  deferred it to activation on 2026-10-24, where the formation release
+  evidence is regenerated once. Until then the publication row asks the
+  owner, the evaluation approves once, and gate 10 stays pending.
+- Feed publishing from scheduled runs waits for `schedule.create` to request
+  `cockpit.write`.
 
 ## Implementation checkpoint: 2026-10-23
 

@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections import deque
+import math
+import re
+from collections import Counter, deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
@@ -44,6 +46,7 @@ from agent_core.domain.errors import (
     DelegationValidationError,
     NotFoundError,
     RunCancelledError,
+    ToolStatementNotGroundedError,
     ToolTrustRejectedError,
     ToolValidationError,
     UserInputRequiredError,
@@ -51,6 +54,11 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, NewEvent
 from agent_core.domain.failures import log_context, log_failure
+from agent_core.domain.memory import (
+    _RECALL_FUNCTION_WORDS,
+    MINIMUM_LEXICAL_TERM_LENGTH,
+    lexical_tokens,
+)
 from agent_core.domain.messages import (
     ContentPart,
     FileReferencePart,
@@ -406,8 +414,15 @@ def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive")
     return origin_trust
 
 
-def _argument_trust(arguments: dict[str, Any], checkpoint: RunCheckpoint) -> dict[str, TrustLevel]:
-    """Raise long verbatim values only when the active user message supplied them."""
+def _argument_trust(
+    arguments: dict[str, Any], checkpoint: RunCheckpoint, *, tool_name: str | None = None
+) -> dict[str, TrustLevel]:
+    """Raise long verbatim values only when the active user message supplied them.
+
+    A `memory.remember` statement is also raised when it is owner-grounded:
+    its content words come from the owner's current message rather than from
+    anything external the turn read (`owner_grounded_statement`).
+    """
 
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
     current_user = next(
@@ -424,7 +439,249 @@ def _argument_trust(arguments: dict[str, Any], checkpoint: RunCheckpoint) -> dic
     for name, value in arguments.items():
         if isinstance(value, str) and len(value) >= 16 and any(value in text for text in user_text):
             trust[name] = TrustLevel.USER
+    if tool_name == MEMORY_REMEMBER_TOOL_NAME and trust.get("statement") is not TrustLevel.USER:
+        statement = arguments.get("statement")
+        if isinstance(statement, str) and owner_grounded_statement(statement, checkpoint):
+            trust["statement"] = TrustLevel.USER
     return trust
+
+
+MEMORY_REMEMBER_TOOL_NAME = "memory.remember"
+# How much of a statement must be the owner's own words, how many words of the
+# model's own phrasing ("Andy wants", "added") it may carry, and the smallest
+# statement the rule judges at all.
+OWNER_GROUNDING_COVERAGE = 0.6
+OWNER_GROUNDING_FREE_WORDS = 3
+OWNER_GROUNDING_MINIMUM_WORDS = 2
+
+
+# Words that carry a statement's polarity, modality or frequency. Recall ranking
+# drops the modals as function words, so provenance judges these on their own: a
+# save may neither introduce one the owner did not say nor drop one from the
+# sentence it restates ("I may transfer funds" never grounds "I will transfer funds").
+_NEGATIONS = frozenset(
+    {"not", "no", "never", "none", "nothing", "nobody", "nowhere", "neither", "nor", "without"}
+)
+_MODALITY = frozenset(
+    {
+        "can",
+        "could",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "should",
+        "will",
+        "would",
+        "ought",
+        "maybe",
+        "perhaps",
+        "probably",
+        "possibly",
+    }
+)
+# How often, or how exclusively, a fact holds qualifies it as a negation does.
+_FREQUENCY = frozenset(
+    {
+        "always",
+        "usually",
+        "often",
+        "sometimes",
+        "occasionally",
+        "rarely",
+        "seldom",
+        "hardly",
+        "barely",
+        "scarcely",
+        "only",
+    }
+)
+_MEANING_MARKERS = _NEGATIONS | _MODALITY | _FREQUENCY
+_CONTRACTIONS = (
+    (re.compile(r"\bcan't\b"), "can not"),
+    (re.compile(r"\bwon't\b"), "will not"),
+    (re.compile(r"\bshan't\b"), "shall not"),
+    (re.compile(r"\bcannot\b"), "can not"),
+    (re.compile(r"n't\b"), " not"),
+    (re.compile(r"'ll\b"), " will"),
+)
+# How the owner puts a request ("could you remember", "please don't forget
+# that") opens a sentence and is not part of what the owner states. Only the
+# owner's sentences lose it, and only at their start: inside a sentence ("I
+# never forget birthdays") and anywhere in a statement those words are meaning.
+_REQUEST_FRAMING = re.compile(
+    r"^\W*(?:(?:please|also|and|so|hey|ok|okay)\W+)*"
+    r"(?:(?:can|could|would|will)\s+you|(?:do\s+not|never)\s+forget)\b"
+)
+_SENTENCE_BREAK = re.compile(r"[.!?;\n]+")
+_WORD = re.compile(r"[^\W\d_]+")
+
+
+def _grounding_text(text: str) -> str:
+    text = text.casefold().replace("\u2019", "'")
+    for pattern, replacement in _CONTRACTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _owner_sentences(text: str) -> list[str]:
+    return [
+        _REQUEST_FRAMING.sub(" ", sentence)
+        for sentence in _SENTENCE_BREAK.split(_grounding_text(text))
+    ]
+
+
+def _content_lexemes(text: str) -> set[str]:
+    return {
+        token
+        for token in lexical_tokens(_grounding_text(text))
+        if len(token) >= MINIMUM_LEXICAL_TERM_LENGTH and token not in _RECALL_FUNCTION_WORDS
+    }
+
+
+def _meaning_markers(text: str) -> Counter[str]:
+    """Each negation and modal with how often it occurs: one of two negations dropped is a drop."""
+
+    return Counter(
+        word for word in _WORD.findall(_grounding_text(text)) if word in _MEANING_MARKERS
+    )
+
+
+# Where a marker's reach ends: punctuation inside a sentence, or a word that
+# joins one clause to the next.
+_CLAUSE_TOKEN = re.compile(r"[^\W\d_]+|[,:\u2013\u2014]")
+_CLAUSE_JOINERS = frozenset(
+    {"and", "but", "or", "nor", "while", "whereas", "although", "though", "because", "yet"}
+)
+
+
+def _stem(word: str) -> str:
+    """A plain inflection's base, enough to tell "eats" or "takes" from a new word."""
+
+    for suffix in ("ing", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) > len(suffix) + 2:
+            word = word[: -len(suffix)]
+            break
+    return word[:-1] if word.endswith("e") and len(word) > 3 else word
+
+
+def _phrased_under_a_marker(statement: str, owner_words: set[str]) -> bool:
+    """Whether a word of the model's own follows a marker and so falls under it."""
+
+    owner_stems = {_stem(word) for word in owner_words}
+    seen_marker = False
+    for token in _WORD.findall(_grounding_text(statement)):
+        if token in _MEANING_MARKERS:
+            seen_marker = True
+        elif (
+            seen_marker
+            and len(token) >= MINIMUM_LEXICAL_TERM_LENGTH
+            and token not in _RECALL_FUNCTION_WORDS
+            and token not in _CLAUSE_JOINERS
+            and token not in owner_words
+            and _stem(token) not in owner_stems
+        ):
+            return True
+    return False
+
+
+def _is_join(token: str) -> bool:
+    return token in _CLAUSE_JOINERS or not token.isalpha()
+
+
+def _marker_frame(text: str, covered: set[str]) -> tuple[str, ...]:
+    """A text's covered words, markers and clause joins, in order.
+
+    Words outside `covered` (inflections, function words, phrasing) drop out,
+    so a paraphrase keeps the frame of what it restates, while a marker moved,
+    added or dropped, an object swapped between clauses, or "and" turned into
+    "or" changes it. Adjacent joins collapse to the joining word (", and" is
+    "and"), and leading or trailing joins are trimmed.
+    """
+
+    frame: list[str] = []
+    for token in _CLAUSE_TOKEN.findall(_grounding_text(text)):
+        if token in _MEANING_MARKERS or (token in covered and not _is_join(token)):
+            frame.append(token)
+        elif _is_join(token) and frame:
+            if not _is_join(frame[-1]):
+                frame.append(token)
+            elif token.isalpha():
+                frame[-1] = token
+    while frame and _is_join(frame[-1]):
+        frame.pop()
+    return tuple(frame)
+
+
+def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
+    """Whether a manual save restates the owner's current message, not what the turn read.
+
+    The active turn is the newest owner message and everything after it. The
+    statement's content words are split three ways: covered by the owner's
+    message, found only in an external or knowledge tool result of this turn,
+    or in neither (the model's own phrasing). Grounded means no word came only
+    from external content, most of the words are the owner's, the model's
+    phrasing stays within a few words, and, where a negation, modal or
+    frequency word is involved, its covered words, markers and clause joins run
+    in the same order as in the one owner sentence it restates, with none of
+    the model's own words after a marker: no marker added, dropped or moved,
+    none attributed when its words reach several sentences. The outcome is the
+    same
+    whether the save is proposed in the step that read the web or a later one:
+    the turn's taint still marks the origin; only the statement's own
+    provenance lifts it.
+    """
+
+    user_texts: list[str] = []
+    external_texts: list[str] = []
+    for item in reversed(checkpoint.conversation):
+        if isinstance(item, UserMessage):
+            if item.trust is not TrustLevel.USER:
+                return False
+            user_texts.extend(part.text for part in item.content if isinstance(part, TextPart))
+            break
+        if isinstance(item, ToolResultItem) and item.trust in {
+            TrustLevel.EXTERNAL_UNTRUSTED,
+            TrustLevel.KNOWLEDGE,
+        }:
+            external_texts.extend(part.text for part in item.content if isinstance(part, TextPart))
+    else:
+        return False
+    words = _content_lexemes(statement)
+    if len(words) < OWNER_GROUNDING_MINIMUM_WORDS:
+        return False
+    owner_words = _content_lexemes(" ".join(user_texts))
+    external_words = _content_lexemes(" ".join(external_texts))
+    covered = words & owner_words
+    tainted = (words - owner_words) & external_words
+    free = words - owner_words - external_words
+    # The owner sentences a statement may restate are those sharing its covered
+    # words (marker words never link one in). A negation or modal is attributed
+    # only when exactly one such sentence exists: with two, a shared word ("grow")
+    # leaves it ambiguous which fact the marker qualifies, and nothing is raised.
+    # Where a marker is involved, the statement's frame (covered words, markers
+    # and clause joins, in order) must be the one owner sentence's frame.
+    candidates = [
+        sentence
+        for sentence in _owner_sentences(" ".join(user_texts))
+        if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered
+    ]
+    # The model's own words stay in front of any marker ("Andy never ..."): one
+    # after it falls under the marker and would extend the owner's fact.
+    markers_match = not (
+        _meaning_markers(statement) or any(_meaning_markers(c) for c in candidates)
+    ) or (
+        len(candidates) == 1
+        and _marker_frame(candidates[0], covered) == _marker_frame(statement, covered)
+        and not _phrased_under_a_marker(statement, owner_words)
+    )
+    return (
+        not tainted
+        and len(covered)
+        >= max(OWNER_GROUNDING_MINIMUM_WORDS, math.ceil(OWNER_GROUNDING_COVERAGE * len(words)))
+        and len(free) <= OWNER_GROUNDING_FREE_WORDS
+        and markers_match
+    )
 
 
 async def authorize_tool_invocation(
@@ -1317,7 +1574,7 @@ class ToolPipeline:
             loaded_skills=tuple(body.model_dump(mode="json") for body in checkpoint.loaded_skills),
             available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),
             origin_trust=invocation.origin_trust,
-            argument_trust=_argument_trust(arguments, checkpoint),
+            argument_trust=_argument_trust(arguments, checkpoint, tool_name=tool.spec.name),
             run_kind=run.kind.value,
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
@@ -1353,14 +1610,16 @@ class ToolPipeline:
                             if result.failure is not None:
                                 phase.outcome = "failed"
                                 phase.failure = browser_failure_category(result.failure.reason_code)
-                    except ToolTrustRejectedError:
+                    except ToolTrustRejectedError as trust_error:
                         result = ToolResult(
                             ok=False,
                             content=[],
                             failure=ToolFailure(
                                 kind=ToolFailureKind.INVALID_ARGUMENTS,
                                 reason_code=(
-                                    "tool.memory.manual_trust_rejected"
+                                    "tool.memory.statement_not_owner_grounded"
+                                    if isinstance(trust_error, ToolStatementNotGroundedError)
+                                    else "tool.memory.manual_trust_rejected"
                                     if tool.spec.name == "memory.remember"
                                     else "tool.trust_rejected"
                                 ),
@@ -1677,7 +1936,7 @@ class ToolPipeline:
             required_scopes=set(tool.spec.required_scopes),
             arguments=arguments,
             normalized_arguments_hash=arguments_hash,
-            argument_trust=_argument_trust(arguments, checkpoint),
+            argument_trust=_argument_trust(arguments, checkpoint, tool_name=tool.spec.name),
             origin_trust=invocation.origin_trust,
             newest_user_trust=_active_turn_facts(checkpoint).newest_user_trust,
             target=ExecutionTarget(

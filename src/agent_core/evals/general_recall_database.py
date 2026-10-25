@@ -32,6 +32,26 @@ def validate_evaluation_database(settings: Settings, *, authorized: bool) -> Non
         )
 
 
+def validate_probe_database(settings: Settings) -> None:
+    """Owner recall probes run only against a clone named for the purpose.
+
+    A probe replay writes sessions, runs, traces and usage events, so it never
+    runs against production; the clone's name says what it is for, and the
+    frozen Milestone 33 scratch databases keep their own name and guard.
+    """
+
+    url = make_url(settings.database_url)
+    if (
+        settings.deployment_mode is DeploymentMode.PRODUCTION
+        or url.drivername != "postgresql+asyncpg"
+        or re.fullmatch(r"veetbot_recall_probe_[a-z0-9_]{1,32}", url.database or "") is None
+    ):
+        raise ValueError(
+            "Owner recall probes require a development clone named "
+            "veetbot_recall_probe_<name>; never production"
+        )
+
+
 def confirmation_databases(
     settings: Settings, *, additional: str | None, authorized: bool
 ) -> tuple[Settings, ...]:

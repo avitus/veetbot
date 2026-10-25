@@ -27,7 +27,11 @@ from agent_core.domain.errors import ConflictError, DeviceIngestError, NotFoundE
 from agent_core.domain.events import NewEvent
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import Run, RunStatus
-from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.sessions import (
+    SESSION_DEVICE_TRIAGE_METADATA_KEY,
+    Session,
+    SessionStatus,
+)
 from agent_core.domain.views import (
     ContentBlock,
     DeviceIngestResult,
@@ -320,7 +324,7 @@ class DeviceMessageIngestService:
             status=SessionStatus.ACTIVE,
             title=DEVICE_TRIAGE_SESSION_TITLE,
             metadata={
-                "device_triage": {
+                SESSION_DEVICE_TRIAGE_METADATA_KEY: {
                     "device_id": str(device_id),
                     "channel": channel,
                 }
