@@ -591,6 +591,9 @@ async def test_a_replayed_write_returns_the_first_outcome(tmp_path: Path) -> Non
         {"email_operational": True},
         {"purpose": "memory_formation"},
         {"device_triage": {"device_id": "00000000-0000-0000-0000-000000000002", "channel": "sms"}},
+        # A marker key excludes the session by its presence, whatever its value.
+        {"device_triage": False},
+        {"purpose": ""},
     ],
 )
 def test_widget_writes_are_withheld_outside_interactive_chat(metadata: dict[str, Any]) -> None:

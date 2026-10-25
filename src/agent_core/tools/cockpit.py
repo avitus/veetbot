@@ -144,7 +144,7 @@ _PUBLIC = (
 def offers_widget_writes(metadata: Mapping[str, object]) -> bool:
     """Whether a session is the owner's interactive chat, the only place widgets are written."""
 
-    return not any(metadata.get(key) for key in _NOT_CHAT)
+    return not any(key in metadata for key in _NOT_CHAT)
 
 
 @dataclass(frozen=True, slots=True)
