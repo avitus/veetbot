@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid5
 
 from agent_core.domain.agents import Principal
@@ -121,6 +122,37 @@ def _clause_subjects(op: ProposedOperation, group: ReconsolidationInput) -> list
         )
         for index, clause in enumerate(op.clauses)
     ]
+
+
+def _operation_payload(
+    payload: dict[str, object], operations: list[ProposedOperation]
+) -> dict[str, object]:
+    """Keep complete originals for the union of the operations' declared inputs.
+
+    The full offered snapshot has already passed revalidation. Never narrow to
+    clause citations: an input's uncited parts can qualify or contradict a claim.
+    """
+    inputs = {
+        str(ref.belief_id)
+        for operation in operations
+        if str(operation.group_id) == payload["id"]
+        for ref in operation.inputs
+    }
+    sources = [
+        source
+        for source in cast(list[dict[str, object]], payload["sources"])
+        if source["belief_id"] in inputs
+    ]
+    excerpt_ids = {key for source in sources for key in cast(list[str], source["excerpt_ids"])}
+    return {
+        **payload,
+        "sources": sources,
+        "excerpts": [
+            excerpt
+            for excerpt in cast(list[dict[str, object]], payload["excerpts"])
+            if excerpt["id"] in excerpt_ids
+        ],
+    }
 
 
 def _verification_request(
@@ -269,7 +301,10 @@ def prepare_verification_request(
         current_policy, _, reason = _egress_subjects(principal, model, egress_policy, subjects, now)
         if subjects and reason is None and current_policy != version:
             reason = "egress_unavailable"
-        candidate_payloads = {**payloads, operation.group_id: payload}
+        candidate_payloads = {
+            **payloads,
+            operation.group_id: _operation_payload(payload, [*operations, operation]),
+        }
         if reason is None:
             request = _verification_request(
                 model,

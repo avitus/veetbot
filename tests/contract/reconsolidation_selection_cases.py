@@ -488,3 +488,115 @@ async def legacy_clocks_and_failed_backlog_reach_review(factory: Factory) -> Non
         )
     assert await worker.run_once() == 0
     assert len(old) == 4 and len(provider.requests) == 2
+
+
+async def crowded_proposal_reaches_review(factory: Factory) -> None:
+    """Verification fits a supported pair even when the offered group is full."""
+    from agent_core.domain.memory import Sensitivity
+    from agent_core.memory.reconsolidation_policy import local_egress_policy
+
+    statement = memory().statement + " Usually with brief examples." * 4
+    originals = []
+    async with factory() as uow:
+        for index in range(9):
+            event = await uow.events.append(
+                NewEvent(
+                    session_id=SESSION_ID,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=principal().principal_id,
+                    payload={"content": statement + " Notes: " + "x" * 166},
+                )
+            )
+            record = memory(belief_id=801 + index, statement=statement).model_copy(
+                update={
+                    "store_position": await uow.memories.next_position(),
+                    "source_event_ids": [event.sequence],
+                }
+            )
+            originals.append(record)
+            await uow.memories.upsert_belief(record)
+
+    class PairProvider(MergeProvider):
+        async def stream(
+            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
+        ) -> AsyncIterator[ModelEvent]:
+            async for event in super().stream(request, resolved, attempt):
+                assert isinstance(event, ModelCompletedEvent)
+                part = event.turn.assistant_messages[0].content[0]
+                assert isinstance(part, TextPart)
+                response = json.loads(part.text)
+                if "operations" in response:
+                    operation = response["operations"][0]
+                    operation["inputs"] = operation["inputs"][:2]
+                    operation["clauses"][0]["text"] = statement
+                    operation["clauses"][0]["support"] = operation["clauses"][0]["support"][:2]
+                    event = event.model_copy(
+                        update={
+                            "turn": event.turn.model_copy(
+                                update={
+                                    "assistant_messages": [
+                                        AssistantMessage(
+                                            item_index=0,
+                                            content=[TextPart(text=json.dumps(response))],
+                                        )
+                                    ],
+                                }
+                            )
+                        }
+                    )
+                yield event
+
+    tracked = TrackedFactory(factory)
+    provider = PairProvider(tracked)
+    worker = ReconsolidationPass(
+        cast(UnitOfWorkFactory, tracked),
+        FixedClock(NOW),
+        principal(),
+        worker_id="crowded-verifier",
+        admitted=lambda: True,
+        ids=RandomIdFactory(),
+        model=model(),
+        provider=provider,
+        egress_policy=local_egress_policy(model().provider),
+        owner_review=True,
+    )
+    await worker.run_once()
+    assert len(provider.requests) == 2, (
+        "A full proposal must leave a valid pair room for verification"
+    )
+    assert 16000 < len(provider.requests[0].model_dump_json().encode()) <= 16384, len(
+        provider.requests[0].model_dump_json().encode()
+    )
+    message = provider.requests[1].conversation[1]
+    assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+    payload = json.loads(message.content[0].text)
+    assert len(payload["groups"][0]["sources"]) == len(payload["groups"][0]["excerpts"]) == 2
+    async with factory() as uow:
+        run = (await uow.reconsolidation.dreaming_runs(principal(), NOW))[0]
+        assert run.outcome == "proposed" and run.proposals == 1 and run.provider_calls == 2
+        operations = await uow.reconsolidation.operation_page(
+            principal(),
+            kind=None,
+            state=None,
+            before=None,
+            limit=10,
+        )
+        assert len(operations) == 1
+        view = await uow.reconsolidation.get_operation(
+            principal(),
+            operations[0].id,
+            NOW,
+            ceiling=Sensitivity.INTERNAL,
+        )
+        assert view is not None and view.state == "proposed" and view.content is not None
+        assert len(view.sources) == 2 and all(s.statement and not s.omitted for s in view.sources)
+        for original in originals:
+            assert await uow.memories.get(original.id, principal()) == original
+        assert not await uow.reconsolidation.active_merges(
+            principal(),
+            tuple(r.id for r in originals),
+            NOW,
+        )
+    assert await worker.run_once() == 0 and len(provider.requests) == 2

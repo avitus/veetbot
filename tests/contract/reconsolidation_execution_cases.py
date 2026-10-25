@@ -597,3 +597,12 @@ async def legacy_backlog_reaches_review(factory: Factory) -> None:
 
 
 EXECUTION_SCENARIOS.append(legacy_backlog_reaches_review)
+
+
+async def execution_crowded_proposal_reaches_review(factory: Factory) -> None:
+    from tests.contract.reconsolidation_selection_cases import crowded_proposal_reaches_review
+
+    await crowded_proposal_reaches_review(factory)
+
+
+EXECUTION_SCENARIOS.append(execution_crowded_proposal_reaches_review)
