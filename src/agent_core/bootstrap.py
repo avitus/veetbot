@@ -6343,6 +6343,17 @@ async def build(
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(COCKPIT_TOOL_NAMES if effective_settings.cockpit_enabled else ()),
         *(
+            [
+                RecordsListTool.spec.name,
+                RecordsQueryTool.spec.name,
+                RecordsAppendTool.spec.name,
+                RecordsCreateSeriesTool.spec.name,
+                RecordsDeleteTool.spec.name,
+            ]
+            if effective_settings.records_enabled
+            else []
+        ),
+        *(
             [DEVICE_SMS_SEND_TOOL_NAME]
             if effective_settings.device_channel_enabled
             and effective_settings.device_sms_enabled
@@ -6367,6 +6378,10 @@ async def build(
             SCHEDULE_CANCEL_TOOL_NAME,
             SUBSCRIPTIONS_TOOL_NAME,
             UNSUBSCRIBE_TOOL_NAME,
+            # Declaring or deleting a series is rare and asks the owner first, so
+            # those two wait in the index; listing, querying and appending stay direct.
+            RecordsCreateSeriesTool.spec.name,
+            RecordsDeleteTool.spec.name,
             # The Cockpit is a mode of its own; its tools never take a definition slot.
             *COCKPIT_TOOL_NAMES,
         )
