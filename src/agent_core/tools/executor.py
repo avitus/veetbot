@@ -540,8 +540,8 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     or in neither (the model's own phrasing). Grounded means no word came only
     from external content, most of the words are the owner's, the model's
     phrasing stays within a few words, and its negations and modals, counted,
-    are exactly those of the owner sentences it restates: none added, none
-    dropped. The
+    are exactly those of the one owner sentence it restates: none added, none
+    dropped, none attributed when its words reach several sentences. The
     outcome is the same whether the save is proposed in the step that read the
     web or a later one: the turn's taint still marks the origin; only the
     statement's own provenance lifts it.
@@ -570,20 +570,25 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     covered = words & owner_words
     tainted = (words - owner_words) & external_words
     free = words - owner_words - external_words
-    # The owner sentences a statement restates are those sharing its covered words;
-    # marker words never link a sentence in, so a negation said about something
-    # else cannot be carried over to this.
+    # The owner sentences a statement may restate are those sharing its covered
+    # words (marker words never link one in). A negation or modal is attributed
+    # only when exactly one such sentence exists: with two, a shared word ("grow")
+    # leaves it ambiguous which fact the marker qualifies, and nothing is raised.
     stated = _meaning_markers(statement)
-    restated: Counter[str] = Counter()
-    for sentence in _owner_sentences(" ".join(user_texts)):
-        if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered:
-            restated += _meaning_markers(sentence)
+    candidates = [
+        _meaning_markers(sentence)
+        for sentence in _owner_sentences(" ".join(user_texts))
+        if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered
+    ]
+    markers_match = not (stated or any(candidates)) or (
+        len(candidates) == 1 and candidates[0] == stated
+    )
     return (
         not tainted
         and len(covered)
         >= max(OWNER_GROUNDING_MINIMUM_WORDS, math.ceil(OWNER_GROUNDING_COVERAGE * len(words)))
         and len(free) <= OWNER_GROUNDING_FREE_WORDS
-        and stated == restated
+        and markers_match
     )
 
 

@@ -201,6 +201,15 @@ QUIET_WEB = "Weather today is mild with light wind."
             "Remember that I do not eat pork and do not eat beef.",
             "I do not eat pork and eat beef.",
         ),
+        # A word shared with several owner sentences leaves it ambiguous which fact a
+        # negation qualifies, so nothing is raised.
+        ("Remember that I never grow roses. I grow tulips.", "I never grow tulips."),
+        ("Remember that I never grow roses. I grow tulips.", "I never grow tulips or roses."),
+        ("Remember that I never grow roses. I never grow roses in pots.", "I grow roses."),
+        (
+            "Remember that I never eat pork. I never drink wine.",
+            "I never eat pork and never drink wine.",
+        ),
     ],
 )
 def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
@@ -225,10 +234,8 @@ def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
         ),
         ("Don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
         ("Please, don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
-        (
-            "Remember that I never eat pork. I never drink wine.",
-            "I never eat pork and never drink wine.",
-        ),
+        # Each fact restated on its own keeps its owner sentence's negation.
+        ("Remember that I never eat pork. I never drink wine.", "I never drink wine."),
     ],
 )
 def test_a_statement_that_keeps_negation_and_modality_stays_grounded(
