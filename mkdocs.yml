@@ -382,4 +382,5 @@ nav:
       - 'ADR-0245: Owner-grounded manual saves': adr/0245-owner-grounded-manual-saves.md
       - 'ADR-0246: Bounded owner recall restart': adr/0246-bounded-owner-recall-restart.md
       - 'ADR-0247: Lifecycle reconciliation and owner confirmation': adr/0247-lifecycle-reconciliation-and-owner-confirmation.md
+      - 'ADR-0248: Attribute-keyed conflicts': adr/0248-attribute-keyed-conflicts.md
   - Changelog: changelog.md

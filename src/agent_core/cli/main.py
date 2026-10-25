@@ -1292,7 +1292,7 @@ def memory_review(
             help=(
                 "dismiss clears the flag; untrue retires; not_here localizes; "
                 "changed supersedes with --replacement; confirm supersedes with "
-                "the same words as the owner's own statement (ADR-0247)."
+                "the same words as the owner's own statement (ADR-0248)."
             ),
         ),
     ],
@@ -1301,7 +1301,7 @@ def memory_review(
         typer.Option("--replacement", help="The corrected wording; only with changed."),
     ] = None,
 ) -> None:
-    """Apply one review outcome to a belief (ADR-0117, ADR-0224, ADR-0247)."""
+    """Apply one review outcome to a belief (ADR-0117, ADR-0224, ADR-0248)."""
 
     if (outcome is MemoryReviewOutcome.CHANGED) != (replacement is not None):
         raise typer.BadParameter(
@@ -1319,6 +1319,36 @@ def memory_review(
 async def _memory_delete(belief_id: UUID) -> None:
     async with build(storage="postgres") as composition:
         await composition.memory.delete(belief_id)
+
+
+async def _memory_reconcile_conflicts(confirm: bool) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.reconcile_conflicts(confirm=confirm)
+
+
+@memory_app.command("reconcile-conflicts")
+def memory_reconcile_conflicts(
+    confirm: Annotated[
+        bool,
+        typer.Option(
+            "--confirm",
+            help="Write the repair; without it the pass only reports what it would change.",
+        ),
+    ] = False,
+) -> None:
+    """Re-evaluate every live conflict link under the predicate rule (ADR-0248).
+
+    Pairs that are not two values of one attribute are unlinked on both sides,
+    each with a memory.conflict_cleared event; a belief left with no link and
+    no other doubt reason has its review flag cleared. Never a SQL status edit.
+    """
+
+    try:
+        result = asyncio.run(_memory_reconcile_conflicts(confirm))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
 
 
 @memory_app.command("delete")

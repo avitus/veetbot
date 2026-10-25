@@ -118,7 +118,7 @@ exists where the persona design deliberately omitted one.
 computes the deterministic result first, calls the provider under a strict
 response schema and a fixed budget, grounds every returned item against its
 source, and records an audited deterministic fallback on any failure
-(memory-formation-and-consolidation.md:807). The grouper is that design with
+(memory-formation-and-consolidation.md:825). The grouper is that design with
 a different schema.
 
 **The maintenance role.** Background work runs as sweeps in the maintenance

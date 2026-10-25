@@ -112,7 +112,7 @@ class RejectionKind(StrEnum):
 
 
 def decay_eligible_lifecycle(record: MemoryRecord, min_unused_deliveries: int) -> bool:
-    """Whether a belief's lifecycle class admits automatic decay (ADR-0247).
+    """Whether a belief's lifecycle class admits automatic decay (ADR-0248).
 
     A user-authority belief and an affirmed direct belief are outside automatic
     decay: review or supersession corrects them. An inferred direct durable
@@ -138,7 +138,7 @@ def decay_eligible_lifecycle(record: MemoryRecord, min_unused_deliveries: int) -
 
 
 class MemoryReviewOutcome(StrEnum):
-    """What the owner decided about a belief (ADR-0117, ADR-0224, ADR-0247).
+    """What the owner decided about a belief (ADR-0117, ADR-0224, ADR-0248).
 
     ``dismiss`` clears the flag and changes nothing else; ``untrue`` and
     ``not_here`` are the existing rejection kinds of the same name. ``changed``
@@ -716,6 +716,9 @@ class MemoryRecord(BaseModel):
     valid_to: datetime | None = None
     superseded_by: UUID | None = None
     conflicts_with: list[UUID] = Field(default_factory=list)
+    # ADR-0248: which attribute of the subject this statement claims; derived
+    # from the statement at formation and at read time for legacy rows.
+    predicate_key: str | None = Field(default=None, max_length=512)
     flagged_for_review: bool = False
     formation_run_id: UUID
     consolidation_policy_version: str = Field(min_length=1)
@@ -863,6 +866,17 @@ class ConsolidationResult(BaseModel):
     run: ConsolidationRun
     beliefs: list[MemoryRecord] = Field(default_factory=list)
     conflicted: int = Field(default=0, ge=0)
+
+
+class ConflictReconciliation(BaseModel):
+    """What a `reconcile-conflicts` pass examined and, unless a dry run, changed (ADR-0248)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    pairs_examined: int = Field(ge=0)
+    pairs_cleared: int = Field(ge=0)
+    flags_cleared: int = Field(ge=0)
+    dry_run: bool
 
 
 class DecayResult(BaseModel):

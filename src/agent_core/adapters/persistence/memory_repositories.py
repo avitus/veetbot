@@ -387,6 +387,7 @@ def _memory(row: MemoryRow) -> MemoryRecord:
         valid_to=row.valid_to,
         superseded_by=row.superseded_by,
         conflicts_with=[UUID(item) for item in row.conflicts_with],
+        predicate_key=row.predicate_key,
         flagged_for_review=row.flagged_for_review,
         formation_run_id=row.formation_run_id,
         consolidation_policy_version=row.consolidation_policy_version,
@@ -1097,7 +1098,7 @@ class PostgresMemoryStore:
                 )
             )
         if min_unused_deliveries is not None:
-            # decay_eligible_lifecycle (ADR-0247), in SQL so a bounded page is
+            # decay_eligible_lifecycle (ADR-0248), in SQL so a bounded page is
             # not filled with rows the sweep would skip.
             predicates.append(MemoryRow.authority != MemoryAuthority.USER.value)
             predicates.append(

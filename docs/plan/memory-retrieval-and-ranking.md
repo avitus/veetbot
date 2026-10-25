@@ -469,7 +469,12 @@ Filling the budget is not the objective.
   `conflicts_with` with no supersession, return **both** with an explicit marker rather
   than silently picking one. Formation deliberately refused to resolve these; retrieval
   must not quietly resolve them at read time. The marker names each partner by the same
-  short identifier the reader cites with, `conflicts=[m:xxxxxxxx]`.
+  short identifier the reader cites with, `conflicts=[m:xxxxxxxx]`. The marker is
+  rendered only beside a partner that is rendered too (ADR-0248): both halves or no
+  marker, so the model never reads a one-sided doubt it cannot inspect; the trace
+  keeps every link. Formation writes the link only between two values of one
+  attribute, the same predicate key the collapse above groups by
+  ([memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)).
 - **Per-subject cap.** At most *n* beliefs per subject, so one heavily-discussed entity
   cannot consume the budget. A conflict partner is exempt: two beliefs in conflict share
   a subject by construction, so the cap would cut exactly the half that makes the marker

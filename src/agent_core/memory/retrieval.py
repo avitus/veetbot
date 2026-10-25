@@ -834,8 +834,15 @@ class HybridMemoryRetriever:
                 continue
             selected.append(item)
             durable_selected += int(durable)
+        shown_partners = frozenset(item.belief_id for item in selected)
         rendered = (
-            render(selected, as_of=now, policy_version=render_policy, known_at=render_known_at)
+            render(
+                selected,
+                as_of=now,
+                policy_version=render_policy,
+                known_at=render_known_at,
+                partners=shown_partners,
+            )
             + people_rendered
         )
         for person_item in eligible_people:
@@ -882,6 +889,7 @@ class HybridMemoryRetriever:
                     as_of=now,
                     policy_version=render_policy,
                     known_at=render_known_at,
+                    partners=shown_partners,
                 ) + "".join("\n" + _person_line(item) for item in selected_people)
                 if (
                     len(selected_items) + len(selected_people) >= effective_query.max_items
@@ -1775,6 +1783,7 @@ def render_memory(
     bounded: bool = False,
     relationship_group: str | None = None,
     next_people_after: UUID | None = None,
+    partners: frozenset[UUID] | None = None,
 ) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
     history = (
@@ -1799,12 +1808,12 @@ def render_memory(
             "supporting facts may be omitted. Narrow the query for more detail." + continuation
         )
     for item in items:
-        lines.append(f"  {_line(item)}")
+        lines.append(f"  {_line(item, partners=partners)}")
     lines.append("</memory>")
     return "\n".join(lines)
 
 
-def _line(item: RecalledItem) -> str:
+def _line(item: RecalledItem, *, partners: frozenset[UUID] | None = None) -> str:
     origin = f" (learned in {html.escape(item.origin_scope)})" if item.carried else ""
     if isinstance(item, RecalledSummary):
         return (
@@ -1813,9 +1822,17 @@ def _line(item: RecalledItem) -> str:
         )
     # A partner is named the way a citation is, so the only identifier the
     # model ever sees for a belief is the eight-digit one it can cite back.
+    # ADR-0248: a marker is shown only beside a partner that is rendered too;
+    # the spec's "return both" is honoured or the dispute is not shown as a
+    # one-sided doubt. The item keeps every link for the trace and the browser.
+    shown = (
+        item.conflict_with
+        if partners is None
+        else [value for value in item.conflict_with if value in partners]
+    )
     conflict = (
-        f" conflicts=[{','.join(f'm:{str(value)[:8]}' for value in sorted(item.conflict_with))}]"
-        if item.conflict_with
+        f" conflicts=[{','.join(f'm:{str(value)[:8]}' for value in sorted(shown))}]"
+        if shown
         else ""
     )
     fact = (

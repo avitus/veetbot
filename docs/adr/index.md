@@ -292,3 +292,4 @@ implementation without one.
 - [ADR-0245: Owner-grounded manual saves after external reads](0245-owner-grounded-manual-saves.md)
 - [ADR-0246: Represent a separately authorized recall restart](0246-bounded-owner-recall-restart.md)
 - [ADR-0247: Lifecycle reconciliation and owner confirmation](0247-lifecycle-reconciliation-and-owner-confirmation.md)
+- [ADR-0248: Attribute-keyed conflicts](0248-attribute-keyed-conflicts.md)

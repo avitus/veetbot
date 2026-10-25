@@ -38,6 +38,8 @@ CONTENT_EXCLUDES = {
     "delivered_count",
     "cited_count",
     "usage_accounting_version",
+    # Derived from the statement (ADR-0248), so never content of its own.
+    "predicate_key",
 }
 
 

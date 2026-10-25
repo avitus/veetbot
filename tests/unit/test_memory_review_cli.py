@@ -43,12 +43,42 @@ def test_memory_review_takes_one_outcome_and_prints_the_reviewed_belief(
     )
     assert changed.exit_code == 0, changed.output
     assert seen[-1] == (belief.id, "changed", "New.")
-    # ADR-0247: confirm carries no text and reaches the same governed write.
+    # ADR-0248: confirm carries no text and reaches the same governed write.
     confirmed = runner.invoke(app, ["memory", "review", str(belief.id), "--outcome", "confirm"])
     assert confirmed.exit_code == 0, confirmed.output
-    assert seen[-1] == (belief.id, "confirm", None)
+    assert seen[-1][:2] == (belief.id, "confirm") and seen[-1][2] is None
     with_text = runner.invoke(
         app,
         ["memory", "review", str(belief.id), "--outcome", "confirm", "--replacement", "New."],
     )
     assert with_text.exit_code == 2
+
+
+def test_memory_reconcile_conflicts_reports_by_default_and_writes_on_confirm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0248: the dry run is the default; --confirm writes the repair."""
+    from agent_core.domain.memory import ConflictReconciliation
+
+    seen: list[bool] = []
+
+    async def fake_reconcile(confirm: bool) -> ConflictReconciliation:
+        seen.append(confirm)
+        return ConflictReconciliation(
+            pairs_examined=7, pairs_cleared=5, flags_cleared=3, dry_run=not confirm
+        )
+
+    monkeypatch.setattr(cli_main, "_memory_reconcile_conflicts", fake_reconcile)
+    runner = CliRunner()
+    dry = runner.invoke(app, ["memory", "reconcile-conflicts"])
+    assert dry.exit_code == 0, dry.output
+    assert json.loads(dry.stdout) == {
+        "pairs_examined": 7,
+        "pairs_cleared": 5,
+        "flags_cleared": 3,
+        "dry_run": True,
+    }
+    committed = runner.invoke(app, ["memory", "reconcile-conflicts", "--confirm"])
+    assert committed.exit_code == 0, committed.output
+    assert json.loads(committed.stdout)["dry_run"] is False
+    assert seen == [False, True]

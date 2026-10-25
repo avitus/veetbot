@@ -120,6 +120,90 @@ async def delivery_case(
     return report, car, retired
 
 
+async def home_city_case(
+    app: Composition, script: FakeModelScript, *, finish: Finish = _wait
+) -> tuple[ProbeReport, MemoryRecord]:
+    """The garden-calendar shape (ADR-0248): an affirmed home address beside
+    five automatically captured email facts about the same subject. None of
+    them may link to the address, and the address must be delivered on both
+    paths for a location-dependent task."""
+
+    from agent_core.domain.memory import MemoryAuthority
+
+    session_id = await app.sessions.create()
+    address = await stated(
+        app, session_id, "Andy Vitus's home address is 12 Oak Lane, Los Altos Hills.", "Andy Vitus"
+    )
+    noise = (
+        "Andy Vitus reported current mouthpieces to the band.",
+        "Andy Vitus asked for the rehearsal recording.",
+        "Andy Vitus confirmed the dentist appointment for Tuesday.",
+        "Andy Vitus renewed the magazine subscription.",
+        "Andy Vitus thanked the caterer for the quote.",
+    )
+    for statement in noise:
+        async with app.uow_factory() as uow:
+            event = await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=app.principal.principal_id,
+                    payload={"content": statement},
+                )
+            )
+        await app.memory.remember(
+            session_id=session_id,
+            run_id=None,
+            statement=statement,
+            subject="Andy Vitus",
+            scope="general",
+            belief_type=BeliefType.FACT,
+            sensitivity=Sensitivity.INTERNAL,
+            source_event_ids=[event.sequence],
+            explicit=False,
+            authority=MemoryAuthority.INFERRED,
+        )
+    async with app.uow_factory() as uow:
+        stored = await uow.memories.get(address.id, app.principal)
+    assert stored.conflicts_with == [] and stored.flagged_for_review is False
+    probes = (
+        Probe(
+            id="home-city-address",
+            incident="garden-calendar",
+            family="attributes",
+            question="Maintain a gardening calendar based on what you know about our garden.",
+            search_text="home garden city location climate zone",
+            paths=("automatic", "deliberate"),
+            expected=(ExpectedEvidence(statement_contains="Los Altos Hills"),),
+            min_required_rendered=1,
+            answer_must_contain=("Los Altos Hills",),
+            answer_must_not_contain=("which city",),
+        ),
+    )
+    report = await observe_probes(app, script, probes, finish=finish)
+    (observation,) = report.probes
+    paths = {path.path: path for path in observation.paths}
+    assert set(paths) == {"automatic", "deliberate"}
+    for path in paths.values():
+        assert path.run_status == "COMPLETED"
+        (evidence,) = path.evidence
+        assert evidence.belief_id == address.id
+    # The explicit location search reaches the address. A scripted answer is
+    # never assessed; the live-model run on a clone checks "Los Altos Hills".
+    deliberate = paths["deliberate"]
+    assert deliberate.evidence[0].stage == "delivered", deliberate
+    assert deliberate.answer_correct is None
+    # The automatic path reproduces production trace d851e572: a task with no
+    # word in common with the address never makes it a candidate, because only
+    # the lexical arm runs and the subject is not in the question. The conflict
+    # repair cannot lift that; the ranking work (plan ADR-B) must, and this pin
+    # is what it changes.
+    assert paths["automatic"].evidence[0].stage == "stored", paths["automatic"]
+    return report, address
+
+
 def assert_delivery_report(report: ProbeReport, car: MemoryRecord) -> None:
     assert report.version == PROBE_REPORT_VERSION
     assert report.activation_evidence is False and report.release_evidence is False
