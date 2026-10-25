@@ -1121,11 +1121,12 @@ async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
 ) -> None:
     """The locked JSONB rewrite unions citations and moves utility, not confidence.
 
-    Two beliefs are recalled into one turn and the answer cites one of them, so
-    the row-locked rewrite is observed marking exactly that belief used in the
-    user view, raising its utility while its confidence stands, and lowering
-    the other's. A later mark widens the set instead of replacing it, repeating
-    it changes nothing, and a foreign principal cannot reach the trace at all.
+    Two beliefs are recalled into one turn, the trace reaches the model, and
+    the answer cites one of them, so the row-locked rewrite is observed marking
+    exactly that belief used in the user view, raising its utility while its
+    confidence stands, and lowering the other's. A later mark widens the set
+    instead of replacing it, repeating it changes nothing, and a foreign
+    principal cannot reach the trace at all.
     """
 
     async with build(settings=_settings(tmp_path), storage="postgres") as composition:
@@ -1153,6 +1154,18 @@ async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
             turn_id=turn_id,
         )
         assert {item.belief_id for item in result.items} == {cited.id, uncited.id}
+        # Non-use is charged only against traces a model request carried, so
+        # record the delivery as the run loop does beside model.request.started.
+        async with composition.uow_factory() as uow:
+            await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=turn_id,
+                    event_type="memory.delivered",
+                    actor_type="runtime",
+                    payload={"step_number": 1, "trace_ids": [str(result.trace_id)]},
+                )
+            )
 
         feedback = await composition.memory.record_usage(
             session_id=session_id,
@@ -1181,6 +1194,8 @@ async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
         assert beliefs[uncited.id].confidence == uncited.confidence
         assert beliefs[uncited.id].last_used_at is None
         assert beliefs[uncited.id].last_reinforced_at == uncited.last_reinforced_at
+        assert (beliefs[cited.id].delivered_count, beliefs[cited.id].cited_count) == (1, 1)
+        assert (beliefs[uncited.id].delivered_count, beliefs[uncited.id].cited_count) == (1, 0)
         # The unique store position survives the in-place update, and neither
         # belief is republished to the recall delta for having been read.
         assert beliefs[cited.id].store_position == cited.store_position
