@@ -1580,9 +1580,10 @@ rows stay. Do not downgrade the migration to roll back code: its
 
 ## Cockpit widget publication (ADR-0240)
 
-Cockpit stays off until its tools and native mode land. Nothing below is
-needed while `AGENT_COCKPIT_ENABLED=0`, and with it off no `/v1/cockpit` route
-exists. Every release still builds the builder image and runs its canary.
+Cockpit stays off until activation. Nothing below is needed while
+`AGENT_COCKPIT_ENABLED=0`, and with it off no `/v1/cockpit` route exists.
+Every release still builds the builder image, runs its canary and exports the
+board's runtime to `/var/lib/veetbot/artifacts/cockpit-runtime`.
 
 The publication path ([Cockpit](plan/cockpit.md)) commits widgets to the
 public `cockpit/widgets` branch through a GitHub App, and only the maintenance
@@ -1625,6 +1626,23 @@ its own commit on the branch, so a retry never commits twice.
 **A rejected import.** A person's commit that fails the builder is recorded in
 `cockpit_import_failures` and leaves the live widget rendering. Fix it with a
 corrected commit to `cockpit/widgets`.
+
+**A quarantined widget.** A widget that hangs the board or navigates its realm
+is held out of the board on that device and shows as paused in the widget's
+details. It returns on its next revision, or when the owner taps Try it again.
+A widget that keeps hanging needs a corrected revision: ask Chat to fix it, or
+revert it from its details.
+
+**Activation.** In this order:
+
+1. Create the App, the rulesets, the key and the settings above.
+2. Add the exact-name `cockpit.widget.write` `tool_rules` entry to
+   `policy/default.yaml`, and regenerate the formation release evidence on the
+   new policy version (the owner deferred this to activation on 2026-10-24).
+3. Set `AGENT_COCKPIT_ENABLED=1` and restart the API, both run workers and
+   the maintenance unit.
+4. Check that `GET /v1/cockpit` answers `200` with a non-null `runtime`, and
+   that Cockpit in the Apple client shows an empty board.
 
 **Rotating the key.** In the App's settings:
 
