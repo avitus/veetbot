@@ -5,8 +5,11 @@ import Foundation
 @MainActor
 public final class AppCoordinator: ObservableObject {
     @Published public var mode: ClientMode = .chat
+    /// A schedule a Cockpit widget asked to open; the window shows the schedules browser.
+    @Published public var requestedSchedule: UUID?
     public let chat: ChatViewModel
     public let email: EmailViewModel
+    public let cockpit: CockpitViewModel
     private var connectionSubscription: AnyCancellable?
     private var emailAccountsSubscription: AnyCancellable?
 
@@ -14,6 +17,7 @@ public final class AppCoordinator: ObservableObject {
     public init(chat: ChatViewModel) {
         self.chat = chat
         email = EmailViewModel(makeAPIClient: { [weak chat] in chat?.currentAPIClient })
+        cockpit = CockpitViewModel(makeClient: { [weak chat] in chat?.currentAPIClient })
         email.authenticationFailure = { [weak chat] error in chat?.reportConnectionError(error) }
         // Window-level controls read account capabilities through this coordinator.
         emailAccountsSubscription = email.$accounts.dropFirst().sink { [weak self] _ in
@@ -21,7 +25,9 @@ public final class AppCoordinator: ObservableObject {
         }
         connectionSubscription = chat.$connectionGeneration.dropFirst().sink { [weak self] _ in
             self?.email.resetConnection()
+            self?.cockpit.resetConnection()
         }
+        cockpit.onOpen = { [weak self] destination in self?.open(destination) }
         chat.chatNotificationHandler = { [weak self] in self?.mode = .chat }
         chat.emailNotificationHandler = { [weak self] threadID, approvalID in
             guard let self else { return }
@@ -29,6 +35,28 @@ public final class AppCoordinator: ObservableObject {
             self.mode = .email
             if let threadID {
                 await self.email.openThread(threadID, approvalID: approvalID)
+            }
+        }
+    }
+
+    /// A widget's `open` intent, already checked against the feeds it was delivered.
+    func open(_ destination: CockpitDestination) {
+        switch destination {
+        case .session(let id):
+            mode = .chat
+            Task { await chat.openSharedSession(id) }
+        case .emailThread(let id):
+            mode = .email
+            Task { await email.openThread(id) }
+        case .schedule(let id):
+            requestedSchedule = id
+        case .approval(let id):
+            Task { [weak self] in
+                guard let self, let api = self.chat.currentAPIClient,
+                      let approval = try? await api.getApproval(id)
+                else { return }
+                self.mode = .chat
+                await self.chat.openSharedSession(approval.sessionID)
             }
         }
     }

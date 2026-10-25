@@ -121,7 +121,13 @@ def test_the_shipped_cockpit_profiles_match_the_defaults() -> None:
         publication.import_interval_seconds,
         publication.commit_wait_seconds,
     ) == (12, 60, 60, 30)
-    assert CockpitProfiles().feeds.history_max == 288
+    feeds = CockpitProfiles().feeds
+    assert (
+        feeds.history_max,
+        feeds.history_days,
+        feeds.projection_interval_seconds,
+        feeds.refresh_seconds,
+    ) == (288, 7, 30, 300)
 
 
 def test_feed_history_cannot_exceed_what_a_manifest_may_declare() -> None:
@@ -129,6 +135,18 @@ def test_feed_history_cannot_exceed_what_a_manifest_may_declare() -> None:
 
     with pytest.raises(ConfigurationError, match="history_max"):
         CockpitProfiles.from_document({"schema_version": 1, "feeds": {"history_max": 289}})
+
+
+def test_a_feed_refreshes_no_faster_than_it_is_projected() -> None:
+    from agent_core.cockpit.profiles import CockpitProfiles
+
+    with pytest.raises(ConfigurationError, match="refresh_seconds"):
+        CockpitProfiles.from_document(
+            {
+                "schema_version": 1,
+                "feeds": {"projection_interval_seconds": 60, "refresh_seconds": 30},
+            }
+        )
 
 
 def test_an_invalid_cockpit_profile_names_the_file() -> None:

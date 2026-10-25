@@ -951,6 +951,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                   {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Second historical answer loaded"}]}
                 ],"next_cursor":null}
                 """
+        case ("GET", "/v1/cockpit"):
+            // A server with Cockpit off has no route, so the mode shows its unavailable state.
+            statusCode = 404
+            body = Self.foldersUnavailableJSON
         case ("GET", "/v1/folders"):
             guard Self.foldersEnabled else {
                 statusCode = 404

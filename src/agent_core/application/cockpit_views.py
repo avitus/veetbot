@@ -141,6 +141,7 @@ class CockpitBoard:
                         kit_api=live.kit_api,
                         manifest=manifest,
                         settings=dict(settings.values) if settings is not None else {},
+                        changed_at=live.updated_at,
                     )
                 )
             layouts: dict[DeviceClass, CockpitLayoutView] = {}
@@ -173,6 +174,7 @@ class CockpitBoard:
         runtime = self._runtime.manifest()
         return CockpitSnapshotView(
             cursor=cursor,
+            server_time=self._clock.now(),
             runtime=None
             if runtime is None
             else CockpitRuntimeView(

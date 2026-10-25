@@ -95,14 +95,17 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 4. builds `agent-core-sandbox:<release-id>` and
    `veetbot-cockpit-builder:<release-id>`, then requires the builder to build
    a reference widget under runsc with no network, a read-only root and the
-   sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`);
+   sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`). It copies the
+   board's content-addressed runtime out of the builder image into
+   `$AGENT_ARTIFACT_ROOT/cockpit-runtime`, never rewriting an asset already
+   there;
 5. checks active provider pins against the staged registry on an existing
    installation, then ensures the local PostgreSQL service is running;
 6. reconciles owner permissions into the staged `.owner-scopes.env`, applies
    `alembic upgrade head`, and runs the production preflight;
 7. stops both run workers, rechecks active provider pins, then switches
-   `/opt/veetbot/current`, tags the sandbox and builder images as
-   `production`, and
+   `/opt/veetbot/current`, switches the board's runtime manifest to this
+   release's, tags the sandbox and builder images as `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
@@ -1280,6 +1283,14 @@ fi
 previous_builder_image="$(
   docker image inspect --format '{{.Id}}' veetbot-cockpit-builder:production 2>/dev/null || true
 )"
+# The board's runtime lives under the artifact root the release exported it to.
+cockpit_runtime_dir="$({
+  set -a
+  # shellcheck disable=SC1090
+  . "$environment_file"
+  set +a
+  printf '%s' "${AGENT_ARTIFACT_ROOT:-/var/lib/veetbot/artifacts}"
+})/cockpit-runtime"
 
 managed_units=(
   veetbot-execution
@@ -1394,6 +1405,12 @@ if test -n "$target_builder_image"; then
 fi
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
+# The board's runtime manifest follows the application back; its
+# content-addressed assets are never removed, so the target's are still there.
+if test -f "$target/.cockpit-runtime/manifest.json"; then
+  cp "$target/.cockpit-runtime/manifest.json" "$cockpit_runtime_dir/.manifest.json.next"
+  mv -f "$cockpit_runtime_dir/.manifest.json.next" "$cockpit_runtime_dir/manifest.json"
+fi
 mv -Tf "$docs_next" /opt/veetbot/shared/docs/current
 docs_next=""
 mv -Tf "$website_next" /opt/veetbot/shared/website/current
@@ -1569,9 +1586,10 @@ rows stay. Do not downgrade the migration to roll back code: its
 
 ## Cockpit widget publication (ADR-0240)
 
-Cockpit stays off until its tools and native mode land. Nothing below is
-needed while `AGENT_COCKPIT_ENABLED=0`, and with it off no `/v1/cockpit` route
-exists. Every release still builds the builder image and runs its canary.
+Cockpit stays off until activation. Nothing below is needed while
+`AGENT_COCKPIT_ENABLED=0`, and with it off no `/v1/cockpit` route exists.
+Every release still builds the builder image, runs its canary and exports the
+board's runtime to `/var/lib/veetbot/artifacts/cockpit-runtime`.
 
 The publication path ([Cockpit](plan/cockpit.md)) commits widgets to the
 public `cockpit/widgets` branch through a GitHub App, and only the maintenance
@@ -1614,6 +1632,23 @@ its own commit on the branch, so a retry never commits twice.
 **A rejected import.** A person's commit that fails the builder is recorded in
 `cockpit_import_failures` and leaves the live widget rendering. Fix it with a
 corrected commit to `cockpit/widgets`.
+
+**A quarantined widget.** A widget that hangs the board or navigates its realm
+is held out of the board on that device and shows as paused in the widget's
+details. It returns on its next revision, or when the owner taps Try it again.
+A widget that keeps hanging needs a corrected revision: ask Chat to fix it, or
+revert it from its details.
+
+**Activation.** In this order:
+
+1. Create the App, the rulesets, the key and the settings above.
+2. Add the exact-name `cockpit.widget.write` `tool_rules` entry to
+   `policy/default.yaml`, and regenerate the formation release evidence on the
+   new policy version (the owner deferred this to activation on 2026-10-24).
+3. Set `AGENT_COCKPIT_ENABLED=1` and restart the API, both run workers and
+   the maintenance unit.
+4. Check that `GET /v1/cockpit` answers `200` with a non-null `runtime`, and
+   that Cockpit in the Apple client shows an empty board.
 
 **Rotating the key.** In the App's settings:
 

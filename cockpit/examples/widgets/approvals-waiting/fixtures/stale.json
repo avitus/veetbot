@@ -3,12 +3,22 @@
   "settings": {},
   "feeds": {
     "veetbot.approvals.pending": {
-      "observedAt": "2026-10-22T17:40:00Z",
-      "expectedIntervalSec": 30,
+      "observedAt": "2026-10-22T17:00:00Z",
+      "expectedIntervalSec": 300,
       "data": {
         "count": 1,
-        "oldestMinutes": 38,
-        "items": [{ "kind": "Reserve now", "summary": "Weekend cabin · booking page", "ageMinutes": 38 }]
+        "oldestAt": "2026-10-22T16:52:00Z",
+        "items": [
+          {
+            "id": "00000000-0000-4000-8000-0000000000a1",
+            "sessionId": "00000000-0000-4000-8000-0000000000b1",
+            "kind": "Website",
+            "summary": "Reserve the weekend cabin on its booking page",
+            "requestedAt": "2026-10-22T16:52:00Z",
+            "expiresAt": "2026-10-23T16:52:00Z",
+            "risk": "high"
+          }
+        ]
       }
     }
   }

@@ -1,5 +1,5 @@
 // Messages between native code, the trusted host page and the realm.
-import type { CockpitPlatform, CockpitTheme, FeedView, TileSize, WidgetSettings } from '../../kit/src/index';
+import type { CockpitPlatform, CockpitTheme, FeedView, IntentKind, TileSize, WidgetSettings } from '../../kit/src/index';
 
 /** A feed snapshot as native code delivers it: instants in epoch milliseconds. */
 export interface FeedEnvelope {
@@ -60,7 +60,8 @@ export type RealmToHost =
   | { type: 'pong'; id: number }
   | { type: 'loaded'; key: string }
   | { type: 'tile_error'; key: string }
-  | { type: 'select'; key: string };
+  | { type: 'select'; key: string }
+  | { type: 'intent'; key: string; kind: string; id: string };
 
 /** Host → native. */
 export type HostToNative =
@@ -68,4 +69,5 @@ export type HostToNative =
   | { type: 'loaded'; slug: string; revision: string }
   | { type: 'tile_error'; slug: string; revision: string }
   | { type: 'select'; slug: string }
+  | { type: 'open'; slug: string; kind: IntentKind; id: string }
   | { type: 'quarantined'; slug: string; revision: string; reason: 'unresponsive' | 'navigated' };

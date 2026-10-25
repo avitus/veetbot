@@ -95,3 +95,41 @@ async def test_event_retention_runs_on_the_import_timer() -> None:
     await worker.run_once()
 
     assert calls == ["events", "events"]
+
+
+async def test_the_feed_projector_runs_on_its_own_interval_and_history_on_the_import_timer() -> (
+    None
+):
+    clock, uow_factory = await memory_uow_factory()
+    calls: list[str] = []
+
+    async def feeds() -> int:
+        calls.append("feeds")
+        return 0
+
+    async def history() -> int:
+        calls.append("history")
+        return 0
+
+    worker = MaintenanceWorker(
+        uow_factory=uow_factory,
+        clock=clock,
+        sweep_cockpit_feeds=feeds,
+        sweep_cockpit_feed_history=history,
+        cockpit_feed_interval_seconds=30,
+        cockpit_import_interval_seconds=60,
+    )
+    for _ in range(5):
+        await worker.run_once()
+        clock.advance(timedelta(seconds=15))
+
+    assert calls == ["feeds", "history", "feeds", "feeds", "history"]
+
+
+def test_the_feed_interval_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="Cockpit feed interval"):
+        MaintenanceWorker(
+            uow_factory=None,  # type: ignore[arg-type]
+            clock=None,  # type: ignore[arg-type]
+            cockpit_feed_interval_seconds=0,
+        )

@@ -114,6 +114,7 @@ def test_required_make_targets_exist() -> None:
         "cockpit-install",
         "test-cockpit",
         "cockpit-builder-image",
+        "cockpit-runtime",
     ):
         assert f"{target}:" in text
     # The real-runtime gates build widgets in the builder image (Milestone 35).
@@ -705,6 +706,17 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     for unit in required_units:
         assert f"  {unit}" in unit_list
     assert 'for unit in "${managed_units[@]}"; do' in manual
+    # The board's runtime manifest returns to the target release's with the app.
+    runtime_restore = 'cp "$target/.cockpit-runtime/manifest.json"'
+    assert 'if test -f "$target/.cockpit-runtime/manifest.json"; then' in manual
+    assert runtime_restore in manual
+    # It is the runtime under the artifact root the release used, not a fixed path.
+    runtime_root = "printf '%s' \"${AGENT_ARTIFACT_ROOT:-/var/lib/veetbot/artifacts}\""
+    assert runtime_root in manual
+    assert '"$cockpit_runtime_dir/.manifest.json.next"' in manual
+    assert "/var/lib/veetbot/artifacts/cockpit-runtime/" not in manual
+    assert manual.index(runtime_root) < manual.index(runtime_restore)
+    assert manual.index(app_switch) < manual.index(runtime_restore)
     assert manual.index(image_validation) < manual.index(app_switch)
     assert manual.index(image_validation) < manual.index(docs_switch)
     assert manual.index(image_validation) < manual.index(website_switch)

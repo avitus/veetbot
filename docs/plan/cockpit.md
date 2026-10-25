@@ -542,18 +542,38 @@ which is theirs and already public.
 
 ### Platform feeds
 
-The maintenance role projects these on a short timer (knob, default thirty
-seconds). It publishes only when the content hash changes, and each is
-present only when its source feature is enabled.
+The maintenance role projects these on a short timer
+(`feeds.projection_interval_seconds`, default thirty seconds). Each is present
+only when its source feature is enabled.
 
-| Feed | Source | Contents |
+- **When it publishes.** A feed is published when its content changes. Its
+  unchanged content is republished once `feeds.refresh_seconds` (default five
+  minutes) has passed, and that period is the feed's expected interval. A quiet
+  feed so stays honestly live, and a stopped projector shows as stale.
+- **Times are absolute.** Every time is an ISO 8601 instant, never an age, so
+  unchanged state projects to unchanged content. Widgets compute ages with
+  the kit's clock.
+- **Failures.** A source that fails publishes one error snapshot, worded by
+  the platform ("The platform could not read this source."), and the others
+  still publish. The reason is logged, never stored in the feed.
+- **What each reads.** Each source reads as the owner, through the same
+  repositories its routes read, and leaves out another principal's rows. The
+  pending approvals feed also drops expired requests. The calls feed drops
+  erased calls and those past the thirty-day retention. The people feed reads
+  at the sensitive ceiling and drops names the people service would not show.
+
+| Feed | Source | Data |
 | --- | --- | --- |
-| `veetbot.approvals.pending` | approvals | count and up to ten pending approvals with kind and age |
-| `veetbot.email.priority` | Email mode | up to five priority threads: correspondent, subject, state |
-| `veetbot.schedules.health` | schedules | next occurrences, recent failures, paused schedules |
-| `veetbot.calls.recent` | calling | recent calls with status and outcome summary |
-| `veetbot.people.recent` | People | people most recently in touch, with interaction kind |
-| `veetbot.runs.activity` | runs | running, waiting and recently failed runs |
+| `veetbot.approvals.pending` | approvals, always | `count`; `oldestAt`; up to ten items, oldest first: `kind` (a platform label), `summary` (the server-authored action summary), `requestedAt`, `expiresAt`, `risk` |
+| `veetbot.email.priority` | Email mode | `count`; up to five threads ranked as the priority view ranks them: `correspondent`, `subject`, `state` (`needs_reply`, `drafted` or `fyi`), `updatedAt` |
+| `veetbot.schedules.health` | the schedule API | `onTime`, `total`, `failed` and `paused` counts for the last day; up to twelve timeline items (`id`, `time` on the schedule's own clock, `title`, `detail`, `state`, `at`): the day's runs, each active schedule's next run, then paused schedules |
+| `veetbot.calls.recent` | calling | up to five newest calls: `direction`, `counterparty`, `status`, `summary`, `startedAt`, `durationMinutes` |
+| `veetbot.people.recent` | People | up to five people most recently in touch: `name`, `lastAt`, and the last interaction's `kind` and `channel` |
+| `veetbot.runs.activity` | runs, always | `running`, `waiting` and `failed` counts; up to eight conversations whose latest run is running, waiting, or failed in the last day: `title`, `state`, `since` |
+
+The schedule items are the kit's `TimelineItem`, so a widget passes them to
+`Timeline` directly. Each schema is closed, and the reference widgets'
+fixtures are checked against it.
 
 ### Assistant feeds
 
@@ -670,8 +690,11 @@ provenance:
 Reading a widget before updating it therefore does not force every later turn
 into approval.
 
-**Feed publishing** is available in scheduled runs: the schedule principal's
-scopes gain `cockpit.write`. Widget writes stay interactive only.
+**Feed publishing** is available in scheduled runs. A Cockpit deployment
+registers `schedule.create` 1.5.0, whose `publish_cockpit_feed=true` asks for
+`cockpit.read` and `cockpit.write` for that schedule's runs and no others.
+Version 1.4.0 stays registered for pinned runs, and a deployment without the
+flag offers 1.4.0 unchanged. Widget writes stay interactive only.
 
 **Feed checks.** A feed's schema must be self-contained JSON Schema (draft
 2020-12) that names no location outside itself, and each of its references
@@ -691,7 +714,7 @@ feed is an indistinguishable 404.
 
 | Route | Scope | Purpose |
 | --- | --- | --- |
-| `GET /v1/cockpit` | `cockpit.read` | Snapshot: runtime asset hashes, live widgets with revision, manifest and bundle hash, settings, layouts, current feed snapshots with declared history, and the stream cursor |
+| `GET /v1/cockpit` | `cockpit.read` | Snapshot: runtime asset hashes, live widgets with revision, manifest, bundle hash and when the revision changed, settings, layouts, current feed snapshots with declared history, the stream cursor, and the server's clock |
 | `GET /v1/cockpit/stream` | `cockpit.read` | Server-sent events |
 | `GET /v1/cockpit/assets/{sha256}` | `cockpit.read` | Runtime and bundle assets by hash; `immutable`, long-lived private caching |
 | `GET /v1/cockpit/widgets/{slug}` | `cockpit.read` | Detail: revisions with commit links, import failures, settings schema |
@@ -713,8 +736,17 @@ The routes' other contracts:
   not offer, are `malformed_request` (400). A build that reached no verdict
   is `sandbox_execution_error` (502), and nothing is recorded.
 - **Runtime assets.** The snapshot's runtime and the asset route read the
-  manifest a release exports to `artifact_root/cockpit-runtime/`. Until that
-  export lands with the native mode, `runtime` is null.
+  manifest a release exports to `artifact_root/cockpit-runtime/`. The release
+  copies the runtime out of the builder image there, never rewriting an asset
+  already present, and switches the manifest at promotion; a rollback switches
+  it back. `make cockpit-runtime` does the same for a local server. Until a
+  runtime is exported, `runtime` is null.
+- **Clocks.** The snapshot carries `server_time`, so a client renders
+  freshness with server-corrected time, and each widget's `changed_at`, so the
+  watchdog quarantines the most recently changed widget first.
+- **The wire contract.** `tests/fixtures/api/cockpit_snapshot_contract.json`
+  is the route's own rendering of one board. The Apple client decodes a
+  checksum-pinned copy of it, so a change to the shape fails both sides.
 - **Asset caching.** An asset answers
   `Cache-Control: private, max-age=31536000, immutable` and
   `X-Content-Type-Options: nosniff`.
@@ -815,7 +847,14 @@ interpolation.
 
 - `open` names a destination kind (approval, email thread, schedule, session)
   and an identifier present in a delivered feed, and native code validates
-  both before navigating.
+  both before navigating. A widget raises it from a kit `Row`'s `opens`
+  target or the `useOpen` hook; the realm sends it with the tile's key, the
+  host forwards only a known kind with a bounded identifier for a placed
+  widget, and native code opens it only when that widget's own declared feeds
+  carry the identifier as a value. The platform feeds therefore carry the
+  identifiers to open: each approval's `id` and `sessionId`, each priority
+  thread's `threadId`, each schedule item's `scheduleId` and each run's
+  `sessionId`.
 - `discuss` opens Chat with the widget's context attached as untrusted
   context, following the Email "Discuss in Chat" precedent. The owner writes
   and sends the message.
@@ -966,9 +1005,11 @@ contract suite.
   - settings purge window.
 
   These knobs join the shipped knob census as each build step reads them.
-  Seven are in it now: the two commit rate limits, the import poll interval
-  and the commit wait under `publication`; the stream lifetime and event
-  retention under `stream`; and `feeds.history_max`.
+  Ten are in it now: the two commit rate limits, the import poll interval and
+  the commit wait under `publication`; the stream lifetime and event retention
+  under `stream`; and `feeds.history_max`, `feeds.history_days`,
+  `feeds.projection_interval_seconds` and `feeds.refresh_seconds`. Feed
+  history older than `history_days` is pruned on the import timer.
 
 ### Release
 
@@ -1140,7 +1181,7 @@ and a runbook covering:
 7. **The tools, session-environment filtering, approval views and
    `kit.describe`, plus an evaluation in which a chat request yields a valid
    committed widget.** Gate 11.
-8. **The platform feed projector.**
+8. **The platform feed projector, and feed publishing from scheduled runs.**
 9. **The `ClientMode` refactor, as a pure refactor.**
 10. **The native Cockpit mode.** The web view sandbox, the stream, the Mac
     panel and iPad keep-awake. Gates 16 (hosted half) through 22.
@@ -1197,14 +1238,55 @@ The evaluation runs the `approvals-waiting` reference package through the
 real publication path with a manifest-checking builder. A gate test holds the
 package identical to the reference widget the workspace's builder tests build.
 
-Two things remain:
+The exact-name `tool_rules` entry is not in the shipped profile. The owner
+deferred it to activation on 2026-10-24, where the formation release evidence
+is regenerated once. Until then the publication row asks the owner, the
+evaluation approves once, and gate 10 stays pending.
 
-- The exact-name `tool_rules` entry is not in the shipped profile. The owner
-  deferred it to activation on 2026-10-24, where the formation release
-  evidence is regenerated once. Until then the publication row asks the
-  owner, the evaluation approves once, and gate 10 stays pending.
-- Feed publishing from scheduled runs waits for `schedule.create` to request
-  `cockpit.write`.
+Build step 8 landed the same day:
+
+- the platform feed projector with its six sources, on the maintenance role's
+  timer behind the flag;
+- feed history pruning on the import timer;
+- `schedule.create` 1.5.0's `publish_cockpit_feed` in Cockpit deployments;
+- three more knobs.
+
+The two platform-feed reference widgets now read the projected shapes:
+absolute times, and the schedule items' `at` and `paused` count.
+
+## Implementation checkpoint: 2026-10-25
+
+Build step 10 landed the native Cockpit mode behind the server's routes:
+
+- the snapshot's `server_time` and `changed_at`, with a pinned wire fixture
+  both sides test against;
+- the release's runtime export, and its rollback;
+- `CockpitWebView`: a non-persistent store, the scheme handler serving only
+  the snapshot's hashes, the blocking rule list, the removed network
+  primitives, the navigation policy, one main-frame message handler and the
+  native watchdog;
+- `CockpitViewModel`, which streams only while Cockpit is visible in an active
+  app and reconnects without a give-up limit;
+- the chrome: connection and last update, night watch, the iPad keep-awake
+  toggle, the Mac's widget list and detail panel, the detail sheet elsewhere,
+  the settings form, history with commit links, Revert, Delete and Restore,
+  and an Arrange sheet that orders, sizes and hides each device class's tiles.
+
+A hosted `WKWebView` test loads the real exported runtime: a widget renders,
+and one that tries ten web escapes reaches no listener on the machine. Gates
+16, 17, 18 and 21 are bound to native tests that run those suites with the
+headless realm suite.
+
+The `open` intent landed with it: approval rows in the reference widget open
+the approval's conversation.
+
+Still to come in this step's area:
+
+- the `discuss` intent, which needs Chat to take a widget's context as
+  untrusted context;
+- gate 20 (state across all three modes) and gate 22 (the realm on the oldest
+  supported iPad);
+- gate 19's preflight rebuild of live widgets against a changed kit.
 
 ## Implementation checkpoint: 2026-10-23
 

@@ -392,6 +392,12 @@
           "name": "icon",
           "type": "ReactNode",
           "optional": true
+        },
+        {
+          "name": "opens",
+          "type": "OpenIntent",
+          "optional": true,
+          "description": "What tapping the row opens natively, from an identifier its feed carries."
         }
       ],
       "example": "<Row title=\"Flight EX 100\" detail=\"Gate B12\" value=\"On time\" marker=\"ok\" />"
@@ -577,6 +583,10 @@
       "signature": "freshnessText(f: FeedFreshness | undefined, now: number, variant: 'short' | 'long' = 'short'): string"
     },
     {
+      "name": "useOpen",
+      "signature": "useOpen(): ((intent: OpenIntent) => void) | null"
+    },
+    {
       "name": "formatCountdown",
       "signature": "formatCountdown(sec: number, format: 'relative' | 'clock'): string"
     }
@@ -589,6 +599,8 @@
     "FeedFreshness": "{ observedAt: number | null; expectedIntervalSec: number; error?: string | null }",
     "FeedView": "{ data: T | null; history: { observedAt: number; data: T }[] }",
     "FreshnessLevel": "'live' | 'aging' | 'stale' | 'error' | 'pending'",
+    "IntentKind": "'approval' | 'email_thread' | 'schedule' | 'session'",
+    "OpenIntent": "{ kind: IntentKind; id: string }",
     "PillTone": "'ok' | 'neutral' | 'attention' | 'error' | 'stale'",
     "RowMarker": "'none' | 'ok' | 'neutral' | 'attention' | 'error' | 'stale'",
     "TileSize": "'sm' | 'md' | 'tall' | 'lg' | 'wide'",

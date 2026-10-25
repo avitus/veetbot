@@ -100,7 +100,12 @@ function draw() {
             return (
               <div className="ck-slot" data-size={tile.size} key={tile.key}>
                 <TileBoundary tile={tile}>
-                  <kit.TileHost size={tile.size} selected={tile.selected} onOpen={() => post({ type: 'select', key: tile.key })}>
+                  <kit.TileHost
+                    size={tile.size}
+                    selected={tile.selected}
+                    onOpen={() => post({ type: 'select', key: tile.key })}
+                    onIntent={(intent) => post({ type: 'intent', key: tile.key, kind: intent.kind, id: intent.id })}
+                  >
                     {Widget ? (
                       <Widget feeds={tile.feeds} settings={tile.settings} size={tile.size} theme={theme} />
                     ) : (

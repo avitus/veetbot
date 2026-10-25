@@ -279,6 +279,8 @@ class MaintenanceWorker:
         sweep_cockpit_outbox: Callable[[], Awaitable[int]] | None = None,
         sweep_cockpit_import: Callable[[], Awaitable[int]] | None = None,
         sweep_cockpit_events: Callable[[], Awaitable[int]] | None = None,
+        sweep_cockpit_feeds: Callable[[], Awaitable[int]] | None = None,
+        sweep_cockpit_feed_history: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
         memory_decay_interval_seconds: float = 86_400,
@@ -286,6 +288,7 @@ class MaintenanceWorker:
         folder_proposal_interval_seconds: float = 900,
         people_duplicate_interval_seconds: float = 900,
         cockpit_import_interval_seconds: float = 60,
+        cockpit_feed_interval_seconds: float = 30,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -315,6 +318,8 @@ class MaintenanceWorker:
         self._sweep_cockpit_outbox = sweep_cockpit_outbox
         self._sweep_cockpit_import = sweep_cockpit_import
         self._sweep_cockpit_events = sweep_cockpit_events
+        self._sweep_cockpit_feeds = sweep_cockpit_feeds
+        self._sweep_cockpit_feed_history = sweep_cockpit_feed_history
         self._last_browser_continuation_sweep: datetime | None = None
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
@@ -333,6 +338,11 @@ class MaintenanceWorker:
         # The importer polls the widget branch on its own timer (docs/plan/cockpit.md).
         self._cockpit_import_interval = timedelta(seconds=cockpit_import_interval_seconds)
         self._last_cockpit_import_at: datetime | None = None
+        if cockpit_feed_interval_seconds <= 0:
+            raise ValueError("Cockpit feed interval must be positive")
+        # The platform feeds are projected on their own short timer.
+        self._cockpit_feed_interval = timedelta(seconds=cockpit_feed_interval_seconds)
+        self._last_cockpit_feeds_at: datetime | None = None
         self._artifact_orphan_interval = timedelta(seconds=artifact_orphan_interval_seconds)
         self._last_artifact_orphan_sweep_at: datetime | None = None
         # Readers withhold expired bodies themselves, so this mailbox-wide sweep
@@ -449,7 +459,9 @@ class MaintenanceWorker:
             or self._clock.now() - self._last_cockpit_import_at >= self._cockpit_import_interval
         )
         if cockpit_import_due and (
-            self._sweep_cockpit_import is not None or self._sweep_cockpit_events is not None
+            self._sweep_cockpit_import is not None
+            or self._sweep_cockpit_events is not None
+            or self._sweep_cockpit_feed_history is not None
         ):
             self._last_cockpit_import_at = self._clock.now()
         if self._sweep_cockpit_import is not None and cockpit_import_due:
@@ -463,6 +475,21 @@ class MaintenanceWorker:
                 await self._sweep_cockpit_events()
             except Exception:
                 logger.exception("Cockpit event retention sweep failed")
+        if self._sweep_cockpit_feeds is not None and (
+            self._last_cockpit_feeds_at is None
+            or self._clock.now() - self._last_cockpit_feeds_at >= self._cockpit_feed_interval
+        ):
+            self._last_cockpit_feeds_at = self._clock.now()
+            try:
+                await self._sweep_cockpit_feeds()
+            except Exception:
+                logger.exception("Cockpit platform feed sweep failed")
+        # Feed history outlives its window only until this pass (the import timer).
+        if self._sweep_cockpit_feed_history is not None and cockpit_import_due:
+            try:
+                await self._sweep_cockpit_feed_history()
+            except Exception:
+                logger.exception("Cockpit feed history sweep failed")
         if self._sweep_browser_continuations is not None and (
             self._last_browser_continuation_sweep is None
             or (self._clock.now() - self._last_browser_continuation_sweep).total_seconds() >= 15

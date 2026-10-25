@@ -913,6 +913,7 @@ a default-off flag. The widget write tool is allowed by an exact-name rule,
 and the trust overlay stays intact.
 
 The `cockpit/` workspace, the stores, the builder sandbox image, the
-publication path, the routes and the stream are implemented, and gates 1, 2,
-4 to 9, 14 and 15 are bound; every other gate is pending. This independent
+publication path, the routes and the stream, the tools, the platform feeds and
+the native Cockpit mode are implemented, and gates 1, 2, 4 to 9 and 14 to 18
+and 21 are bound; every other gate is pending. This independent
 workstream is authorized; the verified ceiling does not move.

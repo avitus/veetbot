@@ -64,6 +64,8 @@ SCHEDULE_WRITE_SCOPE = "schedule.write"
 # occurrence can place the call and read back how it went.
 CALL_PLACE_SCOPE = "mcp.bland_call.use"
 CALL_SCOPES = frozenset({CALL_PLACE_SCOPE, "mcp.bland_read.use"})
+# A feed-keeping run reads the Cockpit and publishes; widget writes stay interactive.
+COCKPIT_FEED_SCOPES = ("cockpit.read", "cockpit.write")
 # Those scopes are all the occurrence holds, so it can never schedule a later
 # attempt; Chat must not confirm a retry or follow-up it cannot arrange.
 CALL_SCHEDULE_LIMITS = (
@@ -322,6 +324,7 @@ class ScheduleCreateTool:
             "requested_scopes": sorted(_requested_scopes(arguments)),
             **({"use_website": True} if arguments.get("use_website") else {}),
             **({"place_call": True} if arguments.get("place_call") else {}),
+            **({"publish_cockpit_feed": True} if arguments.get("publish_cockpit_feed") else {}),
             **(
                 {"call_plan": arguments["call_plan"]}
                 if arguments.get("call_plan") is not None
@@ -489,7 +492,11 @@ def _requested_scopes(arguments: dict[str, Any]) -> frozenset[str]:
         else frozenset()
     )
     return frozenset(
-        {*(("browser.profile.read",) if arguments.get("use_website") else ()), *calling}
+        {
+            *(("browser.profile.read",) if arguments.get("use_website") else ()),
+            *calling,
+            *(COCKPIT_FEED_SCOPES if arguments.get("publish_cockpit_feed") else ()),
+        }
     )
 
 
@@ -539,6 +546,31 @@ def parse_cadence(arguments: dict[str, Any]) -> Cadence:
             "cadence must be DAILY, WEEKLY, MONTHLY, or YEARLY",
         )
     return cadence
+
+
+class CockpitScheduleCreateTool(ScheduleCreateTool):
+    """Version 1.5.0, offered only where the Cockpit is: a run that keeps a feed current.
+
+    A schedule asks for the Cockpit scopes only when it is created to publish a
+    feed, so every other schedule's run still cannot touch the Cockpit.
+    """
+
+    spec = ScheduleCreateTool.spec.model_copy(
+        update={
+            "version": "1.5.0",
+            "description": ScheduleCreateTool.spec.description
+            + " When the scheduled task keeps a Cockpit feed current, set "
+            "publish_cockpit_feed=true so its run can read the Cockpit and call "
+            "cockpit.feed.publish; without it the run cannot publish.",
+            "input_schema": {
+                **INPUT_SCHEMA,
+                "properties": {
+                    **INPUT_SCHEMA["properties"],
+                    "publish_cockpit_feed": {"type": "boolean"},
+                },
+            },
+        }
+    )
 
 
 class SingleCallScheduleCreateTool(ScheduleCreateTool):

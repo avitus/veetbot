@@ -316,6 +316,12 @@ from agent_core.application.cockpit import (
     CommitOutboxWorker,
 )
 from agent_core.application.cockpit_feeds import CockpitFeeds
+from agent_core.application.cockpit_platform_feeds import platform_feed_sources
+from agent_core.application.cockpit_projector import (
+    CockpitFeedRetention,
+    PlatformFeedProjector,
+    PlatformFeedSource,
+)
 from agent_core.application.cockpit_views import CockpitBoard, CockpitRetention
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_ingest import DeviceMessageIngestService
@@ -744,6 +750,7 @@ from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
     SCHEDULE_CREATE_TOOL_NAME,
+    CockpitScheduleCreateTool,
     LegacyScheduleCreateTool,
     PreviousScheduleCreateTool,
     ScheduleCreateTool,
@@ -874,8 +881,10 @@ class _CockpitMaintenance:
         builder: WidgetBuilder,
         owner_names: tuple[str, ...],
         profiles: CockpitProfiles,
+        feed_sources: Sequence[PlatformFeedSource] = (),
     ) -> None:
         self._settings = settings
+        self._feed_sources = tuple(feed_sources)
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
@@ -940,6 +949,26 @@ class _CockpitMaintenance:
             tenant_id=self._principal.tenant_id,
             seconds=self._profiles.stream.event_retention_seconds,
         )
+        feeds = self._profiles.feeds
+        projector = PlatformFeedProjector(
+            uow_factory=self._uow_factory,
+            clock=self._clock,
+            feeds=CockpitFeeds(
+                uow_factory=self._uow_factory,
+                clock=self._clock,
+                schema_check=Draft202012SchemaCheck(),
+                history_max=feeds.history_max,
+            ),
+            principal=self._principal,
+            sources=self._feed_sources,
+            refresh_seconds=feeds.refresh_seconds,
+        )
+        feed_history = CockpitFeedRetention(
+            uow_factory=self._uow_factory,
+            clock=self._clock,
+            principal=self._principal,
+            history_days=feeds.history_days,
+        )
         return {
             "sweep_cockpit_outbox": CommitOutboxWorker(**common).run_once,
             "sweep_cockpit_events": retention.run_once,
@@ -947,6 +976,9 @@ class _CockpitMaintenance:
                 **common, builder=self._builder, owner_names=self._owner_names
             ).run_once,
             "cockpit_import_interval_seconds": publication.import_interval_seconds,
+            "sweep_cockpit_feeds": projector.run_once,
+            "sweep_cockpit_feed_history": feed_history.run_once,
+            "cockpit_feed_interval_seconds": feeds.projection_interval_seconds,
         }
 
     async def close(self) -> None:
@@ -3066,6 +3098,16 @@ async def _compose(
             builder=cockpit_builder,
             owner_names=owner_names,
             profiles=cockpit_profiles,
+            feed_sources=platform_feed_sources(
+                email_account_ids=(
+                    (settings.email_account_ids or ("default",))
+                    if settings.email_enabled and settings.email_mode_enabled
+                    else ()
+                ),
+                schedules=settings.schedule_api_enabled,
+                calls=settings.call_enabled and settings.call_configuration is not None,
+                people=settings.people_enabled,
+            ),
         )
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
@@ -3179,6 +3221,16 @@ async def _compose(
                 calling_enabled=settings.call_enabled,
             )
         )
+        if settings.cockpit_enabled:
+            registry.register(
+                CockpitScheduleCreateTool(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
         registry.register(LegacyScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
@@ -6291,6 +6343,17 @@ async def build(
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(COCKPIT_TOOL_NAMES if effective_settings.cockpit_enabled else ()),
         *(
+            [
+                RecordsListTool.spec.name,
+                RecordsQueryTool.spec.name,
+                RecordsAppendTool.spec.name,
+                RecordsCreateSeriesTool.spec.name,
+                RecordsDeleteTool.spec.name,
+            ]
+            if effective_settings.records_enabled
+            else []
+        ),
+        *(
             [DEVICE_SMS_SEND_TOOL_NAME]
             if effective_settings.device_channel_enabled
             and effective_settings.device_sms_enabled
@@ -6315,6 +6378,10 @@ async def build(
             SCHEDULE_CANCEL_TOOL_NAME,
             SUBSCRIPTIONS_TOOL_NAME,
             UNSUBSCRIBE_TOOL_NAME,
+            # Declaring or deleting a series is rare and asks the owner first, so
+            # those two wait in the index; listing, querying and appending stay direct.
+            RecordsCreateSeriesTool.spec.name,
+            RecordsDeleteTool.spec.name,
             # The Cockpit is a mode of its own; its tools never take a definition slot.
             *COCKPIT_TOOL_NAMES,
         )

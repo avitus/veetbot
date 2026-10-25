@@ -155,4 +155,28 @@ for (const [name, engine] of ENGINES) {
       await board.browser.close();
     }
   });
+
+  test(`${name}: a row opens its destination natively and the tile still selects`, { timeout: 60000 }, async () => {
+    const approvals = await reference('approvals-waiting');
+    const typical = JSON.parse(readFileSync(path.join(root, 'examples/widgets/approvals-waiting/fixtures/typical.json'), 'utf8'));
+    const feed = typical.feeds['veetbot.approvals.pending'];
+    const feeds = { 'veetbot.approvals.pending': { ...feed, observedAt: Date.parse(feed.observedAt) } };
+    const board = await openBoard(engine, [{ ...approvals, size: 'md' }], feeds);
+    try {
+      await board.settled(1);
+      await board.realm().click('.ck-row[data-opens]');
+      await board.page.waitForFunction(() => (window.cockpitNativeLog ?? []).some((message) => message.type === 'open'), null, { timeout: 5000 });
+      const opened = (await board.log()).filter((message) => message.type === 'open');
+      assert.deepEqual(opened, [{ type: 'open', slug: 'approvals-waiting', kind: 'approval', id: feed.data.items[0].id }]);
+      assert.ok(!(await board.log()).some((message) => message.type === 'select'), 'opening a row is not selecting the tile');
+      await board.realm().click('.ck-tile-title');
+      await board.page.waitForFunction(() => (window.cockpitNativeLog ?? []).some((message) => message.type === 'select'), null, { timeout: 5000 });
+      // A forged intent from the realm names no kind native code opens, and is dropped.
+      await board.realm().evaluate(() => window.parent.postMessage({ type: 'intent', key: 'approvals-waiting@x', kind: 'url', id: 'https://evil.example' }, '*'));
+      await board.page.waitForTimeout(200);
+      assert.equal((await board.log()).filter((message) => message.type === 'open').length, 1);
+    } finally {
+      await board.browser.close();
+    }
+  });
 }

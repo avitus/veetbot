@@ -21,3 +21,10 @@ feeds:
   # Snapshots kept per feed; a manifest declares at most this much history
   # (docs/plan/cockpit.md, freshness and delivery).
   history_max: 288
+  # Days of history kept per feed; the smaller of this and history_max wins.
+  history_days: 7
+  # How often the maintenance role reads the platform's veetbot.* sources.
+  projection_interval_seconds: 30
+  # A quiet platform feed republishes its unchanged content this often, so its
+  # freshness stays honest; it is also the feed's expected interval.
+  refresh_seconds: 300

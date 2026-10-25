@@ -27,7 +27,7 @@ from agent_core.context.builder import BudgetedContextBuilder
 from agent_core.context.estimator import ConservativeTokenEstimator, canonical_json_bytes
 from agent_core.context.records_catalog import RecordsCatalogSource, render_records_catalog
 from agent_core.context.rendering import build_prefix, prefix_bytes
-from agent_core.domain.agents import Principal
+from agent_core.domain.agents import DEFERRED_TOOLS_METADATA_KEY, Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.context import REGION_ASSIGNMENTS, ContextClass, ContextPlan, ContextRegion
 from agent_core.domain.errors import NotFoundError
@@ -177,6 +177,35 @@ async def test_registration_under_flag() -> None:
     assert await _registered(None) == set()
     assert await _registered("0") == set()
     assert await _registered("1") == set(TOOL_NAMES)
+
+
+async def _agent_tools(flag: str | None) -> tuple[set[str], set[str]]:
+    """The composed default agent's enabled tools and its explicitly deferred ones."""
+    async with build(
+        settings=load_settings(_environment(flag)), script=FakeModelScript(turns=[])
+    ) as composition:
+        session_id = await composition.sessions.create()
+        async with composition.uow_factory() as uow:
+            session = await uow.sessions.get(session_id, composition.principal)
+            assert session is not None
+            agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+        assert agent is not None
+        deferred = agent.metadata.get(DEFERRED_TOOLS_METADATA_KEY, [])
+        return set(agent.enabled_tools), set(deferred)
+
+
+async def test_the_default_agent_enables_records_under_the_flag() -> None:
+    """Registered is not offered: the agent must enable the tools the flag registers.
+
+    Production on 2026-10-25 registered all five tools, yet the owner's request
+    to track blood pressure ended in a CSV because the default agent's enabled
+    list never named them, so the model could not call any of them.
+    """
+    enabled, deferred = await _agent_tools("1")
+    assert set(TOOL_NAMES) <= enabled
+    assert deferred & set(TOOL_NAMES) == {"records.create_series", "records.delete"}
+    dark_enabled, dark_deferred = await _agent_tools("0")
+    assert not (dark_enabled | dark_deferred) & set(TOOL_NAMES)
 
 
 @pytest.mark.parametrize("value", ["1", "0"])

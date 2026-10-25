@@ -1,0 +1,97 @@
+{
+  "cursor": 0,
+  "feeds": {
+    "agent.weather": {
+      "current": {
+        "data": {
+          "temperature": 62
+        },
+        "error": null,
+        "expected_interval_seconds": 900,
+        "observed_at": "2026-10-24T17:02:00Z",
+        "schema_version": 1
+      },
+      "history": [
+        {
+          "data": {
+            "temperature": 60
+          },
+          "error": null,
+          "expected_interval_seconds": 900,
+          "observed_at": "2026-10-24T17:00:00Z",
+          "schema_version": 1
+        },
+        {
+          "data": {
+            "temperature": 61
+          },
+          "error": null,
+          "expected_interval_seconds": 900,
+          "observed_at": "2026-10-24T17:01:00Z",
+          "schema_version": 1
+        }
+      ],
+      "trust": "untrusted"
+    }
+  },
+  "layouts": {
+    "wide": {
+      "placements": [
+        {
+          "size": "md",
+          "slug": "weather"
+        }
+      ],
+      "revision": 1
+    }
+  },
+  "runtime": {
+    "assets": {
+      "host.html": "952fd991bb21ccc3a71b9d16cc281fec0ea61c0da1da287315aadc8259b8d3e5",
+      "kit.css": "ca91ec6b6d74c9c190c368e9e1c341e4a82e07372ef112741cb28a06d3ae6ec3",
+      "realm.html": "aa139ed417b7741613ef621fa808537d3de5e7dbfc0c39258586227c010cb00b"
+    },
+    "entry": "952fd991bb21ccc3a71b9d16cc281fec0ea61c0da1da287315aadc8259b8d3e5",
+    "kit_api": 1
+  },
+  "server_time": "2026-10-24T17:00:00Z",
+  "widgets": [
+    {
+      "bundle_sha256": "d723e7327e1eed7b84d12d993459c56aad15ef349408cc6f911b0097c3eaaf50",
+      "changed_at": "2026-10-24T17:00:00Z",
+      "kit_api": 1,
+      "manifest": {
+        "feeds": [
+          {
+            "history": 2,
+            "id": "agent.weather"
+          }
+        ],
+        "kit_api": 1,
+        "purpose": "Shows the weather for one place.",
+        "schema": 1,
+        "settings": {
+          "additionalProperties": false,
+          "properties": {
+            "place": {
+              "maxLength": 40,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "sizes": [
+          "sm",
+          "md"
+        ],
+        "slug": "weather",
+        "title": "Weather"
+      },
+      "revision_id": "00000000-0000-0000-0000-000000000007",
+      "settings": {
+        "place": "Example City"
+      },
+      "slug": "weather"
+    }
+  ]
+}

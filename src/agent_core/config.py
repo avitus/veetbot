@@ -505,6 +505,9 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "stream.max_seconds",
             "stream.event_retention_seconds",
             "feeds.history_max",
+            "feeds.history_days",
+            "feeds.projection_interval_seconds",
+            "feeds.refresh_seconds",
         ),
     }
 )

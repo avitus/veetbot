@@ -122,6 +122,12 @@ public struct RootView: View {
         .sheet(item: $globalPeopleLookup) { PeopleLookupSheet(lookup: $0, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
+        .onChange(of: coordinator.requestedSchedule) { _, id in
+            guard let id else { return }
+            coordinator.requestedSchedule = nil
+            showingGlobalSchedules = true
+            Task { await globalSchedules.loadDetail(id) }
+        }
         .sheet(isPresented: $showingGlobalSchedules) {
             ScheduleBrowserView(model: globalSchedules)
                 .environment(\.openScheduleReport) { sessionID in
@@ -267,7 +273,11 @@ public struct RootView: View {
             // scroll position and live Chat rendering across a mode switch.
             GeometryReader { geometry in
                 ZStack {
-                    CockpitModeView(chooseMode: { coordinator.mode = $0 })
+                    CockpitModeView(
+                        model: coordinator.cockpit,
+                        isVisible: coordinator.mode == .cockpit && scenePhase == .active,
+                        chooseMode: { coordinator.mode = $0 }
+                    )
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
                         .opacity(coordinator.mode == .cockpit ? 1 : 0)

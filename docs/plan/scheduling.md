@@ -1058,7 +1058,10 @@ validated website dependency described above (ADR-0172), or `place_call=true`
 (version 1.3.0, ADR-0213) requests exactly `mcp.bland_call.use` and
 `mcp.bland_read.use`; that flag fails as `schedule.calling_unavailable` when
 calling is not composed. A `call_plan` (version 1.4.0, ADR-0221) narrows a call
-schedule to `mcp.bland_call.use` alone. Its step, model-call, and tool-call
+schedule to `mcp.bland_call.use` alone. In a Cockpit deployment, version 1.5.0's
+`publish_cockpit_feed=true` requests `cockpit.read` and `cockpit.write` so the
+run can publish a feed ([cockpit.md](cockpit.md#assistant-feeds)); without the
+Cockpit flag 1.5.0 is not registered. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
 ceilings. Cost is the minimum of the active agent's finite cost or `5` and the
 schedule cost ceiling; run timeout is the lesser of 300 seconds and its
