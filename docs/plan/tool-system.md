@@ -595,10 +595,12 @@ split into those the owner's message contains, those found only in an
 external or knowledge tool result of the turn, and those in neither; the
 statement is grounded when no word came only from external content, at least
 sixty percent of its words (and at least two) are the owner's, at most
-three are the model's own phrasing, and its negations and modals match the
-owner's: it introduces none the owner's message lacks and drops none from an
-owner sentence it restates, with request framing such as "could you" or
-"don't forget" set aside. Overlap of content words is not provenance when
+three are the model's own phrasing, and its negations and modals are exactly
+those of the owner sentences it restates (the sentences sharing its other
+covered words): none added, none dropped, none carried over from a sentence
+about something else. Request framing such as "could you" or "don't forget"
+opening an owner sentence is set aside; anywhere else, and anywhere in the
+statement, those words count. Overlap of content words is not provenance when
 the polarity or modality moved, so "I may transfer funds" never grounds "I
 will transfer funds". A paraphrase of what the owner just said
 is therefore an owner save whether it is proposed in the step that read the

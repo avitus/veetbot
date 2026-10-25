@@ -29,9 +29,10 @@ although nothing had been asked.
    own, none came only from an external or knowledge tool result of that
    turn, at least sixty percent of them (and at least two) appear in the
    owner's message, at most three are the model's own phrasing, and its
-   negations and modals match the owner's: it introduces none the owner's
-   message lacks and drops none from an owner sentence it restates (request
-   framing such as "could you" or "don't forget" set aside). These marker
+   negations and modals are exactly those of the owner sentences it
+   restates: none added, none dropped, none carried over from another
+   sentence (request framing such as "could you" or "don't forget" is set
+   aside only where it opens an owner sentence). These marker
    words are judged apart from recall's function-word list, which drops the
    modals, so ranking changes cannot relax provenance. The
    sixteen-character verbatim rule remains as it was. A message the owner did

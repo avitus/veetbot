@@ -489,9 +489,14 @@ _CONTRACTIONS = (
     (re.compile(r"n't\b"), " not"),
     (re.compile(r"'ll\b"), " will"),
 )
-# How a request is put ("could you remember", "don't forget that") is not part
-# of what the owner states.
-_REQUEST_FRAMING = re.compile(r"\b(?:can|could|would|will)\s+you\b|\b(?:do\s+not|never)\s+forget\b")
+# How the owner puts a request ("could you remember", "please don't forget
+# that") opens a sentence and is not part of what the owner states. Only the
+# owner's sentences lose it, and only at their start: inside a sentence ("I
+# never forget birthdays") and anywhere in a statement those words are meaning.
+_REQUEST_FRAMING = re.compile(
+    r"^\W*(?:(?:please|also|and|so|hey|ok|okay)\W+)*"
+    r"(?:(?:can|could|would|will)\s+you|(?:do\s+not|never)\s+forget)\b"
+)
 _SENTENCE_BREAK = re.compile(r"[.!?;\n]+")
 _WORD = re.compile(r"[^\W\d_]+")
 
@@ -500,7 +505,14 @@ def _grounding_text(text: str) -> str:
     text = text.casefold().replace("\u2019", "'")
     for pattern, replacement in _CONTRACTIONS:
         text = pattern.sub(replacement, text)
-    return _REQUEST_FRAMING.sub(" ", text)
+    return text
+
+
+def _owner_sentences(text: str) -> list[str]:
+    return [
+        _REQUEST_FRAMING.sub(" ", sentence)
+        for sentence in _SENTENCE_BREAK.split(_grounding_text(text))
+    ]
 
 
 def _content_lexemes(text: str) -> set[str]:
@@ -523,8 +535,8 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     message, found only in an external or knowledge tool result of this turn,
     or in neither (the model's own phrasing). Grounded means no word came only
     from external content, most of the words are the owner's, the model's
-    phrasing stays within a few words, and the negations and modals match: none
-    the owner did not say, none dropped from an owner sentence it restates. The
+    phrasing stays within a few words, and its negations and modals are exactly
+    those of the owner sentences it restates: none added, none dropped. The
     outcome is the same whether the save is proposed in the step that read the
     web or a later one: the turn's taint still marks the origin; only the
     statement's own provenance lifts it.
@@ -553,18 +565,20 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     covered = words & owner_words
     tainted = (words - owner_words) & external_words
     free = words - owner_words - external_words
+    # The owner sentences a statement restates are those sharing its covered words;
+    # marker words never link a sentence in, so a negation said about something
+    # else cannot be carried over to this.
     stated = _meaning_markers(statement)
     restated: set[str] = set()
-    for sentence in _SENTENCE_BREAK.split(" ".join(user_texts)):
-        if _content_lexemes(sentence) & covered:
+    for sentence in _owner_sentences(" ".join(user_texts)):
+        if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered:
             restated |= _meaning_markers(sentence)
     return (
         not tainted
         and len(covered)
         >= max(OWNER_GROUNDING_MINIMUM_WORDS, math.ceil(OWNER_GROUNDING_COVERAGE * len(words)))
         and len(free) <= OWNER_GROUNDING_FREE_WORDS
-        and stated <= _meaning_markers(" ".join(user_texts))
-        and restated <= stated
+        and stated == restated
     )
 
 

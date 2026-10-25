@@ -172,6 +172,30 @@ QUIET_WEB = "Weather today is mild with light wind."
         ("Remember that I might move to Lisbon next year.", "Andy moves to Lisbon next year."),
         ("Remember that I don't drink coffee after noon.", "Andy drinks coffee after noon."),
         ("Remember that I have no siblings in Portugal.", "Andy has siblings in Portugal."),
+        # Words that frame a request elsewhere are still the statement's own markers,
+        # and in the middle of an owner sentence they are what the owner states.
+        (
+            "Remember that I forget my sister's birthday every year.",
+            "I never forget my sister's birthday every year.",
+        ),
+        (
+            "Remember that I forget my sister's birthday every year.",
+            "I do not forget my sister's birthday every year.",
+        ),
+        (
+            "Remember that I never forget my sister's birthday.",
+            "I forget my sister's birthday.",
+        ),
+        # A negation borrowed from another of the owner's sentences is not the owner's
+        # statement about this one.
+        (
+            "Remember that I eat pork every Sunday. I can't stand olives.",
+            "I do not eat pork every Sunday.",
+        ),
+        (
+            "Remember that I eat pork every Sunday. I never liked olives.",
+            "I never eat pork every Sunday.",
+        ),
     ],
 )
 def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
@@ -195,6 +219,7 @@ def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
             "Andy does not drink coffee after noon.",
         ),
         ("Don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
+        ("Please, don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
     ],
 )
 def test_a_statement_that_keeps_negation_and_modality_stays_grounded(
