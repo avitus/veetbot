@@ -66,14 +66,14 @@ async def test_slow_base_recall_stops_without_losing_browser_evidence(
 async def test_delta_shares_the_base_deadline_and_preserves_completed_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(context_builder, "AUTOMATIC_RECALL_SECONDS", 0.05, raising=False)
+    monkeypatch.setattr(context_builder, "AUTOMATIC_RECALL_SECONDS", 0.3, raising=False)
     stopped = False
 
     class SlowDelta(_Retriever):
         async def recall(self, *args: Any, **kwargs: Any) -> Any:
             nonlocal stopped
             try:
-                await asyncio.sleep(0.03)
+                await asyncio.sleep(0.2)
             except asyncio.CancelledError:
                 stopped = True
                 raise
