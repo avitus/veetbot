@@ -81,6 +81,28 @@ def test_a_key_only_its_owner_can_read_loads(tmp_path: Path) -> None:
         (0o444, _systemd_acl()),
         # An ACL that cannot be parsed proves nothing.
         (0o440, b"\x02\x00\x00\x00\x01"),
+        # Nor does a header with no entries, or another version's layout.
+        (0o440, b"\x02\x00\x00\x00"),
+        (0o440, b"\x01\x00\x00\x00" + _systemd_acl()[4:]),
+        # An ACL missing its mandatory other or mask entry is incomplete.
+        (
+            0o440,
+            _acl(
+                (USER_OBJ, READ, UNDEFINED),
+                (USER, READ, SERVICE),
+                (GROUP_OBJ, 0, UNDEFINED),
+                (MASK, READ, UNDEFINED),
+            ),
+        ),
+        (
+            0o440,
+            _acl(
+                (USER_OBJ, READ, UNDEFINED),
+                (USER, READ, SERVICE),
+                (GROUP_OBJ, 0, UNDEFINED),
+                (OTHER, 0, UNDEFINED),
+            ),
+        ),
     ],
 )
 def test_a_key_anyone_else_can_read_is_refused(

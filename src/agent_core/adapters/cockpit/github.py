@@ -69,8 +69,18 @@ def _access_acl(path: Path) -> bytes | None:
     return acl
 
 
-# `system.posix_acl_access` entry tags (acl/libacl.h); only these may grant access.
-_ACL_USER, _ACL_GROUP_OBJ, _ACL_GROUP, _ACL_OTHER = 0x02, 0x04, 0x08, 0x20
+# `system.posix_acl_access` (linux/posix_acl_xattr.h): version 2, then entries.
+_ACL_VERSION = 2
+_ACL_USER_OBJ, _ACL_USER, _ACL_GROUP_OBJ, _ACL_GROUP, _ACL_MASK, _ACL_OTHER = (
+    0x01,
+    0x02,
+    0x04,
+    0x08,
+    0x10,
+    0x20,
+)
+# An ACL behind group-class bits always carries these; one without them is incomplete.
+_ACL_REQUIRED = frozenset({_ACL_USER_OBJ, _ACL_GROUP_OBJ, _ACL_MASK, _ACL_OTHER})
 
 
 def _private(mode: int, acl: bytes | None, reader_uid: int) -> bool:
@@ -87,13 +97,17 @@ def _private(mode: int, acl: bytes | None, reader_uid: int) -> bool:
         return True
     if acl is None or len(acl) < 4 or (len(acl) - 4) % 8:
         return False
+    if struct.unpack_from("<I", acl)[0] != _ACL_VERSION:
+        return False
+    tags: set[int] = set()
     for offset in range(4, len(acl), 8):
         tag, perm, ident = struct.unpack_from("<HHI", acl, offset)
+        tags.add(tag)
         if tag == _ACL_USER and perm and ident != reader_uid:
             return False
         if tag in (_ACL_GROUP_OBJ, _ACL_GROUP, _ACL_OTHER) and perm:
             return False
-    return True
+    return tags >= _ACL_REQUIRED
 
 
 def load_app_private_key(
