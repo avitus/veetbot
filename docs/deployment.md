@@ -1611,7 +1611,10 @@ it on `avitus/veetbot` only, then note the App id and the installation id.
 **The key.** Generate a private key for the App and install it as
 `/etc/veetbot/secrets/cockpit-github-app.pem`, owned by root with mode `0400`.
 The maintenance unit loads it with `LoadCredential=cockpit-github-app:…` and
-points `AGENT_COCKPIT_GITHUB_KEY_FILE` at it. A whitespace-only `SetCredential`
+points `AGENT_COCKPIT_GITHUB_KEY_FILE` at it. systemd 255 hands the unit a
+root-owned copy, mode 0440, with an ACL naming only the unit's user. The
+loader accepts exactly that, and refuses a key any other user, group or the
+world can read. A whitespace-only `SetCredential`
 default (`\n`; systemd 255 rejects an empty value as invalid syntax and then
 fails the unit on the missing file) lets the unit start without the file.
 

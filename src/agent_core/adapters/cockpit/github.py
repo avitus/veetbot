@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import stat
-from collections.abc import Mapping
+import struct
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -54,7 +56,52 @@ _PAGE = 100
 _COMMIT_FILES_CAP = 300
 
 
-def load_app_private_key(path: Path) -> bytes:
+def _access_acl(path: Path) -> bytes | None:
+    """The file's POSIX access ACL, where the platform keeps one, else None."""
+
+    getxattr = getattr(os, "getxattr", None)
+    if getxattr is None:
+        return None
+    try:
+        acl: bytes = getxattr(path, "system.posix_acl_access")
+    except OSError:
+        return None
+    return acl
+
+
+# `system.posix_acl_access` entry tags (acl/libacl.h); only these may grant access.
+_ACL_USER, _ACL_GROUP_OBJ, _ACL_GROUP, _ACL_OTHER = 0x02, 0x04, 0x08, 0x20
+
+
+def _private(mode: int, acl: bytes | None, reader_uid: int) -> bool:
+    """Readable by its owner and, through an ACL, the service's own user, and no one else.
+
+    systemd's credential copy is root-owned with an ACL naming the unit's user,
+    so `stat` shows the ACL mask in the group bits. Group bits without an ACL
+    are the group's own access.
+    """
+
+    if mode & 0o007:
+        return False
+    if not mode & 0o070:
+        return True
+    if acl is None or len(acl) < 4 or (len(acl) - 4) % 8:
+        return False
+    for offset in range(4, len(acl), 8):
+        tag, perm, ident = struct.unpack_from("<HHI", acl, offset)
+        if tag == _ACL_USER and perm and ident != reader_uid:
+            return False
+        if tag in (_ACL_GROUP_OBJ, _ACL_GROUP, _ACL_OTHER) and perm:
+            return False
+    return True
+
+
+def load_app_private_key(
+    path: Path,
+    *,
+    acl_reader: Callable[[Path], bytes | None] = _access_acl,
+    reader_uid: int | None = None,
+) -> bytes:
     """The App's key as systemd's `LoadCredential` delivers it: private and present."""
 
     if not path.is_absolute() or path.is_symlink():
@@ -64,7 +111,10 @@ def load_app_private_key(path: Path) -> bytes:
         key = path.read_bytes()
     except OSError as error:
         raise ValueError("is unavailable") from error
-    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) & 0o077:
+    uid = os.geteuid() if reader_uid is None else reader_uid
+    if not stat.S_ISREG(metadata.st_mode) or not _private(
+        stat.S_IMODE(metadata.st_mode), acl_reader(path), uid
+    ):
         raise ValueError("must be a private regular file readable only by its owner")
     if not key.strip():
         raise ValueError("is empty; install the GitHub App's private key")
