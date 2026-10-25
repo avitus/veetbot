@@ -2279,7 +2279,7 @@ def _resource_restatement_key(statement: str) -> str | None:
 
 
 def _attribute_conflict(first: MemoryRecord, second: MemoryRecord) -> bool:
-    """Whether a live `conflicts_with` link is a real dispute (ADR-0248).
+    """Whether a live `conflicts_with` link is a real dispute (ADR-0249).
 
     Two recognised claims conflict only within one attribute and with different
     values. Two unrecognised claims keep the legacy judgement unless they are
@@ -2335,7 +2335,7 @@ class DeterministicConflictResolver:
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
-        # ADR-0248: the same attribute with the same value is a restatement,
+        # ADR-0249: the same attribute with the same value is a restatement,
         # whatever the wording; a recognised attribute cannot disagree with a
         # different one, nor with a claim that names no attribute.
         existing_claim = predicate_claim(existing.statement, existing.belief_type)
@@ -2458,6 +2458,11 @@ class GovernedMemoryService:
         self._usage = usage
         self._people_enabled = people_enabled
         self._commit_guard = commit_guard
+
+    @property
+    def principal(self) -> Principal:
+        """The owner this service forms memories for."""
+        return self._principal
 
     @property
     def formation_profile(self) -> FormationProfile:
@@ -2585,6 +2590,7 @@ class GovernedMemoryService:
         audit_model: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
+        attribution_host: str | None = None,
     ) -> tuple[MemoryRecord, str]:
         """Apply validated formation evidence within an optional caller-owned transaction."""
         attributed_shape = (
@@ -2597,6 +2603,9 @@ class GovernedMemoryService:
             and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             and (
                 portability is Portability.LOCAL
+                # ADR-0250: a website-learned claim carries its host beside it
+                # and may follow the owner across projects at contextual weight.
+                or (source_learning and portability is Portability.CONTEXTUAL)
                 or (
                     semantic_external
                     and portability is Portability.CONTEXTUAL
@@ -2618,7 +2627,11 @@ class GovernedMemoryService:
             raise ToolTrustRejectedError("source learning requires attributed hypothesis ceilings")
         clean_statement = " ".join(statement.split())
         clean_subject = " ".join(subject.split())
-        if not clean_subject or not self._salience.eligible(clean_statement, explicit=explicit):
+        # ADR-0250: a learned quote is verbatim evidence the learn path already
+        # scanned for hazards; the automatic-capture word floor does not apply.
+        if not clean_subject or not self._salience.eligible(
+            clean_statement, explicit=explicit or source_learning
+        ):
             raise ToolValidationError("memory candidate failed eligibility and safety gates")
         effective_portability = portability or portability_ceiling(belief_type)
         effective_claim_kind = claim_kind or {
@@ -2662,7 +2675,7 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
-            # ADR-0248: a recognised attribute can agree or disagree only with
+            # ADR-0249: a recognised attribute can agree or disagree only with
             # the same attribute; two unrecognised claims keep the subject rule.
             # Legacy rows without a stored key are keyed from their statement.
             incoming_claim = predicate_claim(clean_statement, belief_type)
@@ -2729,6 +2742,8 @@ class GovernedMemoryService:
                     if current.statement == clean_statement
                     and (source_learning_target is None or current.id == source_learning_target)
                     and current.status in LIVE_MEMORY_STATUSES
+                    # An expired claim is learned again, not reinforced (ADR-0250).
+                    and (current.expires_at is None or current.expires_at > self._clock.now())
                     and current.authority is MemoryAuthority.INFERRED
                     and current.derivation is MemoryDerivation.HYPOTHESIS
                     and current.longevity is MemoryLongevity.TENTATIVE
@@ -2936,6 +2951,7 @@ class GovernedMemoryService:
                         derivation,
                         longevity,
                         evidence_at,
+                        attribution_host=attribution_host,
                     )
                     replacement = proposed.model_copy(
                         update={"flagged_for_review": True, "conflicts_with": [current.id]},
@@ -2991,6 +3007,7 @@ class GovernedMemoryService:
                         derivation,
                         longevity,
                         evidence_at,
+                        attribution_host=attribution_host,
                     )
                     position = await uow.memories.next_position()
                     superseded = current.model_copy(
@@ -3037,6 +3054,7 @@ class GovernedMemoryService:
                 derivation,
                 longevity,
                 evidence_at,
+                attribution_host=attribution_host,
             )
             if source_learning:
                 record = record.model_copy(update={"consolidation_policy_version": trigger})
@@ -4199,7 +4217,7 @@ class GovernedMemoryService:
         return await self.acknowledge_review(belief_id, existing_uow=existing_uow)
 
     async def reconcile_conflicts(self, *, confirm: bool) -> ConflictReconciliation:
-        """Re-evaluate every live conflict link under the predicate rule (ADR-0248).
+        """Re-evaluate every live conflict link under the predicate rule (ADR-0249).
 
         A link survives only between two claims about the same attribute with
         different values. Every other pair is unlinked on both sides, with one
@@ -4335,7 +4353,7 @@ class GovernedMemoryService:
     async def confirm(
         self, belief_id: UUID, *, existing_uow: RepositoryUnitOfWork | None = None
     ) -> MemoryRecord:
-        """Supersede a belief with the owner's own statement of it (ADR-0248).
+        """Supersede a belief with the owner's own statement of it (ADR-0249).
 
         The governed restore path: the owner saying "this is right" is a new
         explicit statement, so it enters through formation at user authority
@@ -4784,7 +4802,7 @@ class GovernedMemoryService:
 
     def _decays(self, record: MemoryRecord, instant: datetime, interval: timedelta) -> bool:
         """Whether this belief is idle, uncertain, unwritten long enough, and of
-        a lifecycle class that automatic decay may touch (ADR-0248)."""
+        a lifecycle class that automatic decay may touch (ADR-0249)."""
 
         if (
             record.lifecycle_policy_version == "people-lifecycle@1"
@@ -5084,6 +5102,7 @@ class GovernedMemoryService:
         derivation: MemoryDerivation,
         longevity: MemoryLongevity,
         evidence_at: datetime | None,
+        attribution_host: str | None = None,
     ) -> MemoryRecord:
         now = self._clock.now()
         effective_confidence = confidence if confidence is not None else 0.9
@@ -5134,6 +5153,7 @@ class GovernedMemoryService:
                 not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             ),
             predicate_key=predicate_key(statement, belief_type),
+            attribution_host=attribution_host,
             formation_run_id=formation_run_id,
             consolidation_policy_version=self._policy_version,
             authority=authority,

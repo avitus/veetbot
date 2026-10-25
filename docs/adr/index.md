@@ -293,3 +293,5 @@ implementation without one.
 - [ADR-0246: Represent a separately authorized recall restart](0246-bounded-owner-recall-restart.md)
 - [ADR-0247: Lifecycle reconciliation and owner confirmation](0247-lifecycle-reconciliation-and-owner-confirmation.md)
 - [ADR-0248: Attribute-keyed conflicts](0248-attribute-keyed-conflicts.md)
+- [ADR-0249: Review reasons and two ranking controls](0249-review-reasons-and-ranking-controls.md)
+- [ADR-0250: Learned-memory shape v2 and the reshape of v1 rows](0250-learned-memory-shape-v2.md)

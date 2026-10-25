@@ -20,6 +20,7 @@ from agent_core.domain.context import TaskStatus, WorkingState
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
+    ATTENTION_REASONS,
     SENSITIVITY_ORDER,
     BeliefType,
     EpisodeQuery,
@@ -46,6 +47,7 @@ from agent_core.domain.memory import (
     lexical_term_lexemes,
     lexical_tokens,
     recall_query_terms,
+    review_reason,
 )
 from agent_core.domain.memory_candidates import candidate_strength
 from agent_core.domain.memory_sources import SourceRecoveryObservation
@@ -73,6 +75,11 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQueryLookup
 
+# ADR-0249 changes the flag penalty by review reason; the deterministic M16
+# benchmark measured no metric change. The version bump (@4 -> @6, @5 -> @7)
+# is deferred: re-recording the M16 baseline cascades into the frozen M32
+# control, whose manifest pins the baseline digest and whose recording pins
+# that manifest and the policy string, so it waits for the owner's decision.
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
 RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@5"
 OWNED_RESOURCE_POLICY_VERSION = "owned-resources@1"
@@ -806,11 +813,23 @@ class HybridMemoryRetriever:
         )
         durable_ahead = _durable_ahead(collapsed, durable_ids)
         durable_selected = 0
+        # ADR-0249: attention-flagged hypotheses (source learning, automatic
+        # sensitive captures) fill at most a third of the rendered slots, so
+        # they are retrievable and never dominant.
+        attention_cap = math.ceil(effective_query.max_items / 3)
+        attention_selected = 0
         for index, item in enumerate(collapsed):
             durable = item.belief_id in durable_ids
             if owner_core and measure_tokens(_line(item)) > min(
                 256, effective_query.budget_tokens // 3
             ):
+                dropped.append(item.belief_id)
+                continue
+            attention = (
+                item.review_reason in ATTENTION_REASONS
+                and item.derivation is MemoryDerivation.HYPOTHESIS
+            )
+            if attention and attention_selected >= attention_cap:
                 dropped.append(item.belief_id)
                 continue
             # A slot is held for a durable belief further down the ranking only
@@ -834,6 +853,7 @@ class HybridMemoryRetriever:
                 continue
             selected.append(item)
             durable_selected += int(durable)
+            attention_selected += int(attention)
         shown_partners = frozenset(item.belief_id for item in selected)
         rendered = (
             render(
@@ -1648,7 +1668,20 @@ def _score(
     stale = record.status in _STALE_STATUSES or (
         now is not None and record.expires_at is not None and record.expires_at <= now
     )
-    penalty = (0.2 if record.flagged_for_review else 0) + (profile.stale_penalty if stale else 0)
+    reason = review_reason(record)
+    # ADR-0249: doubt and attention are separate controls. A link or a
+    # correction takes the flagged penalty; source learning and an
+    # automatically captured sensitive statement take the attention penalty,
+    # which is what lets a website-learned fact surface as an attributed
+    # tentative line below the owner's own words.
+    # The penalty follows the flag: a link the owner reviewed ("Looks right")
+    # keeps its reason for display and costs nothing.
+    flag_penalty = 0.0
+    if record.flagged_for_review:
+        flag_penalty = (
+            profile.attention_penalty if reason in ATTENTION_REASONS else profile.flagged_penalty
+        )
+    penalty = flag_penalty + (profile.stale_penalty if stale else 0)
     ranking = profile.ranking_weights
     score = min(
         1.0,
@@ -1687,6 +1720,8 @@ def _score(
         score=score,
         arms=arms,
         conflict_with=list(record.conflicts_with),
+        review_reason=reason,
+        attribution_host=record.attribution_host,
         blocked=blocked,
         source_event_ids=list(record.source_event_ids),
     )
@@ -1815,6 +1850,10 @@ def render_memory(
 
 def _line(item: RecalledItem, *, partners: frozenset[UUID] | None = None) -> str:
     origin = f" (learned in {html.escape(item.origin_scope)})" if item.carried else ""
+    # ADR-0250: a website-learned belief names its host beside the claim.
+    host = getattr(item, "attribution_host", None)
+    if host:
+        origin += f" (learned from {html.escape(host)})"
     if isinstance(item, RecalledSummary):
         return (
             f"[m:{str(item.belief_id)[:8]}]{origin} {html.escape(item.statement)} "
@@ -1822,7 +1861,7 @@ def _line(item: RecalledItem, *, partners: frozenset[UUID] | None = None) -> str
         )
     # A partner is named the way a citation is, so the only identifier the
     # model ever sees for a belief is the eight-digit one it can cite back.
-    # ADR-0248: a marker is shown only beside a partner that is rendered too;
+    # ADR-0249: a marker is shown only beside a partner that is rendered too;
     # the spec's "return both" is honoured or the dispute is not shown as a
     # one-sided doubt. The item keeps every link for the trace and the browser.
     shown = (

@@ -353,7 +353,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 218 knobs live, at the values the
+    module that owns it. This is where all 220 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -431,7 +431,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 218. Schema versions, profile names, rule identifiers,
+and asserts the total is 220. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -442,11 +442,11 @@ or invariants rather than knobs and are not counted.
 | `context/plan.yaml` | 32 |
 | `tools/limits.yaml` | 25 |
 | `runtime/limits.yaml` | 65 |
-| `memory/profiles.yaml` | 45 |
+| `memory/profiles.yaml` | 47 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
 | `cockpit/profiles.yaml` | 10 |
-| **Total** | **218** |
+| **Total** | **220** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -489,7 +489,9 @@ each feed keeps (288 snapshots), taking it to 214. Build step 8 adds the
 platform projector's interval (30 seconds) and refresh period (300 seconds) and
 the days of feed history kept (7), taking it to 217. ADR-0247 adds the decay
 sweep's evidence-of-non-use bound (`formation.decay.min_unused_deliveries`,
-3 deliveries), taking it to 218.
+3 deliveries), taking it to 218. ADR-0249 adds the two review-reason
+penalties (`retrieval.flagged_penalty`, `retrieval.attention_penalty`),
+taking it to 220.
 The Cockpit flag, the builder image and the GitHub App settings are
 environment keys.
 
@@ -1357,7 +1359,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 218 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 220 file-layer knobs.** The definition of done
     stands: every newly accepted environment key appears in `.env.example`.
     File-layer paths are not environment keys and remain enumerated and
     documented by their owning committed defaults; moving a key into a default

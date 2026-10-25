@@ -1,4 +1,4 @@
-"""The closed predicate-key set (ADR-0248): which attribute a statement claims."""
+"""The closed predicate-key set (ADR-0249): which attribute a statement claims."""
 
 from __future__ import annotations
 
@@ -102,6 +102,16 @@ def test_preferences_are_not_keyed_so_a_later_one_supersedes_by_subject() -> Non
     light = predicate_claim("User prefers light mode.", BeliefType.PREFERENCE)
     assert not dark.recognized and not light.recognized
     assert comparable(dark, light)
+
+
+def test_long_claims_key_on_a_digest_so_the_key_always_fits_its_column() -> None:
+    """A 512-character learned quote produced a 530-character key and the
+    record failed validation; past 200 characters the claim keys on a digest."""
+    long = "Source suggests: " + "a very long claim " * 40 + "[Source: https://example.com]"
+    key = predicate_key(long, BeliefType.FACT)
+    assert key.startswith("claim:sha256:") and len(key) < 100
+    assert key == predicate_key(long + "  ", BeliefType.FACT)
+    assert key != predicate_key(long + " more", BeliefType.FACT)
 
 
 def test_rule_version_is_pinned() -> None:

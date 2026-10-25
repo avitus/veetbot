@@ -38,6 +38,7 @@ from agent_core.domain.memory import (
     Polarity,
     Portability,
     Sensitivity,
+    review_reason,
 )
 from agent_core.domain.notifications import (
     Notification,
@@ -360,6 +361,10 @@ class MemoryView(BaseModel):
     confidence: float
     corroboration_count: int
     flagged_for_review: bool
+    # ADR-0249: why the belief asks for review, derived; null when it does not.
+    review_reason: str | None
+    # ADR-0250: the website a learned belief came from; null otherwise.
+    attribution_host: str | None
     conflicts_with: list[UUID]
     superseded_by: UUID | None
     source_session_id: UUID
@@ -395,6 +400,8 @@ class MemoryView(BaseModel):
             confidence=record.confidence,
             corroboration_count=record.corroboration_count,
             flagged_for_review=record.flagged_for_review,
+            review_reason=review_reason(record),
+            attribution_host=record.attribution_host,
             conflicts_with=list(record.conflicts_with),
             superseded_by=record.superseded_by,
             source_session_id=record.source_session_id,
@@ -458,6 +465,8 @@ class MemoryCountsView(BaseModel):
     flagged: int = Field(ge=0)
     by_status: dict[MemoryStatus, int]
     by_type: dict[BeliefType, int]
+    # ADR-0249: the live review queue by reason; the four keys always present.
+    by_review_reason: dict[str, int] = Field(default_factory=dict)
     synthesis: int | None = Field(default=None, ge=0)
     counted_at: datetime
 

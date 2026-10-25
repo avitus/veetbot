@@ -285,7 +285,7 @@ replay. The rule and what a
 conflict then commits are stated in
 [memory-evaluation-and-lifecycle.md:973-998](memory-evaluation-and-lifecycle.md:973-998).
 
-**Only the same attribute can disagree (ADR-0248).** Related beliefs are the
+**Only the same attribute can disagree (ADR-0249).** Related beliefs are the
 live beliefs with the same subject, type and **predicate key**: a closed key
 derived from the statement (`home_address`, `home_city`, `phone`, `email`,
 `employer`, `job_title:<org>`, `birthday`, `relationship:<role>`), falling
@@ -385,7 +385,7 @@ guesses — the three answers are three different writes:
 | Not true | Retire the belief: `valid_to = now`, status `superseded`, no replacement. |
 | Was true, has changed | Supersede it with the correction as a new belief at user authority. |
 | True elsewhere, not here | Lower `portability` and record a negative scope override. The belief survives in its origin; it stops being carried here. |
-| Still true (confirm, ADR-0248) | Supersede it with the same words as a new belief at user authority, citing a `memory.owner_confirmation` event; no rejection is recorded. Allowed for a live belief and for one decay or expiry retired. |
+| Still true (confirm, ADR-0249) | Supersede it with the same words as a new belief at user authority, citing a `memory.owner_confirmation` event; no rejection is recorded. Allowed for a live belief and for one decay or expiry retired. |
 | *(unspecified)* | Flag for review and down-weight. Never retire on an ambiguous signal. |
 
 A rejection is **evidence at the highest authority** — a direct user statement, which
@@ -406,7 +406,7 @@ That matching cannot be by belief id, because re-derivation mints new ids. A
 matching is by content similarity on the same comparison the resolver already uses for
 duplicates. A belief that a user has rejected does not come back with a new id.
 
-**"Still true" is the governed restore path (ADR-0248).** The owner saying a
+**"Still true" is the governed restore path (ADR-0249).** The owner saying a
 belief is right is a new explicit statement, so `confirm` enters through
 formation like any other: one unit of work appends `memory.owner_confirmation`,
 supersedes the predecessor (`superseded`, `valid_to`, `superseded_by`) without a
@@ -933,8 +933,18 @@ are excluded. Deterministic phrase grounding preserves word order and rejects
 negation, unsupported subjects, instructions, and secrets. This intentionally
 rejects some valid paraphrases; it does not establish semantic truth.
 
-New claims are locally attributed, inferred provisional hypotheses, tentative,
-sensitive, flagged for review, with 0.35 confidence and thirty-day expiry.
+New claims are inferred provisional hypotheses, tentative, sensitive, flagged
+for review, with 0.35 confidence and thirty-day expiry. Under
+`owner-source-learning@2` (ADR-0250) the statement is the grounded claim
+itself, the subject is the model's grounded subject of at most 64 characters
+or the authorized host when omitted, the host is the belief's
+`attribution_host` rather than text inside the statement, and portability is
+`contextual`; recall prints `(learned from <host>)` beside the identifier.
+Rows learned under `@1` keep their embedded citation until
+`agent memory reshape --policy owner-source-learning@1 --confirm` supersedes
+each with its `@2` shape through formation, citing the same source events;
+receipts follow `superseded_by`, a `@1` deletion or correction still blocks
+the `@2` identity, and an expired claim may be learned again from a fresh read.
 Reinforcement requires full support for a live inferred tentative assertion,
 retains its authority and status, and increases confidence by at most 0.1 up to
 0.55 (an already higher confidence is preserved). Owner corrections and explicit

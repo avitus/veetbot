@@ -1217,14 +1217,15 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_218_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_220_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 218
-    # ADR-0247 adds the decay sweep's evidence-of-non-use bound.
+    assert len(qualified_paths) == 220
+    # ADR-0247 adds the decay sweep's evidence-of-non-use bound; ADR-0249 the
+    # two review-reason penalties.
     # Milestone 35 adds Cockpit's commit rate limits, the importer's poll interval, the
     # stream's lifetime and retention, the write tool's commit wait, the feed history and
     # the platform projector's two timers.
@@ -1356,7 +1357,7 @@ def test_memory_profiles_knob_paths_match_document() -> None:
     declared = set(SHIPPED_KNOB_PATHS["memory/profiles.yaml"])
 
     assert declared == _leaf_paths(document) - {"schema_version"}
-    assert len(declared) == 45
+    assert len(declared) == 47
 
 
 def _provider_artifact(tmp_path: Path, formation_policy_version: str) -> Path:

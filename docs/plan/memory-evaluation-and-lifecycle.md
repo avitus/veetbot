@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:885), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:898), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:852-854).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:349-351), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:927-930),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:940-943),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:922), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:935), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:879) are
 all written down, and none of them runs.
 
@@ -765,7 +765,7 @@ next turn would report a change nobody made — while a retirement is exactly th
 change the correction lines below select on. Explicit user statements are
 `ACTIVE` at high confidence and are never eligible.
 
-**Lifecycle classes (ADR-0248).** Idleness alone does not retire an owner's
+**Lifecycle classes (ADR-0249).** Idleness alone does not retire an owner's
 words. A user-authority belief and an affirmed direct belief are outside
 automatic decay in any status; review or supersession corrects them. An
 inferred direct durable belief, an owner statement formation captured on its
@@ -851,7 +851,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:927-930): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:940-943): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -1038,7 +1038,15 @@ formation@5 -> formation@7   deterministic formation, when established facts
 formation@6 -> formation@8   provider-assisted formation, same change
 retrieval@1 -> retrieval@2   ranking, when time decay and the near-duplicate
                              penalty land
+retrieval@4 -> retrieval@6   ranking, for the review-reason penalties and the
+retrieval@5 -> retrieval@7   attention cap (ADR-0249): deferred, see below
 ```
+
+ADR-0249 landed its penalties without the bump: the deterministic benchmark
+measured no metric change, and re-recording the baseline cascades into the
+frozen M32 control (its manifest pins the baseline digest; its recording pins
+that manifest and the policy string in every trace). The bump waits for the
+owner's decision on refreshing that control offline.
 
 Bumping the provider version invalidates the bundled release evidence, whose
 filename and contents are matched against the version. Under the automatic
@@ -1171,7 +1179,7 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     provisional belief that was delivered to the model and never cited loses
     confidence and one below the floor is retired with its validity closed,
     while an active user-stated belief, an affirmed direct belief, a belief
-    never delivered and a recently reinforced belief are untouched (ADR-0248:
+    never delivered and a recently reinforced belief are untouched (ADR-0249:
     unseen is not unused). Registered as `gate.memory.decay_lifecycle`, case.
     **M16.**
 13. **Citing a belief counts as use and never raises confidence.** A belief

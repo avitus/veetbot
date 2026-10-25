@@ -1292,7 +1292,7 @@ def memory_review(
             help=(
                 "dismiss clears the flag; untrue retires; not_here localizes; "
                 "changed supersedes with --replacement; confirm supersedes with "
-                "the same words as the owner's own statement (ADR-0248)."
+                "the same words as the owner's own statement (ADR-0249)."
             ),
         ),
     ],
@@ -1301,7 +1301,7 @@ def memory_review(
         typer.Option("--replacement", help="The corrected wording; only with changed."),
     ] = None,
 ) -> None:
-    """Apply one review outcome to a belief (ADR-0117, ADR-0224, ADR-0248)."""
+    """Apply one review outcome to a belief (ADR-0117, ADR-0224, ADR-0249)."""
 
     if (outcome is MemoryReviewOutcome.CHANGED) != (replacement is not None):
         raise typer.BadParameter(
@@ -1321,6 +1321,40 @@ async def _memory_delete(belief_id: UUID) -> None:
         await composition.memory.delete(belief_id)
 
 
+async def _memory_reshape(policy: str, confirm: bool) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.source_learning.reshape(policy=policy, confirm=confirm)
+
+
+@memory_app.command("reshape")
+def memory_reshape(
+    policy: Annotated[
+        str,
+        typer.Option("--policy", help="The learned-memory policy version to supersede."),
+    ] = "owner-source-learning@1",
+    confirm: Annotated[
+        bool,
+        typer.Option(
+            "--confirm",
+            help="Write the reshape; without it the pass only counts the rows it would supersede.",
+        ),
+    ] = False,
+) -> None:
+    """Supersede learned memories of one policy version with the @2 shape (ADR-0250).
+
+    Each row becomes a new belief citing the same source events, with the
+    claim as its statement and the website beside it; the old row is
+    superseded and its receipts follow. Governed supersession, never a rewrite.
+    """
+
+    try:
+        result = asyncio.run(_memory_reshape(policy, confirm))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
+
+
 async def _memory_reconcile_conflicts(confirm: bool) -> Any:
     async with build(storage="postgres") as composition:
         return await composition.memory.reconcile_conflicts(confirm=confirm)
@@ -1336,7 +1370,7 @@ def memory_reconcile_conflicts(
         ),
     ] = False,
 ) -> None:
-    """Re-evaluate every live conflict link under the predicate rule (ADR-0248).
+    """Re-evaluate every live conflict link under the predicate rule (ADR-0249).
 
     Pairs that are not two values of one attribute are unlinked on both sides,
     each with a memory.conflict_cleared event; a belief left with no link and

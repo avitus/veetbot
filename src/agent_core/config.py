@@ -470,6 +470,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "retrieval.decay_tau_days.procedure_pointer",
             "retrieval.stale_penalty",
             "retrieval.near_duplicate_penalty",
+            "retrieval.flagged_penalty",
+            "retrieval.attention_penalty",
             "retrieval.usage.cited_utility_delta",
             "retrieval.usage.uncited_utility_delta",
             "snapshots.async.max_items",

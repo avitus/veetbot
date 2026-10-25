@@ -91,7 +91,13 @@ from agent_core.domain.devices import (
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError, ScheduleValidationError
 from agent_core.domain.failures import log_failure
 from agent_core.domain.folders import FolderProposalState
-from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryReviewOutcome,
+    MemoryStatus,
+    ReviewReason,
+    Sensitivity,
+)
 from agent_core.domain.notifications import (
     NotificationKind,
     NotificationSyncRequest,
@@ -1802,6 +1808,7 @@ def create_app(
         text: str | None = None,
         flagged: bool | None = None,
         include_derived: bool = False,
+        review_reason: ReviewReason | None = None,
     ) -> Page[MemoryView | DerivedMemoryView]:
         # A belief body is principal-scoped and sensitivity-bearing, so no
         # shared or on-disk cache may keep it; the artifact content route
@@ -1824,6 +1831,7 @@ def create_app(
                 cursor=cursor,
                 flagged=flagged,
                 include_derived=include_derived,
+                review_reason=review_reason,
             )
         except MemoryCursorError as exc:
             raise MalformedRequestError("memory cursor is malformed") from exc

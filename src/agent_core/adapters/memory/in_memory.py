@@ -47,6 +47,7 @@ from agent_core.domain.memory import (
     lexical_term_lexemes,
     lexical_text_matches,
     recall_query_terms,
+    review_reason,
 )
 from agent_core.domain.memory_candidates import select_candidates
 from agent_core.domain.reconsolidation import SourceVersion
@@ -517,6 +518,8 @@ class InMemoryMemoryStore:
                     query.flagged_for_review is not None
                     and record.flagged_for_review is not query.flagged_for_review
                 ):
+                    continue
+                if query.review_reason is not None and review_reason(record) != query.review_reason:
                     continue
                 if term_lexemes and not lexical_text_matches(
                     term_lexemes, f"{record.subject} {record.statement}"

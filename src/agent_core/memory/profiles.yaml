@@ -43,6 +43,8 @@ retrieval:
     procedure_pointer: 90
   stale_penalty: 0.1
   near_duplicate_penalty: 0.1
+  flagged_penalty: 0.2
+  attention_penalty: 0.05
   usage:
     cited_utility_delta: 0.1
     uncited_utility_delta: -0.05

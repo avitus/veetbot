@@ -103,7 +103,9 @@ from agent_core.domain.memory import (
     MemoryRecord,
     MemoryReviewOutcome,
     MemoryStatus,
+    ReviewReason,
     Sensitivity,
+    review_reason,
 )
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -2257,6 +2259,7 @@ class PublicMemoryService:
         cursor: str | None,
         flagged: bool | None = None,
         include_derived: bool = False,
+        review_reason: ReviewReason | None = None,
     ) -> Page[MemoryView | DerivedMemoryView]:
         require_scope(principal, "memory.read")
         effective_limit = min(max(limit, 1), 200)
@@ -2273,6 +2276,7 @@ class PublicMemoryService:
             limit=effective_limit,
             cursor=decoded,
             flagged_for_review=flagged,
+            review_reason=review_reason,
         )
         if include_derived and not self._derived_enabled:
             raise MemoryCursorError("derived memory browsing is unavailable")
@@ -2354,6 +2358,7 @@ class PublicMemoryService:
             synthesis = (
                 await self._summary_count(uow, principal, ceiling) if include_derived else None
             )
+            by_review_reason = await self._review_reason_counts(uow, principal, ceiling)
         by_status = dict.fromkeys(MemoryStatus, 0)
         by_type = dict.fromkeys(BeliefType, 0)
         flagged = 0
@@ -2367,9 +2372,39 @@ class PublicMemoryService:
             flagged=flagged,
             by_status=by_status,
             by_type=by_type,
+            by_review_reason=by_review_reason,
             synthesis=synthesis,
             counted_at=self._now(),
         )
+
+    async def _review_reason_counts(
+        self, uow: RepositoryUnitOfWork, principal: Principal, ceiling: Sensitivity
+    ) -> dict[str, int]:
+        """The live review queue by reason (ADR-0249), through the list's own
+        predicates: one bounded walk over the flagged rows, which are few."""
+        counts: dict[str, int] = dict.fromkeys(
+            ("conflict", "correction", "source_learned", "sensitive_automatic"), 0
+        )
+        cursor: tuple[int, UUID] | None = None
+        while True:
+            page = await uow.memories.browse(
+                MemoryBrowseQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    ceiling=ceiling,
+                    flagged_for_review=True,
+                    limit=200,
+                    cursor=cursor,
+                )
+            )
+            rows = page[:200]
+            for record in rows:
+                reason = review_reason(record)
+                if reason is not None:
+                    counts[reason] += 1
+            if len(page) <= 200 or not rows:
+                return counts
+            cursor = (rows[-1].store_position, rows[-1].id)
 
     async def _summary_count(
         self, uow: RepositoryUnitOfWork, principal: Principal, ceiling: Sensitivity
@@ -2550,7 +2585,7 @@ class PublicMemoryService:
         """
         require_scope(principal, "memory.write")
         changed = outcome is MemoryReviewOutcome.CHANGED
-        # ADR-0247: `confirm` also answers with a replacement, formed from the
+        # ADR-0248: `confirm` also answers with a replacement, formed from the
         # same words at user authority.
         supersedes = changed or outcome is MemoryReviewOutcome.CONFIRM
         if changed != (replacement_statement is not None):

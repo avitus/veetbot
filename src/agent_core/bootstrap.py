@@ -1014,6 +1014,7 @@ class Composition:
     skill_reviews: SkillBackgroundReview
     tool_pipeline: ToolPipeline
     memory: GovernedMemoryService
+    source_learning: SourceLearningService
     people_erasure: PeopleErasureService
     memory_retriever: HybridMemoryRetriever
     memory_profiles: MemoryProfiles
@@ -5574,6 +5575,7 @@ async def _compose(
                 skill_reviews=skill_reviews,
                 tool_pipeline=pipeline,
                 memory=memory_service,
+                source_learning=source_learning,
                 people_erasure=people_erasure,
                 memory_retriever=memory_retriever,
                 semantic_services=semantic_index_pass,

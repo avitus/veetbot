@@ -91,11 +91,13 @@ async def test_owner_directed_study_forms_a_cited_tentative_memory() -> None:
         if event.event_type.startswith("tool.call.") and event.payload.get("name") == "memory.learn"
     ]
     belief = beliefs[0]
-    assert QUOTE in belief.statement and URL in belief.statement
+    # ADR-0250: the claim is the statement; the host sits beside it.
+    assert belief.statement == QUOTE and URL not in belief.statement
+    assert belief.attribution_host == "family.example.org"
     assert belief.authority is MemoryAuthority.INFERRED
     assert belief.derivation is MemoryDerivation.HYPOTHESIS
     assert belief.status is MemoryStatus.PROVISIONAL
-    assert belief.portability is Portability.LOCAL
+    assert belief.portability is Portability.CONTEXTUAL
     assert belief.confidence == 0.35 and belief.flagged_for_review
     assert belief.expires_at is not None
     evidence = {event.sequence: event.event_type for event in events}
@@ -165,8 +167,9 @@ async def test_deferred_learning_saves_an_album_caption_without_a_paraphrase() -
         await app.runs.wait_terminal(run_id)
         beliefs = await app.memory.list_memories()
         assert len(beliefs) == 1
-        assert beliefs[0].statement == f"Source suggests: {caption} [Source: {URL}]"
-        assert beliefs[0].subject == caption
+        assert beliefs[0].statement == caption
+        assert beliefs[0].subject == "family.example.org"
+        assert beliefs[0].attribution_host == "family.example.org"
         assert beliefs[0].confidence == 0.35
         assert beliefs[0].authority is MemoryAuthority.INFERRED
 
@@ -270,9 +273,10 @@ async def test_learning_quote_limits_preserve_explicit_evidence_compatibility(
             assert beliefs == []
         else:
             assert len(beliefs) == 1
-            assert beliefs[0].subject == proposal.get("subject", quote)
+            assert beliefs[0].subject == proposal.get("subject", "family.example.org")
             claim = proposal.get("claim", quote)
-            assert beliefs[0].statement == f"Source suggests: {claim} [Source: {URL}]"
+            assert beliefs[0].statement == claim
+            assert beliefs[0].attribution_host == "family.example.org"
 
 
 @asynccontextmanager
@@ -674,9 +678,9 @@ async def test_source_learning_has_its_own_audit_policy_version() -> None:
     async with read_archive() as (app, context, run):
         await learn(app, context, observation())
         belief = (await app.memory.list_memories())[0]
-        assert belief.consolidation_policy_version == "owner-source-learning@1"
+        assert belief.consolidation_policy_version == "owner-source-learning@2"
         audits = await app.memory.list_consolidations(session_id=run.session_id)
-        assert audits and all(row.policy_version == "owner-source-learning@1" for row in audits)
+        assert audits and all(row.policy_version == "owner-source-learning@2" for row in audits)
 
 
 async def assert_forgetting_erases_receipt(

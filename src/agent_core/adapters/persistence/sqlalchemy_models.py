@@ -1128,6 +1128,7 @@ class MemoryRow(Base):
     )
     conflicts_with: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     predicate_key: Mapped[str | None] = mapped_column(Text)
+    attribution_host: Mapped[str | None] = mapped_column(Text)
     flagged_for_review: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     formation_run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     consolidation_policy_version: Mapped[str] = mapped_column(Text)

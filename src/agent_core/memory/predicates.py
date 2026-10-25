@@ -1,4 +1,4 @@
-"""Predicate keys: which attribute of a subject a statement claims (ADR-0248).
+"""Predicate keys: which attribute of a subject a statement claims (ADR-0249).
 
 Formation used to select conflict partners by ``(subject, belief_type)``, so
 every lower-authority statement about "Andy Vitus" conflicted with the owner's
@@ -14,6 +14,7 @@ later preference to supersede the earlier one about the same subject.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Final
@@ -101,7 +102,20 @@ def predicate_claim(statement: str, belief_type: BeliefType) -> PredicateClaim:
             if key == "job_title":
                 return PredicateClaim(f"job_title:{_normalize(match.group('org'))}", value)
             return PredicateClaim(key, value)
-    return PredicateClaim(f"claim:{_normalize(clean)}", None)
+    return PredicateClaim(_claim_key(clean), None)
+
+
+_CLAIM_KEY_INLINE_CHARS: Final = 200
+
+
+def _claim_key(statement: str) -> str:
+    """Claim identity: the normalized statement inline while short, a digest of
+    it past 200 characters so the key always fits its 512-character column."""
+    normalized = _normalize(statement)
+    if len(normalized) <= _CLAIM_KEY_INLINE_CHARS:
+        return f"claim:{normalized}"
+    digest = hashlib.sha256(normalized.encode()).hexdigest()
+    return f"claim:sha256:{digest}"
 
 
 def predicate_key(statement: str, belief_type: BeliefType) -> str:

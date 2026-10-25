@@ -641,7 +641,8 @@ def test_lexical_arm_scores_whole_lexemes_the_stores_filter_on() -> None:
 
 
 def test_retrieval_policy_version_is_retrieval_4_in_render_header() -> None:
-    """Snapshot eligibility and content-term recall identify their policy."""
+    """Snapshot eligibility and content-term recall identify their policy; the
+    ADR-0249 bump is deferred until the owner decides on the M32 control refresh."""
 
     assert RETRIEVAL_POLICY_VERSION == "retrieval@4"
     assert 'policy="retrieval@4"' in render_memory([], as_of=NOW)
