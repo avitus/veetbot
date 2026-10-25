@@ -29,8 +29,8 @@ although nothing had been asked.
    own, none came only from an external or knowledge tool result of that
    turn, at least sixty percent of them (and at least two) appear in the
    owner's message, at most three are the model's own phrasing, and its
-   negations and modals are exactly those of the owner sentences it
-   restates: none added, none dropped, none carried over from another
+   negations and modals, counted, are exactly those of the owner sentences
+   it restates: none added, none dropped, none carried over from another
    sentence (request framing such as "could you" or "don't forget" is set
    aside only where it opens an owner sentence). These marker
    words are judged apart from recall's function-word list, which drops the

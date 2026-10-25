@@ -196,6 +196,11 @@ QUIET_WEB = "Weather today is mild with light wind."
             "Remember that I eat pork every Sunday. I never liked olives.",
             "I never eat pork every Sunday.",
         ),
+        # Markers are counted: dropping one of two negations is still a drop.
+        (
+            "Remember that I do not eat pork and do not eat beef.",
+            "I do not eat pork and eat beef.",
+        ),
     ],
 )
 def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
@@ -220,6 +225,10 @@ def test_a_statement_that_changes_negation_or_modality_is_not_grounded(
         ),
         ("Don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
         ("Please, don't forget that my sister lives in Porto.", "Andy's sister lives in Porto."),
+        (
+            "Remember that I never eat pork. I never drink wine.",
+            "I never eat pork and never drink wine.",
+        ),
     ],
 )
 def test_a_statement_that_keeps_negation_and_modality_stays_grounded(

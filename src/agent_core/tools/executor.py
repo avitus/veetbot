@@ -8,7 +8,7 @@ import json
 import logging
 import math
 import re
-from collections import deque
+from collections import Counter, deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
@@ -523,8 +523,12 @@ def _content_lexemes(text: str) -> set[str]:
     }
 
 
-def _meaning_markers(text: str) -> set[str]:
-    return set(_WORD.findall(_grounding_text(text))) & _MEANING_MARKERS
+def _meaning_markers(text: str) -> Counter[str]:
+    """Each negation and modal with how often it occurs: one of two negations dropped is a drop."""
+
+    return Counter(
+        word for word in _WORD.findall(_grounding_text(text)) if word in _MEANING_MARKERS
+    )
 
 
 def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
@@ -535,8 +539,9 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     message, found only in an external or knowledge tool result of this turn,
     or in neither (the model's own phrasing). Grounded means no word came only
     from external content, most of the words are the owner's, the model's
-    phrasing stays within a few words, and its negations and modals are exactly
-    those of the owner sentences it restates: none added, none dropped. The
+    phrasing stays within a few words, and its negations and modals, counted,
+    are exactly those of the owner sentences it restates: none added, none
+    dropped. The
     outcome is the same whether the save is proposed in the step that read the
     web or a later one: the turn's taint still marks the origin; only the
     statement's own provenance lifts it.
@@ -569,10 +574,10 @@ def owner_grounded_statement(statement: str, checkpoint: RunCheckpoint) -> bool:
     # marker words never link a sentence in, so a negation said about something
     # else cannot be carried over to this.
     stated = _meaning_markers(statement)
-    restated: set[str] = set()
+    restated: Counter[str] = Counter()
     for sentence in _owner_sentences(" ".join(user_texts)):
         if (_content_lexemes(sentence) - _MEANING_MARKERS) & covered:
-            restated |= _meaning_markers(sentence)
+            restated += _meaning_markers(sentence)
     return (
         not tainted
         and len(covered)
