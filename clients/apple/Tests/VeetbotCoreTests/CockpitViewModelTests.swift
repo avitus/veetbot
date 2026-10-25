@@ -66,8 +66,11 @@ import Testing
         private func record(_ call: String) { lock.withLock { _calls.append(call) } }
         var failWrites = false
 
+        var detailDelayNanoseconds: UInt64 = 0
+
         func cockpitWidget(_ slug: String) async throws -> CockpitWidgetDetail {
             record("detail \(slug)")
+            if detailDelayNanoseconds > 0 { try? await Task.sleep(nanoseconds: detailDelayNanoseconds) }
             return try JSONDecoder.server.decode(CockpitWidgetDetail.self, from: Data("""
             {"slug": "\(slug)", "state": "active", "live_revision_id": null, "settings_schema": null,
              "settings": {}, "revisions": [], "import_failures": []}
@@ -292,6 +295,35 @@ import Testing
         board.hostReported(.open(slug: "weather", kind: .session, id: delivered.uuidString.lowercased()))
         board.hostReported(.open(slug: "approvals", kind: .schedule, id: "not-a-uuid"))
         #expect(opened == [.approval(delivered), .session(delivered)])
+        board.setVisible(false)
+    }
+
+    @Test
+    func aNewConnectionForgetsTheOldDetailAndMessagesAndIgnoresLateAnswers() async {
+        let client = FakeClient()
+        client.queueSnapshot(.success(Self.snapshot(cursor: 41)))
+        client.queueStream([])
+        let board = model(client)
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.openDetail("weather")
+        await board.delete("weather")
+        client.failWrites = true
+        await board.saveSettings("weather", values: [:])
+        #expect(board.detail != nil && board.actionMessage != nil && board.errorMessage != nil)
+        // A detail request from the old connection is still on its way.
+        client.detailDelayNanoseconds = 50_000_000
+        let late = Task { await board.openDetail("weather") }
+        await eventually { client.calls.filter { $0 == "detail weather" }.count == 3 }
+        board.resetConnection()
+        #expect(board.detail == nil)
+        #expect(board.actionMessage == nil)
+        #expect(board.errorMessage == nil)
+        #expect(!board.isSaving)
+        // The same slug selected on the new board does not admit the old answer.
+        board.selectedSlug = "weather"
+        await late.value
+        #expect(board.detail == nil)
         board.setVisible(false)
     }
 }

@@ -244,7 +244,9 @@ public enum CockpitWebContent {
     })();
     """
 
+    /// WebKit's content-blocker expressions have no alternation, so each scheme family gets its own rule.
     public static let blockingRules = """
-    [{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}}]
+    [{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},
+     {"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}}]
     """
 }

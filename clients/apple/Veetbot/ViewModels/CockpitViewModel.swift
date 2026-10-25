@@ -48,6 +48,8 @@ public final class CockpitViewModel: ObservableObject {
     private var visible = false
     private var streamTask: Task<Void, Never>?
     private var quarantinedRevisions: [String: UUID] = [:]
+    /// Bumped by every new connection, so an answer to the old one never lands on the new board.
+    private var connectionEpoch = 0
 
     public init(
         makeClient: @escaping () -> CockpitBoardClient?,
@@ -76,12 +78,18 @@ public final class CockpitViewModel: ObservableObject {
     public func resetConnection() {
         streamTask?.cancel()
         streamTask = nil
+        connectionEpoch += 1
         snapshot = nil
         availability = .unknown
         connection = .idle
         quarantined = []
         quarantinedRevisions = [:]
         selectedSlug = nil
+        detail = nil
+        actionMessage = nil
+        errorMessage = nil
+        isSaving = false
+        offsetMilliseconds = 0
         if visible {
             streamTask = Task { [weak self] in await self?.run() }
         }
@@ -146,11 +154,12 @@ public final class CockpitViewModel: ObservableObject {
     public func openDetail(_ slug: String) async {
         selectedSlug = slug
         guard let client = makeClient() else { return }
+        let epoch = connectionEpoch
         do {
             let loaded = try await client.cockpitWidget(slug)
-            if selectedSlug == slug { detail = loaded }
+            if epoch == connectionEpoch, selectedSlug == slug { detail = loaded }
         } catch {
-            report(error)
+            if epoch == connectionEpoch { report(error) }
         }
     }
 
@@ -205,13 +214,15 @@ public final class CockpitViewModel: ObservableObject {
     /// One owner write at a time; the stream brings the board's own refresh.
     private func perform(_ work: (CockpitBoardClient) async throws -> String?) async {
         guard let client = makeClient() else { return }
+        let epoch = connectionEpoch
         isSaving = true
         errorMessage = nil
-        defer { isSaving = false }
+        defer { if epoch == connectionEpoch { isSaving = false } }
         do {
-            if let message = try await work(client) { actionMessage = message }
+            let message = try await work(client)
+            if epoch == connectionEpoch, let message { actionMessage = message }
         } catch {
-            report(error)
+            if epoch == connectionEpoch { report(error) }
         }
     }
 

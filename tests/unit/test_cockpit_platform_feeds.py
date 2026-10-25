@@ -365,6 +365,42 @@ async def test_schedule_health_counts_the_last_day_and_lists_what_is_next() -> N
     assert [item["scheduleId"] for item in data["items"]][-1] == str(_id(3))
 
 
+async def test_a_busy_day_drops_the_oldest_runs_not_what_is_running_or_next() -> None:
+    schedules = [
+        _schedule(1, next_at=NOW + timedelta(minutes=30)),
+        _schedule(2, state=ScheduleState.PAUSED, next_at=None),
+    ]
+    revisions = {_id(1): _revision(1, "Hourly check"), _id(2): _revision(2, "Inbox sweep")}
+    # Twenty-four hourly runs in the last day; the newest is still running.
+    occurrences = [
+        _occurrence(100 + hour, 1, hours_ago=hour + 0.5, run=200 + hour) for hour in range(24)
+    ]
+    runs = FakeRuns(
+        runs={
+            _id(200 + hour): _run(
+                200 + hour, RunStatus.RUNNING if hour == 0 else RunStatus.COMPLETED
+            )
+            for hour in range(24)
+        }
+    )
+    uow = SimpleNamespace(
+        schedules=FakeSchedules(schedules, revisions),
+        schedule_occurrences=FakeOccurrences(occurrences),
+        runs=runs,
+    )
+    source = SchedulesSource()
+    data = await source.read(uow, OWNER, NOW)
+    _fits(source, data)
+    assert (data["total"], data["paused"]) == (24, 1)
+    states = [item["state"] for item in data["items"]]
+    assert len(states) == 12
+    # The newest ten past runs, the running one last among them, then next and paused.
+    assert states[-3:] == ["now", "next", "attention"]
+    assert [item["id"] for item in data["items"][:10]] == [
+        str(_id(100 + hour)) for hour in range(9, -1, -1)
+    ]
+
+
 # Calls -------------------------------------------------------------------
 
 

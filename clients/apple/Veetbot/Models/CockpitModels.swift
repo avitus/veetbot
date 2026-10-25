@@ -119,13 +119,18 @@ public struct CockpitWidget: Decodable, Equatable, Identifiable, Sendable {
         return values.compactMap { if case let .string(size) = $0 { size } else { nil } }
     }
 
+    /// The manifest schema's ceiling on a declared feed's history depth.
+    static let maximumHistory = 288
+
     /// The feeds the manifest declares, with the history depth each asks for.
     public var declaredFeeds: [CockpitDeclaredFeed] {
         guard case let .array(values)? = manifest["feeds"] else { return [] }
         return values.compactMap { value in
             guard case let .object(feed) = value, case let .string(id)? = feed["id"] else { return nil }
             var history = 0
-            if case let .number(depth)? = feed["history"], depth > 0, depth.isFinite { history = Int(depth) }
+            if case let .number(depth)? = feed["history"], depth > 0, depth.isFinite {
+                history = Int(min(depth, Double(Self.maximumHistory)))
+            }
             return CockpitDeclaredFeed(id: id, history: history)
         }
     }

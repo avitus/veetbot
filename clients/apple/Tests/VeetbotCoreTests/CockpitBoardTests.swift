@@ -222,8 +222,18 @@ import Testing
         }
         let rules = try JSONSerialization.jsonObject(with: Data(CockpitWebContent.blockingRules.utf8))
         guard let list = rules as? [[String: [String: String]]] else { Issue.record("rules"); return }
-        #expect(list.map { $0["trigger"]?["url-filter"] } == ["^https?://"])
-        #expect(list.map { $0["action"]?["type"] } == ["block"])
+        #expect(list.map { $0["trigger"]?["url-filter"] } == ["^https?://", "^wss?://"])
+        #expect(list.map { $0["action"]?["type"] } == ["block", "block"])
+    }
+
+    @Test
+    func aSettingsNumberOutsideTheIntegerRangeShowsAsADecimal() {
+        #expect(CockpitSettingsField.format(42, integer: false) == "42")
+        #expect(CockpitSettingsField.format(2.5, integer: false) == "2.5")
+        #expect(CockpitSettingsField.format(7.9, integer: true) == "7")
+        #expect(CockpitSettingsField.format(1e30, integer: false) == "1e+30")
+        #expect(CockpitSettingsField.format(-1e30, integer: true) == "-1e+30")
+        #expect(CockpitSettingsField.format(.infinity, integer: true) == "inf")
     }
 
     @Test

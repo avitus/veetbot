@@ -385,7 +385,11 @@ class SchedulesSource:
                     )
                 )
         dated.sort(key=lambda pair: (pair[0], pair[1]["id"]))
-        items = [item for _at, item in dated] + paused
+        # A busy day drops its oldest runs first, never what is next or paused.
+        past = [item for at, item in dated if at <= now]
+        upcoming = [item for at, item in dated if at > now]
+        kept = max(0, _SCHEDULE_ITEMS - len(upcoming) - len(paused))
+        items = past[len(past) - kept :] + upcoming + paused
         return {**counts, "paused": len(paused), "items": items[:_SCHEDULE_ITEMS]}
 
     @staticmethod

@@ -1283,6 +1283,14 @@ fi
 previous_builder_image="$(
   docker image inspect --format '{{.Id}}' veetbot-cockpit-builder:production 2>/dev/null || true
 )"
+# The board's runtime lives under the artifact root the release exported it to.
+cockpit_runtime_dir="$({
+  set -a
+  # shellcheck disable=SC1090
+  . "$environment_file"
+  set +a
+  printf '%s' "${AGENT_ARTIFACT_ROOT:-/var/lib/veetbot/artifacts}"
+})/cockpit-runtime"
 
 managed_units=(
   veetbot-execution
@@ -1400,10 +1408,8 @@ app_next=""
 # The board's runtime manifest follows the application back; its
 # content-addressed assets are never removed, so the target's are still there.
 if test -f "$target/.cockpit-runtime/manifest.json"; then
-  cp "$target/.cockpit-runtime/manifest.json" \
-    /var/lib/veetbot/artifacts/cockpit-runtime/.manifest.json.next
-  mv -f /var/lib/veetbot/artifacts/cockpit-runtime/.manifest.json.next \
-    /var/lib/veetbot/artifacts/cockpit-runtime/manifest.json
+  cp "$target/.cockpit-runtime/manifest.json" "$cockpit_runtime_dir/.manifest.json.next"
+  mv -f "$cockpit_runtime_dir/.manifest.json.next" "$cockpit_runtime_dir/manifest.json"
 fi
 mv -Tf "$docs_next" /opt/veetbot/shared/docs/current
 docs_next=""

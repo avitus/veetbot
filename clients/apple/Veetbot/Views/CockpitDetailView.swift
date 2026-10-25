@@ -212,6 +212,15 @@ struct CockpitSettingsField: Identifiable, Equatable {
             }
         }
     }
+
+    /// A number setting as its field shows it: whole numbers without a fraction,
+    /// and a value beyond exact integers as the decimal it is.
+    static func format(_ number: Double, integer: Bool) -> String {
+        guard number.isFinite, abs(number) < 9.0e15, integer || number.rounded() == number else {
+            return String(number)
+        }
+        return String(Int(number))
+    }
 }
 
 private struct CockpitSettingsFieldView: View {
@@ -231,7 +240,7 @@ private struct CockpitSettingsFieldView: View {
             .accessibilityIdentifier("cockpit.setting.\(field.key)")
         case .number, .integer:
             TextField(field.title, text: Binding(
-                get: { if case let .number(number)? = value { Self.format(number, integer: field.kind == .integer) } else { "" } },
+                get: { if case let .number(number)? = value { CockpitSettingsField.format(number, integer: field.kind == .integer) } else { "" } },
                 set: { text in
                     if let number = Double(text) { value = .number(field.kind == .integer ? number.rounded() : number) }
                     else if text.isEmpty { value = nil }
@@ -257,10 +266,6 @@ private struct CockpitSettingsFieldView: View {
             }
             .accessibilityIdentifier("cockpit.setting.\(field.key)")
         }
-    }
-
-    static func format(_ number: Double, integer: Bool) -> String {
-        integer || number.rounded() == number ? String(Int(number)) : String(number)
     }
 }
 

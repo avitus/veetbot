@@ -35,6 +35,21 @@ import Testing
     }
 
     @Test
+    func anOversizedHistoryDepthIsHeldToTheManifestCeiling() {
+        let widget = CockpitWidget(
+            slug: "weather", revisionID: UUID(), bundleSHA256: String(repeating: "a", count: 64),
+            manifest: ["feeds": .array([
+                .object(["id": .string("agent.weather"), "history": .number(1e30)]),
+                .object(["id": .string("agent.tides"), "history": .number(3)]),
+            ])]
+        )
+        #expect(widget.declaredFeeds == [
+            CockpitDeclaredFeed(id: "agent.weather", history: 288),
+            CockpitDeclaredFeed(id: "agent.tides", history: 3),
+        ])
+    }
+
+    @Test
     func theRenderedSnapshotDecodesIntoTheBoard() throws {
         let snapshot = try JSONDecoder.server.decode(CockpitSnapshot.self, from: try Self.contract())
         let serverTime = try #require(snapshot.serverTime)
