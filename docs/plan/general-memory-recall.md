@@ -746,7 +746,7 @@ The [trial guide](../recall-production-trial.md) describes the conversational
 review and privacy-preserving operator workflow. Neither approval of the trial
 nor these mechanics establishes actual production quality.
 
-[ADR-0244](../adr/0244-bounded-owner-recall-restart.md) represents ADR-0223's
+[ADR-0246](../adr/0246-bounded-owner-recall-restart.md) represents ADR-0223's
 separate restart-after-lapse decision in version-four evidence and admission.
 It preserves the original trial and binds a distinct human restart instruction,
 prior evidence/trial hashes, previous expiry, fresh assessment and withdrawal

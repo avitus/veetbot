@@ -83,7 +83,7 @@ permission for scheduled/delegated recall or unattended reconsolidation.
 ## Restart after a lapse
 
 Preparation does not authorize activation. Follow
-[ADR-0244](adr/0244-bounded-owner-recall-restart.md) only after a separate explicit
+[ADR-0246](adr/0246-bounded-owner-recall-restart.md) only after a separate explicit
 owner restart decision and a fresh assessment. Do not turn a late response into
 a timely renewal, infer answer-quality approval from normal-use confirmation,
 or change the original start or seven-day end.

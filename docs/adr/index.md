@@ -288,5 +288,6 @@ implementation without one.
 - [ADR-0242: Tool-result truncation moves in blocks to keep the body cached](0242-block-quantized-tool-result-truncation.md)
 - [ADR-0243: Static charts and diagrams in the existing sandbox](0243-static-charts-and-diagrams.md)
 
-- [ADR-0244: Represent a separately authorized recall restart](0244-bounded-owner-recall-restart.md)
+- [ADR-0244: Standing owner-reviewed work-inbox junk filtering](0244-standing-owner-email-junk-filter.md)
 - [ADR-0245: Owner-grounded manual saves after external reads](0245-owner-grounded-manual-saves.md)
+- [ADR-0246: Represent a separately authorized recall restart](0246-bounded-owner-recall-restart.md)

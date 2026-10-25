@@ -1,4 +1,4 @@
-# ADR-0244: Represent a separately authorized recall restart
+# ADR-0246: Represent a separately authorized recall restart
 
 - Status: Accepted engineering mechanism within the owner's readiness repair request; activation not authorized
 - Date: 2026-10-25
