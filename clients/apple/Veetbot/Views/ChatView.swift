@@ -361,7 +361,7 @@ public struct ChatView: View {
                 followUp: { model.prepareCallFollowUp($0) })
         }
         .sheet(isPresented: $showingWebsiteAccess) {
-            ConnectionSettingsView(model: model, embedded: false).websiteAccessSheetFrame()
+            ConnectionSettingsView(model: model, embedded: false, forChat: true).websiteAccessSheetFrame()
         }
         .sheet(item: $artifactSelection) { selection in
             ArtifactViewerView(model: model, artifactID: selection.id)
@@ -596,6 +596,13 @@ public struct ChatView: View {
                 }
                 .padding(.horizontal, VeetSpace.s2)
                 .accessibilityIdentifier("chat.activity")
+            }
+            if let offer = model.websiteOffer, !state.isRunActive {
+                WebsiteOfferCard(
+                    offer: offer,
+                    accept: { website in Task { await model.acceptWebsiteOffer(website) } },
+                    dismiss: { model.dismissWebsiteOffer() }
+                )
             }
             if model.activeTaskGrant != nil {
                 TaskGrantBanner(model: model) {
@@ -1011,6 +1018,71 @@ private struct TaskGrantBanner: View {
                 .accessibilityIdentifier("task-grant.banner")
             }
         }
+    }
+}
+
+/// ADR-0251: the owner named a website they have a saved login for, and this
+/// chat is not connected to it. One tap connects it and continues the request.
+struct WebsiteOfferCard: View {
+    let offer: WebsiteOffer
+    let accept: (WebsiteOffer.Website) -> Void
+    let dismiss: () -> Void
+
+    static func title(for offer: WebsiteOffer) -> String {
+        guard offer.websites.count == 1, let website = offer.websites.first else {
+            return "Connect a saved website to this chat"
+        }
+        return offer.connectedOrigin == nil
+            ? "Connect \(website.host) to this chat"
+            : "Switch this chat to \(website.host)"
+    }
+
+    static func actionTitle(for website: WebsiteOffer.Website) -> String {
+        website.needsSignIn ? "Sign in and continue" : "Connect and continue"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: VeetSpace.s2) {
+            HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
+                Image(systemName: "globe")
+                    .foregroundColor(AppTheme.teal)
+                    .accessibilityHidden(true)
+                Text(Self.title(for: offer))
+                    .veetType(.ui, weight: .semibold)
+                    .foregroundColor(AppTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("website-offer.title")
+            }
+            Text("You have a saved login for it. Veetbot continues your request once it is connected.")
+                .veetType(.meta)
+                .foregroundColor(AppTheme.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(offer.websites) { website in
+                HStack(spacing: VeetSpace.s2) {
+                    if offer.websites.count > 1 {
+                        Text(website.host)
+                            .veetMono()
+                            .foregroundColor(AppTheme.ink)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Button(Self.actionTitle(for: website)) { accept(website) }
+                        .primaryCapsule()
+                        .accessibilityIdentifier("website-offer.accept.\(website.profileID.uuidString)")
+                    Spacer(minLength: 0)
+                }
+            }
+            Button("Not now", action: dismiss)
+                .buttonStyle(QuietCapsuleButtonStyle())
+                .accessibilityIdentifier("website-offer.dismiss")
+        }
+        .padding(VeetSpace.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: A2Metrics.tableRadius, style: .continuous).fill(AppTheme.tealWash)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("website-offer")
     }
 }
 

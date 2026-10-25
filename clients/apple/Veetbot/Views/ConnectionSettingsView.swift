@@ -58,6 +58,8 @@ struct ClientBuildIdentity: Equatable {
 public struct ConnectionSettingsView: View {
     @ObservedObject var model: ChatViewModel
     let embedded: Bool
+    /// Opened from a chat's Website Access button: a row can connect that chat.
+    let forChat: Bool
     private let closeAction: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -81,11 +83,13 @@ public struct ConnectionSettingsView: View {
     public init(
         model: ChatViewModel,
         embedded: Bool,
+        forChat: Bool = false,
         onClose: (() -> Void)? = nil,
         onConnecting: (() -> Void)? = nil
     ) {
         self.model = model
         self.embedded = embedded
+        self.forChat = forChat
         closeAction = onClose
         self.onConnecting = onConnecting
         _notificationSettings = StateObject(wrappedValue: NotificationSettingsViewModel(
@@ -930,6 +934,22 @@ public struct ConnectionSettingsView: View {
                 Text(profile.status.displayName)
                     .veetType(.meta)
                     .foregroundColor(profile.status == .needsUser ? AppTheme.amberText : AppTheme.inkSoft)
+                // ADR-0251 decision 6: connecting this chat is its own action;
+                // the device default for new chats stays a separate control.
+                if forChat, model.selectedSessionID != nil, profile.status == .ready {
+                    if model.connectedWebsiteProfileID == profile.id {
+                        Label("Connected to this chat", systemImage: "link")
+                            .veetType(.meta, weight: .semibold)
+                            .foregroundColor(AppTheme.tealText)
+                    } else {
+                        Button("Use in this chat") {
+                            Task { await model.connectWebsiteToSelectedChat(profile.id) }
+                        }
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
+                        .disabled(model.isManagingWebsiteAccess)
+                        .accessibilityIdentifier("website-access.use-in-chat.\(profile.id.uuidString)")
+                    }
+                }
             }
             Spacer(minLength: 8)
             if WebsiteAccessActions.offersSignInAgain(profile.status) {

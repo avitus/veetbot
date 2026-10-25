@@ -4,12 +4,21 @@
   card, never automatic connection; an offer expires at the next owner message
   or 24 hours after its source message); implementation pending
 - Date: 2026-10-25
+- Amended: 2026-10-25, with the implementation. The source run's row states
+  facts only, matching the existing "data only" runtime row: the login is
+  saved, the chat is not connected to it, and a Connect or Switch button
+  connects it and continues the request. The continuation's seed is an owner
+  message the app writes on the tap: `user.message.created` with the
+  principal actor, so existing owner-authority checks hold, and an `origin`
+  of kind `browser_offer`. Memory formation reads it like any owner message;
+  its fixed text names only the website's host. "Not now" hides an offer on
+  that device; the server offer still closes by the rules in decision 4
 - Amends: ADR-0130, ADR-0172
 - Related: ADR-0094, ADR-0128, ADR-0129, ADR-0141, ADR-0164
 - Scope: The existing browser capability (the Milestone 10 browser tranche).
   No milestone or gate moves, and no policy profile changes.
 - Detailed design: `docs/plan/browser-automation.md` and
-  `docs/plan/http-api-and-streaming.md`, updated with the implementation
+  `docs/plan/http-api-and-streaming.md`
 
 ## Context
 

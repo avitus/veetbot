@@ -253,6 +253,41 @@ public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// ADR-0251: an open offer to connect a website the owner named in an
+/// unconnected chat. The card connects it and continues the request.
+public struct WebsiteOffer: Codable, Hashable, Sendable {
+    public struct Website: Codable, Hashable, Sendable, Identifiable {
+        public let profileID: UUID
+        public let origins: [String]
+        public let status: BrowserProfileStatus
+
+        public var id: UUID { profileID }
+        public var host: String {
+            origins.first.flatMap { URL(string: $0)?.host } ?? origins.first ?? ""
+        }
+        public var needsSignIn: Bool { status != .ready }
+
+        enum CodingKeys: String, CodingKey {
+            case origins, status
+            case profileID = "profile_id"
+        }
+    }
+
+    public let offerID: UUID
+    public let sourceSequence: Int
+    public let connectedOrigin: String?
+    public let websites: [Website]
+    public let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case websites
+        case offerID = "offer_id"
+        case sourceSequence = "source_sequence"
+        case connectedOrigin = "connected_origin"
+        case expiresAt = "expires_at"
+    }
+}
+
 /// How the owner signs in to a website profile (ADR-0128). `remote` opens the
 /// isolated service's own browser; `device` signs in on this device and hands
 /// the session to the service.

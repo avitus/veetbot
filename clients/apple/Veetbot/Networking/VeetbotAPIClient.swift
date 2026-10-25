@@ -144,14 +144,29 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
-    public func connectWebsite(sessionID: UUID, profileID: UUID) async throws -> UUID? {
+    /// ADR-0251: an offer ID also continues the request that named the website.
+    public func connectWebsite(
+        sessionID: UUID, profileID: UUID, offerID: UUID? = nil
+    ) async throws -> UUID? {
         let result: BrowserConnectionResult = try await transport.send(TransportRequest(
             method: .put,
             path: "/v1/sessions/\(sessionID.uuidString)/website",
-            body: try JSONEncoder.server.encode(BrowserConnectionBody(browserProfileID: profileID)),
+            body: try JSONEncoder.server.encode(
+                BrowserConnectionBody(browserProfileID: profileID, offerID: offerID)
+            ),
             retryAttempts: 3
         ))
         return result.runID
+    }
+
+    /// ADR-0251: the chat's open offer to connect a website the owner named.
+    public func websiteOffer(sessionID: UUID) async throws -> WebsiteOffer? {
+        let envelope: WebsiteOfferEnvelope = try await transport.send(
+            TransportRequest(
+                method: .get, path: "/v1/sessions/\(sessionID.uuidString)/website-offer"
+            )
+        )
+        return envelope.offer
     }
 
     public func getRun(_ runID: UUID) async throws -> RunView {
@@ -1307,7 +1322,15 @@ private struct MessageBody: Encodable {
 
 private struct BrowserConnectionBody: Encodable {
     let browserProfileID: UUID
-    enum CodingKeys: String, CodingKey { case browserProfileID = "browser_profile_id" }
+    let offerID: UUID?
+    enum CodingKeys: String, CodingKey {
+        case browserProfileID = "browser_profile_id"
+        case offerID = "offer_id"
+    }
+}
+
+private struct WebsiteOfferEnvelope: Decodable {
+    let offer: WebsiteOffer?
 }
 
 private struct BrowserConnectionResult: Decodable {
