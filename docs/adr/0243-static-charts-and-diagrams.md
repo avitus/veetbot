@@ -56,9 +56,11 @@ applications may remove escaping on re-save; CSV remains an untrusted artifact.
 
 ## Verification
 
-On 2026-10-24, the real Docker sandbox passed all 23 cases in
+On 2026-10-24, the initial real Docker sandbox run passed all 23 cases in
 `tests/security/test_static_visuals_runtime.py` and
-`tests/security/test_sandbox_runtime_m6.py` (56.97 seconds). They cover renderer
+`tests/security/test_sandbox_runtime_m6.py` (56.97 seconds): 13 visualization
+cases and 10 existing sandbox cases, before either review regression was added.
+They cover renderer
 availability, actual plotted values and categorical positions, literal labels,
 every format, original CSV rows, graph topology, retries, validation failures,
 artifact byte fidelity and tenant separation, plus the existing isolation and
@@ -66,11 +68,18 @@ resource-limit regressions. The original image first failed the new capability
 probe with both Matplotlib and Graphviz absent. The unchanged PID-limit test
 reproduced the Debian zombie-process failure before Tini made it pass.
 
-The CSV formula-injection regression first failed on unescaped headers and
-cells. After the fix, all 26 visualization and sandbox runtime cases passed in
-78.25 seconds, including ASCII/full-width formula prefixes, leading whitespace,
-quoted and multiline text, unchanged numeric values, original JSON, and literal
-plot labels. This supplements the original implementation evidence above.
+The subdirectory export fix added chart and diagram cases running from
+`reports/`, raising the suite to 25 cases (15 visualization and 10 sandbox).
+Those cases first failed on missing exported files, then all 25 passed in
+67.54 seconds. This was the pre-CSV-fix suite.
+
+The CSV fix added
+`test_chart_csv_neutralizes_formulas_without_changing_source_or_plot`, which
+first failed on unescaped headers and cells. The final suite has 26 cases:
+16 visualization and 10 sandbox cases. All passed in 78.25 seconds, including
+ASCII/full-width formula prefixes, leading whitespace, quoted and multiline
+text, unchanged numeric values, original JSON, and literal plot labels. These
+later runs supplement the initial implementation evidence above.
 
 The 38 pure validation/cleanup cases in `tests/unit/test_static_visuals.py`
 passed. A chart and diagram downloaded through the artifact path were visually
