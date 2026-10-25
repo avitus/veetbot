@@ -283,6 +283,12 @@ async def test_the_snapshot_carries_live_widgets_settings_layouts_feeds_and_the_
         assert widget["bundle_sha256"] == revision.bundle_sha256
         assert widget["manifest"]["sizes"] == ["sm", "md"]
         assert widget["settings"] == {"place": "Example City"}
+        # The client renders with server-corrected time and quarantines the newest change first.
+        assert datetime.fromisoformat(widget["changed_at"]) == NOW
+        assert (
+            abs(datetime.fromisoformat(snapshot["server_time"]) - datetime.now(UTC)).total_seconds()
+            < 60
+        )
         feed = snapshot["feeds"]["agent.weather"]
         assert feed["trust"] == "untrusted"
         assert feed["current"]["data"] == {"temperature": 63}

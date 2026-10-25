@@ -7,6 +7,7 @@ public final class AppCoordinator: ObservableObject {
     @Published public var mode: ClientMode = .chat
     public let chat: ChatViewModel
     public let email: EmailViewModel
+    public let cockpit: CockpitViewModel
     private var connectionSubscription: AnyCancellable?
     private var emailAccountsSubscription: AnyCancellable?
 
@@ -14,6 +15,7 @@ public final class AppCoordinator: ObservableObject {
     public init(chat: ChatViewModel) {
         self.chat = chat
         email = EmailViewModel(makeAPIClient: { [weak chat] in chat?.currentAPIClient })
+        cockpit = CockpitViewModel(makeClient: { [weak chat] in chat?.currentAPIClient })
         email.authenticationFailure = { [weak chat] error in chat?.reportConnectionError(error) }
         // Window-level controls read account capabilities through this coordinator.
         emailAccountsSubscription = email.$accounts.dropFirst().sink { [weak self] _ in
@@ -21,6 +23,7 @@ public final class AppCoordinator: ObservableObject {
         }
         connectionSubscription = chat.$connectionGeneration.dropFirst().sink { [weak self] _ in
             self?.email.resetConnection()
+            self?.cockpit.resetConnection()
         }
         chat.chatNotificationHandler = { [weak self] in self?.mode = .chat }
         chat.emailNotificationHandler = { [weak self] threadID, approvalID in

@@ -29,7 +29,7 @@ endif
 	test-deploy sandbox-image cockpit-builder-image browser-image test-browser-image \
 	production-check \
 	docs docs-serve docs-check citations-fix website-install test-website cockpit-install test-cockpit \
-	cockpit-widgets-worktree
+	cockpit-widgets-worktree cockpit-runtime
 
 install:
 	uv sync --all-groups
@@ -383,6 +383,18 @@ test-cockpit: cockpit-install
 	npm --prefix cockpit exec -- playwright install chromium
 	npm --prefix cockpit test
 	npm --prefix cockpit run lint
+
+# Export the board's runtime to the local artifact root, as a release does, so a
+# local server can serve Cockpit (docs/plan/cockpit.md, the runtime).
+cockpit-runtime: cockpit-install
+	npm --prefix cockpit run build
+	@root="$${AGENT_ARTIFACT_ROOT:-.agent/artifacts}/cockpit-runtime"; mkdir -p "$$root"; \
+	for asset in cockpit/dist/runtime/*; do \
+		name="$${asset##*/}"; \
+		if [ "$$name" != manifest.json ] && [ ! -e "$$root/$$name" ]; then cp "$$asset" "$$root/$$name"; fi; \
+	done; \
+	cp cockpit/dist/runtime/manifest.json "$$root/manifest.json"; \
+	echo "Cockpit runtime exported to $$root"
 
 # Check out the public widget branch beside main to build widgets against the kit.
 cockpit-widgets-worktree:

@@ -267,7 +267,11 @@ public struct RootView: View {
             // scroll position and live Chat rendering across a mode switch.
             GeometryReader { geometry in
                 ZStack {
-                    CockpitModeView(chooseMode: { coordinator.mode = $0 })
+                    CockpitModeView(
+                        model: coordinator.cockpit,
+                        isVisible: coordinator.mode == .cockpit && scenePhase == .active,
+                        chooseMode: { coordinator.mode = $0 }
+                    )
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
                         .opacity(coordinator.mode == .cockpit ? 1 : 0)

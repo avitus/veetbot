@@ -249,6 +249,26 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+# The board's runtime (docs/plan/cockpit.md, the runtime): the host page, the
+# realm, React and the kit, built inside the builder image and copied out to
+# the artifact root the API serves them from by hash. Assets are content
+# addressed, so one already there is never rewritten and a runtime stays
+# servable after its release rotates out; the manifest switches at promotion.
+COCKPIT_RUNTIME_DIR="${AGENT_ARTIFACT_ROOT:-/var/lib/veetbot/artifacts}/cockpit-runtime"
+COCKPIT_RUNTIME_STAGE="$STAGE/.cockpit-runtime"
+runtime_container="$(docker create "$BUILDER_RELEASE_IMAGE")" || fail \
+  "could not open the Cockpit builder image to export its runtime"
+docker cp "$runtime_container:/opt/cockpit/dist/runtime/." "$COCKPIT_RUNTIME_STAGE" || fail \
+  "could not copy the Cockpit runtime out of the builder image"
+docker rm "$runtime_container" >/dev/null || true
+[[ -f "$COCKPIT_RUNTIME_STAGE/manifest.json" ]] || fail \
+  "the Cockpit builder image holds no runtime manifest"
+install -d -m 0700 "$COCKPIT_RUNTIME_DIR"
+for runtime_asset in "$COCKPIT_RUNTIME_STAGE"/*; do
+  runtime_name="${runtime_asset##*/}"
+  [[ "$runtime_name" != manifest.json ]] || continue
+  [[ -e "$COCKPIT_RUNTIME_DIR/$runtime_name" ]] || cp "$runtime_asset" "$COCKPIT_RUNTIME_DIR/$runtime_name"
+done
 # Generate before preflight, but activate only with this release's current
 # symlink. Restricted role environments never load this owner-only file.
 bash deploy/app/owner-scopes.sh deploy/veetbot.env.example >"$STAGE/.owner-scopes.env"
@@ -559,6 +579,8 @@ rm -f -- "$NEXT_CURRENT"
 ln -s "$STAGE" "$NEXT_CURRENT"
 mv -Tf "$NEXT_CURRENT" "$CURRENT"
 PROMOTED=1
+cp "$COCKPIT_RUNTIME_STAGE/manifest.json" "$COCKPIT_RUNTIME_DIR/.manifest.json.next"
+mv -f "$COCKPIT_RUNTIME_DIR/.manifest.json.next" "$COCKPIT_RUNTIME_DIR/manifest.json"
 docker tag "$RELEASE_IMAGE" "$PRODUCTION_IMAGE"
 docker tag "$BUILDER_RELEASE_IMAGE" "$BUILDER_PRODUCTION_IMAGE"
 sudo systemctl enable --now "${UNITS[@]}"

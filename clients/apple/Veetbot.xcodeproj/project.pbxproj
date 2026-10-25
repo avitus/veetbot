@@ -73,8 +73,11 @@
 		1000000000000000000000A1 /* EmailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A1 /* EmailModels.swift */; };
 		1000000000000000000000B1 /* CallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000B1 /* CallModels.swift */; };
 		1000000000000000000000A2 /* EmailAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A2 /* EmailAPIClient.swift */; };
+		100000000000000000005101 /* CockpitAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005101 /* CockpitAPIClient.swift */; };
 		1000000000000000000000B2 /* CallAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000B2 /* CallAPIClient.swift */; };
 		1000000000000000000000A3 /* EmailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A3 /* EmailViewModel.swift */; };
+		100000000000000000005103 /* CockpitViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005103 /* CockpitViewModel.swift */; };
+		100000000000000000005102 /* CockpitBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005102 /* CockpitBoard.swift */; };
 		1000000000000000000000A4 /* EmailModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000A4 /* EmailModeView.swift */; };
 		1000000000000000000000B3 /* CallResultSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000B3 /* CallResultSheet.swift */; };
 		1000000000000000000000C1 /* PeopleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000C1 /* PeopleModels.swift */; };
@@ -105,7 +108,10 @@
 		10000000000000000000E003 /* ChatInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E003 /* ChatInspectorPanel.swift */; };
 		10000000000000000000E004 /* EmailInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E004 /* EmailInspectorPanel.swift */; };
 		10000000000000000000C351 /* ClientMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000C351 /* ClientMode.swift */; };
+		100000000000000000005100 /* CockpitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005100 /* CockpitModels.swift */; };
 		10000000000000000000C352 /* CockpitModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000C352 /* CockpitModeView.swift */; };
+		100000000000000000005105 /* CockpitDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005105 /* CockpitDetailView.swift */; };
+		100000000000000000005104 /* CockpitWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005104 /* CockpitWebView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -189,8 +195,11 @@
 		2000000000000000000000A1 /* EmailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModels.swift; sourceTree = "<group>"; };
 		2000000000000000000000B1 /* CallModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModels.swift; sourceTree = "<group>"; };
 		2000000000000000000000A2 /* EmailAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailAPIClient.swift; sourceTree = "<group>"; };
+		200000000000000000005101 /* CockpitAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitAPIClient.swift; sourceTree = "<group>"; };
 		2000000000000000000000B2 /* CallAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAPIClient.swift; sourceTree = "<group>"; };
 		2000000000000000000000A3 /* EmailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailViewModel.swift; sourceTree = "<group>"; };
+		200000000000000000005103 /* CockpitViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitViewModel.swift; sourceTree = "<group>"; };
+		200000000000000000005102 /* CockpitBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitBoard.swift; sourceTree = "<group>"; };
 		2000000000000000000000A4 /* EmailModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModeView.swift; sourceTree = "<group>"; };
 		2000000000000000000000B3 /* CallResultSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallResultSheet.swift; sourceTree = "<group>"; };
 		2000000000000000000000C1 /* PeopleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleModels.swift; sourceTree = "<group>"; };
@@ -221,7 +230,10 @@
 		20000000000000000000E003 /* ChatInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInspectorPanel.swift; sourceTree = "<group>"; };
 		20000000000000000000E004 /* EmailInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailInspectorPanel.swift; sourceTree = "<group>"; };
 		20000000000000000000C351 /* ClientMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientMode.swift; sourceTree = "<group>"; };
+		200000000000000000005100 /* CockpitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitModels.swift; sourceTree = "<group>"; };
 		20000000000000000000C352 /* CockpitModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitModeView.swift; sourceTree = "<group>"; };
+		200000000000000000005105 /* CockpitDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitDetailView.swift; sourceTree = "<group>"; };
+		200000000000000000005104 /* CockpitWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitWebView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -285,6 +297,7 @@
 				20000000000000000000001F /* NotificationModels.swift */,
 				2000000000000000000000A1 /* EmailModels.swift */,
 				20000000000000000000C351 /* ClientMode.swift */,
+				200000000000000000005100 /* CockpitModels.swift */,
 				20000000000000000000D3 /* EmailSubscriptionModels.swift */,
 				2000000000000000000000B1 /* CallModels.swift */,
 			);
@@ -304,6 +317,7 @@
 				200000000000000000000020 /* DeviceRegistrationCoordinator.swift */,
 				20000000000000000000002C /* DeviceInvocationService.swift */,
 				2000000000000000000000A2 /* EmailAPIClient.swift */,
+				200000000000000000005101 /* CockpitAPIClient.swift */,
 				20000000000000000000D4 /* EmailSubscriptionAPIClient.swift */,
 				2000000000000000000000B2 /* CallAPIClient.swift */,
 			);
@@ -352,6 +366,8 @@
 				200000000000000000000026 /* ScheduleViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
 				2000000000000000000000A3 /* EmailViewModel.swift */,
+				200000000000000000005103 /* CockpitViewModel.swift */,
+				200000000000000000005102 /* CockpitBoard.swift */,
 				20000000000000000000D5 /* EmailSubscriptionsViewModel.swift */,
 				20000000000000000000E001 /* InspectorModel.swift */,
 			);
@@ -401,6 +417,8 @@
 				20000000000000000000E003 /* ChatInspectorPanel.swift */,
 				20000000000000000000E004 /* EmailInspectorPanel.swift */,
 				20000000000000000000C352 /* CockpitModeView.swift */,
+				200000000000000000005105 /* CockpitDetailView.swift */,
+				200000000000000000005104 /* CockpitWebView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -536,7 +554,10 @@
 				10000000000000000000E003 /* ChatInspectorPanel.swift in Sources */,
 				10000000000000000000E004 /* EmailInspectorPanel.swift in Sources */,
 				10000000000000000000C351 /* ClientMode.swift in Sources */,
+				100000000000000000005100 /* CockpitModels.swift in Sources */,
 				10000000000000000000C352 /* CockpitModeView.swift in Sources */,
+				100000000000000000005105 /* CockpitDetailView.swift in Sources */,
+				100000000000000000005104 /* CockpitWebView.swift in Sources */,
 				10000000000000000000B003 /* MemorySynthesisViewModel.swift in Sources */,
 				10000000000000000000B002 /* MemorySynthesisAPIClient.swift in Sources */,
 				10000000000000000000B001 /* MemorySynthesisModels.swift in Sources */,
@@ -614,7 +635,10 @@
 				1000000000000000000000A4 /* EmailModeView.swift in Sources */,
 				1000000000000000000000B3 /* CallResultSheet.swift in Sources */,
 				1000000000000000000000A3 /* EmailViewModel.swift in Sources */,
+				100000000000000000005103 /* CockpitViewModel.swift in Sources */,
+				100000000000000000005102 /* CockpitBoard.swift in Sources */,
 				1000000000000000000000A2 /* EmailAPIClient.swift in Sources */,
+				100000000000000000005101 /* CockpitAPIClient.swift in Sources */,
 				1000000000000000000000B2 /* CallAPIClient.swift in Sources */,
 				1000000000000000000000A1 /* EmailModels.swift in Sources */,
 				10000000000000000000D3 /* EmailSubscriptionModels.swift in Sources */,

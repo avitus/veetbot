@@ -46,6 +46,8 @@ class CockpitWidgetView(_View):
     kit_api: int
     manifest: dict[str, JsonValue]
     settings: dict[str, SettingValue]
+    # When the live revision last changed; the watchdog quarantines the newest first.
+    changed_at: datetime
 
 
 class CockpitLayoutView(_View):
@@ -70,9 +72,14 @@ class CockpitFeedView(_View):
 
 
 class CockpitSnapshotView(_View):
-    """The whole board; `cursor` is where the stream resumes from."""
+    """The whole board; `cursor` is where the stream resumes from.
+
+    `server_time` is the server's clock as it took the snapshot, so a client
+    renders freshness with server-corrected time.
+    """
 
     cursor: int
+    server_time: datetime
     runtime: CockpitRuntimeView | None
     widgets: tuple[CockpitWidgetView, ...]
     layouts: dict[DeviceClass, CockpitLayoutView]

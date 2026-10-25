@@ -387,13 +387,17 @@ stream are implemented behind the flag. The five deferred tools, the session
 filter, the delegated-child forbid, the diff approval view, the kit catalogue
 and the evaluation in which a chat request yields a committed widget are
 implemented. The platform feed projector and feed publishing from scheduled
-runs are implemented. Gates 2, 4 through 9, 14 and 15 are bound. The Apple mode shell
+runs are implemented. The native Cockpit mode is implemented: the web view
+sandbox and scheme handler, the stream held only while visible, the chrome,
+the detail panel and sheet, the Arrange sheet, and the release's runtime
+export. Gates 2, 4 through 9, 14 through 18 and 21 are bound. The Apple mode shell
 runs over three modes (build step 9): the switch reads Cockpit · Chat · Email
 at the top of each Mac left pane, and Cockpit shows its unavailable state.
 Every other gate is pending.
 
 - [ ] Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image
-- [ ] Build steps 10 and 11: the native Cockpit mode (the Apple client shows only its unavailable state behind the three-mode switch) and preview rendering
+- [ ] Build step 10 remainder: the open and discuss intents, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19's preflight rebuild of live widgets
+- [ ] Build step 11: preview rendering
 - [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; hosted CI, review and production delivery
 
 ## Outside a milestone

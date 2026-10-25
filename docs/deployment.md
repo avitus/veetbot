@@ -95,14 +95,17 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 4. builds `agent-core-sandbox:<release-id>` and
    `veetbot-cockpit-builder:<release-id>`, then requires the builder to build
    a reference widget under runsc with no network, a read-only root and the
-   sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`);
+   sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`). It copies the
+   board's content-addressed runtime out of the builder image into
+   `$AGENT_ARTIFACT_ROOT/cockpit-runtime`, never rewriting an asset already
+   there;
 5. checks active provider pins against the staged registry on an existing
    installation, then ensures the local PostgreSQL service is running;
 6. reconciles owner permissions into the staged `.owner-scopes.env`, applies
    `alembic upgrade head`, and runs the production preflight;
 7. stops both run workers, rechecks active provider pins, then switches
-   `/opt/veetbot/current`, tags the sandbox and builder images as
-   `production`, and
+   `/opt/veetbot/current`, switches the board's runtime manifest to this
+   release's, tags the sandbox and builder images as `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
@@ -1394,6 +1397,14 @@ if test -n "$target_builder_image"; then
 fi
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
+# The board's runtime manifest follows the application back; its
+# content-addressed assets are never removed, so the target's are still there.
+if test -f "$target/.cockpit-runtime/manifest.json"; then
+  cp "$target/.cockpit-runtime/manifest.json" \
+    /var/lib/veetbot/artifacts/cockpit-runtime/.manifest.json.next
+  mv -f /var/lib/veetbot/artifacts/cockpit-runtime/.manifest.json.next \
+    /var/lib/veetbot/artifacts/cockpit-runtime/manifest.json
+fi
 mv -Tf "$docs_next" /opt/veetbot/shared/docs/current
 docs_next=""
 mv -Tf "$website_next" /opt/veetbot/shared/website/current

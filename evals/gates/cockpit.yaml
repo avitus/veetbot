@@ -94,19 +94,19 @@
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**The realm has no network.** Every member of the adversarial corpus — fetch, XHR, WebSocket, EventSource, beacon, peer connection, image, script, style, font and frame loads, evaluation, workers, popups, forms and navigation — fails in headless Chromium, in headless WebKit where it is installed, and in a hosted `WKWebView`; a navigating widget is quarantined."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/native/test_cockpit_m35.py::test_cockpit_realm_has_no_network
 - id: gate.cockpit.token_absent_from_web_content
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**The token never enters web content.** No document or frame can read the bearer token or any credential, and the scheme handler's own requests carry none to the web content."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/native/test_cockpit_m35.py::test_cockpit_web_content_holds_no_credential
 - id: gate.cockpit.scheme_handler_allowlist
   milestone: 35
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**The scheme handler serves only named assets.** It answers only content hashes named by the current snapshot, never proxies an API route, answers 404 otherwise, and the navigation policy admits only the host document."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/native/test_cockpit_m35.py::test_cockpit_scheme_handler_serves_only_named_assets
 - id: gate.cockpit.kit_upgrade_rebuilds
   milestone: 35
   kind: case
@@ -124,7 +124,7 @@
   kind: case
   spec: docs/plan/cockpit.md#hard-gates
   statement: "**The stream runs only while Cockpit is visible.** The client opens the stream when Cockpit becomes the visible mode in an active app and closes it otherwise."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/native/test_cockpit_m35.py::test_cockpit_streams_only_while_visible
 - id: gate.cockpit.realm_memory_budget
   milestone: 35
   kind: case

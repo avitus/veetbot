@@ -255,6 +255,8 @@ image, and `test-browser-image` measures what its browser asks for on its own
 `cockpit-widgets-worktree` checks out the public `cockpit/widgets` branch under
 `.worktrees/` so a person can build widgets against the kit on `main`
 ([cockpit.md](cockpit.md)).
+`cockpit-runtime` exports the board's runtime to the local artifact root, as a
+release does, so a local server can serve Cockpit.
 
 `make check` is `lint typecheck test-fast test-browser test-deploy docs-check
 test-website test-cockpit`. `test-fast` is `test-static` followed by `test-contract`;

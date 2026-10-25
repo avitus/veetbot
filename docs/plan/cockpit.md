@@ -714,7 +714,7 @@ feed is an indistinguishable 404.
 
 | Route | Scope | Purpose |
 | --- | --- | --- |
-| `GET /v1/cockpit` | `cockpit.read` | Snapshot: runtime asset hashes, live widgets with revision, manifest and bundle hash, settings, layouts, current feed snapshots with declared history, and the stream cursor |
+| `GET /v1/cockpit` | `cockpit.read` | Snapshot: runtime asset hashes, live widgets with revision, manifest, bundle hash and when the revision changed, settings, layouts, current feed snapshots with declared history, the stream cursor, and the server's clock |
 | `GET /v1/cockpit/stream` | `cockpit.read` | Server-sent events |
 | `GET /v1/cockpit/assets/{sha256}` | `cockpit.read` | Runtime and bundle assets by hash; `immutable`, long-lived private caching |
 | `GET /v1/cockpit/widgets/{slug}` | `cockpit.read` | Detail: revisions with commit links, import failures, settings schema |
@@ -736,8 +736,17 @@ The routes' other contracts:
   not offer, are `malformed_request` (400). A build that reached no verdict
   is `sandbox_execution_error` (502), and nothing is recorded.
 - **Runtime assets.** The snapshot's runtime and the asset route read the
-  manifest a release exports to `artifact_root/cockpit-runtime/`. Until that
-  export lands with the native mode, `runtime` is null.
+  manifest a release exports to `artifact_root/cockpit-runtime/`. The release
+  copies the runtime out of the builder image there, never rewriting an asset
+  already present, and switches the manifest at promotion; a rollback switches
+  it back. `make cockpit-runtime` does the same for a local server. Until a
+  runtime is exported, `runtime` is null.
+- **Clocks.** The snapshot carries `server_time`, so a client renders
+  freshness with server-corrected time, and each widget's `changed_at`, so the
+  watchdog quarantines the most recently changed widget first.
+- **The wire contract.** `tests/fixtures/api/cockpit_snapshot_contract.json`
+  is the route's own rendering of one board. The Apple client decodes a
+  checksum-pinned copy of it, so a change to the shape fails both sides.
 - **Asset caching.** An asset answers
   `Cache-Control: private, max-age=31536000, immutable` and
   `X-Content-Type-Options: nosniff`.
@@ -1237,6 +1246,36 @@ Build step 8 landed the same day:
 
 The two platform-feed reference widgets now read the projected shapes:
 absolute times, and the schedule items' `at` and `paused` count.
+
+## Implementation checkpoint: 2026-10-25
+
+Build step 10 landed the native Cockpit mode behind the server's routes:
+
+- the snapshot's `server_time` and `changed_at`, with a pinned wire fixture
+  both sides test against;
+- the release's runtime export, and its rollback;
+- `CockpitWebView`: a non-persistent store, the scheme handler serving only
+  the snapshot's hashes, the blocking rule list, the removed network
+  primitives, the navigation policy, one main-frame message handler and the
+  native watchdog;
+- `CockpitViewModel`, which streams only while Cockpit is visible in an active
+  app and reconnects without a give-up limit;
+- the chrome: connection and last update, night watch, the iPad keep-awake
+  toggle, the Mac's widget list and detail panel, the detail sheet elsewhere,
+  the settings form, history with commit links, Revert, Delete and Restore,
+  and an Arrange sheet that orders, sizes and hides each device class's tiles.
+
+A hosted `WKWebView` test loads the real exported runtime: a widget renders,
+and one that tries ten web escapes reaches no listener on the machine. Gates
+16, 17, 18 and 21 are bound to native tests that run those suites with the
+headless realm suite.
+
+Still to come in this step's area:
+
+- the `open` and `discuss` intents, which the host protocol does not carry yet;
+- gate 20 (state across all three modes) and gate 22 (the realm on the oldest
+  supported iPad);
+- gate 19's preflight rebuild of live widgets against a changed kit.
 
 ## Implementation checkpoint: 2026-10-23
 

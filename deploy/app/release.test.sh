@@ -63,7 +63,7 @@ printf '%s\n' \
   'AUTH_PRINCIPAL_ID=test' \
   'AUTH_SCOPES=notification.read' \
   'SANDBOX_MECHANISM=gvisor' \
-  'AGENT_ARTIFACT_ROOT=/tmp' \
+  "AGENT_ARTIFACT_ROOT=$TEST_ROOT/artifacts" \
   'VEETBOT_OPENAI_KEY=synthetic-test-provider-key' \
   "BROWSER_PROFILE_SERVICE_AUTH_FILE=$PROFILE_AUTH_FILE" \
   "BROWSER_PROFILE_SESSION_SECRET_FILE=$PROFILE_SESSION_FILE" \
@@ -179,6 +179,16 @@ write_stub docker '
     fi
     grep -Fxv -- "${reference#*:}" "$state" >"$state.next" || true
     /bin/mv "$state.next" "$state"
+  elif [[ "${1:-}" == create ]]; then
+    printf "cockpit-runtime-container\n"
+  elif [[ "${1:-}" == cp && "${2:-}" == cockpit-runtime-container:/opt/cockpit/dist/runtime/. ]]; then
+    # The builder image holds its content-addressed runtime and its manifest.
+    mkdir -p "$3"
+    printf "<host>" >"$3/$(printf a%.0s {1..64}).html"
+    printf "(()=>{})();" >"$3/$(printf b%.0s {1..64}).js"
+    printf "{\"kit_api\": 1, \"release\": \"%s\"}\n" "$VEETBOT_TEST_RELEASE" >"$3/manifest.json"
+  elif [[ "${1:-}" == rm && "${2:-}" == cockpit-runtime-container ]]; then
+    exit 0
   elif [[ "${1:-}" == ps ]]; then
     printf "%s\n" "${VEETBOT_TEST_RUNNING_IMAGES:-}"
   elif [[ "${1:-}" == system && "${2:-}" == df ]]; then
@@ -388,6 +398,8 @@ done
 
 release_id="20260810-152233-abcdef0"
 make_stage "$release_id"
+mkdir -p "$TEST_ROOT/artifacts/cockpit-runtime"
+printf "<kept>" >"$TEST_ROOT/artifacts/cockpit-runtime/$(printf a%.0s {1..64}).html"
 ln -s "$DEPLOY_ROOT/releases/$release_id" "$PROCESS_ROOT/4242/cwd"
 legacy_unprunable_id="20260809-120001-0000001"
 mkdir -p "$DOCKER_IMAGES"
@@ -453,6 +465,19 @@ grep -Fxq "$builder_canary" "$LOG_FILE"
 [[ "$(grep -Fnx "$builder_canary" "$LOG_FILE" | cut -d: -f1)" -lt \
   "$(grep -Fn 'alembic upgrade head' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 grep -Fxq "cockpit builder image veetbot-cockpit-builder:$release_id" "$LOG_FILE"
+# The board's runtime leaves the builder image for the artifact root, where the
+# API serves it by hash; a content-addressed asset already there is never
+# rewritten, and the manifest names this release's runtime.
+runtime_dir="$TEST_ROOT/artifacts/cockpit-runtime"
+grep -Fxq "docker create veetbot-cockpit-builder:$release_id" "$LOG_FILE"
+grep -Fxq "docker rm cockpit-runtime-container" "$LOG_FILE"
+grep -Fxq "{\"kit_api\": 1, \"release\": \"$release_id\"}" "$runtime_dir/manifest.json"
+[[ "$(cat "$runtime_dir/$(printf b%.0s {1..64}).js")" == "(()=>{})();" ]]
+[[ "$(cat "$runtime_dir/$(printf a%.0s {1..64}).html")" == "<kept>" ]] || {
+  printf 'an existing content-addressed runtime asset was rewritten\n' >&2
+  exit 1
+}
+[[ ! -e "$runtime_dir/.manifest.json.next" ]]
 grep -Fxq \
   "docker tag veetbot-cockpit-builder:$release_id veetbot-cockpit-builder:production" \
   "$LOG_FILE"
