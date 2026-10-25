@@ -111,6 +111,10 @@ class DecayProfile(_ProfileModel):
     floor_confidence: float = Field(default=0.2, gt=0.0, le=1.0)
     step: float = Field(default=0.05, gt=0.0, le=1.0)
     max_per_sweep: int = Field(default=200, ge=1)
+    # ADR-0247: an automatically captured durable owner statement takes a step
+    # only once it has been delivered to the model this many times without a
+    # citation (usage-accounting@2). Unseen is not unused.
+    min_unused_deliveries: int = Field(default=3, ge=1)
 
 
 class PersonaNominationProfile(_ProfileModel):

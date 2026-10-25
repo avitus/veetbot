@@ -20,7 +20,7 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:549-559). That surface is right for an
+(memory-formation-and-consolidation.md:561-571). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
@@ -259,7 +259,7 @@ tombstoned so it cannot re-form, People copies are erased, and a
 `memory.deleted` event is appended to the belief's source session.
 
 `POST /v1/memories/{memory_id}/review` takes `{"outcome": ...}` with one of
-four values, and an optional `expected_updated_at`: when it differs from the
+five values, and an optional `expected_updated_at`: when it differs from the
 belief's current `updated_at` the request is `conflict` and nothing changes. `dismiss` clears `flagged_for_review` and nothing else: the
 belief takes a fresh store position, so the next recall delta shows it as
 reviewed, and a `memory.reviewed` event is appended. `untrue` and `not_here`
@@ -282,6 +282,15 @@ replacement at user authority citing that event and inheriting subject, scope,
 type, portability and sensitivity, links `superseded_by` and the rejection's
 `replacement_id`, and records the receipt. The response, and its replay, is the
 replacement's `MemoryView`; the superseded belief stays readable.
+
+`confirm` (ADR-0247) carries no text and is allowed for a live, decay-retired
+or expiry-retired belief. It supersedes the belief with the same words as a new
+belief at user authority through formation, citing a `memory.owner_confirmation`
+event, with no rejection recorded; the response, and its replay, is the
+replacement's `MemoryView`, and the predecessor stays readable with
+`superseded_by` set. A belief a correction already superseded, a statement a
+deletion or rejection blocks, a belief whose sources were erased and a derived
+summary are `conflict`.
 
 ### Errors
 
@@ -452,7 +461,8 @@ the device surface.
 - **Review and deletion (ADR-0117).** A "Needs review" filter asks for the
   review queue through the `flagged` parameter. A row can be swiped to delete,
   behind a confirmation, and the detail view carries a Review menu with Looks
-  right (the `dismiss` outcome), Not true, Not relevant here, and Delete; a
+  right (the `dismiss` outcome), Still true (`confirm`, ADR-0247, also offered
+  for a retired belief), Not true, Not relevant here, and Delete; a
   flagged belief also asks "Is this right?" with those three as buttons. On the
   Mac a group sidebar (Review, Browse by type, Maintenance) replaces the
   collection picker and the review and type filters. Each action sends a fresh

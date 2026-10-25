@@ -172,6 +172,7 @@ public final class MemoryViewModel: ObservableObject {
         case .dismiss: "Marked as reviewed."
         case .untrue: "Marked not true. Veetbot will not form it again from the same evidence."
         case .notHere: "Marked not relevant here."
+        case .confirm: "Confirmed as your own statement. It will not fade on its own."
         }
     }
 

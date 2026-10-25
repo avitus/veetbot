@@ -437,8 +437,11 @@ without touching evidence. A memory cannot keep itself alive by being recalled.
 The bounded maintenance sweep retires tentative hypotheses thirty days after
 `last_evidence_at` and ongoing observations ninety days after it. Durable direct
 beliefs use the existing type-aware horizon and confidence steps, now measured
-from `last_evidence_at`. Explicit remembered beliefs remain outside automatic
-decay. Retirement closes validity and emits `memory.retired` with a content-free
+from `last_evidence_at`; under ADR-0247 an inferred one takes a step only with
+evidence of non-use (delivered to the model, never cited, at least
+`decay.min_unused_deliveries` times), and an affirmed one never decays
+automatically. Explicit remembered beliefs remain outside automatic decay.
+Retirement closes validity and emits `memory.retired` with a content-free
 reason code.
 
 ## Retrieval and uncertainty

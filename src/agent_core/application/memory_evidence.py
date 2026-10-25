@@ -37,6 +37,7 @@ OWNER_TEXT_EVENTS = {
     "user.message.created": "content",
     "people.owner_assertion": "content",
     "memory.owner_correction": "statement",
+    "memory.owner_confirmation": "statement",
 }
 
 

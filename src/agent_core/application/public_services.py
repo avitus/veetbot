@@ -2550,6 +2550,9 @@ class PublicMemoryService:
         """
         require_scope(principal, "memory.write")
         changed = outcome is MemoryReviewOutcome.CHANGED
+        # ADR-0247: `confirm` also answers with a replacement, formed from the
+        # same words at user authority.
+        supersedes = changed or outcome is MemoryReviewOutcome.CONFIRM
         if changed != (replacement_statement is not None):
             raise MemoryCorrectionError("replacement text belongs to the changed outcome only")
         replacement = (
@@ -2577,9 +2580,9 @@ class PublicMemoryService:
                 self._derived_enabled
                 and await uow.reconsolidation.summary_operation(principal, memory_id) is not None
             ):
-                if changed:
+                if supersedes:
                     # A summary's corrections belong to memory-reconsolidation.md.
-                    raise MemoryCorrectionError("a derived summary cannot be reworded")
+                    raise MemoryCorrectionError("a derived summary cannot be reworded or confirmed")
                 now = self._now()
                 if not replayed:
                     action = cast(SummaryAction, outcome.value)
@@ -2592,7 +2595,7 @@ class PublicMemoryService:
                 return await derived_view(uow, principal, memory_id, ceiling, now)
             if replayed:
                 record = await self._visible(uow, principal, memory_id, ceiling)
-                if changed and record.superseded_by is not None:
+                if supersedes and record.superseded_by is not None:
                     record = await self._visible(uow, principal, record.superseded_by, ceiling)
                 return MemoryView.from_record(record)
             record = await self._visible(uow, principal, memory_id, ceiling)

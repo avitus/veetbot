@@ -22,6 +22,7 @@ from agent_core.config import Settings
 from agent_core.domain.context import WorkingState
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
+    USAGE_ACCOUNTING_VERSION,
     BeliefType,
     MemoryAuthority,
     MemoryStatus,
@@ -609,6 +610,7 @@ async def _stated_belief(
     belief_type: BeliefType = BeliefType.PREFERENCE,
     explicit: bool = True,
     confidence: float | None = None,
+    authority: MemoryAuthority = MemoryAuthority.USER,
 ) -> Any:
     """State one belief the way a user turn would, with real provenance."""
 
@@ -633,6 +635,7 @@ async def _stated_belief(
         sensitivity=Sensitivity.INTERNAL,
         source_event_ids=[event.sequence],
         explicit=explicit,
+        authority=authority,
         confidence=confidence,
     )
 
@@ -734,6 +737,7 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor(
             "deploy gating",
             belief_type=BeliefType.FACT,
             explicit=False,
+            authority=MemoryAuthority.INFERRED,
         )
         spent = await _stated_belief(
             composition,
@@ -742,6 +746,7 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor(
             "staging cluster",
             belief_type=BeliefType.FACT,
             explicit=False,
+            authority=MemoryAuthority.INFERRED,
             confidence=0.2,
         )
         stated = await _stated_belief(
@@ -756,6 +761,20 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor(
             explicit=False,
             confidence=0.3,
         )
+        # ADR-0247: unseen is not unused. The sweep steps an automatically
+        # captured owner statement only once it was delivered to the model
+        # without being cited; these two were shown three times and never used.
+        async with composition.uow_factory() as uow:
+            for shown in (idle, spent):
+                await uow.memories.reinforce(
+                    shown.model_copy(
+                        update={
+                            "delivered_count": 3,
+                            "usage_accounting_version": USAGE_ACCOUNTING_VERSION,
+                        },
+                        deep=True,
+                    )
+                )
         assert composition.memory_profiles.formation.scheduled_enabled is True
         tau_days = composition.memory_profiles.retrieval.decay_tau_days.fact
 

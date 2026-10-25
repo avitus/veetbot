@@ -123,6 +123,26 @@ async def _form(
     )
 
 
+async def _delivered_uncited(
+    factory: MemoryUnitOfWorkFactory, *records: MemoryRecord, times: int = 3
+) -> None:
+    """ADR-0247: unseen is not unused. Mark beliefs as delivered to the model
+    ``times`` times and never cited, the evidence the decay sweep now needs
+    before it steps an automatically captured durable owner statement."""
+    async with factory() as uow:
+        for record in records:
+            await uow.memories.reinforce(
+                record.model_copy(
+                    update={
+                        "delivered_count": times,
+                        "cited_count": 0,
+                        "usage_accounting_version": "usage-accounting@2",
+                    },
+                    deep=True,
+                )
+            )
+
+
 async def _memory_event_types(factory: MemoryUnitOfWorkFactory) -> list[str]:
     return [
         event.event_type
@@ -861,17 +881,25 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor() -
     """
 
     clock, factory, service, _retriever = await formation_stack()
-    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+    idle = await _form(
+        factory,
+        service,
+        "Deploys are gated on CI.",
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+    )
     weak = await _form(
         factory,
         service,
         "The staging cluster is us-east-2.",
         subject="staging cluster",
         explicit=False,
+        authority=MemoryAuthority.INFERRED,
         confidence=0.2,
     )
     assert idle.status is MemoryStatus.PROVISIONAL
     assert weak.confidence == pytest.approx(0.2)
+    await _delivered_uncited(factory, idle, weak)
 
     async with factory() as uow:
         activity_before = (await uow.sessions.get(SESSION_ID, principal())).updated_at
@@ -909,15 +937,23 @@ async def test_decay_moves_a_store_position_only_when_it_closes_the_belief() -> 
     """
 
     clock, factory, service, retriever = await formation_stack()
-    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+    idle = await _form(
+        factory,
+        service,
+        "Deploys are gated on CI.",
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+    )
     weak = await _form(
         factory,
         service,
         "The staging cluster is us-east-2.",
         subject="staging cluster",
         explicit=False,
+        authority=MemoryAuthority.INFERRED,
         confidence=0.2,
     )
+    await _delivered_uncited(factory, idle, weak)
     snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
     assert snapshot.items == []
     # Existing retrieval@3 snapshots could contain provisional beliefs. Keep
@@ -1000,7 +1036,14 @@ async def test_decay_sweep_is_idempotent_within_interval() -> None:
     """One belief loses one step per sweep interval, however often it runs."""
 
     clock, factory, service, _retriever = await formation_stack()
-    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+    idle = await _form(
+        factory,
+        service,
+        "Deploys are gated on CI.",
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+    )
+    await _delivered_uncited(factory, idle)
     clock.advance(timedelta(days=31))
 
     first = await service.decay()
@@ -1042,7 +1085,14 @@ async def test_decay_sweep_reaches_the_oldest_idle_belief_past_its_window() -> N
         principal(),
         formation_profile=FormationProfile(decay=DecayProfile(max_per_sweep=ceiling)),
     )
-    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+    idle = await _form(
+        factory,
+        service,
+        "Deploys are gated on CI.",
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+    )
+    await _delivered_uncited(factory, idle)
 
     clock.advance(timedelta(days=31))
     newer = [
@@ -1052,9 +1102,14 @@ async def test_decay_sweep_reaches_the_oldest_idle_belief_past_its_window() -> N
             f"Region {index} is eu-west-{index}.",
             subject=f"region {index}",
             explicit=False,
+            authority=MemoryAuthority.INFERRED,
         )
         for index in range(ceiling)
     ]
+    # Shown and never used, so they are in the window the sweep must not fill with.
+    await _delivered_uncited(factory, *newer)
+    async with factory() as uow:
+        newer = [await uow.memories.get(belief.id, principal()) for belief in newer]
 
     result = await service.decay()
 
@@ -1092,8 +1147,10 @@ async def test_decay_window_excludes_permanently_stable_beliefs_before_limiting(
         "The inferred rollout preference is provisional.",
         subject="rollout preference",
         explicit=False,
+        authority=MemoryAuthority.INFERRED,
         confidence=0.3,
     )
+    await _delivered_uncited(factory, eligible)
     clock.advance(timedelta(days=31))
 
     result = await service.decay()

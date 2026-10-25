@@ -111,19 +111,48 @@ class RejectionKind(StrEnum):
     DELETED = "deleted"
 
 
+def decay_eligible_lifecycle(record: MemoryRecord, min_unused_deliveries: int) -> bool:
+    """Whether a belief's lifecycle class admits automatic decay (ADR-0247).
+
+    A user-authority belief and an affirmed direct belief are outside automatic
+    decay: review or supersession corrects them. An inferred direct durable
+    belief, an owner statement formation captured on its own, decays only with
+    evidence of non-use: delivered to the model at least ``min_unused_deliveries``
+    times more than it was cited. Hypotheses and ongoing or tentative
+    observations keep the evidence-clock rule of adaptive-memory-distillation.md.
+    """
+    if record.authority is MemoryAuthority.USER:
+        return False
+    if (
+        record.authority is MemoryAuthority.AFFIRMED
+        and record.derivation is MemoryDerivation.DIRECT
+    ):
+        return False
+    if (
+        record.authority is MemoryAuthority.INFERRED
+        and record.derivation is MemoryDerivation.DIRECT
+        and record.longevity is MemoryLongevity.DURABLE
+    ):
+        return record.delivered_count - record.cited_count >= min_unused_deliveries
+    return True
+
+
 class MemoryReviewOutcome(StrEnum):
-    """What the owner decided about a belief (ADR-0117, ADR-0224).
+    """What the owner decided about a belief (ADR-0117, ADR-0224, ADR-0247).
 
     ``dismiss`` clears the flag and changes nothing else; ``untrue`` and
     ``not_here`` are the existing rejection kinds of the same name. ``changed``
     carries the owner's replacement text and supersedes the belief with a new
-    one; it never edits a statement in place.
+    one; it never edits a statement in place. ``confirm`` supersedes the belief
+    with the same words as the owner's own statement: user authority, active,
+    outside automatic decay, with no rejection recorded against the predecessor.
     """
 
     DISMISS = "dismiss"
     UNTRUE = "untrue"
     NOT_HERE = "not_here"
     CHANGED = "changed"
+    CONFIRM = "confirm"
 
 
 class RecallProfile(StrEnum):

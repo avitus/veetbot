@@ -41,6 +41,7 @@ from agent_core.domain.memory import (
     TracedBelief,
     TracedPassage,
     TracedPersonContext,
+    decay_eligible_lifecycle,
     is_owned_resource,
     lexical_query_terms,
     lexical_term_lexemes,
@@ -554,6 +555,7 @@ class InMemoryMemoryStore:
         *,
         evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
+        min_unused_deliveries: int | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
         async with self._transaction.owner((principal.tenant_id, principal.principal_id)):
@@ -573,6 +575,10 @@ class InMemoryMemoryStore:
                     decay_confidence_ceiling is None
                     or record.status is MemoryStatus.PROVISIONAL
                     or record.confidence < decay_confidence_ceiling
+                )
+                and (
+                    min_unused_deliveries is None
+                    or decay_eligible_lifecycle(record, min_unused_deliveries)
                 )
             ]
             records.sort(key=lambda item: (item.last_evidence_at, str(item.id)))

@@ -1003,6 +1003,12 @@ async def test_only_direct_owner_kinship_escapes_idle_decay() -> None:
         result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
         assert len(result.beliefs) == 1
         original = result.beliefs[0]
+        # ADR-0247: unseen is not unused; the sweep steps a durable owner
+        # statement only once it was delivered to the model and never cited.
+        async with factory() as uow:
+            await uow.memories.reinforce(
+                original.model_copy(update={"delivered_count": 3, "cited_count": 0}, deep=True)
+            )
         clock.advance(timedelta(days=800))
         await service.decay()
         async with factory() as uow:

@@ -1078,6 +1078,7 @@ class PostgresMemoryStore:
         *,
         evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
+        min_unused_deliveries: int | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
         predicates: list[ColumnElement[bool]] = [
@@ -1093,6 +1094,24 @@ class PostgresMemoryStore:
                 or_(
                     MemoryRow.status == MemoryStatus.PROVISIONAL.value,
                     MemoryRow.confidence < decay_confidence_ceiling,
+                )
+            )
+        if min_unused_deliveries is not None:
+            # decay_eligible_lifecycle (ADR-0247), in SQL so a bounded page is
+            # not filled with rows the sweep would skip.
+            predicates.append(MemoryRow.authority != MemoryAuthority.USER.value)
+            predicates.append(
+                or_(
+                    MemoryRow.authority != MemoryAuthority.AFFIRMED.value,
+                    MemoryRow.derivation != MemoryDerivation.DIRECT.value,
+                )
+            )
+            predicates.append(
+                or_(
+                    MemoryRow.authority != MemoryAuthority.INFERRED.value,
+                    MemoryRow.derivation != MemoryDerivation.DIRECT.value,
+                    MemoryRow.longevity != MemoryLongevity.DURABLE.value,
+                    MemoryRow.delivered_count - MemoryRow.cited_count >= min_unused_deliveries,
                 )
             )
         rows = list(

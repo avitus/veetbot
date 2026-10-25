@@ -310,6 +310,22 @@ public struct MemoryDetailView: View {
                 .disabled(busy)
                 .accessibilityIdentifier("memory.detail.review.dismiss")
             }
+            if memory.status == "active" || memory.status == "provisional"
+                || memory.status == "retired" || memory.status == "expired"
+            {
+                // ADR-0247: the governed restore path. The server supersedes the
+                // belief with the same words at user authority; the row is
+                // replaced by the replacement, and the original stays as history.
+                Button("Still true") {
+                    Task {
+                        if let reviewed = await model.review(memory, outcome: .confirm) {
+                            memory = reviewed
+                        }
+                    }
+                }
+                .disabled(busy)
+                .accessibilityIdentifier("memory.detail.review.confirm")
+            }
             if memory.status == "active" || memory.status == "provisional" {
                 Button("Edit wording…") { editingWording = true }
                     .disabled(busy)

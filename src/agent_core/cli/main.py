@@ -1291,7 +1291,8 @@ def memory_review(
             "--outcome",
             help=(
                 "dismiss clears the flag; untrue retires; not_here localizes; "
-                "changed supersedes with --replacement."
+                "changed supersedes with --replacement; confirm supersedes with "
+                "the same words as the owner's own statement (ADR-0247)."
             ),
         ),
     ],
@@ -1300,7 +1301,7 @@ def memory_review(
         typer.Option("--replacement", help="The corrected wording; only with changed."),
     ] = None,
 ) -> None:
-    """Apply one review outcome to a belief (ADR-0117, ADR-0224)."""
+    """Apply one review outcome to a belief (ADR-0117, ADR-0224, ADR-0247)."""
 
     if (outcome is MemoryReviewOutcome.CHANGED) != (replacement is not None):
         raise typer.BadParameter(

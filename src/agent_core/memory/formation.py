@@ -54,6 +54,7 @@ from agent_core.domain.memory import (
     RejectionKind,
     Sensitivity,
     UsageFeedback,
+    decay_eligible_lifecycle,
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.people_tools import RememberPeopleArgs
@@ -4136,11 +4137,109 @@ class GovernedMemoryService:
             )
         if replacement_statement is not None:
             raise ToolValidationError("only a changed review carries replacement text")
+        if outcome is MemoryReviewOutcome.CONFIRM:
+            return await self.confirm(belief_id, existing_uow=existing_uow)
         if outcome is MemoryReviewOutcome.UNTRUE:
             return await self.reject(belief_id, RejectionKind.UNTRUE, existing_uow=existing_uow)
         if outcome is MemoryReviewOutcome.NOT_HERE:
             return await self.reject(belief_id, RejectionKind.NOT_HERE, existing_uow=existing_uow)
         return await self.acknowledge_review(belief_id, existing_uow=existing_uow)
+
+    async def confirm(
+        self, belief_id: UUID, *, existing_uow: RepositoryUnitOfWork | None = None
+    ) -> MemoryRecord:
+        """Supersede a belief with the owner's own statement of it (ADR-0247).
+
+        The governed restore path: the owner saying "this is right" is a new
+        explicit statement, so it enters through formation at user authority
+        citing a ``memory.owner_confirmation`` event, and the predecessor is
+        superseded without a rejection record. Allowed for live beliefs and for
+        beliefs decay or expiry retired; refused for one a correction already
+        superseded, one whose statement a deletion or rejection blocks, and one
+        whose sources were erased. Never a status edit in place.
+        """
+        if existing_uow is not None:
+            return await self._confirm_in(existing_uow, belief_id)
+        async with self._uow_factory() as uow:
+            return await self._confirm_in(uow, belief_id)
+
+    async def _confirm_in(self, uow: RepositoryUnitOfWork, belief_id: UUID) -> MemoryRecord:
+        from agent_core.domain.people_sources import source_id
+
+        current = await uow.memories.get(belief_id, self._principal)
+        if current.status is MemoryStatus.SUPERSEDED or current.superseded_by is not None:
+            raise ConflictError(
+                "a correction already superseded this memory", reason="memory.already_superseded"
+            )
+        if current.status not in {
+            MemoryStatus.ACTIVE,
+            MemoryStatus.PROVISIONAL,
+            MemoryStatus.RETIRED,
+            MemoryStatus.EXPIRED,
+        }:
+            raise ConflictError("this memory cannot be confirmed", reason="memory.not_confirmable")
+        rejections = await uow.memories.outstanding_rejections(
+            self._principal.tenant_id, self._principal.principal_id
+        )
+        statement_hash = hashlib.sha256(current.statement.casefold().encode()).hexdigest()
+        if any(rejection.statement_sha256 == statement_hash for rejection in rejections):
+            raise ConflictError(
+                "a user deletion or correction blocks this memory",
+                reason="memory.blocked_by_rejection",
+            )
+        source_session = _source_session(current)
+        for sequence in current.source_event_ids:
+            if await uow.people.source_suppressed(
+                self._principal, source_id(self._principal, source_session, sequence)
+            ):
+                raise ConflictError("memory source was erased", reason="memory.source_erased")
+        now = self._clock.now()
+        confirmation = await uow.events.append(
+            NewEvent(
+                session_id=source_session,
+                run_id=None,
+                event_type="memory.owner_confirmation",
+                actor_type="principal",
+                actor_id=self._principal.principal_id,
+                payload={"belief_id": str(current.id), "statement": current.statement},
+            )
+        )
+        superseded = current.model_copy(
+            update={
+                "status": MemoryStatus.SUPERSEDED,
+                "valid_to": now,
+                "store_position": await uow.memories.next_position(),
+                "updated_at": now,
+            },
+            deep=True,
+        )
+        stored = await uow.memories.reinforce(superseded)
+        await self._append_event(uow, source_session, None, "memory.superseded", stored)
+        replacement, _action = await self.remember_formation(
+            session_id=source_session,
+            run_id=None,
+            statement=current.statement,
+            subject=current.subject,
+            scope=current.scope,
+            belief_type=current.belief_type,
+            portability=current.portability,
+            sensitivity=current.sensitivity,
+            source_event_ids=[confirmation.sequence],
+            origin_trust=TrustLevel.USER,
+            explicit=True,
+            authority=MemoryAuthority.USER,
+            polarity=current.polarity,
+            confidence=None,
+            valid_from=None,
+            expires_at=None,
+            trigger="memory.owner_confirmation",
+            record_audit=True,
+            existing_uow=uow,
+        )
+        await uow.memories.reinforce(
+            stored.model_copy(update={"superseded_by": replacement.id}, deep=True)
+        )
+        return replacement
 
     async def acknowledge_review(
         self, belief_id: UUID, *, existing_uow: RepositoryUnitOfWork | None = None
@@ -4463,6 +4562,7 @@ class GovernedMemoryService:
                 self._principal,
                 evidence_before=instant - timedelta(days=horizon),
                 decay_confidence_ceiling=MAX_INFERRED_CONFIDENCE,
+                min_unused_deliveries=decay.min_unused_deliveries,
                 limit=decay.max_per_sweep,
             )
             for record in candidates:
@@ -4496,12 +4596,15 @@ class GovernedMemoryService:
         return DecayResult(decayed=decayed, retired=retired)
 
     def _decays(self, record: MemoryRecord, instant: datetime, interval: timedelta) -> bool:
-        """Whether this belief is idle, uncertain, and unwritten long enough."""
+        """Whether this belief is idle, uncertain, unwritten long enough, and of
+        a lifecycle class that automatic decay may touch (ADR-0247)."""
 
         if (
             record.lifecycle_policy_version == "people-lifecycle@1"
             and record.consolidation_policy_version == "formation@11"
         ):
+            return False
+        if not decay_eligible_lifecycle(record, self._profile.decay.min_unused_deliveries):
             return False
         if record.status is not MemoryStatus.PROVISIONAL and (
             record.confidence >= MAX_INFERRED_CONFIDENCE

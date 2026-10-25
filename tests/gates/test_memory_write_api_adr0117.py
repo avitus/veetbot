@@ -296,3 +296,72 @@ async def test_concurrent_requests_with_one_key_apply_the_write_once() -> None:
             events = await uow.events.list_after(belief.source_session_id, 0, WRITER)
         assert [event.event_type for event in events].count("memory.rejected") == 1
         assert [event.event_type for event in events].count("memory.review_completed") == 1
+
+
+async def test_confirm_restores_a_belief_as_the_owners_own_statement() -> None:
+    """``confirm`` (ADR-0247) is the governed restore path for a belief decay
+    retired or merely doubted: the response is the replacement at user
+    authority, the predecessor stays readable as superseded, a replay returns
+    the same view, a stale ``expected_updated_at`` is a conflict, and a belief a
+    correction already superseded cannot be confirmed."""
+
+    from agent_core.domain.memory import MemoryAuthority
+
+    async with build(
+        settings=_enabled_settings(), storage="memory", sequential_ids=True, principal=WRITER
+    ) as composition:
+        retired = _belief(belief_id=11, position=11, status=MemoryStatus.RETIRED).model_copy(
+            update={"authority": MemoryAuthority.INFERRED, "confidence": 0.15}
+        )
+        corrected = _belief(belief_id=12, position=12, status=MemoryStatus.SUPERSEDED).model_copy(
+            update={"superseded_by": UUID(int=13)}
+        )
+        replacement = _belief(belief_id=13, position=13)
+        await _seed_with_session(composition, [retired, corrected, replacement])
+        async with _client(composition) as client:
+
+            async def confirm(belief_id: UUID, key: str, expected: Any) -> Any:
+                return await client.post(
+                    f"/v1/memories/{belief_id}/review",
+                    params={"ceiling": "restricted"},
+                    headers={"Idempotency-Key": key},
+                    json={"outcome": "confirm", "expected_updated_at": expected},
+                )
+
+            stale = await confirm(retired.id, "confirm-0", "2020-01-01T00:00:00Z")
+            assert stale.status_code == 409
+            assert stale.json()["error"]["code"] == "conflict"
+
+            response = await confirm(retired.id, "confirm-1", retired.updated_at.isoformat())
+            assert response.status_code == 200, response.text
+            view = response.json()
+            assert view["id"] != str(retired.id)
+            assert view["statement"] == retired.statement
+            assert view["authority"] == MemoryAuthority.USER.value
+            assert view["status"] == MemoryStatus.ACTIVE.value
+            assert view["expires_at"] is None
+
+            replay = await confirm(retired.id, "confirm-1", retired.updated_at.isoformat())
+            assert replay.status_code == 200
+            assert replay.json() == view
+
+            predecessor = await client.get(
+                f"/v1/memories/{retired.id}", params={"ceiling": "restricted"}
+            )
+            assert predecessor.json()["status"] == MemoryStatus.SUPERSEDED.value
+            assert predecessor.json()["superseded_by"] == view["id"]
+
+            refused = await confirm(corrected.id, "confirm-2", None)
+            assert refused.status_code == 409
+            assert refused.json()["error"]["code"] == "conflict"
+
+            with_text = await client.post(
+                f"/v1/memories/{replacement.id}/review",
+                params={"ceiling": "restricted"},
+                headers={"Idempotency-Key": "confirm-3"},
+                json={"outcome": "confirm", "replacement_statement": "other words"},
+            )
+            assert with_text.status_code == 400
+        events = await _events(composition, retired.source_session_id)
+        assert "memory.owner_confirmation" in events
+        assert "memory.rejected" not in events
