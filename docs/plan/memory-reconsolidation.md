@@ -205,8 +205,10 @@ original supporting events. IDs alone are not proof that an event supports text.
 Add `content_revision` (positive integer, initially 1) to `memories` and its
 historical revision representation. Increment it on statement, polarity,
 subject, confidence, evidence, authority, sensitivity, scope/portability, validity, review
-rejection, status or person-attribution changes. Usage-only updates to utility
-or `last_used_at` do not increment it. Existing `store_position` is not a content
+rejection, status or person-attribution changes. Usage-only updates to utility,
+`last_used_at` or the `usage-accounting@2` exposure counters (`delivered_count`,
+`cited_count`, `usage_accounting_version`) do not increment it; the content
+signature excludes them. Existing `store_position` is not a content
 revision: decay intentionally preserves positions until retirement. Membership
 and derived objects get their own monotonically increasing revision and new
 store positions through the existing allocator when recall-visible state changes.
