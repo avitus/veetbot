@@ -9,16 +9,18 @@ must still be refused.
 
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
 import pytest
 
-from agent_core.adapters.cockpit.github import _access_acl, load_app_private_key
+from agent_core.adapters.cockpit.github import _access_acl, _private, load_app_private_key
 
 USER_OBJ, USER, GROUP_OBJ, GROUP, MASK, OTHER = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20
 UNDEFINED = 0xFFFFFFFF
-SERVICE = 997
+# The test files belong to whoever runs the tests, who plays the unit's user.
+SERVICE = os.geteuid()
 READ = 4
 
 
@@ -115,3 +117,11 @@ def test_a_key_anyone_else_can_read_is_refused(
 
 def test_a_plain_file_has_no_access_acl(tmp_path: Path) -> None:
     assert _access_acl(_key(tmp_path, 0o400)) is None
+
+
+def test_an_acl_backed_key_must_belong_to_root_or_the_reader() -> None:
+    acl = _systemd_acl()
+    assert _private(0o440, acl, reader_uid=SERVICE, owner_uid=0)
+    assert _private(0o440, acl, reader_uid=SERVICE, owner_uid=SERVICE)
+    # An unrelated owner reads it through the owner entry.
+    assert not _private(0o440, acl, reader_uid=SERVICE, owner_uid=SERVICE + 1)

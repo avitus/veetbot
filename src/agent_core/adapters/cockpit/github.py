@@ -83,18 +83,22 @@ _ACL_USER_OBJ, _ACL_USER, _ACL_GROUP_OBJ, _ACL_GROUP, _ACL_MASK, _ACL_OTHER = (
 _ACL_REQUIRED = frozenset({_ACL_USER_OBJ, _ACL_GROUP_OBJ, _ACL_MASK, _ACL_OTHER})
 
 
-def _private(mode: int, acl: bytes | None, reader_uid: int) -> bool:
+def _private(mode: int, acl: bytes | None, reader_uid: int, owner_uid: int) -> bool:
     """Readable by its owner and, through an ACL, the service's own user, and no one else.
 
     systemd's credential copy is root-owned with an ACL naming the unit's user,
     so `stat` shows the ACL mask in the group bits. Group bits without an ACL
-    are the group's own access.
+    are the group's own access, and an ACL-backed key must belong to root or
+    the reader, whose owner entry would otherwise be one more reader.
     """
 
     if mode & 0o007:
         return False
     if not mode & 0o070:
         return True
+    # The owner entry is one more reader, so it must be root or the reader itself.
+    if owner_uid not in (0, reader_uid):
+        return False
     if acl is None or len(acl) < 4 or (len(acl) - 4) % 8:
         return False
     if struct.unpack_from("<I", acl)[0] != _ACL_VERSION:
@@ -127,7 +131,7 @@ def load_app_private_key(
         raise ValueError("is unavailable") from error
     uid = os.geteuid() if reader_uid is None else reader_uid
     if not stat.S_ISREG(metadata.st_mode) or not _private(
-        stat.S_IMODE(metadata.st_mode), acl_reader(path), uid
+        stat.S_IMODE(metadata.st_mode), acl_reader(path), uid, metadata.st_uid
     ):
         raise ValueError("must be a private regular file readable only by its owner")
     if not key.strip():
