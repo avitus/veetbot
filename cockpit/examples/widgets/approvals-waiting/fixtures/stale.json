@@ -10,6 +10,8 @@
         "oldestAt": "2026-10-22T16:52:00Z",
         "items": [
           {
+            "id": "00000000-0000-4000-8000-0000000000a1",
+            "sessionId": "00000000-0000-4000-8000-0000000000b1",
             "kind": "Website",
             "summary": "Reserve the weekend cabin on its booking page",
             "requestedAt": "2026-10-22T16:52:00Z",

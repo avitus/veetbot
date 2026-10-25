@@ -260,4 +260,38 @@ import Testing
         #expect(board.errorMessage == "The settings do not fit.")
         board.setVisible(false)
     }
+
+    @Test
+    func anOpenIntentNavigatesOnlyToADeliveredIdentifier() async {
+        let delivered = UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!
+        let base = Self.snapshot(cursor: 41)
+        let widget = CockpitWidget(
+            slug: "approvals", revisionID: UUID(), bundleSHA256: String(repeating: "e", count: 64),
+            manifest: ["feeds": .array([.object(["id": .string("veetbot.approvals.pending")])])]
+        )
+        let client = FakeClient()
+        client.queueSnapshot(.success(CockpitSnapshot(
+            cursor: base.cursor, runtime: nil, widgets: base.widgets + [widget],
+            feeds: ["veetbot.approvals.pending": CockpitFeed(current: CockpitFeedEntry(
+                observedAt: Self.now, expectedIntervalSeconds: 300,
+                data: .object(["items": .array([.object([
+                    "id": .string(delivered.uuidString.lowercased()),
+                    "sessionId": .string(delivered.uuidString.lowercased()),
+                ])])])
+            ))]
+        )))
+        client.queueStream([])
+        let board = model(client)
+        var opened: [CockpitDestination] = []
+        board.onOpen = { opened.append($0) }
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        board.hostReported(.open(slug: "approvals", kind: .approval, id: delivered.uuidString.lowercased()))
+        board.hostReported(.open(slug: "approvals", kind: .session, id: delivered.uuidString.lowercased()))
+        board.hostReported(.open(slug: "approvals", kind: .emailThread, id: UUID().uuidString.lowercased()))
+        board.hostReported(.open(slug: "weather", kind: .session, id: delivered.uuidString.lowercased()))
+        board.hostReported(.open(slug: "approvals", kind: .schedule, id: "not-a-uuid"))
+        #expect(opened == [.approval(delivered), .session(delivered)])
+        board.setVisible(false)
+    }
 }

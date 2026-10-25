@@ -35,6 +35,8 @@ public final class CockpitViewModel: ObservableObject {
     @Published public private(set) var actionMessage: String?
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var isSaving = false
+    /// Where a delivered `open` intent navigates; the app routes it to its mode.
+    public var onOpen: (CockpitDestination) -> Void = { _ in }
     /// Server clock minus this device's, so freshness renders with corrected time.
     public private(set) var offsetMilliseconds: Double = 0
 
@@ -91,6 +93,17 @@ public final class CockpitViewModel: ObservableObject {
             quarantine(slug)
         case .select(let slug):
             selectedSlug = slug
+        case .open(let slug, let kind, let id):
+            // Navigation only, and only to what this widget's own feeds delivered.
+            guard let snapshot, CockpitBoard.delivers(id, to: slug, in: snapshot),
+                  let uuid = UUID(uuidString: id)
+            else { return }
+            switch kind {
+            case .approval: onOpen(.approval(uuid))
+            case .emailThread: onOpen(.emailThread(uuid))
+            case .schedule: onOpen(.schedule(uuid))
+            case .session: onOpen(.session(uuid))
+            }
         case .ready, .loaded, .tileError:
             break
         }

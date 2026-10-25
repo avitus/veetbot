@@ -91,6 +91,26 @@ public enum CockpitBoard {
         return allowed.filter(CockpitAssetRoute.isDigest)
     }
 
+    /// Whether a widget's own declared feeds carry this identifier as a value, so
+    /// an `open` intent names only what native code delivered to that widget.
+    public static func delivers(_ id: String, to slug: String, in snapshot: CockpitSnapshot) -> Bool {
+        guard let widget = snapshot.widgets.first(where: { $0.slug == slug }) else { return false }
+        return widget.declaredFeeds.contains { declared in
+            guard let feed = snapshot.feeds[declared.id] else { return false }
+            let entries = [feed.current].compactMap { $0 } + feed.history
+            return entries.contains { contains(id, in: $0.data) }
+        }
+    }
+
+    private static func contains(_ id: String, in value: JSONValue) -> Bool {
+        switch value {
+        case .string(let text): return text == id
+        case .array(let items): return items.contains { contains(id, in: $0) }
+        case .object(let fields): return fields.values.contains { contains(id, in: $0) }
+        case .number, .bool, .null: return false
+        }
+    }
+
     static func milliseconds(_ date: Date) -> Double {
         (date.timeIntervalSince1970 * 1000).rounded()
     }
@@ -155,6 +175,7 @@ public enum CockpitHostMessage: Equatable, Sendable {
     case tileError(slug: String, revision: String)
     case select(slug: String)
     case quarantined(slug: String, revision: String)
+    case open(slug: String, kind: CockpitIntentKind, id: String)
 
     private static let maximumIdentifier = 64
 
@@ -182,10 +203,31 @@ public enum CockpitHostMessage: Equatable, Sendable {
         case "quarantined":
             guard let slug = identifier("slug"), let revision = identifier("revision") else { return nil }
             self = .quarantined(slug: slug, revision: revision)
+        case "open":
+            guard let slug = identifier("slug"), let id = identifier("id"),
+                  let kind = (message["kind"] as? String).flatMap(CockpitIntentKind.init(rawValue:))
+            else { return nil }
+            self = .open(slug: slug, kind: kind, id: id)
         default:
             return nil
         }
     }
+}
+
+/// What a widget may open natively: navigation only, never an effect.
+public enum CockpitIntentKind: String, Sendable {
+    case approval
+    case emailThread = "email_thread"
+    case schedule
+    case session
+}
+
+/// A native destination an `open` intent resolved to.
+public enum CockpitDestination: Equatable, Sendable {
+    case approval(UUID)
+    case emailThread(UUID)
+    case schedule(UUID)
+    case session(UUID)
 }
 
 /// The web view's own defences beside the host's CSP: every web load blocked,

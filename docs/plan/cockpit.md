@@ -847,7 +847,14 @@ interpolation.
 
 - `open` names a destination kind (approval, email thread, schedule, session)
   and an identifier present in a delivered feed, and native code validates
-  both before navigating.
+  both before navigating. A widget raises it from a kit `Row`'s `opens`
+  target or the `useOpen` hook; the realm sends it with the tile's key, the
+  host forwards only a known kind with a bounded identifier for a placed
+  widget, and native code opens it only when that widget's own declared feeds
+  carry the identifier as a value. The platform feeds therefore carry the
+  identifiers to open: each approval's `id` and `sessionId`, each priority
+  thread's `threadId`, each schedule item's `scheduleId` and each run's
+  `sessionId`.
 - `discuss` opens Chat with the widget's context attached as untrusted
   context, following the Email "Discuss in Chat" precedent. The owner writes
   and sends the message.
@@ -1270,9 +1277,13 @@ and one that tries ten web escapes reaches no listener on the machine. Gates
 16, 17, 18 and 21 are bound to native tests that run those suites with the
 headless realm suite.
 
+The `open` intent landed with it: approval rows in the reference widget open
+the approval's conversation.
+
 Still to come in this step's area:
 
-- the `open` and `discuss` intents, which the host protocol does not carry yet;
+- the `discuss` intent, which needs Chat to take a widget's context as
+  untrusted context;
 - gate 20 (state across all three modes) and gate 22 (the realm on the oldest
   supported iPad);
 - gate 19's preflight rebuild of live widgets against a changed kit.

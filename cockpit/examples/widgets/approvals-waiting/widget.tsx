@@ -2,6 +2,8 @@ import { List, Metric, Row, Split, Tile, useNow } from '@veetbot/cockpit-kit';
 import type { WidgetProps } from '@veetbot/cockpit-kit';
 
 interface Approval {
+  id: string;
+  sessionId: string | null;
   kind: string;
   summary: string;
   requestedAt: string;
@@ -38,7 +40,14 @@ export default function ApprovalsWaiting({ feeds, size }: WidgetProps) {
           {figure}
           <List more={Math.max(0, count - pending.items.length)}>
             {pending.items.map((item, index) => (
-              <Row key={index} marker="attention" title={item.kind} detail={item.summary} meta={`${minutes(item.requestedAt)} min`} />
+              <Row
+                key={index}
+                marker="attention"
+                title={item.kind}
+                detail={item.summary}
+                meta={`${minutes(item.requestedAt)} min`}
+                opens={{ kind: 'approval', id: item.id }}
+              />
             ))}
           </List>
         </Split>

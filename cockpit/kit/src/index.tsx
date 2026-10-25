@@ -180,17 +180,35 @@ export function FreshnessIndicator({ freshness, variant = 'short' }: FreshnessIn
 
 export type TileSize = 'sm' | 'md' | 'tall' | 'lg' | 'wide';
 
+/** What a widget can open natively: navigation only, never an effect. */
+export type IntentKind = 'approval' | 'email_thread' | 'schedule' | 'session';
+
+/** A destination by kind and the identifier a delivered feed carries for it. */
+export interface OpenIntent {
+  kind: IntentKind;
+  id: string;
+}
+
 interface TileHostValue {
   size?: TileSize;
   selected?: boolean;
   onOpen?: () => void;
+  onIntent?: (intent: OpenIntent) => void;
 }
 
 const TileHostContext = createContext<TileHostValue>({});
 
 /** The realm wraps each widget in this, so its Tile takes the placement's size and the board's selection. */
-export function TileHost({ size, selected, onOpen, children }: TileHostValue & { children?: ReactNode }) {
-  return <TileHostContext.Provider value={{ size, selected, onOpen }}>{children}</TileHostContext.Provider>;
+export function TileHost({ size, selected, onOpen, onIntent, children }: TileHostValue & { children?: ReactNode }) {
+  return <TileHostContext.Provider value={{ size, selected, onOpen, onIntent }}>{children}</TileHostContext.Provider>;
+}
+
+/**
+ * Ask native code to open a destination a delivered feed names; null outside a board.
+ * Native code opens it only when the identifier is in the widget's own feeds.
+ */
+export function useOpen(): ((intent: OpenIntent) => void) | null {
+  return useContext(TileHostContext).onIntent ?? null;
 }
 
 export interface TileProps {
@@ -605,6 +623,8 @@ export interface RowProps {
   meta?: ReactNode;
   marker?: RowMarker;
   icon?: ReactNode;
+  /** What tapping the row opens natively, from an identifier its feed carries. */
+  opens?: OpenIntent;
 }
 
 /**
@@ -613,11 +633,36 @@ export interface RowProps {
  * @example
  * <Row title="Flight EX 100" detail="Gate B12" value="On time" marker="ok" />
  */
-export function Row({ title, detail, value, meta, marker = 'none', icon }: RowProps) {
+export function Row({ title, detail, value, meta, marker = 'none', icon, opens }: RowProps) {
   const { dim } = useFreshness();
+  const open = useOpen();
   const shown = dim && marker === 'attention' ? 'attention-stale' : dim && marker !== 'none' && marker !== 'error' ? 'stale' : marker;
+  const target = opens && open ? opens : null;
+  const activate = (event: { stopPropagation(): void }) => {
+    if (!target || !open) return;
+    // Opening a row is not selecting its tile.
+    event.stopPropagation();
+    open(target);
+  };
   return (
-    <li className="ck-row" data-marker={shown}>
+    <li
+      className="ck-row"
+      data-marker={shown}
+      data-opens={target ? target.kind : undefined}
+      role={target ? 'button' : undefined}
+      tabIndex={target ? 0 : undefined}
+      onClick={target ? activate : undefined}
+      onKeyDown={
+        target
+          ? (event: KeyboardEvent<HTMLElement>) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                activate(event);
+              }
+            }
+          : undefined
+      }
+    >
       <span className="ck-row-marker" aria-hidden>
         {icon ?? (marker === 'none' ? null : <span className="ck-row-dot" />)}
       </span>

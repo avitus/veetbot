@@ -203,6 +203,10 @@ import Testing
         #expect(parse(["type": "select", "slug": "weather"]) == .select(slug: "weather"))
         #expect(parse(["type": "quarantined", "slug": "weather", "revision": "r1", "reason": "navigated"])
             == .quarantined(slug: "weather", revision: "r1"))
+        #expect(parse(["type": "open", "slug": "weather", "kind": "session", "id": "abc"])
+            == .open(slug: "weather", kind: .session, id: "abc"))
+        #expect(parse(["type": "open", "slug": "weather", "kind": "url", "id": "https://example.test"]) == nil)
+        #expect(parse(["type": "open", "slug": "weather", "kind": "session", "id": String(repeating: "1", count: 80)]) == nil)
         #expect(parse(["type": "ready"], mainFrame: false) == nil)
         #expect(parse(["type": "open_url", "url": "https://example.test"]) == nil)
         #expect(parse(["type": "select", "slug": 7]) == nil)
@@ -220,5 +224,27 @@ import Testing
         guard let list = rules as? [[String: [String: String]]] else { Issue.record("rules"); return }
         #expect(list.map { $0["trigger"]?["url-filter"] } == ["^https?://"])
         #expect(list.map { $0["action"]?["type"] } == ["block"])
+    }
+
+    @Test
+    func aWidgetOpensOnlyWhatItsOwnFeedsDelivered() {
+        let session = "00000000-0000-4000-8000-0000000000b1"
+        var snapshot = Self.snapshot()
+        snapshot = CockpitSnapshot(
+            cursor: snapshot.cursor, serverTime: snapshot.serverTime, runtime: snapshot.runtime,
+            widgets: snapshot.widgets,
+            feeds: snapshot.feeds.merging([
+                "veetbot.approvals.pending": CockpitFeed(current: CockpitFeedEntry(
+                    observedAt: Self.now, expectedIntervalSeconds: 300,
+                    data: .object(["items": .array([.object(["sessionId": .string(session)])])])
+                )),
+            ]) { _, new in new }
+        )
+        #expect(CockpitBoard.delivers(session, to: "approvals", in: snapshot))
+        // Another widget's feed, a value it never received, and an object key are not delivered.
+        #expect(!CockpitBoard.delivers(session, to: "weather", in: snapshot))
+        #expect(!CockpitBoard.delivers("00000000-0000-4000-8000-000000000999", to: "approvals", in: snapshot))
+        #expect(!CockpitBoard.delivers("sessionId", to: "approvals", in: snapshot))
+        #expect(!CockpitBoard.delivers(session, to: "missing", in: snapshot))
     }
 }

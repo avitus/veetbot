@@ -73,6 +73,7 @@ def _approval(n: int, *, minutes: int, principal: str = "owner", **extra: Any) -
         "risk": RiskLevel.HIGH,
         "created_at": NOW - timedelta(minutes=minutes),
         "expires_at": NOW + timedelta(hours=1),
+        "session_id": None,
     }
     return ApprovalRequest.model_construct(**{**values, **extra})
 
@@ -114,6 +115,8 @@ async def test_approvals_are_the_owners_unexpired_ones_oldest_first() -> None:
     assert len(data["items"]) == 10
     first = data["items"][0]
     assert first == {
+        "id": str(_id(52)),
+        "sessionId": None,
         "kind": "Text message",
         "summary": "Send a text",
         "requestedAt": (NOW - timedelta(minutes=97)).isoformat(),
@@ -193,6 +196,7 @@ async def test_priority_email_mirrors_the_priority_view_of_configured_accounts()
     assert data["count"] == 7
     assert len(data["items"]) == 5
     assert data["items"][0] == {
+        "threadId": str(_id(2)),
         "correspondent": "robin@example.test",
         "subject": "Subject 2",
         "state": "fyi",
@@ -357,6 +361,8 @@ async def test_schedule_health_counts_the_last_day_and_lists_what_is_next() -> N
     # Times are the schedule's local clock: 17:00 UTC less ten hours is 00:00 in Los Angeles.
     assert data["items"][0]["time"] == "0:00"
     assert len({item["id"] for item in data["items"]}) == len(data["items"])
+    # Each item names its schedule, so a widget can open it.
+    assert [item["scheduleId"] for item in data["items"]][-1] == str(_id(3))
 
 
 # Calls -------------------------------------------------------------------
@@ -532,6 +538,8 @@ async def test_run_activity_counts_running_waiting_and_recent_failures() -> None
     data = await source.read(uow, OWNER, NOW)
     _fits(source, data)
     assert (data["running"], data["waiting"], data["failed"]) == (1, 1, 1)
+    # Each item names its conversation, so a widget can open it.
+    assert [item.pop("sessionId") for item in data["items"]] == [str(_id(n)) for n in (1, 2, 3)]
     assert data["items"] == [
         {
             "title": "Plan the trip",

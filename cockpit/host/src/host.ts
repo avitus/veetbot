@@ -3,10 +3,12 @@
 // depth) and that widget's own settings, and nothing else. It also runs the
 // watchdog: an unresponsive or navigated realm is reloaded and the most
 // recently changed widget quarantined.
-import type { FeedView } from '../../kit/src/index';
+import type { FeedView, IntentKind } from '../../kit/src/index';
 import type { FeedEnvelope, HostToNative, HostToRealm, NativeMessage, RealmTile, RealmToHost, WidgetPlacement } from './protocol';
 
 const HEARTBEAT_MS = 1000;
+const INTENT_KINDS: ReadonlySet<string> = new Set(['approval', 'email_thread', 'schedule', 'session']);
+const MAX_INTENT_ID = 64;
 const DEADLINE_MS = 5000;
 
 type Snapshot = Extract<NativeMessage, { type: 'snapshot' }>;
@@ -136,6 +138,16 @@ function fromRealm(event: MessageEvent<RealmToHost>) {
     case 'select': {
       const widget = typeof message.key === 'string' ? widgetFor(message.key) : undefined;
       if (widget) toNative({ type: 'select', slug: widget.slug });
+      break;
+    }
+    case 'intent': {
+      // Navigation only: a known kind and a bounded identifier; native code
+      // checks the identifier is in this widget's own feeds before opening it.
+      const widget = typeof message.key === 'string' ? widgetFor(message.key) : undefined;
+      const { kind, id } = message;
+      if (widget && typeof kind === 'string' && INTENT_KINDS.has(kind) && typeof id === 'string' && id.length > 0 && id.length <= MAX_INTENT_ID) {
+        toNative({ type: 'open', slug: widget.slug, kind: kind as IntentKind, id });
+      }
       break;
     }
     default:

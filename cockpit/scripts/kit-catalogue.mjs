@@ -95,7 +95,7 @@ export function kitCatalogue() {
     }
     primitives.push({ name, description, props, example });
   }
-  const shared = ['FeedFreshness', 'FeedView', 'WidgetProps', 'BarDatum', 'TimelineItem'];
+  const shared = ['FeedFreshness', 'FeedView', 'WidgetProps', 'BarDatum', 'TimelineItem', 'OpenIntent'];
   for (const name of shared) {
     const declaration = interfaces.get(name);
     if (declaration) types[name] = `{ ${declaration.members.map((member) => member.getText(source).replace(/\s+/g, ' ').replace(/;$/, '')).join('; ')} }`;
@@ -104,7 +104,7 @@ export function kitCatalogue() {
     kit_api: kitApi,
     rules: RULES,
     primitives,
-    helpers: helpers.filter((helper) => ['useNow', 'useFreshness', 'freshnessLevel', 'freshnessText', 'formatAge', 'formatInterval', 'formatClock', 'formatCountdown', 'ageSeconds'].includes(helper.name)),
+    helpers: helpers.filter((helper) => ['useNow', 'useFreshness', 'freshnessLevel', 'freshnessText', 'formatAge', 'formatInterval', 'formatClock', 'formatCountdown', 'ageSeconds', 'useOpen'].includes(helper.name)),
     types: Object.fromEntries(Object.entries(types).sort(([a], [b]) => a.localeCompare(b))),
   };
 }

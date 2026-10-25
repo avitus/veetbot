@@ -50,6 +50,8 @@ PEOPLE_FEED = "veetbot.people.recent"
 RUNS_FEED = "veetbot.runs.activity"
 
 _TEXT = {"type": "string", "maxLength": 200}
+# An identifier a widget hands back to open its destination natively.
+_IDENTIFIER = {"type": "string", "maxLength": 64}
 _INSTANT = {"type": "string", "format": "date-time"}
 _COUNT = {"type": "integer", "minimum": 0}
 _DAY = timedelta(days=1)
@@ -132,6 +134,8 @@ class ApprovalsSource:
         {"count": _COUNT, "oldestAt": {"anyOf": [_INSTANT, {"type": "null"}]}},
         _object(
             {
+                "id": _IDENTIFIER,
+                "sessionId": {"anyOf": [_IDENTIFIER, {"type": "null"}]},
                 "kind": _TEXT,
                 "summary": {"type": "string", "maxLength": 300},
                 "requestedAt": _INSTANT,
@@ -165,6 +169,8 @@ class ApprovalsSource:
             "oldestAt": _instant(pending[0].created_at) if pending else None,
             "items": [
                 {
+                    "id": str(row.id),
+                    "sessionId": None if row.session_id is None else str(row.session_id),
                     "kind": _approval_kind(row),
                     "summary": _shown(row.action_summary, 300),
                     "requestedAt": _instant(row.created_at),
@@ -198,6 +204,7 @@ class EmailPrioritySource:
         {"count": _COUNT},
         _object(
             {
+                "threadId": _IDENTIFIER,
                 "correspondent": _TEXT,
                 "subject": _TEXT,
                 "state": {"enum": ["needs_reply", "drafted", "fyi"]},
@@ -233,6 +240,7 @@ class EmailPrioritySource:
         for thread in priority[:_EMAIL_ITEMS]:
             items.append(
                 {
+                    "threadId": str(thread.id),
                     "correspondent": _correspondent(thread.senders),
                     "subject": _shown(thread.subject),
                     "state": await self._state(uow, principal, thread),
@@ -294,6 +302,7 @@ class SchedulesSource:
         _object(
             {
                 "id": {"type": "string", "maxLength": 64},
+                "scheduleId": _IDENTIFIER,
                 "time": {"type": "string", "maxLength": 8},
                 "title": _TEXT,
                 "detail": {"type": "string", "maxLength": 40},
@@ -324,7 +333,15 @@ class SchedulesSource:
             zone = _zone(revision)
             if schedule.state is ScheduleState.PAUSED:
                 paused.append(
-                    self._item(f"paused-{schedule.id}", "—", title, "Paused", "attention", None)
+                    self._item(
+                        f"paused-{schedule.id}",
+                        schedule.id,
+                        "—",
+                        title,
+                        "Paused",
+                        "attention",
+                        None,
+                    )
                 )
                 continue
             for occurrence in await uow.schedule_occurrences.list(
@@ -338,7 +355,18 @@ class SchedulesSource:
                 counts["failed"] += int(state == "failed")
                 at = occurrence.nominal_fire_at
                 dated.append(
-                    (at, self._item(str(occurrence.id), _clock(at, zone), title, detail, state, at))
+                    (
+                        at,
+                        self._item(
+                            str(occurrence.id),
+                            schedule.id,
+                            _clock(at, zone),
+                            title,
+                            detail,
+                            state,
+                            at,
+                        ),
+                    )
                 )
             if schedule.next_fire_at is not None:
                 at = schedule.next_fire_at
@@ -346,7 +374,13 @@ class SchedulesSource:
                     (
                         at,
                         self._item(
-                            f"next-{schedule.id}", _clock(at, zone), title, "Next", "next", at
+                            f"next-{schedule.id}",
+                            schedule.id,
+                            _clock(at, zone),
+                            title,
+                            "Next",
+                            "next",
+                            at,
                         ),
                     )
                 )
@@ -356,10 +390,17 @@ class SchedulesSource:
 
     @staticmethod
     def _item(
-        identifier: str, time: str, title: str, detail: str, state: str, at: datetime | None
+        identifier: str,
+        schedule_id: UUID,
+        time: str,
+        title: str,
+        detail: str,
+        state: str,
+        at: datetime | None,
     ) -> dict[str, Any]:
         return {
             "id": identifier,
+            "scheduleId": str(schedule_id),
             "time": time,
             "title": title,
             "detail": detail,
@@ -547,6 +588,7 @@ class RunsSource:
         {"running": _COUNT, "waiting": _COUNT, "failed": _COUNT},
         _object(
             {
+                "sessionId": _IDENTIFIER,
                 "title": _TEXT,
                 "state": {
                     "enum": ["running", "waiting_for_approval", "waiting_for_user", "failed"]
@@ -582,7 +624,17 @@ class RunsSource:
             else:
                 continue
             title = _shown(session.title) or "Untitled chat"
-            entries.append((since, {"title": title, "state": state, "since": _instant(since)}))
+            entries.append(
+                (
+                    since,
+                    {
+                        "sessionId": str(session.id),
+                        "title": title,
+                        "state": state,
+                        "since": _instant(since),
+                    },
+                )
+            )
         entries.sort(key=lambda pair: pair[0], reverse=True)
         return {**counts, "items": [entry for _since, entry in entries[:_RUN_ITEMS]]}
 

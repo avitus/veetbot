@@ -40,6 +40,8 @@ turns:
                   "oldestAt": "2026-10-22T16:52:00Z",
                   "items": [
                     {
+                      "id": "00000000-0000-4000-8000-0000000000a1",
+                      "sessionId": "00000000-0000-4000-8000-0000000000b1",
                       "kind": "Website",
                       "summary": "Reserve the weekend cabin on its booking page",
                       "requestedAt": "2026-10-22T16:52:00Z",
@@ -64,6 +66,8 @@ turns:
                   "oldestAt": "2026-10-22T17:42:00Z",
                   "items": [
                     {
+                      "id": "00000000-0000-4000-8000-0000000000a1",
+                      "sessionId": "00000000-0000-4000-8000-0000000000b1",
                       "kind": "Website",
                       "summary": "Reserve the weekend cabin on its booking page",
                       "requestedAt": "2026-10-22T17:42:00Z",
@@ -71,6 +75,8 @@ turns:
                       "risk": "high"
                     },
                     {
+                      "id": "00000000-0000-4000-8000-0000000000a2",
+                      "sessionId": "00000000-0000-4000-8000-0000000000b2",
                       "kind": "Text message",
                       "summary": "Move the appointment to Tuesday",
                       "requestedAt": "2026-10-22T17:56:00Z",
@@ -98,6 +104,8 @@ turns:
           import type { WidgetProps } from '@veetbot/cockpit-kit';
 
           interface Approval {
+            id: string;
+            sessionId: string | null;
             kind: string;
             summary: string;
             requestedAt: string;
@@ -134,7 +142,14 @@ turns:
                     {figure}
                     <List more={Math.max(0, count - pending.items.length)}>
                       {pending.items.map((item, index) => (
-                        <Row key={index} marker="attention" title={item.kind} detail={item.summary} meta={`${minutes(item.requestedAt)} min`} />
+                        <Row
+                          key={index}
+                          marker="attention"
+                          title={item.kind}
+                          detail={item.summary}
+                          meta={`${minutes(item.requestedAt)} min`}
+                          opens={{ kind: 'approval', id: item.id }}
+                        />
                       ))}
                     </List>
                   </Split>

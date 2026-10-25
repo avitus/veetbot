@@ -396,7 +396,7 @@ at the top of each Mac left pane, and Cockpit shows its unavailable state.
 Every other gate is pending.
 
 - [ ] Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image
-- [ ] Build step 10 remainder: the open and discuss intents, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19's preflight rebuild of live widgets
+- [ ] Build step 10 remainder: the discuss intent, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19's preflight rebuild of live widgets
 - [ ] Build step 11: preview rendering
 - [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; hosted CI, review and production delivery
 

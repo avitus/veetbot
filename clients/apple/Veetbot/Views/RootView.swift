@@ -122,6 +122,12 @@ public struct RootView: View {
         .sheet(item: $globalPeopleLookup) { PeopleLookupSheet(lookup: $0, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalMemory) { MemoryBrowserView(model: globalMemory, sessionID: model.selectedSessionID) }
         .sheet(isPresented: $showingGlobalPersona) { PersonaEditorView(model: globalPersona) }
+        .onChange(of: coordinator.requestedSchedule) { _, id in
+            guard let id else { return }
+            coordinator.requestedSchedule = nil
+            showingGlobalSchedules = true
+            Task { await globalSchedules.loadDetail(id) }
+        }
         .sheet(isPresented: $showingGlobalSchedules) {
             ScheduleBrowserView(model: globalSchedules)
                 .environment(\.openScheduleReport) { sessionID in
