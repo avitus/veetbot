@@ -1008,6 +1008,10 @@ and retain readbacks. The workflow branch selector alone grants no signing
 access. This route does not require a push to `dev` or permit publication from
 the release branch.
 
+For PR #196, ADR-0252 applies the same temporary exact-commit procedure to
+`codex/dreaming-candidate-evidence-release`. Restore the original restrictions
+immediately after its signing attempt, including failure or cancellation.
+
 Second, create a restricted context named `veetbot-apple-testflight` with:
 
 | Variable | Value |

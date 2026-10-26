@@ -381,4 +381,5 @@ nav:
       - 'ADR-0244: Standing owner-reviewed work-inbox junk filtering': adr/0244-standing-owner-email-junk-filter.md
       - 'ADR-0245: Owner-grounded manual saves': adr/0245-owner-grounded-manual-saves.md
       - 'ADR-0246: Bounded owner recall restart': adr/0246-bounded-owner-recall-restart.md
+      - 'ADR-0252: Dreaming release signing': adr/0252-dreaming-release-signing.md
   - Changelog: changelog.md

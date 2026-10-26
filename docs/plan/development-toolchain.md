@@ -620,6 +620,10 @@ admission of the final reviewed revision, with original project/group and
 SSH/API-configuration restrictions preserved and restored after the attempt.
 The branch selector alone grants no access to credentials or publication.
 
+ADR-0252 adds `codex/dreaming-candidate-evidence-release` for PR #196 under the
+same final-reviewed-commit admission and immediate restoration procedure.
+It grants no standing signing access or publication from the dreaming branch.
+
 Job 8 is delivery, not a verification partition and not part of `make check`.
 After the production API reports the matching tested revision, it installs the
 CircleCI-managed `veetbot-app-store` signing bundle, imports the installer

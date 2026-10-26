@@ -1225,7 +1225,15 @@ def test_ci_has_the_required_partitions() -> None:
     assert verify["jobs"][8] == {
         "apple-signing-smoke": {
             "context": "veetbot-apple-signing",
-            "filters": {"branches": {"only": ["dev", "codex/recall-production-release"]}},
+            "filters": {
+                "branches": {
+                    "only": [
+                        "dev",
+                        "codex/recall-production-release",
+                        "codex/dreaming-candidate-evidence-release",
+                    ]
+                }
+            },
         }
     }
     assert verify["jobs"][9:12] == [
@@ -1314,14 +1322,22 @@ def test_hosted_verification_is_automatic_only_on_main() -> None:
         ]
     }
 
-    # Signing selects dev and the isolated recall release; delivery stays main-only.
+    # Signing selects dev and approved isolated releases; delivery stays main-only.
     filtered = {
         next(iter(job)): next(iter(job.values()))["filters"]
         for job in verify["jobs"]
         if isinstance(job, dict) and "filters" in next(iter(job.values()))
     }
     assert filtered == {
-        "apple-signing-smoke": {"branches": {"only": ["dev", "codex/recall-production-release"]}},
+        "apple-signing-smoke": {
+            "branches": {
+                "only": [
+                    "dev",
+                    "codex/recall-production-release",
+                    "codex/dreaming-candidate-evidence-release",
+                ]
+            }
+        },
         "package-release": {"branches": {"only": "main"}},
         "deploy-app": {"branches": {"only": "main"}},
         "deploy-nginx": {"branches": {"only": "main"}},
@@ -1660,7 +1676,15 @@ def test_dev_signing_smoke_exercises_shared_package_script_without_upload() -> N
     )
     assert smoke_invocation == {
         "context": "veetbot-apple-signing",
-        "filters": {"branches": {"only": ["dev", "codex/recall-production-release"]}},
+        "filters": {
+            "branches": {
+                "only": [
+                    "dev",
+                    "codex/recall-production-release",
+                    "codex/dreaming-candidate-evidence-release",
+                ]
+            }
+        },
     }
     assert "Diagnose the managed signing handoff" not in {
         step["run"]["name"]
