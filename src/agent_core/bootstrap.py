@@ -752,6 +752,7 @@ from agent_core.tools.schedule_create import (
     SCHEDULE_CREATE_TOOL_NAME,
     CockpitScheduleCreateTool,
     LegacyScheduleCreateTool,
+    PreviousCockpitScheduleCreateTool,
     PreviousScheduleCreateTool,
     ScheduleCreateTool,
     SingleCallScheduleCreateTool,
@@ -762,7 +763,9 @@ from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_PAUSE_TOOL_NAME,
     SCHEDULE_RESUME_TOOL_NAME,
     SCHEDULE_UPDATE_TOOL_NAME,
+    CockpitScheduleUpdateTool,
     LegacyScheduleListTool,
+    PreviousScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
     SchedulePauseTool,
@@ -3223,18 +3226,22 @@ async def _compose(
             )
         )
         if settings.cockpit_enabled:
-            registry.register(
-                CockpitScheduleCreateTool(
-                    schedule_service,
-                    agent,
-                    schedule_definition_limits,
-                    uow_factory=uow_factory,
-                    calling_enabled=settings.call_enabled,
+            for cockpit_create in (PreviousCockpitScheduleCreateTool, CockpitScheduleCreateTool):
+                registry.register(
+                    cockpit_create(
+                        schedule_service,
+                        agent,
+                        schedule_definition_limits,
+                        uow_factory=uow_factory,
+                        calling_enabled=settings.call_enabled,
+                    )
                 )
-            )
         registry.register(LegacyScheduleListTool(schedule_service))
+        registry.register(PreviousScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
+        if settings.cockpit_enabled:
+            registry.register(CockpitScheduleUpdateTool(schedule_service))
         registry.register(SchedulePauseTool(schedule_service))
         registry.register(ScheduleResumeTool(schedule_service))
         registry.register(ScheduleCancelTool(schedule_service))

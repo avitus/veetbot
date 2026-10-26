@@ -20,16 +20,23 @@ from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.recurrence import RecurrenceCalculator
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.domain.schedules import (
+    COCKPIT_REFRESH_MIN_AGE,
+    FEED_KEEPING_SCOPE,
     AuthoritySnapshot,
+    IntervalCadence,
     OccurrenceDisposition,
     OccurrenceTrigger,
     OnceCadence,
     Schedule,
     ScheduleAdmissionOutcome,
+    ScheduleCursor,
     ScheduleOccurrence,
     SchedulePauseReason,
+    ScheduleRefresh,
+    ScheduleRefreshOutcome,
     ScheduleRevision,
     ScheduleState,
+    cockpit_refresh_key,
 )
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
@@ -53,6 +60,8 @@ WriteProbe = Callable[[str], None]
 
 # ADR-0225 part C: at most this many Run-now occurrences per schedule a day.
 MANUAL_RUNS_PER_DAY = 5
+# ADR-0254: how many active schedules a Cockpit refresh reads at a time.
+REFRESH_PAGE_SIZE = 50
 
 
 class _NotificationProducer(Protocol):
@@ -143,6 +152,8 @@ class ScheduleMaterializer:
                         OccurrenceDisposition.SKIPPED_OVERLAP,
                         "schedule.in_flight",
                         increment_failure=False,
+                        # ADR-0254: a feed refresh that outlasts its interval is routine.
+                        notify=not isinstance(revision.cadence, IntervalCadence),
                     )
 
             if now > nominal + timedelta(seconds=revision.misfire_grace_seconds):
@@ -361,38 +372,7 @@ class ScheduleMaterializer:
                     "schedule.run_now_daily_limit",
                     "this schedule already ran on request five times today",
                 )
-            authority = await self._principals.current(schedule.tenant_id, schedule.principal_id)
-            if authority is None or not authority.enabled:
-                raise ConflictError(
-                    "the schedule's owner cannot run it", reason="schedule.principal_disabled"
-                )
-            if not revision.requested_scopes <= authority.principal.scopes:
-                raise ConflictError(
-                    "the schedule asks for access it no longer has",
-                    reason="schedule.scope_revoked",
-                )
-            try:
-                agent = await uow.agents.get_version(revision.agent_id, revision.agent_version)
-            except NotFoundError as exc:
-                raise ConflictError(
-                    "the schedule's agent is gone", reason="schedule.agent_version_missing"
-                ) from exc
-            if agent.policy_profile != revision.policy_profile:
-                raise ConflictError(
-                    "the schedule's policy changed", reason="schedule.policy_profile_mismatch"
-                )
-            admission_controller = self._admission or uow.schedule_admission
-            admission = await admission_controller.check(schedule.tenant_id, revision, now)
-            if admission.outcome is ScheduleAdmissionOutcome.RETRY:
-                raise RateLimitedError(
-                    admission.reason_code or "schedule.admission_busy",
-                    "scheduled work is busy; try again in a minute",
-                )
-            if admission.outcome is ScheduleAdmissionOutcome.REJECT:
-                raise ConflictError(
-                    "the spending ceiling for scheduled work is reached",
-                    reason=admission.reason_code,
-                )
+            authority, agent = await self._manual_start_checks(uow, schedule, revision, now)
             occurrence = await self._start_run(
                 uow,
                 schedule,
@@ -407,6 +387,148 @@ class ScheduleMaterializer:
             await self._append_occurrence_event(uow, occurrence, schedule, schedule.state, now)
             self._write_probe("process_event")
             return occurrence, False
+
+    async def refresh_feeds(self, principal: Principal) -> list[ScheduleRefresh]:
+        """Start one run now of each active, recurring feed-keeping schedule (ADR-0254).
+
+        Each run is a manual occurrence keyed by the UTC minute. A schedule
+        whose latest run is still going, or started under a minute ago, is
+        skipped. A failed check is reported for that schedule, never raised,
+        so the others still start. These runs leave Run-now's daily count alone.
+        """
+        refreshes: list[ScheduleRefresh] = []
+        for schedule_id in await self._feed_schedule_ids(principal):
+            refresh = await self._refresh_one(principal, schedule_id)
+            if refresh is not None:
+                refreshes.append(refresh)
+        return refreshes
+
+    async def _feed_schedule_ids(self, principal: Principal) -> list[UUID]:
+        found: list[UUID] = []
+        cursor: ScheduleCursor | None = None
+        async with self._uow_factory() as uow:
+            while True:
+                page = await uow.schedules.list(
+                    principal,
+                    limit=REFRESH_PAGE_SIZE + 1,
+                    cursor=cursor,
+                    states=frozenset({ScheduleState.ACTIVE}),
+                )
+                visible = page[:REFRESH_PAGE_SIZE]
+                revisions = await uow.schedules.get_revisions(
+                    tuple((schedule.id, schedule.current_revision) for schedule in visible),
+                    principal,
+                )
+                found.extend(
+                    schedule.id
+                    for schedule in visible
+                    if _keeps_a_feed(revisions[(schedule.id, schedule.current_revision)])
+                )
+                if len(page) <= REFRESH_PAGE_SIZE or not visible:
+                    return sorted(found)
+                tail = visible[-1]
+                cursor = ScheduleCursor(updated_at=tail.updated_at, id=tail.id)
+
+    async def _refresh_one(self, principal: Principal, schedule_id: UUID) -> ScheduleRefresh | None:
+        now = self._clock.now()
+        key = cockpit_refresh_key(now)
+        async with self._uow_factory() as uow:
+            try:
+                schedule = await uow.schedules.lock(schedule_id, principal)
+            except NotFoundError:
+                # Purged since the listing: there is nothing left to refresh.
+                return None
+            if schedule.state is not ScheduleState.ACTIVE:
+                return None
+            owner = Principal(
+                tenant_id=schedule.tenant_id,
+                principal_id=schedule.principal_id,
+                roles=set(),
+                scopes=set(),
+            )
+            revision = await uow.schedules.get_revision(
+                schedule.id, schedule.current_revision, owner
+            )
+            if not _keeps_a_feed(revision):
+                return None
+            latest = await uow.schedule_occurrences.latest_materialized(schedule.id)
+            if latest is not None and latest.run_id is not None:
+                linked = await uow.runs.get(latest.run_id, owner)
+                if linked.status not in TERMINAL_RUN_STATUSES:
+                    return ScheduleRefresh(
+                        schedule_id=schedule.id, outcome=ScheduleRefreshOutcome.RUNNING
+                    )
+            started_at = None if latest is None else latest.materialized_at
+            if (
+                started_at is not None and now - started_at < COCKPIT_REFRESH_MIN_AGE
+            ) or await uow.schedule_occurrences.get_manual(schedule.id, key) is not None:
+                return ScheduleRefresh(
+                    schedule_id=schedule.id, outcome=ScheduleRefreshOutcome.RECENT
+                )
+            try:
+                authority, agent = await self._manual_start_checks(uow, schedule, revision, now)
+            except (ConflictError, RateLimitedError) as exc:
+                return ScheduleRefresh(
+                    schedule_id=schedule.id,
+                    outcome=ScheduleRefreshOutcome.REFUSED,
+                    reason=exc.reason or "schedule.refresh_refused",
+                )
+            occurrence = await self._start_run(
+                uow,
+                schedule,
+                revision,
+                agent,
+                authority,
+                now,
+                now,
+                trigger=OccurrenceTrigger.MANUAL,
+                manual_request_key=key,
+            )
+            await self._append_occurrence_event(uow, occurrence, schedule, schedule.state, now)
+            self._write_probe("process_event")
+            return ScheduleRefresh(schedule_id=schedule.id, outcome=ScheduleRefreshOutcome.STARTED)
+
+    async def _manual_start_checks(
+        self,
+        uow: ScheduleUnitOfWork,
+        schedule: Schedule,
+        revision: ScheduleRevision,
+        now: datetime,
+    ) -> tuple[AuthoritySnapshot, AgentSpec]:
+        """The checks a cadence firing records as a failure, raised for a waiting caller."""
+        authority = await self._principals.current(schedule.tenant_id, schedule.principal_id)
+        if authority is None or not authority.enabled:
+            raise ConflictError(
+                "the schedule's owner cannot run it", reason="schedule.principal_disabled"
+            )
+        if not revision.requested_scopes <= authority.principal.scopes:
+            raise ConflictError(
+                "the schedule asks for access it no longer has",
+                reason="schedule.scope_revoked",
+            )
+        try:
+            agent = await uow.agents.get_version(revision.agent_id, revision.agent_version)
+        except NotFoundError as exc:
+            raise ConflictError(
+                "the schedule's agent is gone", reason="schedule.agent_version_missing"
+            ) from exc
+        if agent.policy_profile != revision.policy_profile:
+            raise ConflictError(
+                "the schedule's policy changed", reason="schedule.policy_profile_mismatch"
+            )
+        admission_controller = self._admission or uow.schedule_admission
+        admission = await admission_controller.check(schedule.tenant_id, revision, now)
+        if admission.outcome is ScheduleAdmissionOutcome.RETRY:
+            raise RateLimitedError(
+                admission.reason_code or "schedule.admission_busy",
+                "scheduled work is busy; try again in a minute",
+            )
+        if admission.outcome is ScheduleAdmissionOutcome.REJECT:
+            raise ConflictError(
+                "the spending ceiling for scheduled work is reached",
+                reason=admission.reason_code,
+            )
+        return authority, agent
 
     async def _start_run(
         self,
@@ -560,6 +682,7 @@ class ScheduleMaterializer:
         authority_version: str | None = None,
         *,
         increment_failure: bool = True,
+        notify: bool = True,
     ) -> ScheduleOccurrence:
         occurrence = ScheduleOccurrence(
             id=self._ids.new_id(),
@@ -578,7 +701,7 @@ class ScheduleMaterializer:
         )
         await self._append_occurrence_event(uow, occurrence, schedule, advanced.state, now)
         self._write_probe("process_event")
-        if self._notification_producer is not None:
+        if notify and self._notification_producer is not None:
             produced = await self._notification_producer.for_schedule_occurrence(
                 uow,
                 schedule=schedule,
@@ -770,3 +893,11 @@ class ScheduleMaterializer:
 async def _materialized_count(uow: ScheduleUnitOfWork, schedule_id: UUID, owner: Principal) -> int:
     occurrences = await uow.schedule_occurrences.list(schedule_id, owner, limit=100)
     return sum(item.disposition is OccurrenceDisposition.MATERIALIZED for item in occurrences)
+
+
+def _keeps_a_feed(revision: ScheduleRevision) -> bool:
+    """A recurring schedule whose runs may publish a Cockpit feed (ADR-0254)."""
+    return (
+        not isinstance(revision.cadence, OnceCadence)
+        and FEED_KEEPING_SCOPE in revision.requested_scopes
+    )

@@ -73,6 +73,24 @@ import Testing
         )
     }
 
+    /// ADR-0254: a feed-keeping schedule's interval reads in minutes or hours.
+    @Test
+    func testAnIntervalCadenceReadsAsHowOftenItFires() throws {
+        func summary(_ minutes: Int) throws -> String {
+            let cadence = try JSONDecoder.server.decode(
+                ScheduleCadenceView.self,
+                from: Data(#"{"kind": "INTERVAL", "every_minutes": \#(minutes), "timezone": "UTC"}"#.utf8)
+            )
+            return scheduleCadenceSummary(cadence, deviceTimeZoneIdentifier: "UTC")
+        }
+        #expect(try summary(1) == "Every minute")
+        #expect(try summary(15) == "Every 15 min")
+        #expect(try summary(60) == "Every hour")
+        #expect(try summary(90) == "Every 90 min")
+        #expect(try summary(120) == "Every 2 h")
+        #expect(try summary(1440) == "Every day")
+    }
+
     @Test
     func testDetailLoadsThePointReadAndShowsTheFullInstruction() throws {
         let source = try source(at: "Veetbot/Views/ScheduleDetailView.swift")

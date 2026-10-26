@@ -55,7 +55,9 @@ on 2026-08-27 and recorded in ADR-0073, adds monthly and yearly calendar rules
 and widens conversational creation to daily, weekly, monthly, and yearly
 schedules. Arbitrary cron or RFC 5545 input, interval multipliers, dependency
 graphs, workflow DAGs, and continuous-session recurrence remain outside the
-closed extension. Milestone 23, authorized by the owner on 2026-09-02 and
+closed extension. ADR-0254, which the owner asked for on 2026-10-26, adds one
+`INTERVAL` cadence that only a feed-keeping Cockpit schedule may use. The
+union stays closed for every other schedule. Milestone 23, authorized by the owner on 2026-09-02 and
 recorded in ADR-0080, brings the existing list, pause, resume, and cancel
 service operations into the governed model-tool pipeline. The owner expanded
 Milestone 23 on 2026-09-04 through ADR-0088: `schedule.update` adds a closed,
@@ -148,6 +150,7 @@ class CadenceKind(StrEnum):
     WEEKLY = "WEEKLY"
     MONTHLY = "MONTHLY"
     YEARLY = "YEARLY"
+    INTERVAL = "INTERVAL"      # ADR-0254: feed-keeping schedules only
 
 
 class ScheduleRevision(BaseModel):
@@ -265,7 +268,17 @@ MONTHLY {"local_time": "HH:MM[:SS]", "days_of_month": [1..31],
 YEARLY {"local_time": "HH:MM[:SS]",
         "dates": [{"month": 1..12, "day": 1..31}, ...],
         "timezone": IANA name}
+INTERVAL {"every_minutes": 1..1440, "timezone": IANA name}
 ```
+
+An `INTERVAL` cadence (ADR-0254) fires at the whole multiples of
+`every_minutes` minutes since 1970-01-01T00:00Z. That epoch is its explicit
+anchor, so its phase depends only on the value, never on creation, revision or
+daylight saving. Its zone only presents its times. Only a definition whose
+requested scopes include `cockpit.write` may use it; any other is refused as
+`schedule.interval_needs_feed`. An overlap skip of an interval schedule is
+recorded without a notification, because a refresh that outlasts its interval
+is routine.
 
 ISO weekday 1 is Monday and 7 is Sunday. Weekly weekdays are unique and stored
 in ascending order. Monthly numbered days are unique and stored in ascending
@@ -613,6 +626,13 @@ and tenant admission are checked as at materialization and refused instead of
 recorded. `next_fire_at` does not move; a cadence instant due while the manual
 run is active is `SKIPPED_OVERLAP` by the existing rule.
 
+A Cockpit refresh (ADR-0254, [cockpit.md](cockpit.md#refresh-on-entry)) uses
+the same manual occurrence for each active, recurring, feed-keeping schedule.
+Its key is `cockpit.refresh:<UTC minute>`, and it does not count toward the
+five a day. It skips a schedule whose latest run is still going, or started
+under a minute ago. It reports a failed check for that schedule instead of
+raising it, and its completed run sends no report notification.
+
 Validation rejects unknown cadence fields, naive datetimes, invalid IANA zones,
 duplicate or out-of-range weekdays, duplicate or out-of-range monthly days,
 empty monthly selectors, duplicate or impossible yearly dates, empty yearly
@@ -668,10 +688,12 @@ summaries are:
 - DAILY: the local time;
 - WEEKLY: ISO weekday names and local time;
 - MONTHLY: numbered days, explicit last day, and local time;
-- YEARLY: month/day selectors and local time.
+- YEARLY: month/day selectors and local time;
+- INTERVAL: "Every minute", "Every N min", "Every hour", "Every N h" or
+  "Every day".
 
-For every recurring cadence, the summary appends the stored IANA zone only
-when it differs from the device's current zone. This is presentation only: the
+For every calendar cadence, the summary appends the stored IANA zone only
+when it differs from the device's current zone; an interval never shows one. This is presentation only: the
 wire model retains the zone and the server remains authoritative for
 recurrence and daylight-saving-time behavior.
 
@@ -1041,7 +1063,8 @@ object is required:
 
 `at` is one timezone-aware ISO 8601 instant. A recurring `cadence` is exactly
 one `DAILY`, `WEEKLY`, `MONTHLY`, or `YEARLY` payload from the closed domain
-union above. Natural-language parsing is not part of the tool: the model uses
+union above. Version 1.6.0 also accepts `INTERVAL`, but only together with
+`publish_cockpit_feed=true`. Natural-language parsing is not part of the tool: the model uses
 `system.current_time` and, when the date, local time, calendar selector, or
 timezone is not known, `conversation.ask_user` before proposing a call.
 Supplying both `at` and `cadence`, or neither, fails before schedule state.
@@ -1070,7 +1093,10 @@ calling is not composed. A `call_plan` (version 1.4.0, ADR-0221) narrows a call
 schedule to `mcp.bland_call.use` alone. In a Cockpit deployment, version 1.5.0's
 `publish_cockpit_feed=true` requests `cockpit.read` and `cockpit.write` so the
 run can publish a feed ([cockpit.md](cockpit.md#assistant-feeds)); without the
-Cockpit flag 1.5.0 is not registered. Its step, model-call, and tool-call
+Cockpit flag 1.5.0 is not registered. Version 1.6.0 (ADR-0254) replaces it
+there and offers `INTERVAL`. 1.5.0 stays registered unchanged for pinned runs.
+A feed-keeping schedule that either version creates is
+`notify: attention_only`, because its widget is its report. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
 ceilings. Cost is the minimum of the active agent's finite cost or `5` and the
 schedule cost ceiling; run timeout is the lesser of 300 seconds and its
@@ -1151,7 +1177,10 @@ enter the default-agent roster only while both schedule deployment flags are
 enabled.
 
 `schedule.list` accepts an optional `limit` from 1 through 50, defaulting to
-50, and an optional opaque `cursor`. It returns `items` and `next_cursor`.
+50, and an optional opaque `cursor`. Version 1.1.0 (ADR-0254), always
+registered, also lists an `INTERVAL` cadence; 1.0.2 and 1.0.1 stay registered
+for pinned runs and leave interval schedules out of their pages, because
+their output cannot describe one. It returns `items` and `next_cursor`.
 Each item is a summary allow-list containing `schedule_id`, `title`, `state`,
 `pause_reason`, `current_revision`, `next_fire_at`, and the canonical
 `cadence`. It never returns the instruction, policy profile, requested scopes,
@@ -1208,7 +1237,8 @@ instant.
 
 At least one of `title`, `instruction`, `at`, or `cadence` is required. `at`
 and `cadence` are mutually exclusive and use the same closed values as
-`schedule.create`; omitted patch fields retain their current values. The
+`schedule.create`. In a Cockpit deployment, version 1.1.0 (ADR-0254) also
+accepts `INTERVAL` for a feed-keeping schedule; omitted patch fields retain their current values. The
 approval view shows the exact ID, expected revision, and complete supplied
 patch, identifying omitted fields as unchanged rather than inventing their
 current content.
@@ -1507,6 +1537,8 @@ invalid content fails closed without another revision.
 3. Interval multipliers such as every second week require an explicit anchor
    and revision-update phase contract. They remain outside the unanchored
    calendar values rather than acquiring an implicit creation-date phase.
+   ADR-0254's minute `INTERVAL` answers this for feed-keeping schedules alone,
+   with the Unix epoch as its anchor.
 4. A future continuous-session mode would conflict with the one-active-run
    constraint and unbounded conversation growth. It requires separate evidence
    and is not an alternate interpretation of the dedicated-session rule here.

@@ -1949,7 +1949,9 @@ def create_app(
         app.include_router(people_router(services.people, secured))
     # Milestone 35: absent unless AGENT_COCKPIT_ENABLED=1 (docs/plan/cockpit.md).
     if settings.cockpit_enabled and services.cockpit is not None:
-        app.include_router(cockpit_router(services.cockpit, secured))
+        app.include_router(
+            cockpit_router(services.cockpit, secured, getattr(services, "schedule_runs", None))
+        )
 
     if settings.memory_api_enabled:
         app.include_router(memory_router)

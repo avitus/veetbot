@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from agent_core.domain.schedules import (
     Cadence,
     DailyCadence,
+    IntervalCadence,
     MonthlyCadence,
     OnceCadence,
     WeeklyCadence,
@@ -24,6 +25,8 @@ class RecurrenceCalculator:
         reference_utc = _as_utc(reference)
         if isinstance(cadence, OnceCadence):
             return cadence.at if cadence.at > reference_utc else None
+        if isinstance(cadence, IntervalCadence):
+            return _interval_at(cadence, _interval_index(cadence, reference_utc) + 1)
 
         zone = ZoneInfo(cadence.timezone)
         if isinstance(cadence, MonthlyCadence):
@@ -45,6 +48,8 @@ class RecurrenceCalculator:
         reference_utc = _as_utc(reference)
         if isinstance(cadence, OnceCadence):
             return cadence.at if cadence.at <= reference_utc else None
+        if isinstance(cadence, IntervalCadence):
+            return _interval_at(cadence, _interval_index(cadence, reference_utc))
 
         zone = ZoneInfo(cadence.timezone)
         if isinstance(cadence, MonthlyCadence):
@@ -71,6 +76,11 @@ class RecurrenceCalculator:
             return 0
         if isinstance(cadence, OnceCadence):
             return int(first_utc <= cadence.at <= last_utc)
+        if isinstance(cadence, IntervalCadence):
+            # Instants are whole multiples, so the count is index arithmetic.
+            return _interval_index(cadence, last_utc) - _interval_index(
+                cadence, first_utc - timedelta(microseconds=1)
+            )
         zone = ZoneInfo(cadence.timezone)
         first_date = first_utc.astimezone(zone).date()
         last_date = last_utc.astimezone(zone).date()
@@ -86,6 +96,19 @@ class RecurrenceCalculator:
         if isinstance(cadence, MonthlyCadence):
             return _count_monthly(cadence, first_utc, last_utc, zone)
         return _count_yearly(cadence, first_utc, last_utc, zone)
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _interval_index(cadence: IntervalCadence, reference: datetime) -> int:
+    """The index of the latest interval instant at or before the reference."""
+
+    return (reference - _EPOCH) // timedelta(minutes=cadence.every_minutes)
+
+
+def _interval_at(cadence: IntervalCadence, index: int) -> datetime:
+    return _EPOCH + index * timedelta(minutes=cadence.every_minutes)
 
 
 def _as_utc(value: datetime) -> datetime:

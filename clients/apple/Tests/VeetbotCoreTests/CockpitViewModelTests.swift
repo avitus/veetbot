@@ -15,13 +15,21 @@ import Testing
         private var _openedAfter: [Int?] = []
         private var _snapshotLoads = 0
         private var _openStreams = 0
+        private var _refreshes = 0
         var holdStreamOpen = true
+        var failRefresh = false
 
         func queueSnapshot(_ result: Result<CockpitSnapshot, Error>) { lock.withLock { _snapshots.append(result) } }
         func queueStream(_ frames: [Result<SSEFrame, Error>]) { lock.withLock { _streams.append(frames) } }
         var openedAfter: [Int?] { lock.withLock { _openedAfter } }
         var snapshotLoads: Int { lock.withLock { _snapshotLoads } }
         var openStreams: Int { lock.withLock { _openStreams } }
+        var refreshes: Int { lock.withLock { _refreshes } }
+
+        func refreshCockpit() async throws {
+            lock.withLock { _refreshes += 1 }
+            if failRefresh { throw URLError(.networkConnectionLost) }
+        }
 
         func cockpitSnapshot() async throws -> CockpitSnapshot {
             let next: Result<CockpitSnapshot, Error> = lock.withLock {
@@ -158,6 +166,36 @@ import Testing
         client.queueStream([])
         board.setVisible(true)
         await eventually { client.openStreams == 1 }
+        board.setVisible(false)
+        await eventually { client.openStreams == 0 }
+    }
+
+    /// ADR-0254: each time Cockpit becomes visible the server refreshes every
+    /// feed and the board reloads; a refresh that fails leaves the board alone.
+    @Test
+    func becomingVisibleRefreshesEveryFeedAndReloadsTheBoard() async {
+        let client = FakeClient()
+        client.queueSnapshot(.success(Self.snapshot(cursor: 41)))
+        client.queueStream([])
+        let board = model(client)
+        board.setVisible(true)
+        await eventually { client.refreshes == 1 && client.snapshotLoads == 1 && board.connection == .live }
+        board.setVisible(false)
+        await eventually { client.openStreams == 0 }
+        #expect(client.refreshes == 1)
+
+        client.queueStream([])
+        board.setVisible(true)
+        await eventually { client.refreshes == 2 && client.snapshotLoads == 2 && client.openStreams == 1 }
+        board.setVisible(false)
+        await eventually { client.openStreams == 0 }
+
+        client.failRefresh = true
+        client.queueStream([])
+        board.setVisible(true)
+        await eventually { client.refreshes == 3 && client.snapshotLoads == 3 && board.connection == .live }
+        #expect(board.snapshot?.cursor == 41)
+        #expect(board.errorMessage == nil)
         board.setVisible(false)
         await eventually { client.openStreams == 0 }
     }

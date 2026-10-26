@@ -10,7 +10,7 @@ buffering.
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import suppress
-from typing import Annotated, cast
+from typing import Annotated, Protocol, cast
 
 from fastapi import APIRouter, Depends, Header, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -24,12 +24,14 @@ from agent_core.domain.cockpit_views import (
     CockpitChangeView,
     CockpitLayoutView,
     CockpitLayoutWrite,
+    CockpitRefreshView,
     CockpitRevertRequest,
     CockpitSettingsView,
     CockpitSettingsWrite,
     CockpitSnapshotView,
     CockpitWidgetDetailView,
 )
+from agent_core.domain.schedules import ScheduleRefresh
 from agent_core.domain.views import StreamFrame
 
 HEARTBEAT_SECONDS = 15.0
@@ -49,7 +51,15 @@ def _accepted(change: CockpitChangeView) -> JSONResponse:
     )
 
 
-def cockpit_router(service: CockpitService, secured: Callable[[str], object]) -> APIRouter:
+class CockpitFeedRefresher(Protocol):
+    async def refresh_feeds(self, principal: Principal) -> list[ScheduleRefresh]: ...
+
+
+def cockpit_router(
+    service: CockpitService,
+    secured: Callable[[str], object],
+    refresher: CockpitFeedRefresher | None = None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.get(
@@ -201,5 +211,17 @@ def cockpit_router(service: CockpitService, secured: Callable[[str], object]) ->
     ) -> JSONResponse:
         """Commit a deleted widget's last live package again."""
         return _accepted(await service.restore(authenticated, slug))
+
+    @router.post("/v1/cockpit/refresh", openapi_extra={"required_scope": "cockpit.write"})
+    async def refresh(
+        authenticated: Annotated[Principal, secured("cockpit.write")],
+    ) -> JSONResponse:
+        """Start one run now of each active feed-keeping schedule (ADR-0254)."""
+        refreshes = () if refresher is None else tuple(await refresher.refresh_feeds(authenticated))
+        return JSONResponse(
+            status_code=202,
+            content=CockpitRefreshView(schedules=refreshes).model_dump(mode="json"),
+            headers={"Cache-Control": PRIVATE_NO_STORE},
+        )
 
     return router

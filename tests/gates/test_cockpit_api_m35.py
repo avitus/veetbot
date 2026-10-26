@@ -73,6 +73,7 @@ ROUTES = {
     ("POST", "/v1/cockpit/widgets/{slug}/revert"): "cockpit.write",
     ("POST", "/v1/cockpit/widgets/{slug}/delete"): "cockpit.write",
     ("POST", "/v1/cockpit/widgets/{slug}/restore"): "cockpit.write",
+    ("POST", "/v1/cockpit/refresh"): "cockpit.write",
 }
 
 
@@ -218,7 +219,7 @@ async def test_off_means_every_cockpit_route_is_absent() -> None:
         assert not [name for name in registry._latest if name.startswith("cockpit.")]
 
 
-async def test_on_mounts_exactly_the_nine_routes_under_their_scopes() -> None:
+async def test_on_mounts_exactly_the_ten_routes_under_their_scopes() -> None:
     async with cockpit_api() as (_composition, client):
         mounted = {
             (method, route.path): (route.openapi_extra or {}).get("required_scope")

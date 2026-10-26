@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 from uuid import UUID
 
 from pydantic import TypeAdapter, ValidationError
@@ -25,8 +25,11 @@ from agent_core.domain.runs import Run, RunLimits
 from agent_core.domain.schedules import (
     Cadence,
     CallPlan,
+    IntervalCadence,
     OnceCadence,
     ScheduleDefinitionLimits,
+    ScheduleNotify,
+    check_interval_cadence,
 )
 from agent_core.domain.tools import (
     ToolExecutionContext,
@@ -162,6 +165,25 @@ RECURRING_CADENCE_INPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+# ADR-0254: the same union plus INTERVAL, for feed-keeping schedules. A calendar
+# kind still needs its local time. Execution validates the domain union, which
+# refuses a field from another kind, so the schema stays small in the roster.
+FEED_CADENCE_INPUT_SCHEMA: dict[str, Any] = {
+    **RECURRING_CADENCE_INPUT_SCHEMA,
+    "properties": {
+        **RECURRING_CADENCE_INPUT_SCHEMA["properties"],
+        "every_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+    },
+    "required": ["kind", "timezone"],
+    "oneOf": [
+        *(
+            {**variant, "required": [*variant.get("required", ()), "local_time"]}
+            for variant in RECURRING_CADENCE_INPUT_SCHEMA["oneOf"]
+        ),
+        {"properties": {"kind": {"const": "INTERVAL"}}, "required": ["every_minutes"]},
+    ],
+}
+
 SINGLE_CALL_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -274,6 +296,9 @@ _SINGLE_CALL_SPEC = ToolSpec(
 class ScheduleCreateTool:
     """Create an approval-gated schedule that delegates only what its flags select."""
 
+    # ADR-0254: only the Cockpit's version offers the INTERVAL cadence.
+    offers_interval: ClassVar[bool] = False
+
     spec = _SINGLE_CALL_SPEC.model_copy(
         update={
             "version": "1.4.0",
@@ -332,13 +357,16 @@ class ScheduleCreateTool:
             ),
         }
         try:
-            cadence = parse_cadence(arguments)
+            cadence = parse_cadence(arguments, interval=self.offers_interval)
         except CadenceInputError:
             proposal.update({key: arguments[key] for key in ("at", "cadence") if key in arguments})
             return f"Create schedule {title!r}", proposal
         if isinstance(cadence, OnceCadence):
             proposal["at"] = cadence.at.isoformat()
             summary = f"Create one-time schedule {title!r} for {cadence.at.isoformat()}"
+        elif isinstance(cadence, IntervalCadence):
+            proposal["cadence"] = cadence.model_dump(mode="json")
+            summary = f"Create schedule {title!r} every {cadence.every_minutes} minutes"
         else:
             proposal["cadence"] = cadence.model_dump(mode="json")
             summary = f"Create {cadence.kind.value.lower()} schedule {title!r}"
@@ -374,11 +402,19 @@ class ScheduleCreateTool:
         context: ToolExecutionContext,
     ) -> ToolResult:
         try:
-            cadence = parse_cadence(arguments)
+            cadence = parse_cadence(arguments, interval=self.offers_interval)
+            check_interval_cadence(cadence, _requested_scopes(arguments))
         except CadenceInputError as exc:
             return _failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
                 exc.reason_code,
+                str(exc),
+                retryable=True,
+            )
+        except ValueError as exc:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "schedule.interval_needs_feed",
                 str(exc),
                 retryable=True,
             )
@@ -421,6 +457,12 @@ class ScheduleCreateTool:
             requested_scopes=_requested_scopes(arguments),
             browser_profile_id=UUID(selected_profile) if selected_profile else None,
             call_plan=call_plan,
+            # ADR-0254: a feed's widget is its report, so its upkeep stays quiet.
+            notify=(
+                ScheduleNotify.ATTENTION_ONLY
+                if arguments.get("publish_cockpit_feed")
+                else ScheduleNotify.EVERY_REPORT
+            ),
         )
         try:
             await context.mark_effect_sent()
@@ -522,7 +564,7 @@ def _call_plan(arguments: dict[str, Any], cadence: Cadence) -> CallPlan | None:
     return plan
 
 
-def parse_cadence(arguments: dict[str, Any]) -> Cadence:
+def parse_cadence(arguments: dict[str, Any], *, interval: bool = False) -> Cadence:
     has_at = "at" in arguments
     has_cadence = "cadence" in arguments
     if has_at == has_cadence:
@@ -540,7 +582,7 @@ def parse_cadence(arguments: dict[str, Any]) -> Cadence:
         cadence = CADENCE_ADAPTER.validate_python(arguments["cadence"])
     except (KeyError, TypeError, ValueError, ValidationError) as exc:
         raise CadenceInputError("schedule.cadence_invalid", str(exc)) from exc
-    if isinstance(cadence, OnceCadence):
+    if isinstance(cadence, OnceCadence) or (isinstance(cadence, IntervalCadence) and not interval):
         raise CadenceInputError(
             "schedule.cadence_invalid",
             "cadence must be DAILY, WEEKLY, MONTHLY, or YEARLY",
@@ -548,7 +590,7 @@ def parse_cadence(arguments: dict[str, Any]) -> Cadence:
     return cadence
 
 
-class CockpitScheduleCreateTool(ScheduleCreateTool):
+class PreviousCockpitScheduleCreateTool(ScheduleCreateTool):
     """Version 1.5.0, offered only where the Cockpit is: a run that keeps a feed current.
 
     A schedule asks for the Cockpit scopes only when it is created to publish a
@@ -567,6 +609,42 @@ class CockpitScheduleCreateTool(ScheduleCreateTool):
                 "properties": {
                     **INPUT_SCHEMA["properties"],
                     "publish_cockpit_feed": {"type": "boolean"},
+                },
+            },
+        }
+    )
+
+
+class CockpitScheduleCreateTool(PreviousCockpitScheduleCreateTool):
+    """Version 1.6.0 (ADR-0254): a feed may refresh every 1 to 1,440 minutes.
+
+    1.5.0 stays registered unchanged for the runs already pinned to it.
+    """
+
+    offers_interval = True
+    spec = PreviousCockpitScheduleCreateTool.spec.model_copy(
+        update={
+            "version": "1.6.0",
+            # Worded to cost no more than 1.5.0, whose roster is at its token cap.
+            "description": (
+                "Create one future one-time or recurring schedule. For recurrence, supply a "
+                "complete IANA-zone cadence; ask about ambiguous dates or times. For a signed-in "
+                "website, set use_website=true to pin this chat's selected website; connect "
+                "Website Access first if missing and never promise authenticated work without "
+                "it. To place a call, set place_call=true and put the recipient's E.164 number, "
+                "the brief and any voicemail text in the instruction; without it the run cannot "
+                "call. To retry a one-time call until answered or follow up after one, also set "
+                "call_plan: retry_every_minutes with retry_until (at most ten calls within an "
+                "hour of at) and/or follow_up_after_answer_minutes; the platform places them and "
+                "reports the outcome, and without call_plan none happen. To keep a Cockpit feed "
+                "current, set publish_cockpit_feed=true or the run cannot publish; only then may "
+                "the cadence be INTERVAL."
+            ),
+            "input_schema": {
+                **PreviousCockpitScheduleCreateTool.spec.input_schema,
+                "properties": {
+                    **PreviousCockpitScheduleCreateTool.spec.input_schema["properties"],
+                    "cadence": FEED_CADENCE_INPUT_SCHEMA,
                 },
             },
         }

@@ -330,8 +330,21 @@ func scheduleCadenceSummary(
             cadence.localTime,
             exceptionalTimeZone,
         ])
+    case .interval:
+        return cadence.everyMinutes.map(scheduleIntervalText) ?? "Interval"
     case nil:
         return scheduleDisplayText(cadence.kind)
+    }
+}
+
+/// "Every 15 min", "Every hour", "Every 2 h": an interval never shows a zone.
+func scheduleIntervalText(_ minutes: Int) -> String {
+    switch minutes {
+    case 1: return "Every minute"
+    case 60: return "Every hour"
+    case 1440: return "Every day"
+    case let minutes where minutes % 60 == 0: return "Every \(minutes / 60) h"
+    default: return "Every \(minutes) min"
     }
 }
 

@@ -298,3 +298,4 @@ implementation without one.
 - [ADR-0251: An unconnected chat offers to connect a website the owner names (Accepted)](0251-chat-offers-to-connect-a-named-website.md)
 - [ADR-0252: Exact-commit signing for the isolated dreaming release](0252-dreaming-release-signing.md)
 - [ADR-0253: A configured tool past the token cap is deferred, not fatal](0253-configured-tools-past-the-token-cap.md)
+- [ADR-0254: Cockpit feeds refresh every minute to every day, and on entry (Accepted)](0254-cockpit-feed-intervals-and-refresh-on-entry.md)
