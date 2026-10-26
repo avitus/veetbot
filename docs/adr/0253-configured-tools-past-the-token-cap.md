@@ -12,10 +12,10 @@
 
 ADR-0123 decision 4 deferred configured tools past the item cap, but a
 configured tool was never checked against the 9,000-token cap: the plan took
-every one and failed with `ContextOverflow` when they did not fit. On 2026-10-25 the
-records tools joined the default roster, and in a chat bound to a website
-profile, whose four browser definitions are required, the configured
-definitions passed the cap. Every new bound chat then failed before its first
+every one and failed with `ContextOverflow` when they did not fit. On
+2026-10-25 the records tools joined the default roster, and in a chat bound to
+a website profile, whose browser definitions are required (ADR-0130), the
+configured definitions passed the cap. Every new bound chat then failed before its first
 step with "context prefix class tool_definitions exceeds its cap". The
 production-shaped roster gate had not gained the hosted browser, media
 generation or records when production activated them, so it never planned
