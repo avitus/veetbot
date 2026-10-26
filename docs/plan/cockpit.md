@@ -407,7 +407,7 @@ root commit if it is absent and the App is allowed to.
 
 Repository rulesets enforce three things:
 
-- only admins may create, update or delete any other branch or any tag;
+- people are exempt; the App may not write any other branch or any tag;
 - nobody may force-push or delete `cockpit/widgets`;
 - the App's installation is limited to this repository with `contents:write`.
 

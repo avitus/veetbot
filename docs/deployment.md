@@ -1609,8 +1609,8 @@ it on `avitus/veetbot` only, then note the App id and the installation id.
 
 **Rulesets.** On the repository, add three rulesets:
 
-- only admins may create, update or delete any branch except
-  `cockpit/widgets`, and any tag;
+- outside `cockpit/widgets`, no branch or tag may be created, updated or
+  deleted, with the admin and write roles exempt, so only the App is fenced;
 - nobody may force-push or delete `cockpit/widgets`;
 - no CircleCI workflow and no CodeRabbit review applies to `cockpit/widgets`.
 
