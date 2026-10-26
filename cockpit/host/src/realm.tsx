@@ -4,7 +4,7 @@
 // beyond its own assets, and the primitives CSP does not govern are removed
 // here, before any widget code runs.
 import * as React from 'react';
-import { Component, type ReactNode } from 'react';
+import { Component, type CSSProperties, type ReactNode } from 'react';
 import * as ReactJSXRuntime from 'react/jsx-runtime';
 import { createRoot } from 'react-dom/client';
 
@@ -89,12 +89,12 @@ let latest: Extract<HostToRealm, { type: 'render' }> | null = null;
 
 function draw() {
   if (!latest) return;
-  const { theme, platform, offsetMs, tiles } = latest;
+  const { theme, platform, offsetMs, columns, tiles } = latest;
   for (const tile of tiles) load(tile, draw);
   root.render(
     <kit.CockpitRoot theme={theme} platform={platform} className="ck-board">
       <kit.CockpitClock offsetMs={offsetMs}>
-        <div className="ck-grid">
+        <div className="ck-grid" style={columns ? ({ '--ck-cols': columns } as CSSProperties) : undefined}>
           {tiles.map((tile) => {
             const Widget = components.get(tile.key);
             return (

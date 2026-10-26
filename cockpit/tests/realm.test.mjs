@@ -51,7 +51,7 @@ async function reference(slug, extra = {}) {
 const ENGINES = [['chromium', chromium]];
 if (existsSync(webkit.executablePath())) ENGINES.push(['webkit', webkit]);
 
-async function openBoard(engine, widgets, feeds = {}) {
+async function openBoard(engine, widgets, feeds = {}, extra = {}) {
   const browser = await engine.launch();
   const context = await browser.newContext();
   const escapes = [];
@@ -70,7 +70,7 @@ async function openBoard(engine, widgets, feeds = {}) {
   await page.goto(`${ORIGIN}/${manifest.entry}`);
   await page.waitForFunction(() => window.cockpitNativeLog?.some((message) => message.type === 'ready'));
   await page.evaluate((snapshot) => window.cockpitHost.apply(snapshot), {
-    type: 'snapshot', theme: 'light', platform: 'mac', offsetMs: 0, widgets, feeds,
+    type: 'snapshot', theme: 'light', platform: 'mac', offsetMs: 0, widgets, feeds, ...extra,
   });
   const log = () => page.evaluate(() => window.cockpitNativeLog ?? []);
   const settled = async (count) => {
@@ -102,6 +102,26 @@ for (const [name, engine] of ENGINES) {
       assert.equal(tiles, widgets.length);
     } finally {
       await board.browser.close();
+    }
+  });
+
+  test(`${name}: the board takes the column count native code asks for`, { timeout: 60000 }, async () => {
+    // Native code asks for three columns while a widget's details panel is open.
+    const narrow = await openBoard(engine, [await reference('approvals-waiting')], {}, { columns: 3 });
+    try {
+      await narrow.settled(1);
+      const columns = await narrow.realm().$eval('.ck-grid', (grid) => getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+      assert.equal(columns, 3);
+    } finally {
+      await narrow.browser.close();
+    }
+    const wide = await openBoard(engine, [await reference('approvals-waiting')]);
+    try {
+      await wide.settled(1);
+      const columns = await wide.realm().$eval('.ck-grid', (grid) => getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+      assert.equal(columns, 4, 'Without a request the Mac board keeps four columns');
+    } finally {
+      await wide.browser.close();
     }
   });
 

@@ -3678,6 +3678,32 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["chat.composer"].waitForExistence(timeout: 10))
     }
 
+    /// Cockpit's left pane resizes from its hairline and reopens at that width.
+    func testCockpitSidebarWidthPersistsAcrossApplicationRestart() {
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1200,900"
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.cockpit"].waitForExistence(timeout: 10))
+        app.buttons["mode.cockpit"].click()
+        let handle = app.descendants(matching: .any)["cockpit.sidebar.resize"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 10), app.debugDescription)
+        let before = handle.frame.midX
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 40, dy: 0)))
+        XCTAssertTrue(waitForFrame(of: handle, timeout: 5) { abs($0.midX - (before + 40)) <= 4 },
+                      "Dragging the hairline must widen Cockpit's left pane\n\(app.debugDescription)")
+        let dragged = handle.frame.midX
+
+        app.launchEnvironment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] = "1"
+        defer { app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH") }
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.cockpit"].waitForExistence(timeout: 10))
+        app.buttons["mode.cockpit"].click()
+        let relaunched = app.descendants(matching: .any)["cockpit.sidebar.resize"]
+        XCTAssertTrue(relaunched.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: relaunched, timeout: 5) { abs($0.midX - dragged) <= 3 },
+                      "Cockpit's left pane must reopen at its dragged width, not \(relaunched.frame)")
+    }
+
     /// The mailbox sidebar's hairline widens it, and the next launch opens it at that width.
     func testEmailMailboxSidebarWidthPersistsAcrossApplicationRestart() {
         launchFullEmailInbox()

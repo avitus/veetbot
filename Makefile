@@ -212,6 +212,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarWidthPersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailMailboxSidebarWidthPersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testCockpitJoinsTheModeSwitchInEveryMode \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testCockpitSidebarWidthPersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailFeedbackRequiresAnExplicitPersonAndClearsChangedTargets \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testOlderServerSidebarStaysFlatWithoutFolderControls \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testRecentChatsIncludesFiledChatsAndCollapses \

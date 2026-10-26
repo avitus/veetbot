@@ -762,8 +762,13 @@ thing in each mode's left pane (MagicPath merry-moon-8243, cozy-evening-6871,
 merrily-city-4157): above Chat's search and New chat, above Email's Search
 mail, and above Cockpit's widget list; the mode bar returns only while that
 pane is hidden. Cockpit shows its native unavailable state ("Cockpit isn't
-available yet", `cockpit.unavailable`) until a server offers its routes; the
-board, its web view and its stream arrive with the native Cockpit mode. Email uses the Chat connection's authenticated
+available yet", `cockpit.unavailable`) until a server offers its routes. On
+the Mac its chrome follows "Mac — Cockpit · A2" (MagicPath merrily-city-4157;
+docs/plan/cockpit.md, "Per platform"): the toolbar's title, Live pill and
+summary, shortcuts, three-step appearance, Arrange and details toggle; a left
+pane of Needs you, Widgets with their freshness and This screen; and a
+details panel. Both side columns resize and keep their widths on this Mac
+(`veetbot.cockpit.sidebarWidth`, `veetbot.cockpit.panelWidth`). Email uses the Chat connection's authenticated
 transport. Its compact navigation opens a thread from the inbox; regular iPad
 and Mac layouts keep a mailbox sidebar beside the list and thread detail.
 Inbox is the initial collection; Needs you and Handled are distinct server

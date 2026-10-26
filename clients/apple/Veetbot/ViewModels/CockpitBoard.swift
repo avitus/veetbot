@@ -32,7 +32,7 @@ public enum CockpitBoard {
     /// feeds, instants in epoch milliseconds, and nothing a widget did not declare.
     public static func hostSnapshot(
         _ snapshot: CockpitSnapshot, deviceClass: CockpitDeviceClass, theme: String, platform: String,
-        offsetMilliseconds: Double, excluded: Set<String>, selected: String?
+        offsetMilliseconds: Double, excluded: Set<String>, selected: String?, columns: Int? = nil
     ) -> JSONValue {
         let placed = placements(snapshot, deviceClass: deviceClass).filter { !excluded.contains($0.widget.slug) }
         var declared: Set<String> = []
@@ -64,14 +64,17 @@ public enum CockpitBoard {
                 }),
             ])
         }
-        return .object([
+        var body: [String: JSONValue] = [
             "type": .string("snapshot"),
             "theme": .string(theme),
             "platform": .string(platform),
             "offsetMs": .number(offsetMilliseconds),
             "widgets": .array(widgets),
             "feeds": .object(feeds),
-        ])
+        ]
+        // The Mac board narrows to three columns while a widget's details are open.
+        if let columns { body["columns"] = .number(Double(columns)) }
+        return .object(body)
     }
 
     /// The widget whose live revision changed most recently: the watchdog's quarantine candidate.

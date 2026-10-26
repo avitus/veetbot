@@ -34,6 +34,8 @@ export type NativeMessage =
       offsetMs: number;
       widgets: WidgetPlacement[];
       feeds: Record<string, FeedEnvelope>;
+      /** The board's column count while native chrome narrows it (a details panel); absent keeps the platform's own. */
+      columns?: number;
     }
   | { type: 'feed'; id: string; envelope: FeedEnvelope }
   | { type: 'retry'; slug: string };
@@ -51,7 +53,7 @@ export interface RealmTile {
 }
 
 export type HostToRealm =
-  | { type: 'render'; theme: CockpitTheme; platform: CockpitPlatform; offsetMs: number; tiles: RealmTile[] }
+  | { type: 'render'; theme: CockpitTheme; platform: CockpitPlatform; offsetMs: number; columns?: number; tiles: RealmTile[] }
   | { type: 'ping'; id: number };
 
 /** Realm → host. Anything else is dropped. */

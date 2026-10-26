@@ -32,6 +32,8 @@ public final class CockpitViewModel: ObservableObject {
     /// Widgets held out of the board after hanging or navigating the realm.
     @Published public private(set) var quarantined: Set<String> = []
     @Published public var selectedSlug: String?
+    /// The arrange sheet, opened from the toolbar on the Mac and the options menu on touch.
+    @Published public var isArranging = false
     @Published public private(set) var detail: CockpitWidgetDetail?
     @Published public private(set) var actionMessage: String?
     @Published public private(set) var errorMessage: String?

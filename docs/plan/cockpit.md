@@ -908,6 +908,17 @@ interpolation.
 
 - **Mac**
   - Supports full screen.
+  - The chrome follows "Mac — Cockpit · A2": the window toolbar carries
+    "Cockpit", a Live pill (or "Reconnecting · last update … ago") and what
+    needs the owner, then how many widgets are stale; then Memory, People,
+    Schedules, Persona and Settings, an appearance button that steps light,
+    dark and night watch, Arrange, and the details panel's toggle. The left
+    pane leads with the mode switch, then Needs you, the widgets with each
+    one's freshness ("6 s", "Stale · 47 min") and This screen.
+  - The left pane (200 to 340 points, 260 to start) and the details panel
+    (280 to 440, 320 to start) resize from their hairlines and keep their
+    widths on this Mac; the board takes the rest, in three columns while the
+    panel is open (the snapshot message's optional `columns`).
   - The Cockpit right panel follows the ADR-0237 pattern. It shows the
     selected widget's purpose, feeds and their freshness, a settings form
     generated from the settings schema, revision history with commit links,

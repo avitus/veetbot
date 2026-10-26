@@ -14,10 +14,19 @@ struct CockpitModeView: View {
     @ObservedObject var model: CockpitViewModel
     var isVisible: Bool = false
     var chooseMode: (ClientMode) -> Void = { _ in }
+    /// What needs the owner, as the other modes' sidebars list it.
+    var attention: [SidebarAttention.Row] = []
+    var openAttention: (UUID) -> Void = { _ in }
     @AppStorage("cockpit.nightWatch") private var nightWatch = false
     @AppStorage("cockpit.keepAwake") private var keepAwake = false
     @Environment(\.colorScheme) private var colorScheme
-    @State private var arranging = false
+    #if os(macOS)
+    var sidebarStore = MacColumnWidthStore.cockpitSidebar()
+    var panelStore = MacColumnWidthStore.cockpitPanel()
+    /// Live widths while a hairline is dragged; nil reads the store.
+    @State private var draggedSidebar: CGFloat?
+    @State private var draggedPanel: CGFloat?
+    #endif
 
     var body: some View {
         content
@@ -33,7 +42,7 @@ struct CockpitModeView: View {
                 UIApplication.shared.isIdleTimerDisabled = false
                 #endif
             }
-            .sheet(isPresented: $arranging) {
+            .sheet(isPresented: $model.isArranging) {
                 CockpitArrangeView(model: model, deviceClass: CockpitDevice.deviceClass)
             }
     }
@@ -41,15 +50,49 @@ struct CockpitModeView: View {
     @ViewBuilder
     private var content: some View {
         #if os(macOS)
+        // The design's two side columns each take the width the owner drags
+        // them to, kept on this Mac; the board takes the rest.
+        let sidebarWidth = draggedSidebar ?? sidebarStore.width
+        let panelWidth = draggedPanel ?? panelStore.width
         HStack(spacing: 0) {
             sidebar
-            Rectangle().fill(AppTheme.hairline).frame(width: 1).accessibilityHidden(true)
+                .frame(width: sidebarWidth)
+                .frame(maxHeight: .infinity)
+            MacColumnDivider(
+                edge: .trailing, width: sidebarWidth, label: "Sidebar width", identifier: "cockpit.sidebar.resize",
+                resize: { width, remember in
+                    if remember {
+                        sidebarStore.remember(width)
+                        draggedSidebar = nil
+                    } else {
+                        draggedSidebar = sidebarStore.clamped(width)
+                    }
+                },
+                reset: {
+                    sidebarStore.forget()
+                    draggedSidebar = nil
+                }
+            )
             board
             if let slug = model.selectedSlug, model.availability == .available {
-                Rectangle().fill(AppTheme.hairline).frame(width: 1).accessibilityHidden(true)
+                MacColumnDivider(
+                    edge: .leading, width: panelWidth, label: "Panel width", identifier: "cockpit.panel.resize",
+                    resize: { width, remember in
+                        if remember {
+                            panelStore.remember(width)
+                            draggedPanel = nil
+                        } else {
+                            draggedPanel = panelStore.clamped(width)
+                        }
+                    },
+                    reset: {
+                        panelStore.forget()
+                        draggedPanel = nil
+                    }
+                )
                 CockpitWidgetDetailView(model: model, slug: slug, close: model.closeDetail)
-                    .frame(width: 340)
-                    .background(AppTheme.paper)
+                    .frame(width: panelWidth)
+                    .background(AppTheme.paperDeep)
             }
         }
         #else
@@ -68,77 +111,86 @@ struct CockpitModeView: View {
     }
 
     #if os(macOS)
+    /// The left pane of "Mac — Cockpit · A2": the mode switch, then Needs you,
+    /// the board's widgets with each one's freshness, and This screen.
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: VeetSpace.s2) {
+        VStack(alignment: .leading, spacing: 0) {
             ModeSegment(selected: .cockpit, choose: chooseMode)
                 .frame(maxWidth: .infinity)
-            SidebarSectionLabel(title: "Widgets")
-            if model.availability == .available, let snapshot = model.snapshot {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(CockpitBoard.placements(snapshot, deviceClass: CockpitDevice.deviceClass), id: \.widget.slug) { placed in
-                            widgetRow(placed.widget, snapshot: snapshot)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !attention.isEmpty {
+                        SidebarSectionLabel(title: "Needs you")
+                        ForEach(attention) { row in
+                            Button { openAttention(row.entry.sessionID) } label: {
+                                SidebarRow { AttentionDot(kind: row.kind) } title: {
+                                    Text("\(Text(row.kind == .approval ? "Approval" : "Report").fontWeight(.semibold))\(Text(" · \(row.entry.title)").foregroundColor(AppTheme.inkSoft))")
+                                }
+                                .padding(.horizontal, VeetSpace.s2)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\(row.label), \(row.entry.title)")
+                            .accessibilityIdentifier("cockpit.attention.\(row.id)")
                         }
                     }
+                    SidebarSectionLabel(title: "Widgets")
+                    if model.availability == .available, let snapshot = model.snapshot {
+                        TimelineView(.periodic(from: .now, by: 5)) { context in
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(CockpitBoard.placements(snapshot, deviceClass: CockpitDevice.deviceClass), id: \.widget.slug) { placed in
+                                    widgetRow(placed.widget, snapshot: snapshot, now: context.date)
+                                }
+                            }
+                        }
+                    } else {
+                        Text("Your board's widgets appear here once this server offers Cockpit.")
+                            .veetType(.meta)
+                            .foregroundColor(AppTheme.inkFaint)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, VeetSpace.s2)
+                    }
+                    SidebarSectionLabel(title: "This screen")
+                    Text("Mac layout · Night watch \(nightWatch ? "on" : "off")")
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.inkFaint)
+                        .padding(.horizontal, VeetSpace.s2)
+                        .accessibilityIdentifier("cockpit.this-screen")
                 }
-                Spacer(minLength: 0)
-                sidebarControls
-            } else {
-                Text("Your board's widgets appear here once this server offers Cockpit.")
-                    .veetType(.meta)
-                    .foregroundColor(AppTheme.inkFaint)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, VeetSpace.s2)
-                Spacer(minLength: 0)
+                .padding(.bottom, VeetSpace.s4)
             }
         }
         .padding(.horizontal, A2Metrics.sidebarGutter)
-        .padding(.vertical, VeetSpace.s3)
-        .frame(width: A2Metrics.sidebarWidth)
-        .frame(maxHeight: .infinity)
+        .padding(.top, VeetSpace.s3)
         .background(AppTheme.paperDeep)
     }
 
-    private func widgetRow(_ widget: CockpitWidget, snapshot: CockpitSnapshot) -> some View {
+    private func widgetRow(_ widget: CockpitWidget, snapshot: CockpitSnapshot, now: Date) -> some View {
         let selected = model.selectedSlug == widget.slug
+        let level = CockpitDevice.freshness(of: widget, in: snapshot, now: now)
         return Button {
             Task { await model.openDetail(widget.slug) }
         } label: {
-            HStack(spacing: VeetSpace.s2) {
-                CockpitFreshnessDot(level: CockpitDevice.freshness(of: widget, in: snapshot))
-                Text(widget.title).veetType(.ui).foregroundColor(AppTheme.ink).lineLimit(1)
-                Spacer(minLength: 0)
+            SidebarRow {
+                CockpitFreshnessDot(level: level)
+            } title: {
+                Text(widget.title).fontWeight(selected ? .medium : .regular)
+            } trailing: { _ in
                 if model.quarantined.contains(widget.slug) {
-                    Text("Paused").veetType(.meta).foregroundColor(AppTheme.amberText)
+                    Text("Paused").foregroundColor(AppTheme.amberText)
+                } else {
+                    Text(CockpitDevice.freshnessText(level, age: CockpitDevice.age(of: widget, in: snapshot, now: now)))
+                        .foregroundColor(level == .error ? AppTheme.red : level == .stale ? AppTheme.inkSoft : AppTheme.inkFaint)
                 }
             }
             .padding(.horizontal, VeetSpace.s2)
-            .frame(minHeight: A2Metrics.rowHeight)
             .background(
                 RoundedRectangle(cornerRadius: A2Metrics.rowRadius, style: .continuous)
                     .fill(selected ? AppTheme.selected : Color.clear)
             )
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("cockpit.widget.\(widget.slug)")
         .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
-    private var sidebarControls: some View {
-        VStack(alignment: .leading, spacing: VeetSpace.s2) {
-            connectionLine
-            HStack {
-                Toggle("Night watch", isOn: $nightWatch)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .accessibilityIdentifier("cockpit.night")
-                Spacer()
-                Button("Arrange") { arranging = true }
-                    .buttonStyle(QuietCapsuleButtonStyle())
-                    .accessibilityIdentifier("cockpit.arrange")
-            }
-        }
     }
     #else
     private var statusBar: some View {
@@ -151,7 +203,7 @@ struct CockpitModeView: View {
                     if CockpitDevice.platform == "ipad" {
                         Toggle("Keep screen on", isOn: $keepAwake)
                     }
-                    Button("Arrange board") { arranging = true }
+                    Button("Arrange board") { model.isArranging = true }
                 } label: {
                     Image(systemName: "slider.horizontal.3").veetIcon(.regular)
                 }
@@ -222,7 +274,8 @@ struct CockpitModeView: View {
                         message: CockpitBoard.hostSnapshot(
                             snapshot, deviceClass: CockpitDevice.deviceClass, theme: theme,
                             platform: CockpitDevice.platform, offsetMilliseconds: model.offsetMilliseconds,
-                            excluded: model.quarantined, selected: model.selectedSlug
+                            excluded: model.quarantined, selected: model.selectedSlug,
+                            columns: boardColumns
                         ),
                         fetch: { [weak model] digest in
                             guard let model else { throw CancellationError() }
@@ -240,6 +293,16 @@ struct CockpitModeView: View {
                 notExported
             }
         }
+    }
+
+    /// Three columns beside an open details panel on the Mac (the design's
+    /// board); otherwise the platform's own.
+    private var boardColumns: Int? {
+        #if os(macOS)
+        model.selectedSlug == nil ? nil : 3
+        #else
+        nil
+        #endif
     }
 
     private var theme: String {
@@ -361,6 +424,60 @@ enum CockpitDevice {
         return levels.max { (order.firstIndex(of: $0) ?? 0) < (order.firstIndex(of: $1) ?? 0) } ?? .live
     }
 
+    /// An age as the design writes it: now, 6 s, 2 min, 3 h, 2 d.
+    static func shortAge(_ seconds: TimeInterval) -> String {
+        let seconds = Int(max(0, seconds))
+        if seconds < 5 { return "now" }
+        if seconds < 60 { return "\(seconds) s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        if hours < 48 { return "\(hours) h" }
+        return "\(hours / 24) d"
+    }
+
+    /// A widget row's trailing text (the design's short freshness).
+    static func freshnessText(_ level: CockpitFreshness, age: TimeInterval?) -> String {
+        let text = age.map(shortAge) ?? ""
+        switch level {
+        case .pending: return "Waiting"
+        case .error: return "Failed · \(text)"
+        case .stale: return "Stale · \(text)"
+        case .aging: return "\(text) ago"
+        case .live: return text
+        }
+    }
+
+    /// The toolbar pill: Live, or how long since the board last heard.
+    static func pillText(_ connection: CockpitViewModel.Connection, lastUpdated: Date?, now: Date) -> String {
+        switch connection {
+        case .live: return "Live"
+        case .reconnecting:
+            return lastUpdated.map { "Reconnecting · last update \(shortAge(now.timeIntervalSince($0))) ago" } ?? "Reconnecting"
+        case .connecting: return "Connecting"
+        case .idle: return "Offline"
+        }
+    }
+
+    /// The toolbar summary: what needs the owner (amber), then what is stale (soft).
+    static func summary(needYou: Int, stale: Int) -> (String?, String?) {
+        let attention = needYou > 0 ? "\(needYou) \(needYou == 1 ? "needs" : "need") you" : nil
+        let staleText = stale > 0 ? "\(stale) stale" : nil
+        return (attention, staleText.map { attention == nil ? $0 : " · \($0)" })
+    }
+
+    /// The age of a widget's stalest declared feed.
+    static func age(of widget: CockpitWidget, in snapshot: CockpitSnapshot, now: Date = Date()) -> TimeInterval? {
+        widget.declaredFeeds.compactMap { snapshot.feeds[$0.id]?.current?.observedAt }
+            .map { now.timeIntervalSince($0) }.max()
+    }
+
+    /// How many placed widgets are stale.
+    static func staleCount(_ snapshot: CockpitSnapshot, now: Date = Date()) -> Int {
+        CockpitBoard.placements(snapshot, deviceClass: deviceClass)
+            .filter { freshness(of: $0.widget, in: snapshot, now: now) == .stale }.count
+    }
+
     static func age(from date: Date, to now: Date) -> String {
         let seconds = max(0, now.timeIntervalSince(date))
         if seconds < 60 { return "just now" }
@@ -371,11 +488,125 @@ enum CockpitDevice {
 }
 
 #if os(macOS)
-/// The Mac window's title while Cockpit is showing.
+/// The Mac window's title while Cockpit is showing (MagicPath merrily-city-4157):
+/// "Cockpit", the stream's pill, and what needs the owner, then what is stale.
 struct CockpitToolbarTitle: View {
+    @ObservedObject var model: CockpitViewModel
+    var needYou = 0
+
     var body: some View {
-        Text("Cockpit").fontWeight(.semibold).veetType(.ui).lineLimit(1)
-            .accessibilityIdentifier("cockpit.toolbar-title")
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            HStack(spacing: VeetSpace.s3) {
+                Text("Cockpit").fontWeight(.semibold).veetType(.ui).lineLimit(1)
+                    .accessibilityIdentifier("cockpit.toolbar-title")
+                if model.availability == .available {
+                    pill(now: context.date)
+                    summary(now: context.date)
+                }
+            }
+            // A toolbar item is offered only its ideal width; the pill must not clip.
+            .fixedSize()
+        }
+    }
+
+    private func pill(now: Date) -> some View {
+        let live = model.connection == .live
+        return HStack(spacing: 6) {
+            Circle().fill(live ? AppTheme.tealText : AppTheme.inkSoft).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(CockpitDevice.pillText(model.connection, lastUpdated: model.lastUpdated, now: now))
+                .veetType(.meta, weight: .medium)
+                .lineLimit(1)
+        }
+        .foregroundColor(live ? AppTheme.tealText : AppTheme.inkSoft)
+        .padding(.horizontal, VeetSpace.s2)
+        .frame(height: 22)
+        .background(Capsule().fill(live ? AppTheme.tealWash : AppTheme.field))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("cockpit.connection")
+    }
+
+    @ViewBuilder
+    private func summary(now: Date) -> some View {
+        let stale = model.snapshot.map { CockpitDevice.staleCount($0, now: now) } ?? 0
+        let (attention, staleText) = CockpitDevice.summary(needYou: needYou, stale: stale)
+        if attention != nil || staleText != nil {
+            HStack(spacing: 6) {
+                if attention != nil {
+                    Circle().fill(AppTheme.amber).frame(width: 7, height: 7).accessibilityHidden(true)
+                }
+                Text("\(Text(attention ?? "").fontWeight(.semibold).foregroundColor(AppTheme.amberText))\(Text(staleText ?? "").foregroundColor(AppTheme.inkSoft))")
+                    .veetType(.meta)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("cockpit.summary")
+        }
+    }
+}
+
+/// Appearance in three steps, as the design's toolbar button cycles it:
+/// light, dark, then night watch, then light again.
+struct CockpitAppearanceButton: View {
+    @EnvironmentObject private var appearance: AppearancePreferences
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("cockpit.nightWatch") private var nightWatch = false
+
+    private var current: String { nightWatch ? "Night watch" : colorScheme == .dark ? "Dark" : "Light" }
+
+    var body: some View {
+        Button {
+            if nightWatch {
+                nightWatch = false
+                appearance.theme = .light
+            } else if colorScheme == .dark {
+                nightWatch = true
+            } else {
+                appearance.theme = .dark
+            }
+        } label: {
+            Image(systemName: nightWatch ? "moon.stars" : colorScheme == .dark ? "moon" : "sun.max")
+                .foregroundColor(AppTheme.inkSoft)
+        }
+        .help("Appearance: \(current)")
+        .accessibilityLabel("Appearance: \(current)")
+        .accessibilityIdentifier("cockpit.appearance")
+    }
+}
+
+/// The design's Arrange button, which opens the arrange sheet.
+struct CockpitArrangeButton: View {
+    @ObservedObject var model: CockpitViewModel
+
+    var body: some View {
+        Button("Arrange") { model.isArranging = true }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
+            .disabled(model.availability != .available || model.snapshot == nil)
+            .accessibilityIdentifier("cockpit.arrange")
+    }
+}
+
+/// The details panel's toolbar button: closes an open panel, or opens the
+/// first widget's details (⌥⌘I, as the other modes' panels).
+struct CockpitPanelToggle: View {
+    @ObservedObject var model: CockpitViewModel
+
+    var body: some View {
+        let open = model.selectedSlug != nil
+        Button {
+            if open {
+                model.closeDetail()
+            } else if let snapshot = model.snapshot,
+                      let first = CockpitBoard.placements(snapshot, deviceClass: CockpitDevice.deviceClass).first {
+                Task { await model.openDetail(first.widget.slug) }
+            }
+        } label: {
+            Image(systemName: "sidebar.trailing").foregroundColor(open ? AppTheme.ink : AppTheme.inkSoft)
+        }
+        .keyboardShortcut("i", modifiers: [.command, .option])
+        .disabled(model.availability != .available || model.snapshot == nil)
+        .help(open ? "Hide details (⌥⌘I)" : "Show details (⌥⌘I)")
+        .accessibilityLabel(open ? "Hide details" : "Show details")
+        .accessibilityIdentifier("cockpit.panel-toggle")
     }
 }
 #endif
