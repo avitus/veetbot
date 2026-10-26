@@ -1113,6 +1113,7 @@ a convenience:
 | --- | --- | --- | --- |
 | Operator | stdio | worker trust zone | broker-resolved |
 | Tenant | HTTP | remote, via egress proxy | broker-resolved |
+| Owner, in Settings | HTTP | remote, via the `mcp_https` proxy | sealed sign-in |
 
 A stdio server is a child process of the worker. It inherits the worker's
 network position, which in this platform is a privileged one, so **stdio
@@ -1186,6 +1187,7 @@ need them. All four are in the table under *Schema additions* below.
 | `header` | HTTP | a token | the header `auth_name` names |
 | `oauth2_client` | HTTP | a client id and secret | `Authorization: Bearer`, after an exchange |
 | `env` | stdio | a token | the variable `auth_name` names |
+| `oauth2_authorization` | HTTP, owner-added | nothing; the reference is NULL | `Authorization: Bearer`, from the sealed sign-in |
 
 The scheme lives in the row rather than inside the secret, which is the
 tempting alternative because it puts everything about a credential in one
@@ -1292,24 +1294,22 @@ header, with a fixed sixty-second skew, and exchanges again inside that
 window. One code path serves expiry and revocation, there is no scheduler
 entry, and an idle connection that gets closed takes its token with it.
 
-**Refresh tokens are not used.** The client-credentials grant is not
-supposed to issue one, and re-running the exchange costs a single request
+**Refresh tokens are not used** for `oauth2_client`, the one scheme here
+that could refresh; the sign-in scheme below is the exception. The
+client-credentials grant is not supposed to issue one, and re-running the exchange costs a single request
 against a credential the worker already holds. A refresh token would be a
 second long-lived secret to store, scope, rotate, and eventually leak,
 bought with nothing.
 
-**The user-delegated flows are deferred, and saying so is the honest
-version.** MCP's authorization specification describes an OAuth
-authorization-code flow with dynamic client registration, which is how a
-server asks a *human* for consent. It needs a browser redirect, a callback
-URL, and a per-principal token store, and the platform has a surface for
-none of the three: `conversation.ask_user` suspends a run for text, not for
-a redirect. A server that requires it fails to connect with
-`tool.auth_unsupported` — an operator-facing error rather than a
-half-working state, the same refusal and the same reason as sampling and
-roots. The unlock is an interactive authorization surface on the HTTP API,
-which is a product decision as much as an engineering one and belongs after
-0.1.
+**The user-delegated flow is for owner-added servers only.** MCP's
+authorization specification describes an OAuth authorization-code flow with
+dynamic client registration, which is how a server asks a *human* for
+consent. It needs a browser redirect, a callback URL and a token store.
+`conversation.ask_user` suspends a run for text, not for a redirect, so a
+configured row that requires the flow still fails to connect with
+`tool.auth_unsupported`, the same refusal as sampling and roots. The owner
+decided the product question on 2026-10-26: Settings is the interactive
+surface, for servers the owner adds there (ADR-0255, below).
 
 **What the tenant and the model see is a reason code.** A
 `WWW-Authenticate` header, an error body, a token endpoint's
@@ -1505,6 +1505,53 @@ in v0.1 — the client does not advertise them — and a server that requires th
 fails to connect with a clear operator-facing error rather than degrading into
 a half-working state. Declining at negotiation rather than at request time
 means a server never gets to try.
+
+### Owner-added servers (ADR-0255)
+
+The owner adds a server in Settings instead of in deployment configuration,
+behind `AGENT_MCP_SERVERS_ENABLED`. The routes, under `settings.read` and
+`settings.write`, are in [http-api-and-streaming.md](http-api-and-streaming.md);
+no model-callable tool reaches them. Everything above applies unchanged except
+four things the owner, not the operator, now decides.
+
+- **Classification.** The owner picks `read_only` (`network_read`, `low`,
+  `read_only`), which the default policy allows like any operator-classified
+  MCP read, or `changes` (`external_write`, `high`, `non_idempotent`, the
+  default), which requires approval for every call. Every tool on the server
+  inherits it, and its tools require no scope.
+- **Egress.** Adding the server is the owner's egress decision. Its traffic,
+  and its sign-in traffic, use the process-local `mcp_https` proxy transport:
+  `CONNECT` only, port 443, a public hostname, every resolved address public,
+  the checked address dialled, each decision logged as
+  `mcp_destination_denied` or `allowed`. The sandbox allowlist is not
+  consulted and still governs sandbox code and every other tenant row. The URL
+  itself must be public HTTPS on port 443 with no credentials or fragment.
+- **Authentication.** Adding probes the URL with an unauthenticated
+  `initialize`. A `2xx` stores `none`. A `401` follows the `resource_metadata`
+  of its `Bearer` challenge, or the RFC 9728 well-known paths, to protected
+  resource metadata whose `resource` matches the URL, and from its first
+  authorization server to RFC 8414 metadata whose `issuer` matches. That server
+  must offer the code flow with `S256` and a registration endpoint, or the
+  add fails with `mcp_sign_in_unsupported`; the validated metadata is stored and
+  the row's scheme is `oauth2_authorization`.
+- **Sign-in.** Starting a sign-in registers a public client through RFC 7591
+  when none is stored for the current callback, preferring no secret, and
+  stores a single-use state hash and a sealed PKCE verifier for ten minutes.
+  The callback consumes the state before anything else can fail, exchanges
+  the code with the verifier and the RFC 8707 `resource`, and stores the
+  tokens. At connect the runtime asks the sealed store for a token; one within
+  sixty seconds of expiry is refreshed under the row's lock, a rotated refresh
+  token replaces the old in the same transaction, and a rejected refresh signs
+  the server out. Step 2 of the ladder above is a forced refresh. A server that
+  is not signed in disconnects with `tool.auth_failed`, and the rest load.
+
+Secrets are AES-GCM sealed with `MCP_AUTHORIZATION_KEY`, with the tenant,
+server and field as additional data, so a sealed value opens only in its own
+row and column. Owner-added tools take only the `owner_tool_index` context
+class ([context-engine.md](context-engine.md)), so a server reaches chats
+created after it is ready and moves no existing tool. With the flag off,
+owner-added rows are ignored and their routes are not mounted.
+
 ## Skills, and the line between a skill and a tool
 
 Section 30.1 draws the line and it is worth restating in the tool system's own
@@ -1752,8 +1799,26 @@ mcp_servers
   timeout_seconds   INT NOT NULL
   maximum_output_bytes  BIGINT NOT NULL
   enabled           BOOLEAN NOT NULL DEFAULT true
+  owner_managed     BOOLEAN NOT NULL DEFAULT false  -- ADR-0255; HTTP, tenant only
   created_at        TIMESTAMPTZ NOT NULL
   UNIQUE (tenant_id, server_id)
+```
+
+```text
+mcp_server_authorizations                  -- ADR-0255, row-level security
+  tenant_id, server_id  PK, FK mcp_servers ON DELETE CASCADE
+  metadata          JSONB NOT NULL    -- validated RFC 9728 / RFC 8414 discovery
+  redirect_uri      TEXT NULL         -- the callback the client is registered for
+  client_id         TEXT NULL
+  client_secret_sealed, access_token_sealed, refresh_token_sealed  TEXT NULL
+  client_auth_method  TEXT NULL       -- none | client_secret_post | client_secret_basic
+  access_expires_at, signed_in_at  TIMESTAMPTZ NULL
+  signed_in_by      TEXT NULL
+  pending_state_hash  CHAR(64) NULL   -- SHA-256 of a ten-minute, single-use state
+  pending_verifier_sealed, pending_principal_id  TEXT NULL
+  pending_expires_at  TIMESTAMPTZ NULL
+  updated_at        TIMESTAMPTZ NOT NULL
+  UNIQUE (tenant_id, pending_state_hash) WHERE pending_state_hash IS NOT NULL
 ```
 
 ```text

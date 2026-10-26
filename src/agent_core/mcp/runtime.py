@@ -27,6 +27,7 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import NewEvent
 from agent_core.domain.mcp import (
+    MCPAuthScheme,
     MCPCallResult,
     MCPDiscovery,
     MCPServerConfig,
@@ -49,7 +50,7 @@ from agent_core.mcp.configuration import build_stdio_environment
 from agent_core.mcp.mapping import MCPMappingReport, map_discovered_tools
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.mcp import MCPClient, MCPClientFactory
+from agent_core.ports.mcp import MCPAccessTokens, MCPClient, MCPClientFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.tools import ToolRegistry
 
@@ -189,6 +190,8 @@ class MCPRuntime:
         warmup_retry_seconds: float = 60,
         warmup_attempts: int = 5,
         call_interceptor: CallInterceptor | None = None,
+        access_tokens: MCPAccessTokens | None = None,
+        owner_servers_enabled: bool = False,
     ) -> None:
         """Share bounded preparation capacity across this runtime's sessions."""
         if not isfinite(idle_timeout_seconds) or idle_timeout_seconds <= 0:
@@ -227,6 +230,9 @@ class MCPRuntime:
         self._preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_PREPARATIONS)
         self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
         self._call_interceptor = call_interceptor
+        # ADR-0255: owner-added rows, and the sealed sign-ins their tokens come from.
+        self._access_tokens = access_tokens
+        self._owner_servers_enabled = owner_servers_enabled
         self._sessions: dict[UUID, dict[str, _Connection]] = {}
         # Sessions whose every enabled server was attempted, and the servers
         # attempted for each session, including scoped typed-task preparation.
@@ -277,10 +283,35 @@ class MCPRuntime:
             self._registry.unregister_dynamic(name, version, tenant_id=tenant_id)
             self._registration_owners.pop(key, None)
 
-    async def _credential(self, config: MCPServerConfig) -> SecretValue | None:
+    async def _credential(
+        self, config: MCPServerConfig, *, refresh: bool = False
+    ) -> SecretValue | None:
+        if config.auth_scheme is MCPAuthScheme.OAUTH2_AUTHORIZATION:
+            # The owner's sign-in, refreshed near expiry or when a call was refused.
+            if self._access_tokens is None:
+                raise PermissionError("MCP sign-in is unavailable")
+            return await self._access_tokens.access_token(
+                config.tenant_id, config.server_id, force_refresh=refresh
+            )
         if config.credential_ref is None:
             return None
         return await self._credentials.resolve(CredentialRef(config.credential_ref))
+
+    async def _configs(self, uow: RepositoryUnitOfWork, tenant_id: str) -> list[MCPServerConfig]:
+        """Enabled rows; owner-added ones only while their feature is on (ADR-0255)."""
+        return [
+            config
+            for config in await uow.mcp_servers.list_enabled(tenant_id)
+            if self._owner_servers_enabled or not config.owner_managed
+        ]
+
+    def owner_server_ids(self, session_id: UUID) -> frozenset[str]:
+        """The session's owner-added servers, whose tools take their own index."""
+        return frozenset(
+            server_id
+            for server_id, connection in self._sessions.get(session_id, {}).items()
+            if connection.config.owner_managed
+        )
 
     @staticmethod
     def _environment(
@@ -517,7 +548,7 @@ class MCPRuntime:
             async with self._uow_factory() as uow:
                 configs = [
                     config
-                    for config in await uow.mcp_servers.list_enabled(principal.tenant_id)
+                    for config in await self._configs(uow, principal.tenant_id)
                     if config.server_id not in attempted
                     and (server_ids is None or config.server_id in server_ids)
                 ]
@@ -948,7 +979,8 @@ class MCPRuntime:
             return self._unavailable(connection.unavailable_reason)
         connection.reauthentication_attempted = True
         try:
-            credential = await self._credential(connection.config)
+            # Step 2 of the ladder: re-resolve, and for a sign-in, refresh (ADR-0255).
+            credential = await self._credential(connection.config, refresh=True)
             changed = await self._connected_client(connection).reauthenticate(
                 credential,
                 self._environment(connection.config, credential),
@@ -1308,7 +1340,7 @@ class MCPRuntime:
             if self._closing:
                 return
             async with self._uow_factory() as uow:
-                configs = await uow.mcp_servers.list_enabled(tenant_id)
+                configs = await self._configs(uow, tenant_id)
             pending = [config for config in configs if self._remembered(config) is None]
             for attempt in range(1, self._warmup_attempts + 1):
                 failed: list[MCPServerConfig] = []

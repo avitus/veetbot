@@ -45,7 +45,7 @@ from agent_core.domain.sessions import (
     Session,
     project_scope,
 )
-from agent_core.domain.tools import ToolKind, ToolSpec
+from agent_core.domain.tools import ToolKind, ToolSource, ToolSpec
 from agent_core.memory.profiles import SnapshotProfile, SnapshotProfiles
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
@@ -192,6 +192,7 @@ class EventContextPlanner:
         snapshot_profiles: SnapshotProfiles | None = None,
         memory_candidate_selection: Literal["recent", "relevance"] = "recent",
         cache_capacity: int = 1_024,
+        owner_server_ids: Callable[[UUID], frozenset[str]] | None = None,
     ) -> None:
         if cache_capacity <= 0:
             raise ValueError("context-plan cache capacity must be positive")
@@ -209,6 +210,8 @@ class EventContextPlanner:
         self._session_required_tools = session_required_tools
         self._session_browser_origins = session_browser_origins
         self._attach_device_tools = attach_device_tools
+        # ADR-0255: the session's owner-added servers, whose tools take their own index.
+        self._owner_server_ids = owner_server_ids
         self._snapshot_profiles = (
             SnapshotProfiles() if snapshot_profiles is None else snapshot_profiles
         )
@@ -532,6 +535,23 @@ class EventContextPlanner:
         # Application orchestration retains registered tools without spending
         # model context on transport pagination and synchronization protocols.
         tools = [tool for tool in tools if tool.model_visible]
+        # ADR-0255: owner-added servers' tools never take a definition; they fill
+        # their own index below, so adding a server moves no existing tool.
+        owner_servers = (
+            frozenset()
+            if self._owner_server_ids is None or not surface
+            else self._owner_server_ids(session.id)
+        )
+        owner_tools = sorted(
+            (
+                tool
+                for tool in tools
+                if tool.source is ToolSource.MCP and tool.server_id in owner_servers
+            ),
+            key=_discovered_rank,
+        )
+        if owner_tools:
+            tools = [tool for tool in tools if tool not in owner_tools]
         if (
             catalog is not None
             and not catalog.entries
@@ -637,7 +657,9 @@ class EventContextPlanner:
         # tool.call refuses control targets, so control overflow is skipped and
         # never reserves a tool.call slot of its own.
         deferring = control is not None and bool(
-            explicitly_deferred or any(tool.kind is not ToolKind.CONTROL for tool in overflow)
+            explicitly_deferred
+            or any(tool.kind is not ToolKind.CONTROL for tool in overflow)
+            or owner_tools
         )
         if deferring:
             assert control is not None
@@ -676,6 +698,26 @@ class EventContextPlanner:
                     skipped_tools.append(tool)
                     continue
                 deferred_tools.append(tool)
+        shared_index_tools = list(deferred_tools)
+        owner_index_config = classes.get("owner_tool_index")
+        if owner_tools and not deferring:
+            # Without tool.call there is no index to hold them.
+            skipped_tools.extend(owner_tools)
+        elif owner_tools:
+            if not isinstance(owner_index_config, dict):
+                raise ValueError("owner-tool-index context configuration must be a mapping")
+            owner_index: list[ToolSpec] = []
+            for tool in owner_tools:
+                proposed_owner = [*owner_index, tool]
+                if len(proposed_owner) > int(
+                    owner_index_config["max_items"]
+                ) or self._estimator.estimate(
+                    envelope_items(deferred_index_items(proposed_owner)), model_id
+                ) > int(owner_index_config["max_tokens"]):
+                    skipped_tools.append(tool)
+                    continue
+                owner_index.append(tool)
+            deferred_tools.extend(owner_index)
         tools = sorted(selected_tools, key=lambda tool: tool.name)
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
@@ -764,6 +806,18 @@ class EventContextPlanner:
             base_prefix[2:], model_id
         ) + self._estimator.estimate_tools(tools, model_id)
         index_tokens = self._estimator.estimate(index_prefix[len(persona_prefix) :], model_id)
+        # The owner index renders inside the shared one; each part keeps its own cap.
+        shared_index_tokens = (
+            index_tokens
+            if len(shared_index_tools) == len(deferred_tools)
+            else self._estimator.estimate(
+                build_prefix(agent, tools, persona=persona_text, deferred_tools=shared_index_tools)[
+                    len(persona_prefix) :
+                ],
+                model_id,
+            )
+        )
+        owner_index_tokens = index_tokens - shared_index_tokens
         skill_catalog_tokens = self._estimator.estimate(
             catalog_prefix[len(index_prefix) :], model_id
         )
@@ -785,10 +839,16 @@ class EventContextPlanner:
                 raise ContextOverflow("context prefix class persona exceeds its cap")
         if tool_tokens > int(tool_config["max_tokens"]):
             raise ContextOverflow("context prefix class tool_definitions exceeds its cap")
-        if index_tokens and (
-            not isinstance(index_config, dict) or index_tokens > int(index_config["max_tokens"])
+        if shared_index_tokens and (
+            not isinstance(index_config, dict)
+            or shared_index_tokens > int(index_config["max_tokens"])
         ):
             raise ContextOverflow("context prefix class deferred_tool_index exceeds its cap")
+        if owner_index_tokens > 0 and (
+            not isinstance(owner_index_config, dict)
+            or owner_index_tokens > int(owner_index_config["max_tokens"])
+        ):
+            raise ContextOverflow("context prefix class owner_tool_index exceeds its cap")
         skill_config = classes.get("skill_catalog")
         if not isinstance(skill_config, dict):
             raise ValueError("skill-catalog context configuration must be a mapping")
