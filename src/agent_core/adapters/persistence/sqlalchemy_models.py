@@ -1013,6 +1013,14 @@ class MCPServerAuthorizationRow(Base):
             name="fk_mcp_server_authorizations_server",
             ondelete="CASCADE",
         ),
+        # The callback finds its sign-in by state; at most one row holds a state.
+        Index(
+            "uq_mcp_server_authorizations_pending_state",
+            "tenant_id",
+            "pending_state_hash",
+            unique=True,
+            postgresql_where=text("pending_state_hash IS NOT NULL"),
+        ),
     )
 
     tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)

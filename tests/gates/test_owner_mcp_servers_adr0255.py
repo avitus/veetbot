@@ -18,7 +18,9 @@ import pytest
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
+from agent_core.adapters.mcp.sealing import AESGCMSecretSealer
 from agent_core.api import create_app
+from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.bootstrap import Composition, build
 from agent_core.config import load_settings
 from agent_core.domain.agents import Principal
@@ -852,3 +854,52 @@ async def test_chat_reaches_an_owner_tool_through_tool_call_under_its_access(
     assert client.call_count == 1
     # The sign-in's access token is the credential the connection used.
     assert client._credential is not None and client._credential.reveal() == "access-1"
+
+
+class _HeldRegistration(FakeGateway):
+    """Hold registration open, as a slow authorization server would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.registering = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def register(
+        self, metadata: MCPAuthorizationMetadata, redirect_uri: str
+    ) -> MCPClientRegistration:
+        self.registering.set()
+        await self.release.wait()
+        return await super().register(metadata, redirect_uri)
+
+
+async def test_starting_a_sign_in_keeps_a_token_rotated_while_it_registered() -> None:
+    """PR 201 review: begin_sign_in must not write back a refresh token already spent."""
+    gateway = FakeGateway()
+    async with _composition(gateway=gateway) as composition, _client(composition) as client:
+        await client.post("/v1/mcp-servers", json=_add())
+        await _signed_in(client)
+        first = composition.services.mcp_servers
+        assert first is not None
+        # The same rows under a new callback URL, so a sign-in registers again.
+        held = _HeldRegistration()
+        second = MCPServerSettingsService(
+            uow_factory=composition.uow_factory,
+            clock=composition.clock,
+            ids=composition.ids,
+            gateway=held,
+            sealer=AESGCMSecretSealer.from_text(KEY),
+            callback_url="http://127.0.0.1:8001/v1/mcp-oauth/callback",
+            tenant_id=TENANT,
+        )
+        starting = asyncio.create_task(second.begin_sign_in(composition.principal, "docs"))
+        await held.registering.wait()
+        rotated = await first.access_token(TENANT, "docs", force_refresh=True)
+        held.release.set()
+        await starting
+        await first.access_token(TENANT, "docs", force_refresh=True)
+    assert rotated.reveal() == "access-2"
+    # The second refresh spends the token the first one stored, not the original.
+    assert [call[1] for call in gateway.calls if call[0] == "refresh"] == [
+        "refresh-1",
+        "refresh-2",
+    ]

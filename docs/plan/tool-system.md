@@ -1204,8 +1204,8 @@ emitter is forbidden to look.
 **Configuration is validated when it is written, not when it is dialled.**
 Five rules, all mechanical:
 
-1. `none` requires a null `credential_ref`, and every other scheme requires
-   a non-null one.
+1. `none` and `oauth2_authorization` require a null `credential_ref`, and
+   every other scheme requires a non-null one.
 2. `header` and `env` require `auth_name`, matching
    `^[A-Za-z0-9_-]{1,64}$`. A `header` scheme may not name `Authorization`,
    because a header scheme that writes `Authorization` is a bearer scheme

@@ -313,6 +313,29 @@ class MCPServerSettingsService:
         async with self._uow_factory() as uow:
             # The server may have been removed while the client registered.
             await self._owner_server(uow, principal, server_id)
+            current = await uow.mcp_servers.get_authorization(
+                principal.tenant_id, server_id, for_update=True
+            )
+            if current is None:
+                raise NotFoundError("MCP server not found")
+            # Overlay only what this sign-in owns: a refresh may have rotated the
+            # tokens while the client registered.
+            pending = current.model_copy(
+                update={
+                    field: getattr(pending, field)
+                    for field in (
+                        "redirect_uri",
+                        "client_id",
+                        "client_secret_sealed",
+                        "client_auth_method",
+                        "pending_state_hash",
+                        "pending_verifier_sealed",
+                        "pending_expires_at",
+                        "pending_principal_id",
+                        "updated_at",
+                    )
+                }
+            )
             await uow.mcp_servers.put_authorization(pending)
         query = {
             "response_type": "code",
@@ -433,6 +456,7 @@ class MCPServerSettingsService:
         self, tenant_id: str, server_id: str, *, force_refresh: bool = False
     ) -> SecretValue:
         """A current token; PermissionError when there is no sign-in to use."""
+        signed_out: str | None = None
         async with self._uow_factory() as uow:
             authorization = await uow.mcp_servers.get_authorization(
                 tenant_id, server_id, for_update=True
@@ -453,31 +477,37 @@ class MCPServerSettingsService:
             if authorization.refresh_token_sealed is None:
                 # An expired or rejected token with nothing to refresh it is a sign-out.
                 await uow.mcp_servers.put_authorization(self._signed_out(authorization))
-                raise PermissionError("MCP sign-in expired")
-            refresh_token = self._sealer.open(
-                authorization.refresh_token_sealed,
-                self._context(authorization, "refresh_token"),
-            )
-            try:
-                # The row stays locked, so no other process spends this token.
-                grant = await self._gateway.refresh(
-                    authorization.metadata,
-                    self._registration(authorization),
-                    refresh_token=refresh_token.reveal(),
+                signed_out = "MCP sign-in expired"
+            else:
+                refresh_token = self._sealer.open(
+                    authorization.refresh_token_sealed,
+                    self._context(authorization, "refresh_token"),
                 )
-            except MCPGrantRejectedError:
-                await uow.mcp_servers.put_authorization(self._signed_out(authorization))
-                raise PermissionError("MCP sign-in was rejected") from None
-            except MCPServerUnavailableError:
-                raise PermissionError("MCP authorization server is unavailable") from None
-            refreshed = authorization.model_copy(
-                update={
-                    **self._sealed_grant(authorization, grant, self._clock.now()),
-                    "updated_at": self._clock.now(),
-                }
-            )
-            await uow.mcp_servers.put_authorization(refreshed)
-            return SecretValue(grant.access_token)
+                try:
+                    # The row stays locked, so no other process spends this token.
+                    grant = await self._gateway.refresh(
+                        authorization.metadata,
+                        self._registration(authorization),
+                        refresh_token=refresh_token.reveal(),
+                    )
+                except MCPGrantRejectedError:
+                    await uow.mcp_servers.put_authorization(self._signed_out(authorization))
+                    signed_out = "MCP sign-in was rejected"
+                except MCPServerUnavailableError:
+                    raise PermissionError("MCP authorization server is unavailable") from None
+                else:
+                    refreshed = authorization.model_copy(
+                        update={
+                            **self._sealed_grant(authorization, grant, self._clock.now()),
+                            "updated_at": self._clock.now(),
+                        }
+                    )
+                    await uow.mcp_servers.put_authorization(refreshed)
+                    return SecretValue(grant.access_token)
+        # Raised only once the sign-out has committed; raising inside the unit of
+        # work would roll it back and leave a rejected token to be spent again.
+        assert signed_out is not None
+        raise PermissionError(signed_out)
 
     # Helpers
 

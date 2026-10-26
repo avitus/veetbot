@@ -364,6 +364,7 @@ ceiling.
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
 | A | Deferred tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
+| A | Owner tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |

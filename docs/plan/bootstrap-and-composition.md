@@ -431,7 +431,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 220. Schema versions, profile names, rule identifiers,
+and asserts the total is 222. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -439,14 +439,14 @@ or invariants rather than knobs and are not counted.
 | --- | ---: |
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
-| `context/plan.yaml` | 32 |
+| `context/plan.yaml` | 34 |
 | `tools/limits.yaml` | 25 |
 | `runtime/limits.yaml` | 65 |
 | `memory/profiles.yaml` | 47 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
 | `cockpit/profiles.yaml` | 10 |
-| **Total** | **220** |
+| **Total** | **222** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
