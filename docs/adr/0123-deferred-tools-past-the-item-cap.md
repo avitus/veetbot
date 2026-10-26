@@ -182,9 +182,13 @@ When the agent enables `tool.call`, a configured tool that would take the
 definitions past the token cap is now deferred like one past the item cap, in
 the same rank order, and the next configured tool that fits still takes a
 definition. A required tool is never deferred, and an agent without
-`tool.call` still fails at plan time. A plan that fit before is selected
-exactly as before, because the check only moves a tool the old plan could not
-have held, so no chat is re-planned and the builder version does not change.
+`tool.call` still fails at plan time. A control tool past either cap is
+recorded in `skipped_tool_names` and never listed, because `tool.call` refuses
+control targets, and control overflow alone reserves no `tool.call` slot. A
+plan that fit before, with every control tool defined, is selected exactly as
+before, because the check only moves a tool the old plan could not have held.
+The default agent's control tools rank ahead of slot thirty, so no chat is
+re-planned and the builder version does not change.
 
 With every production flag on, a bound chat now defines thirty tools and
 moves `records.append` to the index. The index then reaches its own

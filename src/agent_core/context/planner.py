@@ -631,7 +631,11 @@ class EventContextPlanner:
             return selected_tools, overflow
 
         selected_tools, overflow = select([])
-        deferring = control is not None and bool(explicitly_deferred or overflow)
+        # tool.call refuses control targets, so control overflow is skipped and
+        # never reserves a tool.call slot of its own.
+        deferring = control is not None and bool(
+            explicitly_deferred or any(tool.kind is not ToolKind.CONTROL for tool in overflow)
+        )
         if deferring:
             assert control is not None
             # tool.call takes a definition slot only when something is deferred.
@@ -643,8 +647,19 @@ class EventContextPlanner:
                 "required session tools do not fit the tool-definition cap: "
                 + ", ".join(sorted(missing_required))
             )
-        index_candidates = [*explicitly_deferred, *overflow] if deferring else []
-        skipped_tools: list[ToolSpec] = [] if deferring else list(overflow)
+        index_candidates = (
+            [
+                *explicitly_deferred,
+                *(tool for tool in overflow if tool.kind is not ToolKind.CONTROL),
+            ]
+            if deferring
+            else []
+        )
+        skipped_tools: list[ToolSpec] = (
+            [tool for tool in overflow if tool.kind is ToolKind.CONTROL]
+            if deferring
+            else list(overflow)
+        )
         deferred_tools: list[ToolSpec] = []
         index_config = classes.get("deferred_tool_index")
         if index_candidates:
