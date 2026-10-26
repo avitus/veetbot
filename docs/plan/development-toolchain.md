@@ -375,7 +375,7 @@ while validate sends a git bundle into a real repository. Xcode suites
 
 The sidecar is the gate for every branch except `main` (ADR-0107). Hosted
 verification no longer starts when such a branch is pushed, so a change reaches
-`dev` on a passing `chunk validate`, plus the local suites the sidecar cannot
+`dev` or a feature branch on a passing `chunk validate`, plus the local suites the sidecar cannot
 run when the change touches them: `make test-integration` against a scratch
 PostgreSQL database marked disposable, `make test-sandbox`,
 `make test-browser-image` when an input of the browser image check changes,
@@ -620,6 +620,10 @@ admission of the final reviewed revision, with original project/group and
 SSH/API-configuration restrictions preserved and restored after the attempt.
 The branch selector alone grants no access to credentials or publication.
 
+ADR-0252 adds `codex/dreaming-candidate-evidence-release` for PR #196 under the
+same final-reviewed-commit admission and immediate restoration procedure.
+It grants no standing signing access or publication from the dreaming branch.
+
 Job 8 is delivery, not a verification partition and not part of `make check`.
 After the production API reports the matching tested revision, it installs the
 CircleCI-managed `veetbot-app-store` signing bundle, imports the installer
@@ -696,7 +700,8 @@ Three workflow-level facts complete the definition:
       -d '{"branch": "<source-branch>", "parameters": {"run_verify": true}}'
     ```
 
-    An ordinary promotion's source branch is `dev`; the isolated recall release
+    An ordinary promotion's source branch is `dev`, a feature's is its
+    own branch, and the isolated recall release
     uses `codex/recall-production-release` (ADR-0219). CircleCI builds the named branch's
     current head, so a request naming any other branch verifies the wrong
     commit. The requested pipeline reports its job statuses on that commit, so
@@ -741,6 +746,24 @@ exists and `mkdocs build --strict` runs inside job 1, because the docs
 check the gate registry requires is a static check with no database
 and no fixtures, and giving it a job of its own would put a second
 `uv sync` on the critical path to catch a broken link.
+
+### Branches and promotion
+
+Each new feature gets its own branch. Cut it from `origin/main` and name it
+with two lowercase words that describe the feature, joined by one hyphen,
+such as `owner-records`; rename a generated branch such as `claude/<slug>` or
+`codex/<slug>` before its first push. The feature reaches `main` through its
+own pull request and the gate in `AGENTS.md`: sidecar validation as on any
+branch, the CodeRabbit loop, `main` merged in before the final push, one
+requested `run_verify` pipeline naming the feature branch on that final head,
+and production delivery after the merge. The signing smoke runs only on
+`dev`, so a feature, like a hotfix, merges without it. A fix to a feature
+still under review goes on its branch.
+
+Small changes and bug fixes unrelated to an open feature stack onto `dev` and
+reach `main` through the `dev`-to-`main` pull request. That pull request's
+head is `dev` itself, so a push to `dev` waits while one is open; an open
+feature pull request does not hold `dev`.
 
 ## The test tree
 

@@ -386,4 +386,5 @@ nav:
       - 'ADR-0249: Review reasons and ranking controls': adr/0249-review-reasons-and-ranking-controls.md
       - 'ADR-0250: Learned-memory shape v2': adr/0250-learned-memory-shape-v2.md
       - 'ADR-0251: Chat offers to connect a named website': adr/0251-chat-offers-to-connect-a-named-website.md
+      - 'ADR-0252: Dreaming release signing': adr/0252-dreaming-release-signing.md
   - Changelog: changelog.md

@@ -296,3 +296,4 @@ implementation without one.
 - [ADR-0249: Review reasons and two ranking controls](0249-review-reasons-and-ranking-controls.md)
 - [ADR-0250: Learned-memory shape v2 and the reshape of v1 rows](0250-learned-memory-shape-v2.md)
 - [ADR-0251: An unconnected chat offers to connect a website the owner names (Accepted)](0251-chat-offers-to-connect-a-named-website.md)
+- [ADR-0252: Exact-commit signing for the isolated dreaming release](0252-dreaming-release-signing.md)
