@@ -9,8 +9,8 @@
   `tool-system.md` decision 25 (the control-tool set of four)
 - Amended by: ADR-0130 (2026-09-25), which ranks `browser.navigate`,
   `browser.observe` and `browser.act` first and never defers them in a chat
-  bound to a website profile; the amendment of 2026-10-25 below, which defers a
-  configured tool past the token cap
+  bound to a website profile; ADR-0252 (2026-10-25), which defers a configured
+  tool past the token cap
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
 
@@ -103,13 +103,14 @@ one account's tools beat the other's.
 
 ## Consequences
 
-- With production's flags and both Gmail accounts, Chat defines twenty-one
-  configured tools, `tool.call`, the two Bland reads and the six Gmail reads:
-  thirty definitions at 5,908 estimated tokens. The index holds seventeen
+- At this decision (2026-09-25), with production's flags and both Gmail
+  accounts, Chat defined twenty-one configured tools, `tool.call`, the two
+  Bland reads and the six Gmail reads: thirty definitions at 5,908 estimated
+  tokens. The index held seventeen
   entries at 1,013 tokens: the six management tools, `start_call`, and the
-  ten Gmail writes and sends. Nothing is skipped. Before this decision the
+  ten Gmail writes and sends. Nothing was skipped. Before this decision the
   thirty definitions cost 7,058 tokens, and the sixteen Gmail tools were not
-  offered at all.
+  offered at all. ADR-0252 records the roster after records and the Cockpit.
 - `mcp.bland_call.start_call` moves to the index. Starting a call can take one
   more model step, and still waits for the same approval.
 - A configured tool added later no longer evicts a capability. It moves the
@@ -161,39 +162,3 @@ one account's tools beat the other's.
   and leaves the inner call's approval suspended under a running outer
   invocation. Unwrapping before resolution keeps one call, one row and one
   result.
-
-## Amendment, 2026-10-25: a configured tool past the token cap is deferred
-
-Status: Proposed. Shipped as a production repair; the owner has not yet
-reviewed it.
-
-Decision 4 deferred configured tools past the item cap, but a configured tool
-was never checked against the 9,000-token cap: the plan took every one and
-failed with `ContextOverflow` when they did not fit. On 2026-10-25 the
-records tools joined the default roster, and in a chat bound to a website
-profile, whose four browser definitions are required, the configured
-definitions passed the cap. Every new bound chat then failed before its first
-step with "context prefix class tool_definitions exceeds its cap". The
-production-shaped roster gate had not gained the hosted browser, media
-generation or records when production activated them, so it never planned
-that roster.
-
-When the agent enables `tool.call`, a configured tool that would take the
-definitions past the token cap is now deferred like one past the item cap, in
-the same rank order, and the next configured tool that fits still takes a
-definition. A required tool is never deferred, and an agent without
-`tool.call` still fails at plan time. A control tool past either cap is
-recorded in `skipped_tool_names` and never listed, because `tool.call` refuses
-control targets, and control overflow alone reserves no `tool.call` slot. A
-plan that fit before, with every control tool defined, is selected exactly as
-before, because the check only moves a tool the old plan could not have held.
-The default agent's control tools rank ahead of slot thirty, so no chat is
-re-planned and the builder version does not change.
-
-With every production flag on, a bound chat now defines thirty tools and
-moves `records.append` to the index. The index then reaches its own
-2,000-token cap and skips the personal account's `trash_thread` and
-`untrash_thread`, which are recorded in `skipped_tool_names`. The index cap is
-unchanged and remains the owner's decision. The gate in
-`tests/gates/test_deferred_tools_adr0123.py` now plans a bound chat with the
-hosted browser, media generation, records and the Cockpit on.
