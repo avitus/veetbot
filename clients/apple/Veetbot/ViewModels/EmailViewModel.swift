@@ -61,6 +61,14 @@ public final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// A Cockpit widget's Discuss in Chat: a new conversation whose composer
+    /// names the widget, left for the owner to finish and send.
+    public func discussWidget(title: String) {
+        chat.newSession()
+        chat.composerText = "About my Cockpit widget “\(title)”: "
+        mode = .chat
+    }
+
     public func discussSelectedThread() async {
         guard let sessionID = await email.discussionSession() else { return }
         await chat.openSharedSession(sessionID)

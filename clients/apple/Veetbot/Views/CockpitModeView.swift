@@ -17,6 +17,8 @@ struct CockpitModeView: View {
     /// What needs the owner, as the other modes' sidebars list it.
     var attention: [SidebarAttention.Row] = []
     var openAttention: (UUID) -> Void = { _ in }
+    /// A widget's Discuss in Chat, by its title.
+    var discussWidget: (String) -> Void = { _ in }
     @AppStorage("cockpit.nightWatch") private var nightWatch = false
     @AppStorage("cockpit.keepAwake") private var keepAwake = false
     @Environment(\.colorScheme) private var colorScheme
@@ -90,7 +92,7 @@ struct CockpitModeView: View {
                         draggedPanel = nil
                     }
                 )
-                CockpitWidgetDetailView(model: model, slug: slug, close: model.closeDetail)
+                CockpitWidgetDetailView(model: model, slug: slug, close: model.closeDetail, discuss: discussWidget)
                     .frame(width: panelWidth)
                     .background(AppTheme.paperDeep)
             }
@@ -103,7 +105,7 @@ struct CockpitModeView: View {
         }
         .sheet(item: selectionBinding) { selection in
             NavigationStack {
-                CockpitWidgetDetailView(model: model, slug: selection.slug, close: model.closeDetail)
+                CockpitWidgetDetailView(model: model, slug: selection.slug, close: model.closeDetail, discuss: discussWidget)
             }
             .presentationDetents([.medium, .large])
         }

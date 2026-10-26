@@ -284,6 +284,43 @@ import Testing
         board.setVisible(false)
     }
 
+    /// "Remove from this screen" (MagicPath merrily-city-4157) takes the widget
+    /// off this device class's board only, closes its details, and offers Undo,
+    /// which puts the board back as it was. The widget itself stays live.
+    @Test
+    func removingAWidgetFromThisScreenSavesTheLayoutWithoutItAndCanBeUndone() async {
+        let client = FakeClient()
+        // A placed widget: the board shows only sizes its manifest offers.
+        let weather = CockpitWidget(
+            slug: "weather", revisionID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            bundleSHA256: String(repeating: "d", count: 64),
+            manifest: ["title": .string("Weather"), "sizes": .array([.string("md")])], changedAt: Self.now
+        )
+        client.queueSnapshot(.success(CockpitSnapshot(
+            cursor: 41, runtime: nil, widgets: [weather],
+            layouts: [.wide: CockpitLayout(revision: 3, placements: [CockpitPlacement(slug: "weather", size: "md")])]
+        )))
+        client.queueStream([])
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let board = model(client)
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.openDetail("weather")
+        await board.removeFromScreen("weather", deviceClass: .wide)
+        #expect(board.selectedSlug == nil, "The details close once the widget leaves the screen")
+        #expect(toasts.current?.text == "Removed Weather from this screen")
+        #expect(toasts.current?.undo?.label == "Undo")
+        await toasts.performUndo()
+        #expect(client.calls == [
+            "detail weather",
+            "layout wide [] after 3",
+            "layout wide [\"weather\"] after 3",
+        ])
+        #expect(!client.calls.contains { $0.hasPrefix("delete") }, "Removing from a screen never deletes the widget")
+        board.setVisible(false)
+    }
+
     @Test
     func theOwnersChangesGoThroughTheRoutesAndRefreshTheBoard() async {
         let client = FakeClient()

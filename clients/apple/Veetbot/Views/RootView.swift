@@ -281,7 +281,8 @@ public struct RootView: View {
                         openAttention: { sessionID in
                             coordinator.mode = .chat
                             Task { await model.openSharedSession(sessionID) }
-                        }
+                        },
+                        discussWidget: { coordinator.discussWidget(title: $0) }
                     )
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()

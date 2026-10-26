@@ -32,6 +32,28 @@ public final class CockpitViewModel: ObservableObject {
     /// Widgets held out of the board after hanging or navigating the realm.
     @Published public private(set) var quarantined: Set<String> = []
     @Published public var selectedSlug: String?
+    /// Confirms a removal from this screen and offers its Undo.
+    public var toasts: ToastCenter = .shared
+
+    /// Remove from this screen (MagicPath merrily-city-4157): the widget leaves
+    /// this device class's board only and stays live elsewhere; Undo saves the
+    /// board as it was.
+    public func removeFromScreen(_ slug: String, deviceClass: CockpitDeviceClass) async {
+        guard let snapshot else { return }
+        let before = CockpitBoard.placements(snapshot, deviceClass: deviceClass)
+            .map { CockpitPlacement(slug: $0.widget.slug, size: $0.size) }
+        guard before.contains(where: { $0.slug == slug }) else { return }
+        let title = snapshot.widgets.first { $0.slug == slug }?.title ?? slug
+        await saveLayout(deviceClass, placements: before.filter { $0.slug != slug })
+        guard errorMessage == nil else { return }
+        closeDetail()
+        toasts.show("Removed \(title) from this screen", restored: "\(title) is back on this screen") { [weak self] in
+            guard let self else { return false }
+            await self.saveLayout(deviceClass, placements: before)
+            return self.errorMessage == nil
+        }
+    }
+
     /// The arrange sheet, opened from the toolbar on the Mac and the options menu on touch.
     @Published public var isArranging = false
     @Published public private(set) var detail: CockpitWidgetDetail?

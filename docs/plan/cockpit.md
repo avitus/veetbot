@@ -919,10 +919,17 @@ interpolation.
     (280 to 440, 320 to start) resize from their hairlines and keep their
     widths on this Mac; the board takes the rest, in three columns while the
     panel is open (the snapshot message's optional `columns`).
-  - The Cockpit right panel follows the ADR-0237 pattern. It shows the
-    selected widget's purpose, feeds and their freshness, a settings form
-    generated from the settings schema, revision history with commit links,
-    import failures, and Revert, Delete and Restore.
+  - The Cockpit right panel follows the ADR-0237 pattern and the A2 design's
+    details panel. It shows the selected widget's purpose; **Feed**: each
+    declared feed by name and source, then the stalest feed's last value,
+    expected interval and when it goes stale; **Private settings**: a form
+    generated from the settings schema, kept on the owner's server;
+    **History**: each revision's state, who made it, when and its commit, with
+    Live beside the live one and Revert beside the others; import failures;
+    then **Discuss in Chat** (a new conversation with an editable opener naming
+    the widget, never sent for the owner), **Remove from this screen** (this
+    device class's layout without the widget, with Undo; the widget stays
+    live elsewhere), and Delete or Restore.
 - **iPad**
   - Uses the Mac layout at touch sizes, with a keep-screen-on toggle that
     sets the idle timer only while Cockpit is visible.
