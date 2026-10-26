@@ -36,8 +36,10 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
 from agent_core.domain.skills import SessionSkillCatalog
+from agent_core.domain.tools import ToolSpec
 from agent_core.memory.profiles import SnapshotProfiles
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.registry import StaticToolRegistry
@@ -473,6 +475,114 @@ async def test_context_planner_defers_overflow_and_records_what_the_index_cannot
     [part] = index.content
     assert isinstance(part, TextPart)
     assert "- system.current_time(timezone?): " in part.text
+
+
+async def test_context_planner_defers_a_configured_tool_past_the_token_cap() -> None:
+    """ADR-0123: with tool.call, a configured definition that would take the class
+    past its token cap waits in the index; without tool.call it fails the plan."""
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    registry = StaticToolRegistry()
+    registry.register(ToolCallTool())
+    registry.register(WebFetchTool(FakeWebProvider()))
+    registry.register(CurrentTimeTool(clock))
+    registry.register(CalculatorTool())
+    configured_agent = agent().model_copy(
+        update={
+            "enabled_tools": ["system.current_time", "web.fetch", "math.calculate", "tool.call"]
+        }
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    estimator = ConservativeTokenEstimator()
+    web_fetch, clock_tool = WebFetchTool(FakeWebProvider()).spec, CurrentTimeTool(clock).spec
+
+    def cost(*specs: ToolSpec) -> int:
+        ordered = sorted(specs, key=lambda spec: spec.name)
+        return estimator.estimate(
+            build_prefix(configured_agent, ordered)[2:], "fake:scripted"
+        ) + estimator.estimate_tools(ordered, "fake:scripted")
+
+    # Exactly what tool.call and the clock cost: the three configured tools do not fit,
+    # and once tool.call takes its definition nothing past the clock does.
+    config["classes"]["tool_definitions"]["max_tokens"] = cost(ToolCallTool.spec, clock_tool)
+
+    def planner(factory: MemoryUnitOfWorkFactory) -> EventContextPlanner:
+        return EventContextPlanner(
+            factory,
+            registry,
+            ConservativeTokenEstimator(),
+            clock,
+            principal(),
+            config,
+            policy_version="contract-policy@1",
+        )
+
+    plan = await planner(factory).plan(session(), configured_agent, principal(), model)
+
+    assert plan.tool_names == ("system.current_time", "tool.call")
+    assert plan.deferred_tool_names == ("web.fetch", "math.calculate")
+    assert plan.skipped_tool_names == ()
+
+    _clock, fresh, _service, _retriever = await formation_stack()
+    without_control = configured_agent.model_copy(
+        update={"enabled_tools": ["system.current_time", "web.fetch", "math.calculate"]}
+    )
+    config["classes"]["tool_definitions"]["max_tokens"] = (
+        cost(web_fetch, clock_tool, CalculatorTool.spec) - 1
+    )
+    with pytest.raises(ContextOverflow, match="tool_definitions exceeds its cap"):
+        await planner(fresh).plan(session(), without_control, principal(), model)
+
+
+async def test_context_planner_skips_a_control_tool_it_cannot_define() -> None:
+    """tool.call refuses control targets, so a control tool past the cap is recorded
+    as skipped instead of listed, and it reserves no tool.call slot of its own."""
+    clock, factory, _service, _retriever = await formation_stack()
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    registry = StaticToolRegistry()
+    registry.register(ToolCallTool())
+    registry.register(CurrentTimeTool(clock))
+    registry.register(CalculatorTool())
+    registry.register(AskUserTool())
+    configured_agent = agent().model_copy(
+        update={
+            "enabled_tools": [
+                "system.current_time",
+                "math.calculate",
+                "conversation.ask_user",
+                "tool.call",
+            ]
+        }
+    )
+    estimator = ConservativeTokenEstimator()
+    fitting = sorted((CalculatorTool.spec, CurrentTimeTool(clock).spec), key=lambda spec: spec.name)
+    config["classes"]["tool_definitions"]["max_tokens"] = estimator.estimate(
+        build_prefix(configured_agent, fitting)[2:], "fake:scripted"
+    ) + estimator.estimate_tools(fitting, "fake:scripted")
+    planner = EventContextPlanner(
+        factory,
+        registry,
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    )
+
+    plan = await planner.plan(
+        session(),
+        configured_agent,
+        principal(),
+        ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+    )
+
+    assert plan.tool_names == ("math.calculate", "system.current_time")
+    assert plan.deferred_tool_names == ()
+    assert plan.skipped_tool_names == ("conversation.ask_user",)
 
 
 async def test_context_planner_ranks_required_session_tools_first_and_never_defers_them() -> None:

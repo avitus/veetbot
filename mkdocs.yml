@@ -387,4 +387,5 @@ nav:
       - 'ADR-0250: Learned-memory shape v2': adr/0250-learned-memory-shape-v2.md
       - 'ADR-0251: Chat offers to connect a named website': adr/0251-chat-offers-to-connect-a-named-website.md
       - 'ADR-0252: Dreaming release signing': adr/0252-dreaming-release-signing.md
+      - 'ADR-0253: Configured tools past the token cap': adr/0253-configured-tools-past-the-token-cap.md
   - Changelog: changelog.md

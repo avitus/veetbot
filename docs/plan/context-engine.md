@@ -430,8 +430,10 @@ follow **reads first**: tools whose side effect is `NONE`, `WORKSPACE_READ` or
 `NETWORK_READ` before any that change the world, then by server or device, then
 by name. A deferred tool costs at most one extra model step, and a read is
 usually a request's first step, so reads keep their definitions. Discovered
-definitions must fit both the item and token caps; explicitly enabled
-capabilities still fail at plan time if they exceed the token cap. The selected
+definitions must fit both the item and token caps. When the agent enables
+`tool.call`, an explicitly enabled capability that would exceed the token cap
+is deferred like one past the item cap (ADR-0253); without
+`tool.call` it still fails at plan time. The selected
 set is then sorted by name for stable rendering. Adding an MCP account must not
 evict an explicitly enabled web, clock, or workspace capability merely because
 its name sorts earlier.
