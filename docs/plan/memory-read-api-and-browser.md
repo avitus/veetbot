@@ -20,13 +20,13 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:549-559). That surface is right for an
+(memory-formation-and-consolidation.md:582-592). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
 The retrieval design already drew the line this milestone builds on. A recall
 trace explains one answer; browsing everything the agent believes is *a
-different surface* (memory-retrieval-and-ranking.md:781-782), and that surface
+different surface* (memory-retrieval-and-ranking.md:799-800), and that surface
 has never existed anywhere but the command line. Milestone 17 builds it: two
 GET routes, one exact scope, one default-off flag, and a browser in the Apple
 client.
@@ -67,7 +67,7 @@ find it here should find the reason here.
    not safe behind a route at any ceiling. That predicate must be added, and
    the trace store's contract suite must observe it, before a trace route is
    designed. Beyond the defect, a trace view owes the minimum-of-two-ceilings
-   rule (memory-retrieval-and-ranking.md:786-792), which is a second ceiling
+   rule (memory-retrieval-and-ranking.md:804-810), which is a second ceiling
    mechanism in a milestone whose whole ceiling story is one parameter.
 3. **Consolidation and formation audit routes.** `formations` and `diagnose`
    expose model selection, watermarks, and attempt audits — operator-tier
@@ -131,6 +131,8 @@ text         any-term search over subject and statement
 include_derived default false; opt in to the M32 derived projection when enabled
 flagged      true selects the review queue, false everything else;
              absent selects both (ADR-0117)
+review_reason one of conflict, correction, source_learned,
+             sensitive_automatic (ADR-0249); absent selects every reason
 ```
 
 `ceiling` has no default. A request that omits it is a validation error, not a
@@ -195,7 +197,7 @@ extends the existing cross-tenant-404 rule
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
-(memory-retrieval-and-ranking.md:786-792).
+(memory-retrieval-and-ranking.md:804-810).
 
 ### `GET /v1/memories/{memory_id}/evidence`
 
@@ -235,14 +237,15 @@ recall of source text.
 ADR-0224 part C, mounted before the identifier route so `counts` never parses
 as one. `ceiling` is required; `include_derived` defaults to false and, while
 the reconsolidation surface is disabled, is `malformed_request` exactly as on
-the list. The response is `{live, flagged, by_status, by_type, synthesis,
-counted_at}`: `live` and `by_type` count `active` and `provisional`, matching
+the list. The response is `{live, flagged, by_status, by_type, by_review_reason,
+synthesis, counted_at}`: `live` and `by_type` count `active` and `provisional`, matching
 the default browse; `flagged` counts live beliefs with `flagged_for_review`,
 matching `flagged=true`; `by_status` counts every status; `synthesis` is null
 unless `include_derived=true`, and then counts what the derived browse would
-list. Every count applies the list's own tenant, principal, erasure and ceiling
-predicates in both store adapters, so a number never disagrees with the list
-it labels.
+list; `by_review_reason` counts the live review queue by its derived reason
+(ADR-0249), so the browser can group the queue. Every count applies the list's
+own tenant, principal, erasure and ceiling predicates in both store adapters,
+so a number never disagrees with the list it labels.
 
 ### Writes
 
@@ -259,7 +262,7 @@ tombstoned so it cannot re-form, People copies are erased, and a
 `memory.deleted` event is appended to the belief's source session.
 
 `POST /v1/memories/{memory_id}/review` takes `{"outcome": ...}` with one of
-four values, and an optional `expected_updated_at`: when it differs from the
+five values, and an optional `expected_updated_at`: when it differs from the
 belief's current `updated_at` the request is `conflict` and nothing changes. `dismiss` clears `flagged_for_review` and nothing else: the
 belief takes a fresh store position, so the next recall delta shows it as
 reviewed, and a `memory.reviewed` event is appended. `untrue` and `not_here`
@@ -282,6 +285,15 @@ replacement at user authority citing that event and inheriting subject, scope,
 type, portability and sensitivity, links `superseded_by` and the rejection's
 `replacement_id`, and records the receipt. The response, and its replay, is the
 replacement's `MemoryView`; the superseded belief stays readable.
+
+`confirm` (ADR-0247) carries no text and is allowed for a live, decay-retired
+or expiry-retired belief. It supersedes the belief with the same words as a new
+belief at user authority through formation, citing a `memory.owner_confirmation`
+event, with no rejection recorded; the response, and its replay, is the
+replacement's `MemoryView`, and the predecessor stays readable with
+`superseded_by` set. A belief a correction already superseded, a statement a
+deletion or rejection blocks, a belief whose sources were erased and a derived
+summary are `conflict`.
 
 ### Errors
 
@@ -315,7 +327,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1705-1722) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1738-1755) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text
@@ -359,8 +371,9 @@ to the record.
 exposed   id, subject, statement, belief_type, status, polarity, scope,
           claim_kind, derivation, longevity, portability, authority,
           sensitivity, confidence,
-          corroboration_count, flagged_for_review, conflicts_with,
-          superseded_by, source_session_id, source_event_ids,
+          corroboration_count, flagged_for_review, review_reason,
+          attribution_host, conflicts_with, superseded_by, source_session_id,
+          source_event_ids,
           formation_run_id, consolidation_policy_version, origin_scopes,
           valid_from, valid_to, expires_at, last_evidence_at, last_used_at,
           last_reinforced_at, created_at, updated_at
@@ -452,7 +465,8 @@ the device surface.
 - **Review and deletion (ADR-0117).** A "Needs review" filter asks for the
   review queue through the `flagged` parameter. A row can be swiped to delete,
   behind a confirmation, and the detail view carries a Review menu with Looks
-  right (the `dismiss` outcome), Not true, Not relevant here, and Delete; a
+  right (the `dismiss` outcome), Still true (`confirm`, ADR-0247, also offered
+  for a retired belief), Not true, Not relevant here, and Delete; a
   flagged belief also asks "Is this right?" with those three as buttons. On the
   Mac a group sidebar (Review, Browse by type, Maintenance) replaces the
   collection picker and the review and type filters. Each action sends a fresh

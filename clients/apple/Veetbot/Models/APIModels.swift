@@ -253,6 +253,41 @@ public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// ADR-0251: an open offer to connect a website the owner named in an
+/// unconnected chat. The card connects it and continues the request.
+public struct WebsiteOffer: Codable, Hashable, Sendable {
+    public struct Website: Codable, Hashable, Sendable, Identifiable {
+        public let profileID: UUID
+        public let origins: [String]
+        public let status: BrowserProfileStatus
+
+        public var id: UUID { profileID }
+        public var host: String {
+            origins.first.flatMap { URL(string: $0)?.host } ?? origins.first ?? ""
+        }
+        public var needsSignIn: Bool { status != .ready }
+
+        enum CodingKeys: String, CodingKey {
+            case origins, status
+            case profileID = "profile_id"
+        }
+    }
+
+    public let offerID: UUID
+    public let sourceSequence: Int
+    public let connectedOrigin: String?
+    public let websites: [Website]
+    public let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case websites
+        case offerID = "offer_id"
+        case sourceSequence = "source_sequence"
+        case connectedOrigin = "connected_origin"
+        case expiresAt = "expires_at"
+    }
+}
+
 /// How the owner signs in to a website profile (ADR-0128). `remote` opens the
 /// isolated service's own browser; `device` signs in on this device and hands
 /// the session to the service.
@@ -902,10 +937,13 @@ public enum MemorySensitivityKind: String, Codable, CaseIterable, Sendable {
 /// below, so a value this client does not yet know about decodes instead of
 /// throwing (ADR-0049 decision 4).
 /// What the owner decided about a belief flagged for review (ADR-0117).
+/// `confirm` (ADR-0247) keeps the same words as the owner's own statement: the
+/// server answers with a replacement at user authority that never decays.
 public enum MemoryReviewOutcome: String, Codable, CaseIterable, Sendable {
     case dismiss
     case untrue
     case notHere = "not_here"
+    case confirm
 }
 
 /// One source a belief cites (ADR-0224 part B). Only the owner's own words
@@ -982,6 +1020,11 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public let confidence: Double
     public let corroborationCount: Int
     public let flaggedForReview: Bool
+    /// ADR-0249: conflict, correction, source_learned or sensitive_automatic;
+    /// nil when the belief is not asking for review. Older servers omit it.
+    public let reviewReason: String?
+    /// ADR-0250: the website a learned belief came from; nil otherwise.
+    public let attributionHost: String?
     public let conflictsWith: [UUID]
     public let supersededBy: UUID?
     public let sourceSessionID: UUID
@@ -1007,6 +1050,8 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
         case longevity
         case corroborationCount = "corroboration_count"
         case flaggedForReview = "flagged_for_review"
+        case reviewReason = "review_reason"
+        case attributionHost = "attribution_host"
         case conflictsWith = "conflicts_with"
         case supersededBy = "superseded_by"
         case sourceSessionID = "source_session_id"

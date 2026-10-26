@@ -150,6 +150,181 @@ async def test_recovered_detail_shares_the_original_context_budget_and_citation(
         )
 
 
+async def test_recovered_detail_keeps_a_conflict_marker_only_beside_its_partner() -> None:
+    """ADR-0248 rendering survives source recovery: re-rendering a selected
+    belief with its excerpt must not restore a `conflicts=[...]` marker naming
+    a partner the model was never shown."""
+
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.memory.retrieval import HybridMemoryRetriever
+
+    clock, factory, _, _ = await formation_stack()
+    sequence = await user_event(factory, "The workshop is on Thursday. Enter through Bay 6.")
+    unseen = UUID("abcdef12-0000-0000-0000-000000000990")
+    original = memory(statement="The workshop is on Thursday.").model_copy(
+        update={
+            "subject": "workshop",
+            "scope": "general",
+            "source_event_ids": [sequence],
+            "conflicts_with": [unseen],
+        }
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(original)
+    retriever = HybridMemoryRetriever(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=i) for i in range(8100, 8110)),
+        principal(),
+        source_recovery=BoundedSourceRecovery(principal(), admitted=lambda: True),
+    )
+    result = await retriever.recall(
+        recall_query(text="workshop", budget_tokens=2000).model_copy(
+            update={"current_scope": "general"}
+        ),
+        session_id=SESSION_ID,
+    )
+    assert "Enter through Bay 6" in result.rendered, "the recovery render must have run"
+    assert "m:abcdef12" not in result.rendered
+    # The link itself is kept for the trace and the browser.
+    assert isinstance(result.items[0], RecalledBelief)
+    assert result.items[0].conflict_with == [unseen]
+
+
+async def test_admission_measures_the_text_recall_returns_without_hidden_markers() -> None:
+    """ADR-0248: admission measures the same partner-filtered text recall
+    returns, so a marker naming beliefs that are never shown cannot push a
+    belief over a budget its returned text fits."""
+
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.domain.memory import RecallResult
+    from agent_core.memory.retrieval import HybridMemoryRetriever, _token_estimate
+
+    clock, factory, _, _ = await formation_stack()
+    unseen = [UUID(f"abcdef{index:02d}-0000-0000-0000-000000000990") for index in range(24)]
+    belief = memory(statement="The workshop is on Thursday.").model_copy(
+        update={"subject": "workshop", "scope": "general", "conflicts_with": unseen}
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(belief)
+
+    async def recall(budget: int, first_id: int) -> RecallResult:
+        retriever = HybridMemoryRetriever(
+            factory,
+            clock,
+            SequenceIdFactory(UUID(int=i) for i in range(first_id, first_id + 10)),
+            principal(),
+        )
+        return await retriever.recall(
+            recall_query(text="workshop", budget_tokens=budget).model_copy(
+                update={"current_scope": "general"}
+            ),
+            session_id=SESSION_ID,
+        )
+
+    roomy = await recall(4000, 8200)
+    assert "m:abcdef00" not in roomy.rendered
+    exact = await recall(_token_estimate(roomy.rendered), 8300)
+    assert [item.belief_id for item in exact.items] == [belief.id]
+
+
+async def test_owner_core_line_cap_measures_the_line_recall_returns() -> None:
+    """ADR-0248: the owner core's per-line cap measures the partner-filtered
+    line, so markers naming beliefs that are never shown cannot drop a
+    durable belief whose returned line fits the cap."""
+
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.domain.memory import RecallMoment, RecallResult
+    from agent_core.memory.retrieval import HybridMemoryRetriever, _line, _token_estimate
+
+    clock, factory, _, _ = await formation_stack()
+    unseen = [UUID(f"abcdef{index:02d}-0000-0000-0000-000000000991") for index in range(40)]
+    belief = memory(statement="The workshop is on Thursday.").model_copy(
+        update={"subject": "workshop", "scope": "general", "conflicts_with": unseen}
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(belief)
+
+    async def recall(budget: int, first_id: int) -> RecallResult:
+        retriever = HybridMemoryRetriever(
+            factory,
+            clock,
+            SequenceIdFactory(UUID(int=i) for i in range(first_id, first_id + 10)),
+            principal(),
+        )
+        return await retriever.recall(
+            recall_query(text="workshop", budget_tokens=budget).model_copy(
+                update={"current_scope": "general", "candidate_selection": "relevance"}
+            ),
+            session_id=SESSION_ID,
+            moment=RecallMoment.SNAPSHOT.value,
+        )
+
+    roomy = await recall(4000, 8400)
+    assert "owner-core@1" in roomy.rendered
+    [returned] = roomy.items
+    shown = _token_estimate(_line(returned, partners=frozenset({returned.belief_id})))
+    every_marker = _token_estimate(_line(returned))
+    budget = 3 * (shown + 1)
+    # The returned line fits the cap; the line naming every partner does not.
+    assert shown <= budget // 3 < every_marker
+    assert _token_estimate(roomy.rendered) <= budget
+    capped = await recall(budget, 8500)
+    assert [item.belief_id for item in capped.items] == [belief.id]
+
+
+async def test_owner_core_admits_no_partner_that_pushes_a_seated_line_past_the_cap() -> None:
+    """ADR-0248: admitting a conflict partner adds its marker to the line
+    already seated, so the owner core's per-line cap is rechecked for every
+    line the candidate would change, not only the candidate's own."""
+
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.domain.memory import RecallMoment, RecallResult
+    from agent_core.memory.retrieval import HybridMemoryRetriever, _line, _token_estimate
+
+    clock, factory, _, _ = await formation_stack()
+    long_id, short_id = UUID(int=9601), UUID(int=9602)
+    seated = memory(
+        belief_id=9601,
+        statement="The workshop is on Thursday in the north building by the loading dock.",
+    ).model_copy(update={"subject": "workshop", "scope": "general", "conflicts_with": [short_id]})
+    partner = memory(belief_id=9602, statement="The workshop moved.").model_copy(
+        update={"subject": "workshop", "scope": "general", "conflicts_with": [long_id]}
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(seated)
+        await uow.memories.upsert_belief(partner)
+
+    async def recall(budget: int, first_id: int) -> RecallResult:
+        retriever = HybridMemoryRetriever(
+            factory,
+            clock,
+            SequenceIdFactory(UUID(int=i) for i in range(first_id, first_id + 10)),
+            principal(),
+        )
+        return await retriever.recall(
+            recall_query(
+                text="workshop Thursday north building loading dock", budget_tokens=budget
+            ).model_copy(update={"current_scope": "general", "candidate_selection": "relevance"}),
+            session_id=SESSION_ID,
+            moment=RecallMoment.SNAPSHOT.value,
+        )
+
+    roomy = await recall(4000, 8600)
+    assert [item.belief_id for item in roomy.items] == [long_id, short_id]
+    first, second = roomy.items
+    both = frozenset({long_id, short_id})
+    cap = _token_estimate(_line(first, partners=both)) - 1
+    # The seated line fits alone and the partner's own line fits, but seating
+    # the partner adds a marker that carries the seated line past the cap.
+    assert _token_estimate(_line(first, partners=frozenset({long_id}))) <= cap
+    assert _token_estimate(_line(second, partners=both)) <= cap < 256
+    capped = await recall(3 * cap, 8700)
+    shown = frozenset(item.belief_id for item in capped.items)
+    assert long_id in shown
+    assert all(_token_estimate(_line(item, partners=shown)) <= cap for item in capped.items)
+
+
 async def test_expansion_preserves_explicit_original_selection() -> None:
     _, factory, _, _ = await formation_stack()
     sequence = await user_event(factory, "The workshop is on Thursday. Enter through Bay 6.")

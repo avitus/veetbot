@@ -100,8 +100,20 @@ class MemoryStore(Protocol):
         *,
         evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
+        min_unused_deliveries: int | None = None,
         limit: int,
-    ) -> list[MemoryRecord]: ...
+    ) -> list[MemoryRecord]:
+        """Live beliefs last evidenced at or before an instant, least recent first.
+
+        With ``decay_confidence_ceiling`` the window is the decay sweep's:
+        provisional or below the ceiling, never People-lifecycle rows. With
+        ``min_unused_deliveries`` (ADR-0247) it also applies the lifecycle
+        exemptions in SQL so a bounded page is not starved by rows the sweep
+        would skip: user-authority beliefs and affirmed direct beliefs are
+        outside automatic decay, and an inferred direct durable belief is
+        offered only once ``delivered_count - cited_count`` reaches the bound.
+        """
+        ...
 
     async def edit(
         self, belief_id: UUID, principal: Principal, edit: MemoryEdit, edited: MemoryRecord

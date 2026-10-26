@@ -21,6 +21,13 @@ from agent_core.application.attachments import (
 )
 from agent_core.application.authorization import require_scope
 from agent_core.application.browser_connection import bind_chat_website, prepare_follow_request
+from agent_core.application.browser_offers import (
+    CONTINUATION_KIND,
+    continuation_text,
+    open_website_offer,
+    prepare_website_offer,
+    record_website_offer,
+)
 from agent_core.application.browser_task_grants import (
     TaskGrantResolution,
     read_task_grant_context,
@@ -103,7 +110,9 @@ from agent_core.domain.memory import (
     MemoryRecord,
     MemoryReviewOutcome,
     MemoryStatus,
+    ReviewReason,
     Sensitivity,
+    review_reason,
 )
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -169,6 +178,7 @@ from agent_core.domain.views import (
     SubmitResult,
     TextContentBlock,
     TransientStreamFrame,
+    WebsiteOfferView,
 )
 from agent_core.model.attachments import UPLOAD_MAX_BYTES
 from agent_core.ports.artifacts import (
@@ -742,9 +752,13 @@ class PublicRunService:
         resolve_open_question: Callable[[WorkingState, str | None], WorkingState],
         trajectory_export_enabled: bool,
         live_events: LiveEventBroadcaster,
+        offers_websites: bool = False,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
+        # ADR-0251: only a composition that resolves profiles per chat offers
+        # to connect one.
+        self._offers_websites = offers_websites
         self._clock = clock
         self._ids = ids
         self._seed_checkpoint = seed_checkpoint
@@ -803,15 +817,18 @@ class PublicRunService:
                 if browser_profile_id is not None:
                     session = await bind_chat_website(uow, principal, session, browser_profile_id)
                 follow_handle = None
+                offer = None
+                owner_text = "\n".join(
+                    block.text for block in content if isinstance(block, TextContentBlock)
+                )
                 if await uow.runs.active_for_session(session.id, principal) is None:
                     session, follow_handle = await prepare_follow_request(
-                        uow,
-                        principal,
-                        session,
-                        "\n".join(
-                            block.text for block in content if isinstance(block, TextContentBlock)
-                        ),
+                        uow, principal, session, owner_text
                     )
+                    # ADR-0251: only a new owner run from an authenticated client
+                    # is matched; an exact X follow keeps its own rules.
+                    if follow_handle is None and self._offers_websites:
+                        offer = await prepare_website_offer(uow, principal, session, owner_text)
                 prepared = await self._submit_in(
                     uow,
                     principal,
@@ -828,6 +845,10 @@ class PublicRunService:
                     pending.version += 1
                     pending.working_state["browser_access_wait"] = "https://x.com"
                     await uow.checkpoints.write(prepared.run.id, pending, full=True)
+                if offer is not None:
+                    await record_website_offer(
+                        uow, principal, prepared.run.id, session.id, offer, self._ids.new_id()
+                    )
                 if idempotency_key is not None:
                     record = await uow.idempotency.create(
                         IdempotencyRecord(
@@ -852,11 +873,29 @@ class PublicRunService:
         await self._dispatch_prepared(prepared)
         return SubmitResult(run_id=prepared.run.id, status=prepared.run.status)
 
+    async def website_offer(
+        self, principal: Principal, session_id: UUID
+    ) -> WebsiteOfferView | None:
+        """ADR-0251: the chat's open offer to connect a website the owner named."""
+
+        require_scope(principal, "session.read")
+        require_scope(principal, "browser.profile.read")
+        async with self._uow_factory() as uow:
+            session = await uow.sessions.get(session_id, principal)
+            return await open_website_offer(uow, principal, session, self._clock.now())
+
     async def connect_browser(
-        self, principal: Principal, session_id: UUID, profile_id: UUID
+        self,
+        principal: Principal,
+        session_id: UUID,
+        profile_id: UUID,
+        *,
+        offer_id: UUID | None = None,
     ) -> SubmitResult | None:
         require_scope(principal, "session.write")
         require_scope(principal, "browser.profile.read")
+        if offer_id is not None:
+            return await self._accept_website_offer(principal, session_id, profile_id, offer_id)
         resumed = None
         async with (
             self._uow_factory() as uow,
@@ -923,6 +962,64 @@ class PublicRunService:
         if resumed is not None:
             await self._dispatcher.resume(resumed.run_id)
         return resumed
+
+    async def _accept_website_offer(
+        self, principal: Principal, session_id: UUID, profile_id: UUID, offer_id: UUID
+    ) -> SubmitResult:
+        """ADR-0251 decision 5: connect the chat and continue the owner's request.
+
+        The owner's tap admits the continuation, so it carries owner authority;
+        its origin marker says the app, not the owner, wrote its words.
+        """
+
+        require_scope(principal, "run.write")
+        derivation_suffix = str(offer_id)
+        async with (
+            self._uow_factory() as uow,
+            uow.sessions.admission(session_id, principal) as session,
+        ):
+            if session.status is SessionStatus.CLOSED:
+                raise InvalidStateTransition("closed conversations cannot connect websites")
+            existing = await uow.events.get_by_derivation(
+                f"{CONTINUATION_KIND}:{derivation_suffix}", principal
+            )
+            if existing is not None and existing.session_id == session_id and existing.run_id:
+                replayed = await uow.runs.get(existing.run_id, principal)
+                return SubmitResult(run_id=replayed.id, status=replayed.status, replayed=True)
+            if await uow.runs.active_for_session(session_id, principal) is not None:
+                raise ConflictError(
+                    "Finish or cancel the current run before connecting a website.",
+                    reason="active_run_exists",
+                )
+            offer = await open_website_offer(uow, principal, session, self._clock.now())
+            website = (
+                None
+                if offer is None or offer.offer_id != offer_id
+                else next((item for item in offer.websites if item.profile_id == profile_id), None)
+            )
+            if offer is None or website is None:
+                raise ConflictError(
+                    "This website offer is no longer open.", reason="browser_offer_not_open"
+                )
+            session = await bind_chat_website(uow, principal, session, profile_id)
+            prepared = await self._submit_in(
+                uow,
+                principal,
+                session,
+                [TextContentBlock(text=continuation_text(website.origins[0]))],
+                trace_id=None,
+                payload_extra={
+                    "origin": {
+                        "kind": CONTINUATION_KIND,
+                        "offer_id": str(offer_id),
+                        "source_sequence": offer.source_sequence,
+                    }
+                },
+                derivation_namespace=CONTINUATION_KIND,
+                derivation_suffix=derivation_suffix,
+            )
+        await self._dispatch_prepared(prepared)
+        return SubmitResult(run_id=prepared.run.id, status=prepared.run.status)
 
     async def _submit_in(
         self,
@@ -2257,6 +2354,7 @@ class PublicMemoryService:
         cursor: str | None,
         flagged: bool | None = None,
         include_derived: bool = False,
+        review_reason: ReviewReason | None = None,
     ) -> Page[MemoryView | DerivedMemoryView]:
         require_scope(principal, "memory.read")
         effective_limit = min(max(limit, 1), 200)
@@ -2273,6 +2371,7 @@ class PublicMemoryService:
             limit=effective_limit,
             cursor=decoded,
             flagged_for_review=flagged,
+            review_reason=review_reason,
         )
         if include_derived and not self._derived_enabled:
             raise MemoryCursorError("derived memory browsing is unavailable")
@@ -2354,6 +2453,7 @@ class PublicMemoryService:
             synthesis = (
                 await self._summary_count(uow, principal, ceiling) if include_derived else None
             )
+            by_review_reason = await self._review_reason_counts(uow, principal, ceiling)
         by_status = dict.fromkeys(MemoryStatus, 0)
         by_type = dict.fromkeys(BeliefType, 0)
         flagged = 0
@@ -2367,9 +2467,39 @@ class PublicMemoryService:
             flagged=flagged,
             by_status=by_status,
             by_type=by_type,
+            by_review_reason=by_review_reason,
             synthesis=synthesis,
             counted_at=self._now(),
         )
+
+    async def _review_reason_counts(
+        self, uow: RepositoryUnitOfWork, principal: Principal, ceiling: Sensitivity
+    ) -> dict[str, int]:
+        """The live review queue by reason (ADR-0249), through the list's own
+        predicates: one bounded walk over the flagged rows, which are few."""
+        counts: dict[str, int] = dict.fromkeys(
+            ("conflict", "correction", "source_learned", "sensitive_automatic"), 0
+        )
+        cursor: tuple[int, UUID] | None = None
+        while True:
+            page = await uow.memories.browse(
+                MemoryBrowseQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    ceiling=ceiling,
+                    flagged_for_review=True,
+                    limit=200,
+                    cursor=cursor,
+                )
+            )
+            rows = page[:200]
+            for record in rows:
+                reason = review_reason(record)
+                if reason is not None:
+                    counts[reason] += 1
+            if len(page) <= 200 or not rows:
+                return counts
+            cursor = (rows[-1].store_position, rows[-1].id)
 
     async def _summary_count(
         self, uow: RepositoryUnitOfWork, principal: Principal, ceiling: Sensitivity
@@ -2550,6 +2680,9 @@ class PublicMemoryService:
         """
         require_scope(principal, "memory.write")
         changed = outcome is MemoryReviewOutcome.CHANGED
+        # ADR-0247: `confirm` also answers with a replacement, formed from the
+        # same words at user authority.
+        supersedes = changed or outcome is MemoryReviewOutcome.CONFIRM
         if changed != (replacement_statement is not None):
             raise MemoryCorrectionError("replacement text belongs to the changed outcome only")
         replacement = (
@@ -2577,9 +2710,9 @@ class PublicMemoryService:
                 self._derived_enabled
                 and await uow.reconsolidation.summary_operation(principal, memory_id) is not None
             ):
-                if changed:
+                if supersedes:
                     # A summary's corrections belong to memory-reconsolidation.md.
-                    raise MemoryCorrectionError("a derived summary cannot be reworded")
+                    raise MemoryCorrectionError("a derived summary cannot be reworded or confirmed")
                 now = self._now()
                 if not replayed:
                     action = cast(SummaryAction, outcome.value)
@@ -2592,7 +2725,7 @@ class PublicMemoryService:
                 return await derived_view(uow, principal, memory_id, ceiling, now)
             if replayed:
                 record = await self._visible(uow, principal, memory_id, ceiling)
-                if changed and record.superseded_by is not None:
+                if supersedes and record.superseded_by is not None:
                     record = await self._visible(uow, principal, record.superseded_by, ceiling)
                 return MemoryView.from_record(record)
             record = await self._visible(uow, principal, memory_id, ceiling)

@@ -20,19 +20,19 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:880), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:822-824).
+scenarios (memory-retrieval-and-ranking.md:898), and formation precision and
+recall of consequential facts (memory-formation-and-consolidation.md:855-857).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
-(memory-formation-and-consolidation.md:331-333), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:922-925),
+(memory-formation-and-consolidation.md:352-354), usage that resets decay and raises
+utility without ever raising confidence (memory-retrieval-and-ranking.md:940-943),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:917), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:849) are
+resolved at read time (memory-retrieval-and-ranking.md:935), and re-derivation
+that is opt-in per principal (memory-formation-and-consolidation.md:882) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -765,6 +765,22 @@ next turn would report a change nobody made — while a retirement is exactly th
 change the correction lines below select on. Explicit user statements are
 `ACTIVE` at high confidence and are never eligible.
 
+**Lifecycle classes (ADR-0247).** Idleness alone does not retire an owner's
+words. A user-authority belief and an affirmed direct belief are outside
+automatic decay in any status; review or supersession corrects them. An
+inferred direct durable belief, an owner statement formation captured on its
+own, keeps its horizon from `last_evidence_at` but takes a step only with
+evidence of non-use: it was delivered to the model at least
+`decay.min_unused_deliveries` times (default 3) more than it was cited, under
+`usage-accounting@2`. A belief never delivered is unseen, not unused, and is
+left alone. Hypotheses and tentative or ongoing observations keep the
+evidence-clock rule of
+[adaptive-memory-distillation.md](adaptive-memory-distillation.md).
+`decay_eligible_lifecycle()` is the single predicate; both store adapters apply
+it inside the idle window when the sweep passes `min_unused_deliveries`, so a
+bounded page is not filled with rows the sweep would skip. Lifecycle decisions
+read the counters, never legacy utility, which stays a ranking input only.
+
 `MemoryStore` gains `list_idle(principal, evidence_before, limit)` — live
 beliefs last evidenced at or before an instant, least recently evidenced
 first — and the sweep reads its window through it, cut at the shortest time
@@ -835,7 +851,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:922-925): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:940-943): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -990,7 +1006,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:849), so it is a command and it demands
+(memory-formation-and-consolidation.md:882), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the
@@ -1022,7 +1038,15 @@ formation@5 -> formation@7   deterministic formation, when established facts
 formation@6 -> formation@8   provider-assisted formation, same change
 retrieval@1 -> retrieval@2   ranking, when time decay and the near-duplicate
                              penalty land
+retrieval@4 -> retrieval@6   ranking, for the review-reason penalties and the
+retrieval@5 -> retrieval@7   attention cap (ADR-0249): deferred, see below
 ```
+
+ADR-0249 landed its penalties without the bump: the deterministic benchmark
+measured no metric change, and re-recording the baseline cascades into the
+frozen M32 control (its manifest pins the baseline digest; its recording pins
+that manifest and the policy string in every trace). The bump waits for the
+owner's decision on refreshing that control offline.
 
 Bumping the provider version invalidates the bundled release evidence, whose
 filename and contents are matched against the version. Under the automatic
@@ -1152,15 +1176,18 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     untouched, and a second sweep changes nothing. Registered as
     `gate.memory.trace_retention`, case. **M16.**
 12. **Unused provisional beliefs decay and retire.** Under the sweep an idle
-    provisional belief loses confidence and one below the floor is retired with
-    its validity closed, while an active user-stated belief and a recently
-    reinforced belief are untouched. Registered as
-    `gate.memory.decay_lifecycle`, case. **M16.**
-13. **Citing a belief resists decay and never raises confidence.** A belief
+    provisional belief that was delivered to the model and never cited loses
+    confidence and one below the floor is retired with its validity closed,
+    while an active user-stated belief, an affirmed direct belief, a belief
+    never delivered and a recently reinforced belief are untouched (ADR-0247:
+    unseen is not unused). Registered as `gate.memory.decay_lifecycle`, case.
+    **M16.**
+13. **Citing a belief counts as use and never raises confidence.** A belief
     whose short identifier appears in a completed run's final message is marked
-    cited on its trace, gains utility and a fresh reinforcement instant, and
-    keeps its confidence exactly; a returned-but-uncited belief loses utility;
-    repeating the completion changes nothing. Registered as
+    cited on its trace, gains utility, a fresh usage instant and a citation
+    count, and keeps its confidence, evidence and expiry exactly, so the
+    non-use rule of gate 12 does not fire for it; a returned-but-uncited belief
+    loses utility; repeating the completion changes nothing. Registered as
     `gate.memory.usage_feedback`, case. **M16.**
 14. **The recall delta surfaces beliefs formed after the snapshot.** A belief
     written after a session's snapshot is injected in the next turn through the

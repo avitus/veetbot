@@ -1014,6 +1014,7 @@ class Composition:
     skill_reviews: SkillBackgroundReview
     tool_pipeline: ToolPipeline
     memory: GovernedMemoryService
+    source_learning: SourceLearningService
     people_erasure: PeopleErasureService
     memory_retriever: HybridMemoryRetriever
     memory_profiles: MemoryProfiles
@@ -5099,6 +5100,7 @@ async def _compose(
             resolve_open_question=working_state.resolve_question,
             trajectory_export_enabled=trajectory_export_enabled,
             live_events=live_events,
+            offers_websites=isinstance(browser_provider, SessionBoundHostedBrowserProvider),
         )
         browser_continuation = BrowserContinuationService(
             uow_factory=uow_factory,
@@ -5574,6 +5576,7 @@ async def _compose(
                 skill_reviews=skill_reviews,
                 tool_pipeline=pipeline,
                 memory=memory_service,
+                source_learning=source_learning,
                 people_erasure=people_erasure,
                 memory_retriever=memory_retriever,
                 semantic_services=semantic_index_pass,

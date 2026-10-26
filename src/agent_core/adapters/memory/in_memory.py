@@ -41,11 +41,13 @@ from agent_core.domain.memory import (
     TracedBelief,
     TracedPassage,
     TracedPersonContext,
+    decay_eligible_lifecycle,
     is_owned_resource,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
     recall_query_terms,
+    review_reason,
 )
 from agent_core.domain.memory_candidates import select_candidates
 from agent_core.domain.reconsolidation import SourceVersion
@@ -517,6 +519,8 @@ class InMemoryMemoryStore:
                     and record.flagged_for_review is not query.flagged_for_review
                 ):
                     continue
+                if query.review_reason is not None and review_reason(record) != query.review_reason:
+                    continue
                 if term_lexemes and not lexical_text_matches(
                     term_lexemes, f"{record.subject} {record.statement}"
                 ):
@@ -554,6 +558,7 @@ class InMemoryMemoryStore:
         *,
         evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
+        min_unused_deliveries: int | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
         async with self._transaction.owner((principal.tenant_id, principal.principal_id)):
@@ -573,6 +578,10 @@ class InMemoryMemoryStore:
                     decay_confidence_ceiling is None
                     or record.status is MemoryStatus.PROVISIONAL
                     or record.confidence < decay_confidence_ceiling
+                )
+                and (
+                    min_unused_deliveries is None
+                    or decay_eligible_lifecycle(record, min_unused_deliveries)
                 )
             ]
             records.sort(key=lambda item: (item.last_evidence_at, str(item.id)))

@@ -37,7 +37,13 @@ from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, Forward
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest, LegacyRecoveryResult
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
-from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryReviewOutcome,
+    MemoryStatus,
+    ReviewReason,
+    Sensitivity,
+)
 from agent_core.domain.model_settings import ModelChoice, ModelSettingsView
 from agent_core.domain.notifications import NotificationSyncRequest, NotificationSyncResult
 from agent_core.domain.people import (
@@ -115,6 +121,7 @@ from agent_core.domain.views import (
     StreamFrame,
     SubmitResult,
     TestNotificationResult,
+    WebsiteOfferView,
 )
 from agent_core.ports.cockpit import CockpitAsset
 
@@ -149,8 +156,17 @@ class SessionService(Protocol):
 
 class RunService(Protocol):
     async def connect_browser(
-        self, principal: Principal, session_id: UUID, profile_id: UUID
+        self,
+        principal: Principal,
+        session_id: UUID,
+        profile_id: UUID,
+        *,
+        offer_id: UUID | None = None,
     ) -> SubmitResult | None: ...
+
+    async def website_offer(
+        self, principal: Principal, session_id: UUID
+    ) -> WebsiteOfferView | None: ...
 
     async def submit(
         self,
@@ -539,6 +555,7 @@ class MemoryReadService(Protocol):
         cursor: str | None,
         flagged: bool | None = None,
         include_derived: bool = False,
+        review_reason: ReviewReason | None = None,
     ) -> Page[MemoryView | DerivedMemoryView]: ...
 
     async def get(

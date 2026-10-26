@@ -1805,7 +1805,7 @@ import UserNotifications
         await model.selectSession(try #require(model.history.first))
         await model.refreshBrowserProfiles()
         if scenario == "existing" { model.runState.begin(runID: runID, status: .waitingForUser) }
-        let connection = Task { await model.selectBrowserProfile(profileID) }
+        let connection = Task { await model.connectWebsiteToSelectedChat(profileID) }
         if switchDuringReread {
             for _ in 0..<5_000 {
                 if lock.withLock({ rereadStarted }) { break }
@@ -1866,6 +1866,275 @@ import UserNotifications
         await model.refreshBrowserAuthentication()
         #expect(model.selectedSessionID == nil)
         #expect(lock.withLock { connections } == 1)
+    }
+
+    // MARK: - ADR-0251: the card that connects a named website
+
+    private struct WebsiteOfferServer {
+        let sessionID = UUID(), profileID = UUID(), offerID = UUID(), runID = UUID()
+        let sourceRunID = UUID()
+        let lock = NSLock()
+        var status = "ready"
+        /// The profile list's status when it differs from the offer's.
+        var listedStatus: String?
+        /// Whether the source run's stream carries the offer (ADR-0251).
+        var offered = true
+
+        final class Log: @unchecked Sendable {
+            var connections: [URLRequest] = []
+            var offerReads = 0
+            var sourceReplays = 0
+            var accepted = false
+        }
+        let log = Log()
+
+        var connections: [URLRequest] { lock.withLock { log.connections } }
+        var offerReads: Int { lock.withLock { log.offerReads } }
+        var sourceReplays: Int { lock.withLock { log.sourceReplays } }
+
+        var sessionBody: String {
+            #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Readings","metadata":{},"created_at":"2026-10-25T17:13:58Z","updated_at":"2026-10-25T17:15:06Z","active_run_id":null,"last_run_id":"\#(sourceRunID.uuidString)"}"#
+        }
+
+        var sourceRunBody: String {
+            #"{"id":"\#(sourceRunID.uuidString)","session_id":"\#(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-25T17:14:49Z","updated_at":"2026-10-25T17:15:06Z"}"#
+        }
+
+        var sourceEvents: String {
+            let offer = offered
+                ? "id: 52\nevent: session.browser.offered\ndata: {\"run_id\":\"\(sourceRunID.uuidString)\",\"offer_id\":\"\(offerID.uuidString)\"}\n\n"
+                : ""
+            return offer + "id: 60\nevent: run.completed\ndata: {\"run_id\":\"\(sourceRunID.uuidString)\"}\n\n"
+        }
+
+        var offerBody: String {
+            #"{"offer":{"offer_id":"\#(offerID.uuidString)","source_sequence":50,"connected_origin":null,"websites":[{"profile_id":"\#(profileID.uuidString)","origins":["https://mychart.example-health.org"],"status":"\#(status)"}],"expires_at":"2026-10-26T17:14:49Z"}}"#
+        }
+
+        var profilesBody: String {
+            #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://mychart.example-health.org"],"status":"\#(listedStatus ?? status)","generation":7,"created_at":"2026-10-21T05:04:11Z","updated_at":"2026-10-21T17:04:59Z","last_used_at":null}],"next_cursor":null}"#
+        }
+
+        /// Answers a request as (status, body, extra headers), or nil for a 404.
+        func answer(_ request: URLRequest) -> (Int, String, [String: String])? {
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return (200, "{\"items\":[\(sessionBody)],\"next_cursor\":null}", [:])
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return (200, sessionBody, [:])
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return (200, #"{"items":[],"next_cursor":null}"#, [:])
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/website-offer"):
+                let accepted = lock.withLock {
+                    log.offerReads += 1
+                    return log.accepted
+                }
+                return (200, accepted ? #"{"offer":null}"# : offerBody, [:])
+            case ("GET", "/v1/browser-profiles"):
+                return (200, profilesBody, [:])
+            case ("GET", "/v1/browser-task-grants"):
+                return (200, #"{"items":[],"next_cursor":null}"#, [:])
+            case ("PUT", "/v1/sessions/\(sessionID.uuidString)/website"):
+                lock.withLock {
+                    log.connections.append(request)
+                    log.accepted = true
+                }
+                return (200, "{\"run_id\":\"\(runID.uuidString)\"}", [:])
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return (200, "", ["Content-Type": "text/event-stream"])
+            case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return (202, "{\"run_id\":\"\(runID.uuidString)\",\"status\":\"QUEUED\"}", [:])
+            case ("GET", "/v1/runs/\(sourceRunID.uuidString)"):
+                return (200, sourceRunBody, [:])
+            case ("GET", "/v1/runs/\(sourceRunID.uuidString)/events"):
+                lock.withLock { log.sourceReplays += 1 }
+                return (200, sourceEvents, ["Content-Type": "text/event-stream"])
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// The source run's replay ends after its frames; wait for it, then for
+    /// the offer read it may cause.
+    private func settleWebsiteOffer(_ model: ChatViewModel, _ server: WebsiteOfferServer) async throws {
+        for _ in 0..<5_000 where server.sourceReplays == 0 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        guard server.offered else { return }
+        for _ in 0..<5_000 where model.websiteOffer == nil {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+
+    private func websiteOfferModel(_ server: WebsiteOfferServer) async throws -> ChatViewModel {
+        let model = try configuredModel { request in
+            guard let (status, body, headers) = server.answer(request) else {
+                return try response(for: request, statusCode: 404, body: #"{"error":{"code":"not_found","message":"Not found"}}"#)
+            }
+            return try response(for: request, statusCode: status, body: body, headers: headers)
+        }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        await model.selectSession(try #require(model.history.first))
+        try await settleWebsiteOffer(model, server)
+        return model
+    }
+
+    @Test
+    func testAnOrdinaryChatNeverAsksForAnOffer() async throws {
+        var server = WebsiteOfferServer()
+        server.offered = false
+        let model = try await websiteOfferModel(server)
+
+        #expect(server.sourceReplays == 1)
+        #expect(server.offerReads == 0)
+        #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testAnOpenWebsiteOfferLoadsWhenItsConversationOpens() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+
+        let offer = try #require(model.websiteOffer)
+        #expect(model.connectedWebsiteProfileID == nil)
+        #expect(offer.offerID == server.offerID)
+        #expect(offer.connectedOrigin == nil)
+        #expect(offer.websites.map(\.profileID) == [server.profileID])
+        #expect(offer.websites.map(\.host) == ["mychart.example-health.org"])
+    }
+
+    @Test
+    func testConnectAndContinueSendsTheOfferAndWatchesTheContinuation() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        let website = try #require(model.websiteOffer?.websites.first)
+
+        await model.acceptWebsiteOffer(website)
+
+        let request = try #require(server.connections.first)
+        let body = try requestJSONObject(request)
+        #expect(body["browser_profile_id"] as? String == server.profileID.uuidString)
+        #expect(body["offer_id"] as? String == server.offerID.uuidString)
+        #expect(server.connections.count == 1)
+        #expect(model.runState.activeRunID == server.runID)
+        #expect(model.websiteOffer == nil)
+        #expect(model.connectedWebsiteProfileID == server.profileID)
+        // Connecting this chat never changes the device default for new chats.
+        #expect(model.selectedBrowserProfileID == nil)
+    }
+
+    @Test
+    func testNotNowHidesTheOfferForThisConversation() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        #expect(model.websiteOffer != nil)
+
+        model.dismissWebsiteOffer()
+        #expect(model.websiteOffer == nil)
+        await model.selectSession(try #require(model.history.first))
+        for _ in 0..<5_000 where server.offerReads < 2 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        #expect(server.offerReads == 2)
+        #expect(model.websiteOffer == nil)
+        #expect(server.connections.isEmpty)
+    }
+
+    @Test
+    func testAWebsiteThatNeedsSignInStartsSignInBeforeConnecting() async throws {
+        var server = WebsiteOfferServer()
+        server.status = "needs_user"
+        let model = try await websiteOfferModel(server)
+        let website = try #require(model.websiteOffer?.websites.first)
+        #expect(website.needsSignIn)
+
+        await model.acceptWebsiteOffer(website)
+
+        #expect(model.deviceSignInRequest?.profileID == server.profileID)
+        #expect(server.connections.isEmpty)
+    }
+
+    @Test
+    func testAnAbandonedSignInLeavesNoOfferOnALaterConnection() async throws {
+        var server = WebsiteOfferServer()
+        server.status = "needs_user"
+        server.listedStatus = "ready"
+        let model = try await websiteOfferModel(server)
+        let website = try #require(model.websiteOffer?.websites.first)
+        await model.acceptWebsiteOffer(website)
+        #expect(model.deviceSignInRequest?.profileID == server.profileID)
+
+        await model.connectWebsiteToSelectedChat(server.profileID)
+
+        let request = try #require(server.connections.first)
+        #expect(try requestJSONObject(request)["offer_id"] == nil)
+    }
+
+    @Test
+    func testANewConversationClearsTheOffer() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        #expect(model.websiteOffer != nil)
+
+        model.newSession()
+
+        #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testUseInThisChatConnectsOnlyTheOpenConversation() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        await model.refreshBrowserProfiles()
+
+        await model.connectWebsiteToSelectedChat(server.profileID)
+
+        let request = try #require(server.connections.first)
+        let body = try requestJSONObject(request)
+        #expect(body["browser_profile_id"] as? String == server.profileID.uuidString)
+        #expect(body["offer_id"] == nil)
+        #expect(model.selectedBrowserProfileID == nil)
+        #expect(model.connectedWebsiteProfileID == server.profileID)
+    }
+
+    @Test
+    func testAPlainConnectionClearsTheOffer() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        await model.refreshBrowserProfiles()
+        #expect(model.websiteOffer != nil)
+
+        await model.connectWebsiteToSelectedChat(server.profileID)
+
+        // The server closes every open offer on any connection.
+        #expect(server.connections.count == 1)
+        #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testANewMessageClearsTheOffer() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        #expect(model.websiteOffer != nil)
+
+        #expect(await model.send("What is the weather tomorrow?") == true)
+
+        // The server closes the offer when it records the new message.
+        #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testUseForNewChatsNoLongerConnectsTheOpenConversation() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        await model.refreshBrowserProfiles()
+
+        await model.selectBrowserProfile(server.profileID)
+
+        #expect(model.selectedBrowserProfileID == server.profileID)
+        #expect(server.connections.isEmpty)
     }
 
     @Test

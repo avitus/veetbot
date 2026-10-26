@@ -32,11 +32,13 @@ from agent_core.domain.memory import (
     USAGE_ACCOUNTING_VERSION,
     BeliefRejection,
     BeliefType,
+    ConflictReconciliation,
     ConsolidationResult,
     ConsolidationRun,
     DecayResult,
     EvidenceSpan,
     MemoryAuthority,
+    MemoryBrowseQuery,
     MemoryCandidate,
     MemoryClaimKind,
     MemoryDerivation,
@@ -54,6 +56,7 @@ from agent_core.domain.memory import (
     RejectionKind,
     Sensitivity,
     UsageFeedback,
+    decay_eligible_lifecycle,
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.people_tools import RememberPeopleArgs
@@ -70,6 +73,15 @@ from agent_core.memory.communication_sources import (
     formation_sources,
 )
 from agent_core.memory.equivalence import content_terms, lemmatized_terms, main_verb, negated
+from agent_core.memory.predicates import (
+    PREDICATE_RULE_VERSION,
+    PredicateClaim,
+    comparable,
+    comparable_keys,
+    predicate_claim,
+    predicate_key,
+    restates,
+)
 from agent_core.memory.profiles import (
     DEFAULT_FORMATION_PROFILE,
     DEFAULT_RETRIEVAL_PROFILE,
@@ -2266,6 +2278,27 @@ def _resource_restatement_key(statement: str) -> str | None:
     return f"{verb} {' '.join(value.casefold().split())}"
 
 
+def _attribute_conflict(first: MemoryRecord, second: MemoryRecord) -> bool:
+    """Whether a live `conflicts_with` link is a real dispute (ADR-0248).
+
+    Two recognised claims conflict only within one attribute and with different
+    values. Two unrecognised claims keep the legacy judgement unless they are
+    the same statement. A recognised claim never conflicts with an unrecognised
+    one.
+    """
+    if first.belief_type is not second.belief_type:
+        return False
+    if first.subject.casefold() != second.subject.casefold():
+        return False
+    a: PredicateClaim = predicate_claim(first.statement, first.belief_type)
+    b: PredicateClaim = predicate_claim(second.statement, second.belief_type)
+    if not comparable(a, b) or restates(a, b):
+        return False
+    if a.recognized:
+        return True
+    return a.key != b.key
+
+
 class DeterministicConflictResolver:
     @staticmethod
     def _normalized(value: str) -> str:
@@ -2302,6 +2335,15 @@ class DeterministicConflictResolver:
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
+        # ADR-0248: the same attribute with the same value is a restatement,
+        # whatever the wording; a recognised attribute cannot disagree with a
+        # different one, nor with a claim that names no attribute.
+        existing_claim = predicate_claim(existing.statement, existing.belief_type)
+        incoming_claim = predicate_claim(statement, existing.belief_type)
+        if restates(existing_claim, incoming_claim):
+            return "duplicate"
+        if not comparable(existing_claim, incoming_claim):
+            return "independent"
         if (
             same_session
             and existing.belief_type is BeliefType.USER_MODEL_ATTR
@@ -2416,6 +2458,11 @@ class GovernedMemoryService:
         self._usage = usage
         self._people_enabled = people_enabled
         self._commit_guard = commit_guard
+
+    @property
+    def principal(self) -> Principal:
+        """The owner this service forms memories for."""
+        return self._principal
 
     @property
     def formation_profile(self) -> FormationProfile:
@@ -2543,6 +2590,7 @@ class GovernedMemoryService:
         audit_model: str | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
+        attribution_host: str | None = None,
     ) -> tuple[MemoryRecord, str]:
         """Apply validated formation evidence within an optional caller-owned transaction."""
         attributed_shape = (
@@ -2555,6 +2603,9 @@ class GovernedMemoryService:
             and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             and (
                 portability is Portability.LOCAL
+                # ADR-0250: a website-learned claim carries its host beside it
+                # and may follow the owner across projects at contextual weight.
+                or (source_learning and portability is Portability.CONTEXTUAL)
                 or (
                     semantic_external
                     and portability is Portability.CONTEXTUAL
@@ -2576,7 +2627,11 @@ class GovernedMemoryService:
             raise ToolTrustRejectedError("source learning requires attributed hypothesis ceilings")
         clean_statement = " ".join(statement.split())
         clean_subject = " ".join(subject.split())
-        if not clean_subject or not self._salience.eligible(clean_statement, explicit=explicit):
+        # ADR-0250: a learned quote is verbatim evidence the learn path already
+        # scanned for hazards; the automatic-capture word floor does not apply.
+        if not clean_subject or not self._salience.eligible(
+            clean_statement, explicit=explicit or source_learning
+        ):
             raise ToolValidationError("memory candidate failed eligibility and safety gates")
         effective_portability = portability or portability_ceiling(belief_type)
         effective_claim_kind = claim_kind or {
@@ -2620,6 +2675,19 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
+            # ADR-0248: a recognised attribute can agree or disagree only with
+            # the same attribute; two unrecognised claims keep the subject rule.
+            # The key is derived from the statement on every read, as the
+            # resolver and the reconciliation derive it: a stored key goes stale
+            # when an edit or a promotion rewrites the statement.
+            incoming_claim = predicate_claim(clean_statement, belief_type)
+            related = [
+                current
+                for current in related
+                if comparable_keys(
+                    incoming_claim, predicate_key(current.statement, current.belief_type)
+                )
+            ]
             if (
                 belief_type is BeliefType.USER_MODEL_ATTR
                 and not clean_subject.startswith("person:")
@@ -2675,6 +2743,8 @@ class GovernedMemoryService:
                     if current.statement == clean_statement
                     and (source_learning_target is None or current.id == source_learning_target)
                     and current.status in LIVE_MEMORY_STATUSES
+                    # An expired claim is learned again, not reinforced (ADR-0250).
+                    and (current.expires_at is None or current.expires_at > self._clock.now())
                     and current.authority is MemoryAuthority.INFERRED
                     and current.derivation is MemoryDerivation.HYPOTHESIS
                     and current.longevity is MemoryLongevity.TENTATIVE
@@ -2734,6 +2804,7 @@ class GovernedMemoryService:
                 promoted = promotable.model_copy(
                     update={
                         "statement": clean_statement,
+                        "predicate_key": predicate_key(clean_statement, belief_type),
                         "source_event_ids": all_sources,
                         "corroboration_count": promotable.corroboration_count + 1,
                         "claim_kind": effective_claim_kind,
@@ -2882,6 +2953,7 @@ class GovernedMemoryService:
                         derivation,
                         longevity,
                         evidence_at,
+                        attribution_host=attribution_host,
                     )
                     replacement = proposed.model_copy(
                         update={"flagged_for_review": True, "conflicts_with": [current.id]},
@@ -2937,6 +3009,7 @@ class GovernedMemoryService:
                         derivation,
                         longevity,
                         evidence_at,
+                        attribution_host=attribution_host,
                     )
                     position = await uow.memories.next_position()
                     superseded = current.model_copy(
@@ -2983,6 +3056,7 @@ class GovernedMemoryService:
                 derivation,
                 longevity,
                 evidence_at,
+                attribution_host=attribution_host,
             )
             if source_learning:
                 record = record.model_copy(update={"consolidation_policy_version": trigger})
@@ -4051,6 +4125,7 @@ class GovernedMemoryService:
             updated = current.model_copy(
                 update={
                     "statement": edit.statement,
+                    "predicate_key": predicate_key(edit.statement, current.belief_type),
                     "sensitivity": edit.sensitivity or current.sensitivity,
                     "portability": edit.portability or current.portability,
                     "scope": edit.scope or current.scope,
@@ -4136,11 +4211,263 @@ class GovernedMemoryService:
             )
         if replacement_statement is not None:
             raise ToolValidationError("only a changed review carries replacement text")
+        if outcome is MemoryReviewOutcome.CONFIRM:
+            return await self.confirm(belief_id, existing_uow=existing_uow)
         if outcome is MemoryReviewOutcome.UNTRUE:
             return await self.reject(belief_id, RejectionKind.UNTRUE, existing_uow=existing_uow)
         if outcome is MemoryReviewOutcome.NOT_HERE:
             return await self.reject(belief_id, RejectionKind.NOT_HERE, existing_uow=existing_uow)
         return await self.acknowledge_review(belief_id, existing_uow=existing_uow)
+
+    async def reconcile_conflicts(self, *, confirm: bool) -> ConflictReconciliation:
+        """Re-evaluate every live conflict link under the predicate rule (ADR-0248).
+
+        A link survives only between two claims about the same attribute with
+        different values. Every other pair is unlinked on both sides, with one
+        `memory.conflict_cleared` event per pair naming both ids and the rule
+        version, and a belief left with no link and no other doubt reason (an
+        outstanding rejection, source learning, an automatically captured
+        sensitive statement) has its review flag cleared. A dry run reports the
+        same counts and writes nothing. Never a status edit in SQL.
+        """
+        async with self._uow_factory() as uow:
+            records = await self._live_conflicted(uow)
+            by_id = {record.id: record for record in records}
+            pairs = {
+                tuple(sorted((record.id, partner), key=str))
+                for record in records
+                for partner in record.conflicts_with
+            }
+            cleared: set[tuple[UUID, UUID]] = set()
+            for first_id, second_id in sorted(pairs, key=lambda pair: tuple(map(str, pair))):
+                first = by_id.get(first_id) or await self._belief_or_none(uow, first_id)
+                second = by_id.get(second_id) or await self._belief_or_none(uow, second_id)
+                if first is None or second is None or not _attribute_conflict(first, second):
+                    cleared.add((first_id, second_id))
+            rejected_ids = {
+                rejection.belief_id
+                for rejection in await uow.memories.outstanding_rejections(
+                    self._principal.tenant_id, self._principal.principal_id
+                )
+            }
+            flags_cleared = 0
+            changed: list[MemoryRecord] = []
+            for record in records:
+                remaining = [
+                    partner
+                    for partner in record.conflicts_with
+                    if tuple(sorted((record.id, partner), key=str)) not in cleared
+                ]
+                if remaining == list(record.conflicts_with):
+                    continue
+                flagged = record.flagged_for_review
+                if flagged and not remaining and not self._other_doubt(record, rejected_ids):
+                    flagged = False
+                    flags_cleared += 1
+                changed.append(
+                    record.model_copy(
+                        update={"conflicts_with": remaining, "flagged_for_review": flagged},
+                        deep=True,
+                    )
+                )
+            result = ConflictReconciliation(
+                pairs_examined=len(pairs),
+                pairs_cleared=len(cleared),
+                flags_cleared=flags_cleared,
+                dry_run=not confirm,
+            )
+            if not confirm:
+                return result
+            now = self._clock.now()
+            for record in changed:
+                stored = await uow.memories.reinforce(
+                    record.model_copy(
+                        update={
+                            "updated_at": now,
+                            "store_position": await uow.memories.next_position(),
+                        },
+                        deep=True,
+                    )
+                )
+                await self._append_event(
+                    uow, _source_session(stored), None, "memory.reviewed", stored
+                )
+            for first_id, second_id in sorted(cleared, key=lambda pair: tuple(map(str, pair))):
+                anchor = by_id.get(first_id) or by_id.get(second_id)
+                if anchor is None:
+                    continue
+                await uow.events.append(
+                    NewEvent(
+                        session_id=_source_session(anchor),
+                        run_id=None,
+                        event_type="memory.conflict_cleared",
+                        actor_type="principal",
+                        actor_id=self._principal.principal_id,
+                        payload={
+                            "belief_ids": [str(first_id), str(second_id)],
+                            "rule": PREDICATE_RULE_VERSION,
+                        },
+                    )
+                )
+            return result
+
+    async def _live_conflicted(self, uow: RepositoryUnitOfWork) -> list[MemoryRecord]:
+        found: list[MemoryRecord] = []
+        cursor: tuple[int, UUID] | None = None
+        while True:
+            page = await uow.memories.browse(
+                MemoryBrowseQuery(
+                    tenant_id=self._principal.tenant_id,
+                    principal_id=self._principal.principal_id,
+                    ceiling=Sensitivity.RESTRICTED,
+                    limit=200,
+                    cursor=cursor,
+                )
+            )
+            rows = page[:200]
+            found.extend(record for record in rows if record.conflicts_with)
+            if len(page) <= 200 or not rows:
+                return found
+            cursor = (rows[-1].store_position, rows[-1].id)
+
+    async def _belief_or_none(
+        self, uow: RepositoryUnitOfWork, belief_id: UUID
+    ) -> MemoryRecord | None:
+        try:
+            record = await uow.memories.get(belief_id, self._principal)
+        except NotFoundError:
+            return None
+        return record if record.status in LIVE_MEMORY_STATUSES else None
+
+    @staticmethod
+    def _other_doubt(record: MemoryRecord, rejected_ids: set[UUID]) -> bool:
+        """A doubt reason other than a conflict link, in the review-reason
+        vocabulary the retrieval repair plan defines: correction, source
+        learning, an automatically captured sensitive statement."""
+        return (
+            record.id in rejected_ids
+            or record.consolidation_policy_version.startswith("owner-source-learning")
+            or (
+                record.authority is MemoryAuthority.INFERRED
+                and record.sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
+            )
+        )
+
+    async def confirm(
+        self, belief_id: UUID, *, existing_uow: RepositoryUnitOfWork | None = None
+    ) -> MemoryRecord:
+        """Supersede a belief with the owner's own statement of it (ADR-0247).
+
+        The governed restore path: the owner saying "this is right" is a new
+        explicit statement, so it enters through formation at user authority
+        citing a ``memory.owner_confirmation`` event, and the predecessor is
+        superseded without a rejection record. Allowed for live beliefs and for
+        beliefs decay or expiry retired; refused for one a correction already
+        superseded, one whose statement a deletion or rejection blocks, and one
+        whose sources were erased. Never a status edit in place.
+        """
+        if existing_uow is not None:
+            return await self._confirm_in(existing_uow, belief_id)
+        async with self._uow_factory() as uow:
+            return await self._confirm_in(uow, belief_id)
+
+    async def _confirm_in(self, uow: RepositoryUnitOfWork, belief_id: UUID) -> MemoryRecord:
+        from agent_core.domain.people_sources import source_id
+
+        current = await uow.memories.get(belief_id, self._principal)
+        if current.status is MemoryStatus.SUPERSEDED or current.superseded_by is not None:
+            raise ConflictError(
+                "a correction already superseded this memory", reason="memory.already_superseded"
+            )
+        if current.status not in {
+            MemoryStatus.ACTIVE,
+            MemoryStatus.PROVISIONAL,
+            MemoryStatus.RETIRED,
+            MemoryStatus.EXPIRED,
+        }:
+            raise ConflictError("this memory cannot be confirmed", reason="memory.not_confirmable")
+        rejections = await uow.memories.outstanding_rejections(
+            self._principal.tenant_id, self._principal.principal_id
+        )
+        statement_hash = hashlib.sha256(current.statement.casefold().encode()).hexdigest()
+        if any(rejection.statement_sha256 == statement_hash for rejection in rejections):
+            raise ConflictError(
+                "a user deletion or correction blocks this memory",
+                reason="memory.blocked_by_rejection",
+            )
+        source_session = _source_session(current)
+        for sequence in current.source_event_ids:
+            if await uow.people.source_suppressed(
+                self._principal, source_id(self._principal, source_session, sequence)
+            ):
+                raise ConflictError("memory source was erased", reason="memory.source_erased")
+        now = self._clock.now()
+        confirmation = await uow.events.append(
+            NewEvent(
+                session_id=source_session,
+                run_id=None,
+                event_type="memory.owner_confirmation",
+                actor_type="principal",
+                actor_id=self._principal.principal_id,
+                payload={"belief_id": str(current.id), "statement": current.statement},
+            )
+        )
+        superseded = current.model_copy(
+            update={
+                "status": MemoryStatus.SUPERSEDED,
+                "valid_to": now,
+                "store_position": await uow.memories.next_position(),
+                "updated_at": now,
+            },
+            deep=True,
+        )
+        stored = await uow.memories.reinforce(superseded)
+        await self._append_event(uow, source_session, None, "memory.superseded", stored)
+        replacement, _action = await self.remember_formation(
+            session_id=source_session,
+            run_id=None,
+            statement=current.statement,
+            subject=current.subject,
+            scope=current.scope,
+            belief_type=current.belief_type,
+            portability=current.portability,
+            sensitivity=current.sensitivity,
+            source_event_ids=[confirmation.sequence],
+            origin_trust=TrustLevel.USER,
+            explicit=True,
+            authority=MemoryAuthority.USER,
+            polarity=current.polarity,
+            confidence=None,
+            valid_from=None,
+            expires_at=None,
+            trigger="memory.owner_confirmation",
+            record_audit=True,
+            existing_uow=uow,
+        )
+        if replacement.authority is not MemoryAuthority.USER or replacement.expires_at is not None:
+            # Formation reinforces a live belief with the same words instead of
+            # forming a twin, and reinforcement keeps that belief's authority
+            # and expiry. It now rests on the owner's confirmation, so it takes
+            # the confirmation's lifecycle class (ADR-0247).
+            replacement = await uow.memories.reinforce(
+                replacement.model_copy(
+                    update={
+                        "authority": MemoryAuthority.USER,
+                        "status": MemoryStatus.ACTIVE,
+                        "derivation": MemoryDerivation.DIRECT,
+                        "longevity": MemoryLongevity.DURABLE,
+                        "expires_at": None,
+                        "store_position": await uow.memories.next_position(),
+                        "updated_at": now,
+                    },
+                    deep=True,
+                )
+            )
+            await self._append_event(uow, source_session, None, "memory.promoted", replacement)
+        await uow.memories.reinforce(
+            stored.model_copy(update={"superseded_by": replacement.id}, deep=True)
+        )
+        return replacement
 
     async def acknowledge_review(
         self, belief_id: UUID, *, existing_uow: RepositoryUnitOfWork | None = None
@@ -4463,6 +4790,7 @@ class GovernedMemoryService:
                 self._principal,
                 evidence_before=instant - timedelta(days=horizon),
                 decay_confidence_ceiling=MAX_INFERRED_CONFIDENCE,
+                min_unused_deliveries=decay.min_unused_deliveries,
                 limit=decay.max_per_sweep,
             )
             for record in candidates:
@@ -4496,12 +4824,15 @@ class GovernedMemoryService:
         return DecayResult(decayed=decayed, retired=retired)
 
     def _decays(self, record: MemoryRecord, instant: datetime, interval: timedelta) -> bool:
-        """Whether this belief is idle, uncertain, and unwritten long enough."""
+        """Whether this belief is idle, uncertain, unwritten long enough, and of
+        a lifecycle class that automatic decay may touch (ADR-0247)."""
 
         if (
             record.lifecycle_policy_version == "people-lifecycle@1"
             and record.consolidation_policy_version == "formation@11"
         ):
+            return False
+        if not decay_eligible_lifecycle(record, self._profile.decay.min_unused_deliveries):
             return False
         if record.status is not MemoryStatus.PROVISIONAL and (
             record.confidence >= MAX_INFERRED_CONFIDENCE
@@ -4794,6 +5125,7 @@ class GovernedMemoryService:
         derivation: MemoryDerivation,
         longevity: MemoryLongevity,
         evidence_at: datetime | None,
+        attribution_host: str | None = None,
     ) -> MemoryRecord:
         now = self._clock.now()
         effective_confidence = confidence if confidence is not None else 0.9
@@ -4843,6 +5175,8 @@ class GovernedMemoryService:
             flagged_for_review=(
                 not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             ),
+            predicate_key=predicate_key(statement, belief_type),
+            attribution_host=attribution_host,
             formation_run_id=formation_run_id,
             consolidation_policy_version=self._policy_version,
             authority=authority,

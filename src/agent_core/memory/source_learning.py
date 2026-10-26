@@ -8,6 +8,7 @@ from datetime import timedelta
 from urllib.parse import unquote, urlsplit
 from uuid import UUID, uuid5
 
+from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
@@ -15,13 +16,16 @@ from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     BeliefType,
     MemoryAuthority,
+    MemoryBrowseQuery,
     MemoryClaimKind,
     MemoryDerivation,
     MemoryLongevity,
     MemoryRecord,
+    MemoryStatus,
     Polarity,
     Portability,
     Sensitivity,
+    SourceReshape,
 )
 from agent_core.domain.people import PeopleQuery, PeopleSource, SourceMemoryLink
 from agent_core.domain.people_sources import source_id
@@ -35,7 +39,13 @@ from agent_core.memory.formation import GovernedMemoryService
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-VERSION = "owner-source-learning@1"
+# ADR-0250: the claim is the statement; the host sits beside it. Rows learned
+# under @1 keep their embedded citation until the governed reshape supersedes
+# them; receipts are read under both versions so a host still counts once.
+VERSION = "owner-source-learning@2"
+LEGACY_VERSION = "owner-source-learning@1"
+VERSIONS = (VERSION, LEGACY_VERSION)
+MAX_SUBJECT_CHARS = 64
 _READS = {"web.fetch", "browser.navigate", "browser.observe"}
 # Owners name sites as people type them: "www.example.com" or "example.com/team"
 # with no scheme. Email addresses and longer hostnames never yield a site name.
@@ -231,11 +241,17 @@ class SourceLearningService:
                 "owner asked to learn from.",
             )
         claim = item.claim if item.claim is not None else item.quote
-        subject = item.subject if item.subject is not None else claim
-        if len(claim) > 1024 or len(subject) > 512:
+        subject = item.subject
+        # A quote-only observation saves the excerpt itself: 8-512 characters.
+        quote_only_too_long = item.claim is None and len(item.quote) > 512
+        if (
+            len(claim) > 1024
+            or quote_only_too_long
+            or (subject is not None and len(subject) > MAX_SUBJECT_CHARS)
+        ):
             raise SourceLearningRejectionError(
                 "observation_too_long",
-                "Use a shorter exact excerpt or an explicit grounded subject.",
+                "Use a shorter exact excerpt or a grounded subject of at most 64 characters.",
             )
         if item.quote not in text:
             raise SourceLearningRejectionError(
@@ -248,13 +264,14 @@ class SourceLearningService:
                 "Use a contiguous phrase from the quote, or omit claim and subject to save an "
                 "8-512 character quote itself; do not remove negation or add an interpretation.",
             )
-        subject_terms = set(_normalized(subject).split()) - {"and", "the", "s"}
-        if not subject_terms or not subject_terms <= set(_normalized(item.quote).split()):
-            raise SourceLearningRejectionError(
-                "subject_not_grounded",
-                "Use only subject words present in the quote, or omit subject; "
-                "do not infer identity.",
-            )
+        if subject is not None:
+            subject_terms = set(_normalized(subject).split()) - {"and", "the", "s"}
+            if not subject_terms or not subject_terms <= set(_normalized(item.quote).split()):
+                raise SourceLearningRejectionError(
+                    "subject_not_grounded",
+                    "Use only subject words present in the quote, or omit subject; "
+                    "do not infer identity.",
+                )
         quote_start = text.index(item.quote)
         prefix = re.split(r"[.!?\n]", text[max(0, quote_start - 200) : quote_start])[-1]
         if _DENIAL.search(prefix) or _INSTRUCTION.search(item.quote):
@@ -264,7 +281,7 @@ class SourceLearningService:
             )
         if any(
             contains_injection_pattern(value) or contains_secret_material(value)
-            for value in (text, claim, subject, url)
+            for value in (text, claim, subject or "", url)
         ):
             raise SourceLearningRejectionError(
                 "source_hazard",
@@ -314,6 +331,7 @@ class SourceLearningService:
             )
         claim = _claim_text(target.statement) if target else claim
         host = _site((urlsplit(url).hostname or "").casefold())
+        subject = subject if subject is not None else host
         identity = hashlib.sha256(
             (
                 principal.tenant_id
@@ -330,34 +348,41 @@ class SourceLearningService:
                 principal.tenant_id + "\0" + principal.principal_id + "\0" + _normalized(claim)
             ).encode()
         ).hexdigest()
+        quote_suffix = hashlib.sha256(_normalized(item.quote).encode()).hexdigest()
         claim_key = f"{VERSION}:claim:{claim_identity}"
-        quote_key = (
-            f"{VERSION}:quote:{claim_identity}:"
-            + hashlib.sha256(_normalized(item.quote).encode()).hexdigest()
-        )
-        known_claim = await uow.events.get_by_derivation(claim_key, principal)
-        known_quote = await uow.events.get_by_derivation(quote_key, principal)
-        if known_claim is not None:
-            saved = await uow.memories.get(UUID(str(known_claim.payload["belief_id"])), principal)
-            if saved.status not in LIVE_MEMORY_STATUSES or (
-                saved.expires_at is not None and saved.expires_at <= self._clock.now()
-            ):
-                raise ConflictError("previous source claim is no longer live")
-            await self._validate_supports(uow, saved, context)
-            if target is None or known_quote is not None:
-                return {"status": "unchanged", "belief_id": str(saved.id)}
-            if target.id != saved.id:
-                raise ConflictError("source claim already belongs to another belief")
+        quote_key = f"{VERSION}:quote:{claim_identity}:{quote_suffix}"
         receipt_key = f"{VERSION}:{identity}"
-        prior = await uow.events.get_by_derivation(receipt_key, principal)
+        # A deletion or correction of the @1 rendering of this claim from this
+        # site blocks the @2 identity too (formation checks the @2 statement).
+        legacy_hash = hashlib.sha256(
+            f"Source suggests: {claim} [Source: {url}]".casefold().encode()
+        ).hexdigest()
+        rejections = await uow.memories.outstanding_rejections(
+            principal.tenant_id, principal.principal_id
+        )
+        if any(rejection.statement_sha256 == legacy_hash for rejection in rejections):
+            raise ConflictError("a user deletion or correction blocks this memory")
+        known_claim = await self._receipt(uow, principal, "claim", claim_identity)
+        known_quote = await self._receipt(
+            uow, principal, "quote", f"{claim_identity}:{quote_suffix}"
+        )
+        if known_claim is not None:
+            saved = await self._lineage(uow, principal, UUID(str(known_claim.payload["belief_id"])))
+            if saved is not None:
+                await self._validate_supports(uow, saved, context)
+                if target is None or known_quote is not None:
+                    return {"status": "unchanged", "belief_id": str(saved.id)}
+                if target.id != saved.id:
+                    raise ConflictError("source claim already belongs to another belief")
+        prior = await self._newest_receipt(uow, principal, identity)
         if prior is not None:
-            saved = await uow.memories.get(UUID(str(prior.payload["belief_id"])), principal)
-            if saved.status not in LIVE_MEMORY_STATUSES or (
-                saved.expires_at is not None and saved.expires_at <= self._clock.now()
-            ):
-                raise ConflictError("previous source learning is no longer live")
-            await self._validate_supports(uow, saved, context)
-            return {"status": "unchanged", "belief_id": str(prior.payload["belief_id"])}
+            saved = await self._lineage(uow, principal, UUID(str(prior.payload["belief_id"])))
+            if saved is not None:
+                await self._validate_supports(uow, saved, context)
+                return {"status": "unchanged", "belief_id": str(saved.id)}
+            # The earlier belief expired: a fresh read may learn the claim
+            # again, under a receipt chained to the newest one it follows.
+            receipt_key = f"{VERSION}:{identity}:{prior.id}"
         if sum(event.event_type == "memory.source_learned" for event in events) >= 32:
             raise SourceLearningRejectionError(
                 "observation_limit_reached",
@@ -366,7 +391,7 @@ class SourceLearningService:
             )
         if target is not None:
             await self._validate_supports(uow, target, context)
-        statement = target.statement if target else f"Source suggests: {claim} [Source: {url}]"
+        statement = target.statement if target else claim
         belief, action = await self._service.remember_formation(
             session_id=session.id,
             run_id=run.id,
@@ -374,7 +399,7 @@ class SourceLearningService:
             subject=target.subject if target else subject,
             scope=project_scope(session.metadata),
             belief_type=target.belief_type if target else BeliefType.FACT,
-            portability=Portability.LOCAL,
+            portability=Portability.CONTEXTUAL,
             sensitivity=Sensitivity.SENSITIVE,
             source_event_ids=[event.sequence for event in source_events],
             origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
@@ -395,8 +420,9 @@ class SourceLearningService:
             source_learning_target=target.id if target else None,
             audit_model=VERSION,
             existing_uow=uow,
+            attribution_host=host,
         )
-        await self._link_sources(uow, context, belief, source_events, identity)
+        await self._link_sources(uow, principal, belief, source_events, identity)
         await uow.events.append(
             NewEvent(
                 session_id=session.id,
@@ -447,15 +473,199 @@ class SourceLearningService:
                 if await uow.people.source_suppressed(context.principal, key):
                     raise ConflictError("supporting source was erased")
 
+    async def _receipt(
+        self, uow: RepositoryUnitOfWork, principal: Principal, kind: str | None, suffix: str
+    ) -> EventEnvelope | None:
+        """The receipt of either version, newest version first."""
+        for version in VERSIONS:
+            key = f"{version}:{kind}:{suffix}" if kind else f"{version}:{suffix}"
+            found = await uow.events.get_by_derivation(key, principal)
+            if found is not None:
+                return found
+        return None
+
+    async def _newest_receipt(
+        self, uow: RepositoryUnitOfWork, principal: Principal, identity: str
+    ) -> EventEnvelope | None:
+        """The last receipt in a host's chain for a claim. Each relearn keys its
+        receipt by the event ID of the receipt it follows, which is unique across
+        sessions where a session-local sequence is not."""
+        found = await self._receipt(uow, principal, None, identity)
+        while found is not None:
+            following = await uow.events.get_by_derivation(
+                f"{VERSION}:{identity}:{found.id}", principal
+            )
+            if following is None:
+                return found
+            found = following
+        return None
+
+    async def _lineage(
+        self, uow: RepositoryUnitOfWork, principal: Principal, belief_id: UUID
+    ) -> MemoryRecord | None:
+        """The live belief a receipt now stands for: the belief itself, or the
+        replacement a reshape or correction superseded it with. None once the
+        chain ends in an expired belief; a retired or deleted one still refuses."""
+        seen: set[UUID] = set()
+        current = belief_id
+        while current not in seen:
+            seen.add(current)
+            saved = await uow.memories.get(current, principal)
+            if saved.superseded_by is not None:
+                current = saved.superseded_by
+                continue
+            if saved.status is MemoryStatus.EXPIRED or (
+                saved.expires_at is not None and saved.expires_at <= self._clock.now()
+            ):
+                return None
+            if saved.status not in LIVE_MEMORY_STATUSES:
+                raise ConflictError("previous source claim is no longer live")
+            return saved
+        raise ConflictError("source claim lineage is circular")
+
+    async def reshape(self, *, policy: str, confirm: bool) -> SourceReshape:
+        """Supersede every live belief learned under ``policy`` with its @2 shape
+        (ADR-0250): the claim as the statement, the host beside it, contextual
+        portability, the same source events, confidence and expiry. Governed
+        supersession, never a rewrite; a dry run counts and writes nothing.
+        """
+        async with self._factory() as uow:
+            rows = [
+                record
+                for record in await self._live_rows(uow)
+                if record.consolidation_policy_version == policy
+            ]
+        reshaped = 0
+        for record in rows:
+            claim = _claim_text(record.statement)
+            citation = re.search(r" \[Source: (?P<url>[^\]]+)\]$", record.statement)
+            if claim == record.statement or citation is None:
+                continue  # Not a @1 row shape; left for a human.
+            url = citation.group("url")
+            host = _site((urlsplit(url).hostname or "").casefold())
+            if not host:
+                continue
+            reshaped += 1
+            if not confirm:
+                continue
+            principal = self._service.principal
+            async with self._factory() as uow, uow.people.lock(principal):
+                current = await uow.memories.get(record.id, principal)
+                if current.status not in LIVE_MEMORY_STATUSES or current.superseded_by:
+                    continue
+                subject = (
+                    host
+                    if _normalized(current.subject) == _normalized(claim)
+                    or len(current.subject) > MAX_SUBJECT_CHARS
+                    else current.subject
+                )
+                replacement, _action = await self._service.remember_formation(
+                    session_id=current.source_session_id,
+                    run_id=None,
+                    statement=claim,
+                    subject=subject,
+                    scope=current.scope,
+                    belief_type=current.belief_type,
+                    portability=Portability.CONTEXTUAL,
+                    sensitivity=current.sensitivity,
+                    source_event_ids=list(current.source_event_ids),
+                    origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                    explicit=False,
+                    authority=MemoryAuthority.INFERRED,
+                    polarity=Polarity.ASSERT,
+                    confidence=current.confidence,
+                    valid_from=current.valid_from,
+                    expires_at=current.expires_at,
+                    trigger=VERSION,
+                    record_audit=True,
+                    claim_kind=current.claim_kind,
+                    derivation=MemoryDerivation.HYPOTHESIS,
+                    longevity=MemoryLongevity.TENTATIVE,
+                    evidence_at=current.last_evidence_at,
+                    attributed_external=True,
+                    source_learning=True,
+                    audit_model=VERSION,
+                    existing_uow=uow,
+                    attribution_host=host,
+                )
+                now = self._clock.now()
+                superseded = current.model_copy(
+                    update={
+                        "status": MemoryStatus.SUPERSEDED,
+                        "valid_to": now,
+                        "superseded_by": replacement.id,
+                        "store_position": await uow.memories.next_position(),
+                        "updated_at": now,
+                    },
+                    deep=True,
+                )
+                stored = await uow.memories.reinforce(superseded)
+                await uow.events.append(
+                    NewEvent(
+                        session_id=current.source_session_id,
+                        run_id=None,
+                        event_type="memory.superseded",
+                        actor_type="memory",
+                        actor_id=principal.principal_id,
+                        payload={
+                            "belief_id": str(stored.id),
+                            "superseded_by": str(replacement.id),
+                            "policy_version": VERSION,
+                        },
+                    )
+                )
+                # Read each cited source event, never the whole source session.
+                sources = [
+                    event
+                    for sequence in current.source_event_ids
+                    for event in await uow.events.list_after(
+                        current.source_session_id, sequence - 1, principal, limit=1
+                    )
+                    if event.sequence == sequence
+                ]
+                identity = hashlib.sha256(
+                    (
+                        principal.tenant_id
+                        + "\0"
+                        + principal.principal_id
+                        + "\0"
+                        + host.casefold()
+                        + "\0"
+                        + _normalized(claim)
+                    ).encode()
+                ).hexdigest()
+                await self._link_sources(uow, principal, replacement, sources, identity)
+        return SourceReshape(examined=len(rows), reshaped=reshaped, dry_run=not confirm)
+
+    async def _live_rows(self, uow: RepositoryUnitOfWork) -> list[MemoryRecord]:
+        principal = self._service.principal
+        found: list[MemoryRecord] = []
+        cursor: tuple[int, UUID] | None = None
+        while True:
+            page = await uow.memories.browse(
+                MemoryBrowseQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    ceiling=Sensitivity.RESTRICTED,
+                    limit=200,
+                    cursor=cursor,
+                )
+            )
+            rows = page[:200]
+            found.extend(rows)
+            if len(page) <= 200 or not rows:
+                return found
+            cursor = (rows[-1].store_position, rows[-1].id)
+
     async def _link_sources(
         self,
         uow: RepositoryUnitOfWork,
-        context: ToolExecutionContext,
+        principal: Principal,
         belief: MemoryRecord,
         events: list[EventEnvelope],
         identity: str,
     ) -> None:
-        principal, now = context.principal, self._clock.now()
+        now = self._clock.now()
         support: list[UUID] = []
         for event in events:
             key = source_id(principal, event.session_id, event.sequence)
@@ -478,9 +688,27 @@ class SourceLearningService:
                     ),
                     expected_revision=0,
                 )
+        link_id = uuid5(belief.id, identity)
+        existing = await uow.people.get(principal, link_id, ceiling=Sensitivity.RESTRICTED)
+        if existing is not None:
+            # The same belief linked from the same site again keeps every
+            # supporting event, so erasing any of them still reaches the belief.
+            merged = list(dict.fromkeys([*existing.support_ids, *support]))
+            if merged != existing.support_ids:
+                await uow.people.put(
+                    existing.model_copy(
+                        update={
+                            "support_ids": merged,
+                            "revision": existing.revision + 1,
+                            "updated_at": max(now, existing.updated_at + timedelta(microseconds=1)),
+                        }
+                    ),
+                    expected_revision=existing.revision,
+                )
+            return
         await uow.people.put(
             SourceMemoryLink(
-                id=uuid5(belief.id, identity),
+                id=link_id,
                 tenant_id=principal.tenant_id,
                 principal_id=principal.principal_id,
                 created_at=now,

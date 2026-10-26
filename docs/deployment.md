@@ -1859,3 +1859,22 @@ never in Git; the report it writes holds identifiers, stages, ranks and
 latencies only. Without `--live-model` the answer is scripted, so the Used stage
 and answer correctness are not judged; with it the configured model answers and
 costs apply.
+
+### Conflict reconciliation (ADR-0248)
+
+`agent memory reconcile-conflicts` re-evaluates every live `conflicts_with`
+link under the predicate rule and reports the pairs it would unlink and the
+review flags it would clear; `--confirm` writes the repair through the
+governed path (one `memory.conflict_cleared` event per pair, fresh store
+positions, no SQL). Run the dry run first and keep its output with the
+authorization; the owner's affirmed home address and its seven partners are
+the first production case.
+
+### Learned-memory reshape (ADR-0250)
+
+`agent memory reshape --policy owner-source-learning@1` counts the live rows
+learned under the old shape; `--confirm` supersedes each with its `@2` belief
+through formation (claim as statement, host beside it, same sources,
+confidence and expiry) and leaves the old row readable as superseded. Run the
+dry run first; the production run needs the owner's authorization, and the
+fallback is the rows' own thirty-day expiry.

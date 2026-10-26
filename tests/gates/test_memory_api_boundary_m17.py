@@ -46,6 +46,9 @@ PRINCIPAL_ID = "local-user"
 # The spec's exact 26-field exposure list (memory-read-api-and-browser.md).
 MEMORY_VIEW_FIELDS = {
     "id",
+    # ADR-0249 and ADR-0250: the derived review reason and the learned host.
+    "review_reason",
+    "attribution_host",
     "subject",
     "statement",
     "belief_type",

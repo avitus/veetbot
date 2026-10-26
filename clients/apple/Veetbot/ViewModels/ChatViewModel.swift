@@ -139,6 +139,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var browserProfiles: [BrowserProfileView] = []
     private var websiteConnectionSessionID: UUID?
     @Published public private(set) var selectedBrowserProfileID: UUID?
+    /// ADR-0251: the open chat's offer to connect a website the owner named.
+    @Published public private(set) var websiteOffer: WebsiteOffer?
+    private var dismissedWebsiteOfferIDs: Set<UUID> = []
+    private var pendingWebsiteOffer: (offerID: UUID, profileID: UUID, sessionID: UUID)?
     @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
     /// The one-time launch capability of the in-flight ceremony. It is held only
     /// in memory, only while its ceremony is live, and is surrendered with the
@@ -152,7 +156,9 @@ public final class ChatViewModel: ObservableObject {
     /// The open conversation's active task permission, if any (ADR-0129).
     @Published public private(set) var activeTaskGrant: BrowserTaskGrantView?
     /// Only a conversation bound to a website profile can hold one.
-    private var selectedSessionUsesWebsiteProfile = false
+    /// The website the open chat uses, for Website Access's row (ADR-0251).
+    @Published public private(set) var connectedWebsiteProfileID: UUID?
+    private var selectedSessionUsesWebsiteProfile: Bool { connectedWebsiteProfileID != nil }
     /// Every active task permission, for Settings > Website Access.
     @Published public private(set) var taskScopePolicy: BrowserTaskScopePolicy?
     @Published public private(set) var taskScopeError: String?
@@ -1010,7 +1016,9 @@ public final class ChatViewModel: ObservableObject {
         notificationFocus = nil
         notificationNavigationID = nil
         activeTaskGrant = nil
-        selectedSessionUsesWebsiteProfile = false
+        connectedWebsiteProfileID = nil
+        websiteOffer = nil
+        pendingWebsiteOffer = nil
         runState.reset()
     }
 
@@ -1035,7 +1043,8 @@ public final class ChatViewModel: ObservableObject {
         notificationFocus = nil
         notificationNavigationID = nil
         activeTaskGrant = nil
-        selectedSessionUsesWebsiteProfile = false
+        connectedWebsiteProfileID = nil
+        websiteOffer = nil
         runState.reset()
         let log = ConversationDiagnostics.logger
         let trace = requestID.uuidString.prefix(8)
@@ -1045,7 +1054,7 @@ public final class ChatViewModel: ObservableObject {
             guard selectionRequestID == requestID,
                 !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
-            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
+            connectedWebsiteProfileID = Self.websiteProfileID(session)
             if session.isOperational, operationalAttention {
                 try await historyStore.delete(sessionID: session.id)
                 history = try await historyStore.list()
@@ -1381,8 +1390,9 @@ public final class ChatViewModel: ObservableObject {
                 browserProfileID: session.metadata["browser_profile_id"] == nil
                     ? selectedBrowserProfileID : nil
             )
-            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
-                || selectedBrowserProfileID != nil
+            connectedWebsiteProfileID = Self.websiteProfileID(session) ?? selectedBrowserProfileID
+            // The new message closes the previous offer on the server.
+            websiteOffer = nil
             runState.begin(runID: submit.runID, status: submit.status)
             removeSentAttachments(sentAttachments)
             do {
@@ -1615,7 +1625,7 @@ public final class ChatViewModel: ObservableObject {
             sessionCreation = nil
             selectedSessionID = session.id
             loadedNotificationSessionID = session.id
-            selectedSessionUsesWebsiteProfile = session.metadata["browser_profile_id"] != nil
+            connectedWebsiteProfileID = Self.websiteProfileID(session)
             try await store(session: session, lastRunID: nil, suggestedTitle: suggestedTitle)
         }
         return session
@@ -2549,24 +2559,86 @@ public final class ChatViewModel: ObservableObject {
         return (loginURL, origin)
     }
 
+    /// ADR-0251: Connect and continue. A website that needs sign-in signs in
+    /// first; the connection that follows carries the offer.
+    public func acceptWebsiteOffer(_ website: WebsiteOffer.Website) async {
+        guard let offer = websiteOffer, let sessionID = selectedSessionID,
+            offer.websites.contains(website)
+        else { return }
+        pendingWebsiteOffer = (offer.offerID, website.profileID, sessionID)
+        guard website.needsSignIn else {
+            await connectWebsiteToConversation(website.profileID, sessionID: sessionID)
+            return
+        }
+        if !browserProfiles.contains(where: { $0.id == website.profileID }), let api {
+            try? await reloadBrowserProfiles(using: api)
+        }
+        guard let profile = browserProfiles.first(where: { $0.id == website.profileID }),
+            beginDeviceSignIn(profile: profile) != nil
+        else {
+            pendingWebsiteOffer = nil
+            return
+        }
+    }
+
+    /// Not now: this device stops showing the offer; the server's offer simply expires.
+    public func dismissWebsiteOffer() {
+        if let offer = websiteOffer { dismissedWebsiteOfferIDs.insert(offer.offerID) }
+        websiteOffer = nil
+    }
+
+    /// ADR-0251 decision 6: Use in this chat connects only the open chat.
+    public func connectWebsiteToSelectedChat(_ profileID: UUID) async {
+        guard browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready })
+        else { return }
+        // A plain connection never accepts an offer an abandoned sign-in left.
+        pendingWebsiteOffer = nil
+        await connectWebsiteToConversation(profileID, sessionID: selectedSessionID)
+    }
+
+    private static func websiteProfileID(_ session: SessionView) -> UUID? {
+        guard case .string(let raw)? = session.metadata["browser_profile_id"] else { return nil }
+        return UUID(uuidString: raw)
+    }
+
+    /// Reads the open chat's offer. The card is optional, so a failed read
+    /// (an older server without the route, say) shows none.
+    public func refreshWebsiteOffer() async {
+        guard let api, let sessionID = selectedSessionID else {
+            websiteOffer = nil
+            return
+        }
+        let offer = try? await api.websiteOffer(sessionID: sessionID)
+        guard selectedSessionID == sessionID else { return }
+        websiteOffer = offer.flatMap { dismissedWebsiteOfferIDs.contains($0.offerID) ? nil : $0 }
+    }
+
+    /// The device default for new chats (ADR-0251 decision 6). It no longer
+    /// connects the open chat; Use in this chat does that.
     public func selectBrowserProfile(_ profileID: UUID?) async {
         guard profileID == nil
             || browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready })
         else { return }
         selectedBrowserProfileID = profileID
         await configurationStore.saveBrowserProfileID(profileID)
-        if let profileID {
-            await connectWebsiteToConversation(profileID, sessionID: selectedSessionID)
-        }
     }
 
     private func connectWebsiteToConversation(_ profileID: UUID, sessionID: UUID?) async {
         defer { if websiteConnectionSessionID == sessionID { websiteConnectionSessionID = nil } }
         guard let api, let sessionID else { return }
+        // ADR-0251: the connection that accepts an offer continues its request.
+        let offerID = pendingWebsiteOffer.flatMap {
+            $0.profileID == profileID && $0.sessionID == sessionID ? $0.offerID : nil
+        }
+        pendingWebsiteOffer = nil
         do {
-            let resumed = try await api.connectWebsite(sessionID: sessionID, profileID: profileID)
+            let resumed = try await api.connectWebsite(
+                sessionID: sessionID, profileID: profileID, offerID: offerID
+            )
             guard selectedSessionID == sessionID else { return }
-            selectedSessionUsesWebsiteProfile = true
+            connectedWebsiteProfileID = profileID
+            // Any connection closes the chat's open offer on the server.
+            websiteOffer = nil
             var runID = resumed
             if runID == nil {
                 // A replay can omit the run already resumed by the first PUT.
@@ -2834,6 +2906,9 @@ public final class ChatViewModel: ObservableObject {
         watchTasks.task = Task { [weak self] in
             var frames = 0
             var fetchedApprovalIDs = Set<UUID>()
+            // ADR-0251: only a run whose admission matched a saved website
+            // carries this frame, so ordinary chats never ask for an offer.
+            var offerAnnounced = false
             defer {
                 if let self {
                     ConversationDiagnostics.logger.notice(
@@ -2845,6 +2920,7 @@ public final class ChatViewModel: ObservableObject {
                 for try await frame in eventStream.frames(runID: runID) {
                     guard let self, !Task.isCancelled, self.selectionRequestID == selectionID else { return }
                     frames += 1
+                    if frame.event == "session.browser.offered" { offerAnnounced = true }
                     if let replay {
                         replay.reduce(frame)
                         // Bind approval details while their original call is
@@ -2886,6 +2962,7 @@ public final class ChatViewModel: ObservableObject {
                     await self.refreshHistoryAfterRun(runID)
                     self.scheduleTitleRefresh()
                 }
+                if offerAnnounced { await self.refreshWebsiteOffer() }
             } catch is CancellationError {
                 return
             } catch {

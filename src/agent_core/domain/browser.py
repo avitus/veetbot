@@ -138,6 +138,10 @@ class BrowserInteractiveEvent(BaseModel):
         return self
 
 
+# ADR-0251: the source run's checkpoint holds the offer its runtime row states.
+WEBSITE_OFFER_STATE_KEY = "website_offer"
+
+
 class BrowserProfileStatus(StrEnum):
     PROVISIONING = "provisioning"
     AUTHENTICATION_REQUIRED = "authentication_required"

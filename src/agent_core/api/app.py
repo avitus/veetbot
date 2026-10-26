@@ -91,7 +91,13 @@ from agent_core.domain.devices import (
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError, ScheduleValidationError
 from agent_core.domain.failures import log_failure
 from agent_core.domain.folders import FolderProposalState
-from agent_core.domain.memory import BeliefType, MemoryReviewOutcome, MemoryStatus, Sensitivity
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryReviewOutcome,
+    MemoryStatus,
+    ReviewReason,
+    Sensitivity,
+)
 from agent_core.domain.notifications import (
     NotificationKind,
     NotificationSyncRequest,
@@ -324,6 +330,8 @@ class MessageRequest(BaseModel):
 class ConnectBrowserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     browser_profile_id: UUID
+    # ADR-0251: accepting an open offer also continues the owner's request.
+    offer_id: UUID | None = None
 
 
 class OwnerMessageRequest(MessageRequest):
@@ -826,9 +834,21 @@ def create_app(
         authenticated: Annotated[Principal, secured("session.write")],
     ) -> dict[str, object]:
         resumed = await services.runs.connect_browser(
-            authenticated, session_id, body.browser_profile_id
+            authenticated, session_id, body.browser_profile_id, offer_id=body.offer_id
         )
         return {"run_id": str(resumed.run_id) if resumed else None}
+
+    @app.get(
+        "/v1/sessions/{session_id}/website-offer",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def read_session_website_offer(
+        session_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> dict[str, object]:
+        """ADR-0251: the open offer to connect a website the owner named."""
+        offer = await services.runs.website_offer(authenticated, session_id)
+        return {"offer": None if offer is None else offer.model_dump(mode="json")}
 
     @app.get(
         "/v1/sessions/{session_id}/messages",
@@ -1802,6 +1822,7 @@ def create_app(
         text: str | None = None,
         flagged: bool | None = None,
         include_derived: bool = False,
+        review_reason: ReviewReason | None = None,
     ) -> Page[MemoryView | DerivedMemoryView]:
         # A belief body is principal-scoped and sensitivity-bearing, so no
         # shared or on-disk cache may keep it; the artifact content route
@@ -1824,6 +1845,7 @@ def create_app(
                 cursor=cursor,
                 flagged=flagged,
                 include_derived=include_derived,
+                review_reason=review_reason,
             )
         except MemoryCursorError as exc:
             raise MalformedRequestError("memory cursor is malformed") from exc

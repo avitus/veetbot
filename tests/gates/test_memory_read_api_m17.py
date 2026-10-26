@@ -77,6 +77,8 @@ EXPOSED_FIELDS = (
     "confidence",
     "corroboration_count",
     "flagged_for_review",
+    "review_reason",
+    "attribution_host",
     "conflicts_with",
     "superseded_by",
     "source_session_id",
@@ -932,7 +934,7 @@ def test_the_projection_is_exactly_the_exposure_list() -> None:
     """
 
     assert set(MemoryView.model_fields) == set(EXPOSED_FIELDS)
-    assert len(EXPOSED_FIELDS) == 31
+    assert len(EXPOSED_FIELDS) == 33
     assert MemoryView.model_config["extra"] == "forbid"
     assert MemoryView.model_config["frozen"] is True
     assert set(WITHHELD_FIELDS).isdisjoint(MemoryView.model_fields)
@@ -1112,3 +1114,70 @@ async def test_every_error_is_a_member_of_the_closed_vocabulary() -> None:
         (403, "authorization_error"),
         (404, "not_found"),
     }, sorted(observed)
+
+
+async def test_review_reason_is_exposed_filterable_and_counted() -> None:
+    """ADR-0249: the queue says why each belief is in it; the list filters by
+    that reason; the counts route reports the queue by reason."""
+
+    from agent_core.domain.memory import MemoryAuthority
+
+    async with build(
+        settings=_enabled_settings(), storage="memory", sequential_ids=True
+    ) as composition:
+        conflicted = _belief(belief_id=61, position=61).model_copy(
+            update={"flagged_for_review": True, "conflicts_with": [UUID(int=62)]}
+        )
+        partner = _belief(belief_id=62, position=62).model_copy(
+            update={"flagged_for_review": True, "conflicts_with": [UUID(int=61)]}
+        )
+        corrected = _belief(belief_id=63, position=63).model_copy(
+            update={"flagged_for_review": True}
+        )
+        learned = _belief(belief_id=64, position=64).model_copy(
+            update={
+                "flagged_for_review": True,
+                "authority": MemoryAuthority.INFERRED,
+                "consolidation_policy_version": "owner-source-learning@1",
+            }
+        )
+        sensitive = _belief(
+            belief_id=65, position=65, sensitivity=Sensitivity.SENSITIVE
+        ).model_copy(update={"flagged_for_review": True, "authority": MemoryAuthority.INFERRED})
+        plain = _belief(belief_id=66, position=66)
+        await _seed(composition, [conflicted, partner, corrected, learned, sensitive, plain])
+        async with _client(composition) as client:
+
+            async def listed(**params: Any) -> dict[str, str | None]:
+                response = await client.get(
+                    "/v1/memories", params={"ceiling": "restricted", **params}
+                )
+                assert response.status_code == 200, response.text
+                return {item["id"]: item["review_reason"] for item in response.json()["items"]}
+
+            everything = await listed()
+            assert everything[str(UUID(int=61))] == "conflict"
+            assert everything[str(UUID(int=63))] == "correction"
+            assert everything[str(UUID(int=64))] == "source_learned"
+            assert everything[str(UUID(int=65))] == "sensitive_automatic"
+            assert everything[str(UUID(int=66))] is None
+            assert set(await listed(review_reason="conflict")) == {
+                str(UUID(int=61)),
+                str(UUID(int=62)),
+            }
+            assert set(await listed(review_reason="correction")) == {str(UUID(int=63))}
+            assert set(await listed(review_reason="source_learned", flagged="true")) == {
+                str(UUID(int=64))
+            }
+            malformed = await client.get(
+                "/v1/memories", params={"ceiling": "restricted", "review_reason": "vibes"}
+            )
+            assert malformed.status_code == 400
+            counts = await client.get("/v1/memories/counts", params={"ceiling": "restricted"})
+            assert counts.status_code == 200, counts.text
+            assert counts.json()["by_review_reason"] == {
+                "conflict": 2,
+                "correction": 1,
+                "source_learned": 1,
+                "sensitive_automatic": 1,
+            }

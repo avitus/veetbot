@@ -577,6 +577,7 @@ import Testing
             (.dismiss, "Marked as reviewed."),
             (.untrue, "Marked not true. Veetbot will not form it again from the same evidence."),
             (.notHere, "Marked not relevant here."),
+            (.confirm, "Confirmed as your own statement. It will not fade on its own."),
         ]
         for (outcome, text) in expected {
             _ = await model.review(memory, outcome: outcome)

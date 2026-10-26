@@ -167,6 +167,24 @@ WHERE expiring.id IN (
 """
 
 
+def _review_reason_predicate(reason: str) -> ColumnElement[bool]:
+    """The SQL form of `review_reason()` (ADR-0249); both adapters must agree."""
+    linked = func.jsonb_array_length(MemoryRow.conflicts_with) > 0
+    learned = MemoryRow.consolidation_policy_version.like("owner-source-learning%")
+    sensitive = and_(
+        MemoryRow.flagged_for_review.is_(True),
+        MemoryRow.authority == MemoryAuthority.INFERRED.value,
+        MemoryRow.sensitivity.in_((Sensitivity.SENSITIVE.value, Sensitivity.RESTRICTED.value)),
+    )
+    if reason == "conflict":
+        return linked
+    if reason == "source_learned":
+        return and_(~linked, learned)
+    if reason == "sensitive_automatic":
+        return and_(~linked, ~learned, sensitive)
+    return and_(~linked, ~learned, ~sensitive, MemoryRow.flagged_for_review.is_(True))
+
+
 def _memory_values(value: MemoryRecord) -> dict[str, Any]:
     data = value.model_dump(mode="python")
     for key in (
@@ -387,6 +405,8 @@ def _memory(row: MemoryRow) -> MemoryRecord:
         valid_to=row.valid_to,
         superseded_by=row.superseded_by,
         conflicts_with=[UUID(item) for item in row.conflicts_with],
+        predicate_key=row.predicate_key,
+        attribution_host=row.attribution_host,
         flagged_for_review=row.flagged_for_review,
         formation_run_id=row.formation_run_id,
         consolidation_policy_version=row.consolidation_policy_version,
@@ -1021,6 +1041,8 @@ class PostgresMemoryStore:
             predicates.append(MemoryRow.source_session_id == query.session_id)
         if query.flagged_for_review is not None:
             predicates.append(MemoryRow.flagged_for_review.is_(query.flagged_for_review))
+        if query.review_reason is not None:
+            predicates.append(_review_reason_predicate(query.review_reason))
         terms = lexical_query_terms(query.text)
         if terms:
             # Any-term semantics, matching `query()`: a belief matches when it
@@ -1078,6 +1100,7 @@ class PostgresMemoryStore:
         *,
         evidence_before: datetime,
         decay_confidence_ceiling: float | None = None,
+        min_unused_deliveries: int | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
         predicates: list[ColumnElement[bool]] = [
@@ -1093,6 +1116,24 @@ class PostgresMemoryStore:
                 or_(
                     MemoryRow.status == MemoryStatus.PROVISIONAL.value,
                     MemoryRow.confidence < decay_confidence_ceiling,
+                )
+            )
+        if min_unused_deliveries is not None:
+            # decay_eligible_lifecycle (ADR-0247), in SQL so a bounded page is
+            # not filled with rows the sweep would skip.
+            predicates.append(MemoryRow.authority != MemoryAuthority.USER.value)
+            predicates.append(
+                or_(
+                    MemoryRow.authority != MemoryAuthority.AFFIRMED.value,
+                    MemoryRow.derivation != MemoryDerivation.DIRECT.value,
+                )
+            )
+            predicates.append(
+                or_(
+                    MemoryRow.authority != MemoryAuthority.INFERRED.value,
+                    MemoryRow.derivation != MemoryDerivation.DIRECT.value,
+                    MemoryRow.longevity != MemoryLongevity.DURABLE.value,
+                    MemoryRow.delivered_count - MemoryRow.cited_count >= min_unused_deliveries,
                 )
             )
         rows = list(

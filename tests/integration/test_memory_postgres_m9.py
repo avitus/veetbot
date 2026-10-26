@@ -1468,3 +1468,19 @@ async def test_postgres_local_scope_filter_precedes_candidate_limit(tmp_path: Pa
             async with app.uow_factory() as uow:
                 actual = [row.id for row in await uow.memories.query(selected)]
             assert actual == [row.id for row in await mirror.query(selected)] == expected
+
+
+async def test_postgres_lifecycle_exemptions_apply_in_the_idle_window(tmp_path: Path) -> None:
+    """The ADR-0247 lifecycle predicates run in SQL (shared store contract)."""
+    from tests.contract.support import principal, session
+    from tests.contract.test_memory_store_contract import lifecycle_exempt_decay_page_contract
+
+    # The contract writes rows for its own owner and source session: bind the
+    # composition to that owner and create the session the rows cite.
+    async with build(
+        settings=_settings(tmp_path), storage="postgres", principal=principal()
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.sessions.create(session())
+        async with composition.uow_factory() as uow:
+            await lifecycle_exempt_decay_page_contract(uow.memories)

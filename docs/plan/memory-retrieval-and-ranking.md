@@ -397,7 +397,11 @@ results rather than delaying the turn.
   terms remain. A function-word-only query has no lexical matches; explicitly
   named subjects still match. Literal memory browsing and knowledge search keep
   their own lexical behavior. These eligibility and matching repairs are
-  versioned as `retrieval@4` and re-record the deterministic benchmark.
+  versioned as `retrieval@4` and re-record the deterministic benchmark. The
+  review-reason penalties and the attention cap (ADR-0249) changed no
+  benchmark metric; their bump to `retrieval@6` (`retrieval@7` for the
+  relevance selector) is deferred to the owner's decision, because re-recording
+  the baseline cascades into the frozen M32 control.
 - **Semantic** (optional, off at first). `pgvector` over statement embeddings. This is
   where paraphrased preferences are found ("keep it brief" vs "prefers concise
   writing") — the case lexical genuinely misses. It is built behind the fusion
@@ -449,7 +453,15 @@ with:
   `contextual`, heavily for `local`. Carrying is the default, not the exception; the
   discount only decides how hard it has to compete;
 - `penalty(b)` covers `flagged_for_review`, being past `expires_hint`, and being a
-  near-duplicate of a higher-ranked item.
+  near-duplicate of a higher-ranked item. The flag penalty follows the belief's
+  derived **review reason** (ADR-0249): a conflict link or a correction is doubt
+  and takes `retrieval.flagged_penalty` (0.2); a source-learned belief or an
+  automatically captured sensitive statement only asks for attention and takes
+  `retrieval.attention_penalty` (0.05). Under the shipped profile an
+  attention-flagged provisional hypothesis trails an active user belief by at
+  least 0.10 at equal match, a user belief with match at least 0.5 outranks any
+  such hypothesis, and such hypotheses fill at most a third of a recall's
+  rendered slots; the three are tested, not assumed.
 
 Two weight vectors, one function. The `core` profile (snapshot) drops `w_match` to
 zero — there is no query — and raises durability and authority. The `task` profile
@@ -469,7 +481,12 @@ Filling the budget is not the objective.
   `conflicts_with` with no supersession, return **both** with an explicit marker rather
   than silently picking one. Formation deliberately refused to resolve these; retrieval
   must not quietly resolve them at read time. The marker names each partner by the same
-  short identifier the reader cites with, `conflicts=[m:xxxxxxxx]`.
+  short identifier the reader cites with, `conflicts=[m:xxxxxxxx]`. The marker is
+  rendered only beside a partner that is rendered too (ADR-0248): both halves or no
+  marker, so the model never reads a one-sided doubt it cannot inspect; the trace
+  keeps every link. Formation writes the link only between two values of one
+  attribute, the same predicate key the collapse above groups by
+  ([memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)).
 - **Per-subject cap.** At most *n* beliefs per subject, so one heavily-discussed entity
   cannot consume the budget. A conflict partner is exempt: two beliefs in conflict share
   a subject by construction, so the cap would cut exactly the half that makes the marker
@@ -506,6 +523,7 @@ is its Region A half and in-turn recall its Region B half, and in-turn recall is
   [m:1c07] Andy's current project is veetbot.         (user-stated, high)
   [m:44b9] Andy's stack is Postgres-backed.           (inferred, medium)
   [m:7ea5] (learned in atlas) Deploys are gated on CI. (inferred, low)
+  [m:9b02] (learned from www.scalevp.com) Andy sits on the CodeRabbit board. (inferred, low; hypothesis, tentative)
   [m:0d3e] [BLOCKED] withheld: failed injection scan.
 </memory>
 ```

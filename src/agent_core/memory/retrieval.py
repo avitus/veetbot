@@ -20,6 +20,7 @@ from agent_core.domain.context import TaskStatus, WorkingState
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
+    ATTENTION_REASONS,
     SENSITIVITY_ORDER,
     BeliefType,
     EpisodeQuery,
@@ -46,6 +47,7 @@ from agent_core.domain.memory import (
     lexical_term_lexemes,
     lexical_tokens,
     recall_query_terms,
+    review_reason,
 )
 from agent_core.domain.memory_candidates import candidate_strength
 from agent_core.domain.memory_sources import SourceRecoveryObservation
@@ -73,6 +75,11 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQueryLookup
 
+# ADR-0249 changes the flag penalty by review reason; the deterministic M16
+# benchmark measured no metric change. The version bump (@4 -> @6, @5 -> @7)
+# is deferred: re-recording the M16 baseline cascades into the frozen M32
+# control, whose manifest pins the baseline digest and whose recording pins
+# that manifest and the policy string, so it waits for the owner's decision.
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
 RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@5"
 OWNED_RESOURCE_POLICY_VERSION = "owned-resources@1"
@@ -667,6 +674,7 @@ class HybridMemoryRetriever:
                         strengths[member_id] = (best[0], best[1])
         recalled: list[RecalledBelief] = []
         durable_ids: set[UUID] = set()
+        owner_matched: set[UUID] = set()
         excluded = set(effective_query.exclude_ids)
         for record in records:
             # A hard predicate, not a score: the persona row already carries
@@ -684,6 +692,19 @@ class HybridMemoryRetriever:
             )
             if candidate is None:
                 continue
+            if (
+                record.authority is MemoryAuthority.USER
+                and _arm_match(
+                    record,
+                    effective_query,
+                    profile=self._profile,
+                    semantic_rank=semantic_ranks.get(record.id),
+                    semantic_only=semantic_key is not None
+                    and self._profile.semantic_channel == "dense",
+                )[0]
+                >= 0.5
+            ):
+                owner_matched.add(record.id)
             if _is_durable(record, owner_facts=effective_query.candidate_selection == "relevance"):
                 durable_ids.add(record.id)
             recalled.append(candidate)
@@ -721,7 +742,9 @@ class HybridMemoryRetriever:
                 for item in recalled
             ]
         recalled = _penalize_near_duplicates(recalled, penalty=self._profile.near_duplicate_penalty)
-        ranked = self._ranker.rank(recalled, effective_query)
+        ranked = _keep_owner_beliefs_ahead(
+            self._ranker.rank(recalled, effective_query), owner_matched
+        )
         collapsed: list[RecalledBelief] = []
         subjects: defaultdict[str, int] = defaultdict(int)
         seen: set[tuple[str, str, str]] = set()
@@ -806,11 +829,27 @@ class HybridMemoryRetriever:
         )
         durable_ahead = _durable_ahead(collapsed, durable_ids)
         durable_selected = 0
+        # ADR-0249: attention-flagged hypotheses (source learning, automatic
+        # sensitive captures) fill at most a third of the rendered slots, so
+        # they are retrievable and never dominant.
+        attention_cap = math.ceil(effective_query.max_items / 3)
+        attention_selected = 0
         for index, item in enumerate(collapsed):
             durable = item.belief_id in durable_ids
-            if owner_core and measure_tokens(_line(item)) > min(
-                256, effective_query.budget_tokens // 3
+            # Measure what recall would return: markers only beside shown partners.
+            # A candidate adds its marker to a seated partner's line, so every
+            # line it would change is checked against the owner-core cap.
+            prospective = [*selected, item]
+            prospective_partners = frozenset(chosen.belief_id for chosen in prospective)
+            if owner_core and any(
+                measure_tokens(_line(chosen, partners=prospective_partners))
+                > min(256, effective_query.budget_tokens // 3)
+                for chosen in prospective
             ):
+                dropped.append(item.belief_id)
+                continue
+            attention = _asks_attention(item)
+            if attention and attention_selected >= attention_cap:
                 dropped.append(item.belief_id)
                 continue
             # A slot is held for a durable belief further down the ranking only
@@ -819,10 +858,11 @@ class HybridMemoryRetriever:
             held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
             candidate_tokens = measure_tokens(
                 render(
-                    [*selected, item],
+                    prospective,
                     as_of=now,
                     policy_version=render_policy,
                     known_at=render_known_at,
+                    partners=prospective_partners,
                 )
                 + people_rendered
             )
@@ -834,8 +874,16 @@ class HybridMemoryRetriever:
                 continue
             selected.append(item)
             durable_selected += int(durable)
+            attention_selected += int(attention)
+        shown_partners = frozenset(item.belief_id for item in selected)
         rendered = (
-            render(selected, as_of=now, policy_version=render_policy, known_at=render_known_at)
+            render(
+                selected,
+                as_of=now,
+                policy_version=render_policy,
+                known_at=render_known_at,
+                partners=shown_partners,
+            )
             + people_rendered
         )
         for person_item in eligible_people:
@@ -882,6 +930,7 @@ class HybridMemoryRetriever:
                     as_of=now,
                     policy_version=render_policy,
                     known_at=render_known_at,
+                    partners=shown_partners,
                 ) + "".join("\n" + _person_line(item) for item in selected_people)
                 if (
                     len(selected_items) + len(selected_people) >= effective_query.max_items
@@ -935,6 +984,7 @@ class HybridMemoryRetriever:
                         as_of=now,
                         policy_version=render_policy,
                         known_at=render_known_at,
+                        partners=shown_partners,
                     ) + "".join("\n" + _person_line(person) for person in selected_people)
                     if measure_tokens(proposed) <= effective_query.budget_tokens:
                         item = proposed_item
@@ -1540,32 +1590,16 @@ def _durable_ahead(candidates: list[RecalledBelief], durable_ids: set[UUID]) -> 
     return ahead[:-1]
 
 
-def _score(
+def _arm_match(
     record: MemoryRecord,
     query: RecallQuery,
     *,
-    now: datetime | None = None,
-    profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
-    semantic_rank: int | None = None,
-    semantic_only: bool = False,
-) -> RecalledBelief | None:
-    """Score one candidate against one query, as of `now`.
+    profile: RetrievalProfile,
+    semantic_rank: int | None,
+    semantic_only: bool,
+) -> tuple[float, list[str]]:
+    """The candidate's arm match before fusion, 0..1, and the arms that found it."""
 
-    The lexical arm counts whole lexemes over the tokenizer both belief stores
-    filter with, so a term the store would not match cannot score here either.
-    Evidence decays with the time since the belief was last supported, at
-    the time constant its belief type carries: a stable preference fades far
-    more slowly than a situational fact. Without `now` no time has passed,
-    which is what a unit scoring a record against a query measures.
-
-    The stale penalty demotes expired and retired rows. The hard filter keeps
-    them out of an ordinary recall entirely, so the penalty is reachable only
-    through an as-of or include-superseded query, where history is the point
-    and the ranking still has to say which rows are no longer current.
-    """
-
-    if not query.include_provisional and record.status is MemoryStatus.PROVISIONAL:
-        return None
     terms = recall_query_terms(query.text)
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_tokens = lexical_tokens(f"{record.subject} {record.statement}")
@@ -1614,8 +1648,40 @@ def _score(
             else 0
         )
         match = max(structured, lexical, semantic)
-        if match == 0:
-            return None
+    return match, arms
+
+
+def _score(
+    record: MemoryRecord,
+    query: RecallQuery,
+    *,
+    now: datetime | None = None,
+    profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
+    semantic_rank: int | None = None,
+    semantic_only: bool = False,
+) -> RecalledBelief | None:
+    """Score one candidate against one query, as of `now`.
+
+    The lexical arm counts whole lexemes over the tokenizer both belief stores
+    filter with, so a term the store would not match cannot score here either.
+    Evidence decays with the time since the belief was last supported, at
+    the time constant its belief type carries: a stable preference fades far
+    more slowly than a situational fact. Without `now` no time has passed,
+    which is what a unit scoring a record against a query measures.
+
+    The stale penalty demotes expired and retired rows. The hard filter keeps
+    them out of an ordinary recall entirely, so the penalty is reachable only
+    through an as-of or include-superseded query, where history is the point
+    and the ranking still has to say which rows are no longer current.
+    """
+
+    if not query.include_provisional and record.status is MemoryStatus.PROVISIONAL:
+        return None
+    match, arms = _arm_match(
+        record, query, profile=profile, semantic_rank=semantic_rank, semantic_only=semantic_only
+    )
+    if match == 0:
+        return None
     weights = profile.lifecycle_weights
     lifecycle = weights.active if record.status is MemoryStatus.ACTIVE else weights.provisional
     confidence = record.confidence * lifecycle
@@ -1640,7 +1706,20 @@ def _score(
     stale = record.status in _STALE_STATUSES or (
         now is not None and record.expires_at is not None and record.expires_at <= now
     )
-    penalty = (0.2 if record.flagged_for_review else 0) + (profile.stale_penalty if stale else 0)
+    reason = review_reason(record)
+    # ADR-0249: doubt and attention are separate controls. A link or a
+    # correction takes the flagged penalty; source learning and an
+    # automatically captured sensitive statement take the attention penalty,
+    # which is what lets a website-learned fact surface as an attributed
+    # tentative line below the owner's own words.
+    # The penalty follows the flag: a link the owner reviewed ("Looks right")
+    # keeps its reason for display and costs nothing.
+    flag_penalty = 0.0
+    if record.flagged_for_review:
+        flag_penalty = (
+            profile.attention_penalty if reason in ATTENTION_REASONS else profile.flagged_penalty
+        )
+    penalty = flag_penalty + (profile.stale_penalty if stale else 0)
     ranking = profile.ranking_weights
     score = min(
         1.0,
@@ -1679,6 +1758,8 @@ def _score(
         score=score,
         arms=arms,
         conflict_with=list(record.conflicts_with),
+        review_reason=reason,
+        attribution_host=record.attribution_host,
         blocked=blocked,
         source_event_ids=list(record.source_event_ids),
     )
@@ -1708,6 +1789,38 @@ def _penalize_near_duplicates(
             item.model_copy(update={"score": max(0.0, item.score - penalty)}) if duplicate else item
         )
     return penalized
+
+
+def _asks_attention(item: RecalledBelief) -> bool:
+    """An attention-flagged hypothesis: source learned or an automatic sensitive capture."""
+
+    return (
+        item.review_reason in ATTENTION_REASONS and item.derivation is MemoryDerivation.HYPOTHESIS
+    )
+
+
+def _keep_owner_beliefs_ahead(
+    ranked: list[RecalledBelief], owner_matched: set[UUID]
+) -> list[RecalledBelief]:
+    """ADR-0249 (ii): a user belief matched at 0.5 or more outranks every
+    attention-flagged hypothesis.
+
+    The shipped weights keep that order at scoring, but fusion credits a
+    candidate for every arm that found it, so a hypothesis two arms found can
+    overtake a user belief one arm found. Each hypothesis ranked above the last
+    such user belief moves to just below it, keeping its order among them; every
+    other candidate keeps its relative order.
+    """
+
+    last = max(
+        (index for index, item in enumerate(ranked) if item.belief_id in owner_matched),
+        default=-1,
+    )
+    head = ranked[: last + 1]
+    lifted = [item for item in head if _asks_attention(item)]
+    if not lifted:
+        return ranked
+    return [item for item in head if not _asks_attention(item)] + lifted + ranked[last + 1 :]
 
 
 def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
@@ -1775,6 +1888,7 @@ def render_memory(
     bounded: bool = False,
     relationship_group: str | None = None,
     next_people_after: UUID | None = None,
+    partners: frozenset[UUID] | None = None,
 ) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
     history = (
@@ -1799,13 +1913,17 @@ def render_memory(
             "supporting facts may be omitted. Narrow the query for more detail." + continuation
         )
     for item in items:
-        lines.append(f"  {_line(item)}")
+        lines.append(f"  {_line(item, partners=partners)}")
     lines.append("</memory>")
     return "\n".join(lines)
 
 
-def _line(item: RecalledItem) -> str:
+def _line(item: RecalledItem, *, partners: frozenset[UUID] | None = None) -> str:
     origin = f" (learned in {html.escape(item.origin_scope)})" if item.carried else ""
+    # ADR-0250: a website-learned belief names its host beside the claim.
+    host = getattr(item, "attribution_host", None)
+    if host:
+        origin += f" (learned from {html.escape(host)})"
     if isinstance(item, RecalledSummary):
         return (
             f"[m:{str(item.belief_id)[:8]}]{origin} {html.escape(item.statement)} "
@@ -1813,9 +1931,17 @@ def _line(item: RecalledItem) -> str:
         )
     # A partner is named the way a citation is, so the only identifier the
     # model ever sees for a belief is the eight-digit one it can cite back.
+    # ADR-0248: a marker is shown only beside a partner that is rendered too;
+    # the spec's "return both" is honoured or the dispute is not shown as a
+    # one-sided doubt. The item keeps every link for the trace and the browser.
+    shown = (
+        item.conflict_with
+        if partners is None
+        else [value for value in item.conflict_with if value in partners]
+    )
     conflict = (
-        f" conflicts=[{','.join(f'm:{str(value)[:8]}' for value in sorted(item.conflict_with))}]"
-        if item.conflict_with
+        f" conflicts=[{','.join(f'm:{str(value)[:8]}' for value in sorted(shown))}]"
+        if shown
         else ""
     )
     fact = (

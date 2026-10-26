@@ -841,6 +841,69 @@ async def test_protected_people_do_not_starve_bounded_decay_pages() -> None:
     await protected_people_decay_page_contract(_store())
 
 
+async def lifecycle_exempt_decay_page_contract(store: MemoryStore) -> None:
+    """ADR-0247: with ``min_unused_deliveries`` the idle window applies the
+    lifecycle exemptions itself, so a bounded sweep page is not filled with
+    rows it would skip. Asserted over this case's own ids: a shared database
+    may hold other idle rows."""
+    from agent_core.domain.memory import (
+        USAGE_ACCOUNTING_VERSION,
+        MemoryAuthority,
+        MemoryDerivation,
+        MemoryLongevity,
+    )
+
+    def idle(belief_id: int, **update: object) -> MemoryRecord:
+        base = {
+            "subject": f"lifecycle-{belief_id}",
+            "statement": f"Lifecycle belief {belief_id}",
+            "status": MemoryStatus.PROVISIONAL,
+            "confidence": 0.4,
+            "authority": MemoryAuthority.INFERRED,
+            "derivation": MemoryDerivation.DIRECT,
+            "longevity": MemoryLongevity.DURABLE,
+            "last_evidence_at": NOW - timedelta(days=400),
+            "usage_accounting_version": USAGE_ACCOUNTING_VERSION,
+        }
+        return memory(belief_id=belief_id).model_copy(update={**base, **update})
+
+    user_stated = idle(9901, authority=MemoryAuthority.USER, delivered_count=9)
+    affirmed = idle(9902, authority=MemoryAuthority.AFFIRMED, delivered_count=9)
+    unseen = idle(9903)
+    unused = idle(9904, delivered_count=3)
+    cited = idle(9905, delivered_count=3, cited_count=1)
+    hypothesis = idle(
+        9906, derivation=MemoryDerivation.HYPOTHESIS, longevity=MemoryLongevity.TENTATIVE
+    )
+    affirmed_hypothesis = idle(
+        9907,
+        authority=MemoryAuthority.AFFIRMED,
+        derivation=MemoryDerivation.HYPOTHESIS,
+        longevity=MemoryLongevity.TENTATIVE,
+    )
+    records = [user_stated, affirmed, unseen, unused, cited, hypothesis, affirmed_hypothesis]
+    for record in records:
+        await store.upsert_belief(
+            record.model_copy(update={"store_position": await store.next_position()})
+        )
+    mine = {record.id for record in records}
+    kwargs: dict[str, object] = {
+        "evidence_before": NOW - timedelta(days=30),
+        "decay_confidence_ceiling": 0.55,
+        "limit": 200,
+    }
+    plain = await store.list_idle(principal(), **kwargs)  # type: ignore[arg-type]
+    gated = await store.list_idle(principal(), min_unused_deliveries=3, **kwargs)  # type: ignore[arg-type]
+    assert {row.id for row in plain} & mine == mine
+    assert {row.id for row in gated} & mine == {unused.id, hypothesis.id, affirmed_hypothesis.id}
+    stricter = await store.list_idle(principal(), min_unused_deliveries=4, **kwargs)  # type: ignore[arg-type]
+    assert {row.id for row in stricter} & mine == {hypothesis.id, affirmed_hypothesis.id}
+
+
+async def test_lifecycle_exemptions_apply_in_the_idle_window() -> None:
+    await lifecycle_exempt_decay_page_contract(_store())
+
+
 async def historical_recall_contract(store: MemoryStore, clock: FixedClock) -> None:
     original = memory(belief_id=9850, statement="Maya enjoys astronomy").model_copy(
         update={"subject": "Maya", "store_position": 51}

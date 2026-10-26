@@ -160,6 +160,28 @@ without paying for or guessing unusable browser operations. A deployment-wide
 hosted profile, an explicitly injected provider, and the origin-pinned Playwright
 adapter remain globally bound runtime environments and keep their browser tools.
 
+Such a session still learns how to get one (ADR-0251). When the owner's typed
+text names one of their own saved website logins, admission records an offer
+and never connects the chat. The source run's runtime metadata row then carries
+`website_offer=<origins>` with facts only: the login is saved, the chat is not
+connected to it (or is connected to another origin), and the app shows the
+owner a Connect or Switch button that connects it and continues the request.
+An unconnected chat with no match carries `website=none` and the place to
+connect one, Website Access in that chat. The row never names a profile ID and
+sits outside the frozen prefix. Matching reads only the message's typed text:
+a host or registrable domain, approximated without the public suffix list,
+which stays inside the isolated service; one to three words that join to the domain's
+first label (four characters or more, hyphens removed) or to a first host
+label of seven or more letters other than `www`; or one word of five or more
+letters that begins a domain label of five or more. At most three profiles are
+offered, longest matched text first. The app reads the offer only when the
+source run's stream carries `session.browser.offered`, and shows the card once
+that run has ended. The native card connects the chat and
+admits one continuation run through
+[http-api-and-streaming.md](http-api-and-streaming.md); "Not now" hides an
+offer on that device. Website Access opened from a chat offers "Use in this
+chat" separately from the device default for new chats.
+
 Downloads, uploads other than the image contract below, clipboard access,
 notifications, geolocation, camera, microphone, password-manager access, and
 new windows are denied until each has

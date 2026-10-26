@@ -32,7 +32,12 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.evals.owner_recall_probes import evidence_stage, load_probes
-from tests.contract.owner_recall_probe_cases import FakeWebProvider, delivery_case, save_case
+from tests.contract.owner_recall_probe_cases import (
+    FakeWebProvider,
+    delivery_case,
+    home_city_case,
+    save_case,
+)
 from tests.gates.test_memory_m16 import _START
 from tests.integration.m2_support import memory_settings
 
@@ -114,6 +119,26 @@ async def test_probes_report_delivery_retirement_and_latency_through_the_run_loo
         clock=clock,
     ) as app:
         await delivery_case(app, script)
+
+
+async def test_home_city_probe_delivers_the_address_beside_same_subject_noise(
+    tmp_path: Path,
+) -> None:
+    """ADR-0248: the affirmed address is delivered on both paths and carries no
+    false link to the five email facts about the same subject."""
+
+    clock = FixedClock(_START)
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="The garden is in Los Altos Hills; here is the calendar.")],
+        on_exhausted="repeat_last",
+    )
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=clock,
+    ) as app:
+        await home_city_case(app, script)
 
 
 async def test_write_probe_reports_the_save_outcome_after_web_results(tmp_path: Path) -> None:

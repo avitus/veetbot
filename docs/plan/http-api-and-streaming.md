@@ -929,6 +929,39 @@ same connection cannot create another run or another action. Cancelled, expired
 or nonwaiting requests cannot resume. The native Website Access entry connects
 the originating chat and watches the resumed run after successful sign-in.
 
+### Offering a website the owner named (ADR-0251)
+
+In a composition that resolves profiles per session, admitting an owner
+message through `POST /v1/sessions/{session_id}/messages` that starts a new run
+matches the owner's typed text against their own Ready, Authentication
+required and Needs user profiles. Inbound surfaces, schedules, delegated runs,
+input to a waiting run and an exact X follow command are never matched. A match
+appends `session.browser.offered` (offer ID, source message sequence, matched
+profile IDs and origins, the origin the chat already uses) and never connects
+the chat or holds the run. The event carries the source run's ID, so that
+run's event stream delivers it; clients read the offer only after seeing it.
+
+`GET /v1/sessions/{session_id}/website-offer` declares `browser.profile.read`
+and also requires `session.read`. It returns `200 {"offer": null}` or
+`200 {"offer": {"offer_id", "source_sequence", "connected_origin", "websites":
+[{"profile_id", "origins", "status"}], "expires_at"}}`. An offer is open until
+the next `user.message.created` in the chat, any `session.browser.connected`,
+24 hours after the offer, or the loss of every offered profile; an unowned
+session is 404 and a missing scope 403.
+
+`PUT /v1/sessions/{session_id}/website` accepts an optional `offer_id`. With
+one, it also requires `run.write`. Under the admission lock, an open offer that
+names the profile and a chat without an active run connect the chat under the
+rules above and admit one continuation run, returned as `{"run_id": "uuid"}`.
+Its seed is `user.message.created` with the principal actor, the fixed text
+"I connected <host> to this chat. Please continue my earlier request." and an
+`origin` of kind `browser_offer` naming the offer and source sequence, with
+derivation key `browser_offer:<offer_id>`. The owner's tap admits it, so it has
+interactive authority. A replay returns the same run; an expired, superseded,
+consumed or foreign offer, or a profile it does not name, is `409 conflict`
+with reason `browser_offer_not_open`, and an active run is `409` with reason
+`active_run_exists`. Without `offer_id` the endpoint is unchanged.
+
 ### The handler's order of operations
 
 1. Authenticate, producing the `Principal`.
