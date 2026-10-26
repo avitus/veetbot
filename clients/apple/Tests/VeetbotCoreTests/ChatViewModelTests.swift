@@ -1879,9 +1879,12 @@ import UserNotifications
         var listedStatus: String?
         /// Whether the source run's stream carries the offer (ADR-0251).
         var offered = true
+        /// Whether accepting continues the source run parked on a question.
+        var continuesSourceRun = false
 
         final class Log: @unchecked Sendable {
             var connections: [URLRequest] = []
+            var answers: [URLRequest] = []
             var offerReads = 0
             var sourceReplays = 0
             var accepted = false
@@ -1889,6 +1892,7 @@ import UserNotifications
         let log = Log()
 
         var connections: [URLRequest] { lock.withLock { log.connections } }
+        var answers: [URLRequest] { lock.withLock { log.answers } }
         var offerReads: Int { lock.withLock { log.offerReads } }
         var sourceReplays: Int { lock.withLock { log.sourceReplays } }
 
@@ -1939,7 +1943,11 @@ import UserNotifications
                     log.connections.append(request)
                     log.accepted = true
                 }
-                return (200, "{\"run_id\":\"\(runID.uuidString)\"}", [:])
+                let continued = continuesSourceRun ? sourceRunID : runID
+                return (200, "{\"run_id\":\"\(continued.uuidString)\"}", [:])
+            case ("POST", "/v1/runs/\(sourceRunID.uuidString)/input"):
+                lock.withLock { log.answers.append(request) }
+                return (202, "{\"run_id\":\"\(sourceRunID.uuidString)\",\"status\":\"QUEUED\"}", [:])
             case ("GET", "/v1/runs/\(runID.uuidString)/events"):
                 return (200, "", ["Content-Type": "text/event-stream"])
             case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
@@ -2110,6 +2118,69 @@ import UserNotifications
 
         // The server closes every open offer on any connection.
         #expect(server.connections.count == 1)
+        #expect(model.websiteOffer == nil)
+    }
+
+    /// The source run parks on a question about the offer (ADR-0251 owner decision 3).
+    private func askAboutTheOffer(_ model: ChatViewModel, _ server: WebsiteOfferServer) {
+        model.runState.begin(runID: server.sourceRunID, status: .running)
+        model.runState.reduce(
+            SSEFrame(
+                id: 70,
+                event: "run.waiting_for_user",
+                data: [
+                    "run_id": .string(server.sourceRunID.uuidString),
+                    "question_id": .string(UUID().uuidString),
+                    "question": .string("Tap Connect so I can sign in."),
+                ]
+            )
+        )
+    }
+
+    @Test
+    func testTheCardShowsWhileTheSourceRunAsksAQuestion() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        #expect(model.showsWebsiteOffer)
+
+        model.runState.begin(runID: server.sourceRunID, status: .running)
+        // A working run still hides it.
+        #expect(!model.showsWebsiteOffer)
+
+        askAboutTheOffer(model, server)
+        #expect(model.runState.clarifyingQuestion != nil)
+        #expect(model.showsWebsiteOffer)
+    }
+
+    @Test
+    func testAcceptingWhileTheSourceRunAsksContinuesThatRun() async throws {
+        var server = WebsiteOfferServer()
+        server.continuesSourceRun = true
+        let model = try await websiteOfferModel(server)
+        askAboutTheOffer(model, server)
+        let website = try #require(model.websiteOffer?.websites.first)
+
+        await model.acceptWebsiteOffer(website)
+
+        let request = try #require(server.connections.first)
+        #expect(try requestJSONObject(request)["offer_id"] as? String == server.offerID.uuidString)
+        // The tap answers the question; the app sends no typed answer of its own.
+        #expect(server.answers.isEmpty)
+        #expect(model.runState.activeRunID == server.sourceRunID)
+        #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testATypedAnswerToTheQuestionClearsTheOffer() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        askAboutTheOffer(model, server)
+        #expect(model.showsWebsiteOffer)
+
+        #expect(await model.send("Switch") == true)
+
+        // The server closes the offer when it records the owner's answer.
+        #expect(server.answers.count == 1)
         #expect(model.websiteOffer == nil)
     }
 

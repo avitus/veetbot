@@ -5,7 +5,7 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.domain.errors import ConflictError
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.runs import RunLimits, RunStatus
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal, run, session
 
@@ -37,6 +37,54 @@ async def waiting_runs_contract(factory: UnitOfWorkFactory) -> None:
         page = await reader(owner, limit=2, after_id=page[-1].id)
         assert [item.id for item in page] == [UUID(int=7802)]
         assert await reader(owner, limit=0) == []
+
+
+async def waiting_run_limits_contract(factory: UnitOfWorkFactory) -> None:
+    """ADR-0251: a run waiting for its owner takes a connected chat's limits;
+    a run in any other state keeps the limits it was admitted with."""
+
+    owner = principal()
+    source = session().model_copy(update={"id": UUID(int=7900)})
+    waiting = run(status=RunStatus.WAITING_FOR_USER).model_copy(
+        update={"id": UUID(int=7901), "session_id": source.id}
+    )
+    raised = RunLimits(max_steps=160, max_model_calls=120, max_tool_calls=160)
+    async with factory() as uow:
+        await uow.sessions.create(source)
+        await uow.runs.create(waiting)
+    async with factory() as uow:
+        updated = await uow.runs.set_waiting_limits(waiting.id, raised)
+    async with factory() as uow:
+        stored = await uow.runs.get(waiting.id, owner)
+    assert updated.limits == raised and stored.limits == raised
+    assert stored.status is RunStatus.WAITING_FOR_USER
+
+    other = session().model_copy(update={"id": UUID(int=7902)})
+    running = run(status=RunStatus.RUNNING).model_copy(
+        update={"id": UUID(int=7903), "session_id": other.id}
+    )
+    async with factory() as uow:
+        await uow.sessions.create(other)
+        await uow.runs.create(running)
+    with pytest.raises(ConflictError):
+        async with factory() as uow:
+            await uow.runs.set_waiting_limits(running.id, raised)
+    # The deadline is the run's own; new limits cannot move it.
+    with pytest.raises(ConflictError):
+        async with factory() as uow:
+            await uow.runs.set_waiting_limits(
+                waiting.id, raised.model_copy(update={"deadline_at": source.created_at})
+            )
+    async with factory() as uow:
+        assert (await uow.runs.get(running.id, owner)).limits == running.limits
+        assert (await uow.runs.get(waiting.id, owner)).limits == raised
+
+
+async def test_a_waiting_run_takes_new_limits_and_no_other_run_does() -> None:
+    from tests.contract.support import memory_uow_factory
+
+    _clock, factory = await memory_uow_factory()
+    await waiting_run_limits_contract(factory)
 
 
 async def test_waiting_runs_are_bounded_scoped_and_paginated() -> None:

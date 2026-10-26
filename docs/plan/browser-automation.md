@@ -176,8 +176,9 @@ label of seven or more letters other than `www`; or one word of five or more
 letters that begins a domain label of five or more. At most three profiles are
 offered, longest matched text first. The app reads the offer only when the
 source run's stream carries `session.browser.offered`, and shows the card once
-that run has ended. The native card connects the chat and
-admits one continuation run through
+that run has ended or while it waits for the owner's answer to a question. The
+native card connects the chat and admits one continuation run, or answers the
+waiting source run's question in that run, through
 [http-api-and-streaming.md](http-api-and-streaming.md); "Not now" hides an
 offer on that device. Website Access opened from a chat offers "Use in this
 chat" separately from the device default for new chats.

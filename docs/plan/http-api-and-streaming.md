@@ -957,10 +957,18 @@ Its seed is `user.message.created` with the principal actor, the fixed text
 "I connected <host> to this chat. Please continue my earlier request." and an
 `origin` of kind `browser_offer` naming the offer and source sequence, with
 derivation key `browser_offer:<offer_id>`. The owner's tap admits it, so it has
-interactive authority. A replay returns the same run; an expired, superseded,
+interactive authority. When the chat's active run is the offer's source run,
+waiting for the owner's answer to a question with nothing else pending, the
+same text is delivered instead as the owner's answer to that question, in that
+run: `user.message.created` with the principal actor, the `question_id`, the
+`browser_offer` origin and the same derivation key, and the response names
+that run. The connection starts a new capability epoch as the browser-access
+wait does: tool pins are planned again, the provider continuation is dropped,
+the run's offer row is cleared, and the run takes the browser-task limits.
+A replay returns the same run; an expired, superseded,
 consumed or foreign offer, or a profile it does not name, is `409 conflict`
-with reason `browser_offer_not_open`, and an active run is `409` with reason
-`active_run_exists`. Without `offer_id` the endpoint is unchanged.
+with reason `browser_offer_not_open`, and any other active run is `409` with
+reason `active_run_exists`. Without `offer_id` the endpoint is unchanged.
 
 ### The handler's order of operations
 

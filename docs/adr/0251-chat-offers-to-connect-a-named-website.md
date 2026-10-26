@@ -2,7 +2,9 @@
 
 - Status: Accepted by the owner on 2026-10-25 with both recommended choices (a
   card, never automatic connection; an offer expires at the next owner message
-  or 24 hours after its source message); implemented 2026-10-25, delivery pending
+  or 24 hours after its source message); implemented 2026-10-25 and delivered
+  2026-10-26. The 2026-10-26 amendment (owner decision 3) is implemented,
+  delivery pending
 - Date: 2026-10-25
 - Amended: 2026-10-25, with the implementation. The source run's row states
   facts only, matching the existing "data only" runtime row: the login is
@@ -17,6 +19,14 @@
   the registrable domain is approximated: the last two labels, or three
   under a two-letter country code whose second level is `ac`, `co`, `com`,
   `edu`, `gov`, `net` or `org`
+- Amended: 2026-10-26, by the owner (owner decision 3). In production the
+  model answered a matched message by asking the owner to tap Switch with
+  `conversation.ask_user` instead of ending its turn. The source run then
+  waited for the owner, the app hid the card while a run was active, and
+  accepting would have been refused with `active_run_exists`. The owner's
+  typed answer closed the offer. The card now also shows while the source run
+  waits for the owner's answer to a question, and accepting it answers that
+  question in the same run (decisions 4 and 5)
 - Amends: ADR-0130, ADR-0172
 - Related: ADR-0094, ADR-0128, ADR-0129, ADR-0141, ADR-0164
 - Scope: The existing browser capability (the Milestone 10 browser tranche).
@@ -106,7 +116,8 @@ that inherited the default X or shopping profile still lacks the portal.
    Neither row is a tool, and neither grants anything.
 
 4. **The native card.** On iPhone, iPad and Mac, the app shows the offer under
-   the reply once the source run has ended. The card reads "Connect <host> to
+   the reply once the source run has ended, or while the source run waits for
+   the owner's answer to a question. The card reads "Connect <host> to
    this chat", or "Switch this chat to <host>" when the chat uses another
    profile. Its buttons are "Connect and continue" and "Not now". For a profile
    that needs sign-in, the first button reads "Sign in and continue" and starts
@@ -130,6 +141,17 @@ that inherited the default X or shopping profile still lacks the portal.
    - The first acceptance consumes the offer, and a replay returns the same
      run. An expired, superseded or foreign offer returns
      `409 browser_offer_not_open` and connects nothing.
+   - When the chat's active run is the source run, waiting for the owner's
+     answer to a question with nothing else pending, the service connects the
+     chat and delivers the same text as the owner's answer to that question,
+     in the same run. The answer is a `user.message.created` event with the
+     principal actor, the question's ID and the `browser_offer` origin. As in
+     the browser-access wait (ADR-0172), the connection starts a new capability
+     epoch: the run's tool pins are planned again and its provider continuation
+     is dropped. The run's offer row is cleared, and the run takes the limits a
+     run admitted in the connected chat gets (ADR-0130). A waiting run holds no
+     browser lease, so the next browser action opens the newly connected
+     profile. Any other active run returns `409 active_run_exists`.
    - Without an `offer_id`, the endpoint behaves exactly as it does today.
 
 6. **Website Access says what its button does.** When Website Access is opened
@@ -140,6 +162,9 @@ that inherited the default X or shopping profile still lacks the portal.
 7. **What does not change.**
    - Browser tools still appear only in a connected chat (ADR-0130), and only
      the owner connects one.
+   - A live run changes its website only in two cases, and both start a new
+     capability epoch on the owner's tap: the browser-access wait (ADR-0172),
+     and accepting an offer while its source run waits for the owner's answer.
    - Policy, approvals, task grants (ADR-0129) and task approval websites
      (ADR-0141) are unchanged. A click on the portal still needs approval unless
      the owner adds the site to the task approval websites.
@@ -163,7 +188,10 @@ that inherited the default X or shopping profile still lacks the portal.
   An unconnected chat's context gains one short row outside the prefix, so the
   cache does not rotate.
 - A continuation run uses the browser-task limits (ADR-0130) because the chat is
-  now connected.
+  now connected. A continued source run takes the same limits.
+- When the model asks the owner a question about the offer, the card and the
+  question show together. Tapping the card answers the question. A typed
+  answer is the owner's next message, so it closes the offer (owner decision 2).
 
 ## Alternatives considered
 
@@ -192,6 +220,12 @@ The owner accepted both recommendations on 2026-10-25:
 2. An offer expires at the next owner message in the chat, or 24 hours after
    its source message, whichever comes first.
 
+On 2026-10-26 the owner added a third decision:
+
+3. The card also shows while the source run waits for the owner's answer to a
+   question. Accepting it connects the chat and answers that question in the
+   same run, as the browser-access wait does.
+
 ## Verification
 
 Test-first regressions cover:
@@ -209,8 +243,15 @@ Test-first regressions cover:
   admitted, with the principal actor. A replay returns the same run. Consumed,
   expired, superseded and foreign offers, an active run, and the sign-in path
   each return the documented result.
+- **A waiting source run:** accepting connects the chat and answers the
+  question in the same run, with the principal actor and the question's ID.
+  It admits no second run, starts a new capability epoch with browser tools,
+  clears the offer row and applies the browser-task limits. A replay returns
+  the same run. The run store sets a waiting run's limits and refuses any
+  other status.
 - **Native:** the card's states and the relabeled Website Access row on iPhone,
-  iPad and Mac.
+  iPad and Mac. The card shows while the source run waits on a question, and a
+  typed answer removes it.
 
 Production acceptance: in a new, unconnected chat, naming the saved portal shows
 the card, and one tap continues the original request.

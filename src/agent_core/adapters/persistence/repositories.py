@@ -148,6 +148,7 @@ from agent_core.domain.runs import (
     RunCheckpoint,
     RunFailure,
     RunKind,
+    RunLimits,
     RunStatus,
     RunUsage,
 )
@@ -815,6 +816,19 @@ class PostgresRunRepository:
         )
         if not _rowcount(await self._session.execute(statement)):
             await self._raise_guard_failure(run.id, run.status, lease, "counter update")
+
+    async def set_waiting_limits(self, run_id: UUID, limits: RunLimits) -> Run:
+        row = await self._session.get(RunRow, run_id, with_for_update=True)
+        if row is None:
+            raise NotFoundError("run not found")
+        if row.status != RunStatus.WAITING_FOR_USER.value:
+            raise ConflictError("only a run waiting for its owner takes new limits")
+        if limits.deadline_at != row.deadline_at:
+            raise ConflictError("new limits cannot move the run's deadline")
+        row.limits = limits.model_dump(mode="json")
+        row.updated_at = self._clock.now()
+        await self._session.flush()
+        return run_to_domain(row)
 
     async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
         statement = (

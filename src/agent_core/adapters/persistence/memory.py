@@ -75,6 +75,7 @@ from agent_core.domain.runs import (
     RunCheckpoint,
     RunFailure,
     RunKind,
+    RunLimits,
     RunStatus,
     RunUsage,
 )
@@ -612,6 +613,22 @@ class InMemoryRunRepository:
             if supplied != updated:
                 raise ConflictError("counter update may change only counters and usage")
             self._runs[run.id] = updated
+
+    async def set_waiting_limits(self, run_id: UUID, limits: RunLimits) -> Run:
+        async with self._lock:
+            try:
+                current = self._runs[run_id]
+            except KeyError as exc:
+                raise NotFoundError("run not found") from exc
+            if current.status is not RunStatus.WAITING_FOR_USER:
+                raise ConflictError("only a run waiting for its owner takes new limits")
+            if limits.deadline_at != current.deadline_at:
+                raise ConflictError("new limits cannot move the run's deadline")
+            updated = current.model_copy(
+                update={"limits": limits.model_copy(deep=True), "updated_at": self._clock.now()}
+            )
+            self._runs[run_id] = updated
+            return updated.model_copy(deep=True)
 
     async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
         async with self._lock:

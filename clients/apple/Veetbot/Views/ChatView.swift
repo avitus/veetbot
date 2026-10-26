@@ -597,7 +597,7 @@ public struct ChatView: View {
                 .padding(.horizontal, VeetSpace.s2)
                 .accessibilityIdentifier("chat.activity")
             }
-            if let offer = model.websiteOffer, !state.isRunActive {
+            if let offer = model.websiteOffer, model.showsWebsiteOffer {
                 WebsiteOfferCard(
                     offer: offer,
                     accept: { website in Task { await model.acceptWebsiteOffer(website) } },
