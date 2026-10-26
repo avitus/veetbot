@@ -16,6 +16,7 @@ from agent_core.domain.schedules import (
     SchedulePauseReason,
     ScheduleRevision,
     ScheduleState,
+    is_cockpit_refresh,
 )
 from agent_core.observability.schedules import ScheduleMetrics
 from agent_core.ports.determinism import Clock, IdFactory
@@ -152,10 +153,11 @@ class ScheduleOutcomeAccountant:
             )
             self._write_probe("process_event")
             # ADR-0225 part D: a completed report may stay quiet; a run that
-            # failed or was cancelled always tells the owner.
-            quiet = (
-                run.status is RunStatus.COMPLETED
-                and revision.notify is ScheduleNotify.ATTENTION_ONLY
+            # failed or was cancelled always tells the owner. A completed
+            # Cockpit refresh is shown by its widget (ADR-0254).
+            quiet = run.status is RunStatus.COMPLETED and (
+                revision.notify is ScheduleNotify.ATTENTION_ONLY
+                or is_cockpit_refresh(occurrence.manual_request_key)
             )
             if (
                 self._notification_producer is not None

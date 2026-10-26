@@ -23,6 +23,7 @@ from agent_core.domain.cockpit import (
     RevisionState,
     WidgetState,
 )
+from agent_core.domain.schedules import ScheduleRefresh
 
 type SettingValue = str | int | float | bool
 
@@ -133,6 +134,12 @@ class CockpitLayoutWrite(_View):
 
 class CockpitRevertRequest(_View):
     revision_id: UUID
+
+
+class CockpitRefreshView(_View):
+    """What a refresh did with each feed-keeping schedule (ADR-0254)."""
+
+    schedules: tuple[ScheduleRefresh, ...]
 
 
 class CockpitChangeView(_View):

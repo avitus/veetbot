@@ -18,6 +18,7 @@ from agent_core.config import Settings
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.schedules import ScheduleNotify
 from tests.contract.fake_github import app_private_key
 from tests.integration.m2_support import memory_settings
 
@@ -81,7 +82,7 @@ async def test_a_schedule_created_to_publish_a_feed_asks_for_the_cockpit_scopes(
         completed = await composition.runs.wait_terminal(run_id)
         page = await composition.schedules.list(composition.principal, 10, None)
 
-    assert current.version == "1.5.0"
+    assert current.version == "1.6.0"
     assert current.input_schema["properties"]["publish_cockpit_feed"] == {"type": "boolean"}
     assert "publish_cockpit_feed" not in pinned.input_schema["properties"]
     assert approval.arguments["requested_scopes"] == ["cockpit.read", "cockpit.write"]
@@ -89,6 +90,7 @@ async def test_a_schedule_created_to_publish_a_feed_asks_for_the_cockpit_scopes(
     assert completed.status is RunStatus.COMPLETED
     [record] = page.items
     assert record.revision.requested_scopes == frozenset({"cockpit.read", "cockpit.write"})
+    assert record.revision.notify is ScheduleNotify.ATTENTION_ONLY
     assert record.schedule.next_fire_at is not None
     assert record.schedule.next_fire_at - NOW < timedelta(days=1)
 

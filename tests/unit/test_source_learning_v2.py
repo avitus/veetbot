@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4, uuid5
 
 import pytest
@@ -52,6 +52,7 @@ from tests.unit.test_source_learning import (
 )
 
 HOST = "family.example.org"
+SECOND = "https://second.example.org/albums"
 LEGACY_VERSION = "owner-source-learning@1"
 
 
@@ -60,28 +61,50 @@ def _service(app: Any) -> Any:
 
 
 @asynccontextmanager
-async def _chats(count: int) -> AsyncIterator[tuple[Any, list[ToolExecutionContext]]]:
-    """One owner, ``count`` chats, each asking to learn from the same site and reading it."""
+async def _chats(
+    *urls: str, storage: Literal["memory", "postgres"] = "memory"
+) -> AsyncIterator[tuple[Any, list[ToolExecutionContext]]]:
+    """One owner, a chat per URL, each asking to learn from that site and reading it."""
     script = FakeModelScript(
         turns=[
             turn
-            for _ in range(count)
+            for url in urls
             for turn in (
                 _tool_turn(
-                    ScriptedToolCall(name="web.fetch", call_id="read-album", arguments={"url": URL})
+                    ScriptedToolCall(name="web.fetch", call_id="read-album", arguments={"url": url})
                 ),
                 ScriptedTurn(text="Read the archive."),
             )
         ]
     )
+    if storage == "postgres":
+        from tests.integration.m2_support import database_settings
+
+        settings = database_settings()
+    else:
+        settings = _settings()
     async with build(
-        settings=_settings(), script=script, web_fetch_provider_override=ArchiveProvider()
+        settings=settings,
+        storage=storage,
+        script=script,
+        web_fetch_provider_override=ArchiveProvider(),
     ) as app:
         contexts = []
-        for _ in range(count):
-            run = await app.runs.wait_terminal(
-                await app.runs.submit(f"Study {URL} and learn about our family.")
-            )
+        for url in urls:
+            run_id = await app.runs.submit(f"Study {url} and learn about our family.")
+            if storage == "postgres":
+                from agent_core.runtime.worker import DurableWorker
+
+                worker = DurableWorker(
+                    uow_factory=app.uow_factory,
+                    executor=app.executor,
+                    clock=app.clock,
+                    worker_id="source-learning-test",
+                )
+                assert await worker.run_once()
+                run = await app.runs.get(run_id)
+            else:
+                run = await app.runs.wait_terminal(run_id)
             contexts.append(
                 replace(
                     tool_context(),
@@ -248,6 +271,27 @@ async def test_an_expired_claim_can_be_learned_again_from_a_fresh_read() -> None
         assert again["belief_id"] != first["belief_id"]
 
 
+async def test_a_retired_claim_still_refuses_after_its_expiry_passes() -> None:
+    """Only expiry frees a claim to be learned again; retiring it refuses for good."""
+    async with read_archive() as (app, context, _run):
+        (first,) = await learn(app, context, observation())
+        assert first["status"] == "committed"
+        async with app.uow_factory() as uow:
+            record = await uow.memories.get(UUID(first["belief_id"]), app.principal)
+            await uow.memories.reinforce(
+                record.model_copy(
+                    update={
+                        "status": MemoryStatus.RETIRED,
+                        "expires_at": app.clock.now() - timedelta(seconds=1),
+                    },
+                    deep=True,
+                )
+            )
+        (again,) = await learn(app, context, observation())
+        assert again["status"] == "rejected", again
+        assert await app.memory.list_memories() == []
+
+
 async def test_reshape_supersedes_v1_rows_with_v2_beliefs_through_formation() -> None:
     async with read_archive() as (app, context, run):
         first = await _legacy_row(app, run)
@@ -285,7 +329,7 @@ async def test_reshape_supersedes_v1_rows_with_v2_beliefs_through_formation() ->
 async def test_each_relearn_of_an_expired_claim_still_counts_its_host_once() -> None:
     """A relearn chains its receipt to the newest receipt, never to the first one,
     so the host stays once-per-claim however many times the claim expires."""
-    async with _chats(3) as (app, (first_chat, second_chat, third_chat)):
+    async with _chats(URL, URL, URL) as (app, (first_chat, second_chat, third_chat)):
         (first,) = await learn(app, first_chat, observation())
         await _expire(app, first["belief_id"])
         (second,) = await learn(app, second_chat, observation())
@@ -352,3 +396,100 @@ async def test_linking_a_belief_again_keeps_every_supporting_event() -> None:
         source_id(app.principal, run.session_id, event.sequence) for event in events[:3]
     ]
     assert link.revision == 2
+
+
+async def assert_relearned_claim_unchanged(
+    storage: Literal["memory", "postgres"] = "memory",
+) -> None:
+    """The claim receipt chains like the host receipt, so once a claim is relearned
+    the same claim from a second website still names the belief it already is."""
+    async with read_archive(
+        message=f"Learn from {URL} and {SECOND}.", second_url=SECOND, storage=storage
+    ) as (app, context, _run):
+        (first,) = await learn(app, context, observation())
+        await _expire(app, first["belief_id"])
+        (again,) = await learn(app, context, observation())
+        assert again["status"] == "committed", again
+        assert await learn(app, context, observation(call_id="read-second")) == [
+            {"status": "unchanged", "belief_id": again["belief_id"]}
+        ]
+
+
+async def test_a_relearned_claim_from_another_website_is_unchanged() -> None:
+    await assert_relearned_claim_unchanged()
+
+
+async def test_a_relearned_quote_on_another_website_adds_no_corroboration() -> None:
+    """ADR-0233: an identical quotation on another website is not independent
+    support, including after the belief it supports was relearned."""
+    async with read_archive(message=f"Learn from {URL} and {SECOND}.", second_url=SECOND) as (
+        app,
+        context,
+        _run,
+    ):
+        (first,) = await learn(app, context, observation())
+        await _expire(app, first["belief_id"])
+        (again,) = await learn(app, context, observation())
+        assert again["status"] == "committed", again
+        assert await learn(
+            app, context, observation(call_id="read-second", reinforce_id=again["belief_id"])
+        ) == [{"status": "unchanged", "belief_id": again["belief_id"]}]
+        async with app.uow_factory() as uow:
+            belief = await uow.memories.get(UUID(again["belief_id"]), app.principal)
+        assert belief.confidence == 0.35
+
+
+async def test_reshape_leaves_a_v1_row_that_expired_before_the_sweep() -> None:
+    async with read_archive() as (app, _context, run):
+        legacy = await _legacy_row(app, run)
+        await _expire(app, str(legacy.id))
+        service = _service(app)
+        dry = await service.reshape(policy=LEGACY_VERSION, confirm=False)
+        assert (dry.examined, dry.reshaped) == (0, 0)
+        done = await service.reshape(policy=LEGACY_VERSION, confirm=True)
+        assert (done.examined, done.reshaped) == (0, 0)
+        async with app.uow_factory() as uow:
+            kept = await uow.memories.get(legacy.id, app.principal)
+        assert kept.superseded_by is None and kept.status is MemoryStatus.PROVISIONAL
+
+
+async def assert_reshape_carries_support(storage: Literal["memory", "postgres"] = "memory") -> None:
+    """Support a second website's reinforcement linked to a v1 row follows the row
+    onto its replacement, so deleting that chat still fences the reshaped belief."""
+    from agent_core.domain.people import PeopleErasure, PeopleQuery
+
+    async with _chats(URL, SECOND, storage=storage) as (app, (first_chat, second_chat)):
+        async with app.uow_factory() as uow:
+            run = await uow.runs.get(first_chat.run_id, app.principal)
+        legacy = await _legacy_row(app, run)
+        assert await learn(app, second_chat, observation(reinforce_id=str(legacy.id))) == [
+            {"status": "reinforced", "belief_id": str(legacy.id)}
+        ]
+        done = await _service(app).reshape(policy=LEGACY_VERSION, confirm=True)
+        assert done.reshaped == 1
+        (replacement,) = await app.memory.list_memories()
+        assert replacement.id != legacy.id
+        async with app.uow_factory() as uow:
+            await uow.session_deletions.delete(
+                second_chat.session_id, app.principal, app.clock.now()
+            )
+            receipts = await uow.people.query(
+                PeopleQuery(
+                    tenant_id=app.principal.tenant_id,
+                    principal_id=app.principal.principal_id,
+                    kinds=["erasure"],
+                    sensitivity_ceiling=Sensitivity.RESTRICTED,
+                    limit=100,
+                )
+            )
+    blocked = {
+        belief
+        for row in receipts
+        if isinstance(row, PeopleErasure)
+        for belief in row.blocked_belief_ids
+    }
+    assert replacement.id in blocked
+
+
+async def test_reshape_carries_another_websites_support_to_the_replacement() -> None:
+    await assert_reshape_carries_support()

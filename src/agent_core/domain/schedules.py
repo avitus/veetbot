@@ -22,6 +22,7 @@ class CadenceKind(StrEnum):
     WEEKLY = "WEEKLY"
     MONTHLY = "MONTHLY"
     YEARLY = "YEARLY"
+    INTERVAL = "INTERVAL"
 
 
 class OnceCadence(BaseModel):
@@ -161,7 +162,31 @@ class YearlyCadence(BaseModel):
         return _validate_timezone(value)
 
 
-type Cadence = OnceCadence | DailyCadence | WeeklyCadence | MonthlyCadence | YearlyCadence
+class IntervalCadence(BaseModel):
+    """ADR-0254: every N minutes, at the multiples of N since the Unix epoch.
+
+    The epoch is the explicit anchor, so the phase depends only on the value.
+    The zone only presents the schedule's times; it never moves an instant.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal[CadenceKind.INTERVAL] = CadenceKind.INTERVAL
+    every_minutes: int = Field(ge=1, le=1440)
+    timezone: str
+
+    @field_validator("timezone")
+    @classmethod
+    def timezone_is_iana(cls, value: str) -> str:
+        return _validate_timezone(value)
+
+
+type Cadence = (
+    OnceCadence | DailyCadence | WeeklyCadence | MonthlyCadence | YearlyCadence | IntervalCadence
+)
+
+# ADR-0254: only a schedule that keeps a Cockpit feed current fires on an interval.
+FEED_KEEPING_SCOPE = "cockpit.write"
 
 
 # ADR-0221 bounds: a plan places at most ten calls before any follow-up, all
@@ -240,6 +265,39 @@ class OccurrenceTrigger(StrEnum):
 
     SCHEDULED = "SCHEDULED"
     MANUAL = "MANUAL"
+
+
+# ADR-0254: a Cockpit refresh is a manual occurrence under its own key, at
+# most once a minute per schedule, and never counts toward Run-now's limit.
+COCKPIT_REFRESH_KEY_PREFIX = "cockpit.refresh:"
+COCKPIT_REFRESH_MIN_AGE = timedelta(minutes=1)
+
+
+def cockpit_refresh_key(now: datetime) -> str:
+    return f"{COCKPIT_REFRESH_KEY_PREFIX}{now.astimezone(UTC):%Y-%m-%dT%H:%M}Z"
+
+
+def is_cockpit_refresh(manual_request_key: str | None) -> bool:
+    return manual_request_key is not None and manual_request_key.startswith(
+        COCKPIT_REFRESH_KEY_PREFIX
+    )
+
+
+class ScheduleRefreshOutcome(StrEnum):
+    """What a Cockpit refresh did with one feed-keeping schedule (ADR-0254)."""
+
+    STARTED = "started"
+    RUNNING = "running"
+    RECENT = "recent"
+    REFUSED = "refused"
+
+
+class ScheduleRefresh(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schedule_id: UUID
+    outcome: ScheduleRefreshOutcome
+    reason: str | None = None
 
 
 class OccurrenceDisposition(StrEnum):
@@ -572,6 +630,12 @@ class OccurrenceCursor(BaseModel):
     @classmethod
     def nominal_fire_at_is_aware_utc(cls, value: datetime) -> datetime:
         return _aware_utc(value)
+
+
+def check_interval_cadence(cadence: Cadence, requested_scopes: frozenset[str]) -> None:
+    """ADR-0254: an interval is for a feed-keeping schedule alone."""
+    if isinstance(cadence, IntervalCadence) and FEED_KEEPING_SCOPE not in requested_scopes:
+        raise ValueError("an interval cadence keeps a Cockpit feed; request publish_cockpit_feed")
 
 
 def check_call_plan(plan: CallPlan | None, cadence: Cadence) -> None:

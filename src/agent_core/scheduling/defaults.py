@@ -19,6 +19,7 @@ from agent_core.domain.schedules import (
     CallPlan,
     ScheduleDefinition,
     ScheduleDefinitionLimits,
+    ScheduleNotify,
 )
 
 DEFAULT_RUN_TIMEOUT_SECONDS = 300
@@ -64,6 +65,7 @@ def derived_definition(
     requested_scopes: frozenset[str] = frozenset(),
     browser_profile_id: UUID | None = None,
     call_plan: CallPlan | None = None,
+    notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT,
 ) -> ScheduleDefinition:
     """A complete definition whose pins and limits the server chose."""
 
@@ -81,6 +83,7 @@ def derived_definition(
         misfire_grace_seconds=min(DEFAULT_MISFIRE_GRACE_SECONDS, limits.max_misfire_grace_seconds),
         max_consecutive_failures=DEFAULT_MAX_CONSECUTIVE_FAILURES,
         call_plan=call_plan,
+        notify=notify,
     )
 
 

@@ -131,6 +131,7 @@ async def test_schedule_lifecycle_tools_are_feature_gated_and_classified() -> No
             name: composition.tool_pipeline._registry.get(name).spec for name in LIFECYCLE_NAMES
         }
         legacy_list_spec = composition.tool_pipeline._registry.get("schedule.list", "1.0.1").spec
+        previous_list_spec = composition.tool_pipeline._registry.get("schedule.list", "1.0.2").spec
         run_id = await composition.runs.submit("ready?")
         run = await composition.runs.wait_terminal(run_id)
         async with composition.uow_factory() as uow:
@@ -143,7 +144,9 @@ async def test_schedule_lifecycle_tools_are_feature_gated_and_classified() -> No
     assert specs["schedule.list"].risk is RiskLevel.LOW
     assert specs["schedule.list"].idempotency is IdempotencyClass.READ_ONLY
     assert specs["schedule.list"].allow_parallel is True
-    assert specs["schedule.list"].version == "1.0.2"
+    # ADR-0254: 1.1.0 can describe an INTERVAL cadence; earlier versions stay pinned.
+    assert specs["schedule.list"].version == "1.1.0"
+    assert previous_list_spec.version == "1.0.2"
     assert legacy_list_spec.version == "1.0.1"
     assert specs["schedule.update"].required_scopes == {"schedule.write"}
     assert specs["schedule.update"].side_effect is SideEffectClass.EXTERNAL_WRITE

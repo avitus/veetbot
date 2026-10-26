@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -17,7 +17,7 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.schedules import ScheduleDefinitionPatch, ScheduleRecord
+from agent_core.domain.schedules import IntervalCadence, ScheduleDefinitionPatch, ScheduleRecord
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolFailure,
@@ -26,6 +26,7 @@ from agent_core.domain.tools import (
     ToolSpec,
 )
 from agent_core.tools.schedule_create import (
+    FEED_CADENCE_INPUT_SCHEMA,
     RECURRING_CADENCE_INPUT_SCHEMA,
     CadenceInputError,
     parse_cadence,
@@ -138,6 +139,23 @@ CADENCE_OUTPUT_SCHEMA: dict[str, Any] = {
     ]
 }
 
+# ADR-0254: a feed-keeping schedule may fire every 1 to 1,440 minutes.
+FEED_CADENCE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "oneOf": [
+        *CADENCE_OUTPUT_SCHEMA["oneOf"],
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "INTERVAL"},
+                "every_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+                "timezone": {"type": "string"},
+            },
+            "required": ["kind", "every_minutes", "timezone"],
+            "additionalProperties": False,
+        },
+    ]
+}
+
 SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -190,6 +208,23 @@ LIST_OUTPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+FEED_LIST_OUTPUT_SCHEMA: dict[str, Any] = {
+    **LIST_OUTPUT_SCHEMA,
+    "properties": {
+        **LIST_OUTPUT_SCHEMA["properties"],
+        "items": {
+            **LIST_OUTPUT_SCHEMA["properties"]["items"],
+            "items": {
+                **SUMMARY_OUTPUT_SCHEMA,
+                "properties": {
+                    **SUMMARY_OUTPUT_SCHEMA["properties"],
+                    "cadence": FEED_CADENCE_OUTPUT_SCHEMA,
+                },
+            },
+        },
+    },
+}
+
 MUTATION_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -238,6 +273,11 @@ UPDATE_INPUT_SCHEMA: dict[str, Any] = {
     ],
     "not": {"required": ["at", "cadence"]},
     "additionalProperties": False,
+}
+
+FEED_UPDATE_INPUT_SCHEMA: dict[str, Any] = {
+    **UPDATE_INPUT_SCHEMA,
+    "properties": {**UPDATE_INPUT_SCHEMA["properties"], "cadence": FEED_CADENCE_INPUT_SCHEMA},
 }
 
 UPDATE_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -307,27 +347,34 @@ def _mutation_result(record: ScheduleRecord, action: str) -> ToolResult:
     )
 
 
+_LIST_SPEC = ToolSpec(
+    name=SCHEDULE_LIST_TOOL_NAME,
+    version="1.0.2",
+    description=(
+        "List bounded schedule summaries with stable IDs and revisions. Use before "
+        "changes; ask if zero or multiple schedules match."
+    ),
+    input_schema=LIST_INPUT_SCHEMA,
+    output_schema=LIST_OUTPUT_SCHEMA,
+    side_effect=SideEffectClass.NONE,
+    risk=RiskLevel.LOW,
+    idempotency=IdempotencyClass.READ_ONLY,
+    required_scopes={SCHEDULE_READ_SCOPE},
+    timeout_seconds=15,
+    maximum_output_bytes=524_288,
+    allow_parallel=True,
+    output_trust=TrustLevel.INTERNAL_TOOL,
+)
+
+
 class ScheduleListTool:
     """List principal-owned schedule summaries without instruction content."""
 
-    spec = ToolSpec(
-        name=SCHEDULE_LIST_TOOL_NAME,
-        version="1.0.2",
-        description=(
-            "List bounded schedule summaries with stable IDs and revisions. Use before "
-            "changes; ask if zero or multiple schedules match."
-        ),
-        input_schema=LIST_INPUT_SCHEMA,
-        output_schema=LIST_OUTPUT_SCHEMA,
-        side_effect=SideEffectClass.NONE,
-        risk=RiskLevel.LOW,
-        idempotency=IdempotencyClass.READ_ONLY,
-        required_scopes={SCHEDULE_READ_SCOPE},
-        timeout_seconds=15,
-        maximum_output_bytes=524_288,
-        allow_parallel=True,
-        output_trust=TrustLevel.INTERNAL_TOOL,
+    # Version 1.1.0 (ADR-0254) can describe an INTERVAL cadence.
+    spec = _LIST_SPEC.model_copy(
+        update={"version": "1.1.0", "output_schema": FEED_LIST_OUTPUT_SCHEMA}, deep=True
     )
+    lists_intervals: ClassVar[bool] = True
 
     def __init__(self, service: ScheduleService) -> None:
         self._service = service
@@ -374,8 +421,13 @@ class ScheduleListTool:
                 str(exc),
                 message="The schedules could not be listed.",
             )
+        records = [
+            record
+            for record in page.items
+            if self.lists_intervals or not isinstance(record.revision.cadence, IntervalCadence)
+        ]
         structured = {
-            "items": [_summary(record) for record in page.items],
+            "items": [_summary(record) for record in records],
             "next_cursor": page.next_cursor,
         }
         return ToolResult(
@@ -394,14 +446,23 @@ class ScheduleListTool:
         )
 
 
-class LegacyScheduleListTool(ScheduleListTool):
+class PreviousScheduleListTool(ScheduleListTool):
+    """Version 1.0.2 for pinned sessions; its output cannot describe an interval."""
+
+    spec = _LIST_SPEC
+    lists_intervals = False
+
+
+class LegacyScheduleListTool(PreviousScheduleListTool):
     """Compatibility registration for sessions pinned before the 1.0.2 repair."""
 
-    spec = ScheduleListTool.spec.model_copy(update={"version": "1.0.1"}, deep=True)
+    spec = _LIST_SPEC.model_copy(update={"version": "1.0.1"}, deep=True)
 
 
 class ScheduleUpdateTool:
     """Patch model-visible schedule fields without exposing execution authority."""
+
+    offers_interval: ClassVar[bool] = False
 
     spec = ToolSpec(
         name=SCHEDULE_UPDATE_TOOL_NAME,
@@ -490,7 +551,9 @@ class ScheduleUpdateTool:
             )
         try:
             cadence = (
-                parse_cadence(arguments) if "at" in arguments or "cadence" in arguments else None
+                parse_cadence(arguments, interval=self.offers_interval)
+                if "at" in arguments or "cadence" in arguments
+                else None
             )
             patch = ScheduleDefinitionPatch(
                 title=arguments.get("title"),
@@ -609,6 +672,23 @@ def _mutation_spec(
         maximum_output_bytes=4096,
         allow_parallel=False,
         output_trust=TrustLevel.INTERNAL_TOOL,
+    )
+
+
+class CockpitScheduleUpdateTool(ScheduleUpdateTool):
+    """Version 1.1.0 (ADR-0254), where the Cockpit is: a feed may move to an interval.
+
+    1.0.1 stays registered unchanged for the runs already pinned to it.
+    """
+
+    offers_interval = True
+    spec = ScheduleUpdateTool.spec.model_copy(
+        update={
+            "version": "1.1.0",
+            "description": ScheduleUpdateTool.spec.description
+            + " Only a Cockpit feed's schedule may move to an INTERVAL cadence.",
+            "input_schema": FEED_UPDATE_INPUT_SCHEMA,
+        }
     )
 
 

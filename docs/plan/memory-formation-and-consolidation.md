@@ -947,7 +947,8 @@ Rows learned under `@1` keep their embedded citation until
 `agent memory reshape --policy owner-source-learning@1 --confirm` supersedes
 each with its `@2` shape through formation, citing the same source events;
 receipts follow `superseded_by`, a `@1` deletion or correction still blocks
-the `@2` identity, and an expired claim may be learned again from a fresh read.
+the `@2` identity, and an expired claim may be learned again from a fresh read;
+a retired claim still refuses, even once its expiry has passed.
 Reinforcement requires full support for a live inferred tentative assertion,
 retains its authority and status, and increases confidence by at most 0.1 up to
 0.55 (an already higher confidence is preserved). Owner corrections and explicit

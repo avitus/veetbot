@@ -31,6 +31,7 @@ from agent_core.domain.schedules import (
     ScheduleRevision,
     ScheduleState,
     check_call_plan,
+    check_interval_cadence,
 )
 from agent_core.domain.security import contains_credential
 from agent_core.domain.views import Page
@@ -602,6 +603,10 @@ async def _validate_definition(
         check_call_plan(definition.call_plan, definition.cadence)
     except ValueError as exc:
         raise ScheduleValidationError("schedule.call_plan_invalid", str(exc)) from exc
+    try:
+        check_interval_cadence(definition.cadence, definition.requested_scopes)
+    except ValueError as exc:
+        raise ScheduleValidationError("schedule.interval_needs_feed", str(exc)) from exc
     if not definition.requested_scopes <= principal.scopes:
         raise ScheduleValidationError(
             "schedule.scope_not_granted",

@@ -5,8 +5,9 @@ import Foundation
 /// path-based `SSEReader` only while Cockpit is the visible mode in an active
 /// app (gate 21). It reconnects with capped exponential backoff and no give-up
 /// limit, because an always-on display outlives any run's limits, and refetches
-/// the board on every change and on `stream.reset`. Feed data and private
-/// settings stay in memory.
+/// the board on every change and on `stream.reset`. Each time Cockpit becomes
+/// visible it asks the server to refresh every feed and reloads the board
+/// (ADR-0254). Feed data and private settings stay in memory.
 @MainActor
 public final class CockpitViewModel: ObservableObject {
     public enum Availability: Equatable, Sendable {
@@ -47,6 +48,7 @@ public final class CockpitViewModel: ObservableObject {
     private let sleep: @Sendable (Double) async throws -> Void
     private var visible = false
     private var streamTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
     private var quarantinedRevisions: [String: UUID] = [:]
     /// Bumped by every new connection, so an answer to the old one never lands on the new board.
     private var connectionEpoch = 0
@@ -71,7 +73,8 @@ public final class CockpitViewModel: ObservableObject {
         streamTask = nil
         connection = .idle
         guard visible else { return }
-        streamTask = Task { [weak self] in await self?.run() }
+        refreshFeeds()
+        streamTask = Task { [weak self] in await self?.run(reloading: true) }
     }
 
     /// A new connection: forget the board and stream again if visible.
@@ -90,9 +93,19 @@ public final class CockpitViewModel: ObservableObject {
         errorMessage = nil
         isSaving = false
         offsetMilliseconds = 0
+        refreshTask?.cancel()
+        refreshTask = nil
         if visible {
+            refreshFeeds()
             streamTask = Task { [weak self] in await self?.run() }
         }
+    }
+
+    /// Ask the server to refresh every feed (ADR-0254). Best effort: a refresh
+    /// that fails leaves the board as it is.
+    private func refreshFeeds() {
+        refreshTask?.cancel()
+        refreshTask = makeClient().map { client in Task { try? await client.refreshCockpit() } }
     }
 
     public func hostReported(_ message: CockpitHostMessage) {
@@ -250,8 +263,9 @@ public final class CockpitViewModel: ObservableObject {
         quarantined.insert(slug)
     }
 
-    private func run() async {
+    private func run(reloading: Bool = false) async {
         var failures = 0
+        var reload = reloading
         while !Task.isCancelled {
             guard let client = makeClient() else {
                 // No connection is configured, so there is no board to show.
@@ -259,7 +273,10 @@ public final class CockpitViewModel: ObservableObject {
                 return
             }
             do {
-                if snapshot == nil || failures > 0 { apply(try await client.cockpitSnapshot()) }
+                if reload || snapshot == nil || failures > 0 {
+                    apply(try await client.cockpitSnapshot())
+                    reload = false
+                }
                 let events = client.cockpitEvents(after: snapshot?.cursor)
                 connection = .live
                 for try await frame in events {

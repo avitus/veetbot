@@ -24,6 +24,8 @@ public protocol CockpitBoardClient: Sendable {
     func revertCockpitWidget(_ slug: String, to revision: UUID) async throws -> CockpitChange
     func deleteCockpitWidget(_ slug: String) async throws -> CockpitChange
     func restoreCockpitWidget(_ slug: String) async throws -> CockpitChange
+    /// Ask the server to refresh every assistant feed now (ADR-0254).
+    func refreshCockpit() async throws
 }
 
 extension VeetbotAPIClient: CockpitBoardClient {
@@ -79,6 +81,11 @@ extension VeetbotAPIClient: CockpitBoardClient {
 
     public func restoreCockpitWidget(_ slug: String) async throws -> CockpitChange {
         try await cockpitChange(slug, action: "restore", body: Data("{}".utf8))
+    }
+
+    public func refreshCockpit() async throws {
+        // The answer lists what each feed's schedule did; the stream brings the new data.
+        _ = try await transport.sendData(TransportRequest(method: .post, path: "/v1/cockpit/refresh"))
     }
 
     private func cockpitChange(_ slug: String, action: String, body: Data) async throws -> CockpitChange {

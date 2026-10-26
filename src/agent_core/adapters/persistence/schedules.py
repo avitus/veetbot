@@ -30,6 +30,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.schedules import (
+    COCKPIT_REFRESH_KEY_PREFIX,
     OccurrenceCursor,
     OccurrenceDisposition,
     OccurrenceTrigger,
@@ -40,6 +41,7 @@ from agent_core.domain.schedules import (
     ScheduleOccurrence,
     ScheduleRevision,
     ScheduleState,
+    is_cockpit_refresh,
 )
 
 
@@ -319,6 +321,7 @@ class InMemoryScheduleRepository:
             for occurrence in self._occurrences.values()
             if occurrence.schedule_id == schedule_id
             and occurrence.trigger is OccurrenceTrigger.MANUAL
+            and not is_cockpit_refresh(occurrence.manual_request_key)
             and occurrence.created_at >= boundary
         )
 
@@ -823,6 +826,9 @@ class PostgresScheduleRepository:
             .where(
                 ScheduleOccurrenceRow.schedule_id == schedule_id,
                 ScheduleOccurrenceRow.trigger == OccurrenceTrigger.MANUAL.value,
+                ~ScheduleOccurrenceRow.manual_request_key.startswith(
+                    COCKPIT_REFRESH_KEY_PREFIX, autoescape=True
+                ),
                 ScheduleOccurrenceRow.created_at >= _aware_utc(since),
             )
         )

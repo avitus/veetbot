@@ -677,6 +677,7 @@ public enum ScheduleCadenceKind: String, Codable, CaseIterable, Sendable {
     case weekly = "WEEKLY"
     case monthly = "MONTHLY"
     case yearly = "YEARLY"
+    case interval = "INTERVAL"
 }
 
 public struct ScheduleMonthDayView: Codable, Equatable, Sendable {
@@ -701,12 +702,15 @@ public struct ScheduleCadenceView: Codable, Equatable, Sendable {
     public let daysOfMonth: [Int]?
     public let lastDay: Bool?
     public let dates: [ScheduleMonthDayView]?
+    /// ADR-0254: a feed-keeping schedule's interval.
+    public var everyMinutes: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case kind, at, timezone, weekdays, dates
         case localTime = "local_time"
         case daysOfMonth = "days_of_month"
         case lastDay = "last_day"
+        case everyMinutes = "every_minutes"
     }
 
     public var kindKind: ScheduleCadenceKind? { ScheduleCadenceKind(rawValue: kind) }

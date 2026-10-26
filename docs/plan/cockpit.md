@@ -588,6 +588,13 @@ fixtures are checked against it.
   budget and failure pause. For example, a schedule every fifteen minutes
   reads a weather or market source with the existing web tools and publishes
   the result.
+- A feed refreshes as often as its schedule fires (ADR-0254). An `INTERVAL`
+  cadence fires every 1 to 1,440 minutes, and only a feed-keeping schedule,
+  one that requests `cockpit.write`, may use it. A calendar cadence still
+  serves a feed that changes once a day or less.
+- A feed-keeping schedule that `schedule.create` makes notifies only for
+  attention, because the widget is its report. An interval schedule skips an
+  instant its previous run still overlaps without notifying anyone.
 
 ### Freshness and delivery
 
@@ -608,6 +615,28 @@ fixtures are checked against it.
   declares. The host never delivers an undeclared feed, another widget's
   settings, or any account or session identifier beyond what a declared feed
   contains.
+
+### Refresh on entry
+
+Each time Cockpit becomes the visible mode of an active app, the client asks
+for every feed to be refreshed (ADR-0254). `POST /v1/cockpit/refresh` starts
+one run, now, of each active, recurring, feed-keeping schedule:
+
+- **The occurrence.** It is a manual occurrence keyed
+  `cockpit.refresh:<UTC minute>`, so a repeated request in the same minute
+  starts nothing new. Refresh runs do not count toward Run-now's five a day.
+- **Skips.** A schedule whose latest run is still going reports `running`. One
+  whose latest run started under a minute ago reports `recent`.
+- **Checks.** Authority, scopes, the pinned agent and tenant admission are
+  checked as for Run-now. A failed check reports `refused` with its reason
+  for that schedule, and the others still start.
+- **Notifications.** A completed refresh run sends no report notification. A
+  failed one notifies as any scheduled run does.
+
+Platform feeds are not re-projected, because the projector already publishes
+their changes every thirty seconds. The answer is `202` with one
+`{schedule_id, outcome, reason}` per feed-keeping schedule, where `outcome`
+is `started`, `running`, `recent` or `refused`.
 
 ## The tools
 
@@ -691,10 +720,13 @@ Reading a widget before updating it therefore does not force every later turn
 into approval.
 
 **Feed publishing** is available in scheduled runs. A Cockpit deployment
-registers `schedule.create` 1.5.0, whose `publish_cockpit_feed=true` asks for
-`cockpit.read` and `cockpit.write` for that schedule's runs and no others.
-Version 1.4.0 stays registered for pinned runs, and a deployment without the
-flag offers 1.4.0 unchanged. Widget writes stay interactive only.
+registers `schedule.create` 1.6.0, whose `publish_cockpit_feed=true` asks for
+`cockpit.read` and `cockpit.write` for that schedule's runs and no others, and
+which offers the `INTERVAL` cadence to such a schedule (ADR-0254). It also
+registers `schedule.update` 1.1.0, which can move a feed schedule to an
+interval. Versions 1.5.0 and 1.4.0 stay registered for pinned runs, and a
+deployment without the flag offers 1.4.0 unchanged. Widget writes stay
+interactive only.
 
 **Feed checks.** A feed's schema must be self-contained JSON Schema (draft
 2020-12) that names no location outside itself, and each of its references
@@ -723,6 +755,7 @@ feed is an indistinguishable 404.
 | `POST /v1/cockpit/widgets/{slug}/revert` | `cockpit.write` | Owner reverts to a named revision |
 | `POST /v1/cockpit/widgets/{slug}/delete` | `cockpit.write` | Owner deletes |
 | `POST /v1/cockpit/widgets/{slug}/restore` | `cockpit.write` | Owner restores |
+| `POST /v1/cockpit/refresh` | `cockpit.write` | Refresh every assistant feed now ([refresh on entry](#refresh-on-entry)) |
 
 The owner's own write routes go through the same outbox and pipeline as the
 tool. They need no approval, because the owner's gesture is the decision.
@@ -866,6 +899,9 @@ interpolation.
   the run stream's limits suit a run, not an always-on display;
 - holds the stream only while Cockpit is the visible mode and the app is
   active;
+- each time Cockpit becomes visible, asks the server to refresh every feed
+  and reloads the board (ADR-0254). A refresh that fails leaves the board as
+  it is;
 - applies events in sequence order and refetches on `stream.reset`.
 
 ### Per platform
@@ -1287,6 +1323,19 @@ Still to come in this step's area:
 - gate 20 (state across all three modes) and gate 22 (the realm on the oldest
   supported iPad);
 - gate 19's preflight rebuild of live widgets against a changed kit.
+
+## Implementation checkpoint: 2026-10-26
+
+ADR-0254 landed what the owner asked for that day:
+
+- the `INTERVAL` cadence for feed-keeping schedules;
+- `schedule.create` 1.6.0, `schedule.update` 1.1.0 and `schedule.list` 1.1.0;
+- quiet feed upkeep;
+- `POST /v1/cockpit/refresh`;
+- the native client's refresh and reload each time Cockpit becomes visible.
+
+The production widget's daily schedule keeps its cadence until Chat or the
+owner changes it.
 
 ## Implementation checkpoint: 2026-10-23
 
