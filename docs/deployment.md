@@ -987,7 +987,7 @@ required; never place the PKCS#12, password, or decoded key in the repository,
 a project variable, cache, workspace, artifact, or log.
 
 The `apple-signing-smoke` job proves this complete signing path in the
-requested `dev` pipeline that precedes a merge to `main` (ADR-0107). It runs the same
+requested `dev` pipeline that precedes a `dev`-to-`main` promotion (ADR-0107). It runs the same
 repository-owned archive and package script as `apple-testflight`, including
 the archived identity checks, application-signature verification,
 `productbuild`, and `pkgutil` verification. It receives neither the
@@ -996,7 +996,9 @@ invoke `altool`, persists no artifact, and therefore cannot publish its package.
 It does receive `veetbot-apple-signing`, so access to `dev` and changes to the
 CircleCI workflow are nevertheless release-signing security boundaries. Keep
 `dev` restricted to trusted maintainers and require the smoke job to pass on the
-exact revision proposed for `main`.
+exact `dev` revision proposed for `main`. Feature and hotfix branches cannot
+receive this context, so their pull requests merge without the smoke, and
+`apple-testflight` on `main` is the first run of the signing path for them.
 
 ADR-0219 also selects the isolated `codex/recall-production-release` branch.
 Before its ordinary requested pipeline, the operator must retain the original
