@@ -546,7 +546,10 @@ class EventContextPlanner:
         }
         # ADR-0123: an agent that enables tool.call offers what does not fit as
         # deferred index entries instead of dropping it, and defers the tools its
-        # configuration names. Without tool.call, overflow is skipped and recorded.
+        # configuration names. Without tool.call, item-cap overflow and discovered
+        # tools past the token cap are skipped and recorded, while configured tools
+        # past the token cap stay selected and the final plan check rejects them
+        # with ContextOverflow (ADR-0253).
         control = (
             next((tool for tool in tools if tool.name == _TOOL_CALL_TOOL_NAME), None)
             if _TOOL_CALL_TOOL_NAME in configured_order
@@ -609,7 +612,13 @@ class EventContextPlanner:
                 if len(selected_tools) >= maximum_tools:
                     overflow.append(tool)
                     continue
-                if tool.name not in configured_order:
+                # With tool.call, a configured definition past the token cap waits
+                # in the index like one past the item cap, so one more enabled
+                # tool cannot fail every chat. Required tools never move.
+                token_checked = tool.name not in configured_order or (
+                    control is not None and tool.name not in required_names
+                )
+                if token_checked:
                     proposed = sorted([*selected_tools, tool], key=lambda item: item.name)
                     proposed_prefix = build_prefix(agent, proposed)
                     token_count = self._estimator.estimate(
@@ -618,13 +627,18 @@ class EventContextPlanner:
                     if token_count > maximum_tool_tokens:
                         overflow.append(tool)
                         continue
-                # Explicit capabilities still fail at plan time if they cannot fit.
-                # Discovery fills only the remaining item and token capacity.
+                # Without tool.call, explicit capabilities still fail at plan time
+                # if they cannot fit, as do required ones. Discovery fills only the
+                # remaining item and token capacity.
                 selected_tools.append(tool)
             return selected_tools, overflow
 
         selected_tools, overflow = select([])
-        deferring = control is not None and bool(explicitly_deferred or overflow)
+        # tool.call refuses control targets, so control overflow is skipped and
+        # never reserves a tool.call slot of its own.
+        deferring = control is not None and bool(
+            explicitly_deferred or any(tool.kind is not ToolKind.CONTROL for tool in overflow)
+        )
         if deferring:
             assert control is not None
             # tool.call takes a definition slot only when something is deferred.
@@ -636,8 +650,19 @@ class EventContextPlanner:
                 "required session tools do not fit the tool-definition cap: "
                 + ", ".join(sorted(missing_required))
             )
-        index_candidates = [*explicitly_deferred, *overflow] if deferring else []
-        skipped_tools: list[ToolSpec] = [] if deferring else list(overflow)
+        index_candidates = (
+            [
+                *explicitly_deferred,
+                *(tool for tool in overflow if tool.kind is not ToolKind.CONTROL),
+            ]
+            if deferring
+            else []
+        )
+        skipped_tools: list[ToolSpec] = (
+            [tool for tool in overflow if tool.kind is ToolKind.CONTROL]
+            if deferring
+            else list(overflow)
+        )
         deferred_tools: list[ToolSpec] = []
         index_config = classes.get("deferred_tool_index")
         if index_candidates:

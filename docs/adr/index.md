@@ -292,3 +292,4 @@ implementation without one.
 - [ADR-0245: Owner-grounded manual saves after external reads](0245-owner-grounded-manual-saves.md)
 - [ADR-0246: Represent a separately authorized recall restart](0246-bounded-owner-recall-restart.md)
 - [ADR-0252: Exact-commit signing for the isolated dreaming release](0252-dreaming-release-signing.md)
+- [ADR-0253: A configured tool past the token cap is deferred, not fatal](0253-configured-tools-past-the-token-cap.md)

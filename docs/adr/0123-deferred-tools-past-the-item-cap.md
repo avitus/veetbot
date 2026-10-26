@@ -9,7 +9,8 @@
   `tool-system.md` decision 25 (the control-tool set of four)
 - Amended by: ADR-0130 (2026-09-25), which ranks `browser.navigate`,
   `browser.observe` and `browser.act` first and never defers them in a chat
-  bound to a website profile
+  bound to a website profile; ADR-0253 (2026-10-25), which defers a configured
+  tool past the token cap
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
 
@@ -81,7 +82,10 @@ one account's tools beat the other's.
      configured tools past slot thirty, which were previously cut silently.
    - A candidate that fits in neither is skipped, and its name is recorded on
      the plan event as `skipped_tool_names`. An agent without `tool.call`
-     defers nothing and records its skips the same way.
+     defers nothing and records the same way its item-cap skips and the
+     discovered tools that would pass the token cap. ADR-0253 extends deferral
+     to configured tools past the token cap; without `tool.call`, a configured
+     set past the token cap still fails with `ContextOverflow`.
    - Nothing leaves the roster silently. This amends ADR-0105's consequence
      that a silent skip remains the documented behavior.
 5. **The default agent defers its six management tools.** Its configuration
@@ -102,13 +106,14 @@ one account's tools beat the other's.
 
 ## Consequences
 
-- With production's flags and both Gmail accounts, Chat defines twenty-one
-  configured tools, `tool.call`, the two Bland reads and the six Gmail reads:
-  thirty definitions at 5,908 estimated tokens. The index holds seventeen
+- At this decision (2026-09-25), with production's flags and both Gmail
+  accounts, Chat defined twenty-one configured tools, `tool.call`, the two
+  Bland reads and the six Gmail reads: thirty definitions at 5,908 estimated
+  tokens. The index held seventeen
   entries at 1,013 tokens: the six management tools, `start_call`, and the
-  ten Gmail writes and sends. Nothing is skipped. Before this decision the
+  ten Gmail writes and sends. Nothing was skipped. Before this decision the
   thirty definitions cost 7,058 tokens, and the sixteen Gmail tools were not
-  offered at all.
+  offered at all. ADR-0253 records the roster after records and the Cockpit.
 - `mcp.bland_call.start_call` moves to the index. Starting a call can take one
   more model step, and still waits for the same approval.
 - A configured tool added later no longer evicts a capability. It moves the
