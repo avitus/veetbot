@@ -836,7 +836,10 @@ class HybridMemoryRetriever:
         attention_selected = 0
         for index, item in enumerate(collapsed):
             durable = item.belief_id in durable_ids
-            if owner_core and measure_tokens(_line(item)) > min(
+            # Measure what recall would return: markers only beside shown partners.
+            prospective = [*selected, item]
+            prospective_partners = frozenset(chosen.belief_id for chosen in prospective)
+            if owner_core and measure_tokens(_line(item, partners=prospective_partners)) > min(
                 256, effective_query.budget_tokens // 3
             ):
                 dropped.append(item.belief_id)
@@ -849,15 +852,13 @@ class HybridMemoryRetriever:
             # while one is actually still pending, so the reservation never
             # shrinks a snapshot that has no durable belief left to seat.
             held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
-            # Measure what recall would return: markers only beside shown partners.
-            prospective = [*selected, item]
             candidate_tokens = measure_tokens(
                 render(
                     prospective,
                     as_of=now,
                     policy_version=render_policy,
                     known_at=render_known_at,
-                    partners=frozenset(chosen.belief_id for chosen in prospective),
+                    partners=prospective_partners,
                 )
                 + people_rendered
             )
