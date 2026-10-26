@@ -849,12 +849,15 @@ class HybridMemoryRetriever:
             # while one is actually still pending, so the reservation never
             # shrinks a snapshot that has no durable belief left to seat.
             held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
+            # Measure what recall would return: markers only beside shown partners.
+            prospective = [*selected, item]
             candidate_tokens = measure_tokens(
                 render(
-                    [*selected, item],
+                    prospective,
                     as_of=now,
                     policy_version=render_policy,
                     known_at=render_known_at,
+                    partners=frozenset(chosen.belief_id for chosen in prospective),
                 )
                 + people_rendered
             )

@@ -191,6 +191,43 @@ async def test_recovered_detail_keeps_a_conflict_marker_only_beside_its_partner(
     assert result.items[0].conflict_with == [unseen]
 
 
+async def test_admission_measures_the_text_recall_returns_without_hidden_markers() -> None:
+    """ADR-0248: admission measures the same partner-filtered text recall
+    returns, so a marker naming beliefs that are never shown cannot push a
+    belief over a budget its returned text fits."""
+
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.domain.memory import RecallResult
+    from agent_core.memory.retrieval import HybridMemoryRetriever, _token_estimate
+
+    clock, factory, _, _ = await formation_stack()
+    unseen = [UUID(f"abcdef{index:02d}-0000-0000-0000-000000000990") for index in range(24)]
+    belief = memory(statement="The workshop is on Thursday.").model_copy(
+        update={"subject": "workshop", "scope": "general", "conflicts_with": unseen}
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(belief)
+
+    async def recall(budget: int, first_id: int) -> RecallResult:
+        retriever = HybridMemoryRetriever(
+            factory,
+            clock,
+            SequenceIdFactory(UUID(int=i) for i in range(first_id, first_id + 10)),
+            principal(),
+        )
+        return await retriever.recall(
+            recall_query(text="workshop", budget_tokens=budget).model_copy(
+                update={"current_scope": "general"}
+            ),
+            session_id=SESSION_ID,
+        )
+
+    roomy = await recall(4000, 8200)
+    assert "m:abcdef00" not in roomy.rendered
+    exact = await recall(_token_estimate(roomy.rendered), 8300)
+    assert [item.belief_id for item in exact.items] == [belief.id]
+
+
 async def test_expansion_preserves_explicit_original_selection() -> None:
     _, factory, _, _ = await formation_stack()
     sequence = await user_event(factory, "The workshop is on Thursday. Enter through Bay 6.")
