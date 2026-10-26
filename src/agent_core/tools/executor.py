@@ -22,7 +22,11 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest, ApprovalStatus
 from agent_core.domain.argument_views import approval_argument_digests, approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
-from agent_core.domain.browser_act_views import TASK_GRANT_AUTHORIZATION_KIND
+from agent_core.domain.browser_act_views import (
+    RESEARCH_AUTHORIZATION_KIND,
+    RESEARCH_REASON_PREFIX,
+    TASK_GRANT_AUTHORIZATION_KIND,
+)
 from agent_core.domain.browser_diagnostics import (
     BrowserDiagnostics,
     browser_failure_category,
@@ -32,6 +36,7 @@ from agent_core.domain.browser_diagnostics import (
 )
 from agent_core.domain.browser_projection import browser_context_projection
 from agent_core.domain.browser_task_grants import (
+    RESEARCH_NOT_COVERED_REASONS,
     TASK_GRANT_NOT_COVERED_REASONS,
     BrowserTaskGrantOffer,
     TaskGrantNotCovered,
@@ -294,23 +299,41 @@ def _action_kind(tool: Tool) -> ActionKind:
     return ActionKind.TOOL_CALL
 
 
+# ADR-0255: calls whose results bring nothing a page could be typed from, so
+# G5 does not count them: a file export, which reports platform identifiers,
+# and a question once the owner or the platform has answered it.
+_G5_EXEMPT_TOOL_NAMES = frozenset({"artifact.export"})
+_G5_EXEMPT_ANSWER_TRUSTS = frozenset({TrustLevel.USER, TrustLevel.PLATFORM})
+
+
 def _active_turn_facts(checkpoint: RunCheckpoint) -> AuthorizationTurn:
     """ADR-0129: the newest user message's trust and the tools called since.
 
     A ``tool.call`` wrapper counts as the tool it names; one that does not
     parse counts as ``tool.call``, which is not a browser tool. The loop
     appends a step's calls before running them, so the current step's other
-    calls are included.
+    calls are included. A file export and an answered question are left out
+    (ADR-0255); a pending question, or one answered with other trust, counts.
     """
 
     names: set[str] = set()
+    answers: dict[str, TrustLevel] = {}
     newest_user_trust = TrustLevel.EXTERNAL_UNTRUSTED
     for item in reversed(checkpoint.conversation):
         if isinstance(item, UserMessage):
             newest_user_trust = item.trust
             break
-        if isinstance(item, ToolCallItem):
-            names.add(_unwrapped_call_name(item))
+        if isinstance(item, ToolResultItem):
+            # Walking backwards, a result comes before the call it answers.
+            answers[item.call_id] = item.trust
+        elif isinstance(item, ToolCallItem):
+            name = _unwrapped_call_name(item)
+            if name in _G5_EXEMPT_TOOL_NAMES or (
+                name == "conversation.ask_user"
+                and answers.get(item.call_id) in _G5_EXEMPT_ANSWER_TRUSTS
+            ):
+                continue
+            names.add(name)
     # ADR-0213 looks past the active turn: origin trust resets at each user
     # message, so an email read earlier must still count.
     owner_texts = tuple(
@@ -367,6 +390,21 @@ def _task_grant_not_covered(
         )
     except ValueError:
         return None
+
+
+def _research_not_covered(standing: StandingAuthorization | None) -> str | None:
+    """The closed reason research authorization refused this action, when it
+    was the most specific refusal; nothing otherwise (ADR-0255)."""
+
+    if (
+        standing is None
+        or standing.allowed
+        or standing.authorization_kind != RESEARCH_AUTHORIZATION_KIND
+        or not standing.reason_code.startswith(RESEARCH_REASON_PREFIX)
+    ):
+        return None
+    reason = standing.reason_code.removeprefix(RESEARCH_REASON_PREFIX)
+    return reason if reason in RESEARCH_NOT_COVERED_REASONS else None
 
 
 def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive") -> TrustLevel:
@@ -2087,6 +2125,7 @@ class ToolPipeline:
             created_at=now,
             task_grant_offer=offer,
             task_grant_not_covered=not_covered,
+            research_not_covered=_research_not_covered(standing),
         )
         waiting = invocation.model_copy(
             update={

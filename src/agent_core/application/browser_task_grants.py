@@ -22,6 +22,7 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
 )
 from agent_core.domain.browser_act_views import (
+    RESEARCH_AUTHORIZATION_KIND,
     TASK_GRANT_AUTHORIZATION_KIND,
     TASK_GRANT_AUTHORIZED_REASON,
     TaskGrantSessionContext,
@@ -333,7 +334,8 @@ class CompositeStandingAuthorizer:
     """Ask the pinned standing grant first, then the task grant (D18).
 
     The first allow wins. A denial falls back to approval; when the task
-    grant was consulted and named a grant, its denial is the most specific.
+    grant was consulted and named a grant, its denial is the most specific,
+    then research's named refusal (ADR-0255).
     """
 
     def __init__(self, authorizers: Sequence[StandingAuthorizer]) -> None:
@@ -379,6 +381,17 @@ class CompositeStandingAuthorizer:
         )
         if specific is not None:
             return specific
+        # ADR-0255: research's named refusal is the next most specific.
+        research = next(
+            (
+                denial
+                for denial in denials
+                if denial.authorization_kind == RESEARCH_AUTHORIZATION_KIND
+            ),
+            None,
+        )
+        if research is not None:
+            return research
         if denials:
             return denials[0]
         return StandingAuthorization(allowed=False, reason_code="standing.unavailable")

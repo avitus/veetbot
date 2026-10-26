@@ -7,9 +7,13 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent_core.domain.browser_task_grants import BrowserTaskGrantOffer, TaskGrantNotCovered
+from agent_core.domain.browser_task_grants import (
+    RESEARCH_NOT_COVERED_REASONS,
+    BrowserTaskGrantOffer,
+    TaskGrantNotCovered,
+)
 from agent_core.domain.policies import ActionKind, PolicyDecision, RiskLevel
 
 
@@ -95,6 +99,16 @@ class ApprovalRequest(BaseModel):
     task_grant_offer: BrowserTaskGrantOffer | None = None
     task_grant_not_covered: TaskGrantNotCovered | None = None
     task_grant_id: UUID | None = None
+    # ADR-0255: why research authorization refused the action, from a closed
+    # content-free list. Stored for diagnosis; responses do not carry it.
+    research_not_covered: str | None = None
+
+    @field_validator("research_not_covered")
+    @classmethod
+    def research_reason_is_closed(cls, value: str | None) -> str | None:
+        if value is not None and value not in RESEARCH_NOT_COVERED_REASONS:
+            raise ValueError("research reason is not in the closed list")
+        return value
 
 
 class ApprovalPresentation(BaseModel):

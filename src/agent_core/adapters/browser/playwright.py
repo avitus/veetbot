@@ -39,6 +39,7 @@ from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_
 from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
 from agent_core.adapters.browser.page_structure import REGION_CAPTURE_SCRIPT
 from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
+from agent_core.adapters.browser.use_copies import inspected_use_references
 from agent_core.adapters.browser.virtual_display import platform_virtual_display
 from agent_core.domain.browser import (
     MAXIMUM_FACT_LABEL_CHARACTERS,
@@ -1000,13 +1001,14 @@ class PythonPlaywrightRuntime:
             )
             slots = asyncio.Semaphore(8)
             page_url = page.url
+            inspection = _UseInspection(page)
 
             async def capture(
                 index: int, handle: ElementHandle
             ) -> tuple[BrowserElement, BrowserElementFacts] | None:
                 async with slots:
                     return await self._element_observation(
-                        handle, f"{revision}:{index}", page_url=page_url
+                        handle, f"{revision}:{index}", page_url=page_url, inspection=inspection
                     )
 
             captures = [
@@ -1106,7 +1108,11 @@ class PythonPlaywrightRuntime:
 
     @staticmethod
     async def _element_observation(
-        handle: ElementHandle, ref: str, *, page_url: str
+        handle: ElementHandle,
+        ref: str,
+        *,
+        page_url: str,
+        inspection: _UseInspection | None = None,
     ) -> tuple[BrowserElement, BrowserElementFacts] | None:
         """Read one captured node without resolving a selector that may have changed.
 
@@ -1118,6 +1124,12 @@ class PythonPlaywrightRuntime:
         if not await handle.is_visible():
             return None
         metadata = await handle.evaluate(_ELEMENT_SCRIPT)
+        if inspection is not None and _external_uses(metadata):
+            # ADR-0255: an external <use> copy page script cannot see; read it
+            # through the browser, then read the element again.
+            inspected = await inspection.references()
+            if inspected:
+                metadata = await handle.evaluate(_ELEMENT_SCRIPT, inspected)
         tag = str(metadata["tag"])
         input_type = metadata["inputType"]
         checked: bool | None = None
@@ -1395,6 +1407,14 @@ class PythonPlaywrightRuntime:
         try:
             guard = await handle.evaluate_handle(_GUARDED_READ_SCRIPT)
             metadata = await guard.evaluate("guard => guard.metadata")
+            if _external_uses(metadata):
+                # ADR-0255: inspect the live page's copies, then read and arm again.
+                inspected = await _inspected_use_references(page)
+                if inspected:
+                    await _release_guards([guard])
+                    guard = None
+                    guard = await handle.evaluate_handle(_GUARDED_READ_SCRIPT, inspected)
+                    metadata = await guard.evaluate("guard => guard.metadata")
             covered = await self._live_coverage(page, handle, action, constraint, metadata, now=now)
         except PlaywrightError:
             covered = False
@@ -1739,6 +1759,50 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
     await asyncio.gather(*(release(handle) for handle in released.values()))
 
 
+def _external_uses(metadata: object) -> bool:
+    """Whether an element read met an external ``<use>`` reference (ADR-0255)."""
+
+    uses = metadata.get("externalUses") if isinstance(metadata, dict) else None
+    return isinstance(uses, list) and bool(uses)
+
+
+async def _inspected_use_references(page: Page) -> list[str]:
+    """Same-origin external ``<use>`` references whose copies are inert (ADR-0255).
+
+    Chromium's DevTools protocol shows each copy as the element's user-agent
+    shadow root, which page script cannot reach or alter. Any failure inspects
+    nothing, so every external reference stays opaque.
+    """
+
+    try:
+        session = await page.context.new_cdp_session(page)
+        try:
+            tree = await session.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        finally:
+            with suppress(PlaywrightError):
+                await session.detach()
+    except PlaywrightError:
+        return []
+    root = tree.get("root") if isinstance(tree, dict) else None
+    return sorted(inspected_use_references(root)) if isinstance(root, dict) else []
+
+
+class _UseInspection:
+    """At most one DevTools read per observation, made only when an element
+    met an external ``<use>`` reference (ADR-0255)."""
+
+    def __init__(self, page: Page) -> None:
+        self._page = page
+        self._lock = asyncio.Lock()
+        self._references: list[str] | None = None
+
+    async def references(self) -> list[str]:
+        async with self._lock:
+            if self._references is None:
+                self._references = await _inspected_use_references(self._page)
+            return self._references
+
+
 # One read of an element: its bounded label-derived name, and every
 # live attribute its facts are derived from (ADR-0129 section 4.5). Facts follow
 # the flat tree the browser renders and dispatches events through: a slotted
@@ -1747,10 +1811,12 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
 # element's centre, which may be a descendant, so descendants' targets count
 # too. Past the walk's bounds, or with an embedded document, an image map or an
 # SVG <use> whose copy could hold a link inside, the element is opaque: its
-# targets cannot be listed. Beside the metadata it returns every
+# targets cannot be listed. An external reference the runtime inspected
+# through the browser is read like a fragment one (ADR-0255). Beside the
+# metadata it returns every
 # element it read: the node, its ancestors and descendants, the controls of
 # labels among them, and the default button of its form.
-_READ_ELEMENT_SCRIPT = """node => {
+_READ_ELEMENT_SCRIPT = """(node, inspected) => {
     const collapse = value => Array.from(String(value || '').replace(/\\s+/g, ' ').trim());
     const clean = value => collapse(value).slice(0, 1024).join('');
     const byId = (element, id) => {
@@ -1815,13 +1881,19 @@ _READ_ELEMENT_SCRIPT = """node => {
     // cannot read. A copy that could hold a link or embedded content, or of
     // something in another document, is opaque; a plain icon is not.
     const copyUnsafe = [...embedders, 'a', 'use', 'foreignObject'];
+    // Same-origin external references whose every copy the runtime read
+    // through the browser and found inert (ADR-0255).
+    const inspectedUses = new Set(Array.isArray(inspected) ? inspected : []);
+    const externalUses = new Set();
     const useOpaque = use => [use.getAttribute('href'),
         use.getAttributeNS('http://www.w3.org/1999/xlink', 'href'),
         use.href instanceof SVGAnimatedString ? use.href.animVal : null]
         .filter(value => typeof value === 'string' && value.trim()).some(value => {
             const reference = value.trim();
             if (!reference.startsWith('#')) {
-                return true;
+                const resolved = resolve(reference);
+                externalUses.add(resolved);
+                return !inspectedUses.has(resolved);
             }
             let id = reference.slice(1);
             try { id = decodeURIComponent(id); } catch (error) { return true; }
@@ -1961,6 +2033,7 @@ _READ_ELEMENT_SCRIPT = """node => {
         links: links.slice(0, 64),
         forms: forms.slice(0, 64),
         opaque,
+        externalUses: [...externalUses].slice(0, 64),
         download: flat.some(element => anchor(element) && element.hasAttribute('download')),
         context: dialog ? clean(dialog.getAttribute('aria-label')
             || referenced(dialog, dialog.getAttribute('aria-labelledby'))
@@ -1970,7 +2043,7 @@ _READ_ELEMENT_SCRIPT = """node => {
         ...(defaultButton ? [defaultButton] : [])];
     return {metadata, read};
 }"""
-_ELEMENT_SCRIPT = "node => (" + _READ_ELEMENT_SCRIPT + ")(node).metadata"
+_ELEMENT_SCRIPT = "(node, inspected) => (" + _READ_ELEMENT_SCRIPT + ")(node, inspected).metadata"
 # The live read of a grant-constrained act, which also arms a click guard in
 # the same turn of the page's event loop: until released, a trusted click aimed
 # at any element the read did not cover is stopped with its default action.
@@ -1979,9 +2052,9 @@ _ELEMENT_SCRIPT = "node => (" + _READ_ELEMENT_SCRIPT + ")(node).metadata"
 # cannot redirect it. Returns the release function, which reports whether the
 # guard stopped a click, with the metadata on it.
 _GUARDED_READ_SCRIPT = (
-    "node => { const read = ("
+    "(node, inspected) => { const read = ("
     + _READ_ELEMENT_SCRIPT
-    + """)(node);
+    + """)(node, inspected);
     const covered = new Set(read.read);
     let stopped = false;
     const guard = event => {

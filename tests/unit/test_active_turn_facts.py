@@ -114,3 +114,46 @@ def test_owner_words_and_outside_content_span_the_whole_conversation() -> None:
     assert facts.conversation_untrusted is True
     assert clean.owner_texts == ("Call Riv at +1 (650) 555-0123.",)
     assert clean.conversation_untrusted is False
+
+
+def test_an_answered_question_or_a_file_export_leaves_the_turn_browser_only() -> None:
+    """ADR-0255: the platform's sign-in resumption, the owner's own answer and
+    a file export bring nothing into the turn a page could be typed from."""
+    facts = _active_turn_facts(
+        checkpoint(
+            user("Look up my records."),
+            call("browser.observe", {}, 0),
+            call("conversation.ask_user", {"question": "Please sign in."}, 1),
+            result(1, TrustLevel.PLATFORM),
+            call("conversation.ask_user", {"question": "Which year?"}, 2),
+            result(2, TrustLevel.USER),
+            call("artifact.export", {"content": "a", "filename": "a.csv"}, 3),
+            result(3, TrustLevel.INTERNAL_TOOL),
+            call("tool.call", {"name": "artifact.export", "arguments": {}}, 4),
+            call("browser.act", {"kind": "click"}, 5),
+        )
+    )
+
+    assert facts.tool_names == frozenset({"browser.observe", "browser.act"})
+
+
+def test_a_pending_or_untrusted_answer_still_counts() -> None:
+    """ADR-0255: only an answer from the owner or the platform is exempt."""
+    pending = _active_turn_facts(
+        checkpoint(
+            user("Look up my records."),
+            call("conversation.ask_user", {"question": "Which year?"}, 0),
+            call("browser.act", {"kind": "click"}, 1),
+        )
+    )
+    untrusted = _active_turn_facts(
+        checkpoint(
+            user("Look up my records."),
+            call("conversation.ask_user", {"question": "Which year?"}, 0),
+            result(0, TrustLevel.EXTERNAL_UNTRUSTED),
+            call("browser.act", {"kind": "click"}, 1),
+        )
+    )
+
+    assert pending.tool_names == frozenset({"conversation.ask_user", "browser.act"})
+    assert untrusted.tool_names == frozenset({"conversation.ask_user", "browser.act"})

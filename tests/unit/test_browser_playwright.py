@@ -2015,7 +2015,11 @@ async def lesson_pages(
     left: list[str] = []
 
     async def page(request: Request) -> Response:
-        return HTMLResponse(pages[request.url.path])
+        path = request.url.path
+        if path.endswith(".svg"):
+            # A sprite a page draws its icons from (ADR-0255).
+            return Response(pages[path], media_type="image/svg+xml")
+        return HTMLResponse(pages[path])
 
     async def elsewhere(request: Request) -> Response:
         if request.url.path != "/favicon.ico":

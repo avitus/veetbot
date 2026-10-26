@@ -237,6 +237,45 @@ def test_inflected_and_irregular_forms_name_the_consequence() -> None:
     assert {text: classify(text) for text in expected} == expected
 
 
+def test_two_record_descriptions_name_no_consequence() -> None:
+    """ADR-0255: a past-tense "updated" before a month dates a record, and
+    "report" after a clinical report type names a document."""
+    descriptive = [
+        "H&P, Updated Oct 16, 2026, 2:22 PM, A. Clinician, MD",
+        "Progress note, updated January 5, 2024",
+        "Lab PATHOLOGY REPORT Sep 09, 2022 A. Clinician, MD",
+        "Radiology report",
+        "Imaging reports",
+        "Laboratory Report",
+        "Lab rep0rt",
+    ]
+    still = {
+        "Update email": C.SECURITY_CHANGE,
+        "Updated": C.SECURITY_CHANGE,
+        "Updated settings": C.SECURITY_CHANGE,
+        "Update Oct 16": C.SECURITY_CHANGE,
+        "Updated 10/16/2026": C.SECURITY_CHANGE,
+        "Report": C.PUBLICATION,
+        "Report spam": C.PUBLICATION,
+        "Report lab results": C.PUBLICATION,
+        "Spam report": C.PUBLICATION,
+        "Send lab report": C.PUBLICATION,
+        "Messages from care team": C.PUBLICATION,
+        "Request Refills": C.PAYMENT,
+    }
+    reported = facts(
+        link_target=BrowserTargetFacts(
+            same_origin=True, first_segment="report", sensitive_path=False
+        )
+    )
+
+    assert {text: classify(text, role="link") for text in descriptive} == dict.fromkeys(
+        descriptive, C.UNKNOWN
+    )
+    assert {text: classify(text, role="link") for text in still} == still
+    assert classify("Lab report", role="link", element=reported) is C.PUBLICATION
+
+
 def test_the_old_hard_exclusions_are_named_consequences() -> None:
     expected = {
         "accept": C.LEGAL_ACCEPTANCE,

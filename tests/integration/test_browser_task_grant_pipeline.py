@@ -497,6 +497,7 @@ async def pipeline(
     settings: Settings | None = None,
     storage: Literal["memory", "postgres"] = "memory",
     research: bool = False,
+    tools: tuple[str, ...] = (),
 ) -> AsyncIterator[Pipeline]:
     """Compose an isolated owner-profile run with explicitly selected research permission."""
     settings = settings or task_grant_settings()
@@ -578,6 +579,7 @@ async def pipeline(
             "browser.observe",
             "browser.act",
             "system.current_time",
+            *tools,
         ],
         browser_provider_override=provider,
     ) as composition:

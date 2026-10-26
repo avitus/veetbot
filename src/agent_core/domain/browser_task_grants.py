@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agent_core.domain.browser import (
     TASK_GRANT_PATH_SEGMENT,
+    BrowserActionConsequence,
     BrowserActionKind,
     browser_origin,
     normalize_browser_origin,
@@ -240,6 +241,40 @@ class BrowserTaskGrantOffer(BaseModel):
     @classmethod
     def prefix_is_one_segment(cls, value: str) -> str:
         return require_task_grant_path_prefix(value)
+
+
+# Why research authorization refused an action (ADR-0255): its own checks,
+# then each coverage rule a research constraint can fail. Content-free, and
+# kept on the approval record only.
+RESEARCH_NOT_COVERED_REASONS: frozenset[str] = frozenset(
+    {
+        "ineligible_run",
+        "untrusted_turn",
+        "turn_not_browser_only",
+        "deadline_passed",
+        "invalid_action",
+        "not_owner_seed",
+        "profile_unavailable",
+        "observation_unavailable",
+        "outside_profile_origin",
+        "policy_changed",
+        "facts_unavailable",
+        "outside_origin",
+        "sensitive_path",
+        "unnamed_element",
+        "element_disabled",
+        "field_not_covered",
+        "text_too_long",
+        "text_not_covered",
+        "link_outside_prefix",
+        "form_outside_prefix",
+    }
+    | {
+        f"excluded.{consequence.value}"
+        for consequence in BrowserActionConsequence
+        if consequence not in {BrowserActionConsequence.ROUTINE, BrowserActionConsequence.UNKNOWN}
+    }
+)
 
 
 class TaskGrantEcho(BaseModel):
