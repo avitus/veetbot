@@ -112,12 +112,9 @@ website checks. Do not separately rerun passed checks unless their inputs change
 Use `make docs-check` for standalone documentation verification, and `make citations-fix` to repair moved citations before the final verification.
 Measure each verification stage and report durations, total wall-clock time, overlap, and the slowest checks before each commit; label estimates explicitly.
 
-The specifications cite each other by line number through the citation ledger.
-After editing a document that others cite into, run `make citations-fix` and
-review the diff; a citation whose text is gone or now ambiguous is reported
-rather than guessed, and needs a human. Write every line reference as
-`file.md:LINE` or `file.md:LO-HI`; a prose form like "line 1408" is invisible
-to the ledger, and `make docs-check` rejects it in a specification.
+Specifications cite each other by line number through the citation ledger. Review the `make citations-fix` diff: a
+citation whose text is gone or ambiguous is reported, not guessed, for a human. Write line references as
+`file.md:LINE` or `file.md:LO-HI`; the ledger cannot see a prose "line 1408", and `make docs-check` rejects it in a spec.
 
 This section and `make check` must grow formatting, linting, type checking,
 and tests as tooling lands. Do not claim a command works unless it exists here.
@@ -143,7 +140,8 @@ failure, and retry coverage.
 
 ## Pull request review and deployment gate
 
-GitHub mergeability is insufficient. Use only the CodeRabbit GitHub PR integration; never use the rate-limited, non-authoritative local CLI. Loop:
+A new feature gets its own branch from `main`, named in two lowercase words (`owner-records`), and its own PR to
+`main`; small changes and unrelated bug fixes stack onto `dev`. GitHub mergeability is insufficient. Use only the CodeRabbit GitHub PR integration; never use the rate-limited, non-authoritative local CLI. Loop:
 
 1. Wait for CodeRabbit to finish reviewing the current head commit.
 2. Address every CodeRabbit comment — inline, summary, outside-diff, nitpick, suggestion, trivial, or any severity.
@@ -164,7 +162,6 @@ Never call a PR ready, mergeable, approved, or complete while CodeRabbit is queu
 - Update the current architecture documentation when an implementation changes it.
 - Add an **ADR** for material architectural decisions.
 - Add **verification evidence** before marking any acceptance criterion complete.
-- Never edit generated files under `site/` or `dist/` (they are regenerated).
 - Never store private reasoning, secrets, raw credentials, sensitive tool output, or temporary debugging transcripts in project documentation.
 
 ## Documentation governance (canonical rules)
