@@ -168,6 +168,7 @@ records.create_series         capability  owner-records
 records.append                capability  owner-records
 records.query                 capability  owner-records
 records.delete                capability  owner-records
+records.import                capability  owner-records
 cockpit.read                  capability  cockpit
 cockpit.check                 capability  cockpit
 cockpit.widget.write          capability  cockpit
@@ -1922,9 +1923,9 @@ nothing, which is what lets recovery re-execute a call that has no read-back.
 
 ## Milestone 34 records tools
 
-[owner-records.md](owner-records.md#the-five-tools) owns `records.list`,
-`records.create_series`, `records.append`, `records.query`, and
-`records.delete`. All five are `in_process` capabilities with
+[owner-records.md](owner-records.md#the-six-tools) owns `records.list`,
+`records.create_series`, `records.append`, `records.query`,
+`records.delete`, and `records.import`. All six are `in_process` capabilities with
 `INTERNAL_TOOL` result trust and a ten-second timeout, and exist only with
 `AGENT_RECORDS_ENABLED=1`; with the flag unset or off the roster is
 unchanged. Their closed JSON schemas expose every bound.
@@ -1936,6 +1937,7 @@ unchanged. Their closed JSON schemas expose every bound.
 | `records.create_series` | `records.write` | `EXTERNAL_WRITE` / `MEDIUM` / `IDEMPOTENT` | no |
 | `records.append` | `records.write` | `NONE` / `MEDIUM` / `CONDITIONALLY_IDEMPOTENT` | no |
 | `records.delete` | `records.write` | `EXTERNAL_DELETE` / `MEDIUM` / `IDEMPOTENT` | no |
+| `records.import` | `records.write` | `EXTERNAL_WRITE` / `MEDIUM` / `CONDITIONALLY_IDEMPOTENT` | no |
 
 The writes land in the platform's own store and leave the host for nowhere.
 Create and delete carry external classes so that the deterministic matrix
@@ -1944,7 +1946,10 @@ row and no policy profile change. The append stays `NONE`: it awaits
 `mark_effect_sent` before its insert and returns the stored entry with
 `replayed` set for a key the series already holds, and the records service
 refuses it in a turn whose origin trust is `EXTERNAL_UNTRUSTED` with
-`records.untrusted_turn`.
+`records.untrusted_turn`, which points the model at `records.import`. The
+import carries create's class for the same reason: the owner approves a batch
+of up to fifty entries on one card that renders every value, and the batch is
+stored whole, once, or not at all.
 
 ## Image and video generation (ADR-0140)
 

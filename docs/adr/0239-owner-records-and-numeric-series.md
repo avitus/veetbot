@@ -20,6 +20,12 @@
   scheduled run carries only its revision's requested scopes and no schedule
   requests a records scope, so the unattended reminder of section 9 and the
   scheduled holder of section 10 await a later design note
+- Amended: 2026-10-26 — the owner called the refusal's ask-again path "a
+  terrible user experience" and asked that values read from elsewhere be shown
+  in the chat, confirmed and saved: a sixth tool, `records.import`, classified
+  `EXTERNAL_WRITE`, stores a batch of up to fifty entries once the owner
+  approves a card that renders every value (section 5); the default profile
+  and the formation release evidence are unchanged
 - Related: ADR-0018, ADR-0019, ADR-0021, ADR-0026, ADR-0029, ADR-0031,
   ADR-0033, ADR-0100, ADR-0117, ADR-0122, ADR-0126; Sections 8, 9.2, 15,
   18.4, 21 (roadmap), 22 and 24 of the engineering plan
@@ -344,6 +350,24 @@ for untrusted appends, the condition and its row, is the pending
 alternative: it lands when the owner accepts re-admitting the formation
 release evidence, and it replaces the service check rather than joining it.
 `docs/plan/owner-records.md` states the shipped mechanism.
+
+**Amended 2026-10-26, on the owner's request.** In production on 2026-10-26
+the owner asked for blood-pressure readings from a website to be tracked; the
+series was created on approval, every append was refused, and the reply asked
+the owner to restate twenty readings. The owner asked instead that the values
+be displayed, the owner asked whether they trust them, and the values then
+saved. `records.import` does this without a profile edit. It is classified
+`EXTERNAL_WRITE`, so the matrix requires approval in every turn exactly as for
+`records.create_series`; its card is server-rendered, a summary naming the
+count and the stored series and one line per entry with its time, values and
+units, and the approval is bound to the arguments' hash, so what is stored is
+what was shown. The batch is validated whole before any write and keyed per
+entry from the invocation's idempotency key, so a re-invocation replays. The
+`records.untrusted_turn` refusal stays and now points the model at the import.
+The tool waits in the deferred index with create and delete, because as a
+direct definition it pushed two Gmail tools out of a website-bound chat
+(ADR-0253). The `turn_origin_trusted` alternative remains deferred to the
+2026-12-22 revisit, where it now matters only for single appends.
 
 ### 6. Scans and sensitivity
 

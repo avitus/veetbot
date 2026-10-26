@@ -71,6 +71,7 @@ from agent_core.tools.records import (
     RecordsAppendTool,
     RecordsCreateSeriesTool,
     RecordsDeleteTool,
+    RecordsImportTool,
     RecordsListTool,
     RecordsQueryTool,
 )
@@ -111,6 +112,7 @@ TOOL_NAMES = (
     "records.append",
     "records.query",
     "records.delete",
+    "records.import",
 )
 REASON_CODES = (
     "series_unknown",
@@ -166,6 +168,7 @@ async def test_registration_under_flag() -> None:
         RecordsAppendTool(service, zone),
         RecordsQueryTool(service, zone),
         RecordsDeleteTool(service, zone),
+        RecordsImportTool(service, zone),
     ]
     assert [tool.spec.name for tool in tools] == list(TOOL_NAMES)
     for tool in tools:
@@ -203,7 +206,11 @@ async def test_the_default_agent_enables_records_under_the_flag() -> None:
     """
     enabled, deferred = await _agent_tools("1")
     assert set(TOOL_NAMES) <= enabled
-    assert deferred & set(TOOL_NAMES) == {"records.create_series", "records.delete"}
+    assert deferred & set(TOOL_NAMES) == {
+        "records.create_series",
+        "records.delete",
+        "records.import",
+    }
     dark_enabled, dark_deferred = await _agent_tools("0")
     assert not (dark_enabled | dark_deferred) & set(TOOL_NAMES)
 
@@ -340,6 +347,148 @@ async def test_approved_create_series_executes_once() -> None:
         async with composition.uow_factory() as uow:
             events = await uow.events.list_after(completed.session_id, 0, composition.principal)
         assert [e.event_type for e in events].count("records.series.created") == 1
+
+
+IMPORTED = [
+    {"values": {"systolic": 132, "diastolic": 89}, "observed_at": "2026-01-05T15:20:00-08:00"},
+    {
+        "values": {"systolic": 128.5, "diastolic": 84},
+        "observed_at": "2026-01-12T09:05:00-08:00",
+        "note": "after coffee",
+    },
+]
+
+
+def _import_arguments(entries: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {"series": "Blood pressure", "entries": IMPORTED if entries is None else entries}
+
+
+async def test_untrusted_append_refusal_points_at_the_reviewed_import() -> None:
+    """2026-10-26: the owner asked for website readings to be shown and confirmed,
+    not refused; the refusal now names the tool that asks them."""
+    service, _, context = await _seeded(TrustLevel.EXTERNAL_UNTRUSTED)
+    result = await RecordsAppendTool(service, UTC_ZONE).execute(
+        {"series": "Blood pressure", "values": {"systolic": 120, "diastolic": 80}}, context
+    )
+    assert result.failure is not None
+    assert "records.import" in result.failure.detail
+    assert "records.import" in TOOL_MESSAGES["records.untrusted_turn"]
+    assert "records.import" in RecordsAppendTool.spec.description
+
+
+async def test_import_requires_approval_by_matrix_in_any_turn() -> None:
+    engine = DeterministicPolicyEngine(DEFAULT_RULESET)
+    spec = RecordsImportTool.spec
+    assert spec.side_effect is SideEffectClass.EXTERNAL_WRITE
+    assert spec.idempotency is IdempotencyClass.CONDITIONALLY_IDEMPOTENT
+    assert spec.required_scopes == {"records.write"}
+    assert spec.allow_parallel is False
+    for origin in (TrustLevel.USER, TrustLevel.MEMORY, TrustLevel.EXTERNAL_UNTRUSTED):
+        decision = await engine.evaluate(_proposed(spec, origin), principal(), run())
+        assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
+
+
+async def test_import_card_shows_every_reading() -> None:
+    service, _, context = await _seeded(TrustLevel.EXTERNAL_UNTRUSTED)
+    tool = RecordsImportTool(service, UTC_ZONE)
+    view = await tool.approval_view_in_session(
+        _import_arguments(), run=run(), principal=context.principal, turn=None, not_covered=None
+    )
+    assert view.summary == "Save 2 readings to the series Blood pressure"
+    assert view.arguments["readings"] == [
+        "2026-01-05T15:20:00-08:00: systolic 132 mmHg, diastolic 89 mmHg",
+        "2026-01-12T09:05:00-08:00: systolic 128.5 mmHg, diastolic 84 mmHg (note: after coffee)",
+    ]
+    unknown = await tool.approval_view_in_session(
+        {"series": "Weight", "entries": IMPORTED[:1]},
+        run=run(),
+        principal=context.principal,
+        turn=None,
+        not_covered=None,
+    )
+    # A model-authored series name never reaches the server-authored summary.
+    assert unknown.summary == "Save 1 reading to a series that does not exist"
+
+
+async def test_untrusted_turn_import_stores_every_reading_once() -> None:
+    service, factory, context = await _seeded(TrustLevel.EXTERNAL_UNTRUSTED)
+    tool = RecordsImportTool(service, UTC_ZONE)
+    first = await tool.execute(_import_arguments(), context)
+    assert first.ok, first.failure
+    assert first.structured is not None
+    assert first.structured["imported"] == 2 and first.structured["replayed"] == 0
+    assert first.structured["entry_count"] == 2
+    assert await _entry_and_event_counts(service, factory, context) == (2, 2)
+    # A re-invocation with the same key after a crash stores nothing new.
+    second = await tool.execute(_import_arguments(), context)
+    assert second.ok and second.structured is not None
+    assert second.structured["imported"] == 0 and second.structured["replayed"] == 2
+    assert [e["entry_id"] for e in second.structured["entries"]] == [
+        e["entry_id"] for e in first.structured["entries"]
+    ]
+    assert await _entry_and_event_counts(service, factory, context) == (2, 2)
+
+
+async def test_import_is_all_or_nothing() -> None:
+    service, factory, context = await _seeded(TrustLevel.USER)
+    tool = RecordsImportTool(service, UTC_ZONE)
+    future = {"values": {"systolic": 1, "diastolic": 2}, "observed_at": "2099-01-01T00:00:00Z"}
+    result = await tool.execute(_import_arguments([*IMPORTED, future]), context)
+    assert result.ok is False and result.failure is not None
+    assert result.failure.reason_code == "records.observed_in_future"
+    assert result.failure.detail.startswith("reading 3: ")
+    missing = {"values": {"systolic": 1}, "observed_at": "2026-01-01T00:00:00Z"}
+    mismatch = await tool.execute(_import_arguments([missing, *IMPORTED]), context)
+    assert mismatch.failure is not None
+    assert mismatch.failure.reason_code == "records.component_mismatch"
+    assert await _entry_and_event_counts(service, factory, context) == (0, 0)
+
+
+async def _import_run(resolution: ApprovalResolutionType) -> tuple[Any, int]:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="records.create_series",
+                        arguments={"series": "Blood pressure", "components": BP},
+                    )
+                ]
+            ),
+            ScriptedTurn(
+                tool_calls=[ScriptedToolCall(name="records.import", arguments=_import_arguments())]
+            ),
+            ScriptedTurn(text="Done."),
+        ]
+    )
+    async with build(
+        settings=load_settings(_environment("1")),
+        script=script,
+        enabled_tools=["records.create_series", "records.import"],
+    ) as composition:
+        run_id = await composition.runs.submit("Track these blood pressure readings.")
+        [create] = await composition.approvals.list_pending(run_id=run_id)
+        await composition.approvals.resolve(create.id, ApprovalResolutionType.APPROVE_ONCE)
+        [card] = await composition.approvals.list_pending(run_id=run_id)
+        assert card.tool_name == "records.import"
+        assert card.action_summary == "Save 2 readings to the series Blood pressure"
+        assert len(card.arguments["readings"]) == 2
+        [series] = await _stored_series(composition)
+        async with composition.uow_factory() as uow:
+            assert await uow.records.count_entries(composition.principal, series.series.id) == 0
+        await composition.approvals.resolve(card.id, resolution)
+        completed = await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            stored = await uow.records.count_entries(composition.principal, series.series.id)
+        return completed, stored
+
+
+async def test_approved_import_stores_and_denied_import_stores_nothing() -> None:
+    approved, stored = await _import_run(ApprovalResolutionType.APPROVE_ONCE)
+    assert approved.status is RunStatus.COMPLETED, approved.failure
+    assert stored == 2
+    _, refused = await _import_run(ApprovalResolutionType.DENY)
+    assert refused == 0
 
 
 async def _stored_series(composition: Any) -> list[Any]:
