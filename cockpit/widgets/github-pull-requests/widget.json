@@ -1,0 +1,1 @@
+{"schema":1,"slug":"github-pull-requests","title":"Pull requests","purpose":"Open pull requests by repository with draft, review, CI, conflict, and access status.","kit_api":1,"sizes":["md","tall","lg","wide"],"feeds":[{"id":"agent.github-pull-requests","history":0}],"settings":{"type":"object","properties":{},"additionalProperties":false}}
