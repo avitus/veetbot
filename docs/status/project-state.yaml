@@ -347,6 +347,22 @@ milestones:
     - Complete the once/dry-run operator controls and bind each remaining complete runtime gate to integrated evidence
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
+    - check: Supervised verification input isolation repair (2026-10-25)
+      outcome: implemented_pending_delivery
+      detail: >-
+        The October 24 evening run reached the proposal provider but deferred
+        verification after its near-limit group left no room for the proposed
+        clauses. A read-only preflight reproduced input_budget for a two-memory
+        candidate in that group. Verification now sizes complete originals for
+        the union of admitted operations' declared inputs after revalidating the
+        whole offered snapshot. Privacy-refused and oversized candidates remain
+        excluded without consuming valid siblings' request space. Regression
+        coverage exercises a readable pending proposal through both stores,
+        complete uncited source parts, unchanged originals and daily limits.
+        The same read-only synthetic pair preflight improves verification from
+        six to eight of eight otherwise admitted queued groups; the remaining
+        privacy-refused group stays refused. No provider call or production
+        mutation was used for that diagnostic; live delivery remains pending.
     - check: Supervised source-clock and retry fairness repair (2026-10-24)
       outcome: implemented_pending_delivery
       detail: >-
