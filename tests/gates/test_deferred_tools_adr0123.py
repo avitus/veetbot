@@ -278,7 +278,7 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
     assert plan is not None
     # ADR-0130: the bound chat still defines its browser tools.
     assert set(plan.tool_names) >= {"browser.navigate", "browser.observe", "browser.act"}
-    # The configured tools past the token cap wait in the index (ADR-0252).
+    # The configured tools past the token cap wait in the index (ADR-0253).
     advertised = {*plan.tool_names, *plan.deferred_tool_names}
     assert advertised >= {*COCKPIT_TOOL_NAMES, *RECORDS_TOOLS}
     assert "records.append" in plan.deferred_tool_names

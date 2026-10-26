@@ -1,4 +1,4 @@
-# ADR-0252: A configured tool past the token cap is deferred, not fatal
+# ADR-0253: A configured tool past the token cap is deferred, not fatal
 
 - Status: Proposed (a production repair the owner asked for on 2026-10-25; the
   owner has not yet reviewed the decision)

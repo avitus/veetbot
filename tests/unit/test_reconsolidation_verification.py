@@ -613,3 +613,168 @@ def test_supervised_verifier_cannot_spend_below_the_minimum_complete_request() -
     fitted = prepare(remaining=cost, fit_output_budget=True).prepared
     assert fitted is not None and fitted.request.maximum_output_tokens == 1
     assert fitted.maximum_cost_usd == cost
+
+
+def crowded_group() -> ReconsolidationInput:
+    """A proposal fits, but repeating all nine originals in verification does not."""
+    from uuid import uuid5
+
+    from agent_core.domain.people_sources import source_id
+    from agent_core.domain.reconsolidation import group_digest
+    from tests.unit.test_reconsolidation_merge import source
+
+    value = selected()
+    sources = []
+    excerpts = []
+    for index in range(9):
+        item = source(501 + index, "User prefers tea " + "with milk " * 10)
+        item = item.model_copy(
+            update={"record": item.record.model_copy(update={"source_event_ids": [index + 1]})}
+        )
+        sources.append(item)
+        event = source_id(principal(), item.record.source_session_id, index + 1)
+        excerpts.append(
+            value.excerpts[0].model_copy(
+                update={
+                    "id": uuid5(event, "reconsolidation-excerpt@1:0"),
+                    "event_id": event,
+                    "event_sequence": index + 1,
+                    "text": item.record.statement + "x" * 78,
+                }
+            )
+        )
+    versions = tuple(item.version for item in sources)
+    return value.model_copy(
+        update={
+            "sources": tuple(sources),
+            "excerpts": tuple(excerpts),
+            "group": value.group.model_copy(
+                update={
+                    "sources": versions,
+                    "input_digest": group_digest(versions),
+                }
+            ),
+        }
+    )
+
+
+def test_full_proposal_can_verify_a_small_operation_with_complete_support() -> None:
+    value = crowded_group()
+    original = build(value).prepared
+    assert original is not None and 16000 < original.estimated_input_tokens <= 16384
+    raw = json.loads(response())
+    operation = raw["operations"][0]
+    operation["clauses"] = [
+        {
+            "text": item.record.statement,
+            "support": [
+                {
+                    "belief_id": str(item.record.id),
+                    "excerpt_id": str(value.excerpts[index].id),
+                }
+            ],
+        }
+        for index, item in enumerate(value.sources[:2])
+    ]
+    result = prepare(raw=json.dumps(raw), original=original, groups=(value,))
+    assert result.prepared is not None, "Unused group evidence must not crowd out a valid proposal"
+    message = result.prepared.request.conversation[1]
+    assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+    group = json.loads(message.content[0].text)["groups"][0]
+    assert [s["belief_id"] for s in group["sources"]] == [
+        str(s.record.id) for s in value.sources[:2]
+    ]
+    assert [e["text"] for e in group["excerpts"]] == [e.text for e in value.excerpts[:2]]
+    assert [e["id"] for e in group["excerpts"]] == [str(e.id) for e in value.excerpts[:2]]
+    review = review_prepared_verification(result.prepared, verification_for(result.prepared))
+    assert [r.reason for r in review.candidates] == ["verified"]
+
+
+@pytest.mark.parametrize("blocked", ["privacy", "size", "none"])
+def test_verification_unions_complete_inputs_only_for_admitted_operations(blocked: str) -> None:
+    from agent_core.memory.reconsolidation_policy import local_egress_policy
+
+    value = crowded_group()
+    original = build(value, egress_policy=local_egress_policy("fake")).prepared
+    assert original is not None
+    raw = json.loads(response())
+    first = raw["operations"][0]
+    first["clauses"][0].update(text=value.sources[0].record.statement)
+    first["clauses"][0]["support"][0]["excerpt_id"] = str(value.excerpts[0].id)
+    other = copy.deepcopy(first)
+    other["id"] = str(UUID(int=11))
+    chosen = value.sources[2:4] if blocked != "size" else value.sources
+    other["inputs"] = [
+        {"belief_id": str(s.record.id), "content_revision": s.version.content_revision}
+        for s in chosen
+    ]
+    other["clauses"][0] = {
+        "text": "My passport is private" if blocked == "privacy" else chosen[0].record.statement,
+        "support": [
+            {
+                "belief_id": str(chosen[0].record.id),
+                "excerpt_id": str(value.excerpts[2 if blocked != "size" else 0].id),
+            }
+        ],
+    }
+    raw["operations"] = [other, first]
+    result = prepare(
+        raw=json.dumps(raw), original=original, groups=(value,), policy=local_egress_policy("fake")
+    )
+    assert result.prepared is not None
+    message = result.prepared.request.conversation[1]
+    assert isinstance(message, UserMessage) and isinstance(message.content[0], TextPart)
+    payload = json.loads(message.content[0].text)
+    expected = value.sources[:4] if blocked == "none" else value.sources[:2]
+    assert {s["belief_id"] for s in payload["groups"][0]["sources"]} == {
+        str(s.record.id) for s in expected
+    }
+    assert len(payload["groups"][0]["excerpts"]) == len(expected)
+    assert len(payload["operations"]) == (2 if blocked == "none" else 1)
+    assert [r.reason for r in result.deferred] == (
+        {"privacy": ["egress_denied"], "size": ["input_budget"], "none": []}[blocked]
+    )
+    assert "My passport is private" not in result.prepared.serialized_request
+
+
+def test_verifier_keeps_every_part_of_an_input_even_when_only_one_part_is_cited() -> None:
+    from uuid import uuid5
+
+    value = selected()
+    first = value.excerpts[0].model_copy(update={"part_count": 2})
+    second = first.model_copy(
+        update={
+            "id": uuid5(first.event_id, "reconsolidation-excerpt@1:1"),
+            "part_index": 1,
+            "text": "This preference applies only on weekdays.",
+        }
+    )
+    value = value.model_copy(update={"excerpts": (first, second)})
+    original = build(value).prepared
+    assert original is not None
+    result = prepare(original=original, groups=(value,))
+    assert result.prepared is not None
+    assert second.text in result.prepared.serialized_request
+    assert str(second.id) in result.prepared.serialized_request
+
+
+@pytest.mark.parametrize("change", ["statement", "privacy"])
+def test_omitted_neighbors_still_require_full_snapshot_revalidation(change: str) -> None:
+    value = crowded_group()
+    original = build(value).prepared
+    assert original is not None
+    neighbor = value.sources[-1]
+    update = (
+        {"statement": "A changed original"}
+        if change == "statement"
+        else {"sensitivity": Sensitivity.RESTRICTED}
+    )
+    neighbor = neighbor.model_copy(update={"record": neighbor.record.model_copy(update=update)})
+    changed = value.model_copy(update={"sources": (*value.sources[:-1], neighbor)})
+    raw = json.loads(response())
+    raw["operations"][0]["clauses"][0]["support"][0]["excerpt_id"] = str(value.excerpts[0].id)
+    result = prepare(raw=json.dumps(raw), original=original, groups=(changed,))
+    assert result.prepared is None
+    assert result.deferred[0].reason == (
+        "source_unavailable" if change == "statement" else "source_ineligible"
+    )

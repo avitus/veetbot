@@ -9,7 +9,7 @@
   `tool-system.md` decision 25 (the control-tool set of four)
 - Amended by: ADR-0130 (2026-09-25), which ranks `browser.navigate`,
   `browser.observe` and `browser.act` first and never defers them in a chat
-  bound to a website profile; ADR-0252 (2026-10-25), which defers a configured
+  bound to a website profile; ADR-0253 (2026-10-25), which defers a configured
   tool past the token cap
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
@@ -110,7 +110,7 @@ one account's tools beat the other's.
   entries at 1,013 tokens: the six management tools, `start_call`, and the
   ten Gmail writes and sends. Nothing was skipped. Before this decision the
   thirty definitions cost 7,058 tokens, and the sixteen Gmail tools were not
-  offered at all. ADR-0252 records the roster after records and the Cockpit.
+  offered at all. ADR-0253 records the roster after records and the Cockpit.
 - `mcp.bland_call.start_call` moves to the index. Starting a call can take one
   more model step, and still waits for the same approval.
 - A configured tool added later no longer evicts a capability. It moves the
