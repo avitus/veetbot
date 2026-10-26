@@ -188,6 +188,15 @@ async def test_run_now_needs_its_own_scope_and_the_current_revision() -> None:
         assert missing_key.status_code in {400, 422}
 
 
+async def test_a_cockpit_refresh_key_is_reserved() -> None:
+    """ADR-0254: Run-now cannot borrow a refresh key to skip its limit or its report."""
+    async with _api() as (client, _):
+        refused = await _run(client, "cockpit.refresh:2026-10-20T15:00Z")
+        assert refused.status_code == 409
+        assert refused.json()["error"]["details"]["reason"] == "schedule.run_key_reserved"
+        assert (await _run(client, "run-1")).status_code == 201
+
+
 async def test_a_one_time_schedule_runs_only_at_its_time() -> None:
     async with _api(once=True) as (client, _):
         refused = await _run(client, "run-1")

@@ -200,6 +200,22 @@ import Testing
         await eventually { client.openStreams == 0 }
     }
 
+    /// A new connection while Cockpit is visible refreshes the feeds it now reads.
+    @Test
+    func aNewConnectionWhileVisibleRefreshesEveryFeedAgain() async {
+        let client = FakeClient()
+        client.queueSnapshot(.success(Self.snapshot(cursor: 41)))
+        client.queueStream([])
+        let board = model(client)
+        board.setVisible(true)
+        await eventually { client.refreshes == 1 && board.connection == .live }
+        client.queueStream([])
+        board.resetConnection()
+        await eventually { client.refreshes == 2 && client.snapshotLoads == 2 && board.connection == .live }
+        board.setVisible(false)
+        await eventually { client.openStreams == 0 }
+    }
+
     @Test
     func aServerWithoutTheRoutesIsUnavailableAndNothingStreams() async {
         let client = FakeClient()

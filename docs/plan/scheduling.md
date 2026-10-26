@@ -629,7 +629,9 @@ run is active is `SKIPPED_OVERLAP` by the existing rule.
 A Cockpit refresh (ADR-0254, [cockpit.md](cockpit.md#refresh-on-entry)) uses
 the same manual occurrence for each active, recurring, feed-keeping schedule.
 Its key is `cockpit.refresh:<UTC minute>`, and it does not count toward the
-five a day. It skips a schedule whose latest run is still going, or started
+five a day. Run-now refuses a request key with that prefix as
+`schedule.run_key_reserved`, so it can neither replay a refresh nor pass as
+one. It skips a schedule whose latest run is still going, or started
 under a minute ago. It reports a failed check for that schedule instead of
 raising it, and its completed run sends no report notification.
 

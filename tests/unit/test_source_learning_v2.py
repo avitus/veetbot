@@ -271,6 +271,27 @@ async def test_an_expired_claim_can_be_learned_again_from_a_fresh_read() -> None
         assert again["belief_id"] != first["belief_id"]
 
 
+async def test_a_retired_claim_still_refuses_after_its_expiry_passes() -> None:
+    """Only expiry frees a claim to be learned again; retiring it refuses for good."""
+    async with read_archive() as (app, context, _run):
+        (first,) = await learn(app, context, observation())
+        assert first["status"] == "committed"
+        async with app.uow_factory() as uow:
+            record = await uow.memories.get(UUID(first["belief_id"]), app.principal)
+            await uow.memories.reinforce(
+                record.model_copy(
+                    update={
+                        "status": MemoryStatus.RETIRED,
+                        "expires_at": app.clock.now() - timedelta(seconds=1),
+                    },
+                    deep=True,
+                )
+            )
+        (again,) = await learn(app, context, observation())
+        assert again["status"] == "rejected", again
+        assert await app.memory.list_memories() == []
+
+
 async def test_reshape_supersedes_v1_rows_with_v2_beliefs_through_formation() -> None:
     async with read_archive() as (app, context, run):
         first = await _legacy_row(app, run)

@@ -533,10 +533,13 @@ class SourceLearningService:
             if saved.superseded_by is not None:
                 current = saved.superseded_by
                 continue
-            if self._expired(saved):
+            # Only expiry frees a claim; a retired one refuses even past its expiry.
+            if saved.status is MemoryStatus.EXPIRED:
                 return None
             if saved.status not in LIVE_MEMORY_STATUSES:
                 raise ConflictError("previous source claim is no longer live")
+            if self._expired(saved):
+                return None
             return saved
         raise ConflictError("source claim lineage is circular")
 

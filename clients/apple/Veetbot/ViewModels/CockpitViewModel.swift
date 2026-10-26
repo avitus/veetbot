@@ -73,9 +73,7 @@ public final class CockpitViewModel: ObservableObject {
         streamTask = nil
         connection = .idle
         guard visible else { return }
-        // Best effort: a refresh that fails leaves the board as it is.
-        refreshTask?.cancel()
-        refreshTask = makeClient().map { client in Task { try? await client.refreshCockpit() } }
+        refreshFeeds()
         streamTask = Task { [weak self] in await self?.run(reloading: true) }
     }
 
@@ -95,9 +93,19 @@ public final class CockpitViewModel: ObservableObject {
         errorMessage = nil
         isSaving = false
         offsetMilliseconds = 0
+        refreshTask?.cancel()
+        refreshTask = nil
         if visible {
+            refreshFeeds()
             streamTask = Task { [weak self] in await self?.run() }
         }
+    }
+
+    /// Ask the server to refresh every feed (ADR-0254). Best effort: a refresh
+    /// that fails leaves the board as it is.
+    private func refreshFeeds() {
+        refreshTask?.cancel()
+        refreshTask = makeClient().map { client in Task { try? await client.refreshCockpit() } }
     }
 
     public func hostReported(_ message: CockpitHostMessage) {

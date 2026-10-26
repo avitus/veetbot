@@ -37,6 +37,7 @@ from agent_core.domain.schedules import (
     ScheduleRevision,
     ScheduleState,
     cockpit_refresh_key,
+    is_cockpit_refresh,
 )
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
@@ -331,6 +332,13 @@ class ScheduleMaterializer:
         cadence path records as a failed occurrence is refused here instead,
         because the owner is waiting for the answer.
         """
+        # ADR-0254: refresh keys are the Cockpit's, so a Run-now request can
+        # neither replay a refresh nor slip past the daily limit as one.
+        if is_cockpit_refresh(request_key):
+            raise ConflictError(
+                "this request key is reserved for Cockpit refreshes",
+                reason="schedule.run_key_reserved",
+            )
         now = self._clock.now()
         async with self._uow_factory() as uow:
             schedule = await uow.schedules.lock(schedule_id, principal)
