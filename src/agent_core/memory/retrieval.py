@@ -837,10 +837,14 @@ class HybridMemoryRetriever:
         for index, item in enumerate(collapsed):
             durable = item.belief_id in durable_ids
             # Measure what recall would return: markers only beside shown partners.
+            # A candidate adds its marker to a seated partner's line, so every
+            # line it would change is checked against the owner-core cap.
             prospective = [*selected, item]
             prospective_partners = frozenset(chosen.belief_id for chosen in prospective)
-            if owner_core and measure_tokens(_line(item, partners=prospective_partners)) > min(
-                256, effective_query.budget_tokens // 3
+            if owner_core and any(
+                measure_tokens(_line(chosen, partners=prospective_partners))
+                > min(256, effective_query.budget_tokens // 3)
+                for chosen in prospective
             ):
                 dropped.append(item.belief_id)
                 continue

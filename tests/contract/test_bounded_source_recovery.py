@@ -273,6 +273,58 @@ async def test_owner_core_line_cap_measures_the_line_recall_returns() -> None:
     assert [item.belief_id for item in capped.items] == [belief.id]
 
 
+async def test_owner_core_admits_no_partner_that_pushes_a_seated_line_past_the_cap() -> None:
+    """ADR-0248: admitting a conflict partner adds its marker to the line
+    already seated, so the owner core's per-line cap is rechecked for every
+    line the candidate would change, not only the candidate's own."""
+
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.domain.memory import RecallMoment, RecallResult
+    from agent_core.memory.retrieval import HybridMemoryRetriever, _line, _token_estimate
+
+    clock, factory, _, _ = await formation_stack()
+    long_id, short_id = UUID(int=9601), UUID(int=9602)
+    seated = memory(
+        belief_id=9601,
+        statement="The workshop is on Thursday in the north building by the loading dock.",
+    ).model_copy(update={"subject": "workshop", "scope": "general", "conflicts_with": [short_id]})
+    partner = memory(belief_id=9602, statement="The workshop moved.").model_copy(
+        update={"subject": "workshop", "scope": "general", "conflicts_with": [long_id]}
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(seated)
+        await uow.memories.upsert_belief(partner)
+
+    async def recall(budget: int, first_id: int) -> RecallResult:
+        retriever = HybridMemoryRetriever(
+            factory,
+            clock,
+            SequenceIdFactory(UUID(int=i) for i in range(first_id, first_id + 10)),
+            principal(),
+        )
+        return await retriever.recall(
+            recall_query(
+                text="workshop Thursday north building loading dock", budget_tokens=budget
+            ).model_copy(update={"current_scope": "general", "candidate_selection": "relevance"}),
+            session_id=SESSION_ID,
+            moment=RecallMoment.SNAPSHOT.value,
+        )
+
+    roomy = await recall(4000, 8600)
+    assert [item.belief_id for item in roomy.items] == [long_id, short_id]
+    first, second = roomy.items
+    both = frozenset({long_id, short_id})
+    cap = _token_estimate(_line(first, partners=both)) - 1
+    # The seated line fits alone and the partner's own line fits, but seating
+    # the partner adds a marker that carries the seated line past the cap.
+    assert _token_estimate(_line(first, partners=frozenset({long_id}))) <= cap
+    assert _token_estimate(_line(second, partners=both)) <= cap < 256
+    capped = await recall(3 * cap, 8700)
+    shown = frozenset(item.belief_id for item in capped.items)
+    assert long_id in shown
+    assert all(_token_estimate(_line(item, partners=shown)) <= cap for item in capped.items)
+
+
 async def test_expansion_preserves_explicit_original_selection() -> None:
     _, factory, _, _ = await formation_stack()
     sequence = await user_event(factory, "The workshop is on Thursday. Enter through Bay 6.")
