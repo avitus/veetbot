@@ -546,7 +546,9 @@ class EventContextPlanner:
         }
         # ADR-0123: an agent that enables tool.call offers what does not fit as
         # deferred index entries instead of dropping it, and defers the tools its
-        # configuration names. Without tool.call, overflow is skipped and recorded.
+        # configuration names. Without tool.call, item-cap overflow is skipped and
+        # recorded, while configured tools past the token cap stay selected and the
+        # final plan check rejects them with ContextOverflow (ADR-0253).
         control = (
             next((tool for tool in tools if tool.name == _TOOL_CALL_TOOL_NAME), None)
             if _TOOL_CALL_TOOL_NAME in configured_order

@@ -82,7 +82,10 @@ one account's tools beat the other's.
      configured tools past slot thirty, which were previously cut silently.
    - A candidate that fits in neither is skipped, and its name is recorded on
      the plan event as `skipped_tool_names`. An agent without `tool.call`
-     defers nothing and records its skips the same way.
+     defers nothing and records its item-cap skips the same way. ADR-0253
+     extends deferral to configured tools past the token cap; without
+     `tool.call`, a configured set past the token cap still fails with
+     `ContextOverflow`.
    - Nothing leaves the roster silently. This amends ADR-0105's consequence
      that a silent skip remains the documented behavior.
 5. **The default agent defers its six management tools.** Its configuration

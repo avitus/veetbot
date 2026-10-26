@@ -282,6 +282,11 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
     advertised = {*plan.tool_names, *plan.deferred_tool_names}
     assert advertised >= {*COCKPIT_TOOL_NAMES, *RECORDS_TOOLS}
     assert "records.append" in plan.deferred_tool_names
+    # The index's own 2,000-token cap is then full (ADR-0253, Consequences).
+    assert set(plan.skipped_tool_names) == {
+        "mcp.gmail_write.trash_thread",
+        "mcp.gmail_write.untrash_thread",
+    }
 
 
 async def test_the_production_plan_renders_its_prefix_again_from_jsonb(tmp_path: Path) -> None:
