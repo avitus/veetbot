@@ -166,7 +166,7 @@ from data, downgrade written.
 
 Closed JSON schemas with `additionalProperties: false`, every bound visible to
 the model, after the pattern the People tools set
-(`docs/plan/builtin-tools.md:1877`).
+(`docs/plan/builtin-tools.md:1895`).
 
 `records.create_series`:
 
@@ -235,7 +235,7 @@ arguments. `records.delete` takes `series` and an optional `entry_id`.
 
 ### 4. Classification
 
-Every `ToolSpec` field, in the table form `docs/plan/builtin-tools.md:269`
+Every `ToolSpec` field, in the table form `docs/plan/builtin-tools.md:284`
 uses:
 
 ```text
