@@ -674,6 +674,7 @@ class HybridMemoryRetriever:
                         strengths[member_id] = (best[0], best[1])
         recalled: list[RecalledBelief] = []
         durable_ids: set[UUID] = set()
+        owner_matched: set[UUID] = set()
         excluded = set(effective_query.exclude_ids)
         for record in records:
             # A hard predicate, not a score: the persona row already carries
@@ -691,6 +692,19 @@ class HybridMemoryRetriever:
             )
             if candidate is None:
                 continue
+            if (
+                record.authority is MemoryAuthority.USER
+                and _arm_match(
+                    record,
+                    effective_query,
+                    profile=self._profile,
+                    semantic_rank=semantic_ranks.get(record.id),
+                    semantic_only=semantic_key is not None
+                    and self._profile.semantic_channel == "dense",
+                )[0]
+                >= 0.5
+            ):
+                owner_matched.add(record.id)
             if _is_durable(record, owner_facts=effective_query.candidate_selection == "relevance"):
                 durable_ids.add(record.id)
             recalled.append(candidate)
@@ -728,7 +742,9 @@ class HybridMemoryRetriever:
                 for item in recalled
             ]
         recalled = _penalize_near_duplicates(recalled, penalty=self._profile.near_duplicate_penalty)
-        ranked = self._ranker.rank(recalled, effective_query)
+        ranked = _keep_owner_beliefs_ahead(
+            self._ranker.rank(recalled, effective_query), owner_matched
+        )
         collapsed: list[RecalledBelief] = []
         subjects: defaultdict[str, int] = defaultdict(int)
         seen: set[tuple[str, str, str]] = set()
@@ -825,10 +841,7 @@ class HybridMemoryRetriever:
             ):
                 dropped.append(item.belief_id)
                 continue
-            attention = (
-                item.review_reason in ATTENTION_REASONS
-                and item.derivation is MemoryDerivation.HYPOTHESIS
-            )
+            attention = _asks_attention(item)
             if attention and attention_selected >= attention_cap:
                 dropped.append(item.belief_id)
                 continue
@@ -963,6 +976,7 @@ class HybridMemoryRetriever:
                         as_of=now,
                         policy_version=render_policy,
                         known_at=render_known_at,
+                        partners=shown_partners,
                     ) + "".join("\n" + _person_line(person) for person in selected_people)
                     if measure_tokens(proposed) <= effective_query.budget_tokens:
                         item = proposed_item
@@ -1568,32 +1582,16 @@ def _durable_ahead(candidates: list[RecalledBelief], durable_ids: set[UUID]) -> 
     return ahead[:-1]
 
 
-def _score(
+def _arm_match(
     record: MemoryRecord,
     query: RecallQuery,
     *,
-    now: datetime | None = None,
-    profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
-    semantic_rank: int | None = None,
-    semantic_only: bool = False,
-) -> RecalledBelief | None:
-    """Score one candidate against one query, as of `now`.
+    profile: RetrievalProfile,
+    semantic_rank: int | None,
+    semantic_only: bool,
+) -> tuple[float, list[str]]:
+    """The candidate's arm match before fusion, 0..1, and the arms that found it."""
 
-    The lexical arm counts whole lexemes over the tokenizer both belief stores
-    filter with, so a term the store would not match cannot score here either.
-    Evidence decays with the time since the belief was last supported, at
-    the time constant its belief type carries: a stable preference fades far
-    more slowly than a situational fact. Without `now` no time has passed,
-    which is what a unit scoring a record against a query measures.
-
-    The stale penalty demotes expired and retired rows. The hard filter keeps
-    them out of an ordinary recall entirely, so the penalty is reachable only
-    through an as-of or include-superseded query, where history is the point
-    and the ranking still has to say which rows are no longer current.
-    """
-
-    if not query.include_provisional and record.status is MemoryStatus.PROVISIONAL:
-        return None
     terms = recall_query_terms(query.text)
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_tokens = lexical_tokens(f"{record.subject} {record.statement}")
@@ -1642,8 +1640,40 @@ def _score(
             else 0
         )
         match = max(structured, lexical, semantic)
-        if match == 0:
-            return None
+    return match, arms
+
+
+def _score(
+    record: MemoryRecord,
+    query: RecallQuery,
+    *,
+    now: datetime | None = None,
+    profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
+    semantic_rank: int | None = None,
+    semantic_only: bool = False,
+) -> RecalledBelief | None:
+    """Score one candidate against one query, as of `now`.
+
+    The lexical arm counts whole lexemes over the tokenizer both belief stores
+    filter with, so a term the store would not match cannot score here either.
+    Evidence decays with the time since the belief was last supported, at
+    the time constant its belief type carries: a stable preference fades far
+    more slowly than a situational fact. Without `now` no time has passed,
+    which is what a unit scoring a record against a query measures.
+
+    The stale penalty demotes expired and retired rows. The hard filter keeps
+    them out of an ordinary recall entirely, so the penalty is reachable only
+    through an as-of or include-superseded query, where history is the point
+    and the ranking still has to say which rows are no longer current.
+    """
+
+    if not query.include_provisional and record.status is MemoryStatus.PROVISIONAL:
+        return None
+    match, arms = _arm_match(
+        record, query, profile=profile, semantic_rank=semantic_rank, semantic_only=semantic_only
+    )
+    if match == 0:
+        return None
     weights = profile.lifecycle_weights
     lifecycle = weights.active if record.status is MemoryStatus.ACTIVE else weights.provisional
     confidence = record.confidence * lifecycle
@@ -1751,6 +1781,38 @@ def _penalize_near_duplicates(
             item.model_copy(update={"score": max(0.0, item.score - penalty)}) if duplicate else item
         )
     return penalized
+
+
+def _asks_attention(item: RecalledBelief) -> bool:
+    """An attention-flagged hypothesis: source learned or an automatic sensitive capture."""
+
+    return (
+        item.review_reason in ATTENTION_REASONS and item.derivation is MemoryDerivation.HYPOTHESIS
+    )
+
+
+def _keep_owner_beliefs_ahead(
+    ranked: list[RecalledBelief], owner_matched: set[UUID]
+) -> list[RecalledBelief]:
+    """ADR-0249 (ii): a user belief matched at 0.5 or more outranks every
+    attention-flagged hypothesis.
+
+    The shipped weights keep that order at scoring, but fusion credits a
+    candidate for every arm that found it, so a hypothesis two arms found can
+    overtake a user belief one arm found. Each hypothesis ranked above the last
+    such user belief moves to just below it, keeping its order among them; every
+    other candidate keeps its relative order.
+    """
+
+    last = max(
+        (index for index, item in enumerate(ranked) if item.belief_id in owner_matched),
+        default=-1,
+    )
+    head = ranked[: last + 1]
+    lifted = [item for item in head if _asks_attention(item)]
+    if not lifted:
+        return ranked
+    return [item for item in head if not _asks_attention(item)] + lifted + ranked[last + 1 :]
 
 
 def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
@@ -1861,7 +1923,7 @@ def _line(item: RecalledItem, *, partners: frozenset[UUID] | None = None) -> str
         )
     # A partner is named the way a citation is, so the only identifier the
     # model ever sees for a belief is the eight-digit one it can cite back.
-    # ADR-0249: a marker is shown only beside a partner that is rendered too;
+    # ADR-0248: a marker is shown only beside a partner that is rendered too;
     # the spec's "return both" is honoured or the dispute is not shown as a
     # one-sided doubt. The item keeps every link for the trace and the browser.
     shown = (

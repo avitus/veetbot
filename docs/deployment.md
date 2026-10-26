@@ -1856,7 +1856,7 @@ latencies only. Without `--live-model` the answer is scripted, so the Used stage
 and answer correctness are not judged; with it the configured model answers and
 costs apply.
 
-### Conflict reconciliation (ADR-0249)
+### Conflict reconciliation (ADR-0248)
 
 `agent memory reconcile-conflicts` re-evaluates every live `conflicts_with`
 link under the predicate rule and reports the pairs it would unlink and the

@@ -20,7 +20,7 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:579-589). That surface is right for an
+(memory-formation-and-consolidation.md:582-592). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
@@ -286,7 +286,7 @@ type, portability and sensitivity, links `superseded_by` and the rejection's
 `replacement_id`, and records the receipt. The response, and its replay, is the
 replacement's `MemoryView`; the superseded belief stays readable.
 
-`confirm` (ADR-0249) carries no text and is allowed for a live, decay-retired
+`confirm` (ADR-0247) carries no text and is allowed for a live, decay-retired
 or expiry-retired belief. It supersedes the belief with the same words as a new
 belief at user authority through formation, citing a `memory.owner_confirmation`
 event, with no rejection recorded; the response, and its replay, is the
@@ -465,7 +465,7 @@ the device surface.
 - **Review and deletion (ADR-0117).** A "Needs review" filter asks for the
   review queue through the `flagged` parameter. A row can be swiped to delete,
   behind a confirmation, and the detail view carries a Review menu with Looks
-  right (the `dismiss` outcome), Still true (`confirm`, ADR-0249, also offered
+  right (the `dismiss` outcome), Still true (`confirm`, ADR-0247, also offered
   for a retired belief), Not true, Not relevant here, and Delete; a
   flagged belief also asks "Is this right?" with those three as buttons. On the
   Mac a group sidebar (Review, Browse by type, Maintenance) replaces the

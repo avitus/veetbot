@@ -120,9 +120,10 @@ that inherited the default X or shopping profile still lacks the portal.
    `offer_id`. The service takes the session admission lock and checks for an
    open offer that names this profile, with no active run in the chat. It then
    connects the chat under ADR-0172's selection rules, and admits one
-   continuation run. The run's seed is a platform-authored item: "The owner
-   connected <origin> to this chat. Continue their request from message
-   <sequence> using fresh browser evidence."
+   continuation run. The run's seed is a `user.message.created` event that
+   the app writes on the tap, with the fixed text "I connected <host> to this
+   chat. Please continue my earlier request." and an `origin` of kind
+   `browser_offer` that names the offer and its source message.
    - The owner's authenticated tap admits the run. It therefore records the
      principal actor, has interactive authority (ADR-0172), and carries the
      tap's scopes, like any owner message.

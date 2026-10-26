@@ -2680,7 +2680,7 @@ class PublicMemoryService:
         """
         require_scope(principal, "memory.write")
         changed = outcome is MemoryReviewOutcome.CHANGED
-        # ADR-0248: `confirm` also answers with a replacement, formed from the
+        # ADR-0247: `confirm` also answers with a replacement, formed from the
         # same words at user authority.
         supersedes = changed or outcome is MemoryReviewOutcome.CONFIRM
         if changed != (replacement_statement is not None):

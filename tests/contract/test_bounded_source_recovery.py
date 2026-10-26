@@ -150,6 +150,47 @@ async def test_recovered_detail_shares_the_original_context_budget_and_citation(
         )
 
 
+async def test_recovered_detail_keeps_a_conflict_marker_only_beside_its_partner() -> None:
+    """ADR-0248 rendering survives source recovery: re-rendering a selected
+    belief with its excerpt must not restore a `conflicts=[...]` marker naming
+    a partner the model was never shown."""
+
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.memory.retrieval import HybridMemoryRetriever
+
+    clock, factory, _, _ = await formation_stack()
+    sequence = await user_event(factory, "The workshop is on Thursday. Enter through Bay 6.")
+    unseen = UUID("abcdef12-0000-0000-0000-000000000990")
+    original = memory(statement="The workshop is on Thursday.").model_copy(
+        update={
+            "subject": "workshop",
+            "scope": "general",
+            "source_event_ids": [sequence],
+            "conflicts_with": [unseen],
+        }
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(original)
+    retriever = HybridMemoryRetriever(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=i) for i in range(8100, 8110)),
+        principal(),
+        source_recovery=BoundedSourceRecovery(principal(), admitted=lambda: True),
+    )
+    result = await retriever.recall(
+        recall_query(text="workshop", budget_tokens=2000).model_copy(
+            update={"current_scope": "general"}
+        ),
+        session_id=SESSION_ID,
+    )
+    assert "Enter through Bay 6" in result.rendered, "the recovery render must have run"
+    assert "m:abcdef12" not in result.rendered
+    # The link itself is kept for the trace and the browser.
+    assert isinstance(result.items[0], RecalledBelief)
+    assert result.items[0].conflict_with == [unseen]
+
+
 async def test_expansion_preserves_explicit_original_selection() -> None:
     _, factory, _, _ = await formation_stack()
     sequence = await user_event(factory, "The workshop is on Thursday. Enter through Bay 6.")

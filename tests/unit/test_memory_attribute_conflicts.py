@@ -18,12 +18,16 @@ from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
+    MemoryDerivation,
+    MemoryEdit,
+    MemoryLongevity,
     MemoryRecord,
     RecalledBelief,
     RecallQuery,
     Sensitivity,
 )
 from agent_core.memory.formation import GovernedMemoryService
+from agent_core.memory.predicates import predicate_key
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
 from tests.contract.support import PRINCIPAL_ID, SESSION_ID, TENANT, principal
 
@@ -31,6 +35,8 @@ ADDRESS = "Andy Vitus's home address is 12 Oak Lane, Los Altos Hills."
 OTHER_ADDRESS = "Andy Vitus's home address is 9 Pine Street, Palo Alto."
 SHIPPING = "Shipping address for Andy Vitus: 12 Oak Lane, Los Altos Hills."
 MOUTHPIECES = "Andy Vitus reported current mouthpieces to the band."
+HOME_CITY = "Andy Vitus lives in Palo Alto."
+TEA = "Andy Vitus likes green tea in the morning."
 
 
 async def _form(
@@ -110,6 +116,61 @@ async def test_different_values_for_one_attribute_still_conflict_and_flag_both()
     stored = await _get(factory, address.id)
     assert stored.conflicts_with == [other.id]
     assert stored.flagged_for_review is True
+
+
+async def test_formation_keys_a_belief_by_its_statement_not_a_stale_stored_key() -> None:
+    """The stored key is derived content: a row whose statement changed after
+    the key was written still names the attribute its words claim. Here the
+    stored key says `home_city` but the statement names no attribute, so the
+    owner restating it corroborates instead of forming a twin beside it."""
+
+    _clock, factory, service, _retriever = await formation_stack()
+    tea = await _form(factory, service, TEA, authority=MemoryAuthority.USER, explicit=True)
+    async with factory() as uow:
+        await uow.memories.reinforce(
+            tea.model_copy(
+                update={"predicate_key": predicate_key(HOME_CITY, BeliefType.FACT)}, deep=True
+            )
+        )
+
+    restated = await _form(factory, service, TEA, authority=MemoryAuthority.USER, explicit=True)
+
+    assert restated.id == tea.id
+    assert restated.corroboration_count == tea.corroboration_count + 1
+
+
+async def test_rewriting_a_statement_stores_the_key_of_its_new_words() -> None:
+    """An owner edit and a hypothesis promotion both rewrite a statement in
+    place; the stored key follows the words, so it never names an attribute the
+    belief no longer claims."""
+
+    _clock, factory, service, _retriever = await formation_stack()
+    city = await _form(factory, service, HOME_CITY, authority=MemoryAuthority.USER, explicit=True)
+    assert city.predicate_key == "home_city"
+    edited = await service.edit(city.id, MemoryEdit(statement=TEA))
+    assert edited.predicate_key == predicate_key(TEA, BeliefType.FACT)
+    assert (await _get(factory, city.id)).predicate_key == predicate_key(TEA, BeliefType.FACT)
+
+    guess = "Andy Vitus may move the studio to Lisbon next year."
+    settled = "Andy Vitus is moving the studio to Lisbon in March."
+    sequence = await user_event(factory, guess)
+    hypothesis = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement=guess,
+        subject="Andy Vitus",
+        scope="project-a",
+        belief_type=BeliefType.FACT,
+        source_event_ids=[sequence],
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+        derivation=MemoryDerivation.HYPOTHESIS,
+        longevity=MemoryLongevity.TENTATIVE,
+    )
+    promoted = await _form(factory, service, settled, authority=MemoryAuthority.USER, explicit=True)
+    assert promoted.id == hypothesis.id
+    assert promoted.statement == settled
+    assert promoted.predicate_key == predicate_key(settled, BeliefType.FACT)
 
 
 async def test_a_conflict_marker_is_rendered_only_beside_its_partner() -> None:

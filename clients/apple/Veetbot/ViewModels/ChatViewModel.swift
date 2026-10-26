@@ -1391,6 +1391,8 @@ public final class ChatViewModel: ObservableObject {
                     ? selectedBrowserProfileID : nil
             )
             connectedWebsiteProfileID = Self.websiteProfileID(session) ?? selectedBrowserProfileID
+            // The new message closes the previous offer on the server.
+            websiteOffer = nil
             runState.begin(runID: submit.runID, status: submit.status)
             removeSentAttachments(sentAttachments)
             do {
@@ -2635,7 +2637,8 @@ public final class ChatViewModel: ObservableObject {
             )
             guard selectedSessionID == sessionID else { return }
             connectedWebsiteProfileID = profileID
-            if offerID != nil { websiteOffer = nil }
+            // Any connection closes the chat's open offer on the server.
+            websiteOffer = nil
             var runID = resumed
             if runID == nil {
                 // A replay can omit the run already resumed by the first PUT.

@@ -1,4 +1,4 @@
-"""Predicate keys: which attribute of a subject a statement claims (ADR-0249).
+"""Predicate keys: which attribute of a subject a statement claims (ADR-0248).
 
 Formation used to select conflict partners by ``(subject, belief_type)``, so
 every lower-authority statement about "Andy Vitus" conflicted with the owner's

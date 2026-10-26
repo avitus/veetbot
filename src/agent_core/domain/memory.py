@@ -141,7 +141,7 @@ def review_reason(record: MemoryRecord) -> ReviewReason | None:
 
 
 def decay_eligible_lifecycle(record: MemoryRecord, min_unused_deliveries: int) -> bool:
-    """Whether a belief's lifecycle class admits automatic decay (ADR-0249).
+    """Whether a belief's lifecycle class admits automatic decay (ADR-0247).
 
     A user-authority belief and an affirmed direct belief are outside automatic
     decay: review or supersession corrects them. An inferred direct durable
@@ -167,7 +167,7 @@ def decay_eligible_lifecycle(record: MemoryRecord, min_unused_deliveries: int) -
 
 
 class MemoryReviewOutcome(StrEnum):
-    """What the owner decided about a belief (ADR-0117, ADR-0224, ADR-0249).
+    """What the owner decided about a belief (ADR-0117, ADR-0224, ADR-0247).
 
     ``dismiss`` clears the flag and changes nothing else; ``untrue`` and
     ``not_here`` are the existing rejection kinds of the same name. ``changed``
@@ -745,7 +745,7 @@ class MemoryRecord(BaseModel):
     valid_to: datetime | None = None
     superseded_by: UUID | None = None
     conflicts_with: list[UUID] = Field(default_factory=list)
-    # ADR-0249: which attribute of the subject this statement claims; derived
+    # ADR-0248: which attribute of the subject this statement claims; derived
     # from the statement at formation and at read time for legacy rows.
     predicate_key: str | None = Field(default=None, max_length=512)
     # ADR-0250: the website a learned belief came from; provenance beside the
@@ -913,7 +913,7 @@ class SourceReshape(BaseModel):
 
 
 class ConflictReconciliation(BaseModel):
-    """What a `reconcile-conflicts` pass examined and, unless a dry run, changed (ADR-0249)."""
+    """What a `reconcile-conflicts` pass examined and, unless a dry run, changed (ADR-0248)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

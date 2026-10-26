@@ -1292,7 +1292,7 @@ def memory_review(
             help=(
                 "dismiss clears the flag; untrue retires; not_here localizes; "
                 "changed supersedes with --replacement; confirm supersedes with "
-                "the same words as the owner's own statement (ADR-0249)."
+                "the same words as the owner's own statement (ADR-0247)."
             ),
         ),
     ],
@@ -1301,7 +1301,7 @@ def memory_review(
         typer.Option("--replacement", help="The corrected wording; only with changed."),
     ] = None,
 ) -> None:
-    """Apply one review outcome to a belief (ADR-0117, ADR-0224, ADR-0249)."""
+    """Apply one review outcome to a belief (ADR-0117, ADR-0224, ADR-0247)."""
 
     if (outcome is MemoryReviewOutcome.CHANGED) != (replacement is not None):
         raise typer.BadParameter(
@@ -1370,7 +1370,7 @@ def memory_reconcile_conflicts(
         ),
     ] = False,
 ) -> None:
-    """Re-evaluate every live conflict link under the predicate rule (ADR-0249).
+    """Re-evaluate every live conflict link under the predicate rule (ADR-0248).
 
     Pairs that are not two values of one attribute are unlinked on both sides,
     each with a memory.conflict_cleared event; a belief left with no link and

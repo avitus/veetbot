@@ -43,7 +43,7 @@ def test_memory_review_takes_one_outcome_and_prints_the_reviewed_belief(
     )
     assert changed.exit_code == 0, changed.output
     assert seen[-1] == (belief.id, "changed", "New.")
-    # ADR-0248: confirm carries no text and reaches the same governed write.
+    # ADR-0247: confirm carries no text and reaches the same governed write.
     confirmed = runner.invoke(app, ["memory", "review", str(belief.id), "--outcome", "confirm"])
     assert confirmed.exit_code == 0, confirmed.output
     assert seen[-1][:2] == (belief.id, "confirm") and seen[-1][2] is None

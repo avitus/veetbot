@@ -1119,7 +1119,7 @@ class PostgresMemoryStore:
                 )
             )
         if min_unused_deliveries is not None:
-            # decay_eligible_lifecycle (ADR-0249), in SQL so a bounded page is
+            # decay_eligible_lifecycle (ADR-0247), in SQL so a bounded page is
             # not filled with rows the sweep would skip.
             predicates.append(MemoryRow.authority != MemoryAuthority.USER.value)
             predicates.append(

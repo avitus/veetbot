@@ -152,6 +152,50 @@ def test_ordering_invariant_under_the_shipped_profile(
     assert user.score - same_match.score >= 0.10 - 1e-9
 
 
+@pytest.mark.parametrize("hypothesis_confidence", [0.2, 0.55])
+async def test_a_half_matched_user_belief_outranks_a_hypothesis_through_fusion(
+    hypothesis_confidence: float,
+) -> None:
+    """(ii) holds on what recall returns, not only on `_score`. Fusion credits a
+    candidate for every arm that found it, so a hypothesis the structured and
+    the lexical arm both found must still trail a user belief only half the
+    query's terms found, under the shipped profile."""
+
+    clock, factory = await memory_uow_factory()
+    stated = memory(belief_id=901, statement="User prefers concise replies").model_copy(
+        update={"subject": "writing"}
+    )
+    learned = _learned(902, confidence=hypothesis_confidence)
+    async with factory() as uow:
+        for record in (stated, learned):
+            await uow.memories.upsert_belief(
+                record.model_copy(update={"store_position": await uow.memories.next_position()})
+            )
+    query = RecallQuery(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL_ID,
+        current_scope="project-a",
+        text="concise answers",
+        subjects=[learned.subject],
+        budget_tokens=4000,
+        max_items=6,
+        min_score=0.0,
+    )
+    user = _score(stated, query)
+    hypothesis = _score(learned, query)
+    assert user is not None and hypothesis is not None
+    # The user belief leads before fusion, on one arm against two.
+    assert user.score > hypothesis.score
+    assert user.arms == ["lexical"] and hypothesis.arms == ["structured", "lexical"]
+
+    retriever = HybridMemoryRetriever(
+        factory, clock, RandomIdFactory(), principal(), profile=RetrievalProfile()
+    )
+    result = await retriever.recall(query, session_id=SESSION_ID, turn_id=UUID(int=91))
+    order = [item.belief_id for item in result.items if isinstance(item, RecalledBelief)]
+    assert order.index(stated.id) < order.index(learned.id), order
+
+
 async def test_attention_flagged_hypotheses_fill_at_most_a_third_of_the_slots() -> None:
     clock, factory = await memory_uow_factory()
     async with factory() as uow:

@@ -21,18 +21,18 @@ not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
 scenarios (memory-retrieval-and-ranking.md:898), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:852-854).
+recall of consequential facts (memory-formation-and-consolidation.md:855-857).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
-(memory-formation-and-consolidation.md:349-351), usage that resets decay and raises
+(memory-formation-and-consolidation.md:352-354), usage that resets decay and raises
 utility without ever raising confidence (memory-retrieval-and-ranking.md:940-943),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
 resolved at read time (memory-retrieval-and-ranking.md:935), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:879) are
+that is opt-in per principal (memory-formation-and-consolidation.md:882) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -765,7 +765,7 @@ next turn would report a change nobody made — while a retirement is exactly th
 change the correction lines below select on. Explicit user statements are
 `ACTIVE` at high confidence and are never eligible.
 
-**Lifecycle classes (ADR-0249).** Idleness alone does not retire an owner's
+**Lifecycle classes (ADR-0247).** Idleness alone does not retire an owner's
 words. A user-authority belief and an affirmed direct belief are outside
 automatic decay in any status; review or supersession corrects them. An
 inferred direct durable belief, an owner statement formation captured on its
@@ -1006,7 +1006,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:879), so it is a command and it demands
+(memory-formation-and-consolidation.md:882), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the
@@ -1179,7 +1179,7 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     provisional belief that was delivered to the model and never cited loses
     confidence and one below the floor is retired with its validity closed,
     while an active user-stated belief, an affirmed direct belief, a belief
-    never delivered and a recently reinforced belief are untouched (ADR-0249:
+    never delivered and a recently reinforced belief are untouched (ADR-0247:
     unseen is not unused). Registered as `gate.memory.decay_lifecycle`, case.
     **M16.**
 13. **Citing a belief counts as use and never raises confidence.** A belief

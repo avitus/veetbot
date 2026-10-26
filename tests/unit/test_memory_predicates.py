@@ -1,4 +1,4 @@
-"""The closed predicate-key set (ADR-0249): which attribute a statement claims."""
+"""The closed predicate-key set (ADR-0248): which attribute a statement claims."""
 
 from __future__ import annotations
 

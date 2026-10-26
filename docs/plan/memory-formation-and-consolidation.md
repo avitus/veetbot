@@ -285,13 +285,16 @@ replay. The rule and what a
 conflict then commits are stated in
 [memory-evaluation-and-lifecycle.md:973-998](memory-evaluation-and-lifecycle.md:973-998).
 
-**Only the same attribute can disagree (ADR-0249).** Related beliefs are the
+**Only the same attribute can disagree (ADR-0248).** Related beliefs are the
 live beliefs with the same subject, type and **predicate key**: a closed key
 derived from the statement (`home_address`, `home_city`, `phone`, `email`,
 `employer`, `job_title:<org>`, `birthday`, `relationship:<role>`), falling
 back to the normalized statement itself and never to the bare subject;
 preferences are not keyed. The key is stored on new beliefs
-(`memories.predicate_key`) and derived at read time for older rows. Within one
+(`memories.predicate_key`) and recomputed when an edit or a promotion rewrites
+the statement, but formation derives it from the statement whenever it
+compares beliefs, so a stale or missing stored key never decides a relation.
+Within one
 attribute the rules above apply; the same attribute with the same value is a
 restatement and reinforces, whatever the wording; a recognised attribute is
 independent of a different attribute and of any claim that names none, and
@@ -385,7 +388,7 @@ guesses — the three answers are three different writes:
 | Not true | Retire the belief: `valid_to = now`, status `superseded`, no replacement. |
 | Was true, has changed | Supersede it with the correction as a new belief at user authority. |
 | True elsewhere, not here | Lower `portability` and record a negative scope override. The belief survives in its origin; it stops being carried here. |
-| Still true (confirm, ADR-0249) | Supersede it with the same words as a new belief at user authority, citing a `memory.owner_confirmation` event; no rejection is recorded. Allowed for a live belief and for one decay or expiry retired. |
+| Still true (confirm, ADR-0247) | Supersede it with the same words as a new belief at user authority, citing a `memory.owner_confirmation` event; no rejection is recorded. Allowed for a live belief and for one decay or expiry retired. |
 | *(unspecified)* | Flag for review and down-weight. Never retire on an ambiguous signal. |
 
 A rejection is **evidence at the highest authority** — a direct user statement, which
@@ -406,7 +409,7 @@ That matching cannot be by belief id, because re-derivation mints new ids. A
 matching is by content similarity on the same comparison the resolver already uses for
 duplicates. A belief that a user has rejected does not come back with a new id.
 
-**"Still true" is the governed restore path (ADR-0249).** The owner saying a
+**"Still true" is the governed restore path (ADR-0247).** The owner saying a
 belief is right is a new explicit statement, so `confirm` enters through
 formation like any other: one unit of work appends `memory.owner_confirmation`,
 supersedes the predecessor (`superseded`, `valid_to`, `superseded_by`) without a

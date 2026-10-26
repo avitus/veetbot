@@ -1942,6 +1942,8 @@ import UserNotifications
                 return (200, "{\"run_id\":\"\(runID.uuidString)\"}", [:])
             case ("GET", "/v1/runs/\(runID.uuidString)/events"):
                 return (200, "", ["Content-Type": "text/event-stream"])
+            case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return (202, "{\"run_id\":\"\(runID.uuidString)\",\"status\":\"QUEUED\"}", [:])
             case ("GET", "/v1/runs/\(sourceRunID.uuidString)"):
                 return (200, sourceRunBody, [:])
             case ("GET", "/v1/runs/\(sourceRunID.uuidString)/events"):
@@ -1959,7 +1961,8 @@ import UserNotifications
         for _ in 0..<5_000 where server.sourceReplays == 0 {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
-        for _ in 0..<200 where model.websiteOffer == nil {
+        guard server.offered else { return }
+        for _ in 0..<5_000 where model.websiteOffer == nil {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
     }
@@ -2094,6 +2097,32 @@ import UserNotifications
         #expect(body["offer_id"] == nil)
         #expect(model.selectedBrowserProfileID == nil)
         #expect(model.connectedWebsiteProfileID == server.profileID)
+    }
+
+    @Test
+    func testAPlainConnectionClearsTheOffer() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        await model.refreshBrowserProfiles()
+        #expect(model.websiteOffer != nil)
+
+        await model.connectWebsiteToSelectedChat(server.profileID)
+
+        // The server closes every open offer on any connection.
+        #expect(server.connections.count == 1)
+        #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testANewMessageClearsTheOffer() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        #expect(model.websiteOffer != nil)
+
+        #expect(await model.send("What is the weather tomorrow?") == true)
+
+        // The server closes the offer when it records the new message.
+        #expect(model.websiteOffer == nil)
     }
 
     @Test

@@ -2279,7 +2279,7 @@ def _resource_restatement_key(statement: str) -> str | None:
 
 
 def _attribute_conflict(first: MemoryRecord, second: MemoryRecord) -> bool:
-    """Whether a live `conflicts_with` link is a real dispute (ADR-0249).
+    """Whether a live `conflicts_with` link is a real dispute (ADR-0248).
 
     Two recognised claims conflict only within one attribute and with different
     values. Two unrecognised claims keep the legacy judgement unless they are
@@ -2335,7 +2335,7 @@ class DeterministicConflictResolver:
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
-        # ADR-0249: the same attribute with the same value is a restatement,
+        # ADR-0248: the same attribute with the same value is a restatement,
         # whatever the wording; a recognised attribute cannot disagree with a
         # different one, nor with a claim that names no attribute.
         existing_claim = predicate_claim(existing.statement, existing.belief_type)
@@ -2675,16 +2675,17 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
-            # ADR-0249: a recognised attribute can agree or disagree only with
+            # ADR-0248: a recognised attribute can agree or disagree only with
             # the same attribute; two unrecognised claims keep the subject rule.
-            # Legacy rows without a stored key are keyed from their statement.
+            # The key is derived from the statement on every read, as the
+            # resolver and the reconciliation derive it: a stored key goes stale
+            # when an edit or a promotion rewrites the statement.
             incoming_claim = predicate_claim(clean_statement, belief_type)
             related = [
                 current
                 for current in related
                 if comparable_keys(
-                    incoming_claim,
-                    current.predicate_key or predicate_key(current.statement, current.belief_type),
+                    incoming_claim, predicate_key(current.statement, current.belief_type)
                 )
             ]
             if (
@@ -2803,6 +2804,7 @@ class GovernedMemoryService:
                 promoted = promotable.model_copy(
                     update={
                         "statement": clean_statement,
+                        "predicate_key": predicate_key(clean_statement, belief_type),
                         "source_event_ids": all_sources,
                         "corroboration_count": promotable.corroboration_count + 1,
                         "claim_kind": effective_claim_kind,
@@ -4123,6 +4125,7 @@ class GovernedMemoryService:
             updated = current.model_copy(
                 update={
                     "statement": edit.statement,
+                    "predicate_key": predicate_key(edit.statement, current.belief_type),
                     "sensitivity": edit.sensitivity or current.sensitivity,
                     "portability": edit.portability or current.portability,
                     "scope": edit.scope or current.scope,
@@ -4217,7 +4220,7 @@ class GovernedMemoryService:
         return await self.acknowledge_review(belief_id, existing_uow=existing_uow)
 
     async def reconcile_conflicts(self, *, confirm: bool) -> ConflictReconciliation:
-        """Re-evaluate every live conflict link under the predicate rule (ADR-0249).
+        """Re-evaluate every live conflict link under the predicate rule (ADR-0248).
 
         A link survives only between two claims about the same attribute with
         different values. Every other pair is unlinked on both sides, with one
@@ -4353,7 +4356,7 @@ class GovernedMemoryService:
     async def confirm(
         self, belief_id: UUID, *, existing_uow: RepositoryUnitOfWork | None = None
     ) -> MemoryRecord:
-        """Supersede a belief with the owner's own statement of it (ADR-0249).
+        """Supersede a belief with the owner's own statement of it (ADR-0247).
 
         The governed restore path: the owner saying "this is right" is a new
         explicit statement, so it enters through formation at user authority
@@ -4441,6 +4444,26 @@ class GovernedMemoryService:
             record_audit=True,
             existing_uow=uow,
         )
+        if replacement.authority is not MemoryAuthority.USER or replacement.expires_at is not None:
+            # Formation reinforces a live belief with the same words instead of
+            # forming a twin, and reinforcement keeps that belief's authority
+            # and expiry. It now rests on the owner's confirmation, so it takes
+            # the confirmation's lifecycle class (ADR-0247).
+            replacement = await uow.memories.reinforce(
+                replacement.model_copy(
+                    update={
+                        "authority": MemoryAuthority.USER,
+                        "status": MemoryStatus.ACTIVE,
+                        "derivation": MemoryDerivation.DIRECT,
+                        "longevity": MemoryLongevity.DURABLE,
+                        "expires_at": None,
+                        "store_position": await uow.memories.next_position(),
+                        "updated_at": now,
+                    },
+                    deep=True,
+                )
+            )
+            await self._append_event(uow, source_session, None, "memory.promoted", replacement)
         await uow.memories.reinforce(
             stored.model_copy(update={"superseded_by": replacement.id}, deep=True)
         )
@@ -4802,7 +4825,7 @@ class GovernedMemoryService:
 
     def _decays(self, record: MemoryRecord, instant: datetime, interval: timedelta) -> bool:
         """Whether this belief is idle, uncertain, unwritten long enough, and of
-        a lifecycle class that automatic decay may touch (ADR-0249)."""
+        a lifecycle class that automatic decay may touch (ADR-0247)."""
 
         if (
             record.lifecycle_policy_version == "people-lifecycle@1"

@@ -374,15 +374,15 @@ class SourceLearningService:
                     return {"status": "unchanged", "belief_id": str(saved.id)}
                 if target.id != saved.id:
                     raise ConflictError("source claim already belongs to another belief")
-        prior = await self._receipt(uow, principal, None, identity)
+        prior = await self._newest_receipt(uow, principal, identity)
         if prior is not None:
             saved = await self._lineage(uow, principal, UUID(str(prior.payload["belief_id"])))
             if saved is not None:
                 await self._validate_supports(uow, saved, context)
                 return {"status": "unchanged", "belief_id": str(saved.id)}
             # The earlier belief expired: a fresh read may learn the claim
-            # again, under a receipt chained to the one it follows.
-            receipt_key = f"{VERSION}:{identity}:{prior.sequence}"
+            # again, under a receipt chained to the newest one it follows.
+            receipt_key = f"{VERSION}:{identity}:{prior.id}"
         if sum(event.event_type == "memory.source_learned" for event in events) >= 32:
             raise SourceLearningRejectionError(
                 "observation_limit_reached",
@@ -482,6 +482,22 @@ class SourceLearningService:
             found = await uow.events.get_by_derivation(key, principal)
             if found is not None:
                 return found
+        return None
+
+    async def _newest_receipt(
+        self, uow: RepositoryUnitOfWork, principal: Principal, identity: str
+    ) -> EventEnvelope | None:
+        """The last receipt in a host's chain for a claim. Each relearn keys its
+        receipt by the event ID of the receipt it follows, which is unique across
+        sessions where a session-local sequence is not."""
+        found = await self._receipt(uow, principal, None, identity)
+        while found is not None:
+            following = await uow.events.get_by_derivation(
+                f"{VERSION}:{identity}:{found.id}", principal
+            )
+            if following is None:
+                return found
+            found = following
         return None
 
     async def _lineage(
@@ -598,8 +614,15 @@ class SourceLearningService:
                         },
                     )
                 )
-                events = await uow.events.list_after(current.source_session_id, 0, principal)
-                sources = [e for e in events if e.sequence in set(current.source_event_ids)]
+                # Read each cited source event, never the whole source session.
+                sources = [
+                    event
+                    for sequence in current.source_event_ids
+                    for event in await uow.events.list_after(
+                        current.source_session_id, sequence - 1, principal, limit=1
+                    )
+                    if event.sequence == sequence
+                ]
                 identity = hashlib.sha256(
                     (
                         principal.tenant_id
@@ -666,8 +689,23 @@ class SourceLearningService:
                     expected_revision=0,
                 )
         link_id = uuid5(belief.id, identity)
-        if await uow.people.get(principal, link_id, ceiling=Sensitivity.RESTRICTED) is not None:
-            return  # The same belief learned from the same site again: linked already.
+        existing = await uow.people.get(principal, link_id, ceiling=Sensitivity.RESTRICTED)
+        if existing is not None:
+            # The same belief linked from the same site again keeps every
+            # supporting event, so erasing any of them still reaches the belief.
+            merged = list(dict.fromkeys([*existing.support_ids, *support]))
+            if merged != existing.support_ids:
+                await uow.people.put(
+                    existing.model_copy(
+                        update={
+                            "support_ids": merged,
+                            "revision": existing.revision + 1,
+                            "updated_at": max(now, existing.updated_at + timedelta(microseconds=1)),
+                        }
+                    ),
+                    expected_revision=existing.revision,
+                )
+            return
         await uow.people.put(
             SourceMemoryLink(
                 id=link_id,

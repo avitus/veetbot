@@ -222,6 +222,52 @@ async def test_confirm_restores_a_decay_retired_belief_and_the_replacement_never
     assert (await _get(factory, restored.id)).confidence == pytest.approx(0.9)
 
 
+async def test_confirm_lifts_a_live_duplicate_to_user_authority() -> None:
+    """Decay retired a belief; automatic capture later formed the same words
+    again at inferred authority with an expiry. Confirming the retired belief
+    meets that duplicate in formation, which reinforces it rather than forming
+    a twin, and the reinforced row is then the owner's statement: user
+    authority, active, direct, durable, no automatic expiry, never decayed."""
+
+    clock, factory, service, _retriever = await formation_stack()
+    statement = "Remove Galileo from the tracked companies."
+    retired = await _form(factory, service, statement, subject="tracked", confidence=0.2)
+    await _set(factory, retired, **_delivered(3, 0))
+    clock.advance(timedelta(days=31))
+    assert (await service.decay()).retired == 1
+    sequence = await user_event(factory, statement)
+    recaptured = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement=statement,
+        subject="tracked",
+        scope="project-a",
+        belief_type=BeliefType.FACT,
+        source_event_ids=[sequence],
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+        longevity=MemoryLongevity.ONGOING,
+    )
+    assert recaptured.id != retired.id
+    assert recaptured.expires_at is not None
+
+    restored = await service.review(retired.id, MemoryReviewOutcome.CONFIRM)
+
+    assert restored.id == recaptured.id
+    assert restored.authority is MemoryAuthority.USER
+    assert restored.status is MemoryStatus.ACTIVE
+    assert restored.derivation is MemoryDerivation.DIRECT
+    assert restored.longevity is MemoryLongevity.DURABLE
+    assert restored.expires_at is None
+    assert await _get(factory, restored.id) == restored
+    assert (await _get(factory, retired.id)).superseded_by == restored.id
+
+    await _set(factory, restored, **_delivered(50, 0))
+    clock.advance(timedelta(days=400))
+    assert (await service.decay()).model_dump() == {"decayed": 0, "retired": 0}
+    assert (await _get(factory, restored.id)).status is MemoryStatus.ACTIVE
+
+
 async def test_confirm_refuses_tombstones_corrections_and_replacement_text() -> None:
     clock, factory, service, _retriever = await formation_stack()
     deleted = await _form(factory, service, "The office is in Palo Alto.", subject="office")

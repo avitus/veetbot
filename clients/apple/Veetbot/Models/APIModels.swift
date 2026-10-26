@@ -937,7 +937,7 @@ public enum MemorySensitivityKind: String, Codable, CaseIterable, Sendable {
 /// below, so a value this client does not yet know about decodes instead of
 /// throwing (ADR-0049 decision 4).
 /// What the owner decided about a belief flagged for review (ADR-0117).
-/// `confirm` (ADR-0248) keeps the same words as the owner's own statement: the
+/// `confirm` (ADR-0247) keeps the same words as the owner's own statement: the
 /// server answers with a replacement at user authority that never decays.
 public enum MemoryReviewOutcome: String, Codable, CaseIterable, Sendable {
     case dismiss
