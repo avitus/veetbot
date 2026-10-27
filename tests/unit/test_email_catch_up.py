@@ -596,3 +596,56 @@ async def test_catch_up_progress_reports_cutoff_and_oldest_inbox_mail_reached(
     assert datetime.fromisoformat(item["catch_up_since"]) == cutoff
     reached = datetime.fromisoformat(item["inbox_reached_at"])
     assert reached == (earlier if restart == "none" else NOW - timedelta(days=40))
+
+
+@pytest.mark.parametrize(
+    ("age_days", "spent", "scope"),
+    [(10, "250", "full"), (10, "350", "new_mail"), (0, "35", "new_mail")],
+)
+async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
+    age_days: int, spent: str, scope: str
+) -> None:
+    """Above 75% of either ceiling, a refresh reads only new mail (ADR-0256)."""
+    inbox = {f"inbox-{index}": NOW - timedelta(days=10 + index) for index in range(8)}
+    changes = [f"change-{index}" for index in range(6)]
+    factory, reads = await _catching_up_mailbox(inbox, changes)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=FixedClock(NOW),
+        mcp_client_factory=factory,
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+    ) as app:
+        service = app.services.email
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("40"), monthly_cost=Decimal("400")
+        )
+        created = NOW - timedelta(days=age_days)
+        earlier = EmailTask(
+            id=uuid4(),
+            run_id=uuid4(),
+            session_id=uuid4(),
+            kind="refresh",
+            account_ids=["default"],
+            created_at=created,
+            reservation=Decimal("1"),
+            settled_cost=Decimal(spent),
+        )
+        assert earlier.scope == "full"
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email, app.principal, "task", str(earlier.run_id), earlier, created
+            )
+        operation = await service.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        task = await service.get_task(app.principal, operation.run_id)
+        async with app.uow_factory() as uow:
+            sync = await uow.email.get(app.principal, "sync", "default")
+    assert task is not None and sync is not None
+    assert task.scope == scope
+    if scope == "full":
+        assert reads[:4] == changes[::-1][:4]
+        assert any(item.startswith("inbox-") for item in reads)
+        assert {"history-0", "history-1"} <= set(reads)
+    else:
+        assert reads == changes[::-1]
+        assert sync.payload["change_pending"] == []

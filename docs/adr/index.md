@@ -299,3 +299,4 @@ implementation without one.
 - [ADR-0252: Exact-commit signing for the isolated dreaming release](0252-dreaming-release-signing.md)
 - [ADR-0253: A configured tool past the token cap is deferred, not fatal](0253-configured-tools-past-the-token-cap.md)
 - [ADR-0254: Cockpit feeds refresh every minute to every day, and on entry (Accepted)](0254-cockpit-feed-intervals-and-refresh-on-entry.md)
+- [ADR-0256: New mail keeps a reserved share of the Email budget (Accepted)](0256-new-mail-keeps-a-reserved-email-budget-share.md)

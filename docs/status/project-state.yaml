@@ -14,6 +14,10 @@
 # by itself, and an offer expires at the next owner message or after 24 hours.
 # Implemented 2026-10-25 with server, native and spec tests; delivery is
 # pending. No milestone, gate or policy profile moves.
+# ADR-0256: Owner asked on 2026-10-26 that new mail keep working when the Email
+# budget runs low: background learning stops at 75% of each ceiling and new
+# mail keeps the rest. Implemented with focused tests; delivery is pending.
+# No milestone or gate moves.
 schema_version: 1
 
 project:
