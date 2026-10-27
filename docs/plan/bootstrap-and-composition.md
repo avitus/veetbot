@@ -541,7 +541,7 @@ model identifier.
 [sandbox-isolation.md](sandbox-isolation.md) as a production adapter in the
 sense the plan uses for the in-memory repositories, a real implementation of
 the port that runs the contract suite unchanged
-(`sandbox-isolation.md:1309`), and it is what lets the whole system be
+(`sandbox-isolation.md:1314`), and it is what lets the whole system be
 exercised without a hypervisor. Startup check 4 below refuses it in
 production beside `docker`.
 
@@ -632,7 +632,7 @@ checks run there, before any adapter exists:
 4.  `deployment_mode == "production"` implies `sandbox` is neither `docker`
     nor `fake`. ADR-0008: "Production startup must refuse to run untrusted
     code under the development fallback." `fake` is behind the same check
-    because it executes nothing (`sandbox-isolation.md:1662`), and a
+    because it executes nothing (`sandbox-isolation.md:1667`), and a
     mechanism that executes nothing isolates less than the fallback this
     rule was written for.
 5.  `config_dir`, if set, exists and contains only files that mirror a shipped

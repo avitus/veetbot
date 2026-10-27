@@ -1147,6 +1147,11 @@ says sandbox output is, and fetching it back returns it inside its
 envelope with its label intact — the guarantee
 [tool-system.md](tool-system.md) already makes for elided untrusted
 spans, applied to the same bytes arriving by a different route.
+ADR-0261 proposes the first model-callable route of that kind, which is not
+yet implemented. `artifact.read_capture` would return sections of a chat's own
+`EXTERNAL_UNTRUSTED` `TOOL_OUTPUT` captures. Admission would mark each capture
+in the row's metadata, so a tool's own `TOOL_OUTPUT` file, such as a chart,
+never opens through it.
 
 `filename` is metadata and never a path. It is what a download is
 named and it is sanitized on the way out, not on the way in, because

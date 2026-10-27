@@ -120,7 +120,7 @@ Two separate defects produced that experience.
   2026-10-27, for the injection reason above.
 - **Let the model read a long capture in sections.** Not part of this change.
   It would let a large filing be read rather than excerpted, but it is a new
-  tool capability that needs its own design.
+  tool capability that needs its own design. ADR-0261 proposes it.
 
 ## Validation
 

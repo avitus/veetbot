@@ -181,7 +181,12 @@ output limit, and `web.search` drops trailing results until its rendered
 output fits the declared acquisition limit. The tool pipeline then applies
 its separate inline admission ceiling: large pages become a persisted excerpt
 and an owner-readable artifact containing the acquired result. The acquisition
-limit is unchanged; the excerpt does not replace the full capture. Redirect following is disabled for provider API calls so a bearer
+limit is unchanged; the excerpt does not replace the full capture.
+ADR-0261 (proposed, not yet implemented) would let the model read that capture
+in 16 KiB sections, or search it, with `artifact.read_capture`. Each section
+would stay `EXTERNAL_UNTRUSTED`, and the page would not be fetched again
+([tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)).
+Redirect following is disabled for provider API calls so a bearer
 credential cannot be forwarded to another host.
 
 Search has a 30-second total tool deadline. Fetch has a 60-second total tool

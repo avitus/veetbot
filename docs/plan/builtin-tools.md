@@ -178,6 +178,10 @@ cockpit.feed.publish          capability  cockpit
 
 Fifty-one model-callable builtin tools in total: the original roster of
 eight, the forty-one above, and the two media-generation tools in ADR-0140.
+ADR-0261 proposes a fifty-second, `artifact.read_capture`, which is not yet
+implemented. [tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
+would declare and classify it, and it would register whenever the composition
+root has an artifact store.
 Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
