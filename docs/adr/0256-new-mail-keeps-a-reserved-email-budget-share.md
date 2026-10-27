@@ -49,7 +49,8 @@ when nothing has arrived.
 ## Consequences
 
 When historical learning nears its share, new mail is still read and ranked,
-and catch-up resumes on its own once spending falls back under the share. New
+and catch-up resumes on its own once a refresh again passes the 75% admission
+check, counted spending and live reservations included. New
 mail can use the whole allowance, because its spending counts toward the share
 as well. The share is a fixed fraction of the operator's ceilings, so raising
 or lowering a ceiling moves both parts. Email mode does not yet say that

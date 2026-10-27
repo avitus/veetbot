@@ -400,7 +400,9 @@ newer messages cannot be read. Expired Inbox bodies, automatic drafts and unsubs
 verification proceed as usual. The first page of an Inbox pass is also read;
 it holds the newest mail, so a resynchronization still recovers new mail. Later
 catch-up pages, the ninety-day history pass, other non-Inbox assessment and
-correspondence summaries wait until spending falls back under the share. Owner-requested drafts and People imports use the full ceilings.
+correspondence summaries wait until a refresh again passes the 75% admission
+check, counted spending and live reservations included. Owner-requested drafts
+and People imports use the full ceilings.
 Each refresh task records its admitted `scope`, `full` or `new_mail`; earlier
 tasks read as `full`.
 
