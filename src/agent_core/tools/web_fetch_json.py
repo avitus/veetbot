@@ -98,10 +98,14 @@ def _document(content: str) -> Any:
     """
 
     text = content.strip()
-    if text.startswith("```"):
+    fence = len(text) - len(text.lstrip("`"))
+    if fence >= 3:
         first, _, rest = text.partition("\n")
-        if rest.rstrip().endswith("```") and first.strip("`").strip().casefold() in {"", "json"}:
-            text = rest.rstrip()[:-3]
+        body = rest.rstrip()
+        # A closing fence is at least as long as the opening one.
+        closing = len(body) - len(body.rstrip("`"))
+        if closing >= fence and first[fence:].strip().casefold() in {"", "json"}:
+            text = body[:-closing]
     try:
         return _well_formed(json.loads(text, parse_constant=_non_finite, parse_float=_finite))
     except RecursionError as error:
