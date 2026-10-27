@@ -1,4 +1,4 @@
-# ADR-0255: Fewer browser approvals in owner research
+# ADR-0258: Fewer browser approvals in owner research
 
 - Status: Proposed. The owner authorized implementation of decisions 1 to 4 on
   2026-10-25; acceptance follows the production check in Validation. A fifth

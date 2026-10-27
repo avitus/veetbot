@@ -1282,7 +1282,7 @@ waiting to be discovered. Responses carry `action_summary`, `tool_name`,
 for `browser.act` the optional `task_grant_offer`, `task_grant_id`, and
 `task_grant_not_covered` (ADR-0129); they do not carry the rule that fired.
 The stored record also keeps `research_not_covered`, the closed reason that
-research authorization refused the action (ADR-0255), which responses omit.
+research authorization refused the action (ADR-0258), which responses omit.
 
 `arguments` is a redacted view, not the action: a value under a sensitive key or
 matching a credential shape becomes `[REDACTED]`, and a string over 512

@@ -1,4 +1,4 @@
-"""Which same-origin external SVG ``<use>`` copies are inert (ADR-0255).
+"""Which same-origin external SVG ``<use>`` copies are inert (ADR-0258).
 
 Page script cannot see the copy an external ``<use>`` reference renders, so
 ADR-0129 treats its element as reaching a target outside every origin.

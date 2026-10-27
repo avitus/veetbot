@@ -196,7 +196,7 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
     )
     assert result.allowed is (problem in {None, "scheduler", "dated_post_link", "typed_text"})
     if not result.allowed:
-        # ADR-0255: each refusal names its closed, content-free reason.
+        # ADR-0258: each refusal names its closed, content-free reason.
         assert problem is not None
         assert result.authorization_kind == "browser_research"
         assert result.reason_code == f"browser.research.{REFUSAL_REASONS[problem]}"

@@ -117,7 +117,7 @@ def test_owner_words_and_outside_content_span_the_whole_conversation() -> None:
 
 
 def test_an_answered_question_or_a_file_export_leaves_the_turn_browser_only() -> None:
-    """ADR-0255: the platform's sign-in resumption, the owner's own answer and
+    """ADR-0258: the platform's sign-in resumption, the owner's own answer and
     a file export bring nothing into the turn a page could be typed from."""
     facts = _active_turn_facts(
         checkpoint(
@@ -138,7 +138,7 @@ def test_an_answered_question_or_a_file_export_leaves_the_turn_browser_only() ->
 
 
 def test_a_pending_or_untrusted_answer_still_counts() -> None:
-    """ADR-0255: only an answer from the owner or the platform is exempt."""
+    """ADR-0258: only an answer from the owner or the platform is exempt."""
     pending = _active_turn_facts(
         checkpoint(
             user("Look up my records."),

@@ -238,7 +238,7 @@ def test_inflected_and_irregular_forms_name_the_consequence() -> None:
 
 
 def test_two_record_descriptions_name_no_consequence() -> None:
-    """ADR-0255: a past-tense "updated" before a month dates a record, and
+    """ADR-0258: a past-tense "updated" before a month dates a record, and
     "report" after a clinical report type names a document."""
     descriptive = [
         "H&P, Updated Oct 16, 2026, 2:22 PM, A. Clinician, MD",

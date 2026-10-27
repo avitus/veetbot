@@ -53,7 +53,7 @@ BROWSER_ACT_VIEW: Final = "browser.act.v1"
 # How tool.call.authorized and a denial name a task grant (ADR-0129 section 9).
 TASK_GRANT_AUTHORIZATION_KIND: Final = "browser_task_grant"
 TASK_GRANT_AUTHORIZED_REASON: Final = "browser.task_grant.authorized"
-# How research authorization names itself on a receipt and a refusal (ADR-0255).
+# How research authorization names itself on a receipt and a refusal (ADR-0258).
 RESEARCH_AUTHORIZATION_KIND: Final = "browser_research"
 RESEARCH_REASON_PREFIX: Final = "browser.research."
 UNDESCRIBED_SUMMARY: Final = "Run a browser action the server can no longer describe"

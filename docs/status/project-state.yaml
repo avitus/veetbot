@@ -38,7 +38,7 @@ project:
   # each call's closed result. No milestone or gate moves; delivery is pending.
   # ADR-0209 records the owner-authorized browser approval, native feedback and
   # deadline repair on 2026-10-16. No milestone or gate moves; delivery is pending.
-  # ADR-0255 (Proposed) records the owner's 2026-10-25 authorization to cut
+  # ADR-0258 (Proposed) records the owner's 2026-10-25 authorization to cut
   # research approvals: answered questions and file exports no longer end
   # research authority, refusals name a reason, same-origin sprite icons are
   # inspected through DevTools, and two record phrases stop matching. No

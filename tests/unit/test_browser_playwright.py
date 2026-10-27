@@ -2017,7 +2017,7 @@ async def lesson_pages(
     async def page(request: Request) -> Response:
         path = request.url.path
         if path.endswith(".svg"):
-            # A sprite a page draws its icons from (ADR-0255).
+            # A sprite a page draws its icons from (ADR-0258).
             return Response(pages[path], media_type="image/svg+xml")
         return HTMLResponse(pages[path])
 

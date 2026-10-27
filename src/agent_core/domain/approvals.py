@@ -99,7 +99,7 @@ class ApprovalRequest(BaseModel):
     task_grant_offer: BrowserTaskGrantOffer | None = None
     task_grant_not_covered: TaskGrantNotCovered | None = None
     task_grant_id: UUID | None = None
-    # ADR-0255: why research authorization refused the action, from a closed
+    # ADR-0258: why research authorization refused the action, from a closed
     # content-free list. Stored for diagnosis; responses do not carry it.
     research_not_covered: str | None = None
 
