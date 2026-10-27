@@ -596,3 +596,199 @@ async def test_catch_up_progress_reports_cutoff_and_oldest_inbox_mail_reached(
     assert datetime.fromisoformat(item["catch_up_since"]) == cutoff
     reached = datetime.fromisoformat(item["inbox_reached_at"])
     assert reached == (earlier if restart == "none" else NOW - timedelta(days=40))
+
+
+@pytest.mark.parametrize(
+    ("age_days", "spent", "scope", "resync"),
+    [
+        (10, "250", "full", False),
+        (10, "350", "new_mail", False),
+        (0, "35", "new_mail", False),
+        (10, "350", "new_mail", True),
+    ],
+)
+async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
+    age_days: int, spent: str, scope: str, resync: bool
+) -> None:
+    """Above 75% of either ceiling, a refresh reads only new mail (ADR-0256).
+
+    A resynchronization restarts the Inbox pass, whose first page is the newest
+    mail, so a new-mail slice still lists and reads it.
+    """
+    inbox = {f"inbox-{index}": NOW - timedelta(days=10 + index) for index in range(8)}
+    changes = [f"change-{index}" for index in range(6)]
+    factory, reads = await _catching_up_mailbox(inbox, changes, resync=resync)
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=FixedClock(NOW),
+        mcp_client_factory=factory,
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+    ) as app:
+        service = app.services.email
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("40"), monthly_cost=Decimal("400")
+        )
+        created = NOW - timedelta(days=age_days)
+        earlier = EmailTask(
+            id=uuid4(),
+            run_id=uuid4(),
+            session_id=uuid4(),
+            kind="refresh",
+            account_ids=["default"],
+            created_at=created,
+            reservation=Decimal("1"),
+            settled_cost=Decimal(spent),
+        )
+        assert earlier.scope == "full"
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email, app.principal, "task", str(earlier.run_id), earlier, created
+            )
+            # Mid-way through catch-up, as the Work account was in production.
+            await save_value(
+                uow.email,
+                app.principal,
+                "account",
+                "default",
+                EmailAccount(
+                    id="default", label="Mail", history_id="101", inbox_cursor="older-page"
+                ),
+                NOW,
+            )
+            await save_value(
+                uow.email,
+                app.principal,
+                "sync",
+                "default",
+                EmailSyncState(
+                    history_policy="email-history@2:90d",
+                    history_since=int((NOW - timedelta(days=90)).timestamp()),
+                ),
+                NOW,
+            )
+        operation = await service.submit_task(app.principal, kind="refresh")
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        task = await service.get_task(app.principal, operation.run_id)
+        async with app.uow_factory() as uow:
+            sync = await uow.email.get(app.principal, "sync", "default")
+    assert task is not None and sync is not None
+    assert task.scope == scope
+    if scope == "full":
+        assert reads[:4] == changes[::-1][:4]
+        assert any(item.startswith("inbox-") for item in reads)
+        assert {"history-0", "history-1"} <= set(reads)
+    elif resync:
+        assert sorted(reads) == sorted(inbox)
+    else:
+        assert reads == changes[::-1]
+        assert sync.payload["change_pending"] == []
+
+
+async def test_new_mail_slice_assesses_a_window_its_change_waits_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new-mail slice still assesses a full window that discovery waits on (ADR-0256).
+
+    The change belongs to an archived thread, so the window is not Inbox mail.
+    If the slice skipped it, the window would never be analyzed and the
+    thread's later pages, the new mail among them, would never be read.
+    """
+    from agent_core.runtime import email_tasks
+
+    monkeypatch.setattr(email_tasks, "EMAIL_MESSAGE_WINDOW", 2)
+    base = await _current_mail_factory()
+    reads: list[int] = []
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        """Serve one archived five-page thread as a new Gmail change."""
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Report the change and page through the archived thread."""
+            value: dict[str, Any]
+            if name == "search_threads":
+                value = {"threads": []}
+            elif name == "sync_changes":
+                value = {
+                    "schema_version": 1,
+                    "history_id": "101",
+                    "changes": [
+                        {
+                            "kind": "message_added",
+                            "thread_id": "archived",
+                            "message_id": "m4",
+                            "label_ids": [],
+                        }
+                    ],
+                    "next_page_token": None,
+                    "resync_required": False,
+                }
+            elif name == "get_thread_page":
+                index = int(arguments.get("page_token") or 0)
+                reads.append(index)
+                value = _page()
+                value["thread_id"] = "archived"
+                value["messages"][0].update(
+                    thread_id="archived",
+                    id=f"m{index}",
+                    body=f"Passage {index}",
+                    label_ids=[],
+                    internal_date=int(NOW.timestamp() * 1000) - 1000 * (5 - index),
+                )
+                value.update(
+                    total_messages=5,
+                    next_page_token=str(index + 1) if index < 4 else None,
+                    complete=index == 4,
+                )
+            else:
+                return await original(name, arguments)
+            return MCPCallResult(content=(json.dumps(value),), structured=value)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        clock=FixedClock(NOW),
+        mcp_client_factory=factory,
+        script=FakeModelScript(turns=[_assessment_turn() for _ in range(20)]),
+    ) as app:
+        service = app.services.email
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("40"), monthly_cost=Decimal("400")
+        )
+        created = NOW - timedelta(days=10)
+        earlier = EmailTask(
+            id=uuid4(),
+            run_id=uuid4(),
+            session_id=uuid4(),
+            kind="refresh",
+            account_ids=["default"],
+            created_at=created,
+            reservation=Decimal("1"),
+            settled_cost=Decimal("350"),
+        )
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email, app.principal, "task", str(earlier.run_id), earlier, created
+            )
+            await save_value(
+                uow.email,
+                app.principal,
+                "account",
+                "default",
+                EmailAccount(id="default", label="Mail", history_id="100", inbox_complete=True),
+                NOW,
+            )
+        # Each slice reads one page and assesses one passage: two slices fill
+        # the window, two analyze it, and the fifth reads on.
+        for _ in range(5):
+            operation = await service.submit_task(app.principal, kind="refresh")
+            current = await app.runs.get(operation.run_id)
+            assert current.status is RunStatus.COMPLETED, current.failure
+            task = await service.get_task(app.principal, operation.run_id)
+            assert task is not None and task.scope == "new_mail"
+    assert reads == [0, 1, 2]

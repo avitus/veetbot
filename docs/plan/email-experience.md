@@ -389,6 +389,23 @@ ceiling. The numbers are reviewable configuration defaults, not permission to
 spend outside the approved implementation and evaluation scope. “Maximum learning” means broad, resumable evidence use,
 not an unbounded parallel import or automatic budget increase.
 
+New mail keeps a reserved share (ADR-0256). A refresh is a full slice only
+while counted spending, live reservations and its reservation fit within 75% of
+both the daily and the rolling thirty-day allowance. Above that share and
+within both ceilings it is a new-mail slice: new Gmail changes take all eight
+full-thread reads, and only current Inbox conversations are assessed, newest
+activity first. A retained window that a change is waiting on is assessed
+ahead of them even outside the Inbox, since until it is analyzed the thread's
+newer messages cannot be read. Expired Inbox bodies, automatic drafts and unsubscribe
+verification proceed as usual. The first page of an Inbox pass is also read;
+it holds the newest mail, so a resynchronization still recovers new mail. Later
+catch-up pages, the ninety-day history pass, other non-Inbox assessment and
+correspondence summaries wait until a refresh again passes the 75% admission
+check, counted spending and live reservations included. Owner-requested drafts
+and People imports use the full ceilings.
+Each refresh task records its admitted `scope`, `full` or `new_mail`; earlier
+tasks read as `full`.
+
 The shipped `runtime/limits.yaml` values `email.daily_cost` and
 `email.monthly_cost` hold these defaults. A reviewed operator overlay under
 `AGENT_CONFIG_DIR` can set owner-authorized allowances; both values must be

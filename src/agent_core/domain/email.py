@@ -18,6 +18,8 @@ from agent_core.domain.email_subscriptions import EmailSubscriptionConsent
 
 EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
+# Background learning stops here; new mail keeps the rest of each ceiling (ADR-0256).
+EMAIL_LEARNING_SHARE = Decimal("0.75")
 EMAIL_HISTORY_DAYS = 90
 EMAIL_BODY_RETENTION = timedelta(days=30)
 
@@ -275,6 +277,8 @@ class EmailTask(EmailValue):
     # A budget estimate, never a claim of known provider usage (ADR-0173).
     budget_charge: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     budget_charge_reason: Literal["incomplete_usage", "missing_run"] | None = None
+    # A refresh admitted above the learning share reads only new mail (ADR-0256).
+    scope: Literal["full", "new_mail"] = "full"
     stage: str = "queued"
     state: dict[str, object] = Field(default_factory=dict)
 
