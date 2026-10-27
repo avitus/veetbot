@@ -678,7 +678,8 @@ the cheapest and most recoverable loss first:
    `tool.call` for a tool the plan defers, and its content is exactly the
    `tool.arguments_invalid` outcome and that tool's pinned definition. Kept
    answers together stay within the budget, newest first; an older one past it
-   truncates in its turn. A result
+   truncates in its turn, and once every other result is a pointer the oldest
+   kept answers give way until they and the pointers fit. A result
    of the current run carries the sequence of the event that recorded it, so
    its pointer names that event, beside the artifact when one holds the
    content. While anything is truncated, the step context

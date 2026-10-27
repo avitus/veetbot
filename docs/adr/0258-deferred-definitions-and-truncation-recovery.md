@@ -51,7 +51,9 @@ took 29 steps and 2.31 million input tokens, cost USD 13.70, and kept nothing.
    Tool-result truncation skips it and still counts it against the budget.
    The kept answers together never exceed that budget: past it, the oldest
    truncate in their turn like any other result, so probing many deferred
-   tools cannot crowd out the rest. An
+   tools cannot crowd out the rest. Once every other result is a pointer, the
+   pointers count too, and the oldest kept answers give way until the whole
+   set fits. An
    answer qualifies only when it replies to `tool.call` for a tool the plan
    defers, and its content is exactly the platform outcome
    `tool.arguments_invalid` followed by that tool's pinned definition. A
@@ -120,7 +122,8 @@ that text would change every plan's prefix and re-plan every chat.
   with the trust of each, and the production rosters defer `web.fetch_json`.
 - `tests/unit/test_context_truncation_recovery.py`: the newest definition
   answer survives truncation while a stale copy, a direct call's copy and a
-  schema-only answer truncate, and kept answers stay within the budget; an
+  schema-only answer truncate, and kept answers stay within the budget,
+  pointers included once nothing else is whole; an
   artifact pointer also names its event; the
   note appears only while results are
   truncated and names the events of the results still shown, after the

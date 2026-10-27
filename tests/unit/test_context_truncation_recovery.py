@@ -279,6 +279,24 @@ async def test_kept_definition_answers_never_exceed_the_budget() -> None:
     assert deferred_definition_text(WebFetchJsonTool.spec) in _results(request)[newer]
 
 
+async def test_a_kept_answer_gives_way_when_only_pointers_remain_beside_it() -> None:
+    # Truncating every other result leaves pointers, which also cost tokens; if
+    # the kept answer and those pointers still pass the budget, it truncates too.
+    conversation = _Conversation()
+    probe = conversation.probe("probe")
+    pages = [conversation.page(index) for index in range(3)]
+    [answer] = [
+        item
+        for item in conversation.items
+        if isinstance(item, ToolResultItem) and item.call_id == probe
+    ]
+    size = ConservativeTokenEstimator().estimate([answer], "fake:scripted")
+
+    request = await _request(conversation, tool_result_budget=size + 10)
+
+    assert _truncated(request) == {probe, *pages}
+
+
 @pytest.mark.parametrize(
     ("name", "answer"),
     [

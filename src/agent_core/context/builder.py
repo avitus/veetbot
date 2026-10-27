@@ -198,6 +198,37 @@ def _definition_answers(items: Sequence[ConversationItem], plan: ContextPlan) ->
     return set(newest.values())
 
 
+def _tool_result_pointer(item: ToolResultItem) -> ToolResultItem:
+    """The pointer that replaces a truncated result (ADR-0242, ADR-0258)."""
+
+    byte_length = len(_canonical_json(item.model_dump(mode="json")))
+    location = next(
+        (
+            # A fact cites its result's event, so an artifact pointer names the
+            # recording event too (ADR-0258).
+            f"artifact:{part.artifact_id}"
+            + (
+                f"; event:{item.source_event_sequence}"
+                if item.source_event_sequence is not None
+                else ""
+            )
+            for part in item.content
+            if isinstance(part, FileReferencePart)
+        ),
+        f"event:{item.source_event_sequence or 'pending'}",
+    )
+    return item.model_copy(
+        update={
+            "content": [
+                TextPart(
+                    text=f"[tool result truncated: {byte_length} bytes; full content at {location}]"
+                )
+            ]
+        },
+        deep=True,
+    )
+
+
 def _truncation_note(
     items: Sequence[ConversationItem], truncated: set[int], plan: ContextPlan
 ) -> UserMessage:
@@ -1156,7 +1187,8 @@ class BudgetedContextBuilder:
 
         The newest definition answer of each deferred tool stays whole and
         still counts against the budget, while the kept answers together fit
-        it (ADR-0258). Returns the indexes it truncated.
+        it, and with the pointers of everything else once nothing else is
+        whole (ADR-0258). Returns the indexes it truncated.
         """
 
         result = [item.model_copy(deep=True) for item in items]
@@ -1194,35 +1226,20 @@ class BudgetedContextBuilder:
             item = result[index]
             assert isinstance(item, ToolResultItem)
             truncated_tokens += self._estimator.estimate([item], plan.model_id)
-            byte_length = len(_canonical_json(item.model_dump(mode="json")))
-            artifact = next(
-                (
-                    # A fact cites its result's event, so an artifact pointer
-                    # names the recording event too (ADR-0258).
-                    f"artifact:{part.artifact_id}"
-                    + (
-                        f"; event:{item.source_event_sequence}"
-                        if item.source_event_sequence is not None
-                        else ""
-                    )
-                    for part in item.content
-                    if isinstance(part, FileReferencePart)
-                ),
-                f"event:{item.source_event_sequence or 'pending'}",
-            )
-            result[index] = item.model_copy(
-                update={
-                    "content": [
-                        TextPart(
-                            text=(
-                                f"[tool result truncated: {byte_length} bytes; "
-                                f"full content at {artifact}]"
-                            )
-                        )
-                    ]
-                },
-                deep=True,
-            )
+            result[index] = _tool_result_pointer(item)
+            truncated.add(index)
+        # Once every other result is a pointer, the pointers count as well: if
+        # they and the kept answers still pass the budget, the oldest answers
+        # give way too.
+        while not indexes and kept:
+            shown = [item for item in result if isinstance(item, ToolResultItem)]
+            if self._estimator.estimate(shown, plan.model_id) <= budget:
+                break
+            index = min(kept)
+            kept.remove(index)
+            item = result[index]
+            assert isinstance(item, ToolResultItem)
+            result[index] = _tool_result_pointer(item)
             truncated.add(index)
         return result, truncated
 
