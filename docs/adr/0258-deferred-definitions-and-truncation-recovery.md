@@ -62,7 +62,8 @@ took 29 steps and 2.31 million input tokens, cost USD 13.70, and kept nothing.
    it, as history rebuilt from the log already does: the model's batch, a
    refusal, the runtime's own browser recovery and workflow reads, and a batch
    resumed after an approval. A replayed result recorded by an earlier attempt
-   keeps none. A truncated result's pointer names that event, after the
+   keeps none, and so does a call identifier that more than one result
+   carries. A truncated result's pointer names that event, after the
    artifact when one holds the content.
 4. **A platform note says when results are truncated.** While anything is
    truncated, the step context gains a platform row: older results are
@@ -87,8 +88,9 @@ took 29 steps and 2.31 million input tokens, cost USD 13.70, and kept nothing.
    definition slot.
 
 The deferred-index note still says that an invalid call returns the input
-schema, which stays true. Changing that text would change every plan's prefix
-and re-plan every chat.
+schema. That wording predates this decision but is not false: the refusal now
+returns the whole definition, the description and the input schema. Changing
+that text would change every plan's prefix and re-plan every chat.
 
 ## Consequences
 
@@ -126,7 +128,8 @@ and re-plan every chat.
 - `tests/gates/test_truncation_recovery_adr0258.py`: in a composed run, every
   truncation pointer names a recorded `tool.call.completed` event and the note
   lists events of results still shown; a browser recovery read and a batch
-  resumed after an approval carry their events.
+  resumed after an approval carry their events, and a call identifier
+  recorded twice carries none.
 - `tests/unit/test_browser_feed_workflow.py`: every browser workflow read in
   the final report request carries its event.
 - `tests/unit/test_web_fetch_json.py`: field selection from raw and fenced

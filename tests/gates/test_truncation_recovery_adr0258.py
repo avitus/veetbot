@@ -11,6 +11,10 @@ forced an answer, and the run saved nothing.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any, cast
+from uuid import uuid4
 
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
@@ -27,6 +31,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunLimits, RunStatus
+from agent_core.runtime.loop import with_event_sequences
 from tests.gates.test_runtime_tool_budget import _requests, _settings, _tool_turn
 from tests.unit.test_browser_recovery import InterruptedBrowser, navigation
 from tests.unit.test_config import base_environment
@@ -170,3 +175,59 @@ async def test_a_batch_resumed_after_approval_carries_its_events() -> None:
     assert run.status is RunStatus.COMPLETED, run.failure
     [result] = _results(requests[-1])
     assert result.source_event_sequence == recorded[result.call_id]
+
+
+async def test_a_call_id_recorded_twice_gets_no_event() -> None:
+    """A result names its event only when its call identifier picks one out.
+
+    Duplicate identifiers already fail the run before its next model request,
+    but the batch is checkpointed first; the later event must not be written
+    onto both results.
+    """
+
+    run_id, session_id = uuid4(), uuid4()
+
+    def recorded(sequence: int, call_id: str) -> EventEnvelope:
+        return EventEnvelope(
+            id=sequence,
+            session_id=session_id,
+            run_id=run_id,
+            sequence=sequence,
+            event_type="tool.call.completed",
+            payload_schema_version=1,
+            actor_type="runtime",
+            actor_id=None,
+            payload={"call_id": call_id},
+            trace_id=None,
+            created_at=datetime(2026, 10, 27, tzinfo=UTC),
+        )
+
+    events = [recorded(11, "twice"), recorded(12, "twice"), recorded(13, "once")]
+
+    class _Events:
+        async def list_after(self, *_args: Any, **_kwargs: Any) -> list[EventEnvelope]:
+            return events
+
+    class _UnitOfWork:
+        events = _Events()
+
+        async def __aenter__(self) -> _UnitOfWork:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    context = SimpleNamespace(
+        uow_factory=_UnitOfWork,
+        run=SimpleNamespace(id=run_id, session_id=session_id),
+        checkpoint=SimpleNamespace(last_event_sequence=10),
+        principal=None,
+    )
+    results = [
+        ToolResultItem(call_id=call_id, content=[TextPart(text=call_id)])
+        for call_id in ("twice", "twice", "once")
+    ]
+
+    attributed = await with_event_sequences(cast(Any, context), results)
+
+    assert [item.source_event_sequence for item in attributed] == [None, None, 13]

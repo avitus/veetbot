@@ -735,14 +735,25 @@ async def with_event_sequences(
             context.principal,
             run_id=context.run.id,
         )
-    recorded = {
-        event.payload.get("call_id"): event.sequence
-        for event in events
-        if event.event_type in TOOL_RESULT_EVENTS
+    recorded: dict[object, int] = {}
+    # A repeated call identifier picks out no one event, so its results keep
+    # none; the duplicate still fails the run before the next model request.
+    ambiguous: set[object] = {
+        result.call_id
+        for index, result in enumerate(results)
+        if any(other.call_id == result.call_id for other in results[:index])
     }
+    for event in events:
+        if event.event_type in TOOL_RESULT_EVENTS:
+            call_id = event.payload.get("call_id")
+            if call_id in recorded:
+                ambiguous.add(call_id)
+            recorded[call_id] = event.sequence
     return [
         result
-        if result.source_event_sequence is not None or result.call_id not in recorded
+        if result.source_event_sequence is not None
+        or result.call_id not in recorded
+        or result.call_id in ambiguous
         else result.model_copy(update={"source_event_sequence": recorded[result.call_id]})
         for result in results
     ]
