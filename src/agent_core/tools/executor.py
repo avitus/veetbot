@@ -19,6 +19,7 @@ from typing import Any, Protocol, cast
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approval_copy import approval_reason, generic_action_summary
 from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest, ApprovalStatus
 from agent_core.domain.argument_views import approval_argument_digests, approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
@@ -152,6 +153,9 @@ class DelegationStarter(Protocol):
 # remain for the modules and tests that read them from here.
 _approval_argument_view = approval_argument_view
 _approval_argument_digests = approval_argument_digests
+# No model-callable tool reads a capture back (tool-system.md); a marker that
+# only names the artifact sent a model hunting for it in the sandbox (ADR-0260).
+_CAPTURE_NOTE = ", kept for the owner; no tool, sandbox or workspace can open it"
 
 
 class _UnavailableCollaborator:
@@ -1880,6 +1884,7 @@ class ToolPipeline:
                 budget=budget,
                 location=f"artifact:{UUID(int=0)}",
                 capture_label=capture_label,
+                note=_CAPTURE_NOTE,
                 reference=FileReferencePart(
                     artifact_id=UUID(int=0), media_type=media_type, filename=filename
                 ),
@@ -1907,6 +1912,7 @@ class ToolPipeline:
             budget=budget,
             location=f"artifact:{ref.artifact_id}",
             capture_label=capture_label,
+            note=_CAPTURE_NOTE,
             reference=reference,
         )
         if (
@@ -2058,7 +2064,7 @@ class ToolPipeline:
         if invocation.normalized_arguments is None or invocation.normalized_arguments_hash is None:
             raise ConflictError("approval action has no normalized arguments")
         token.raise_if_cancelled()
-        action_summary = f"Run {tool.spec.name} with validated arguments."
+        action_summary = generic_action_summary(tool.spec)
         approval_arguments = dict(invocation.normalized_arguments)
         offer: BrowserTaskGrantOffer | None = None
         not_covered = _task_grant_not_covered(standing)
@@ -2092,7 +2098,7 @@ class ToolPipeline:
                 "approval_view_failed",
                 extra={"tool_name": tool.spec.name},
             )
-            action_summary = f"Run {tool.spec.name} with validated arguments."
+            action_summary = generic_action_summary(tool.spec)
             approval_arguments = dict(invocation.normalized_arguments)
             offer = None
         token.raise_if_cancelled()
@@ -2116,6 +2122,7 @@ class ToolPipeline:
             agent_version=agent.version,
             risk=tool.spec.risk,
             policy_reason=decision.reason_code,
+            policy_reason_text=approval_reason(decision, tool.spec.side_effect),
             policy_decision=decision,
             policy_version=decision.policy_version,
             expires_at=min(

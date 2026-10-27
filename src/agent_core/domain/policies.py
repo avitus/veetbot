@@ -137,6 +137,9 @@ class PolicyDecision(BaseModel):
     explanation: str
     modified_arguments: dict[str, Any] | None = None
     policy_version: str
+    # ADR-0260: the trust overlay, not the class's own row, raised this
+    # decision to approval. Older stored decisions carry none.
+    untrusted_escalation: bool = False
 
 
 class AdvisoryVerdictType(StrEnum):

@@ -84,6 +84,7 @@ class ApprovalRequest(BaseModel):
     agent_version: str
     risk: RiskLevel
     policy_reason: str
+    policy_reason_text: str | None = None
     policy_decision: PolicyDecision
     policy_version: str
     revalidated_policy_version: str | None = None

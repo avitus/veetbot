@@ -1576,7 +1576,8 @@ An approval reads as:
 ```
 
 `policy_reason` is a human-readable statement of why approval was
-required. **The rule that fired is not exposed**, which is
+required: one sentence from a closed table, never a reason code or model
+text (ADR-0260). **The rule that fired is not exposed**, which is
 [policy-and-approvals.md](policy-and-approvals.md)'s decision: a rule
 identifier on the wire becomes a rule identifier in a client's
 conditional, and the rule set is meant to be editable without breaking

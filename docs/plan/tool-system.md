@@ -800,7 +800,7 @@ The rules:
   acquire. ADR-0137 records the production history/cache failure this repairs.
 
 ```text
-[... 41,882 bytes elided; full output: artifact:a/9d02 ...]
+[... 41,882 bytes elided; full output: artifact:a/9d02, kept for the owner; no tool, sandbox or workspace can open it ...]
 ```
 
 Head *and* tail rather than head alone because the two things most often
@@ -819,7 +819,10 @@ last line is `FAILED: 3 tests` is unreadable if only its first 8 KB survives.
   the store rather than out of it, and the `workspace.*` readers see only the
   run's workspace. The elided span therefore never re-enters context outside
   its envelope; a client reads the whole capture through the owner-scoped
-  artifact routes.
+  artifact routes. The marker says so, because a marker that only named the
+  artifact sent a model searching the sandbox for it (ADR-0260). The excerpt
+  context assembly makes for sessions older than admission-time excerpts keeps
+  its `event:<sequence>` marker unchanged.
 
 Section 8.1's `maximum_output_bytes` is per-tool. The registry additionally
 enforces a global ceiling from configuration, and a `ToolSpec` declaring more

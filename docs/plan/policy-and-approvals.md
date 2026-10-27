@@ -380,7 +380,7 @@ joined by dots, of which the last is the action. The four `browser.` scopes
 have three; the other forty-two have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1421` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1424` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -1286,6 +1286,29 @@ for `browser.act` the optional `task_grant_offer`, `task_grant_id`, and
 `task_grant_not_covered` (ADR-0129); they do not carry the rule that fired.
 The stored record also keeps `research_not_covered`, the closed reason that
 research authorization refused the action (ADR-0258), which responses omit.
+
+**What the card says (ADR-0260).** `action_summary` is a plain-English
+headline. A tool's presenter writes it, and a tool without one, or whose
+presenter fails, gets a headline keyed on its side-effect class, such as "Send
+a message with <tool>" or "Run code in Veetbot's sandbox with <tool>".
+`sandbox.run_command` shows the command itself. `policy_reason` in a response is
+one sentence on why approval was required, chosen from a closed table and never
+written by the model:
+
+- an advisory escalation says a second safety check flagged the request;
+- a decision with `untrusted_escalation` says the chat has read web pages or
+  other outside content;
+- a class whose own row asks names that kind of action, for example "Veetbot
+  asks before sending a message for you.";
+- anything else gets "Veetbot's safety rules ask for your approval on this
+  action."
+
+The pipeline stores that sentence as `policy_reason_text` beside the reason
+code, which stays on the record. For an approval stored before the sentence
+existed, the response maps the stored code to its class sentence or the
+fallback. `untrusted_escalation` is set on `PolicyDecision` exactly when the
+trust overlay raised an allow to approval. It changes no decision, reason code
+or `policy_version`, and a stored decision without it reads as false.
 
 `arguments` is a redacted view, not the action: a value under a sensitive key or
 matching a credential shape becomes `[REDACTED]`, and a string over 512

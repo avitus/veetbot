@@ -49,6 +49,7 @@ from agent_core.domain.agents import (
     chat_model_variant,
     run_limits_for_session,
 )
+from agent_core.domain.approval_copy import legacy_approval_reason
 from agent_core.domain.approvals import (
     ApprovalCursor,
     ApprovalRequest,
@@ -280,7 +281,9 @@ def _approval_view(approval: ApprovalRequest) -> ApprovalView:
         arguments=dict(approval.arguments),
         argument_digests=dict(approval.argument_digests),
         risk=approval.risk.value.upper(),
-        policy_reason=approval.policy_reason,
+        # The API spec defines this field as a plain statement of why approval
+        # was needed; the stored code stays on the record (ADR-0260).
+        policy_reason=approval.policy_reason_text or legacy_approval_reason(approval.policy_reason),
         expires_at=approval.expires_at,
         created_at=approval.created_at,
         resolved_at=approval.resolved_at,

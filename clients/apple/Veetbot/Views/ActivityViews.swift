@@ -377,11 +377,15 @@ struct AttentionCardLabel: View {
     }
 }
 
+/// What will happen and why Veetbot is asking come first, in the server's
+/// words; the tool, risk, expiry and raw arguments wait behind Details while
+/// the card is pending (ADR-0260).
 struct ApprovalCard: View {
     let approval: ApprovalView
     var inFlight: ApprovalDecision? = nil
     let resolve: (ApprovalDecision, String?) -> Void
     @State private var denialReason = ""
+    @State private var showsDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -389,23 +393,14 @@ struct ApprovalCard: View {
             Text(approval.actionSummary)
                 .veetType(.ui, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
-                if let toolName = approval.toolName {
-                    Text(toolName).veetMono()
-                    Text("·")
-                }
-                Text("\(approval.risk.capitalized) risk")
-                Text("·")
-                Text(approval.expiresAt.map { "Expires \($0.formatted())" } ?? "No expiry")
+            if let reason = approval.ownerReason {
+                Text(reason)
+                    .veetType(.ui)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("approval.reason")
             }
-            .veetType(.meta)
-            .foregroundColor(AppTheme.inkSoft)
-            if !approval.arguments.isEmpty {
-                DetailBlock(
-                    title: "Arguments",
-                    text: JSONValue.object(approval.arguments).prettyPrinted
-                )
-            }
+            if !approval.status.isPending { technicalDetails }
             if approval.status.isPending {
                 DenialReasonField(text: $denialReason)
                     .disabled(inFlight != nil)
@@ -425,6 +420,23 @@ struct ApprovalCard: View {
                 }
                 .padding(.top, 4)
                 .disabled(inFlight != nil)
+                Button {
+                    showsDetails.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Details")
+                        Image(systemName: "chevron.right")
+                            .veetIcon(.small, weight: .semibold)
+                            .rotationEffect(.degrees(showsDetails ? 90 : 0))
+                    }
+                    .veetType(.meta, weight: .medium)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("approval.more")
+                .accessibilityValue(showsDetails ? "Expanded" : "Collapsed")
+                if showsDetails { technicalDetails }
             } else {
                 Text("Resolved: \(approval.decision?.rawValue ?? approval.status.displayName)")
                     .veetType(.meta)
@@ -432,6 +444,28 @@ struct ApprovalCard: View {
             }
         }
         .attentionCard()
+    }
+
+    /// The registry name, risk, expiry and the redacted arguments themselves.
+    @ViewBuilder
+    private var technicalDetails: some View {
+        HStack(spacing: 6) {
+            if let toolName = approval.toolName {
+                Text(toolName).veetMono()
+                Text("·")
+            }
+            Text("\(approval.risk.capitalized) risk")
+            Text("·")
+            Text(approval.expiresAt.map { "Expires \($0.formatted())" } ?? "No expiry")
+        }
+        .veetType(.meta)
+        .foregroundColor(AppTheme.inkSoft)
+        if !approval.arguments.isEmpty {
+            DetailBlock(
+                title: "Arguments",
+                text: JSONValue.object(approval.arguments).prettyPrinted
+            )
+        }
     }
 }
 

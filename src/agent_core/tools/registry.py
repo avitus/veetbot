@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approval_copy import generic_action_summary
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND, UNSUBSCRIBE_TOOL_NAME
@@ -83,7 +84,7 @@ class RegisteredTool:
     ) -> tuple[str, dict[str, Any]]:
         presenter = getattr(self.implementation, "approval_view", None)
         if presenter is None:
-            return f"Run {self.spec.name} with validated arguments.", arguments
+            return generic_action_summary(self.spec), arguments
         return cast(
             tuple[str, dict[str, Any]],
             await presenter(arguments, tenant_id=tenant_id),

@@ -1535,7 +1535,9 @@ two still owe:
     Section 28, ADR-0008, and
     [sandbox-isolation.md](sandbox-isolation.md), which gives the tool
     its full `ToolSpec`. The one thing fixed here is that its
-    `output_trust` is `EXTERNAL_UNTRUSTED` and cannot be raised.
+    `output_trust` is `EXTERNAL_UNTRUSTED` and cannot be raised. When it
+    asks for approval, its card's headline names the command, redacted
+    like the arguments view and cut to 160 characters (ADR-0260).
 2.  **`artifact.export`, at Milestone 6.** The argument shape, the
     `ArtifactRef` it returns, the size ceiling, and the
     same-path-same-run identity that makes its `IDEMPOTENT`

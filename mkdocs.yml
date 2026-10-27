@@ -393,4 +393,5 @@ nav:
       - 'ADR-0256: New mail keeps a reserved Email budget share': adr/0256-new-mail-keeps-a-reserved-email-budget-share.md
       - 'ADR-0257: One final verification run': adr/0257-one-final-verification-run.md
       - 'ADR-0258: Fewer browser approvals in owner research': adr/0258-fewer-browser-approvals-in-owner-research.md
+      - 'ADR-0260: Plain approval cards': adr/0260-plain-approval-cards.md
   - Changelog: changelog.md

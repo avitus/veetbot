@@ -103,6 +103,37 @@ async def test_admission_captures_full_output_under_tool_limit_and_bounds_excerp
     assert original.content[0].text == text
 
 
+async def test_the_capture_marker_says_no_tool_reads_the_capture_back(tmp_path: Path) -> None:
+    """ADR-0260: a pointer the model cannot follow must say so, or it goes looking."""
+    clock, factory = await _factory()
+    writers = ArtifactWriterFactory(
+        factory, FilesystemArtifactStore(tmp_path), clock, SequenceIdFactory()
+    )
+    tool = _LargeOutputTool()
+    tool.spec = tool.spec.model_copy(update={"maximum_output_bytes": 1_048_576})
+    pipeline = ToolPipeline(
+        StaticToolRegistry(), factory, clock, SequenceIdFactory(), artifact_writers=writers
+    )
+    result = await pipeline._artifactize_large_output(
+        result=ToolResult(ok=True, content=[TextPart(text="S-1 " * 50_000)]),
+        tool=tool,
+        run=run(),
+        principal=principal(),
+    )
+    assert result.context_content is not None
+    excerpt = result.context_content[0]
+    assert isinstance(excerpt, TextPart)
+    reference = next(p for p in result.context_content if isinstance(p, FileReferencePart))
+    assert (
+        f"full output: artifact:{reference.artifact_id}, kept for the owner; "
+        "no tool, sandbox or workspace can open it ..." in excerpt.text
+    )
+    assert (
+        len(_serialized(result.model_copy(update={"content": result.context_content})))
+        <= INLINE_BYTES
+    )
+
+
 async def test_large_web_batches_keep_prior_wire_history_stable_after_durable_replay(
     tmp_path: Path,
 ) -> None:

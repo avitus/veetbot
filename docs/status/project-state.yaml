@@ -24,6 +24,10 @@
 # budget runs low: background learning stops at 75% of each ceiling and new
 # mail keeps the rest. Implemented with focused tests; delivery is pending.
 # No milestone or gate moves.
+# ADR-0260: Owner authorized plain approval cards and an honest capture marker
+# on 2026-10-27, declining a sandbox exemption and a model-written purpose line.
+# Implemented with server and native tests; delivery is pending. No milestone,
+# gate or policy version moves.
 schema_version: 1
 
 project:
