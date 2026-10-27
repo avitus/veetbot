@@ -549,7 +549,9 @@ focal identities and reads at most 100 relationship rows per identity, under the
 owner fence. Pages order their people closest first: partner or spouse,
 children, parents, siblings, then other relatives, ties broken by identifier
 (ADR-0259, `+owner-overview@2`), so the automatic first page holds the owner's
-household; one overview reads at most 50 people per relationship group. Existing belief visibility predicates admit the supporting evidence
+household; one overview reads at most 50 people per relationship group, and a
+group holding more says so and points the model to asking about a person by
+name. Existing belief visibility predicates admit the supporting evidence
 before projection; neither names nor indirect graph paths infer relationships.
 Directed endpoints and evidence confidence are retained, including provisional
 status. Coverage and continuation are rendered inside the shared recall budget;

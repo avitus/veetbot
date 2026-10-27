@@ -807,6 +807,7 @@ class HybridMemoryRetriever:
             bounded=coverage,
             relationship_group=effective_query.relationship_group,
             next_people_after=effective_query.next_people_after,
+            people_overflow=effective_query.people_overflow,
         )
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
@@ -1109,7 +1110,9 @@ class HybridMemoryRetriever:
             people=selected_people,
             rendered=rendered,
             tokens=rendered_tokens,
-            truncated=bool(dropped) or effective_query.next_people_after is not None,
+            truncated=bool(dropped)
+            or effective_query.next_people_after is not None
+            or effective_query.people_overflow,
             trace_id=trace_id,
             watermark=head,
             validate_snapshot_dependencies=True,
@@ -1923,6 +1926,7 @@ def render_memory(
     bounded: bool = False,
     relationship_group: str | None = None,
     next_people_after: UUID | None = None,
+    people_overflow: bool = False,
     partners: frozenset[UUID] | None = None,
 ) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
@@ -1943,9 +1947,17 @@ def render_memory(
             if next_people_after is not None
             else ""
         )
+        overflow = (
+            " More people hold this relationship than one overview reads; ask about a "
+            "person by name."
+            if people_overflow
+            else ""
+        )
         lines.append(
             "  Direct owner relationships: bounded page of at most three people; "
-            "supporting facts may be omitted. Narrow the query for more detail." + continuation
+            "supporting facts may be omitted. Narrow the query for more detail."
+            + continuation
+            + overflow
         )
     for item in items:
         lines.append(f"  {_line(item, partners=partners)}")

@@ -45,7 +45,8 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 # How close an owner relationship is, for overview paging: lower is closer.
 _RANK = ("partner", "child", "parent", "sibling", "relative")
-# Bounds one overview's identity reads; a larger family pages by identifier.
+# Bounds one overview's identity reads per relationship group; a larger group
+# is named as incomplete rather than paged (ADR-0259).
 _OVERVIEW_CANDIDATES = 50
 
 
@@ -510,6 +511,7 @@ class PeopleContextService:
         async with self._factory() as uow, uow.people.lock(principal):
             await uow.sessions.get(session_id, principal)
             people: dict[UUID, Person] = {}
+            overflow = False
             for key in groups:
                 page = await uow.people.query(
                     PeopleQuery(
@@ -523,7 +525,11 @@ class PeopleContextService:
                         limit=_OVERVIEW_CANDIDATES,
                     )
                 )
-                people.update((row.id, row) for row in page if isinstance(row, Person))
+                # The repository returns one row past the limit when more exist.
+                overflow = overflow or len(page) > _OVERVIEW_CANDIDATES
+                people.update(
+                    (row.id, row) for row in page[:_OVERVIEW_CANDIDATES] if isinstance(row, Person)
+                )
             owner_edges: dict[UUID, list[RelationshipAssertion]] = {}
             for person_id in people:
                 rows = await uow.people.query(
@@ -615,6 +621,7 @@ class PeopleContextService:
                 update={
                     "relationship_group": group,
                     "next_people_after": next_after,
+                    "people_overflow": overflow,
                     "expand_ids": tuple(sorted(evidence)),
                     "sensitivity_ceiling": ceiling,
                     "budget_tokens": min(query.budget_tokens, 2000),

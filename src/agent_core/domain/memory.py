@@ -1108,6 +1108,8 @@ class RecallQuery(BaseModel):
     relationship_group: Literal["family", "partner", "friend", "work", "other"] | None = None
     people_after: UUID | None = None
     next_people_after: UUID | None = None
+    # An overview group held more people than one overview reads (ADR-0259).
+    people_overflow: bool = False
     max_items: PositiveInt
     min_score: float = Field(ge=0, le=1)
     # The recall delta bounds a query by the store position a session froze its

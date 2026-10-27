@@ -423,6 +423,7 @@ def test_historical_trace_queries_load_without_new_fields() -> None:
             "structured_belief_types",
             "include_owned_resources",
             "include_home_location",
+            "people_overflow",
         }
     )
     loaded = RecallQuery.model_validate(payload)
@@ -430,6 +431,7 @@ def test_historical_trace_queries_load_without_new_fields() -> None:
     assert loaded.structured_belief_types == []
     assert loaded.include_owned_resources is False
     assert loaded.model_dump().get("include_home_location") is False
+    assert loaded.people_overflow is False
 
 
 async def test_structured_profile_preserves_scope_ceiling_and_ranking() -> None:

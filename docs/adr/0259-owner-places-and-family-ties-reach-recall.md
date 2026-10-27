@@ -77,7 +77,9 @@ identifiers, while an overview delivers family as People lines.
    parents, siblings, then other relatives, ties broken by identifier. Pages
    still hold three people, and `people_after` continues after the last
    person shown in that order. One overview reads at most 50 people per
-   relationship group and 100 relationship rows per person.
+   relationship group and 100 relationship rows per person; a group holding
+   more says so on the page and points to asking about a person by name,
+   so the page never looks complete when it is not.
 
 5. **Word-ending folding, `retrieval@8`.** Relevance matching folds a plural
    or third-person "-s" off a plain ASCII query word: "boards" also matches

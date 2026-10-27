@@ -235,12 +235,15 @@ CLOSENESS: tuple[tuple[int, str, RelationshipPredicate, bool], ...] = (
 )
 
 
-async def seed_closeness(app: Composition) -> None:
-    """The owner's family in `CLOSENESS`: a relationship memory and edge each."""
+async def seed_closeness(
+    app: Composition,
+    members: tuple[tuple[int, str, RelationshipPredicate, bool], ...] = CLOSENESS,
+) -> None:
+    """The owner's family in `members`: a relationship memory and edge each."""
 
     source_session_id = await app.sessions.create()
     async with app.uow_factory() as uow:
-        for number, name, predicate, owner_first in CLOSENESS:
+        for number, name, predicate, owner_first in members:
             source = await uow.events.append(
                 NewEvent(
                     session_id=source_session_id,
@@ -309,6 +312,29 @@ async def closeness_overview_run(app: Composition) -> None:
         assert f"--> {name}" not in initial and f"{name} --" not in initial, name
     # The continuation names the last person shown, in closeness order.
     assert str(UUID(int=90014)) in initial and "people_after" in initial
+    assert OVERFLOW_NOTE not in initial
+
+
+OVERFLOW_NOTE = "ask about a person by name"
+
+
+async def overflow_overview_run(app: Composition) -> None:
+    """A group larger than one overview reads says so instead of looking complete.
+
+    Each relationship group reads at most 50 people; the page must not imply
+    that the people it can reach are all there are.
+    """
+
+    session_id = await app.sessions.create()
+    await seed_closeness(
+        app,
+        tuple((91000 + index, f"Kin{index}", "relative", True) for index in range(52)),
+    )
+    run_id = await app.runs.submit("Tell me everything you know about me.", session_id=session_id)
+    assert (await finish(app, run_id)).status is RunStatus.COMPLETED
+    initial = html.unescape(_requests(app)[-1].model_dump_json())
+    assert "--relative--> Kin" in initial
+    assert OVERFLOW_NOTE in initial
 
 
 async def finish(app: Composition, run_id: UUID) -> Run:
