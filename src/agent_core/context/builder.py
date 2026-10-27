@@ -1189,7 +1189,14 @@ class BudgetedContextBuilder:
             byte_length = len(_canonical_json(item.model_dump(mode="json")))
             artifact = next(
                 (
+                    # A fact cites its result's event, so an artifact pointer
+                    # names the recording event too (ADR-0256).
                     f"artifact:{part.artifact_id}"
+                    + (
+                        f"; event:{item.source_event_sequence}"
+                        if item.source_event_sequence is not None
+                        else ""
+                    )
                     for part in item.content
                     if isinstance(part, FileReferencePart)
                 ),

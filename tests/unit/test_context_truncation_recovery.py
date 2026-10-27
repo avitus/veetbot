@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from uuid import UUID
 
 import pytest
 
@@ -23,6 +24,7 @@ from agent_core.context.rendering import build_prefix, prefix_bytes
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.messages import (
     ConversationItem,
+    FileReferencePart,
     ModelRequest,
     TextPart,
     ToolCallItem,
@@ -102,6 +104,28 @@ class _Conversation:
             ToolResultItem(
                 call_id=call_id,
                 content=[TextPart(text=f"page {index:02d} " + "x" * PAGE_BYTES)],
+                trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            ),
+        )
+
+    def export(self, artifact_id: UUID) -> str:
+        """A result whose content an artifact holds, as an export returns it."""
+
+        call_id = f"export-{artifact_id.hex[:8]}"
+        return self._exchange(
+            ToolCallItem(
+                call_id=call_id,
+                item_index=0,
+                name="web.fetch",
+                arguments={"url": "https://example.org/export"},
+                raw_arguments="{}",
+            ),
+            ToolResultItem(
+                call_id=call_id,
+                content=[
+                    TextPart(text="export " + "x" * PAGE_BYTES),
+                    FileReferencePart(artifact_id=artifact_id, media_type="text/csv"),
+                ],
                 trust=TrustLevel.EXTERNAL_UNTRUSTED,
             ),
         )
@@ -228,6 +252,22 @@ async def test_only_the_pinned_definition_answer_is_kept(name: str, answer: str 
         conversation.page(index)
 
     assert probe in _truncated(await _request(conversation))
+
+
+async def test_an_artifact_pointer_also_names_the_recording_event() -> None:
+    conversation = _Conversation()
+    artifact_id = UUID("6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
+    exported = conversation.export(artifact_id)
+    sequence = conversation.sequence
+    for index in range(12):
+        conversation.page(index)
+
+    request = await _request(conversation)
+
+    assert exported in _truncated(request)
+    # A fact cites its result's event, so the pointer names it beside the artifact.
+    pointer = f"full content at artifact:{artifact_id}; event:{sequence}]"
+    assert pointer in _results(request)[exported]
 
 
 async def test_no_note_before_anything_is_truncated() -> None:

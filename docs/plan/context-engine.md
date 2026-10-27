@@ -678,7 +678,8 @@ the cheapest and most recoverable loss first:
    `tool.call` for a tool the plan defers, and its content is exactly the
    `tool.arguments_invalid` outcome and that tool's pinned definition. A result
    of the current run carries the sequence of the event that recorded it, so
-   its pointer names that event. While anything is truncated, the step context
+   its pointer names that event, beside the artifact when one holds the
+   content. While anything is truncated, the step context
    gains a platform note that older results are pointers no tool reads back
    and that a call should not be repeated only to recover one. When the plan
    defines `context.update_working_state`, the note also says to keep each

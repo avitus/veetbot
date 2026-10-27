@@ -56,7 +56,8 @@ took 29 steps and 2.31 million input tokens, cost USD 13.70, and kept nothing.
    it, as history rebuilt from the log already does: the model's batch, a
    refusal, the runtime's own browser recovery and workflow reads, and a batch
    resumed after an approval. A replayed result recorded by an earlier attempt
-   keeps none.
+   keeps none. A truncated result's pointer names that event, after the
+   artifact when one holds the content.
 4. **A platform note says when results are truncated.** While anything is
    truncated, the step context gains a platform row: older results are
    pointers that no tool reads back, and a call should not be repeated only to
@@ -111,7 +112,8 @@ and re-plan every chat.
   with the trust of each, and the production rosters defer `web.fetch_json`.
 - `tests/unit/test_context_truncation_recovery.py`: the newest definition
   answer survives truncation while a stale copy, a direct call's copy and a
-  schema-only answer truncate; the note appears only while results are
+  schema-only answer truncate; an artifact pointer also names its event; the
+  note appears only while results are
   truncated and names the events of the results still shown, after the
   history cut.
 - `tests/gates/test_truncation_recovery_adr0256.py`: in a composed run, every
