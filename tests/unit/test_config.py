@@ -1217,13 +1217,18 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_222_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_224_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 222
+    assert len(qualified_paths) == 224
+    # ADR-0261 adds the capture reader's step and run read limits.
+    assert {
+        "tools/limits.yaml:capture.step_maximum_reads",
+        "tools/limits.yaml:capture.run_maximum_reads",
+    } <= qualified_paths
     # ADR-0247 adds the decay sweep's evidence-of-non-use bound; ADR-0249 the
     # two review-reason penalties.
     # Milestone 35 adds Cockpit's commit rate limits, the importer's poll interval, the

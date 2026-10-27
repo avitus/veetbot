@@ -566,7 +566,7 @@ moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none
 of them differs between two deployments of the same revision
-(bootstrap-and-composition.md:344-346). `folders/profiles.yaml` ships:
+(bootstrap-and-composition.md:345-347). `folders/profiles.yaml` ships:
 
 ```yaml
 schema_version: 1
@@ -588,7 +588,7 @@ the two judgment knobs ship with the matcher. `judgment_match_threshold` is
 above 0.5 and at most 1, so at most one option of a question can clear it.
 One environment key, `AGENT_THREAD_FOLDERS_API_ENABLED`, gates the router and
 the pass together, defaults off, and appears in `.env.example` in the same
-change (bootstrap-and-composition.md:557-562). The matcher additionally needs
+change (bootstrap-and-composition.md:558-563). The matcher additionally needs
 the `JUDGMENT_PROVIDER` selector [typed-judgment.md](typed-judgment.md)
 defines; with the knob on and no provider composed, the pass uses the inner
 grouper alone and says so once in the log.

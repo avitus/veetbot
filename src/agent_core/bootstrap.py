@@ -480,6 +480,7 @@ from agent_core.domain.agents import (
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile, BrowserRunState
 from agent_core.domain.browser_act_views import TaskGrantSessionContext
+from agent_core.domain.captures import CAPTURE_READER_TOOL_NAME
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -690,6 +691,7 @@ from agent_core.titles.generator import ConversationTitleGenerator
 from agent_core.titles.profiles import TitleProfiles
 from agent_core.titles.titling import ConversationTitlePass, request_title_after_run
 from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
+from agent_core.tools.artifact_read_capture import ArtifactReadCaptureTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
@@ -2833,6 +2835,8 @@ async def _compose(
     max_parallel_calls: int,
     hard_ceiling_multiplier: int,
     inline_output_bytes: int,
+    capture_step_maximum_reads: int,
+    capture_run_maximum_reads: int,
     lease_seconds: float,
     heartbeat_divisor: int,
     worker_poll_interval: float,
@@ -4358,6 +4362,15 @@ async def _compose(
             ids,
             retention_days=artifact_retention_days,
             maximum_bytes=artifact_maximum_bytes,
+        )
+        registry.register(
+            ArtifactReadCaptureTool(
+                uow_factory,
+                general_artifact_store,
+                clock,
+                step_maximum_reads=capture_step_maximum_reads,
+                run_maximum_reads=capture_run_maximum_reads,
+            )
         )
 
         async def reconcile_artifact_orphans() -> int:
@@ -6381,6 +6394,8 @@ async def build(
         WORKING_STATE_TOOL_NAME,
         SKILL_LOAD_TOOL_NAME,
         TOOL_CALL_TOOL_NAME,
+        # ADR-0261: an unindexed deferral; the capture marker advertises it.
+        CAPTURE_READER_TOOL_NAME,
         "memory.remember",
         "memory.learn",
         "memory.search",
@@ -6463,6 +6478,7 @@ async def build(
             RecordsImportTool.spec.name,
             # The Cockpit is a mode of its own; its tools never take a definition slot.
             *COCKPIT_TOOL_NAMES,
+            CAPTURE_READER_TOOL_NAME,
         )
         if name in default_enabled_tools
     ]
@@ -6750,6 +6766,8 @@ async def build(
             max_parallel_calls=int(parallel["maximum_calls"]),
             hard_ceiling_multiplier=int(output_config["hard_ceiling_multiplier"]),
             inline_output_bytes=int(output_config["inline_maximum_bytes"]),
+            capture_step_maximum_reads=int(tool_config["capture"]["step_maximum_reads"]),
+            capture_run_maximum_reads=int(tool_config["capture"]["run_maximum_reads"]),
             lease_seconds=float(worker_config["lease_seconds"]),
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),

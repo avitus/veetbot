@@ -6,9 +6,9 @@ import asyncio
 import hashlib
 import logging
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -97,6 +97,8 @@ class BoundArtifactWriter:
         filename: str,
         media_type: str,
         trust: TrustLevel,
+        *,
+        metadata: Mapping[str, Any] | None = None,
     ) -> StoredArtifactRef:
         digest = hashlib.sha256()
         size = 0
@@ -114,7 +116,7 @@ class BoundArtifactWriter:
                 return existing
             artifact_id = self._ids.new_id()
             expires_at = now + timedelta(days=self._retention_days)
-            metadata = ArtifactMetadata(
+            stored_metadata = ArtifactMetadata(
                 artifact_id=artifact_id,
                 tenant_id=self._tenant_id,
                 principal_id=self._principal_id,
@@ -129,7 +131,7 @@ class BoundArtifactWriter:
                 created_at=now,
                 expires_at=expires_at,
             )
-            stored = await self._store.put(_file_stream(spool), metadata)
+            stored = await self._store.put(_file_stream(spool), stored_metadata)
         artifact = ArtifactRef(
             id=artifact_id,
             tenant_id=self._tenant_id,
@@ -145,6 +147,7 @@ class BoundArtifactWriter:
             trust=trust,
             expires_at=expires_at,
             created_at=now,
+            metadata=dict(metadata or {}),
         )
         try:
             async with self._uow_factory() as uow:

@@ -1,7 +1,8 @@
 # ADR-0261: Read a long tool result in sections
 
-- Status: Proposed. Awaiting the owner's approval of the design; nothing is
-  implemented.
+- Status: Proposed. The owner approved the design and authorized its
+  implementation on 2026-10-27; acceptance follows the production check in
+  Validation.
 - Date: 2026-10-27
 - Amends: ADR-0260 decision 6 (the capture marker), ADR-0123 (how a deferred
   tool is advertised), and ADR-0137's single admission ceiling (one tool is
@@ -117,8 +118,11 @@ Four constraints shape it.
    it. The planner pins it as the one *unindexed* deferral: it is pinned and
    reachable through `tool.call` like any deferred tool, but it has no index
    entry and uses none of the index's forty entries or 2,000 tokens. The
-   capture marker advertises it by printing the exact call. A plan without
-   `tool.call` records it in `skipped_tool_names`. The description of
+   capture marker advertises it by printing the exact call. It is never ranked
+   for a definition, even when an agent enables it without deferring it. When
+   it is the only deferral, `tool.call` takes a definition slot so the reader
+   stays reachable. A plan without `tool.call` records it in
+   `skipped_tool_names`. The description of
    `tool.call` still says it calls index tools, because rewording it would
    change every plan's prefix.
 9. **The marker points to the reader.** When the run pins the reader and the
@@ -146,7 +150,13 @@ Four constraints shape it.
   11,000 tokens, so a step of reads moves the truncated prefix at most once. A
   run that spends all sixteen reads costs roughly USD 3 to 4 at gpt-6-astra
   prices, mostly in uncached input after truncation moves. A targeted search
-  and four reads costs well under USD 1.
+  and four reads costs well under USD 1. Measured with the conservative
+  estimator and the prefix at its 24,000-token ceiling, two sections come to
+  11,025 tokens against a 14,481-token block.
+- On a small window the reader helps little. The 32k-token deterministic model
+  has a tool-result budget below one section, so a section is truncated to a
+  pointer like any other result; its call stays in context, so it can be read
+  again. Production's 272k window holds two sections.
 - `memory.learn` is unchanged. The reader is not an admitted source read
   (ADR-0233). A quote found in a section cites the original `web.fetch` call,
   whose canonical content holds the whole result whenever the result fit the
@@ -157,8 +167,9 @@ Four constraints shape it.
   the reader. Older chats keep ADR-0260's marker until their plan rotates, and
   schedules stay pinned to their agent version until someone re-pins them.
   Captures written before the deploy stay closed.
-- The builtin census gains one tool. The four new reason codes need fixed
-  messages in the checked-in table.
+- The builtin census gains one tool, for fifty-two, and the configuration
+  inventory two knobs, for 224. The four new reason codes have fixed messages
+  in the checked-in table.
 - PR #204 (truncation recovery, numbered ADR-0258 on its branch) adds a note
   saying that no tool reads a truncated pointer back. Whichever of the two
   changes lands second makes that note except readable captures.
@@ -194,35 +205,40 @@ Four constraints shape it.
 
 ## Validation
 
-Red tests precede each change:
+Each change began with a red test:
 
-- **Sections.** A property test over multibyte text, lines longer than a
-  section and escape-heavy text checks that boundaries cover the text exactly
-  once, fall at line ends and render within 16 KiB. The marker's count equals
-  the reader's, and a partial capture reads.
-- **The reader.** Both result shapes and the header; case-folded search, its
-  20-match cap and total; a section past the end. `tool.capture.not_found` for
-  another chat, principal and tenant, an expired capture, an unmarked capture,
-  a chart, an export, an upload, a trusted capture and a revoked scope. The
-  step and run limits, refused calls not counting, and a resumed run counting
-  earlier reads.
-- **The executor.** The marker names the reader exactly when the run pins it
-  and the capture opens, and otherwise is ADR-0260's; both fit the inline
-  budget. The capture mark is written. A 16 KiB section is admitted whole and
-  is not captured again.
-- **Policy.** A read after a web fetch is allowed without approval. A sandbox
-  command after a read still records `untrusted_escalation`. The compiled
-  `policy_version` is unchanged.
-- **Context.** The planner pins the reader with no index entry. With every
-  production flag on and a website bound, the rendered prefix, the
-  definitions, the index and `skipped_tool_names` are the same with and
-  without it. Without `tool.call` it is skipped. Truncation pointer bytes are
-  unchanged, and a carried section is excerpted.
-- **A gate, `tests/gates/test_capture_reader_adr0261.py`.** A composed run
-  fetches a 520 KB fixture through the fake web provider, searches it and
-  reads two sections in one step; a third read in that step is refused. The
-  next request carries both sections inside untrusted envelopes, and a
-  following sandbox command asks.
+- **Sections** (`tests/unit/test_capture_sections.py`). A property test over
+  multibyte text, lines longer than a section and escape-heavy text checks
+  that boundaries cover the text exactly once, fall at line ends and render
+  within 16 KiB. It also covers case-folded, literal search with snippets and
+  a result that fits. A partial capture reads.
+- **The reader** (`tests/unit/test_artifact_read_capture.py`). Both result
+  shapes and the header; a section past the end. `tool.capture.not_found`
+  for an unknown id, another chat, another principal, an unmarked capture, a
+  trusted capture, an export, a model-output artifact, a chart, an expired
+  capture and a revoked scope. The step and run limits, with refused and
+  failed reads not counting.
+- **The executor** (`tests/unit/test_capture_admission_adr0261.py`). The
+  marker names the reader, with the reader's own section count, exactly when
+  the run pins it and the capture is untrusted; otherwise it is ADR-0260's.
+  Both fit the inline budget. The capture mark records the tool and its
+  sorted scopes. A 16 KiB section is admitted whole and is not captured
+  again. Two sections fit one truncation block on the production window.
+- **The roster** (`tests/unit/test_capture_reader_roster.py`). The reader is
+  pinned with no definition and no index entry, the rendered prefix and
+  `prefix_tokens` equal a plan without it, it takes no share of the index's
+  item cap, an enabled reader is never a definition, and without `tool.call`
+  it is skipped. The production-shaped roster gates
+  (`tests/gates/test_deferred_tools_adr0123.py`) still define thirty tools
+  and skip only the two Gmail writes ADR-0253 skips.
+- **The composed gate** (`tests/gates/test_capture_reader_adr0261.py`). A
+  chat fetches a 497 KB page through the fake web provider, and its marker
+  names the reader. The next turn searches the capture and reads two sections
+  in one step; a third read in that step is refused with
+  `tool.capture.step_limit`. The recorded sections are whole and labeled
+  untrusted, every read reaches the model in an untrusted envelope, and a
+  following sandbox command waits for an approval with `untrusted_escalation`
+  set.
 
 `make check` on the sidecar gates delivery. Production acceptance: a new Chat
 asked to analyze a long filing searches and reads the fetched filing, cites

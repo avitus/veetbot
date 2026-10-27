@@ -42,6 +42,12 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskGrantOffer,
     TaskGrantNotCovered,
 )
+from agent_core.domain.captures import (
+    CAPTURE_METADATA_KEY,
+    CAPTURE_READER_TOOL_NAME,
+    CaptureSections,
+    capture_text,
+)
 from agent_core.domain.delegations import Delegation, DelegationRequest
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND
 from agent_core.domain.errors import (
@@ -156,6 +162,28 @@ _approval_argument_digests = approval_argument_digests
 # No model-callable tool reads a capture back (tool-system.md); a marker that
 # only names the artifact sent a model hunting for it in the sandbox (ADR-0260).
 _CAPTURE_NOTE = ", kept for the owner; no tool, sandbox or workspace can open it"
+
+
+def _reader_note(artifact_id: UUID, sections: int) -> str:
+    """ADR-0261: the marker is the reader's advertisement, so it prints the call."""
+
+    call = json.dumps(
+        {
+            "name": CAPTURE_READER_TOOL_NAME,
+            "arguments": {"artifact": str(artifact_id), "section": 1},
+        },
+        separators=(",", ":"),
+    )
+    return f', {sections} sections; read one with tool.call {call}, or pass "find" to search it'
+
+
+def _capture_reader_reachable(checkpoint: RunCheckpoint, agent: AgentSpec) -> bool:
+    """Whether this run can call artifact.read_capture through tool.call."""
+
+    return all(
+        name in checkpoint.pinned_tool_specs and name in agent.enabled_tools
+        for name in (CAPTURE_READER_TOOL_NAME, TOOL_CALL_TOOL_NAME)
+    )
 
 
 class _UnavailableCollaborator:
@@ -1690,6 +1718,7 @@ class ToolPipeline:
                         tool=tool,
                         run=run,
                         principal=principal,
+                        capture_reader=_capture_reader_reachable(checkpoint, agent),
                     )
                     if progress[-1] == 11:
                         progress.append(12)
@@ -1821,10 +1850,17 @@ class ToolPipeline:
         tool: Tool,
         run: Run,
         principal: Principal,
+        capture_reader: bool = False,
     ) -> ToolResult:
         result = result.model_copy(update={"context_content": None})
         rendered = content_bytes(result.content)
-        budget = min(tool.spec.maximum_output_bytes, self._inline_output_bytes)
+        # ADR-0261: a section is already a bounded read of a capture, so the reader
+        # is admitted at its own limit; capturing it again would capture a capture.
+        budget = (
+            tool.spec.maximum_output_bytes
+            if tool.spec.name == CAPTURE_READER_TOOL_NAME
+            else min(tool.spec.maximum_output_bytes, self._inline_output_bytes)
+        )
         if len(rendered) <= budget:
             result.metrics["output_bytes"] = len(rendered)
             return result
@@ -1877,6 +1913,19 @@ class ToolPipeline:
             if partial_capture
             else "full output"
         )
+        # Only an untrusted capture opens for the reader (ADR-0261); any other
+        # marker says that nothing can open it (ADR-0260).
+        sections = (
+            CaptureSections(
+                capture_text(artifact_bytes), artifact_id=UUID(int=0), tool=tool.spec.name
+            ).count
+            if capture_reader and trust is TrustLevel.EXTERNAL_UNTRUSTED
+            else None
+        )
+
+        def note(artifact_id: UUID) -> str:
+            return _CAPTURE_NOTE if sections is None else _reader_note(artifact_id, sections)
+
         # Reject a tiny per-tool limit before creating an orphaned capture.
         try:
             output_excerpt(
@@ -1884,7 +1933,7 @@ class ToolPipeline:
                 budget=budget,
                 location=f"artifact:{UUID(int=0)}",
                 capture_label=capture_label,
-                note=_CAPTURE_NOTE,
+                note=note(UUID(int=0)),
                 reference=FileReferencePart(
                     artifact_id=UUID(int=0), media_type=media_type, filename=filename
                 ),
@@ -1900,7 +1949,18 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        ref = await writer.create(stream(), filename, media_type, trust)
+        ref = await writer.create(
+            stream(),
+            filename,
+            media_type,
+            trust,
+            metadata={
+                CAPTURE_METADATA_KEY: {
+                    "tool": tool.spec.name,
+                    "required_scopes": sorted(tool.spec.required_scopes),
+                }
+            },
+        )
         reference = FileReferencePart(
             artifact_id=ref.artifact_id,
             media_type=ref.media_type,
@@ -1912,7 +1972,7 @@ class ToolPipeline:
             budget=budget,
             location=f"artifact:{ref.artifact_id}",
             capture_label=capture_label,
-            note=_CAPTURE_NOTE,
+            note=note(ref.artifact_id),
             reference=reference,
         )
         if (

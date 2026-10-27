@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from agent_core.domain.artifacts import (
@@ -54,6 +54,8 @@ class ArtifactWriter(Protocol):
         filename: str,
         media_type: str,
         trust: TrustLevel,
+        *,
+        metadata: Mapping[str, Any] | None = None,
     ) -> StoredArtifactRef: ...
 
 

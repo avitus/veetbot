@@ -28,6 +28,11 @@
 # on 2026-10-27, declining a sandbox exemption and a model-written purpose line.
 # Implemented with server and native tests; delivery is pending. No milestone,
 # gate or policy version moves.
+# ADR-0261: Owner approved on 2026-10-27 reading a long tool result in
+# sections: artifact.read_capture opens only a chat's own untrusted captures,
+# two reads a step and sixteen a run, with no prompt tokens. Implemented with
+# unit, roster and composed gate tests; delivery is pending. No milestone or
+# gate moves.
 schema_version: 1
 
 project:

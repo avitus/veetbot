@@ -448,13 +448,12 @@ the rest are recorded in `skipped_tool_names`. Each part keeps its own cap, so
 adding a server moves no existing definition or index entry. Without
 `tool.call` the owner-added tools are recorded as skipped.
 
-[ADR-0261](../adr/0261-read-a-capture-in-sections.md) proposes one
-*unindexed deferral*, `artifact.read_capture`, which is not yet implemented.
-It would be pinned with the deferred tools and resolved by `tool.call`, but
-the index would render no entry for it, and it would count against neither
-index cap. Its only useful advertisement is the capture marker that names it,
-so it adds no bytes to the prefix. A plan without `tool.call` would record it
-as skipped.
+[ADR-0261](../adr/0261-read-a-capture-in-sections.md) adds one *unindexed
+deferral*, `artifact.read_capture`. It is pinned with the deferred tools and
+resolved by `tool.call`, but the index renders no entry for it, and it counts
+against neither index cap. Its only useful advertisement is the capture marker
+that names it, so it adds no bytes to the prefix. It never takes a
+definition; a plan without `tool.call` records it as skipped.
 
 In a session bound to a website profile, `browser.navigate`,
 `browser.observe` and `browser.act` are required definitions (ADR-0130): they
@@ -568,9 +567,9 @@ results; a deployment or operator limit change can change these bytes once.
 The aggregate tool-result budget and its oldest-first yield still apply after
 this normalization, including to active results from a resumed older run.
 `legacy_tool_excerpts` records this normalization in the pressure event. A
-section from `artifact.read_capture` (ADR-0261, proposed) would be admitted
-whole at up to 16 KiB in its own run. Carried into a later run, it would get
-this excerpt like any other carried result over the limit.
+section from `artifact.read_capture` (ADR-0261) is admitted whole at up to
+16 KiB in its own run. Carried into a later run, it gets this excerpt like any
+other carried result over the limit.
 
 **At assembly, the retained set is a suffix, never a subset.** History is selected
 as a contiguous tail of the ordered item list — one cut index, everything at or
@@ -679,9 +678,9 @@ the cheapest and most recoverable loss first:
    the Kindle run of 2026-10-23 paid a full uncached read of about 60,000 tokens
    on each of thirty-two consecutive steps that way. The block is a function of the
    budget alone, so `build()` stays pure, and the pointer still names the event or
-   artifact that holds the content. Under ADR-0261 (proposed), the model could
-   follow a pointer that names a capture the chat can open, using
-   `artifact.read_capture`; the pointer's bytes would not change.
+   artifact that holds the content. Under ADR-0261, the model can follow a
+   pointer that names a capture the chat can open, using
+   `artifact.read_capture`; the pointer's bytes did not change.
 4. **History compacts.** Deliberately last: it is the only step that costs a model
    call on the critical path, and the only one that loses information the run
    cannot cheaply re-fetch.

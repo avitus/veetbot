@@ -154,6 +154,22 @@ TOOL_MESSAGES: dict[str, str] = {
     "approval.expired": "Not performed. The approval expired.",
     "approval.cancelled": "Not performed. The approval was cancelled.",
     "tool.not_found.no_such_path": "No such path in the workspace.",
+    # ADR-0261: one code for every capture that does not open, so the reader
+    # never says whether an id exists in another chat.
+    "tool.capture.not_found": (
+        "No capture with that id can be read in this chat. Use an artifact id from a "
+        "capture marker or truncation pointer in this conversation."
+    ),
+    "tool.capture.section_out_of_range": (
+        "That section is past the end of the capture. The capture marker and every "
+        "section header give the number of sections."
+    ),
+    "tool.capture.step_limit": (
+        "Not performed. Only two capture reads are allowed in one step; read more in the next step."
+    ),
+    "tool.capture.run_limit": (
+        "Not performed. This run has used all of its capture reads; answer from what has been read."
+    ),
     "tool.not_found.not_offered": (
         "Not performed. No tool by that name is offered in this conversation."
     ),

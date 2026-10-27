@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **200 configuration knobs** across the specifications;
+The corpus now declares **224 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -314,7 +314,8 @@ startup warm-up's handshake timeout, retry interval and attempts, and
 ADR-0130 adds the five browser-task run limits; ADR-0137 adds the inline
 tool-output byte ceiling; ADR-0155 adds the title pass's five knobs; ADR-0178
 adds the recall candidate-selection mode (`relevance`, with `recent` for rollback
-and frozen controls). The plan names **three
+and frozen controls); ADR-0261 adds the capture reader's step and run read
+limits. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -339,13 +340,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-200 falls out.
+224 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-200 tuning knobs in YAML.
+224 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -353,7 +354,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 222 knobs live, at the values the
+    module that owns it. This is where all 224 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by

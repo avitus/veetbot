@@ -13,6 +13,7 @@ from weakref import WeakValueDictionary
 from agent_core.context.budget import ContextBudgetAllocator
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.rendering import (
+    UNINDEXED_DEFERRED_TOOLS,
     build_prefix,
     deferred_index_items,
     envelope_items,
@@ -552,6 +553,11 @@ class EventContextPlanner:
         )
         if owner_tools:
             tools = [tool for tool in tools if tool not in owner_tools]
+        # ADR-0261: an unindexed deferral never competes for a definition or an
+        # index entry; it is pinned behind tool.call or recorded as skipped.
+        unindexed = [tool for tool in tools if tool.name in UNINDEXED_DEFERRED_TOOLS]
+        if unindexed:
+            tools = [tool for tool in tools if tool not in unindexed]
         if (
             catalog is not None
             and not catalog.entries
@@ -660,6 +666,7 @@ class EventContextPlanner:
             explicitly_deferred
             or any(tool.kind is not ToolKind.CONTROL for tool in overflow)
             or owner_tools
+            or unindexed
         )
         if deferring:
             assert control is not None
@@ -728,6 +735,13 @@ class EventContextPlanner:
                     continue
                 owner_index.append(tool)
             deferred_tools.extend(owner_index)
+        if deferring:
+            deferred_tools.extend(unindexed)
+        else:
+            skipped_tools.extend(unindexed)
+        owner_indexed = len(deferred_tools) - (len(unindexed) if deferring else 0) > len(
+            shared_index_tools
+        )
         tools = sorted(selected_tools, key=lambda tool: tool.name)
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
@@ -819,7 +833,7 @@ class EventContextPlanner:
         # The owner index renders inside the shared one; each part keeps its own cap.
         shared_index_tokens = (
             index_tokens
-            if len(shared_index_tools) == len(deferred_tools)
+            if not owner_indexed
             else self._estimator.estimate(
                 build_prefix(agent, tools, persona=persona_text, deferred_tools=shared_index_tools)[
                     len(persona_prefix) :
@@ -829,7 +843,7 @@ class EventContextPlanner:
         )
         owner_index_tokens = (
             0
-            if len(shared_index_tools) == len(deferred_tools)
+            if not owner_indexed
             else index_tokens_of(deferred_tools) - index_tokens_of(shared_index_tools)
         )
         skill_catalog_tokens = self._estimator.estimate(

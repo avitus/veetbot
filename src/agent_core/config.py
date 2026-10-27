@@ -276,7 +276,7 @@ SHIPPED_CONFIGS = (
     "titles/profiles.yaml",
     "cockpit/profiles.yaml",
 )
-# The design corpus declares 199 operator-reviewable knobs. Metadata such as
+# The design corpus declares 224 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -358,6 +358,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "circuit_breaker.identical_call_threshold",
             "circuit_breaker.uncertain_threshold",
             "parallel.maximum_calls",
+            "capture.step_maximum_reads",
+            "capture.run_maximum_reads",
             "mcp.connect_timeout_seconds",
             "mcp.request_timeout_seconds",
             "mcp.idle_timeout_seconds",
@@ -530,6 +532,8 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
     {
         "runtime/limits.yaml:model.max_internal_attempts": 1,
         "tools/limits.yaml:output.inline_maximum_bytes": 1024,
+        "tools/limits.yaml:capture.step_maximum_reads": 1,
+        "tools/limits.yaml:capture.run_maximum_reads": 1,
         "tools/limits.yaml:mcp.warmup_connect_timeout_seconds": 1,
         "tools/limits.yaml:mcp.warmup_retry_seconds": 1,
         "tools/limits.yaml:mcp.warmup_attempts": 1,

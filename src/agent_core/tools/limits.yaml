@@ -11,6 +11,11 @@ circuit_breaker:
   uncertain_threshold: 1
 parallel:
   maximum_calls: 8
+# ADR-0261: artifact.read_capture reads at most this many sections or searches
+# in one step and in one run, counting only completed reads.
+capture:
+  step_maximum_reads: 2
+  run_maximum_reads: 16
 mcp:
   connect_timeout_seconds: 10
   request_timeout_seconds: 30
