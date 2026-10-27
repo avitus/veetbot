@@ -195,12 +195,10 @@ async def home_city_case(
     deliberate = paths["deliberate"]
     assert deliberate.evidence[0].stage == "delivered", deliberate
     assert deliberate.answer_correct is None
-    # The automatic path reproduces production trace d851e572: a task with no
-    # word in common with the address never makes it a candidate, because only
-    # the lexical arm runs and the subject is not in the question. The conflict
-    # repair cannot lift that; the ranking work (plan ADR-B) must, and this pin
-    # is what it changes.
-    assert paths["automatic"].evidence[0].stage == "stored", paths["automatic"]
+    # The automatic path once reproduced production trace d851e572: the task
+    # shares no word with the address. "Our garden" now anchors the owner's
+    # residence (+home-location@1), so the address reaches the first request.
+    assert paths["automatic"].evidence[0].stage == "delivered", paths["automatic"]
     return report, address
 
 

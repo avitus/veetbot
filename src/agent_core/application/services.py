@@ -68,6 +68,7 @@ from agent_core.domain.people_views import (
     LegacyPeopleLinkResult,
     MergeSuggestionDetail,
     MergeSuggestionPage,
+    OwnerKinshipRepairReport,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
     PeopleCounts,
@@ -655,6 +656,9 @@ class PeopleService(Protocol):
     async def link_existing(
         self, principal: Principal, *, limit: int = 100, cursor: str | None = None
     ) -> LegacyPeopleLinkResult: ...
+    async def link_kinship(
+        self, principal: Principal, *, confirm: bool
+    ) -> OwnerKinshipRepairReport: ...
     async def list_imports(
         self,
         principal: Principal,

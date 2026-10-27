@@ -195,6 +195,28 @@ def link_existing(
     emit(link_legacy(owner, limit, cursor))
 
 
+async def link_kinship_report(owner: str, confirm: bool) -> object:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise AuthorizationError("--owner must match the configured tenant/principal")
+        if composition.services.people is None:
+            raise NotFoundError("People is disabled")
+        report = await composition.services.people.link_kinship(principal, confirm=confirm)
+        return report.model_dump(mode="json")
+
+
+@app.command("link-kinship")
+def link_kinship(
+    owner: Owner,
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Record the ties. Without it, only preview.")
+    ] = False,
+) -> None:
+    """Record family ties your own messages state behind earlier saves (ADR-0258)."""
+    emit(link_kinship_report(owner, confirm))
+
+
 async def repair_directory_report(owner: str, confirm: bool) -> object:
     async with build(storage="postgres") as composition:
         principal = composition.principal

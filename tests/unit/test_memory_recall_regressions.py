@@ -15,6 +15,7 @@ from agent_core.domain.memory import (
     MemoryAuthority,
     MemoryClaimKind,
     MemoryDerivation,
+    MemoryRecord,
     MemoryStatus,
     Polarity,
     Portability,
@@ -416,12 +417,18 @@ def test_recall_filter_preserves_negation_names_and_non_english_terms() -> None:
 
 def test_historical_trace_queries_load_without_new_fields() -> None:
     payload = recall_query().model_dump(
-        exclude={"include_provisional", "structured_belief_types", "include_owned_resources"}
+        exclude={
+            "include_provisional",
+            "structured_belief_types",
+            "include_owned_resources",
+            "include_home_location",
+        }
     )
     loaded = RecallQuery.model_validate(payload)
     assert loaded.include_provisional is True
     assert loaded.structured_belief_types == []
     assert loaded.include_owned_resources is False
+    assert loaded.model_dump().get("include_home_location") is False
 
 
 async def test_structured_profile_preserves_scope_ceiling_and_ranking() -> None:
@@ -480,3 +487,129 @@ async def test_personal_intent_survives_unrelated_type_candidate_flood(
     query = DeterministicQueryFormer(principal()).form(run(), WorkingState(), question)[0]
     result = await retriever.recall(query, session_id=SESSION_ID)
     assert [item.belief_id for item in result.items] == [target.id]
+
+
+GARDEN_QUESTION = "Maintain a gardening calendar based on what you know about our garden."
+
+
+def _home(statement: str, *, subject: str = "home location") -> MemoryRecord:
+    return memory(belief_id=7000, statement=statement).model_copy(
+        update={
+            "subject": subject,
+            "belief_type": BeliefType.USER_MODEL_ATTR,
+            "claim_kind": MemoryClaimKind.RECURRING_STATE,
+            "status": MemoryStatus.PROVISIONAL,
+            "authority": MemoryAuthority.INFERRED,
+            "confidence": 0.6,
+            "flagged_for_review": True,
+            "sensitivity": Sensitivity.SENSITIVE,
+            "scope": "general",
+            "origin_scopes": ["general"],
+        }
+    )
+
+
+async def _recalled_home(question: str, home: MemoryRecord) -> tuple[bool, str]:
+    """Recall `question` over the home fact and a calendar-word candidate flood."""
+
+    _clock, factory, _service, retriever = await formation_stack()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(home)
+        for index in range(161):
+            await uow.memories.upsert_belief(
+                home.model_copy(
+                    update={
+                        "id": UUID(int=21000 + index),
+                        "subject": f"calendar entry {index}",
+                        "statement": f"Calendar entry {index} was added to the shared calendar.",
+                        "belief_type": BeliefType.FACT,
+                        "flagged_for_review": False,
+                        "store_position": index + 2,
+                    }
+                )
+            )
+    query = DeterministicQueryFormer(principal(), current_scope="general").from_text(question)[0]
+    recalled = await retriever.recall(query, session_id=SESSION_ID)
+    async with factory() as uow:
+        trace = await uow.traces.get(recalled.trace_id, principal())
+    return home.id in [item.belief_id for item in recalled.items], trace.retrieval_policy_version
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        GARDEN_QUESTION,
+        "When should I prune the roses in my yard?",
+        "What grows well around our house?",
+        "Plan the planting calendar for my backyard.",
+    ],
+)
+async def test_household_task_recalls_the_home_location_before_candidate_flood(
+    question: str,
+) -> None:
+    """A task about the owner's own place needs where that place is.
+
+    "Our garden" shares no word with "User lives in Exampleville", and no
+    owner-question form names it, so only a residence anchor reaches it.
+    """
+
+    found, policy = await _recalled_home(question, _home("User lives in Exampleville, CA."))
+    assert found
+    assert policy.endswith("+home-location@1")
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "User lives in Exampleville, CA.",
+        "The user resides at 1 Example Lane, Exampleville.",
+        "Example Owner's home mailing address is 1 Example Lane, Exampleville.",
+        "The home address is 123 Example Lane, Exampleville.",
+    ],
+)
+async def test_home_location_anchor_recognizes_residence_shapes(statement: str) -> None:
+    found, _policy = await _recalled_home(
+        GARDEN_QUESTION, _home(statement, subject="Example Owner")
+    )
+    assert found
+
+
+@pytest.mark.parametrize(
+    ("statement", "subject"),
+    [
+        ("User no longer lives in Oldtown.", "home location"),
+        ("User lives to garden on weekends.", "home location"),
+        ("Cheryl's home address is 4 Example Road.", f"person:{UUID(int=9)}:Cheryl"),
+        ("User wants to visit Exampleville.", "travel"),
+    ],
+)
+async def test_home_location_anchor_ignores_past_third_party_and_non_residence(
+    statement: str, subject: str
+) -> None:
+    found, _policy = await _recalled_home(GARDEN_QUESTION, _home(statement, subject=subject))
+    assert not found
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How do I start a vegetable garden?",
+        "What is the best garden hose?",
+        "Where is Cheryl's house?",
+        "Which house should we buy?",
+    ],
+)
+async def test_generic_or_third_party_places_do_not_anchor_the_home_location(
+    question: str,
+) -> None:
+    found, policy = await _recalled_home(question, _home("User lives in Exampleville, CA."))
+    assert not found
+    assert "home-location" not in policy
+
+
+async def test_hypothesized_residence_does_not_anchor() -> None:
+    home = _home("User lives in Exampleville, CA.").model_copy(
+        update={"derivation": MemoryDerivation.HYPOTHESIS}
+    )
+    found, _policy = await _recalled_home(GARDEN_QUESTION, home)
+    assert not found

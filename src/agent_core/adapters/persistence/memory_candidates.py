@@ -49,11 +49,16 @@ def ranked_candidates(
         or query.subjects
         or query.structured_belief_types
         or query.include_owned_resources
+        or query.include_home_location
         or query.include_ids is not None
         or query.expand_ids
     ):
         return base.order_by(
-            *([owned_resource.desc()] if query.include_owned_resources else []),
+            *(
+                [owned_resource.desc()]
+                if query.include_owned_resources or query.include_home_location
+                else []
+            ),
             position.desc(),
             identifier,
         ).limit(limit)

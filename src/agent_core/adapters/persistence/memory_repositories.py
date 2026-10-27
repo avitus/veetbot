@@ -22,6 +22,7 @@ from sqlalchemy import (
     delete,
     false,
     func,
+    not_,
     or_,
     select,
     text,
@@ -75,6 +76,7 @@ from agent_core.domain.knowledge import (
     RetrievedPassage,
 )
 from agent_core.domain.memory import (
+    HOME_LOCATION_PATTERN,
     LIFECYCLE_POLICY_VERSION,
     OWNED_RESOURCE_PATTERN,
     SENSITIVITY_ORDER,
@@ -126,6 +128,46 @@ def _owned_resource_sql(
         derivation == MemoryDerivation.DIRECT.value,
         polarity == Polarity.ASSERT.value,
         statement.op("~*")(OWNED_RESOURCE_PATTERN),
+    )
+
+
+def _home_location_sql(
+    belief_type: SQLColumnExpression[str],
+    derivation: SQLColumnExpression[str],
+    polarity: SQLColumnExpression[str],
+    subject: SQLColumnExpression[str],
+    statement: SQLColumnExpression[str],
+) -> ColumnElement[bool]:
+    """Keep the structured residence arm equivalent to is_home_location."""
+
+    return and_(
+        belief_type.in_((BeliefType.FACT.value, BeliefType.USER_MODEL_ATTR.value)),
+        derivation == MemoryDerivation.DIRECT.value,
+        polarity == Polarity.ASSERT.value,
+        not_(func.lower(subject).startswith("person:", autoescape=True)),
+        statement.op("~*")(HOME_LOCATION_PATTERN),
+    )
+
+
+def _owner_anchor_sql(
+    query: RecallQuery,
+    *,
+    belief_type: SQLColumnExpression[str],
+    claim_kind: SQLColumnExpression[str],
+    derivation: SQLColumnExpression[str],
+    polarity: SQLColumnExpression[str],
+    subject: SQLColumnExpression[str],
+    statement: SQLColumnExpression[str],
+) -> ColumnElement[bool]:
+    """The SQL form of owner_anchored: possession or residence, as the query asks."""
+
+    return or_(
+        _owned_resource_sql(belief_type, claim_kind, derivation, polarity, statement)
+        if query.include_owned_resources
+        else false(),
+        _home_location_sql(belief_type, derivation, polarity, subject, statement)
+        if query.include_home_location
+        else false(),
     )
 
 
@@ -671,22 +713,21 @@ class PostgresMemoryStore:
         predicates = self.current_predicates(query)
         terms = recall_query_terms(query.text)
         vectors = lexemes(MemoryRow.subject, MemoryRow.statement)
-        owned_resource = (
-            _owned_resource_sql(
-                MemoryRow.belief_type,
-                MemoryRow.claim_kind,
-                MemoryRow.derivation,
-                MemoryRow.polarity,
-                MemoryRow.statement,
-            )
-            if query.include_owned_resources
-            else false()
+        owned_resource = _owner_anchor_sql(
+            query,
+            belief_type=MemoryRow.belief_type,
+            claim_kind=MemoryRow.claim_kind,
+            derivation=MemoryRow.derivation,
+            polarity=MemoryRow.polarity,
+            subject=MemoryRow.subject,
+            statement=MemoryRow.statement,
         )
         if query.include_ids is None and (
             query.text is not None
             or query.subjects
             or query.structured_belief_types
             or query.include_owned_resources
+            or query.include_home_location
         ):
             # Any-term semantics: lexical recall is a ranking arm, so one term
             # matching is enough to make a record a candidate for the ranker.
@@ -810,22 +851,21 @@ class PostgresMemoryStore:
         subjects = tuple(item.casefold() for item in query.subjects)
         terms = recall_query_terms(query.text)
         vectors = lexemes(payload["subject"].astext, payload["statement"].astext)
-        owned_resource = (
-            _owned_resource_sql(
-                payload["belief_type"].astext,
-                payload["claim_kind"].astext,
-                payload["derivation"].astext,
-                payload["polarity"].astext,
-                payload["statement"].astext,
-            )
-            if query.include_owned_resources
-            else false()
+        owned_resource = _owner_anchor_sql(
+            query,
+            belief_type=payload["belief_type"].astext,
+            claim_kind=payload["claim_kind"].astext,
+            derivation=payload["derivation"].astext,
+            polarity=payload["polarity"].astext,
+            subject=payload["subject"].astext,
+            statement=payload["statement"].astext,
         )
         if query.include_ids is None and (
             query.text is not None
             or query.subjects
             or query.structured_belief_types
             or query.include_owned_resources
+            or query.include_home_location
         ):
             predicates.append(
                 or_(

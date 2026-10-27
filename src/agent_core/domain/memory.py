@@ -1029,6 +1029,9 @@ class RecallQuery(BaseModel):
     # A bounded structured arm for personal possessions whose stored model
     # name need not share words with a question about "my car" or "my laptop".
     include_owned_resources: bool = False
+    # The owner's residence for a task about "my/our" home, house or garden,
+    # which need not share a word with "User lives in ..." (ADR-0258).
+    include_home_location: bool = False
     # Older persisted queries keep their original selection semantics. New
     # task queries explicitly select relevance (ADR-0178).
     candidate_selection: Literal["recent", "relevance"] = "recent"
@@ -1082,6 +1085,38 @@ def is_owned_resource(record: MemoryRecord) -> bool:
         and record.derivation is MemoryDerivation.DIRECT
         and record.polarity is Polarity.ASSERT
         and re.search(OWNED_RESOURCE_PATTERN, record.statement, re.I) is not None
+    )
+
+
+# Shared with PostgreSQL's case-insensitive regex arm, so word edges are
+# spelled as character classes rather than a dialect's boundary escape.
+HOME_LOCATION_PATTERN = (
+    r"^(the )?user (lives|resides) (in|at|near) "
+    r"|(^|[^a-z])home (mailing |street |postal )?address([^a-z]|$)"
+)
+
+
+def is_home_location(record: MemoryRecord) -> bool:
+    """Recognize a direct statement of where the owner lives.
+
+    A person-scoped subject is someone else's record, so "Cheryl's home
+    address" never answers where the owner's garden is.
+    """
+
+    return (
+        record.belief_type in {BeliefType.FACT, BeliefType.USER_MODEL_ATTR}
+        and record.derivation is MemoryDerivation.DIRECT
+        and record.polarity is Polarity.ASSERT
+        and not record.subject.casefold().startswith("person:")
+        and re.search(HOME_LOCATION_PATTERN, record.statement, re.I) is not None
+    )
+
+
+def owner_anchored(record: MemoryRecord, query: RecallQuery) -> bool:
+    """Whether a query's possession or residence anchor selects this record."""
+
+    return (query.include_owned_resources and is_owned_resource(record)) or (
+        query.include_home_location and is_home_location(record)
     )
 
 

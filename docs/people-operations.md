@@ -239,6 +239,24 @@ remain, no source is suppressed, and each removal appends a content-free
 The repair refuses to run while a People import is queued or running. A second
 run changes nothing. Rerun it after restoring a snapshot taken before it ran.
 
+## Owner kinship repair
+
+[ADR-0258](adr/0258-owner-places-and-family-ties-reach-recall.md) records the
+owner's tie when a person-linked relationship save comes from an owner message
+that states it ("Erin is my wife"). Saves made before it hold only the memory
+link, so family overviews leave those people out. Preview, then apply:
+
+```text
+agent people link-kinship --owner TENANT/PRINCIPAL
+agent people link-kinship --owner TENANT/PRINCIPAL --confirm
+```
+
+It reads live, direct, owner-confirmed relationship memories that are linked
+to People, and each memory's own cited owner message. A linked person who was
+later merged contributes the edge to the surviving person. The report holds
+counts only: memories scanned, linked memories eligible, ties pending and ties
+created. The preview writes nothing, and a second run creates nothing new.
+
 ## Duplicate people
 
 [ADR-0125](adr/0125-duplicate-people-merge-on-decisive-evidence.md) merges

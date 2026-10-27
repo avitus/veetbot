@@ -361,6 +361,24 @@ metrics and probe rows. Regression coverage includes older possessions,
 candidate floods, model request assembly and PostgreSQL parity. This adds no
 semantic retrieval arm.
 
+A task about the owner's own place needs where that place is: "Maintain a
+gardening calendar for our garden" shares no word with "User lives in
+Exampleville." ([ADR-0258](../adr/0258-owner-places-and-family-ties-reach-recall.md)).
+A `my` or `our` reference to a household place (home, house, garden, yard,
+lawn, property, apartment, neighbourhood, town or city) anchors the owner's
+direct residence statements: `fact` or `user_model_attr`, direct and
+asserted, with a
+subject that is not person-scoped, saying the user lives or resides somewhere
+or giving a home (mailing) address. The query records `include_home_location`,
+false for older saved queries. The residence anchor shares the ownership
+anchor's match weight of 0.5, its priority before the candidate cap in both
+stores, its PostgreSQL regular-expression parity and its hard filters.
+Generic advice ("How do I start a garden?") and someone else's place do not
+activate it. Deliberate `memory.search` accepts a keyword query naming the
+user or owner with a residence word, in relevance mode only. Queries using it
+append `+home-location@1`; legacy-mode queries, and so the frozen benchmark,
+never set it.
+
 ### 2. Hard filter
 
 Applied in the SQL predicate, before any scoring:

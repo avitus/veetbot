@@ -336,6 +336,16 @@ friend, colleague/collaborator, introduced-by, reports-to, employment, founder,
 board membership, and investor relationship. Preserve a bounded descriptive
 qualifier when a supported relationship is more nuanced than the vocabulary.
 
+An explicit person-linked `relationship` save also records the owner's tie
+when the owner's own message states it in a plain present-tense clause ("Erin
+is my wife", "my mother, Cheryl, …", "Kyrri and Riv are my daughters") and the
+saved statement names the same tie
+([ADR-0258](../adr/0258-owner-places-and-family-ties-reach-recall.md)). The tie
+is read for the name that identified the selected person, never from the
+model's paraphrase; a negation, "ex-", "late", a past tense or a possessive
+chain records nothing, and a current edge of the same kind is not duplicated.
+`agent people link-kinship` applies the same rule to earlier saves.
+
 Inverse labels such as parent/child can be rendered deterministically from
 one assertion. Do not independently store both directions or infer friendship,
 family membership, investment, or trust through transitivity. No uniqueness
@@ -536,7 +546,10 @@ relationship pages for explicit owner/family overviews. The first family page
 includes family and partner edges; deliberate `memory.search` can select a group
 and continue after the returned person identifier. Each page visits at most three
 focal identities and reads at most 100 relationship rows per identity, under the
-owner fence. Existing belief visibility predicates admit the supporting evidence
+owner fence. Pages order their people closest first: partner or spouse,
+children, parents, siblings, then other relatives, ties broken by identifier
+(ADR-0258, `+owner-overview@2`), so the automatic first page holds the owner's
+household; one overview reads at most 50 people per relationship group. Existing belief visibility predicates admit the supporting evidence
 before projection; neither names nor indirect graph paths infer relationships.
 Directed endpoints and evidence confidence are retained, including provisional
 status. Coverage and continuation are rendered inside the shared recall budget;
@@ -892,7 +905,7 @@ history coverage, per-stage cost, and erasure backlog. Keep “stored,” “lin
 The operator CLI provides `agent people list`, `get`, `history`,
 `diagnose`, `merge`, `split`, `undo`, `forget`, `import`, and `import-status`
 subcommands, plus `link-existing`, `repair-directory` (ADR-0121), `dedupe`
-(ADR-0125), and the signed erasure-recovery pair `export-erasure` and
+(ADR-0125), `link-kinship` (ADR-0258), and the signed erasure-recovery pair `export-erasure` and
 `restore-erasure`. These must call
 the same services as HTTP and use explicit owner selection for destructive
 operations. A diagnostic should explain why a person is

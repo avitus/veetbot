@@ -42,10 +42,10 @@ from agent_core.domain.memory import (
     TracedPassage,
     TracedPersonContext,
     decay_eligible_lifecycle,
-    is_owned_resource,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
+    owner_anchored,
     recall_query_terms,
     review_reason,
 )
@@ -390,12 +390,13 @@ class InMemoryMemoryStore:
                         or subjects
                         or query.structured_belief_types
                         or query.include_owned_resources
+                        or query.include_home_location
                     )
                     and query.include_ids is None
                     and record.id not in query.expand_ids
                     and record.subject.casefold() not in subjects
                     and record.belief_type not in query.structured_belief_types
-                    and not (query.include_owned_resources and is_owned_resource(record))
+                    and not owner_anchored(record, query)
                 ):
                     text = f"{record.subject} {record.statement}"
                     if not lexical_text_matches(term_lexemes, text):

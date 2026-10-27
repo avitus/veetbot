@@ -75,6 +75,7 @@ class BoundedSourceRecovery:
                     "expand_ids": (),
                     "structured_belief_types": [],
                     "include_owned_resources": False,
+                    "include_home_location": False,
                 }
             )
         )

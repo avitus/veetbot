@@ -43,3 +43,16 @@ async def test_production_overview_continues_postgres(tmp_path: Path) -> None:
         script=page_script(),
     ) as app:
         await paged_overview_run(app)
+
+
+async def test_production_overview_first_page_is_the_closest_family_postgres(
+    tmp_path: Path,
+) -> None:
+    from tests.contract.owner_overview_cases import closeness_overview_run
+
+    async with build(
+        settings=replace(_settings(tmp_path), people_enabled=True),
+        storage="postgres",
+        script=script(True),
+    ) as app:
+        await closeness_overview_run(app)
