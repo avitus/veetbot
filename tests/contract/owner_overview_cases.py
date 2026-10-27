@@ -235,14 +235,9 @@ CLOSENESS: tuple[tuple[int, str, RelationshipPredicate, bool], ...] = (
 )
 
 
-async def closeness_overview_run(app: Composition) -> None:
-    """ADR-0258: the first overview page holds the closest family, not the lowest ids.
+async def seed_closeness(app: Composition) -> None:
+    """The owner's family in `CLOSENESS`: a relationship memory and edge each."""
 
-    Production: Riv was on page 2 because pages held three people in id order,
-    and the automatic path only ever renders page 1.
-    """
-
-    session_id = await app.sessions.create()
     source_session_id = await app.sessions.create()
     async with app.uow_factory() as uow:
         for number, name, predicate, owner_first in CLOSENESS:
@@ -294,6 +289,17 @@ async def closeness_overview_run(app: Composition) -> None:
                 ),
                 expected_revision=0,
             )
+
+
+async def closeness_overview_run(app: Composition) -> None:
+    """ADR-0258: the first overview page holds the closest family, not the lowest ids.
+
+    Production: Riv was on page 2 because pages held three people in id order,
+    and the automatic path only ever renders page 1.
+    """
+
+    session_id = await app.sessions.create()
+    await seed_closeness(app)
     run_id = await app.runs.submit("Tell me everything you know about me.", session_id=session_id)
     assert (await finish(app, run_id)).status is RunStatus.COMPLETED
     initial = html.unescape(_requests(app)[-1].model_dump_json())

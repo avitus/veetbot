@@ -15,6 +15,7 @@ tunes a policy; the frozen evaluation controls are untouched.
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
@@ -191,6 +192,13 @@ async def _observe_path(
     for trace in traces:
         if trace.id in delivered_trace_ids:
             delivered.update(trace.returned)
+    rendered = html.unescape(
+        "\n".join(trace.rendered for trace in traces if trace.id in delivered_trace_ids)
+    ).casefold()
+    delivered_found = tuple(
+        re.search(rf"(?<!\w){re.escape(text.casefold())}(?!\w)", rendered) is not None
+        for text in probe.delivered_must_contain
+    )
     answer = run.final_message if script is None else None
     arms = tuple(sorted({arm for trace in traces for arm in trace.arm_latencies_ms}))
     recall_latency = max((sum(trace.arm_latencies_ms.values()) for trace in traces), default=0)
@@ -255,6 +263,7 @@ async def _observe_path(
         recall_latency_ms=recall_latency,
         within_latency_ceiling=within,
         evidence=tuple(evidence),
+        delivered_found=delivered_found,
         required_delivered=required_delivered,
         forbidden_delivered=forbidden_delivered,
         answer_correct=answer_correct,

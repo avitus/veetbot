@@ -212,7 +212,24 @@ def _trace(*, returned: list[UUID], dropped: list[UUID] | None = None) -> Recall
         candidates=len(returned) + len(dropped or []),
         returned=returned,
         dropped_for_budget=dropped or [],
-        retrieval_policy_version="retrieval@7",
+        retrieval_policy_version="retrieval@8",
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
         operator_fields_expire_at=datetime(2026, 1, 31, tzinfo=UTC),
     )
+
+
+async def test_family_probe_checks_the_names_the_overview_delivers(tmp_path: Path) -> None:
+    """ADR-0258: an overview answer is People lines; the probe checks names, never ids."""
+
+    from tests.contract.owner_recall_probe_cases import family_names_case
+
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(
+            memory_settings(), artifact_root=tmp_path / "artifacts", people_enabled=True
+        ),
+        storage="memory",
+        script=script,
+        clock=FixedClock(_START),
+    ) as app:
+        await family_names_case(app, script)

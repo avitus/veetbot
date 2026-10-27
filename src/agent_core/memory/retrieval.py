@@ -43,10 +43,11 @@ from agent_core.domain.memory import (
     RecallTrace,
     Sensitivity,
     TracedPersonContext,
-    lexical_term_lexemes,
+    lexical_term_matched,
     lexical_tokens,
     owner_anchored,
     recall_query_terms,
+    recall_term_lexemes,
     review_reason,
 )
 from agent_core.domain.memory_candidates import candidate_strength
@@ -79,9 +80,10 @@ from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQue
 # selector moves @5 -> @7 so production traces name the new ranking. The base
 # label stays @4 by the owner's decision: the deterministic M16 benchmark
 # measured no metric change, and re-recording its baseline would re-pin the
-# frozen M32 control and the owner-reviewed review contract.
+# frozen M32 control and the owner-reviewed review contract. ADR-0258 folds
+# a plural or third-person "-s" in relevance matching only: @7 -> @8.
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
-RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@7"
+RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@8"
 OWNED_RESOURCE_POLICY_VERSION = "owned-resources@1"
 HOME_LOCATION_POLICY_VERSION = "home-location@1"
 RECONSOLIDATION_RETRIEVAL_POLICY_VERSION = "retrieval-reconsolidation@2"
@@ -1634,12 +1636,11 @@ def _arm_match(
 ) -> tuple[float, list[str]]:
     """The candidate's arm match before fusion, 0..1, and the arms that found it."""
 
-    terms = recall_query_terms(query.text)
+    terms = recall_term_lexemes(query.text, fold=query.candidate_selection == "relevance")
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_tokens = lexical_tokens(f"{record.subject} {record.statement}")
     lexical = (
-        sum(1 for lexemes in lexical_term_lexemes(terms) if lexemes and lexemes <= record_tokens)
-        / len(terms)
+        sum(1 for forms in terms if lexical_term_matched(forms, record_tokens)) / len(terms)
         if terms
         else 0
     )

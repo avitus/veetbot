@@ -40,7 +40,11 @@ from sqlalchemy.sql.selectable import Subquery
 
 from agent_core.adapters.persistence.integrity import constraint_name
 from agent_core.adapters.persistence.mappers import artifact_to_domain
-from agent_core.adapters.persistence.memory_candidates import lexemes, ranked_candidates
+from agent_core.adapters.persistence.memory_candidates import (
+    lexemes,
+    ranked_candidates,
+    term_matches,
+)
 from agent_core.adapters.persistence.people_erasure import lock_run_erasure
 from agent_core.adapters.persistence.reconsolidation_sources import (
     append_change,
@@ -103,6 +107,7 @@ from agent_core.domain.memory import (
     TracedPersonContext,
     lexical_query_terms,
     recall_query_terms,
+    recall_term_forms,
 )
 from agent_core.domain.reconsolidation import content_signature
 from agent_core.domain.trajectory import ArtifactRef
@@ -731,11 +736,14 @@ class PostgresMemoryStore:
         ):
             # Any-term semantics: lexical recall is a ranking arm, so one term
             # matching is enough to make a record a candidate for the ranker.
+            # Relevance recall also accepts a term's folded forms (ADR-0258).
             text_match: ColumnElement[bool] = or_(
                 owned_resource,
                 *[
-                    vectors.c.vector.op("@@")(func.plainto_tsquery("simple", term))
-                    for term in terms
+                    term_matches(vectors.c.vector, forms)
+                    for forms in recall_term_forms(
+                        query.text, fold=query.candidate_selection == "relevance"
+                    )
                 ],
             )
             if query.subjects:
@@ -871,8 +879,10 @@ class PostgresMemoryStore:
                 or_(
                     owned_resource,
                     *[
-                        vectors.c.vector.op("@@")(func.plainto_tsquery("simple", term))
-                        for term in terms
+                        term_matches(vectors.c.vector, forms)
+                        for forms in recall_term_forms(
+                            query.text, fold=query.candidate_selection == "relevance"
+                        )
                     ],
                     payload["belief_type"].astext.in_(
                         tuple(kind.value for kind in query.structured_belief_types)

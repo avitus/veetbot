@@ -419,7 +419,14 @@ results rather than delaying the turn.
   review-reason penalties and the attention cap (ADR-0249) changed no
   benchmark metric. They move the live relevance selector to `retrieval@7`;
   the base label stays `retrieval@4` by the owner's decision, because
-  re-recording the baseline would re-pin the frozen M32 control.
+  re-recording the baseline would re-pin the frozen M32 control. Relevance
+  matching also folds a plural or third-person "-s" off a plain query word
+  ("boards" finds "board", "sit" finds "sits"). Both stores expand the query,
+  never the stored text, into the spellings that fold to the same stem and
+  match them as whole lexemes, so PostgreSQL needs no stemming dictionary
+  ([ADR-0258](../adr/0258-owner-places-and-family-ties-reach-recall.md)). This
+  moves the live selector to `retrieval@8`; legacy mode keeps whole-lexeme
+  matching.
 - **Semantic** (optional, off at first). `pgvector` over statement embeddings. This is
   where paraphrased preferences are found ("keep it brief" vs "prefers concise
   writing") — the case lexical genuinely misses. It is built behind the fusion

@@ -178,6 +178,72 @@ async def test_postgres_home_location_recall_matches_the_in_memory_residence_arm
         assert not refused & {record.statement for record in found}
 
 
+@pytest.mark.parametrize("historical", [False, True])
+async def test_postgres_relevance_recall_folds_words_like_the_in_memory_store(
+    tmp_path: Path, historical: bool
+) -> None:
+    """ADR-0258: both stores fold a plural or third-person "-s" in relevance mode."""
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as app:
+        session_id = await app.sessions.create()
+        claim = await _remember(
+            app,
+            session_id,
+            "He sits on the boards of Northwind and Contoso.",
+            subject="example.com",
+            belief_type=BeliefType.FACT,
+        )
+        noise = [
+            claim.model_copy(
+                update={
+                    "id": uuid4(),
+                    "subject": f"portfolio note {index}",
+                    "statement": f"Company {index} hired a new finance lead.",
+                    "store_position": claim.store_position + 1 + index,
+                }
+            )
+            for index in range(161)
+        ]
+        shapes = {
+            "Board meeting minutes were filed.": True,
+            "Companies House filing is due.": True,
+            "The sites list was updated.": False,
+            "Status of the sitting room is unknown.": False,
+        }
+        shaped = [
+            claim.model_copy(
+                update={
+                    "id": uuid4(),
+                    "subject": "note",
+                    "statement": statement,
+                    "store_position": claim.store_position + 200 + index,
+                }
+            )
+            for index, statement in enumerate(shapes)
+        ]
+        mirror = InMemoryMemoryStore(app.clock, ReconsolidationIndex(MemoryTransaction()))
+        async with app.uow_factory() as uow:
+            for record in [*noise, *shaped]:
+                await uow.memories.upsert_belief(record)
+        for record in [claim, *noise, *shaped]:
+            await mirror.upsert_belief(record)
+        query = _query(app, text="Which company boards do I sit on?").model_copy(
+            update={
+                "candidate_selection": "relevance",
+                "known_at": app.clock.now() if historical else None,
+            }
+        )
+        async with app.uow_factory() as uow:
+            found = await uow.memories.query(query)
+        assert [record.id for record in found] == [
+            record.id for record in await mirror.query(query)
+        ]
+        assert found[0].id == claim.id
+        statements = {record.statement for record in found}
+        assert {statement for statement, folds in shapes.items() if folds} <= statements
+        assert not {statement for statement, folds in shapes.items() if not folds} & statements
+
+
 @pytest.mark.parametrize("profile_text", ["unmatched paraphrase", None])
 async def test_postgres_recall_common_word_and_snapshot_candidate_filters(
     tmp_path: Path, profile_text: str | None

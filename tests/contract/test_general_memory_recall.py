@@ -164,7 +164,7 @@ async def test_deliberate_search_uses_general_candidate_selection() -> None:
     assert result.structured is not None
     assert str(target.id) in result.structured["belief_ids"]
     assert isinstance(result.content[0], TextPart)
-    assert 'policy="retrieval@7' in result.content[0].text
+    assert 'policy="retrieval@8' in result.content[0].text
 
 
 @pytest.mark.parametrize("terms", ["SAFFRON saffron meals", "saffron meals", "saffron-meals"])

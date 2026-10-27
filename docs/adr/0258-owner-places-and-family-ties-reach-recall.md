@@ -1,6 +1,7 @@
 # ADR-0258: Owner places and family ties reach recall
 
-- Status: Proposed (the owner asked for these repairs on 2026-10-27)
+- Status: Proposed (the owner asked for these repairs on 2026-10-27, and the
+  same day for the word-ending folding and the probe's name check)
 - Date: 2026-10-27
 - Related: ADR-0100, ADR-0121, ADR-0125, ADR-0232, ADR-0238, ADR-0247, ADR-0249
 - Detailed design: `docs/plan/memory-retrieval-and-ranking.md`,
@@ -27,8 +28,10 @@ facts the owner had stated:
    provisional duplicate.
 
 A fourth miss, the website-learned board seats, ranked 53rd on the automatic
-path. That ranking follows ADR-0249; the measurement below informs a separate
-owner decision.
+path. "Which company boards do I sit on?" shared only "boards" with "He sits on
+the boards of …", and memories sharing only "company" tied it and won on
+recency. The private family probe also misreported: it named three memory
+identifiers, while an overview delivers family as People lines.
 
 ## Decision
 
@@ -76,15 +79,33 @@ owner decision.
    person shown in that order. One overview reads at most 50 people per
    relationship group and 100 relationship rows per person.
 
-## Measured, not adopted
+5. **Word-ending folding, `retrieval@8`.** Relevance matching folds a plural
+   or third-person "-s" off a plain ASCII query word: "boards" also matches
+   "board", "sit" matches "sits", "companies" matches "company", "classes"
+   matches "class". A word ending "ss", "us" or "is" keeps its "s", and a word
+   of three letters or fewer is not shortened. The query is expanded into the
+   spellings that fold to the same stem and stored text is never folded, so
+   PostgreSQL matches the same spellings as whole lexemes of its unfolded
+   `simple` vector in candidate selection, arm order and the lexical score.
+   Legacy (`recent`) mode keeps whole-lexeme matching, so the base label
+   `retrieval@4` and the frozen benchmark do not move; the live selector moves
+   `retrieval@7 -> retrieval@8`.
 
-Light suffix folding in lexical matching ("boards" = "board", "sits" = "sit",
-"companies" = "company") raises the learned board-seat claim's match from one
-of three query words to two, and changed no metric of the deterministic M16
-benchmark (`needed_recalled` 58/60, `noise_total` 43, every category and probe
-identical). Adopting it is the owner's decision; under ADR-0249's rule it would
-move only the live selector, and PostgreSQL candidate selection would need the
-same folding.
+6. **Probes check delivered names.** A probe may list `delivered_must_contain`:
+   words or names the delivered recall must render as whole words. The private
+   family probe checks the family's names rather than memory identifiers an
+   overview never delivers. The report holds one flag per entry, never the
+   text, and each entry counts as required evidence in the summary.
+
+## Measurement
+
+On the 402 synthetic seeds of the general-recall diagnostic driver (1,000
+noise statements, relevance mode), folding raised rendered recall at 20 from
+0.688 to 0.723 on the automatic path and from 0.688 to 0.725 on the
+deliberate path. No family fell; mean rendered tokens rose from 310 to 338.
+Legacy mode and the deterministic M16 benchmark are unchanged
+(`needed_recalled` 58/60, `noise_total` 43). The learned board-seat claim now
+matches two of the question's three words, ahead of the one-word flood.
 
 ## Consequences
 
@@ -94,5 +115,8 @@ same folding.
 - The production repair run is an owner decision; it adds the spouse edge
   behind the 2026-09-29 save and any other tie a linked save already states.
 - Frozen M16 and M33 controls, the ADR-0220 held-out and the base label
-  `retrieval@4` are untouched: the anchor applies only in relevance mode, and
-  the benchmark's metrics and probe rows are unchanged.
+  `retrieval@4` are untouched: the anchor and the folding apply only in
+  relevance mode, and the benchmark's metrics and probe rows are unchanged.
+- Production recall traces read `retrieval@8` once this ships. Folding lets a
+  few more one-word matches into the candidate set; the ranking arms, budgets
+  and caps are unchanged.

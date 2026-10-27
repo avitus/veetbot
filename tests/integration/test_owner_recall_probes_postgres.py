@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -10,7 +11,12 @@ from uuid import UUID
 from agent_core.bootstrap import build
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.runtime.worker import DurableWorker
-from tests.contract.owner_recall_probe_cases import FakeWebProvider, delivery_case, save_case
+from tests.contract.owner_recall_probe_cases import (
+    FakeWebProvider,
+    delivery_case,
+    family_names_case,
+    save_case,
+)
 from tests.integration.test_memory_postgres_m9 import _settings
 
 
@@ -37,3 +43,13 @@ async def test_write_probe_reports_the_save_outcome_postgres(tmp_path: Path) -> 
         web_search_provider_override=web,
     ) as app:
         await save_case(app, script, web, finish=_finish)
+
+
+async def test_family_probe_checks_delivered_names_postgres(tmp_path: Path) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(_settings(tmp_path), people_enabled=True),
+        storage="postgres",
+        script=script,
+    ) as app:
+        await family_names_case(app, script, finish=_finish)

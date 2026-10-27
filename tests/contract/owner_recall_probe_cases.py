@@ -290,3 +290,39 @@ async def save_case(
     assert refused.status == "save_refused:tool.memory.statement_not_owner_grounded"
     assert report.summary.saves_committed == 3 and report.summary.saves_refused == 1
     return report
+
+
+async def family_names_case(
+    app: Composition, script: FakeModelScript, *, finish: Finish = _wait
+) -> ProbeReport:
+    """An owner overview delivers family as People lines, not as one belief each.
+
+    The private family probe named three memory ids and reported them
+    `stored` while the overview showed the same people through other edges.
+    It checks the names the delivered recall renders instead.
+    """
+
+    from tests.contract.owner_overview_cases import seed_closeness
+
+    await seed_closeness(app)
+    probe = Probe.model_validate(
+        {
+            "id": "family-names",
+            "incident": "owner-family-overview",
+            "family": "relationships",
+            "question": "Tell me everything you know about me.",
+            "paths": ["automatic"],
+            "delivered_must_contain": ["Erin", "Riv", "Kyrri", "Cousin"],
+        }
+    )
+    report = await observe_probes(app, script, (probe,), finish=finish)
+    (observation,) = report.probes
+    (path,) = observation.paths
+    assert path.run_status == "COMPLETED"
+    # Page one holds the three closest; a cousin waits for the continuation.
+    assert path.delivered_found == (True, True, True, False)
+    assert report.summary.required_evidence == 4
+    assert report.summary.required_delivered == 3
+    assert report.summary.facts_missed == 1
+    assert "Erin" not in report.model_dump_json()
+    return report

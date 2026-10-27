@@ -6,19 +6,20 @@ from uuid import UUID
 from agent_core.domain.memory import (
     MemoryRecord,
     RecallQuery,
-    lexical_term_lexemes,
+    lexical_term_matched,
     lexical_tokens,
     owner_anchored,
     recall_query_terms,
+    recall_term_lexemes,
 )
 
 
 def candidate_strength(record: MemoryRecord, query: RecallQuery) -> tuple[int, int]:
     """Return structured strength and distinct whole-term coverage, not authority."""
 
-    terms = lexical_term_lexemes(recall_query_terms(query.text))
+    terms = recall_term_lexemes(query.text, fold=query.candidate_selection == "relevance")
     tokens = lexical_tokens(f"{record.subject} {record.statement}")
-    lexical = sum(bool(term) and term <= tokens for term in terms)
+    lexical = sum(lexical_term_matched(forms, tokens) for forms in terms)
     structured = (
         4
         if record.subject.casefold() in {item.casefold() for item in query.subjects}

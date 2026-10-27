@@ -46,7 +46,7 @@ from agent_core.domain.memory import (
     lexical_term_lexemes,
     lexical_text_matches,
     owner_anchored,
-    recall_query_terms,
+    recall_term_lexemes,
     review_reason,
 )
 from agent_core.domain.memory_candidates import select_candidates
@@ -285,7 +285,14 @@ class InMemoryMemoryStore:
         self, query: RecallQuery, *, lexical: bool = True
     ) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
-        term_lexemes = lexical_term_lexemes(recall_query_terms(query.text))
+        # Any form of any term makes a candidate; relevance folds (ADR-0258).
+        term_lexemes = [
+            lexemes
+            for forms in recall_term_lexemes(
+                query.text, fold=query.candidate_selection == "relevance"
+            )
+            for lexemes in forms
+        ]
         subjects = {subject.casefold() for subject in query.subjects}
         async with self._transaction.owner((query.tenant_id, query.principal_id)):
             changed_members: set[UUID] = set()

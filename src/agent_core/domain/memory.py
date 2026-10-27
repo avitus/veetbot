@@ -547,6 +547,66 @@ def recall_query_terms(text: str | None) -> list[str]:
     return [term for term in lexical_query_terms(text) if term not in _RECALL_FUNCTION_WORDS]
 
 
+_FOLDABLE_WORD = re.compile(r"[a-z]+")
+
+
+def fold_word(word: str) -> str:
+    """Fold a plural or third-person "-s" off one plain word (ADR-0258).
+
+    Deliberately light: "boards" is "board", "sits" "sit", "companies"
+    "company", "classes" "class". A word ending "ss", "us" or "is" keeps its
+    "s" ("glass", "status", "analysis"), and a word of three letters or fewer
+    is left whole.
+    """
+
+    if len(word) <= 3:
+        return word
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith(("sses", "shes", "ches", "xes", "zes")):
+        return word[:-2]
+    if word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
+def recall_term_forms(text: str | None, *, fold: bool) -> list[tuple[str, ...]]:
+    """Each recall term with the spellings that count as matching it.
+
+    Without folding a term is its only form. Relevance recall folds
+    (ADR-0258): a plain ASCII word also matches every word that folds to the
+    same stem, so "boards" finds "board" and "sit" finds "sits". The query is
+    expanded, never the stored text, so PostgreSQL matches the same forms as
+    whole lexemes of its unfolded `simple` vector. A term with digits,
+    joiners or other letters keeps only itself.
+    """
+
+    forms: list[tuple[str, ...]] = []
+    for term in recall_query_terms(text):
+        if not fold or _FOLDABLE_WORD.fullmatch(term) is None:
+            forms.append((term,))
+            continue
+        stem = fold_word(term)
+        spellings = (term, stem, f"{stem}s", f"{stem}es", f"{stem[:-1]}ies")
+        forms.append(tuple(dict.fromkeys(form for form in spellings if fold_word(form) == stem)))
+    return forms
+
+
+def recall_term_lexemes(text: str | None, *, fold: bool) -> list[tuple[frozenset[str], ...]]:
+    """Each recall term's alternative lexeme sets, one per form."""
+
+    return [
+        tuple(frozenset(lexical_tokens(form)) for form in forms)
+        for forms in recall_term_forms(text, fold=fold)
+    ]
+
+
+def lexical_term_matched(alternatives: Iterable[frozenset[str]], tokens: set[str]) -> bool:
+    """Whether every lexeme of any one form of a term is among these tokens."""
+
+    return any(lexemes and lexemes <= tokens for lexemes in alternatives)
+
+
 class ProviderExtractionEvaluationEvidence(BaseModel):
     """Version-bound evidence required before provider extraction can activate."""
 
