@@ -998,7 +998,49 @@ class MCPServerRow(Base):
     timeout_seconds: Mapped[int] = mapped_column(Integer)
     maximum_output_bytes: Mapped[int] = mapped_column(BigInteger)
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    owner_managed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MCPServerAuthorizationRow(Base):
+    """One owner-added server's sealed sign-in (ADR-0255)."""
+
+    __tablename__ = "mcp_server_authorizations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "server_id"],
+            ["mcp_servers.tenant_id", "mcp_servers.server_id"],
+            name="fk_mcp_server_authorizations_server",
+            ondelete="CASCADE",
+        ),
+        # The callback finds its sign-in by state; at most one row holds a state.
+        Index(
+            "uq_mcp_server_authorizations_pending_state",
+            "tenant_id",
+            "pending_state_hash",
+            unique=True,
+            postgresql_where=text("pending_state_hash IS NOT NULL"),
+        ),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    server_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    metadata_document: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
+    redirect_uri: Mapped[str | None] = mapped_column(Text)
+    client_id: Mapped[str | None] = mapped_column(Text)
+    client_secret_sealed: Mapped[str | None] = mapped_column(Text)
+    client_auth_method: Mapped[str | None] = mapped_column(Text)
+    access_token_sealed: Mapped[str | None] = mapped_column(Text)
+    access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    refresh_token_sealed: Mapped[str | None] = mapped_column(Text)
+    signed_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    signed_in_by: Mapped[str | None] = mapped_column(Text)
+    pending_state_hash: Mapped[str | None] = mapped_column(String(64))
+    pending_verifier_sealed: Mapped[str | None] = mapped_column(Text)
+    pending_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_principal_id: Mapped[str | None] = mapped_column(Text)
+    exchanging_state_hash: Mapped[str | None] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class MCPToolCatalogRow(Base):

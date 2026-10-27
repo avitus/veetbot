@@ -4,6 +4,16 @@ title: Current Milestone
 
 # Current milestone
 
+- **Owner-added MCP servers — ADR-0255:** On 2026-10-26 the owner asked to
+  connect the MagicPath MCP server and to add MCP servers from the Settings
+  window. Owner-added HTTP servers are stored with a per-server access level,
+  sign in through the authorization-code flow with PKCE and dynamic client
+  registration, keep sealed tokens that refresh at use, reach the network only
+  through an audited public-HTTPS transport, and fill their own deferred-index
+  class. It is default off behind `AGENT_MCP_SERVERS_ENABLED`; implementation
+  and tests are complete, and review and delivery are pending. No milestone or
+  gate moves.
+
 - **Static charts and diagrams — ADR-0243:** The owner authorized an independent
   extension on 2026-10-24: offline rendering in the existing Python sandbox,
   PNG previews, optional SVG/PDF downloads, chart CSV and editable diagram source.

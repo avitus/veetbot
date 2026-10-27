@@ -1217,13 +1217,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_220_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_222_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 220
+    assert len(qualified_paths) == 222
     # ADR-0247 adds the decay sweep's evidence-of-non-use bound; ADR-0249 the
     # two review-reason penalties.
     # Milestone 35 adds Cockpit's commit rate limits, the importer's poll interval, the

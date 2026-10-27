@@ -112,6 +112,10 @@
 		10000000000000000000C352 /* CockpitModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000C352 /* CockpitModeView.swift */; };
 		100000000000000000005105 /* CockpitDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005105 /* CockpitDetailView.swift */; };
 		100000000000000000005104 /* CockpitWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005104 /* CockpitWebView.swift */; };
+		10000000000000000000F551 /* MCPServerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F551 /* MCPServerModels.swift */; };
+		10000000000000000000F552 /* MCPServerAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F552 /* MCPServerAPIClient.swift */; };
+		10000000000000000000F553 /* MCPServerSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F553 /* MCPServerSettingsViewModel.swift */; };
+		10000000000000000000F554 /* MCPServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F554 /* MCPServerSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -234,6 +238,10 @@
 		20000000000000000000C352 /* CockpitModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitModeView.swift; sourceTree = "<group>"; };
 		200000000000000000005105 /* CockpitDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitDetailView.swift; sourceTree = "<group>"; };
 		200000000000000000005104 /* CockpitWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitWebView.swift; sourceTree = "<group>"; };
+		20000000000000000000F551 /* MCPServerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerModels.swift; sourceTree = "<group>"; };
+		20000000000000000000F552 /* MCPServerAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerAPIClient.swift; sourceTree = "<group>"; };
+		20000000000000000000F553 /* MCPServerSettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerSettingsViewModel.swift; sourceTree = "<group>"; };
+		20000000000000000000F554 /* MCPServerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -286,6 +294,7 @@
 		400000000000000000000003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000F551 /* MCPServerModels.swift */,
 				20000000000000000000B001 /* MemorySynthesisModels.swift */,
 				20000000000000000000A008 /* BrowserTaskGrantModels.swift */,
 				20000000000000000000A001 /* DeviceSessionHandoff.swift */,
@@ -307,6 +316,7 @@
 		400000000000000000000004 /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000F552 /* MCPServerAPIClient.swift */,
 				20000000000000000000B002 /* MemorySynthesisAPIClient.swift */,
 				20000000000000000000A003 /* DeviceSignInHandoffClient.swift */,
 				20000000000000000000A002 /* WebsiteSessionScope.swift */,
@@ -350,6 +360,7 @@
 		400000000000000000000007 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000F553 /* MCPServerSettingsViewModel.swift */,
 				20000000000000000000B003 /* MemorySynthesisViewModel.swift */,
 				20000000000000000000A009 /* BrowserActionApprovalPresentation.swift */,
 				20000000000000000000A006 /* DeviceSignIn.swift */,
@@ -377,6 +388,7 @@
 		400000000000000000000008 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000F554 /* MCPServerSettingsView.swift */,
 				20000000000000000000B004 /* MemorySynthesisView.swift */,
 				20000000000000000000A00A /* BrowserActionApprovalCard.swift */,
 				20000000000000000000A007 /* WebsiteAccessActions.swift */,
@@ -548,6 +560,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				10000000000000000000F554 /* MCPServerSettingsView.swift in Sources */,
+				10000000000000000000F553 /* MCPServerSettingsViewModel.swift in Sources */,
+				10000000000000000000F552 /* MCPServerAPIClient.swift in Sources */,
+				10000000000000000000F551 /* MCPServerModels.swift in Sources */,
 				10000000000000000000B004 /* MemorySynthesisView.swift in Sources */,
 				10000000000000000000E001 /* InspectorModel.swift in Sources */,
 				10000000000000000000E002 /* InspectorPanel.swift in Sources */,
