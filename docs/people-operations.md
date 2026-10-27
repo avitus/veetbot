@@ -241,7 +241,7 @@ run changes nothing. Rerun it after restoring a snapshot taken before it ran.
 
 ## Owner kinship repair
 
-[ADR-0258](adr/0258-owner-places-and-family-ties-reach-recall.md) records the
+[ADR-0259](adr/0259-owner-places-and-family-ties-reach-recall.md) records the
 owner's tie when a person-linked relationship save comes from an owner message
 that states it ("Erin is my wife"). Saves made before it hold only the memory
 link, so family overviews leave those people out. Preview, then apply:

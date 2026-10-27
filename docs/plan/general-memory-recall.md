@@ -616,7 +616,7 @@ an automatic age-based sweep of other databases or retained evaluation evidence.
 
 ## First implementation and diagnostic status (2026-10-11)
 
-The live selector was `retrieval@5` (`retrieval@7` since ADR-0249, `retrieval@8` since ADR-0258); `memory/profiles.yaml` exposes
+The live selector was `retrieval@5` (`retrieval@7` since ADR-0249, `retrieval@8` since ADR-0259); `memory/profiles.yaml` exposes
 `retrieval.candidate_selection: relevance` with `recent` as its rollback/control
 value. Both persistence adapters retain independent candidate arms. Automatic
 query formation and `memory.search` select that mode explicitly. Frozen M16 and

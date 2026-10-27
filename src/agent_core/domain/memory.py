@@ -551,7 +551,7 @@ _FOLDABLE_WORD = re.compile(r"[a-z]+")
 
 
 def fold_word(word: str) -> str:
-    """Fold a plural or third-person "-s" off one plain word (ADR-0258).
+    """Fold a plural or third-person "-s" off one plain word (ADR-0259).
 
     Deliberately light: "boards" is "board", "sits" "sit", "companies"
     "company", "classes" "class". A word ending "ss", "us" or "is" keeps its
@@ -574,7 +574,7 @@ def recall_term_forms(text: str | None, *, fold: bool) -> list[tuple[str, ...]]:
     """Each recall term with the spellings that count as matching it.
 
     Without folding a term is its only form. Relevance recall folds
-    (ADR-0258): a plain ASCII word also matches every word that folds to the
+    (ADR-0259): a plain ASCII word also matches every word that folds to the
     same stem, so "boards" finds "board" and "sit" finds "sits". The query is
     expanded, never the stored text, so PostgreSQL matches the same forms as
     whole lexemes of its unfolded `simple` vector. A term with digits,
@@ -1090,7 +1090,7 @@ class RecallQuery(BaseModel):
     # name need not share words with a question about "my car" or "my laptop".
     include_owned_resources: bool = False
     # The owner's residence for a task about "my/our" home, house or garden,
-    # which need not share a word with "User lives in ..." (ADR-0258).
+    # which need not share a word with "User lives in ..." (ADR-0259).
     include_home_location: bool = False
     # Older persisted queries keep their original selection semantics. New
     # task queries explicitly select relevance (ADR-0178).

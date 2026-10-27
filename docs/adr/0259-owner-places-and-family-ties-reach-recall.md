@@ -1,4 +1,4 @@
-# ADR-0258: Owner places and family ties reach recall
+# ADR-0259: Owner places and family ties reach recall
 
 - Status: Proposed (the owner asked for these repairs on 2026-10-27, and the
   same day for the word-ending folding and the probe's name check)

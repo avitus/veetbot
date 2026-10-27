@@ -111,7 +111,7 @@ async def test_postgres_owned_resource_recall_precedes_generic_candidate_flood(
 async def test_postgres_home_location_recall_matches_the_in_memory_residence_arm(
     tmp_path: Path, historical: bool
 ) -> None:
-    """ADR-0258: the residence anchor selects the same rows in both stores."""
+    """ADR-0259: the residence anchor selects the same rows in both stores."""
 
     async with build(settings=_settings(tmp_path), storage="postgres") as app:
         session_id = await app.sessions.create()
@@ -182,7 +182,7 @@ async def test_postgres_home_location_recall_matches_the_in_memory_residence_arm
 async def test_postgres_relevance_recall_folds_words_like_the_in_memory_store(
     tmp_path: Path, historical: bool
 ) -> None:
-    """ADR-0258: both stores fold a plural or third-person "-s" in relevance mode."""
+    """ADR-0259: both stores fold a plural or third-person "-s" in relevance mode."""
 
     async with build(settings=_settings(tmp_path), storage="postgres") as app:
         session_id = await app.sessions.create()

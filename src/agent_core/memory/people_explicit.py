@@ -212,7 +212,7 @@ async def remember_linked(
                     ),
                     expected_revision=0,
                 )
-        # ADR-0258: "Erin is my wife" in the owner's own message records the
+        # ADR-0259: "Erin is my wife" in the owner's own message records the
         # tie itself, not only a memory linked to Erin's People record.
         for person_id, named in identified.items():
             kinship = stated_kinship(belief, source.text, named)

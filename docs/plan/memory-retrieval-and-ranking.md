@@ -363,7 +363,7 @@ semantic retrieval arm.
 
 A task about the owner's own place needs where that place is: "Maintain a
 gardening calendar for our garden" shares no word with "User lives in
-Exampleville." ([ADR-0258](../adr/0258-owner-places-and-family-ties-reach-recall.md)).
+Exampleville." ([ADR-0259](../adr/0259-owner-places-and-family-ties-reach-recall.md)).
 A `my` or `our` reference to a household place (home, house, garden, yard,
 lawn, property, apartment, neighbourhood, town or city) anchors the owner's
 direct residence statements: `fact` or `user_model_attr`, direct and
@@ -424,7 +424,7 @@ results rather than delaying the turn.
   ("boards" finds "board", "sit" finds "sits"). Both stores expand the query,
   never the stored text, into the spellings that fold to the same stem and
   match them as whole lexemes, so PostgreSQL needs no stemming dictionary
-  ([ADR-0258](../adr/0258-owner-places-and-family-ties-reach-recall.md)). This
+  ([ADR-0259](../adr/0259-owner-places-and-family-ties-reach-recall.md)). This
   moves the live selector to `retrieval@8`; legacy mode keeps whole-lexeme
   matching.
 - **Semantic** (optional, off at first). `pgvector` over statement embeddings. This is

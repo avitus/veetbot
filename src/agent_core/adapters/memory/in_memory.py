@@ -285,7 +285,7 @@ class InMemoryMemoryStore:
         self, query: RecallQuery, *, lexical: bool = True
     ) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
-        # Any form of any term makes a candidate; relevance folds (ADR-0258).
+        # Any form of any term makes a candidate; relevance folds (ADR-0259).
         term_lexemes = [
             lexemes
             for forms in recall_term_lexemes(

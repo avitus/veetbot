@@ -15,7 +15,7 @@
 # budget, default off behind AGENT_MCP_SERVERS_ENABLED. Implemented with gate,
 # unit, PostgreSQL and native tests; review and delivery are pending. No
 # milestone or gate moves.
-# ADR-0258: Owner asked on 2026-10-27 to repair three recall probe misses:
+# ADR-0259: Owner asked on 2026-10-27 to repair three recall probe misses:
 # "our garden" tasks anchor the owner's residence (+home-location@1); an
 # owner-stated tie on a person-linked save records the People edge, with an
 # `agent people link-kinship` repair for earlier saves; overview pages run

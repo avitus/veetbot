@@ -546,7 +546,7 @@ class PeopleContextService:
                     and row.predicate in predicates
                     and any(endpoint.kind == "owner" for endpoint in (row.subject, row.object))
                 ]
-            # ADR-0258: pages run closest first (partner, children, parents,
+            # ADR-0259: pages run closest first (partner, children, parents,
             # siblings, other relatives), so the automatic first page holds the
             # owner's household rather than whoever has the lowest identifier.
             ordered = sorted(

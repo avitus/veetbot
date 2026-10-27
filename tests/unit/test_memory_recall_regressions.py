@@ -637,7 +637,7 @@ BOARD_QUESTION = "Which company boards do I sit on?"
 def test_relevance_recall_folds_a_plural_or_third_person_s(
     asked: str, stored: str, folds: bool
 ) -> None:
-    """ADR-0258: "boards" finds "board" and "sit" finds "sits", in relevance mode only."""
+    """ADR-0259: "boards" finds "board" and "sit" finds "sits", in relevance mode only."""
 
     record = memory(statement=f"Example {stored} note.")
     relevance = recall_query(text=asked).model_copy(update={"candidate_selection": "relevance"})

@@ -213,7 +213,7 @@ def link_kinship(
         bool, typer.Option("--confirm", help="Record the ties. Without it, only preview.")
     ] = False,
 ) -> None:
-    """Record family ties your own messages state behind earlier saves (ADR-0258)."""
+    """Record family ties your own messages state behind earlier saves (ADR-0259)."""
     emit(link_kinship_report(owner, confirm))
 
 

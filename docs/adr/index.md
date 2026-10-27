@@ -300,4 +300,4 @@ implementation without one.
 - [ADR-0253: A configured tool past the token cap is deferred, not fatal](0253-configured-tools-past-the-token-cap.md)
 - [ADR-0254: Cockpit feeds refresh every minute to every day, and on entry (Accepted)](0254-cockpit-feed-intervals-and-refresh-on-entry.md)
 - [ADR-0255: Owner-added MCP servers with in-app sign-in (Accepted)](0255-owner-added-mcp-servers.md)
-- [ADR-0258: Owner places and family ties reach recall (Proposed)](0258-owner-places-and-family-ties-reach-recall.md)
+- [ADR-0259: Owner places and family ties reach recall (Proposed)](0259-owner-places-and-family-ties-reach-recall.md)

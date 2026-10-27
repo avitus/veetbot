@@ -106,7 +106,7 @@ class Probe(BaseModel):
     min_required_rendered: NonNegativeInt = 0
     forbidden: tuple[ForbiddenEvidence, ...] = ()
     # Whole words or names the delivered recall must render. An owner overview
-    # delivers family as People lines rather than one belief each (ADR-0258).
+    # delivers family as People lines rather than one belief each (ADR-0259).
     delivered_must_contain: tuple[str, ...] = ()
     answer_must_contain: tuple[str, ...] = ()
     answer_must_not_contain: tuple[str, ...] = ()

@@ -1,4 +1,4 @@
-"""Owner-stated kinship becomes a People relationship (ADR-0258).
+"""Owner-stated kinship becomes a People relationship (ADR-0259).
 
 Production, 2026-09-29: the owner wrote "Erin is my wife. We married in 2005.
 Kyrri is my second daughter." The chat saved "Andy Vitus says Erin is his
@@ -194,7 +194,7 @@ async def test_kinship_edge_is_not_duplicated_when_the_tie_is_saved_again() -> N
 
 
 async def test_kinship_repair_previews_then_records_ties_behind_earlier_saves() -> None:
-    """Erin's production shape: a save from before ADR-0258, linked by role
+    """Erin's production shape: a save from before ADR-0259, linked by role
     "object" to an "Erin Vitus" record the owner later merged into "Erin"."""
 
     from tests.contract.people_kinship_cases import kinship_repair_case

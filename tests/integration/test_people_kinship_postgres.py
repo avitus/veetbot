@@ -1,4 +1,4 @@
-"""Owner kinship repair (ADR-0258) against PostgreSQL."""
+"""Owner kinship repair (ADR-0259) against PostgreSQL."""
 
 from dataclasses import replace
 from pathlib import Path

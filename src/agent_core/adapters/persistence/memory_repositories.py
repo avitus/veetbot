@@ -736,7 +736,7 @@ class PostgresMemoryStore:
         ):
             # Any-term semantics: lexical recall is a ranking arm, so one term
             # matching is enough to make a record a candidate for the ranker.
-            # Relevance recall also accepts a term's folded forms (ADR-0258).
+            # Relevance recall also accepts a term's folded forms (ADR-0259).
             text_match: ColumnElement[bool] = or_(
                 owned_resource,
                 *[

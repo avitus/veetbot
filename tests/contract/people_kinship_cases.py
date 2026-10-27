@@ -1,4 +1,4 @@
-"""Owner kinship repair (ADR-0258) shared by the in-memory and PostgreSQL suites."""
+"""Owner kinship repair (ADR-0259) shared by the in-memory and PostgreSQL suites."""
 
 from __future__ import annotations
 

@@ -219,7 +219,7 @@ def _trace(*, returned: list[UUID], dropped: list[UUID] | None = None) -> Recall
 
 
 async def test_family_probe_checks_the_names_the_overview_delivers(tmp_path: Path) -> None:
-    """ADR-0258: an overview answer is People lines; the probe checks names, never ids."""
+    """ADR-0259: an overview answer is People lines; the probe checks names, never ids."""
 
     from tests.contract.owner_recall_probe_cases import family_names_case
 

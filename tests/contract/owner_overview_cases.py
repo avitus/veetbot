@@ -292,7 +292,7 @@ async def seed_closeness(app: Composition) -> None:
 
 
 async def closeness_overview_run(app: Composition) -> None:
-    """ADR-0258: the first overview page holds the closest family, not the lowest ids.
+    """ADR-0259: the first overview page holds the closest family, not the lowest ids.
 
     Production: Riv was on page 2 because pages held three people in id order,
     and the automatic path only ever renders page 1.

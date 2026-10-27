@@ -1044,7 +1044,7 @@ retrieval@1 -> retrieval@2   ranking, when time decay and the near-duplicate
 retrieval@5 -> retrieval@7   live relevance ranking, for the review-reason
                              penalties and the attention cap (ADR-0249)
 retrieval@7 -> retrieval@8   live relevance matching folds a plural or
-                             third-person "-s" (ADR-0258)
+                             third-person "-s" (ADR-0259)
 ```
 
 ADR-0249 kept the base label `retrieval@4` by the owner's decision: the

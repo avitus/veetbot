@@ -80,7 +80,7 @@ from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQue
 # selector moves @5 -> @7 so production traces name the new ranking. The base
 # label stays @4 by the owner's decision: the deterministic M16 benchmark
 # measured no metric change, and re-recording its baseline would re-pin the
-# frozen M32 control and the owner-reviewed review contract. ADR-0258 folds
+# frozen M32 control and the owner-reviewed review contract. ADR-0259 folds
 # a plural or third-person "-s" in relevance matching only: @7 -> @8.
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
 RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@8"

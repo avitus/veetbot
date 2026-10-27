@@ -1,4 +1,4 @@
-"""Owner kinship edges from explicit person-linked saves (ADR-0258)."""
+"""Owner kinship edges from explicit person-linked saves (ADR-0259)."""
 
 from __future__ import annotations
 

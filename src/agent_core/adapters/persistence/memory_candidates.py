@@ -28,7 +28,7 @@ def lexemes(subject: Any, statement: Any) -> LateralFromClause:
 
 
 def term_matches(vector: Any, forms: tuple[str, ...]) -> ColumnElement[bool]:
-    """Whether the vector holds any one form of a recall term (ADR-0258)."""
+    """Whether the vector holds any one form of a recall term (ADR-0259)."""
 
     return or_(*[vector.op("@@")(func.plainto_tsquery("simple", form)) for form in forms])
 

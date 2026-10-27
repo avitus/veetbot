@@ -1,4 +1,4 @@
-"""Owner kinship stated in the owner's own words (ADR-0258).
+"""Owner kinship stated in the owner's own words (ADR-0259).
 
 "Erin is my wife" names a person and the owner's tie to them in one clause.
 The tie is read from the owner's message, never from a model's paraphrase,

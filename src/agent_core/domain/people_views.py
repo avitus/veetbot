@@ -85,7 +85,7 @@ class PeoplePage(PeopleValue):
 
 
 class OwnerKinshipRepairReport(PeopleValue):
-    """Counts only (ADR-0258): no names, statements or identifiers."""
+    """Counts only (ADR-0259): no names, statements or identifiers."""
 
     applied: bool
     scanned: int = Field(ge=0)

@@ -390,5 +390,5 @@ nav:
       - 'ADR-0253: Configured tools past the token cap': adr/0253-configured-tools-past-the-token-cap.md
       - 'ADR-0254: Cockpit feed intervals and refresh on entry': adr/0254-cockpit-feed-intervals-and-refresh-on-entry.md
       - 'ADR-0255: Owner-added MCP servers': adr/0255-owner-added-mcp-servers.md
-      - 'ADR-0258: Owner places and family ties': adr/0258-owner-places-and-family-ties-reach-recall.md
+      - 'ADR-0259: Owner places and family ties': adr/0259-owner-places-and-family-ties-reach-recall.md
   - Changelog: changelog.md
