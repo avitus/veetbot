@@ -327,9 +327,14 @@ external states visible in App Store Connect and TestFlight.
 ## Runtime behavior
 
 One submitted message creates one run. A stable idempotency key is reused across
-connection retries. If the server reports `active_run_exists`, the UI attaches
-to the named run and does not queue a second message. A waiting user's answer is
-routed to run input with the displayed question identifier. Stop requests use
+connection retries. While a deploy restarts the API, the proxy in front of it
+answers with its own 502, 503 or 504 page; a follow-up's session read and the
+submission keep retrying through those answers for up to three minutes of
+backoff, the release's readiness bound, before a failure is shown. The API's
+own error responses keep the ordinary retry bound. If the server reports
+`active_run_exists`, the UI attaches to the named run and does not queue a
+second message. A waiting user's answer is routed to run input with the
+displayed question identifier. Stop requests use
 the run-cancel route. The native composer uses padded multiline input; Return
 sends its contents, while Command-Return inserts a newline. The composer floats
 over the end of the transcript, which keeps the composer's measured height free

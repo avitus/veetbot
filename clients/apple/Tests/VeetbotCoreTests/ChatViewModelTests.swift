@@ -1092,6 +1092,65 @@ import UserNotifications
         }
     }
 
+    /// A follow-up sent while a deploy restarts the API reaches it: the proxy's
+    /// Bad Gateway answers to the session read and the submission are waited
+    /// out under one idempotency key instead of being shown to the owner.
+    @Test
+    func testFollowUpSentWhileTheServerRestartsIsDelivered() async throws {
+        let sessionID = UUID(), runID = UUID()
+        let lock = NSLock()
+        var restarting = false
+        var gatewayAnswers = ["read": 1, "submit": 3]
+        var submissionKeys: [String?] = []
+        let sessionBody = """
+            {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Saved chat","metadata":{},"created_at":"2026-10-27T16:51:00Z","updated_at":"2026-10-27T16:54:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let model = try configuredModel { request in
+            func answersBadGateway(_ route: String) -> Bool {
+                lock.withLock {
+                    guard restarting, let left = gatewayAnswers[route], left > 0 else { return false }
+                    gatewayAnswers[route] = left - 1
+                    return true
+                }
+            }
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}")
+            case ("GET", "/v1/sessions/\(sessionID)"):
+                if answersBadGateway("read") { return try proxyBadGateway(for: request) }
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID)/messages"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"items":[{"sequence":2,"role":"assistant","content":[{"type":"text","text":"Saved answer"}]}],"next_cursor":null}
+                    """)
+            case ("POST", "/v1/sessions/\(sessionID)/messages"):
+                lock.withLock { submissionKeys.append(request.value(forHTTPHeaderField: "Idempotency-Key")) }
+                if answersBadGateway("submit") { return try proxyBadGateway(for: request) }
+                return try response(for: request, statusCode: 202, body: "{\"run_id\":\"\(runID)\",\"status\":\"QUEUED\"}")
+            case ("GET", "/v1/runs/\(runID)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            default:
+                Issue.record("Unexpected request: \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        defer { model.newSession() }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        await model.selectSession(try #require(model.history.first))
+        lock.withLock { restarting = true }
+
+        #expect(await model.send("And their growth rate?"))
+
+        #expect(model.errorMessage == nil)
+        #expect(model.runState.activeRunID == runID)
+        #expect(model.runState.timeline.map(\.text) == ["Saved answer", "And their growth rate?"])
+        let keys = lock.withLock { submissionKeys }
+        #expect(keys.count == 4)
+        #expect(Set(keys).count == 1)
+    }
+
     /// Reopening a chat whose answer followed three approved commands lands on
     /// the answer, with the commands in one collapsed summary above it.
     @Test(arguments: [3, 12])
@@ -3937,6 +3996,16 @@ import UserNotifications
             )
         )
         return (response, Data(body.utf8))
+    }
+
+    /// What nginx answers while the API behind it is not listening.
+    private func proxyBadGateway(for request: URLRequest) throws -> (HTTPURLResponse, Data) {
+        try response(
+            for: request,
+            statusCode: 502,
+            body: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center></body></html>",
+            headers: ["Content-Type": "text/html"]
+        )
     }
 }
 

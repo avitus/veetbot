@@ -67,9 +67,16 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
-    public func getSession(_ sessionID: UUID) async throws -> SessionView {
+    public func getSession(
+        _ sessionID: UUID,
+        restartWindow: TimeInterval = 0
+    ) async throws -> SessionView {
         try await transport.send(
-            TransportRequest(method: .get, path: "/v1/sessions/\(sessionID.uuidString)")
+            TransportRequest(
+                method: .get,
+                path: "/v1/sessions/\(sessionID.uuidString)",
+                restartWindow: restartWindow
+            )
         )
     }
 
@@ -139,7 +146,8 @@ public struct VeetbotAPIClient: Sendable {
                 path: "/v1/sessions/\(sessionID.uuidString)/messages",
                 body: try JSONEncoder.server.encode(MessageBody(content: content, browserProfileID: browserProfileID)),
                 headers: ["Idempotency-Key": idempotencyKey],
-                retryAttempts: 3
+                retryAttempts: 3,
+                restartWindow: TransportRequest.serverRestartWindow
             )
         )
     }

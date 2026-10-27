@@ -1379,7 +1379,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             let session: SessionView
             if let selectedSessionID {
-                session = try await api.getSession(selectedSessionID)
+                // A follow-up sent while a deploy restarts the API waits for it.
+                session = try await api.getSession(
+                    selectedSessionID, restartWindow: TransportRequest.serverRestartWindow)
             } else {
                 session = try await createSelectedSession(suggestedTitle: suggestedTitle)
             }

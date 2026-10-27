@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-27 — Chat: a message sent during an update no longer fails with "Bad Gateway"
+
+- Each update to Veetbot's server restarts it, and for a minute or two the
+  app's messages used to fail with a "bad gateway" error. A follow-up sent
+  then now waits for the server to come back and is delivered, sent once.
+- If the server is still unavailable after three minutes, the error is shown
+  as before and your message stays in the composer.
+
 ## 2026-10-23 — Website tasks: a long task no longer spends its budget re-reading
 
 - A chat bound to a website that works through many pages, such as compiling
