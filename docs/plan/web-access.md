@@ -178,7 +178,7 @@ rewritten. This is bootstrap curation, not runtime or model-directed routing.
 
 ## Policy, egress, and trust
 
-Both tools declare `NETWORK_READ`, `LOW`, `READ_ONLY`, parallel execution,
+All three tools declare `NETWORK_READ`, `LOW`, `READ_ONLY`, parallel execution,
 bounded time and output, and `target_kind: web_provider`. Registration accepts
 that target only for builtin `web.*` tools with this exact read-only
 classification and `EXTERNAL_UNTRUSTED` output.
@@ -190,9 +190,10 @@ adapter hard-codes its HTTPS API endpoint. A model-authored `url` or
 Sandbox networking remains default-deny, and model-generated code receives no
 provider credential.
 
-Every search snippet and fetched page is `EXTERNAL_UNTRUSTED`. The label is
-declared on the tool specification, returned on the `ToolResult`, and persisted
-on the invocation result. Page text therefore cannot become policy,
+Every search snippet, fetched page and selected JSON value is
+`EXTERNAL_UNTRUSTED`. The label is declared on the tool specification, returned
+on the `ToolResult`, and persisted on the invocation result. Page text and JSON
+values therefore cannot become policy,
 configuration, a credential, or a trusted skill-authoring source.
 
 ## Bounds and failures
@@ -201,16 +202,18 @@ Provider HTTP responses are streamed into a two-MiB hard bound before JSON
 decoding; a larger response is invalid provider output. Search snippets,
 titles, result counts, fetched content, and final tool outputs have lower
 contract bounds: `web.fetch` truncates page content to its declared tool
-output limit, and `web.search` drops trailing results until its rendered
-output fits the declared acquisition limit. The tool pipeline then applies
+output limit, `web.search` drops trailing results until its rendered
+output fits the declared acquisition limit, and `web.fetch_json` fails a
+selection past its 64 KiB limit rather than cutting it. The tool pipeline then applies
 its separate inline admission ceiling: large pages become a persisted excerpt
 and an owner-readable artifact containing the acquired result. The acquisition
 limit is unchanged; the excerpt does not replace the full capture. Redirect following is disabled for provider API calls so a bearer
 credential cannot be forwarded to another host.
 
-Search has a 30-second total tool deadline. Fetch has a 60-second total tool
-deadline so an extraction that continues to make bounded read progress is not
-cut off by the provider clients' 30-second per-I/O limits. Both tools place a
+Search has a 30-second total tool deadline. Fetch and the JSON read have a
+60-second total tool deadline so an extraction that continues to make bounded
+read progress is not cut off by the provider clients' 30-second per-I/O
+limits. All three tools place a
 provider-attribution deadline just inside the effective pipeline deadline; an
 expiry is therefore normalized as a retryable provider-unavailable result that
 names the already-selected provider instead of falling through to an

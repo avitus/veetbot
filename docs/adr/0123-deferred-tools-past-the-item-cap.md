@@ -62,10 +62,10 @@ one account's tools beat the other's.
    - The named tool must be in the run's pinned set and must not be a control
      tool. Otherwise the call is denied with `tool.not_found.not_offered`. A
      malformed wrapper fails with `tool.arguments_invalid`.
-   - Invalid arguments for the named tool return its input schema, because
-     its definition never reached the provider. A schema from a server or
-     device is returned as untrusted data. ADR-0258 returns the whole
-     definition, description included.
+   - Before ADR-0258, invalid arguments for the named tool returned its input
+     schema, because its definition never reached the provider. A schema from
+     a server or device was returned as untrusted data. ADR-0258 returns the
+     whole definition, description included, under the same trust split.
    - `tool.call` is advertised only while the plan defers something. It is
      classified `NONE`, so every policy decision uses the deferred tool's own
      classification, and the policy files do not change.

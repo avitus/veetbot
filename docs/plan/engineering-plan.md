@@ -5024,17 +5024,17 @@ and general-purpose subagents.
 
 ### 32.2 Security and rollout
 
-- Both capabilities are disabled by default and absent from the registry until
-  explicitly configured.
+- The web capabilities are disabled by default and absent from the registry
+  until explicitly configured; `web.fetch_json` is registered only with fetch.
 - Provider credentials are broker-resolved at execution and never enter model
   context, tool arguments, durable events, or results.
 - Actual worker egress is restricted to fixed HTTPS provider API endpoints.
   A model-authored URL cannot authorize or redirect worker egress.
-- Search results and fetched page content are always
+- Search results, fetched page content and selected JSON values are always
   `EXTERNAL_UNTRUSTED`, bounded before context entry, and unable to grant
   policy, memory, or skill-authoring authority.
-- Fetch refuses non-public and non-HTTPS destinations before it delegates the
-  request to a provider.
+- Fetch and the JSON read refuse non-public and non-HTTPS destinations before
+  they delegate the request to a provider.
 
 ### 32.3 Acceptance criteria
 
