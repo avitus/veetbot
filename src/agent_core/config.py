@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -172,6 +174,11 @@ class Settings:
     call_configuration: CallConfiguration | None = None
     call_webhook_secret: SecretStr | None = None
     svp_enabled: bool = False
+    # ADR-0255: owner-added MCP servers, the key sealing their tokens, and the
+    # absolute URL of their sign-in callback.
+    mcp_servers_enabled: bool = False
+    mcp_authorization_key: SecretStr | None = None
+    mcp_oauth_callback_url: str | None = None
     email_enabled: bool = False
     email_mode_enabled: bool = False
     email_junk_filter_mode: EmailJunkMode = EmailJunkMode.OFF
@@ -315,6 +322,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "classes.tool_definitions.max_tokens",
             "classes.deferred_tool_index.max_items",
             "classes.deferred_tool_index.max_tokens",
+            "classes.owner_tool_index.max_items",
+            "classes.owner_tool_index.max_tokens",
             "classes.skill_catalog.max_items",
             "classes.skill_catalog.max_tokens",
             "classes.memory_snapshot.max_items",
@@ -759,6 +768,54 @@ def _read_private_surface_secret_file(raw_path: str, name: str) -> str:
     if not 16 <= len(value) <= 4096 or any(character.isspace() for character in value):
         raise ConfigurationError(f"{name} must contain one non-whitespace ASCII secret")
     return value
+
+
+MCP_OAUTH_CALLBACK_PATH = "/v1/mcp-oauth/callback"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _mcp_servers_settings(
+    values: Mapping[str, str],
+) -> tuple[bool, SecretStr | None, str | None]:
+    """Owner-added MCP servers fail closed without their key and callback (ADR-0255)."""
+
+    enabled = _parse_flag(values, "AGENT_MCP_SERVERS_ENABLED")
+    raw_key = values.get("MCP_AUTHORIZATION_KEY", "").strip()
+    raw_callback = values.get("MCP_OAUTH_CALLBACK_URL", "").strip()
+    if not enabled:
+        if raw_key or raw_callback:
+            raise ConfigurationError(
+                "MCP_AUTHORIZATION_KEY and MCP_OAUTH_CALLBACK_URL require "
+                "AGENT_MCP_SERVERS_ENABLED=1"
+            )
+        return False, None, None
+    if not raw_key:
+        raise ConfigurationError("AGENT_MCP_SERVERS_ENABLED=1 requires MCP_AUTHORIZATION_KEY")
+    try:
+        decoded = base64.urlsafe_b64decode(raw_key + "=" * (-len(raw_key) % 4))
+    except (ValueError, binascii.Error) as exc:
+        raise ConfigurationError("MCP_AUTHORIZATION_KEY must be base64url") from exc
+    if len(decoded) != 32:
+        raise ConfigurationError("MCP_AUTHORIZATION_KEY must encode exactly 32 bytes")
+    if not raw_callback:
+        raise ConfigurationError("AGENT_MCP_SERVERS_ENABLED=1 requires MCP_OAUTH_CALLBACK_URL")
+    callback = urlsplit(raw_callback)
+    secure = callback.scheme == "https" or (
+        callback.scheme == "http" and callback.hostname in _LOOPBACK_HOSTS
+    )
+    if (
+        not secure
+        or callback.hostname is None
+        or callback.username is not None
+        or callback.path != MCP_OAUTH_CALLBACK_PATH
+        or callback.query
+        or callback.fragment
+    ):
+        raise ConfigurationError(
+            "MCP_OAUTH_CALLBACK_URL must be an HTTPS (or loopback HTTP) URL ending in "
+            f"{MCP_OAUTH_CALLBACK_PATH}"
+        )
+    return True, SecretStr(raw_key), raw_callback
 
 
 def _svp_credential_path(raw_path: str) -> str:
@@ -1852,6 +1909,9 @@ def _load_settings(
         credentials["svp_read"] = SecretStr(_svp_credential_path(raw_svp_credential_file))
     elif raw_svp_credential_file and not svp_enabled:
         raise ConfigurationError("SVP_CREDENTIAL_FILE requires AGENT_SVP_ENABLED=1")
+    mcp_servers_enabled, mcp_authorization_key, mcp_oauth_callback_url = _mcp_servers_settings(
+        values
+    )
     email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
     email_mode_enabled = _parse_flag(values, "AGENT_EMAIL_MODE_ENABLED")
     email_junk_filter_mode = _parse_enum(
@@ -2125,6 +2185,9 @@ def _load_settings(
         call_configuration=call_configuration,
         call_webhook_secret=call_webhook_secret,
         svp_enabled=svp_enabled,
+        mcp_servers_enabled=mcp_servers_enabled,
+        mcp_authorization_key=mcp_authorization_key,
+        mcp_oauth_callback_url=mcp_oauth_callback_url,
         email_enabled=email_enabled,
         email_mode_enabled=email_mode_enabled,
         email_junk_filter_mode=email_junk_filter_mode,

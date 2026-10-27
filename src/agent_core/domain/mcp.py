@@ -15,6 +15,39 @@ from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectCl
 
 MCP_SERVER_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 MCP_AUTH_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# ADR-0255: an owner-added server's name, and the first-party prefixes it may not take.
+OWNER_MCP_SERVER_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+RESERVED_MCP_SERVER_PREFIXES = ("gmail_", "bland_", "svp_")
+MAXIMUM_OWNER_MCP_SERVERS = 16
+MAXIMUM_OWNER_MCP_URL_LENGTH = 2048
+
+
+def validate_owner_server_url(url: str) -> str:
+    """An owner-added server is public HTTPS on port 443 (ADR-0255 decision 2)."""
+
+    if len(url) > MAXIMUM_OWNER_MCP_URL_LENGTH or not url.isascii() or not url.isprintable():
+        raise ValueError("MCP server URL is invalid")
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("MCP server URL is invalid") from exc
+    hostname = parsed.hostname or ""
+    labels = hostname.rstrip(".").split(".")
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or port not in {None, 443}
+        or len(labels) < 2
+        or labels[-1].isdigit()
+        or ":" in hostname
+        or hostname.endswith((".internal", ".local", ".localhost", ".home", ".lan"))
+    ):
+        raise ValueError("MCP server URL must be public HTTPS on port 443")
+    return url
 
 
 class MCPTransport(StrEnum):
@@ -28,6 +61,8 @@ class MCPAuthScheme(StrEnum):
     HEADER = "header"
     OAUTH2_CLIENT = "oauth2_client"
     ENV = "env"
+    # ADR-0255: the owner's own sign-in; tokens come from the sealed store.
+    OAUTH2_AUTHORIZATION = "oauth2_authorization"
 
 
 class MCPServerConfig(BaseModel):
@@ -50,6 +85,8 @@ class MCPServerConfig(BaseModel):
     timeout_seconds: int = Field(default=30, gt=0)
     maximum_output_bytes: int = Field(default=1_048_576, gt=0)
     enabled: bool = True
+    # ADR-0255: added by the owner in Settings rather than by deployment.
+    owner_managed: bool = False
 
     @model_validator(mode="after")
     def validate_shape(self) -> MCPServerConfig:
@@ -59,9 +96,19 @@ class MCPServerConfig(BaseModel):
             raise ValueError("MCP endpoint must not be empty")
         if self.transport is MCPTransport.STDIO and not self.operator_configured:
             raise ValueError("stdio MCP servers must be operator configured")
-        if self.auth_scheme is MCPAuthScheme.NONE:
+        if self.owner_managed:
+            validate_owner_server_url(self.endpoint)
+            if self.transport is not MCPTransport.HTTP or self.operator_configured:
+                raise ValueError("owner-added MCP servers are tenant HTTP servers")
+            if self.auth_scheme not in {MCPAuthScheme.NONE, MCPAuthScheme.OAUTH2_AUTHORIZATION}:
+                raise ValueError("owner-added MCP servers use no credential or a sign-in")
+        elif self.auth_scheme is MCPAuthScheme.OAUTH2_AUTHORIZATION:
+            raise ValueError("MCP sign-in authentication is only for owner-added servers")
+        if self.auth_scheme in {MCPAuthScheme.NONE, MCPAuthScheme.OAUTH2_AUTHORIZATION}:
             if self.credential_ref is not None:
-                raise ValueError("MCP auth scheme none requires no credential reference")
+                raise ValueError(
+                    f"MCP auth scheme {self.auth_scheme.value} requires no credential reference"
+                )
         elif not self.credential_ref:
             raise ValueError("MCP authenticated schemes require a credential reference")
         if self.auth_scheme in {MCPAuthScheme.HEADER, MCPAuthScheme.ENV} and (
@@ -174,3 +221,139 @@ class MCPToolCatalogRecord(BaseModel):
     input_schema: dict[str, Any]
     discovered_at: datetime
     withdrawn_at: datetime | None = None
+
+
+class MCPServerAccess(StrEnum):
+    """The owner's classification of every tool on one server (ADR-0255 decision 3)."""
+
+    READ_ONLY = "read_only"
+    CHANGES = "changes"
+
+
+OWNER_ACCESS_CLASSIFICATIONS: dict[
+    MCPServerAccess, tuple[SideEffectClass, RiskLevel, IdempotencyClass]
+] = {
+    MCPServerAccess.READ_ONLY: (
+        SideEffectClass.NETWORK_READ,
+        RiskLevel.LOW,
+        IdempotencyClass.READ_ONLY,
+    ),
+    MCPServerAccess.CHANGES: (
+        SideEffectClass.EXTERNAL_WRITE,
+        RiskLevel.HIGH,
+        IdempotencyClass.NON_IDEMPOTENT,
+    ),
+}
+
+
+def server_access(config: MCPServerConfig) -> MCPServerAccess:
+    """Read a row's classification back as the access level Settings shows."""
+
+    reads = {SideEffectClass.NONE, SideEffectClass.NETWORK_READ}
+    if config.side_effect in reads and config.idempotency is IdempotencyClass.READ_ONLY:
+        return MCPServerAccess.READ_ONLY
+    return MCPServerAccess.CHANGES
+
+
+class MCPServerStatus(StrEnum):
+    READY = "ready"
+    SIGN_IN_REQUIRED = "sign_in_required"
+
+
+class MCPServerView(BaseModel):
+    """One server as Settings shows it; operator rows are read-only (ADR-0255)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    server_id: str
+    url: str | None
+    managed_by: Literal["owner", "operator"]
+    access: MCPServerAccess
+    authentication: Literal["none", "sign_in", "operator"]
+    status: MCPServerStatus
+    sign_in_host: str | None = None
+    signed_in_at: datetime | None = None
+
+
+class MCPServerList(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    servers: list[MCPServerView]
+
+
+class MCPSignInStart(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    authorization_url: str
+    callback_scheme: Literal["veetbot"] = "veetbot"
+    expires_at: datetime
+
+
+class MCPAuthorizationMetadata(BaseModel):
+    """RFC 9728 and RFC 8414 discovery, validated before it is stored (ADR-0255)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    resource: str
+    issuer: str
+    authorization_endpoint: str
+    token_endpoint: str
+    registration_endpoint: str
+    scopes: tuple[str, ...] = ()
+    token_endpoint_auth_methods: tuple[str, ...] = ()
+
+
+class MCPClientRegistration(BaseModel):
+    """An RFC 7591 registration; the secret is sealed before it is stored."""
+
+    model_config = ConfigDict(frozen=True)
+
+    client_id: str
+    client_secret: str | None = None
+    auth_method: Literal["none", "client_secret_post", "client_secret_basic"] = "none"
+
+
+class MCPTokenGrant(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    access_token: str
+    refresh_token: str | None = None
+    expires_in: int | None = None
+
+
+class MCPServerAuthorization(BaseModel):
+    """One server's sealed sign-in state; every secret field is AES-GCM sealed."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str
+    server_id: str
+    metadata: MCPAuthorizationMetadata
+    redirect_uri: str | None = None
+    client_id: str | None = None
+    client_secret_sealed: str | None = None
+    client_auth_method: Literal["none", "client_secret_post", "client_secret_basic"] | None = None
+    access_token_sealed: str | None = None
+    access_expires_at: datetime | None = None
+    refresh_token_sealed: str | None = None
+    signed_in_at: datetime | None = None
+    signed_in_by: str | None = None
+    pending_state_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    pending_verifier_sealed: str | None = None
+    pending_expires_at: datetime | None = None
+    pending_principal_id: str | None = None
+    # The consumed state whose code is being exchanged; a sign-out clears it.
+    exchanging_state_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    updated_at: datetime
+
+    @property
+    def signed_in(self) -> bool:
+        return self.refresh_token_sealed is not None or self.access_token_sealed is not None
+
+
+class MCPProbeResult(BaseModel):
+    """What an unauthenticated probe found: an open server, or how to sign in."""
+
+    model_config = ConfigDict(frozen=True)
+
+    authorization: MCPAuthorizationMetadata | None = None

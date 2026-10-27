@@ -4,6 +4,7 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case connection
     case models
     case websiteAccess
+    case mcpServers
     case notifications
     case appearance
     case smsIntegration
@@ -18,13 +19,13 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     // at each group's `case` in the page switch below.
     private static let titles: [ConnectionSettingsSection: String] = [
         .connection: "Connection", .models: "Models", .websiteAccess: "Website access",
-        .notifications: "Notifications", .appearance: "Appearance",
+        .mcpServers: "MCP servers", .notifications: "Notifications", .appearance: "Appearance",
         .smsIntegration: "SMS integration", .dataAndPrivacy: "Data & privacy",
     ]
 
     private static let systemImages: [ConnectionSettingsSection: String] = [
         .connection: "key", .models: "wand.and.stars", .websiteAccess: "globe",
-        .notifications: "bell", .appearance: "paintpalette",
+        .mcpServers: "puzzlepiece.extension", .notifications: "bell", .appearance: "paintpalette",
         .smsIntegration: "message", .dataAndPrivacy: "lock.shield",
     ]
 
@@ -282,7 +283,7 @@ public struct ConnectionSettingsView: View {
                 }
                 .a2Card()
                 .padding(.horizontal, 16)
-                Text("Models and website access are saved on the server; everything else stays on this \(deviceName).")
+                Text("Models, website access and MCP servers are saved on the server; everything else stays on this \(deviceName).")
                     .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .padding(.horizontal, 20)
@@ -663,6 +664,22 @@ public struct ConnectionSettingsView: View {
 
         case .smsIntegration:
             smsIntegrationSection
+
+        case .mcpServers:
+            SettingsCard(
+                title: "MCP Servers",
+                summary: "Connect Veetbot to the tools other services offer over MCP.",
+                systemImage: "puzzlepiece.extension",
+                tint: AppTheme.tealText
+            ) {
+                if model.isConfigured {
+                    MCPServerSettingsSection()
+                } else {
+                    Text("Connect this app to Veetbot before adding MCP servers.")
+                        .veetType(.ui)
+                        .foregroundColor(AppTheme.inkSoft)
+                }
+            }
 
         case .notifications:
             SettingsCard(

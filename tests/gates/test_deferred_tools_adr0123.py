@@ -117,6 +117,8 @@ async def _production(
     *,
     enabled_tools: list[str] | None = None,
     extra_environment: Mapping[str, str] = MappingProxyType({}),
+    extra_scripts: Mapping[str, ScriptedMCPServer] = MappingProxyType({}),
+    **build_kwargs: Any,
 ) -> tuple[ScriptedMCPClientFactory, AbstractAsyncContextManager[Composition]]:
     configuration = call_configuration()
     loaded = load_settings(
@@ -170,6 +172,7 @@ async def _production(
         ),
     )
     scripts["svp_read"] = ScriptedMCPServer(name="svp_read", discovery=await _svp_discovery())
+    scripts.update(extra_scripts)
     factory = ScriptedMCPClientFactory(scripts)
     provider = FakeWebProvider()
     return factory, build(
@@ -180,6 +183,7 @@ async def _production(
         web_fetch_provider_override=provider,
         one_click_transport_override=Transport(),
         enabled_tools=enabled_tools,
+        **build_kwargs,
     )
 
 

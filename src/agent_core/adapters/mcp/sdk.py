@@ -187,7 +187,8 @@ class SDKMCPClient:
         endpoint = urlsplit(self._config.endpoint)
         if endpoint.scheme != "https" or endpoint.hostname is None:
             raise MCPTransportError
-        if self._config.auth_scheme is MCPAuthScheme.BEARER:
+        if self._config.auth_scheme in {MCPAuthScheme.BEARER, MCPAuthScheme.OAUTH2_AUTHORIZATION}:
+            # A sign-in's access token arrives resolved and refreshed (ADR-0255).
             return {"Authorization": f"Bearer {self._credential.reveal()}"}
         if self._config.auth_scheme is MCPAuthScheme.HEADER:
             if self._config.auth_name is None:
@@ -529,8 +530,11 @@ class SDKMCPClient:
 
 
 class SDKMCPClientFactory:
-    def __init__(self, *, http_proxy_url: str | None = None) -> None:
+    def __init__(
+        self, *, http_proxy_url: str | None = None, owner_proxy_url: str | None = None
+    ) -> None:
         self._http_proxy_url = http_proxy_url
+        self._owner_proxy_url = owner_proxy_url
 
     def __call__(
         self,
@@ -538,11 +542,14 @@ class SDKMCPClientFactory:
         credential: SecretValue | None,
         environment: dict[str, str],
     ) -> SDKMCPClient:
-        if config.transport is MCPTransport.HTTP and self._http_proxy_url is None:
+        # Owner-added servers use the owner MCP transport, every other HTTP row
+        # the sandbox allowlist's (ADR-0255 decision 7).
+        proxy_url = self._owner_proxy_url if config.owner_managed else self._http_proxy_url
+        if config.transport is MCPTransport.HTTP and proxy_url is None:
             raise MCPTransportError
         return SDKMCPClient(
             config,
             credential,
             environment,
-            http_proxy_url=self._http_proxy_url,
+            http_proxy_url=proxy_url,
         )

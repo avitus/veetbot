@@ -1528,6 +1528,33 @@ with `tool.call`, and the production-roster gates include the flag
 was working means the grant has ended: repeat steps 1 and 2 with a new file.
 
 
+## Optional owner-added MCP servers
+
+ADR-0255 lets the owner add MCP servers, such as MagicPath, from the
+Settings window and sign in to them there. It is off by default. To enable it:
+
+1. Generate the key that seals stored sign-ins once, and keep it. A new key
+   signs every server out; losing it loses nothing else.
+
+   ```bash
+   python3 -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())'
+   ```
+
+2. Set `AGENT_MCP_SERVERS_ENABLED=1`, `MCP_AUTHORIZATION_KEY=<that key>` and
+   `MCP_OAUTH_CALLBACK_URL=https://api.veetbot.com/v1/mcp-oauth/callback` in
+   `/etc/veetbot/veetbot.env`, then restart the API and the three workers.
+   The callback is served by the API's existing virtual host, with no bearer
+   token; its single-use state is the authority.
+3. In Settings → MCP servers, add the server by name and URL, or paste its
+   JSON configuration, choose its access, and sign in when asked.
+
+Each addition is the owner's egress decision for that server: its traffic and
+its sign-in go through the API's or worker's own audited `mcp_https` proxy
+(public HTTPS on port 443 only), and the sandbox allowlist is unchanged. New
+chats offer a ready server's tools as deferred index entries reached with
+`tool.call`; chats already open keep their tools. The owner's principal needs
+`settings.read` and `settings.write`, which Model settings already require.
+
 ## Optional Bland calling services
 
 [Bland setup](bland-setup.md) defines the private configuration, distinct database
