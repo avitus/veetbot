@@ -30,12 +30,14 @@ when nothing has arrived.
 2. **New mail keeps the remaining quarter.** Above that share and within the
    full ceilings, a refresh is admitted as a new-mail slice. That slice reads
    new Gmail changes with all eight full-thread reads. It assesses only current
-   Inbox conversations, the newest activity first. It may still re-read expired
-   Inbox bodies, prepare eligible automatic drafts and verify unsubscribe
-   evidence. It still lists and reads the first page of an Inbox pass, which
+   Inbox conversations, the newest activity first, after any retained window
+   that a change is waiting on: until that window is analyzed, the thread's
+   newer messages cannot be read, even when the thread is not in the Inbox.
+   It may still re-read expired Inbox bodies, prepare eligible automatic
+   drafts and verify unsubscribe evidence. It still lists and reads the first page of an Inbox pass, which
    holds the newest mail, so a resynchronization after an expired history
    cursor recovers new mail. It lists no later catch-up page, does not advance
-   the ninety-day history pass, assesses no non-Inbox mail and writes no
+   the ninety-day history pass, assesses no other non-Inbox mail and writes no
    correspondence summaries. Importing a thread still records the owner's own
    Sent replies in it as learning evidence: that step makes no model call.
 3. **The full ceilings are unchanged.** At either ceiling every refresh is still

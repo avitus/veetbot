@@ -1071,7 +1071,19 @@ class _TaskIO:
         foreground = [thread for thread in pending if thread.in_inbox]
         historical = [thread for thread in pending if not thread.in_inbox]
         if new_mail_only:
-            selected = sorted(foreground, key=lambda thread: -thread.updated_at.timestamp())
+            # A window discovery waits on holds new mail back, Inbox or not.
+            selected = sorted(
+                (
+                    thread
+                    for thread in pending
+                    if thread.in_inbox
+                    or (thread.account_id, thread.provider_thread_id) in self.window_waiting
+                ),
+                key=lambda thread: (
+                    (thread.account_id, thread.provider_thread_id) not in self.window_waiting,
+                    -thread.updated_at.timestamp(),
+                ),
+            )
         else:
             selected = foreground[:3] + historical[:1]
             selected_ids = {thread.id for thread in selected}
