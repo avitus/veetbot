@@ -15,6 +15,7 @@ import re
 from agent_core.bootstrap import build
 from agent_core.config import load_settings
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.events import TOOL_RESULT_EVENTS, EventEnvelope
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelRequest,
@@ -113,6 +114,16 @@ def _results(request: ModelRequest) -> list[ToolResultItem]:
     return [item for item in request.conversation if isinstance(item, ToolResultItem)]
 
 
+def _recorded_by(events: list[EventEnvelope]) -> dict[str, int]:
+    """The sequence of the event that recorded each call's result."""
+
+    return {
+        event.payload["call_id"]: event.sequence
+        for event in events
+        if event.event_type in TOOL_RESULT_EVENTS
+    }
+
+
 async def test_a_browser_recovery_read_carries_its_event() -> None:
     # The runtime's own recovery read is appended outside the model's batch.
     async with build(
@@ -125,11 +136,14 @@ async def test_a_browser_recovery_read_carries_its_event() -> None:
         run_id = await composition.runs.submit("Read the account.")
         run = await composition.runs.wait_terminal(run_id)
         requests = _requests(composition)
+        recorded = _recorded_by(await composition.runs.events(run_id))
 
     assert run.status is RunStatus.COMPLETED, run.failure
     results = _results(requests[-1])
     assert [item.call_id.startswith("browser-recovery:") for item in results] == [False, True]
-    assert all(item.source_event_sequence is not None for item in results)
+    assert [item.source_event_sequence for item in results] == [
+        recorded[item.call_id] for item in results
+    ]
 
 
 async def test_a_batch_resumed_after_approval_carries_its_events() -> None:
@@ -151,7 +165,8 @@ async def test_a_batch_resumed_after_approval_carries_its_events() -> None:
         await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
         run = await composition.runs.wait_terminal(run_id)
         requests = _requests(composition)
+        recorded = _recorded_by(await composition.runs.events(run_id))
 
     assert run.status is RunStatus.COMPLETED, run.failure
     [result] = _results(requests[-1])
-    assert result.source_event_sequence is not None
+    assert result.source_event_sequence == recorded[result.call_id]

@@ -51,8 +51,9 @@ produce the same request on every rebuild. The pointer text, the artifact or
 event reference it names, the never-yield set, the yield order, and the
 budgets are unchanged. Nothing is frozen or suppressed to improve caching: the
 model loses up to one quarter budget of old tool results a little earlier than
-the minimal rule would have taken them, and every one of them remains
-reachable through its pointer.
+the minimal rule would have taken them. Each pointer still names the event or
+artifact that keeps its content, but no model-callable tool reads it back
+(corrected by ADR-0256).
 
 The history cut and compaction are not changed by this decision. The history
 cut did not bind in the run above; if a long run shows the same rolling loss
