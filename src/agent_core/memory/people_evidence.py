@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agent_core.domain.messages import ResolvedModel
 from agent_core.domain.people_evidence import PeopleFormationEvidence
-from agent_core.memory.distillation import PeopleAssistedCandidateExtractor
+from agent_core.memory.people_owner_formation import OwnerPeopleCandidateExtractor
 
 PEOPLE_CORPUS_PATH = Path("evals/capability/people.v1.json")
 PEOPLE_HOLDOUT_PATH = Path("evals/capability/people.v1-holdout.json")
@@ -31,7 +31,7 @@ def reviewed_corpora() -> bool:
 def schema_digest() -> str:
     return hashlib.sha256(
         json.dumps(
-            PeopleAssistedCandidateExtractor._distillation_schema(),
+            OwnerPeopleCandidateExtractor._distillation_schema(),
             sort_keys=True,
             separators=(",", ":"),
         ).encode()

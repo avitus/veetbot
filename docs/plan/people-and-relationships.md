@@ -447,6 +447,23 @@ Provider work stays outside database transactions. Invalid candidates fail
 individually; source-wide structural failures take the existing audited fallback
 and bounded retry path. Corrections win races with imports and background work.
 
+Formation@11 statements preserve the app, product, project or other referent
+needed to understand a claim outside its conversation. Structured context anchors
+name exact owner-source spans; normalization rejects an anchor omitted from the
+statement or its cited evidence. Questions can establish a topic, never prove
+an assertion. Ambiguous references must not be guessed. Earlier owner context is
+bounded to eight complete messages and 8,192 UTF-8 bytes within the preceding
+256-event window, filtered for source exclusion before provider use. The final
+stage may cite that context alongside a current observation; coverage still
+accounts only for current events. Context-only claims are refused. Commit rereads
+original context and rechecks source suppression, preserving every cited dependency
+without advancing evidence clocks from recall or changing the watermark. Isolated
+imports receive no earlier context. Frozen formation policies retain their original
+source windows and schemas; the current owner extractor extends them separately,
+and its schema and implementation remain bound by the existing evidence digests.
+This repairs future extraction; it does not automatically re-extract or
+rewrite historical memories, and scripted regressions are not live quality evidence.
+
 Formation@11 accepts a named statement subject from an exact source-backed subject
 mention and the candidate's own evidence quote. It preserves that name in the fact;
 it does not rewrite another person's claim as an owner claim. The existing hazard,

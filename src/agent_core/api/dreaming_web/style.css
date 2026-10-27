@@ -832,3 +832,25 @@ dialog::backdrop {
     flex-wrap: wrap;
   }
 }
+
+/* Source reading keeps the review open and never renders source markup. */
+#conversation {
+  width: min(760px, calc(100vw - 32px));
+  max-width: 760px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  box-sizing: border-box;
+}
+.source-link { display: inline-block; margin-top: 12px; color: var(--ink); }
+.conversation-message { padding: 12px; border-bottom: 1px solid var(--line); }
+.supporting-message { border-left: 4px solid var(--ink); background: var(--paper); }
+.conversation-message h3 { font-size: 14px; }
+#conversation-error { color: #9b2828; }
+
+.conversation-toolbar {
+  position: sticky;
+  top: -28px;
+  z-index: 1;
+  background: var(--paper);
+  padding: 12px 0;
+}

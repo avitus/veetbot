@@ -201,3 +201,66 @@ async def test_status_explains_legacy_erasure_block_without_exposing_records() -
             result = await client.get("/v1/dreaming")
             assert result.json().get("blockers") == ["legacy_attribution_unavailable"]
             assert str(UUID(int=9876)) not in result.text
+
+
+async def test_source_conversation_is_scoped_to_visible_operation_and_session_authority() -> None:
+    from uuid import UUID
+
+    reader = owner().model_copy(update={"scopes": {"memory.read", "memory.write", "session.read"}})
+    settings = replace(
+        memory_settings(),
+        memory_api_enabled=True,
+        memory_reconsolidation_api_enabled=True,
+        memory_dreaming_review_enabled=True,
+    )
+    async with build(
+        settings=settings, storage="memory", principal=reader, clock=FixedClock(NOW)
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+        prepared, review = await prepared_batch(cast(Factory, app.uow_factory))
+        applied = await apply_review(
+            app.uow_factory,
+            FixedClock(NOW),
+            reader,
+            prepared,
+            review,
+            admitted=lambda: True,
+            owner_review=True,
+        )
+        key = applied[0].operation_ids[0]
+        async with _client(app, principal=reader) as client:
+            operation = (
+                await client.get(f"/v1/memory-reconsolidations/{key}?ceiling=restricted")
+            ).json()
+            source = operation["sources"][0]
+            path = f"/v1/dreaming/{key}/sources/{source['belief_id']}/conversation"
+            for _ in range(2):
+                response = await client.get(path + "?ceiling=restricted&limit=1")
+                assert response.status_code == 200, response.text
+                body = response.json()
+                assert body["session"]["id"] == source["session_id"]
+                assert body["source_event_ids"] == source["event_ids"]
+                assert len(body["messages"]["items"]) == 1
+                assert response.headers["cache-control"] == "private, no-store"
+            cursor = body["messages"]["next_cursor"]
+            if cursor:
+                following = await client.get(
+                    path + "?ceiling=restricted&limit=1",
+                    params={"ceiling": "restricted", "limit": 1, "cursor": cursor},
+                )
+                assert following.status_code == 200
+                assert following.json()["messages"]["items"] != body["messages"]["items"]
+            assert (await client.get(path + "?ceiling=public")).status_code == 404
+            assert (await client.get(path + "?ceiling=restricted&cursor=bad")).status_code == 400
+            unknown = f"/v1/dreaming/{key}/sources/{UUID(int=999)}/conversation?ceiling=restricted"
+            assert (await client.get(unknown)).status_code == 404
+        async with _client(app, principal=owner()) as client:
+            assert (await client.get(path + "?ceiling=restricted")).status_code == 403
+        foreign = reader.model_copy(update={"principal_id": "other"})
+        async with _client(app, principal=foreign) as client:
+            assert (await client.get(path + "?ceiling=restricted")).status_code == 404
+        async with app.uow_factory() as uow:
+            await uow.memories.fence_for_erasure(reader, [UUID(source["belief_id"])])
+        async with _client(app, principal=reader) as client:
+            assert (await client.get(path + "?ceiling=restricted")).status_code == 404

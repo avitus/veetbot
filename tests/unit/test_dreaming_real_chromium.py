@@ -12,11 +12,12 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.api.app import create_app
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode
+from agent_core.domain.events import NewEvent
 from agent_core.memory.reconsolidation_apply import apply_review
 from tests.contract.reconsolidation_apply_cases import prepared_batch
 from tests.contract.reconsolidation_cases import Factory
 from tests.contract.reconsolidation_surface_cases import owner
-from tests.contract.support import NOW, session
+from tests.contract.support import NOW, SESSION_ID, session
 from tests.integration.m2_support import memory_settings
 from tests.real_browser_support import require_real_browser
 
@@ -29,6 +30,7 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
         memory_reconsolidation_api_enabled=True,
         memory_dreaming_review_enabled=True,
     )
+    reader = owner().model_copy(update={"scopes": {"memory.read", "memory.write", "session.read"}})
     clock = FixedClock(NOW)
     async with build(settings=settings, storage="memory", principal=owner(), clock=clock) as app:
         async with app.uow_factory() as uow:
@@ -43,6 +45,18 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
             admitted=lambda: True,
             owner_review=True,
         )
+        async with app.uow_factory() as uow:
+            for index in range(51):
+                await uow.events.append(
+                    NewEvent(
+                        session_id=SESSION_ID,
+                        run_id=None,
+                        event_type="user.message.created",
+                        actor_type="principal",
+                        actor_id=reader.principal_id,
+                        payload={"content": f"Context {index}: <img src=x onerror=alert(1)>"},
+                    )
+                )
         auth_settings = replace(
             settings,
             auth_mode=AuthMode.TOKEN,
@@ -51,7 +65,7 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
         api_app = create_app(
             app.services,
             auth_settings,
-            owner(),
+            reader,
             app.new_request_id,
             app.readiness_probe,
             clock=app.clock,
@@ -67,7 +81,14 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
             errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(str(error)))
 
+            source_failures = 1
+
             async def route(request: Route) -> None:
+                nonlocal source_failures
+                if "/conversation?" in request.request.url and source_failures:
+                    source_failures -= 1
+                    await request.fulfill(status=503, body="Unavailable")
+                    return
                 incoming = request.request
                 client.cookies.clear()
                 response = await client.request(
@@ -87,6 +108,23 @@ async def test_real_review_approve_undo_reject_pause_and_mobile() -> None:
             await page.locator("#token").fill("synthetic-browser-review-secret")
             await page.get_by_role("button", name="Connect", exact=True).click()
             await expect(page.locator(".card")).to_have_count(2)
+            await page.get_by_role("link", name="View source conversation").first.click()
+            await expect(page.locator("#conversation")).to_be_visible()
+            await page.get_by_role("button", name="Retry loading conversation").click()
+            await expect(page.locator("#conversation-messages")).to_contain_text("Context 0: <img")
+            assert await page.locator("#conversation img").count() == 0
+            await expect(page.locator("#conversation-messages")).not_to_contain_text("Context 50:")
+            await page.get_by_role("button", name="Load more messages").click()
+            await expect(page.locator("#conversation-messages")).to_contain_text("Context 50:")
+            await page.locator("#conversation").evaluate("el => { el.scrollTop = 0; }")
+            await page.screenshot(path="/tmp/dreaming-conversation-desktop.png")
+            await page.set_viewport_size({"width": 390, "height": 844})
+            assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            await page.screenshot(path="/tmp/dreaming-conversation-mobile.png")
+            await page.set_viewport_size({"width": 1440, "height": 1000})
+            await expect(page.locator("#conversation .supporting-message").first).to_be_visible()
+            await page.get_by_role("button", name="Close conversation").click()
+            await expect(page.locator("#conversation")).not_to_be_visible()
             await page.get_by_role("button", name="Approve and apply", exact=True).click()
             await page.locator("#confirm-button").click()
             await expect(page.locator(".card")).to_have_count(1)
