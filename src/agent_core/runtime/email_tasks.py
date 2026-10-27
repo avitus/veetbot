@@ -895,6 +895,8 @@ class _TaskIO:
     async def refresh(self) -> None:
         """Advance bounded discovery, assessment, and eligible automatic drafts."""
         c = self.context
+        # Above the learning share only new mail is read and ranked (ADR-0256).
+        new_mail_only = self.task.scope == "new_mail"
         for account_id in self.task.account_ids:
             account, sync = await self._state(account_id)
             try:
@@ -916,13 +918,16 @@ class _TaskIO:
                 await self._save_sync(account, sync)
                 # New mail first; an unfinished catch-up keeps the rest of the read budget.
                 account, sync = await self._changes(
-                    account, sync, read_limit=8 if account.inbox_complete else 4
+                    account, sync, read_limit=8 if account.inbox_complete or new_mail_only else 4
                 )
                 if account.history_id is None:
                     # A resync re-lists the inbox below; resume changes from before that listing.
                     account = account.model_copy(update={"history_id": profile["history_id"]})
                     await self._save_sync(account, sync)
-                if not account.inbox_complete and not sync.inbox_page_open:
+                # A pass's first page is the newest Inbox mail, which a
+                # resynchronization must recover even in a new-mail slice.
+                catch_up = not new_mail_only or account.inbox_cursor is None
+                if not account.inbox_complete and not sync.inbox_page_open and catch_up:
                     page = await self.call(
                         account_id,
                         "search_threads",
@@ -942,7 +947,7 @@ class _TaskIO:
                     sync.inbox_page_open = True
                     await self._save_sync(account, sync)
                 # Reserve historical progress even if the current inbox stays busy.
-                for provider_id in list(sync.inbox_pending):
+                for provider_id in list(sync.inbox_pending) if catch_up else []:
                     if self.full_reads.get(account_id, 0) >= 8:
                         break
                     completed, thread = await self._import(account_id, provider_id)
@@ -969,7 +974,11 @@ class _TaskIO:
                     if not (await self._import(account_id, thread.provider_thread_id))[0]:
                         break
                 learning = await self.service.learning_context(c.principal, None)
-                if not learning.get("paused", False) and not account.history_complete:
+                if (
+                    not learning.get("paused", False)
+                    and not account.history_complete
+                    and not new_mail_only
+                ):
                     account, sync = await self._history(account, sync)
                 current_complete = (
                     account.inbox_complete and not sync.change_pending and not sync.change_cursor
@@ -1061,9 +1070,24 @@ class _TaskIO:
         # from monopolizing every slice with the same newest conversations.
         foreground = [thread for thread in pending if thread.in_inbox]
         historical = [thread for thread in pending if not thread.in_inbox]
-        selected = foreground[:3] + historical[:1]
-        selected_ids = {thread.id for thread in selected}
-        selected.extend(thread for thread in pending if thread.id not in selected_ids)
+        if new_mail_only:
+            # A window discovery waits on holds new mail back, Inbox or not.
+            selected = sorted(
+                (
+                    thread
+                    for thread in pending
+                    if thread.in_inbox
+                    or (thread.account_id, thread.provider_thread_id) in self.window_waiting
+                ),
+                key=lambda thread: (
+                    (thread.account_id, thread.provider_thread_id) not in self.window_waiting,
+                    -thread.updated_at.timestamp(),
+                ),
+            )
+        else:
+            selected = foreground[:3] + historical[:1]
+            selected_ids = {thread.id for thread in selected}
+            selected.extend(thread for thread in pending if thread.id not in selected_ids)
         for thread in selected[:4]:
             learning = await self.service.learning_context(c.principal, thread)
             try:
@@ -1113,7 +1137,8 @@ class _TaskIO:
                 with suppress(EmailModelResultError):
                     await self.generate_draft(thread.id)
         await self._verify_subscriptions()
-        await self._summarize_correspondence()
+        if not new_mail_only:
+            await self._summarize_correspondence()
 
     async def _summarize_correspondence(self) -> None:
         """Give observed exchanges a short summary, newest first (ADR-0126).
