@@ -78,7 +78,7 @@ from agent_core.ports.tools import ToolRegistry
 MAX_LOADED_SKILL_BODIES = 2
 # Tool-result truncation advances in this many blocks of its budget (ADR-0242).
 TOOL_RESULT_TRUNCATION_BLOCKS = 4
-# ADR-0256: while results are truncated, the note names at most this many of
+# ADR-0258: while results are truncated, the note names at most this many of
 # the newest results still shown, by the event a working-state fact cites.
 TRUNCATION_NOTE_RESULTS = 12
 # The context package does not import the tools package (as in the planner).
@@ -167,7 +167,7 @@ def _argument_refusal(part: ContentPart) -> bool:
 
 
 def _definition_answers(items: Sequence[ConversationItem], plan: ContextPlan) -> set[int]:
-    """The newest answer that carries each deferred tool's definition (ADR-0256).
+    """The newest answer that carries each deferred tool's definition (ADR-0258).
 
     An invalid call through ``tool.call`` answers with the platform outcome and
     the pinned definition, and nothing else. Only that exact pair is kept
@@ -201,7 +201,7 @@ def _definition_answers(items: Sequence[ConversationItem], plan: ContextPlan) ->
 def _truncation_note(
     items: Sequence[ConversationItem], truncated: set[int], plan: ContextPlan
 ) -> UserMessage:
-    """Say that truncated results are gone, and what a fact can cite (ADR-0256).
+    """Say that truncated results are gone, and what a fact can cite (ADR-0258).
 
     Only names the plan pins reach this platform row: a call's own name when it
     has a definition, the named tool when it went through ``tool.call``.
@@ -698,7 +698,7 @@ class BudgetedContextBuilder:
         if note_items:
             # The note names results still shown, so it is rendered again from
             # what the cut kept. It can only lose entries, so the fixed body it
-            # was measured in still bounds it (ADR-0256).
+            # was measured in still bounds it (ADR-0258).
             note_index = len(active_with_context) - (len(active) - active_prefix) - 1
             active_with_context[note_index] = _truncation_note(
                 combined[cut:], {index - cut for index in truncated_indexes if index >= cut}, plan
@@ -1156,7 +1156,7 @@ class BudgetedContextBuilder:
 
         The newest definition answer of each deferred tool stays whole and
         still counts against the budget, while the kept answers together fit
-        it (ADR-0256). Returns the indexes it truncated.
+        it (ADR-0258). Returns the indexes it truncated.
         """
 
         result = [item.model_copy(deep=True) for item in items]
@@ -1198,7 +1198,7 @@ class BudgetedContextBuilder:
             artifact = next(
                 (
                     # A fact cites its result's event, so an artifact pointer
-                    # names the recording event too (ADR-0256).
+                    # names the recording event too (ADR-0258).
                     f"artifact:{part.artifact_id}"
                     + (
                         f"; event:{item.source_event_sequence}"

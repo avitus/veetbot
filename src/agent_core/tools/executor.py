@@ -931,7 +931,7 @@ class ToolPipeline:
         except ToolValidationError:
             # A deferred tool's definition was never sent to the provider, and
             # its index entry shows one sentence, so the refusal carries the
-            # whole definition; the model retries with valid arguments (ADR-0256).
+            # whole definition; the model retries with valid arguments (ADR-0258).
             return await self._refusal(
                 run,
                 call,

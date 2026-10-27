@@ -1,4 +1,4 @@
-"""web.fetch_json returns the named fields of one public JSON document (ADR-0256).
+"""web.fetch_json returns the named fields of one public JSON document (ADR-0258).
 
 The Cockpit research run of 2026-10-26 read about sixty GitHub compare answers
 with web.fetch to learn two numbers from each: every answer was the whole

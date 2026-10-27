@@ -232,7 +232,7 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     assert "tool.call" in defined
     # The six management tools are deferred by the default agent's configuration.
     assert deferred >= MANAGEMENT_TOOLS | {"memory.learn", "workspace.write_text"}
-    # A JSON field read waits in the index beside web.fetch's definition (ADR-0256).
+    # A JSON field read waits in the index beside web.fetch's definition (ADR-0258).
     assert "web.fetch" in defined and "web.fetch_json" in deferred
     # Reads take the definition slots before anything that changes the world.
     assert defined >= DISCOVERED_READS
@@ -291,7 +291,7 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
     assert "records.append" in plan.deferred_tool_names
     # The index's own 2,000-token cap is then full (ADR-0253, Consequences), and
     # web.fetch_json, a configured deferral, takes the last Gmail write's room
-    # (ADR-0256, Consequences).
+    # (ADR-0258, Consequences).
     assert set(plan.skipped_tool_names) == {
         "mcp.gmail_write.modify_labels",
         "mcp.gmail_write.trash_thread",
@@ -454,7 +454,7 @@ async def test_invalid_deferred_arguments_return_the_input_schema(tmp_path: Path
 async def test_invalid_deferred_arguments_return_the_whole_definition(
     tmp_path: Path, name: str, trust: str
 ) -> None:
-    """ADR-0256: the index shows one sentence, so the refusal carries the rest.
+    """ADR-0258: the index shows one sentence, so the refusal carries the rest.
 
     The production Cockpit chat of 2026-10-26 probed each Cockpit tool with
     empty arguments and got its schema back, never the description that says

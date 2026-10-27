@@ -718,7 +718,7 @@ async def _record_refusals(
 async def with_event_sequences(
     context: RunContext, results: list[ToolResultItem]
 ) -> list[ToolResultItem]:
-    """Give each new result the sequence of the event that recorded it (ADR-0256).
+    """Give each new result the sequence of the event that recorded it (ADR-0258).
 
     History rebuilt from the log carries it already. Without it, a result of
     the current run truncates to ``event:pending`` and a working-state fact

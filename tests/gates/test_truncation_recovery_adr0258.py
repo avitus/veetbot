@@ -1,4 +1,4 @@
-"""ADR-0256: a long tool loop can keep what truncation takes from it.
+"""ADR-0258: a long tool loop can keep what truncation takes from it.
 
 The Cockpit research run of 2026-10-26 made 111 fetches. From step 8 its
 oldest results were truncated to pointers that no tool reads back, and a

@@ -6452,7 +6452,7 @@ async def build(
             "memory.learn",
             "workspace.write_text",
             # A JSON read is a narrower web.fetch, chosen once the model knows
-            # the answer is JSON; it waits in the index (ADR-0256).
+            # the answer is JSON; it waits in the index (ADR-0258).
             "web.fetch_json",
             SCHEDULE_UPDATE_TOOL_NAME,
             SCHEDULE_PAUSE_TOOL_NAME,

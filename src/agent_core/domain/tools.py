@@ -74,7 +74,7 @@ class ToolSpec(BaseModel):
 
 
 def deferred_definition_text(spec: ToolSpec) -> str:
-    """The definition a deferred tool's one-line index entry abbreviates (ADR-0256).
+    """The definition a deferred tool's one-line index entry abbreviates (ADR-0258).
 
     An invalid call through ``tool.call`` answers with it, and the context
     builder keeps a definition answer whole by recognizing exactly this text.

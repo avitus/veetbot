@@ -16,7 +16,7 @@ tool contract.
 ## Scope
 
 The first tranche exposes two read-only builtin capability tools, and
-ADR-0256 adds a third that reads named fields of a JSON document:
+ADR-0258 adds a third that reads named fields of a JSON document:
 
 | Tool | Purpose | Recommended provider |
 | --- | --- | --- |
@@ -80,7 +80,7 @@ remains responsible for DNS-resolution and redirect defenses inside its own
 fetch boundary.
 
 `web.fetch_json`
-([ADR-0256](../adr/0256-deferred-definitions-and-truncation-recovery.md))
+([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md))
 accepts one URL under `web.fetch`'s rule and one to thirty-two unique field
 paths. A path is dotted: each segment is an object key, an array index, or
 `*` for every element of an array, which maps the rest of the path over the

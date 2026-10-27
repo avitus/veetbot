@@ -417,7 +417,7 @@ description. The model reaches it through the control tool `tool.call`, which
 the tool pipeline unwraps before resolution, so validation, policy, approval,
 idempotency and events all run under the deferred tool's own name; invalid
 arguments return that tool's whole definition, its description and its input
-schema ([ADR-0256](../adr/0256-deferred-definitions-and-truncation-recovery.md)).
+schema ([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)).
 A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
 forty entries and 2,000 tokens, and the prefix ceiling rose by exactly that cap.
@@ -673,7 +673,7 @@ the cheapest and most recoverable loss first:
    artifact that holds the content.
 
    Three rules keep a long loop from repeating its calls to recover what
-   truncation took (ADR-0256). The newest answer that carries a deferred tool's
+   truncation took (ADR-0258). The newest answer that carries a deferred tool's
    definition stays whole and still counts against the budget: it replies to
    `tool.call` for a tool the plan defers, and its content is exactly the
    `tool.arguments_invalid` outcome and that tool's pinned definition. Kept

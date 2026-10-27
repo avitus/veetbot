@@ -1,4 +1,4 @@
-# ADR-0256: Deferred definitions, recoverable truncation, and JSON field reads
+# ADR-0258: Deferred definitions, recoverable truncation, and JSON field reads
 
 - Status: Accepted (the owner asked for all four changes on 2026-10-26)
 - Date: 2026-10-26
@@ -8,6 +8,9 @@
   through its pointer)
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/web-access.md`
+- Renumbered from ADR-0256 on 2026-10-27, when `main` took that number for
+  the new-mail Email budget reserve; earlier commits and review comments on
+  PR #204 call this decision ADR-0256
 
 ## Context
 
@@ -120,7 +123,7 @@ and re-plan every chat.
   note appears only while results are
   truncated and names the events of the results still shown, after the
   history cut.
-- `tests/gates/test_truncation_recovery_adr0256.py`: in a composed run, every
+- `tests/gates/test_truncation_recovery_adr0258.py`: in a composed run, every
   truncation pointer names a recorded `tool.call.completed` event and the note
   lists events of results still shown; a browser recovery read and a batch
   resumed after an approval carry their events.

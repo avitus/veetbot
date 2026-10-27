@@ -1,6 +1,6 @@
 """Truncated tool results must not send the model back to repeat its calls.
 
-context-engine.md ("Yield order under pressure", item 3) and ADR-0256. A
+context-engine.md ("Yield order under pressure", item 3) and ADR-0258. A
 deferred tool's index entry shows one sentence, so the answer that carries its
 definition stays whole while older results truncate; and while results are
 truncated, a platform note says that no tool reads them back and names the

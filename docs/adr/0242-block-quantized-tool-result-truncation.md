@@ -5,7 +5,7 @@
 - Amends: `context-engine.md` "Yield order under pressure" item 3 and "The
   history cache window"
 - Related: ADR-0078, ADR-0130, ADR-0135, ADR-0229
-- Amended by: ADR-0256 (2026-10-26), which keeps definition answers whole and
+- Amended by: ADR-0258 (2026-10-26), which keeps definition answers whole and
   notes truncation; no model-callable tool reads a pointer back
 - Scope: Existing context-builder behavior; no milestone or gate moves
 
@@ -53,7 +53,7 @@ budgets are unchanged. Nothing is frozen or suppressed to improve caching: the
 model loses up to one quarter budget of old tool results a little earlier than
 the minimal rule would have taken them. Each pointer still names the event or
 artifact that keeps its content, but no model-callable tool reads it back
-(corrected by ADR-0256).
+(corrected by ADR-0258).
 
 The history cut and compaction are not changed by this decision. The history
 cut did not bind in the run above; if a long run shows the same rolling loss
@@ -66,7 +66,7 @@ there, it needs its own evidence and decision.
   would have paid for about three uncached reads instead of thirty.
 - A quarter budget of recent tool results may become pointers up to a quarter
   budget earlier than before. No model-callable tool reads a pointer's content
-  back (corrected by ADR-0256): a finding the model still needs belongs in
+  back (corrected by ADR-0258): a finding the model still needs belongs in
   working state, citing the event of the result it came from.
 - `context.budget.pressure` goes on recording `tool_results` on every step on
   which anything is truncated; the event does not distinguish a step that

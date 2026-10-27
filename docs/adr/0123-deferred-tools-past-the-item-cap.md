@@ -10,7 +10,7 @@
 - Amended by: ADR-0130 (2026-09-25), which ranks `browser.navigate`,
   `browser.observe` and `browser.act` first and never defers them in a chat
   bound to a website profile; ADR-0253 (2026-10-25), which defers a configured
-  tool past the token cap; ADR-0256 (2026-10-26), which returns the whole
+  tool past the token cap; ADR-0258 (2026-10-26), which returns the whole
   definition on invalid arguments
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
@@ -64,7 +64,7 @@ one account's tools beat the other's.
      malformed wrapper fails with `tool.arguments_invalid`.
    - Invalid arguments for the named tool return its input schema, because
      its definition never reached the provider. A schema from a server or
-     device is returned as untrusted data. ADR-0256 returns the whole
+     device is returned as untrusted data. ADR-0258 returns the whole
      definition, description included.
    - `tool.call` is advertised only while the plan defers something. It is
      classified `NONE`, so every policy decision uses the deferred tool's own

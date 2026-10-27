@@ -1,4 +1,4 @@
-"""Field selection from one public JSON document (ADR-0256).
+"""Field selection from one public JSON document (ADR-0258).
 
 The document is read through the same provider route as ``web.fetch``, so the
 tool adds no egress of its own: the worker never connects to the model's URL.
@@ -133,7 +133,7 @@ class WebFetchJsonTool:
         name="web.fetch_json",
         version="1.0.0",
         # The first sentence is the index entry, and the index has little room
-        # left in a chat bound to a website profile (ADR-0256).
+        # left in a chat bound to a website profile (ADR-0258).
         description=(
             "Fetch named fields from one public HTTPS JSON document. Each field is a "
             "dotted path of object keys, array indexes, and * for every element of an "

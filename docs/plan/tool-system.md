@@ -1046,7 +1046,7 @@ not offer is denied with `tool.not_found.not_offered`, both under
 whole definition, because it never reached the provider and its index entry
 shows one sentence: `Definition of <name>.`, the full description and the
 input schema
-([ADR-0256](../adr/0256-deferred-definitions-and-truncation-recovery.md)). A
+([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)). A
 server's or device's definition is returned as untrusted data. The
 parallel-batch check unwraps the same way, so a batch's parallelism is decided
 by the tools it actually runs.
