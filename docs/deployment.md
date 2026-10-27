@@ -1597,7 +1597,7 @@ alerts; cleanup and viewed-result acknowledgement require the updated client.
 
 ## Optional owner records (ADR-0239)
 
-`AGENT_RECORDS_ENABLED` (default `0`) registers the five `records.*` tools and
+`AGENT_RECORDS_ENABLED` (default `0`) registers the six `records.*` tools and
 puts the records catalog in the request body
 ([owner records](plan/owner-records.md)). The migration that adds
 `record_series` and `record_entries` applies with every release whether or

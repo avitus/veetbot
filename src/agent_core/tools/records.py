@@ -12,18 +12,22 @@ from zoneinfo import ZoneInfo
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.records import RecordsRefusal, RecordsService
+from agent_core.domain.agents import Principal
+from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.records import (
     RecordCadence,
     RecordComponent,
+    RecordDraft,
     RecordEntry,
     RecordPrecision,
     RecordSeries,
     RecordValueError,
     canonical_value,
     due_since,
+    normalize_series_name,
     ordered_values,
     short_value,
     validate_value,
@@ -46,6 +50,16 @@ _NOT_MEMORY = (
     " Records are the owner's own measurements and are not memory; they are never recalled "
     "unprompted."
 )
+_VALUES_SCHEMA = {
+    "type": "object",
+    "minProperties": 1,
+    "maxProperties": 4,
+    "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,31}$"},
+    "additionalProperties": {"type": "number"},
+}
+_PRECISION_SCHEMA = {"type": "string", "enum": [item.value for item in RecordPrecision]}
+_NOTE_SCHEMA = {"type": "string", "minLength": 1, "maxLength": 200}
+MAX_IMPORT_ENTRIES = 50
 _PERMISSION_CODES = frozenset(
     {"records.secret_detected", "records.name_rejected", "records.untrusted_turn"}
 )
@@ -247,8 +261,8 @@ class RecordsCreateSeriesTool(_RecordsTool):
     _scope = "records.write"
     spec = _spec(
         "records.create_series",
-        "Declare a named series of one to four numeric components with optional units, "
-        "sensitivity and a cadence. This needs the owner's approval, and a series must "
+        "Declare a new numeric series. It has one to four components with optional units, "
+        "a sensitivity and a cadence. This needs the owner's approval, and a series must "
         "exist before records.append can add to it. Components cannot change afterwards.",
         {
             "type": "object",
@@ -317,21 +331,15 @@ class RecordsAppendTool(_RecordsTool):
         "Add one entry to an existing series with a value for every declared component, "
         "an optional observed time and precision, and an optional note. Values are the "
         "owner's own words and the series must already exist. In a turn that read "
-        "external content the tool refuses; ask the owner to state the value in chat.",
+        "external content the tool refuses; use records.import there instead.",
         {
             "type": "object",
             "properties": {
                 "series": _NAME_SCHEMA,
-                "values": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 4,
-                    "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,31}$"},
-                    "additionalProperties": {"type": "number"},
-                },
+                "values": _VALUES_SCHEMA,
                 "observed_at": {"type": "string", "format": "date-time"},
-                "precision": {"type": "string", "enum": [item.value for item in RecordPrecision]},
-                "note": {"type": "string", "minLength": 1, "maxLength": 200},
+                "precision": _PRECISION_SCHEMA,
+                "note": _NOTE_SCHEMA,
             },
             "required": ["series", "values"],
             "additionalProperties": False,
@@ -516,5 +524,154 @@ class RecordsDeleteTool(_RecordsTool):
                 "series": name,
                 "entries_removed": result.entries_removed,
                 "series_removed": result.series_removed,
+            },
+        )
+
+
+def _reading(series: RecordSeries | None, item: Mapping[str, Any]) -> str:
+    """One card line: the observed time as stated, then each value with its unit."""
+
+    raw = dict(item.get("values") or {})
+    units = {c.name: c.unit for c in series.components} if series is not None else {}
+    keyed = _in_order(series, raw) if series is not None else raw
+    keyed.update({key: value for key, value in raw.items() if key not in keyed})
+    parts = []
+    for key, value in keyed.items():
+        try:
+            shown = short_value(parse_decimal_values({key: value})[key])
+        except ValueError:
+            shown = str(value)
+        unit = units.get(key)
+        parts.append(f"{key} {shown}{' ' + unit if unit else ''}")
+    line = f"{item.get('observed_at', 'now')}: {', '.join(parts)}"
+    note = item.get("note")
+    return f"{line} (note: {note})" if note else line
+
+
+class RecordsImportTool(_RecordsTool):
+    _scope = "records.write"
+    spec = _spec(
+        "records.import",
+        "Save readings the owner approves. Use it for one to fifty entries of an existing "
+        "series read from a web page, document, email or file, each with its observed "
+        "time. The owner sees every value on an approval card, nothing is stored unless "
+        "they approve, and the batch is stored whole or not at all.",
+        {
+            "type": "object",
+            "properties": {
+                "series": _NAME_SCHEMA,
+                "entries": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_IMPORT_ENTRIES,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "values": _VALUES_SCHEMA,
+                            "observed_at": {"type": "string", "format": "date-time"},
+                            "precision": _PRECISION_SCHEMA,
+                            "note": _NOTE_SCHEMA,
+                        },
+                        "required": ["values", "observed_at"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["series", "entries"],
+            "additionalProperties": False,
+        },
+        risk=RiskLevel.MEDIUM,
+        idempotency=IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+        scope="records.write",
+        maximum_output_bytes=16384,
+        allow_parallel=False,
+        side_effect=SideEffectClass.EXTERNAL_WRITE,
+    )
+
+    async def approval_view_in_session(
+        self,
+        arguments: dict[str, Any],
+        *,
+        run: object,
+        principal: Principal,
+        turn: object,
+        not_covered: object,
+    ) -> ApprovalPresentation:
+        """Every reading in server-rendered lines; the summary names only the stored series."""
+
+        del run, turn, not_covered
+        entries = list(arguments.get("entries") or [])
+        series: RecordSeries | None = None
+        try:
+            name = normalize_series_name(str(arguments.get("series", "")))
+        except ValueError:
+            name = None
+        if name is not None:
+            series = next(
+                (
+                    s.series
+                    for s in await self._service.list_series(principal)
+                    if s.series.name == name
+                ),
+                None,
+            )
+        count = f"{len(entries)} reading{'' if len(entries) == 1 else 's'}"
+        summary = (
+            f"Save {count} to the series {series.display_name}"
+            if series is not None
+            else f"Save {count} to a series that does not exist"
+        )
+        return ApprovalPresentation(
+            summary=summary,
+            arguments={
+                "series": arguments.get("series"),
+                "readings": [_reading(series, item) for item in entries],
+            },
+        )
+
+    async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        drafts = [
+            RecordDraft(
+                values=parse_decimal_values(item["values"]),
+                observed_at=str(item["observed_at"]),
+                precision=RecordPrecision(item.get("precision", RecordPrecision.EXACT.value)),
+                note=item.get("note"),
+            )
+            for item in arguments["entries"]
+        ]
+        mark: Callable[[], Awaitable[None]] = context.mark_effect_sent
+        await mark()
+        result = await self._service.import_entries(
+            context.principal,
+            series_name=str(arguments["series"]),
+            drafts=drafts,
+            idempotency_key=context.idempotency_key,
+            session_id=context.session_id,
+            run_id=context.run_id,
+        )
+        series = result.series
+        stored = sorted(result.entries, key=lambda entry: entry.observed_at)
+        span = f"{_stamp(stored[0].observed_at)} to {_stamp(stored[-1].observed_at)}"
+        return ToolResult(
+            ok=True,
+            content=[
+                TextPart(
+                    text=f"Recorded {len(result.entries)} entries for '{series.display_name}' "
+                    f"({span})."
+                )
+            ],
+            structured={
+                "series": series.display_name,
+                "entries": [
+                    {
+                        "entry_id": str(entry.id),
+                        "observed_at": _stamp(entry.observed_at),
+                        "values": _values(ordered_values(series, entry.values)),
+                    }
+                    for entry in result.entries
+                ],
+                "entry_count": result.entry_count,
+                "imported": result.imported,
+                "replayed": result.replayed,
             },
         )

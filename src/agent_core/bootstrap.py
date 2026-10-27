@@ -747,6 +747,7 @@ from agent_core.tools.records import (
     RecordsAppendTool,
     RecordsCreateSeriesTool,
     RecordsDeleteTool,
+    RecordsImportTool,
     RecordsListTool,
     RecordsQueryTool,
 )
@@ -4139,6 +4140,7 @@ async def _compose(
         registry.register(RecordsAppendTool(records_service, records_zone))
         registry.register(RecordsQueryTool(records_service, records_zone))
         registry.register(RecordsDeleteTool(records_service, records_zone))
+        registry.register(RecordsImportTool(records_service, records_zone))
     if cockpit_toolset is not None:
         for cockpit_tool in cockpit_tools(cockpit_toolset):
             registry.register(cockpit_tool)
@@ -6423,6 +6425,7 @@ async def build(
                 RecordsAppendTool.spec.name,
                 RecordsCreateSeriesTool.spec.name,
                 RecordsDeleteTool.spec.name,
+                RecordsImportTool.spec.name,
             ]
             if effective_settings.records_enabled
             else []
@@ -6452,10 +6455,12 @@ async def build(
             SCHEDULE_CANCEL_TOOL_NAME,
             SUBSCRIPTIONS_TOOL_NAME,
             UNSUBSCRIBE_TOOL_NAME,
-            # Declaring or deleting a series is rare and asks the owner first, so
-            # those two wait in the index; listing, querying and appending stay direct.
+            # Declaring or deleting a series and the reviewed import are rare and
+            # ask the owner first, so they wait in the index; listing, querying and
+            # appending stay direct. A refused append names records.import.
             RecordsCreateSeriesTool.spec.name,
             RecordsDeleteTool.spec.name,
+            RecordsImportTool.spec.name,
             # The Cockpit is a mode of its own; its tools never take a definition slot.
             *COCKPIT_TOOL_NAMES,
         )
