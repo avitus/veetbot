@@ -342,4 +342,5 @@ async def test_values_render_in_the_declared_component_order() -> None:
 def test_append_description_says_the_tool_refuses_an_untrusted_turn() -> None:
     description = RecordsAppendTool.spec.description
     assert "asks the owner first" not in description
-    assert "refuses" in description and "state the value" in description
+    # 2026-10-26: the owner asked for a reviewed save, not to restate each value.
+    assert "refuses" in description and "records.import" in description

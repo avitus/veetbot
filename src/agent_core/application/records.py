@@ -22,10 +22,12 @@ from agent_core.domain.records import (
     Bucket,
     CatalogLine,
     DeleteResult,
+    ImportResult,
     Order,
     QueryResult,
     RecordCadence,
     RecordComponent,
+    RecordDraft,
     RecordEntry,
     RecordFutureError,
     RecordPrecision,
@@ -44,7 +46,7 @@ from agent_core.domain.records import (
     validate_value,
 )
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.records import SeriesExists
 
 MAX_BUCKETS: Final = 1_000
@@ -188,79 +190,166 @@ class RecordsService:
         if origin_trust is TrustLevel.EXTERNAL_UNTRUSTED:
             raise RecordsRefusal(
                 "records.untrusted_turn",
-                "this turn read external content; ask the owner to state the value in chat",
+                "this turn read external content; call records.import so the owner "
+                "reviews the values on an approval card",
             )
-        name = normalize_series_name(series_name)
+        draft = RecordDraft(
+            values=dict(values), observed_at=observed_at, precision=precision, note=note
+        )
         now = self._clock.now()
         async with self._uow_factory() as uow:
-            series = await uow.records.get_series(principal, name)
-            if series is None:
-                raise RecordsRefusal("records.series_unknown", "create the series first")
-            declared = {component.name for component in series.components}
-            if set(values) != declared:
-                raise RecordsRefusal(
-                    "records.component_mismatch",
-                    f"values must carry exactly: {', '.join(sorted(declared))}",
-                )
-            try:
-                checked = ordered_values(
-                    series, {key: validate_value(value) for key, value in values.items()}
-                )
-                when = resolve_observed_at(observed_at, precision, now)
-            except RecordValueError as exc:
-                raise RecordsRefusal("records.value_out_of_range", str(exc)) from exc
-            except RecordFutureError as exc:
-                raise RecordsRefusal("records.observed_in_future", str(exc)) from exc
-            kept = (note.strip() or None) if note is not None else None
-            withheld = False
-            if kept:
-                if contains_secret_material(kept):
-                    raise RecordsRefusal("records.secret_detected", "the note matched the scan")
-                if contains_injection_pattern(kept):
-                    kept, withheld = None, True
+            series = await self._known_series(uow, principal, series_name)
+            entry = self._entry(principal, series, draft, idempotency_key, session_id, now)
             count = await uow.records.count_entries(principal, series.id)
             known = await uow.records.find_entry(principal, series.id, idempotency_key)
             if known is None and count >= self._max_entries:
                 raise RecordsRefusal(
                     "records.entry_limit", f"at most {self._max_entries} entries are allowed"
                 )
-            entry = RecordEntry(
-                id=self._ids.new_id(),
-                series_id=series.id,
-                tenant_id=principal.tenant_id,
-                principal_id=principal.principal_id,
-                observed_at=when,
-                observed_precision=precision,
-                values=checked,
-                note=kept,
-                note_withheld=withheld,
-                idempotency_key=idempotency_key,
-                source_session_id=session_id,
-                created_at=now,
-            )
-            stored, replayed = await uow.records.append(entry)
+            stored, replayed = await self._store(uow, principal, series, entry, session_id, run_id)
             if not replayed:
                 count += 1
-                await uow.events.append(
-                    self._event(
-                        principal,
-                        session_id,
-                        run_id,
-                        "records.entry.appended",
-                        {
-                            "series_id": str(series.id),
-                            "entry_id": str(stored.id),
-                            "observed_at": stored.observed_at.isoformat(),
-                            "observed_precision": stored.observed_precision.value,
-                            "values": {
-                                k: canonical_value(v)
-                                for k, v in ordered_values(series, stored.values).items()
-                            },
-                            "note_withheld": stored.note_withheld,
-                        },
-                    )
-                )
         return AppendResult(entry=stored, series=series, entry_count=count, replayed=replayed)
+
+    async def import_entries(
+        self,
+        principal: Principal,
+        *,
+        series_name: str,
+        drafts: Sequence[RecordDraft],
+        idempotency_key: str,
+        session_id: UUID,
+        run_id: UUID | None,
+    ) -> ImportResult:
+        """Store a reviewed batch whole or not at all.
+
+        The tool is EXTERNAL_WRITE, so the matrix has already asked the owner,
+        who saw every value on the card; that approval is why this path takes no
+        origin trust. Every draft is validated before the first write, and each
+        entry's key derives from the invocation's, so a re-invoked import
+        replays rather than duplicating.
+        """
+
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            series = await self._known_series(uow, principal, series_name)
+            entries: list[RecordEntry] = []
+            for index, draft in enumerate(drafts, start=1):
+                key = f"{idempotency_key}#{index}"
+                try:
+                    entries.append(self._entry(principal, series, draft, key, session_id, now))
+                except RecordsRefusal as exc:
+                    raise RecordsRefusal(exc.code, f"reading {index}: {exc.detail}") from exc
+            count = await uow.records.count_entries(principal, series.id)
+            fresh = 0
+            for entry in entries:
+                known = await uow.records.find_entry(principal, series.id, entry.idempotency_key)
+                fresh += known is None
+            if count + fresh > self._max_entries:
+                raise RecordsRefusal(
+                    "records.entry_limit", f"at most {self._max_entries} entries are allowed"
+                )
+            stored: list[RecordEntry] = []
+            replays = 0
+            for entry in entries:
+                kept, replayed = await self._store(
+                    uow, principal, series, entry, session_id, run_id
+                )
+                stored.append(kept)
+                replays += replayed
+        return ImportResult(
+            series=series,
+            entries=stored,
+            entry_count=count + len(stored) - replays,
+            imported=len(stored) - replays,
+            replayed=replays,
+        )
+
+    async def _known_series(
+        self, uow: RepositoryUnitOfWork, principal: Principal, series_name: str
+    ) -> RecordSeries:
+        series = await uow.records.get_series(principal, normalize_series_name(series_name))
+        if series is None:
+            raise RecordsRefusal("records.series_unknown", "create the series first")
+        return series
+
+    def _entry(
+        self,
+        principal: Principal,
+        series: RecordSeries,
+        draft: RecordDraft,
+        idempotency_key: str,
+        session_id: UUID,
+        now: datetime,
+    ) -> RecordEntry:
+        declared = {component.name for component in series.components}
+        if set(draft.values) != declared:
+            raise RecordsRefusal(
+                "records.component_mismatch",
+                f"values must carry exactly: {', '.join(sorted(declared))}",
+            )
+        try:
+            checked = ordered_values(
+                series, {key: validate_value(value) for key, value in draft.values.items()}
+            )
+            when = resolve_observed_at(draft.observed_at, draft.precision, now)
+        except RecordValueError as exc:
+            raise RecordsRefusal("records.value_out_of_range", str(exc)) from exc
+        except RecordFutureError as exc:
+            raise RecordsRefusal("records.observed_in_future", str(exc)) from exc
+        kept = (draft.note.strip() or None) if draft.note is not None else None
+        withheld = False
+        if kept:
+            if contains_secret_material(kept):
+                raise RecordsRefusal("records.secret_detected", "the note matched the scan")
+            if contains_injection_pattern(kept):
+                kept, withheld = None, True
+        return RecordEntry(
+            id=self._ids.new_id(),
+            series_id=series.id,
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            observed_at=when,
+            observed_precision=draft.precision,
+            values=checked,
+            note=kept,
+            note_withheld=withheld,
+            idempotency_key=idempotency_key,
+            source_session_id=session_id,
+            created_at=now,
+        )
+
+    async def _store(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        series: RecordSeries,
+        entry: RecordEntry,
+        session_id: UUID,
+        run_id: UUID | None,
+    ) -> tuple[RecordEntry, bool]:
+        stored, replayed = await uow.records.append(entry)
+        if not replayed:
+            await uow.events.append(
+                self._event(
+                    principal,
+                    session_id,
+                    run_id,
+                    "records.entry.appended",
+                    {
+                        "series_id": str(series.id),
+                        "entry_id": str(stored.id),
+                        "observed_at": stored.observed_at.isoformat(),
+                        "observed_precision": stored.observed_precision.value,
+                        "values": {
+                            k: canonical_value(v)
+                            for k, v in ordered_values(series, stored.values).items()
+                        },
+                        "note_withheld": stored.note_withheld,
+                    },
+                )
+            )
+        return stored, replayed
 
     async def query(
         self,

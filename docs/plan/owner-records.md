@@ -22,18 +22,18 @@ the sandbox workspace is a cache
 ([sandbox-isolation.md](sandbox-isolation.md)), and a knowledge document is
 read-only input. This milestone gives the owner's principal a bounded record
 store: named numeric series the agent appends to, lists, queries and deletes
-through five tools, with a catalog of the series in every request so the
+through six tools, with a catalog of the series in every request so the
 model knows what exists and can say when a series is due.
 
 ## What this document is responsible for
 
 - The domain model: a series, its one-to-four named numeric components, an
   entry, the normalization that makes a name unique, and every bound.
-- The five tools in the `records` domain: closed schemas, result shapes, the
+- The six tools in the `records` domain: closed schemas, result shapes, the
   closed reason-code vocabulary, the descriptions the model reads, and every
   `ToolSpec` field.
-- The approval classification of the five tools and the service's refusal
-  of an append in an untrusted turn.
+- The approval classification of the six tools, the service's refusal of an
+  append in an untrusted turn, and the reviewed import that takes its place.
 - The scans, the sensitivity label and the ceiling reads apply.
 - Persistence: two tables, their indexes and row-level security, the store
   port, both adapters, the append replay contract, and erasure.
@@ -47,6 +47,8 @@ model knows what exists and can say when a series is due.
 Out of scope, by the owner's decisions in ADR-0239: SQL of any kind, HTTP
 routes, a native screen, unit conversion, derived series, charts, and import
 from files. A later amendment may add any of them; none is assumed here.
+`records.import` is not a file import: the model states each entry, and the
+owner approves the batch on a card.
 
 ## Domain model
 
@@ -134,7 +136,7 @@ at most `NOTE_MAX_CHARACTERS` (200) characters after trimming. The three are
 module constants in `domain/records.py`, not configuration knobs. A query
 page is 1 to 1,000 entries and a bucketed query at most 1,000 buckets.
 
-## The five tools
+## The six tools
 
 | Tool | Bounded purpose |
 | --- | --- |
@@ -143,8 +145,9 @@ page is 1 to 1,000 entries and a bucketed query at most 1,000 buckets.
 | `records.append` | Add one entry to an existing series: values for every declared component, the observed time and precision, an optional note. |
 | `records.query` | Entries of one series in a half-open time window, newest first by default, with a per-component summary over the whole window, or per-bucket aggregates instead of entries. |
 | `records.delete` | Remove one entry, or a whole series with its entries. Requires approval in every turn. |
+| `records.import` | Store one to fifty entries of an existing series, each with its observed time, after the owner approves every value on one card. The path for values read from a web page, document, email or file. |
 
-All five are `CAPABILITY`, `BUILTIN`, `in_process`, `INTERNAL_TOOL` output
+All six are `CAPABILITY`, `BUILTIN`, `in_process`, `INTERNAL_TOOL` output
 trust, registered only with `AGENT_RECORDS_ENABLED=1`, and declared in the
 `records` domain, which joins the partition table in
 [tool-system.md](tool-system.md) as a builtin domain registered at build time
@@ -160,6 +163,7 @@ records.query          NONE             LOW     READ_ONLY                 record
 records.create_series  EXTERNAL_WRITE   MEDIUM  IDEMPOTENT                records.write
 records.append         NONE             MEDIUM  CONDITIONALLY_IDEMPOTENT  records.write
 records.delete         EXTERNAL_DELETE  MEDIUM  IDEMPOTENT                records.write
+records.import         EXTERNAL_WRITE   MEDIUM  CONDITIONALLY_IDEMPOTENT  records.write
 
 name                   timeout_s  max_output_bytes  allow_parallel
 ---------------------  ---------  ----------------  --------------
@@ -168,6 +172,7 @@ records.query          10         262144            yes
 records.create_series  10         4096              no
 records.append         10         4096              no
 records.delete         10         4096              no
+records.import         10         16384             no
 ```
 
 `records.list`, `records.query` and `records.append` are `NONE` on the
@@ -183,7 +188,11 @@ re-execution: the tool awaits `context.mark_effect_sent()` before its insert,
 and when invoked with an idempotency key the series already holds it returns
 the stored entry with `replayed: true` and inserts nothing. `records.delete`
 and `records.create_series` are `IDEMPOTENT`: deleting what is gone and
-declaring what exists change nothing.
+declaring what exists change nothing. `records.import` is `EXTERNAL_WRITE` for
+the same reason create is, so the matrix asks the owner in every turn. It
+keeps the append's two obligations, keying entry `n` of a batch
+`<invocation key>#n`, so a re-invoked import returns the stored entries and
+inserts nothing.
 
 ### Schemas
 
@@ -275,6 +284,33 @@ share one idempotency key.
 }
 ```
 
+`records.import`, whose entry `values` is the `records.append` values schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "series": {"type": "string", "minLength": 1, "maxLength": 64},
+    "entries": {
+      "type": "array", "minItems": 1, "maxItems": 50,
+      "items": {
+        "type": "object",
+        "properties": {
+          "values": {"type": "object"},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "precision": {"type": "string", "enum": ["exact", "day"]},
+          "note": {"type": "string", "minLength": 1, "maxLength": 200}
+        },
+        "required": ["values", "observed_at"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["series", "entries"],
+  "additionalProperties": false
+}
+```
+
 `records.list` takes `{"type": "object", "properties": {},
 "additionalProperties": false}`.
 
@@ -303,6 +339,9 @@ and a `structured` body the harness and the clients read.
   succeeds with zeros; a delete that names a series the principal does not
   have, whether for one entry or the whole series, is `records.series_unknown`,
   so a stranger's delete is indistinguishable from a missing one.
+- `records.import` → `{"series", "entries": [{"entry_id", "observed_at",
+  "values"}...], "entry_count", "imported": n, "replayed": n}`, the entries
+  in the order given.
 
 The window is half-open, `[since, until)`. `since` defaults to the earliest
 entry and `until` to the clock plus the five-minute future skew, so an entry
@@ -338,6 +377,9 @@ records.invalid_arguments     an argument the schema admits has an invalid value
                               an observed_at without an offset
 ```
 
+An import validates every entry before it writes one, so any refusal stores
+nothing, and a per-entry refusal's detail begins `reading <n>: `.
+
 The first ten are the domain's refusals and the gate's census; the last two
 are the service's trust refusal and the tool's fallback for a value the
 schema cannot express. `records.secret_detected`, `records.name_rejected` and
@@ -355,10 +397,13 @@ Each description is three or four sentences, stable, and says what the tool
 cannot infer. `records.create_series` says that it needs the owner's approval
 and that a series must exist before an append. `records.append` says that
 values are the owner's words, that the series must already exist, and that in
-a turn that read external content the tool refuses and the model asks the
-owner to state the value in chat, which the refusal it receives there repeats.
+a turn that read external content the tool refuses and `records.import` is the
+path, which the refusal it receives there repeats. `records.import` opens with
+the short sentence `Save readings the owner approves.`, because the deferred
+index renders only a first sentence and has no room for a longer one, then
+says what it is for and that the batch is stored whole or not at all.
 `records.query` says the summary covers the window and that `bucket` replaces
-entries with aggregates. `records.delete` says it asks the owner. All five say
+entries with aggregates. `records.delete` says it asks the owner. All six say
 that records are the owner's own measurements and are not memory.
 
 ## Policy
@@ -378,6 +423,13 @@ runs the tool exactly as an allowed one, once; a denied or expired approval
 writes nothing. `human_confirms_arguments` is not set: the approval card
 already carries the tool's arguments, so the owner sees the name, components
 and units of a new series and the series or entry a delete removes.
+`records.import` is `EXTERNAL_WRITE` too and is approved the same way, in
+every turn. Its card is server-rendered: the summary names the count and the
+stored series' display name, never the model's series argument, and reads "a
+series that does not exist" when the argument names none; the view carries
+one line per entry, `<observed_at as given>: <component> <value> <unit>, ...`,
+with any note after it. The executor binds the approval to the arguments'
+hash, so the values stored are the values shown.
 `records.list`, `records.query` and `records.append` are `NONE` and the
 matrix allows them. Hardline rules run first and are untouched.
 
@@ -397,8 +449,10 @@ that read an email, a web page, a knowledge passage or any external tool
 result is labelled `EXTERNAL_UNTRUSTED` by the executor and is refused;
 `USER`, `MEMORY` and `INTERNAL_TOOL` origins append without a card. Internal
 tool results, `records.list` among them, do not lower the label. The refusal
-tells the model to ask the owner to state the value in chat, where the
-owner's own next turn appends it.
+tells the model to call `records.import`, which shows the owner every value
+and stores them on approval. On 2026-10-26 the owner rejected the earlier
+wording, which sent the model back to ask for every value again, as "a
+terrible user experience".
 
 ### Why no profile row
 
@@ -414,7 +468,8 @@ accepted. This slice therefore adds no condition and no row. The approval
 path for untrusted appends, as the condition and its row, is the pending
 alternative; it lands only when the owner accepts re-admitting the formation
 release evidence, and it would replace the service check rather than sit
-beside it.
+beside it. `records.import` gives the owner that approval without it: its
+class, not a row, is what asks, so the default profile is unchanged.
 
 ## Scans and the sensitivity ceiling
 
@@ -724,7 +779,7 @@ Wiring a schedule to request it is a later design note.
 One environment flag and two shipped knobs:
 
 ```text
-AGENT_RECORDS_ENABLED                         env   bool  default 0   registers the five tools and injects the catalog source
+AGENT_RECORDS_ENABLED                         env   bool  default 0   registers the six tools and injects the catalog source
 classes.records_catalog.max_items             plan  int   16          context/plan.yaml
 classes.records_catalog.max_tokens            plan  int   600         context/plan.yaml
 ```
@@ -800,7 +855,11 @@ Each step begins with its red test, and the gate a step turns green is named.
    classified `EXTERNAL_WRITE` and `EXTERNAL_DELETE`, evaluate to
    `REQUIRE_APPROVAL` under the deterministic matrix in any turn, so neither
    executes without a resolved approval, and an approved create executes
-   once. **M34.**
+   once. A `records.import` evaluates to `REQUIRE_APPROVAL` in every turn,
+   its card names the stored series and renders every entry with units, an
+   approved import in an `EXTERNAL_UNTRUSTED` turn stores every entry once and
+   replays on re-invocation, any invalid entry stores nothing, and a denied
+   import stores nothing. **M34.**
    The registry check
    `tests/gates/test_records_m34.py::test_untrusted_turn_append_is_refused_and_writes_nothing`
    proves the refusal clause; the trusted-turn, approval and execute-once
@@ -808,6 +867,12 @@ Each step begins with its red test, and the gate a step turns green is named.
    `tests/gates/test_records_m34.py::test_memory_turn_append_is_allowed`,
    `tests/gates/test_records_m34.py::test_create_and_delete_require_approval_by_matrix`
    and `tests/gates/test_records_m34.py::test_approved_create_series_executes_once`,
+   and the import clauses by
+   `tests/gates/test_records_m34.py::test_import_requires_approval_by_matrix_in_any_turn`,
+   `tests/gates/test_records_m34.py::test_import_card_shows_every_reading`,
+   `tests/gates/test_records_m34.py::test_untrusted_turn_import_stores_every_reading_once`,
+   `tests/gates/test_records_m34.py::test_import_is_all_or_nothing` and
+   `tests/gates/test_records_m34.py::test_approved_import_stores_and_denied_import_stores_nothing`,
    which run beside it.
 3. **Append replay.** A `records.append` re-executed after a simulated crash
    with the effect watermark set stores one entry, and the re-invoked tool
@@ -830,11 +895,11 @@ Each step begins with its red test, and the gate a step turns green is named.
    an entry appended in the same segment, on every extractor whose
    candidates pass the governed service's candidate loop, while a statement
    carrying only one value of a two-component entry still forms. **M34.**
-8. **Registration.** Startup registration validation accepts all five tools
+8. **Registration.** Startup registration validation accepts all six tools
    with every `ToolSpec` field, `records` is a builtin domain, the two scopes
    are in the closed vocabulary, every records reason code has a static
    message, and with `AGENT_RECORDS_ENABLED` unset or `0` the tools are
-   unregistered and the roster is unchanged, while `1` registers all five.
+   unregistered and the roster is unchanged, while `1` registers all six.
    **M34.**
 9. **Listing stable.** `records.list` output and the catalog rendering for
    the same store are byte-identical across calls. **M34.**
@@ -870,7 +935,7 @@ Each addition lands with the step that implements it; none changes an
 existing requirement.
 
 - [builtin-tools.md](builtin-tools.md): the census of tools declared by other
-  specifications gains the five, and a Milestone 34 section carries the
+  specifications gains the six, and a Milestone 34 section carries the
   classification above.
 - [tool-system.md](tool-system.md): the `records` domain in the partition
   table.
@@ -910,6 +975,14 @@ existing requirement.
   `records.untrusted_turn`. On 2026-10-22 the owner accepted the refusal for
   now and deferred the approval path to a revisit around 2026-12-22
   (ADR-0239, amended 2026-10-22).
+- On 2026-10-26 the owner asked that values read from elsewhere be shown,
+  confirmed and saved rather than refused. `records.import`, classified
+  `EXTERNAL_WRITE`, does it through the matrix, so the profile and the
+  formation release evidence stay as they are. It is deferred to the index
+  with create and delete: as a direct definition it pushed two Gmail tools out
+  of a website-bound chat (`tests/gates/test_deferred_tools_adr0123.py`), and
+  `records.create_series` took a shorter first sentence so that the index
+  holds what it held before.
 - The catalog is `INTERNAL_TOOL`, not `MEMORY`, so its presence never turns
   a fresh chat's append into an approval.
 - Series creation is an approval, because an approval card is enforceable

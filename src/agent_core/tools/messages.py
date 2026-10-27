@@ -219,8 +219,9 @@ TOOL_MESSAGES: dict[str, str] = {
         "Not recorded. A series, component or unit name looked like an instruction."
     ),
     "records.untrusted_turn": (
-        "Not recorded. This turn read external content, so nothing is stored from it. "
-        "Ask the owner to state the value in chat, then append it."
+        "Not recorded. This turn read external content, so records.append stores nothing "
+        "from it. Call records.import instead: the owner reviews every value on an "
+        "approval card before it is saved."
     ),
     "records.invalid_arguments": (
         "An argument has an invalid shape or value; check the observed time or window "
