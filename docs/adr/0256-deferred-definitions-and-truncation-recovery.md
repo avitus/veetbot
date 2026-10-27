@@ -98,7 +98,7 @@ and re-plan every chat.
   a website profile skips nothing.
 - The default agent's version changes, so the new tool reaches chats started
   after the deploy. Schedules stay pinned.
-- The builtin census gains one tool, for fifty-one.
+- The builtin census gains one tool, for fifty-two.
 
 ## Verification
 

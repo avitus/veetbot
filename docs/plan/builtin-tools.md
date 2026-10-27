@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Forty-one more model-callable tools are declared at build time by other
+Forty-two more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -169,6 +169,7 @@ records.create_series         capability  owner-records
 records.append                capability  owner-records
 records.query                 capability  owner-records
 records.delete                capability  owner-records
+records.import                capability  owner-records
 cockpit.read                  capability  cockpit
 cockpit.check                 capability  cockpit
 cockpit.widget.write          capability  cockpit
@@ -176,8 +177,8 @@ cockpit.configure             capability  cockpit
 cockpit.feed.publish          capability  cockpit
 ```
 
-Fifty-one model-callable builtin tools in total: the original roster of
-eight, the forty-one above, and the two media-generation tools in ADR-0140.
+Fifty-two model-callable builtin tools in total: the original roster of
+eight, the forty-two above, and the two media-generation tools in ADR-0140.
 Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
@@ -192,10 +193,10 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty-one, `skill.manage`, `web.search`,
+nothing else.** Of the other forty-two, `skill.manage`, `web.search`,
 `web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
 five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
-three `people.*`, and five `records.*` tools in this document's Milestone 26,
+three `people.*`, and six `records.*` tools in this document's Milestone 26,
 28, 31, and 34 sections below;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
 `skill.load` carries three. The four remaining control tools inherit
@@ -216,13 +217,13 @@ that is a function of the deployment. Eighteen identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the four `memory.*` tools,
-`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-two register only
-with their flag or provider: `skill.manage` with skill authoring, the two
+`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-four register only
+with their flag or provider: `skill.manage` with skill authoring, the three
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
 and worker, the three `people.*` tools with People, `email.context` and
 `email.feedback` with Email mode, and `email.subscriptions` and
-`email.unsubscribe` with email unsubscribe, the five `records.*` tools with
+`email.unsubscribe` with email unsubscribe, the six `records.*` tools with
 `AGENT_RECORDS_ENABLED=1`, the five `cockpit.*` tools with
 `AGENT_COCKPIT_ENABLED=1`, and `image.generate` and `video.generate` with the
 TensorScale credential. Historical versions of
@@ -1676,9 +1677,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; fifty model-callable builtin tools
-    are declared at build time across the corpus, and forty of them
-    belong to other specifications. Resolved by naming those forty here,
+    is the original roster; fifty-two model-callable builtin tools
+    are declared at build time across the corpus, and forty-two of them
+    belong to other specifications. Resolved by naming those forty-two here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
@@ -1923,9 +1924,9 @@ nothing, which is what lets recovery re-execute a call that has no read-back.
 
 ## Milestone 34 records tools
 
-[owner-records.md](owner-records.md#the-five-tools) owns `records.list`,
-`records.create_series`, `records.append`, `records.query`, and
-`records.delete`. All five are `in_process` capabilities with
+[owner-records.md](owner-records.md#the-six-tools) owns `records.list`,
+`records.create_series`, `records.append`, `records.query`,
+`records.delete`, and `records.import`. All six are `in_process` capabilities with
 `INTERNAL_TOOL` result trust and a ten-second timeout, and exist only with
 `AGENT_RECORDS_ENABLED=1`; with the flag unset or off the roster is
 unchanged. Their closed JSON schemas expose every bound.
@@ -1937,6 +1938,7 @@ unchanged. Their closed JSON schemas expose every bound.
 | `records.create_series` | `records.write` | `EXTERNAL_WRITE` / `MEDIUM` / `IDEMPOTENT` | no |
 | `records.append` | `records.write` | `NONE` / `MEDIUM` / `CONDITIONALLY_IDEMPOTENT` | no |
 | `records.delete` | `records.write` | `EXTERNAL_DELETE` / `MEDIUM` / `IDEMPOTENT` | no |
+| `records.import` | `records.write` | `EXTERNAL_WRITE` / `MEDIUM` / `CONDITIONALLY_IDEMPOTENT` | no |
 
 The writes land in the platform's own store and leave the host for nowhere.
 Create and delete carry external classes so that the deterministic matrix
@@ -1945,7 +1947,10 @@ row and no policy profile change. The append stays `NONE`: it awaits
 `mark_effect_sent` before its insert and returns the stored entry with
 `replayed` set for a key the series already holds, and the records service
 refuses it in a turn whose origin trust is `EXTERNAL_UNTRUSTED` with
-`records.untrusted_turn`.
+`records.untrusted_turn`, which points the model at `records.import`. The
+import carries create's class for the same reason: the owner approves a batch
+of up to fifty entries on one card that renders every value, and the batch is
+stored whole, once, or not at all.
 
 ## Image and video generation (ADR-0140)
 

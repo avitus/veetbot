@@ -4357,12 +4357,13 @@ All coverage, quality and security gates and the existing absolute deadline rema
 The owner authorized roadmap item B14 on 2026-10-22 under ADR-0239.
 [Owner records](owner-records.md) declares ten gates and gives the owner's
 principal a bounded record store: named numeric series with one to four
-components, appended to, listed, queried and deleted through five `records.*`
-tools, with a catalog of the series in every request. It requires approval
-for a new series and for every deletion, a refusal of an append in a turn
-that read untrusted content (the model then asks the owner to state the
-value; the owner chose this over an approval through a new policy condition
-on 2026-10-22, to be revisited around 2026-12-22), scans on names
+components, appended to, imported, listed, queried and deleted through six
+`records.*` tools, with a catalog of the series in every request. It requires
+approval for a new series and for every deletion, a refusal of an append in a
+turn that read untrusted content, and in its place an approval-classed import
+whose card shows the owner every value before any is stored (added on
+2026-10-26 at the owner's request; the policy-condition alternative stays
+deferred to a revisit around 2026-12-22), scans on names
 and notes, forced row-level security, value-free deletion events, a formation
 eligibility rule so that a reading never becomes a belief, and a body-region
 catalog item with an absolute cap and a stability gate. No SQL surface, HTTP
