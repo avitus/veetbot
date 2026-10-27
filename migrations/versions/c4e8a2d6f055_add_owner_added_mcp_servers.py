@@ -44,6 +44,7 @@ def upgrade() -> None:
         sa.Column("pending_verifier_sealed", sa.Text(), nullable=True),
         sa.Column("pending_expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("pending_principal_id", sa.Text(), nullable=True),
+        sa.Column("exchanging_state_hash", sa.String(64), nullable=True),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("tenant_id", "server_id"),
         sa.ForeignKeyConstraint(

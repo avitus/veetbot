@@ -363,14 +363,25 @@ class MCPServerSettingsService:
         """Consume a callback's state once; failures carry no upstream text."""
         if state is None or not 1 <= len(state) <= 512 or not state.isascii():
             return None, "expired"
+        attempt = _state_hash(state)
         now = self._clock.now()
+        refused: SignInOutcome | None = None
         async with self._uow_factory() as uow:
-            pending = await uow.mcp_servers.find_authorization_by_state(
-                self._tenant_id, _state_hash(state)
-            )
+            pending = await uow.mcp_servers.find_authorization_by_state(self._tenant_id, attempt)
             if pending is None:
                 return None, "expired"
-            # Single use: the state is spent before anything else can fail.
+            if (
+                pending.pending_expires_at is None
+                or pending.pending_expires_at <= now
+                or pending.pending_verifier_sealed is None
+                or pending.client_id is None
+                or pending.redirect_uri is None
+            ):
+                refused = "expired"
+            elif error is not None or code is None or not 1 <= len(code) <= 4096:
+                refused = "failed"
+            # Single use: the state is spent before anything else can fail, and
+            # an exchange that goes ahead is recorded so a sign-out can withdraw it.
             await uow.mcp_servers.put_authorization(
                 pending.model_copy(
                     update={
@@ -378,21 +389,16 @@ class MCPServerSettingsService:
                         "pending_verifier_sealed": None,
                         "pending_expires_at": None,
                         "pending_principal_id": None,
+                        "exchanging_state_hash": attempt if refused is None else None,
                         "updated_at": now,
                     }
                 )
             )
         server_id = pending.server_id
-        if (
-            pending.pending_expires_at is None
-            or pending.pending_expires_at <= now
-            or pending.pending_verifier_sealed is None
-            or pending.client_id is None
-            or pending.redirect_uri is None
-        ):
-            return server_id, "expired"
-        if error is not None or code is None or not 1 <= len(code) <= 4096:
-            return server_id, "failed"
+        if refused is not None:
+            return server_id, refused
+        assert pending.pending_verifier_sealed is not None and pending.redirect_uri is not None
+        assert code is not None
         verifier = self._sealer.open(
             pending.pending_verifier_sealed, self._context(pending, "verifier")
         )
@@ -411,27 +417,29 @@ class MCPServerSettingsService:
             current = await uow.mcp_servers.get_authorization(
                 pending.tenant_id, server_id, for_update=True
             )
-            if current is None:
+            # A removal or sign-out during the exchange withdrew this attempt.
+            if current is None or current.exchanging_state_hash != attempt:
                 return server_id, "failed"
             signed_in = current.model_copy(
                 update={
                     **self._sealed_grant(current, grant, completed),
                     "signed_in_at": completed,
                     "signed_in_by": pending.pending_principal_id,
+                    "exchanging_state_hash": None,
                     "updated_at": completed,
                 }
             )
             await uow.mcp_servers.put_authorization(signed_in)
+            event_id = self._ids.new_id()
             await uow.process_events.append(
                 ProcessEvent(
-                    id=self._ids.new_id(),
+                    id=event_id,
                     event_type="settings.mcp_servers.signed_in",
                     actor_type="principal",
                     actor_id=pending.pending_principal_id,
                     payload={"tenant_id": pending.tenant_id, "server_id": server_id},
                     derivation_key=(
-                        f"settings.mcp_servers.signed_in:{pending.tenant_id}:{server_id}:"
-                        f"{completed.isoformat()}"
+                        f"settings.mcp_servers.signed_in:{pending.tenant_id}:{server_id}:{event_id}"
                     ),
                     created_at=completed,
                 )
@@ -445,9 +453,26 @@ class MCPServerSettingsService:
             authorization = await uow.mcp_servers.get_authorization(
                 principal.tenant_id, server_id, for_update=True
             )
-            if authorization is None or not authorization.signed_in:
+            if authorization is None or not (
+                authorization.signed_in
+                or authorization.pending_state_hash is not None
+                or authorization.exchanging_state_hash is not None
+            ):
                 return
-            await uow.mcp_servers.put_authorization(self._signed_out(authorization))
+            # Signing out also withdraws a sign-in in progress, so a callback still
+            # exchanging its code stores nothing.
+            await uow.mcp_servers.put_authorization(
+                self._signed_out(authorization).model_copy(
+                    update={
+                        "pending_state_hash": None,
+                        "pending_verifier_sealed": None,
+                        "pending_expires_at": None,
+                        "pending_principal_id": None,
+                        "exchanging_state_hash": None,
+                        "updated_at": self._clock.now(),
+                    }
+                )
+            )
             await self._audit(uow, principal, "settings.mcp_servers.signed_out", config)
 
     # The runtime's token source
@@ -572,9 +597,10 @@ class MCPServerSettingsService:
         config: MCPServerConfig,
     ) -> None:
         now = self._clock.now()
+        event_id = self._ids.new_id()
         await uow.process_events.append(
             ProcessEvent(
-                id=self._ids.new_id(),
+                id=event_id,
                 event_type=event_type,
                 actor_type="principal",
                 actor_id=principal.principal_id,
@@ -583,9 +609,8 @@ class MCPServerSettingsService:
                     "server_id": config.server_id,
                     "access": server_access(config).value,
                 },
-                derivation_key=(
-                    f"{event_type}:{principal.tenant_id}:{config.server_id}:{now.isoformat()}"
-                ),
+                # Keyed by the event's own id: two changes in one clock tick are two events.
+                derivation_key=f"{event_type}:{principal.tenant_id}:{config.server_id}:{event_id}",
                 created_at=now,
             )
         )

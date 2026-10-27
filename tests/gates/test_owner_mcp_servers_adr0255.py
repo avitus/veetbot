@@ -987,3 +987,58 @@ async def test_loosening_access_keeps_a_live_session_working() -> None:
         await client.patch("/v1/mcp-servers/docs", json={"access": "read_only"})
         result = await composition.mcp.call_tool(context, spec, "get_design", {"id": "a"})
     assert result.ok
+
+
+class _HeldExchange(FakeGateway):
+    """Hold the code exchange open, as a slow authorization server would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.exchanging = asyncio.Event()
+        self.release = asyncio.Event()
+        self.hold = True
+
+    async def exchange(
+        self,
+        metadata: MCPAuthorizationMetadata,
+        registration: MCPClientRegistration,
+        *,
+        code: str,
+        verifier: str,
+        redirect_uri: str,
+    ) -> MCPTokenGrant:
+        if self.hold:
+            self.exchanging.set()
+            await self.release.wait()
+        return await super().exchange(
+            metadata, registration, code=code, verifier=verifier, redirect_uri=redirect_uri
+        )
+
+
+@pytest.mark.parametrize("already_signed_in", [False, True])
+async def test_signing_out_during_a_callback_exchange_stores_no_tokens(
+    already_signed_in: bool,
+) -> None:
+    """PR 201 review: a sign-out that commits while the callback exchanges the code
+    withdraws that sign-in, so the callback stores nothing."""
+    gateway = _HeldExchange()
+    async with _composition(gateway=gateway) as composition, _client(composition) as client:
+        await client.post("/v1/mcp-servers", json=_add())
+        if already_signed_in:
+            gateway.hold = False
+            await _signed_in(client)
+            gateway.hold = True
+        service = composition.services.mcp_servers
+        assert service is not None
+        started = await client.post("/v1/mcp-servers/docs/sign-in")
+        state = parse_qs(urlsplit(started.json()["authorization_url"]).query)["state"][0]
+        completing = asyncio.create_task(service.complete_sign_in(state, "late", None))
+        await gateway.exchanging.wait()
+        assert (await client.delete("/v1/mcp-servers/docs/sign-in")).status_code == 204
+        gateway.release.set()
+        outcome = await completing
+        listed = await client.get("/v1/mcp-servers")
+        with pytest.raises(PermissionError):
+            await service.access_token(TENANT, "docs")
+    assert outcome == ("docs", "failed")
+    assert listed.json()["servers"][0]["status"] == "sign_in_required"

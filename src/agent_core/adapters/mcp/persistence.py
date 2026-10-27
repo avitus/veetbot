@@ -156,6 +156,7 @@ class PostgresMCPServerRepository:
             "pending_verifier_sealed": authorization.pending_verifier_sealed,
             "pending_expires_at": authorization.pending_expires_at,
             "pending_principal_id": authorization.pending_principal_id,
+            "exchanging_state_hash": authorization.exchanging_state_hash,
             "updated_at": authorization.updated_at,
         }
         statement = pg_insert(MCPServerAuthorizationRow).values(**values)

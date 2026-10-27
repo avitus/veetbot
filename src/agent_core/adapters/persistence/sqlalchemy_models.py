@@ -1039,6 +1039,7 @@ class MCPServerAuthorizationRow(Base):
     pending_verifier_sealed: Mapped[str | None] = mapped_column(Text)
     pending_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pending_principal_id: Mapped[str | None] = mapped_column(Text)
+    exchanging_state_hash: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

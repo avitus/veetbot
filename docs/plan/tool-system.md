@@ -1537,9 +1537,10 @@ four things the owner, not the operator, now decides.
 - **Sign-in.** Starting a sign-in registers a public client through RFC 7591
   when none is stored for the current callback, preferring no secret, and
   stores a single-use state hash and a sealed PKCE verifier for ten minutes.
-  The callback consumes the state before anything else can fail, exchanges
-  the code with the verifier and the RFC 8707 `resource`, and stores the
-  tokens. At connect the runtime asks the sealed store for a token; one within
+  The callback consumes the state before anything else can fail, records it
+  as the attempt being exchanged, exchanges the code with the verifier and
+  the RFC 8707 `resource`, and stores the tokens only if that attempt is
+  still current: a sign-out or removal during the exchange withdraws it. At connect the runtime asks the sealed store for a token; one within
   sixty seconds of expiry is refreshed under the row's lock, a rotated refresh
   token replaces the old in the same transaction, and a rejected refresh signs
   the server out. Step 2 of the ladder above is a forced refresh. A server that
@@ -1826,6 +1827,7 @@ mcp_server_authorizations                  -- ADR-0255, row-level security
   pending_state_hash  CHAR(64) NULL   -- SHA-256 of a ten-minute, single-use state
   pending_verifier_sealed, pending_principal_id  TEXT NULL
   pending_expires_at  TIMESTAMPTZ NULL
+  exchanging_state_hash  CHAR(64) NULL  -- the consumed attempt; sign-out clears it
   updated_at        TIMESTAMPTZ NOT NULL
   UNIQUE (tenant_id, pending_state_hash) WHERE pending_state_hash IS NOT NULL
 ```

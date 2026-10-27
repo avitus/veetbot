@@ -342,6 +342,8 @@ class MCPServerAuthorization(BaseModel):
     pending_verifier_sealed: str | None = None
     pending_expires_at: datetime | None = None
     pending_principal_id: str | None = None
+    # The consumed state whose code is being exchanged; a sign-out clears it.
+    exchanging_state_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     updated_at: datetime
 
     @property

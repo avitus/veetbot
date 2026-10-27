@@ -113,6 +113,7 @@ async def assert_owner_server_repository_contract(repository: MCPServerRepositor
         pending_verifier_sealed=_sealed("verifier"),
         pending_expires_at=NOW,
         pending_principal_id="owner",
+        exchanging_state_hash="d" * 64,
         updated_at=NOW,
     )
     await repository.put_authorization(pending)
@@ -126,6 +127,7 @@ async def assert_owner_server_repository_contract(repository: MCPServerRepositor
             "pending_verifier_sealed": None,
             "pending_expires_at": None,
             "pending_principal_id": None,
+            "exchanging_state_hash": None,
             "access_token_sealed": _sealed("access"),
             "access_expires_at": NOW,
             "refresh_token_sealed": _sealed("refresh"),

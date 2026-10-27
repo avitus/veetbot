@@ -2411,7 +2411,8 @@ the sign-in routes.
 
 `POST .../sign-in` returns `authorization_url`, `callback_scheme` (`veetbot`) and
 `expires_at`, ten minutes ahead; a server that needs no sign-in is `409`.
-`DELETE .../sign-in` is `204` and forgets the tokens. The callback answers
+`DELETE .../sign-in` is `204`, forgets the tokens, and withdraws a sign-in in
+progress, so a callback still exchanging its code stores nothing. The callback answers
 `303` to `veetbot://mcp-sign-in?server_id=…&outcome=signed_in|failed|expired`,
 or to `veetbot://mcp-sign-in?outcome=expired` for an unknown state, with a
 fixed HTML body; it reflects nothing from the request. Every response carries

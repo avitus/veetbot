@@ -93,7 +93,9 @@ and give owner-added servers their own index budget.
    tokens, and answers `303` to
    `veetbot://mcp-sign-in?server_id=…&outcome=signed_in|failed`, or to
    `…?outcome=expired` for an unknown state. No upstream text reaches the page.
-   `DELETE .../sign-in` forgets the tokens and keeps the registration.
+   `DELETE .../sign-in` forgets the tokens, withdraws a sign-in in progress
+   so a callback still exchanging its code stores nothing, and keeps the
+   registration.
 
 6. **Tokens live in PostgreSQL, sealed, and refresh at use.**
    `mcp_server_authorizations` holds one row per server under row-level
