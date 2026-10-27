@@ -45,7 +45,10 @@ took 29 steps and 2.31 million input tokens, cost USD 13.70, and kept nothing.
    definition is trusted configuration, and a server's or device's definition
    is untrusted data.
 2. **The newest definition answer of each deferred tool stays whole.**
-   Tool-result truncation skips it and still counts it against the budget. An
+   Tool-result truncation skips it and still counts it against the budget.
+   The kept answers together never exceed that budget: past it, the oldest
+   truncate in their turn like any other result, so probing many deferred
+   tools cannot crowd out the rest. An
    answer qualifies only when it replies to `tool.call` for a tool the plan
    defers, and its content is exactly the platform outcome
    `tool.arguments_invalid` followed by that tool's pinned definition. A
@@ -112,7 +115,8 @@ and re-plan every chat.
   with the trust of each, and the production rosters defer `web.fetch_json`.
 - `tests/unit/test_context_truncation_recovery.py`: the newest definition
   answer survives truncation while a stale copy, a direct call's copy and a
-  schema-only answer truncate; an artifact pointer also names its event; the
+  schema-only answer truncate, and kept answers stay within the budget; an
+  artifact pointer also names its event; the
   note appears only while results are
   truncated and names the events of the results still shown, after the
   history cut.

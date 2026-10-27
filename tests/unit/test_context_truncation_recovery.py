@@ -33,10 +33,16 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunCheckpoint, RunStatus
-from agent_core.domain.tools import ToolOutcome, ToolOutcomeStatus, deferred_definition_text
+from agent_core.domain.tools import (
+    ToolOutcome,
+    ToolOutcomeStatus,
+    ToolSpec,
+    deferred_definition_text,
+)
 from agent_core.tools.cockpit import CockpitReadTool
 from agent_core.tools.context_update import UpdateWorkingStateTool
 from agent_core.tools.web_fetch import WebFetchTool
+from agent_core.tools.web_fetch_json import WebFetchJsonTool
 from tests.contract.support import NOW, agent, principal, run, session
 from tests.gates.test_context_m7 import _budget, _PlanStore, _working_state
 
@@ -47,11 +53,15 @@ TOOL_RESULT_BUDGET = 4_000
 PAGE_BYTES = 900
 
 
-def _builder(*, working_state: bool = True) -> BudgetedContextBuilder:
+def _builder(
+    *,
+    working_state: bool = True,
+    deferred: tuple[ToolSpec, ...] = (DEFERRED,),
+    tool_result_budget: int = TOOL_RESULT_BUDGET,
+) -> BudgetedContextBuilder:
     tools = (
         (UpdateWorkingStateTool.spec, WebFetchTool.spec) if working_state else (WebFetchTool.spec,)
     )
-    deferred = (DEFERRED,)
     configured_agent = agent()
     estimator = ConservativeTokenEstimator()
     prefix = build_prefix(configured_agent, tools, deferred_tools=deferred)
@@ -66,9 +76,9 @@ def _builder(*, working_state: bool = True) -> BudgetedContextBuilder:
         tool_schema_sha256=hashlib.sha256(b"[]").hexdigest(),
         policy_version="adr-0256-test",
         builder_version="context-builder@14",
-        budget=_budget(tool_results=TOOL_RESULT_BUDGET),
+        budget=_budget(tool_results=tool_result_budget),
         created_at=NOW,
-        deferred_tool_names=(DEFERRED.name,),
+        deferred_tool_names=tuple(spec.name for spec in deferred),
         deferred_tool_specs=deferred,
     )
     return BudgetedContextBuilder(
@@ -130,18 +140,25 @@ class _Conversation:
             ),
         )
 
-    def probe(self, call_id: str, *, answer: str | None = None, name: str = "tool.call") -> str:
+    def probe(
+        self,
+        call_id: str,
+        *,
+        answer: str | None = None,
+        name: str = "tool.call",
+        spec: ToolSpec = DEFERRED,
+    ) -> str:
         """The model's empty-argument call and the refusal that answers it."""
 
         outcome = ToolOutcome(
             status=ToolOutcomeStatus.FAILED,
-            action=DEFERRED.name,
+            action=spec.name,
             reason_code="tool.arguments_invalid",
             message="Not performed. The arguments are invalid.",
             retryable=False,
             remediation="modify_arguments",
         )
-        arguments = {"name": DEFERRED.name, "arguments": {}} if name == "tool.call" else {}
+        arguments = {"name": spec.name, "arguments": {}} if name == "tool.call" else {}
         return self._exchange(
             ToolCallItem(
                 call_id=call_id,
@@ -154,7 +171,7 @@ class _Conversation:
                 call_id=call_id,
                 content=[
                     TextPart(text=outcome.model_dump_json()),
-                    TextPart(text=deferred_definition_text(DEFERRED) if answer is None else answer),
+                    TextPart(text=deferred_definition_text(spec) if answer is None else answer),
                 ],
                 is_error=True,
             ),
@@ -167,6 +184,8 @@ async def _request(
     working_state: bool = True,
     seed: int = 0,
     summarized_through: int = 0,
+    deferred: tuple[ToolSpec, ...] = (DEFERRED,),
+    tool_result_budget: int = TOOL_RESULT_BUDGET,
 ) -> ModelRequest:
     current = run(status=RunStatus.RUNNING).model_copy(update={"seed_event_sequence": seed})
     checkpoint = RunCheckpoint(
@@ -178,9 +197,10 @@ async def _request(
         replaced_through_sequence=summarized_through,
         created_at=NOW,
     )
-    return await _builder(working_state=working_state).build(
-        current, checkpoint, agent(), principal()
+    builder = _builder(
+        working_state=working_state, deferred=deferred, tool_result_budget=tool_result_budget
     )
+    return await builder.build(current, checkpoint, agent(), principal())
 
 
 def _results(request: ModelRequest) -> dict[str, str]:
@@ -233,6 +253,30 @@ async def test_the_newest_definition_answer_survives_truncation() -> None:
     assert current not in truncated
     assert set(pages[:2]) <= truncated
     assert deferred_definition_text(DEFERRED) in _results(request)[current]
+
+
+async def test_kept_definition_answers_never_exceed_the_budget() -> None:
+    # Each deferred tool keeps its newest definition answer, but together they
+    # stay within the tool-result budget: past it the oldest truncate as any
+    # other result would, so probing many tools cannot crowd out the rest.
+    conversation = _Conversation()
+    older = conversation.probe("probe-cockpit")
+    newer = conversation.probe("probe-json", spec=WebFetchJsonTool.spec)
+    estimator = ConservativeTokenEstimator()
+    sizes = {
+        item.call_id: estimator.estimate([item], "fake:scripted")
+        for item in conversation.items
+        if isinstance(item, ToolResultItem)
+    }
+
+    request = await _request(
+        conversation,
+        deferred=(DEFERRED, WebFetchJsonTool.spec),
+        tool_result_budget=sizes[newer] + sizes[older] // 2,
+    )
+
+    assert _truncated(request) == {older}
+    assert deferred_definition_text(WebFetchJsonTool.spec) in _results(request)[newer]
 
 
 @pytest.mark.parametrize(

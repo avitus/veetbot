@@ -1155,19 +1155,27 @@ class BudgetedContextBuilder:
         and the function stays a pure function of the items it is given.
 
         The newest definition answer of each deferred tool stays whole and
-        still counts against the budget (ADR-0256). Returns the indexes it
-        truncated.
+        still counts against the budget, while the kept answers together fit
+        it (ADR-0256). Returns the indexes it truncated.
         """
 
         result = [item.model_copy(deep=True) for item in items]
-        kept = _definition_answers(result, plan)
+        budget = plan.budget.tool_result_tokens
+        # Kept answers together stay within the budget, newest first; an older
+        # one past it truncates in its turn like any other result.
+        kept: set[int] = set()
+        kept_tokens = 0
+        for index in sorted(_definition_answers(result, plan), reverse=True):
+            kept_tokens += self._estimator.estimate([result[index]], plan.model_id)
+            if kept_tokens > budget:
+                break
+            kept.add(index)
         definitions = [result[index] for index in sorted(kept)]
         indexes = [
             index
             for index, item in enumerate(result)
             if isinstance(item, ToolResultItem) and index not in kept
         ]
-        budget = plan.budget.tool_result_tokens
         block = max(1, budget // TOOL_RESULT_TRUNCATION_BLOCKS)
         truncated: set[int] = set()
         truncated_tokens = 0
