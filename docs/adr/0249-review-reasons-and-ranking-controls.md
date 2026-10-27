@@ -1,8 +1,8 @@
 # ADR-0249: Review reasons and two ranking controls
 
 - Status: Accepted (the owner accepted the two controls and the ordering
-  invariant with its one-third cap on 2026-10-26; the policy-version bump
-  is still open, see point 4)
+  invariant with its one-third cap on 2026-10-26, and chose the same day to
+  bump only the live selector to `retrieval@7`, see point 4)
 - Date: 2026-10-25
 - Related: ADR-0117, ADR-0224, ADR-0233, ADR-0245, ADR-0247, ADR-0248
 - Detailed design: `docs/plan/memory-retrieval-and-ranking.md`,
@@ -43,16 +43,21 @@ at owner authority.
    (ii) a user belief with match at least 0.5 outranks any attention-flagged
    hypothesis whatever its match; (iii) attention-flagged hypotheses fill at
    most `ceil(max_items / 3)` of a recall's rendered slots.
-4. **Policy version, deferred.** The rule is `retrieval@4 -> retrieval@6`
-   and `retrieval@5 -> retrieval@7` with the M16 deterministic baseline
-   re-recorded in the same change. The re-record was run: every metric is
-   identical, only the policy string and build reference move. It is not
-   committed, because the M32 frozen control pins the baseline's digest in
-   `memory-reconsolidation.manifest.json`, and its recording pins that
-   manifest's digest and `retrieval@4` in all 72 traces; the bump therefore
-   requires refreshing a frozen control (an offline re-record, zero provider
-   calls, identical scores expected). **Open decision for the owner:** refresh
-   the M32 control and bump, or keep `retrieval@4` while the penalties stand.
+4. **Policy version: the live selector moves, the base label stays.** The
+   rule is `retrieval@4 -> retrieval@6` and `retrieval@5 -> retrieval@7`
+   with the M16 deterministic baseline re-recorded in the same change. The
+   re-record was run: every metric is identical, only the policy string and
+   build reference move. The M32 frozen control pins the baseline's digest in
+   `memory-reconsolidation.manifest.json`, its recording pins that manifest
+   and `retrieval@4` in all 72 traces, and the owner-reviewed review contract
+   pins the manifest, so the base bump would re-pin a reviewed contract for no
+   measured change. The owner decided on 2026-10-26 to bump only the live
+   relevance selector, `retrieval@5 -> retrieval@7`, which every production
+   recall trace carries, and to keep `retrieval@4`. This is a recorded
+   deviation from the both-labels rule: `retrieval@4` keeps naming base
+   ranking whose penalties changed for inputs the M16 corpus does not hold
+   (learned and attention-flagged memories). A base bump becomes due when a
+   change moves an M16 metric.
 
 ## Consequences
 
