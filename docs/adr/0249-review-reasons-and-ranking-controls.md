@@ -1,8 +1,8 @@
 # ADR-0249: Review reasons and two ranking controls
 
-- Status: Proposed (plan decision 3: the two controls and the ordering
-  invariant with its one-third cap await the owner's acceptance; the plan
-  carrying them was approved on 2026-10-25)
+- Status: Accepted (the owner accepted the two controls and the ordering
+  invariant with its one-third cap on 2026-10-26; the policy-version bump
+  is still open, see point 4)
 - Date: 2026-10-25
 - Related: ADR-0117, ADR-0224, ADR-0233, ADR-0245, ADR-0247, ADR-0248
 - Detailed design: `docs/plan/memory-retrieval-and-ranking.md`,

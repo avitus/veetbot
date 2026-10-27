@@ -1,10 +1,11 @@
 # ADR-0247: Lifecycle reconciliation and owner confirmation
 
-- Status: Proposed (the owner approved the repair plan that contains this table
-  on 2026-10-25; acceptance of the table itself, plan decision 2, is pending)
+- Status: Accepted (the owner accepted the lifecycle table, including the
+  redefinition of gate 12's "unused", on 2026-10-26; the CEO list and
+  Matthew Scullion beliefs were confirmed in production the same day)
 - Date: 2026-10-25
 - Related: ADR-0117, ADR-0169, ADR-0174, ADR-0224, ADR-0232, ADR-0245
-- Would amend: `memory-evaluation-and-lifecycle.md` gates 12 and 13
+- Amends: `memory-evaluation-and-lifecycle.md` gates 12 and 13
 - Detailed design: `docs/plan/memory-evaluation-and-lifecycle.md`,
   `docs/plan/adaptive-memory-distillation.md`,
   `docs/plan/memory-formation-and-consolidation.md`,
