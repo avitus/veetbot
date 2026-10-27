@@ -1033,7 +1033,9 @@ contract suite.
 
 ### Configuration
 
-- **Flag.** `AGENT_COCKPIT_ENABLED`, exactly `0` or `1`, default `0`.
+- **Flag.** `AGENT_COCKPIT_ENABLED`, exactly `0` or `1`, default `0`. The
+  scheduler environment mirrors it, so a feed-keeping schedule's occurrences
+  keep `cockpit.read` and `cockpit.write` ([scheduling](scheduling.md)).
 - **Settings.** The settings are:
   - `AGENT_COCKPIT_BUILDER_IMAGE`;
   - `AGENT_COCKPIT_GITHUB_REPOSITORY`;

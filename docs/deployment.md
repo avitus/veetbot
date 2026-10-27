@@ -1681,8 +1681,11 @@ revert it from its details.
 2. Add the exact-name `cockpit.widget.write` `tool_rules` entry to
    `policy/default.yaml`, and regenerate the formation release evidence on the
    new policy version (the owner deferred this to activation on 2026-10-24).
-3. Set `AGENT_COCKPIT_ENABLED=1` and restart the API, both run workers and
-   the maintenance unit.
+3. Set `AGENT_COCKPIT_ENABLED=1` in the application environment and in
+   `/etc/veetbot/veetbot-schedule.env`. Restart the API, both run workers,
+   the maintenance unit and `veetbot-schedule`. The scheduler needs the flag
+   to vouch for a feed schedule's Cockpit scopes, and the release refuses a
+   schedule environment whose flag differs.
 4. Check that `GET /v1/cockpit` answers `200` with a non-null `runtime`, and
    that Cockpit in the Apple client shows an empty board.
 

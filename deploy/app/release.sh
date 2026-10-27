@@ -355,6 +355,11 @@ if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
   [[ "$SCHEDULE_NOTIFICATION_API_FLAG" == \
     "${AGENT_NOTIFICATION_API_ENABLED:-0}" ]] || fail \
     "schedule worker notification flags must match the application notification flags"
+  # The scheduler vouches for a feed schedule's Cockpit scopes only under the
+  # application's Cockpit flag (docs/plan/scheduling.md).
+  [[ "$(environment_flag "$SCHEDULE_ENV_FILE" AGENT_COCKPIT_ENABLED)" == \
+    "${AGENT_COCKPIT_ENABLED:-0}" ]] || fail \
+    "schedule worker AGENT_COCKPIT_ENABLED must match the application environment"
 fi
 if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
   [[ "$NOTIFY_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \

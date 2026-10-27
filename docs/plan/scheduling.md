@@ -868,6 +868,15 @@ from the enabled flag. Gmail scopes therefore stay synchronized with account
 renames and removals without adding them to the closed `AUTH_SCOPES` platform
 vocabulary or placing credentials in the scheduler role.
 
+Calling and Cockpit follow the same rule. The scheduler environment mirrors
+`AGENT_CALL_ENABLED` (ADR-0213) and `AGENT_COCKPIT_ENABLED` (ADR-0254), and
+under each flag the snapshot holds the two calling scopes or a feed-keeping
+schedule's `cockpit.read` and `cockpit.write`. Run-now and Cockpit refresh check
+authority in the API, which holds the owner's scopes, so without the mirror a
+feed schedule passes those and fails every scheduled occurrence with
+`schedule.scope_revoked`. The release therefore refuses a schedule environment
+whose Cockpit flag differs from the application's.
+
 No in-memory scheduler queue is introduced. In-memory repositories exist only
 to run application and property tests; production startup refuses scheduling
 without PostgreSQL, a durable principal directory, and a non-development worker

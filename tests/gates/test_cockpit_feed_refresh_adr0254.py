@@ -300,6 +300,14 @@ async def test_the_interval_tool_versions_are_offered_only_where_the_cockpit_is(
         )
 
 
+def test_the_schedule_role_vouches_for_feed_scopes_only_where_the_cockpit_is() -> None:
+    from agent_core.bootstrap import _schedule_principal
+
+    base = replace(memory_settings(), auth_scopes=frozenset({"schedule.read", "schedule.write"}))
+    assert not FEED & _schedule_principal(base).scopes
+    assert _schedule_principal(replace(base, cockpit_enabled=True)).scopes >= FEED
+
+
 async def test_only_a_feed_keeping_schedule_may_fire_on_an_interval() -> None:
     async with _composition() as (composition, client):
         refused = await client.post(

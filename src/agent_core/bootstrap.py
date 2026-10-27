@@ -756,6 +756,7 @@ from agent_core.tools.records import (
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
+    COCKPIT_FEED_SCOPES,
     SCHEDULE_CREATE_TOOL_NAME,
     CockpitScheduleCreateTool,
     LegacyScheduleCreateTool,
@@ -2034,11 +2035,13 @@ def _schedule_principal(settings: Settings) -> Principal:
         for row in calling_server_configs(settings.auth_tenant_id, enabled=settings.call_enabled)
         for scope in row.required_scopes
     }
+    # ADR-0254: a feed-keeping schedule's occurrence keeps its Cockpit scopes.
+    feed_scopes = COCKPIT_FEED_SCOPES if settings.cockpit_enabled else ()
     return Principal(
         tenant_id=settings.auth_tenant_id,
         principal_id=settings.auth_principal_id,
         roles=set(settings.auth_roles),
-        scopes={*settings.auth_scopes, *email_scopes, *call_scopes},
+        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *feed_scopes},
     )
 
 
