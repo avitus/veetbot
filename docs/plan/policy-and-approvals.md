@@ -361,14 +361,14 @@ Milestone 28 adds `people.read` and `people.write`; ADR-0117 adds
 `memory.write`; ADR-0119 adds `settings.read` and `settings.write`; ADR-0140
 adds `media.generate`; ADR-0143 adds `notification.write`; ADR-0225 adds
 `schedule.run` for the Run now route; and Milestone 34 adds `records.read` and
-`records.write` for the five `records.*` tools in
+`records.write` for the six `records.*` tools in
 [owner-records.md](owner-records.md). The implemented platform vocabulary,
 `PLATFORM_SCOPES` in `src/agent_core/policy/scopes.py`, therefore contains
 forty-six strings.
 
-The records tools add no `tool_rules` row: `records.create_series` is
-`EXTERNAL_WRITE` and `records.delete` `EXTERNAL_DELETE`, so the existing
-matrix requires approval for both, and `records.list`, `records.query` and
+The records tools add no `tool_rules` row: `records.create_series` and
+`records.import` are `EXTERNAL_WRITE` and `records.delete` `EXTERNAL_DELETE`,
+so the existing matrix requires approval for all three, and `records.list`, `records.query` and
 `records.append` are `NONE` and allowed. The append's untrusted-turn rule is
 a check in the records service, not a policy condition, so the default
 profile and its version are unchanged.
@@ -643,7 +643,10 @@ They resolve as follows, without changing any outcome the plan states.
   its idempotency is `READ_ONLY`. The stdio command remains operator-owned and
   the remote package confines its own destinations; no model-authored URL field
   satisfies either arm. The exact `mcp.{server_id}.use` scope remains an
-  independent prerequisite.
+  independent prerequisite. An owner-added server (ADR-0255) is classified by
+  the owner in Settings rather than by the operator, satisfies the same arm
+  when the owner chose `read_only`, requires no scope, and otherwise requires
+  approval through `external_write`; no policy document changes.
 - **"Allow only in sandbox"** (execute code) is the same shape, with
   `target.isolated` as the predicate.
 - **"Deny initially"** (install packages, enable sandbox network) is `DENY` in

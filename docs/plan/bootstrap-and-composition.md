@@ -325,7 +325,7 @@ enabled, so it cannot create, alter, or reactivate work that no materializer
 will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
-`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 22,000-token
+`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 24,000-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
 cap. Not one of them differs between two deployments of the same revision.
 They differ between *revisions*, which is another way of saying they belong in
@@ -353,7 +353,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 220 knobs live, at the values the
+    module that owns it. This is where all 222 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -417,7 +417,7 @@ src/agent_core/
   policy/default.yaml      the v0.1 policy profile
   models/policies.yaml     model_policies and provider profiles
   models/catalog.yaml      aliases, limits, context windows, prices
-  context/plan.yaml        region caps, reserves, snapshot caps, the 22,000 ceiling
+  context/plan.yaml        region caps, reserves, snapshot caps, the 24,000 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
   memory/profiles.yaml     RRF k, decay and usage knobs
@@ -431,7 +431,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 220. Schema versions, profile names, rule identifiers,
+and asserts the total is 222. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -439,14 +439,14 @@ or invariants rather than knobs and are not counted.
 | --- | ---: |
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
-| `context/plan.yaml` | 32 |
+| `context/plan.yaml` | 34 |
 | `tools/limits.yaml` | 25 |
 | `runtime/limits.yaml` | 65 |
 | `memory/profiles.yaml` | 47 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
 | `cockpit/profiles.yaml` | 10 |
-| **Total** | **220** |
+| **Total** | **222** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -708,7 +708,7 @@ decisions that can be made from configuration alone, before anything is
 built. Authentication configured or fail. Production refuses the development
 sandbox. Production refuses any policy profile, principal, or tenant name
 beginning with `eval.` or `tenant_eval`. The configured context plan's prefix
-classes sum to at most 22,000 tokens. Nothing has been constructed yet, so
+classes sum to at most 24,000 tokens. Nothing has been constructed yet, so
 nothing has to be torn down, which is the entire reason these checks are
 first rather than convenient.
 
@@ -793,7 +793,7 @@ the probe is built from a `Composition` that has no provider client on it.
 | Production refuses the dev sandbox | ADR-0008 | 1 |
 | Production cannot load an eval identity | eval spec | 1 and 4 |
 | Readiness must not call a provider | plan §16 | 5 |
-| Prefix classes fit the 22,000 ceiling | context spec | 1 and per session |
+| Prefix classes fit the 24,000 ceiling | context spec | 1 and per session |
 | Role-conditional composition | runtime spec | 5 |
 | Migrations upgrade cleanly | plan §25 | not startup |
 | A port with no contract module fails | eval spec | build gate |
@@ -1514,6 +1514,20 @@ resolver carries its path, and the fixed sibling `svp_mcp` package, which
 cannot import core, reads and rewrites it. Composition adds the `svp_read`
 row and its `mcp.svp_read.use` scope to the owner's principal. The mechanism
 is in [tool-system.md](tool-system.md).
+
+
+## Owner-added MCP server composition
+
+[ADR-0255](../adr/0255-owner-added-mcp-servers.md) adds default-off
+`AGENT_MCP_SERVERS_ENABLED`, which requires `MCP_AUTHORIZATION_KEY`, a
+base64url 32-byte key, and `MCP_OAUTH_CALLBACK_URL`, an HTTPS (or loopback
+HTTP) URL ending in `/v1/mcp-oauth/callback`. Startup fails closed without
+either, and refuses either without the flag. Enabled, composition starts the
+process-local `mcp_https` proxy, builds the sign-in service over it, hands the
+runtime its token source and the planner its owner-server lookup, and mounts
+the routes. Configured rows may not be owner-added, and a configured row may
+not take an owner-added server's name. With the flag off, owner-added rows are
+ignored everywhere. The mechanism is in [tool-system.md](tool-system.md).
 
 
 ## Milestone 28 People composition

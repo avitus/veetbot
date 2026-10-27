@@ -27,6 +27,7 @@ from agent_core.api.dreaming import dreaming_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
+from agent_core.api.mcp_servers import mcp_servers_router
 from agent_core.api.middleware import (
     PayloadTooLargeError,
     RequestBoundaryMiddleware,
@@ -54,6 +55,7 @@ from agent_core.application.services import (
     DeviceService,
     EmailService,
     FolderService,
+    MCPServerSettings,
     MemoryReadService,
     ModelSettingsService,
     NotificationService,
@@ -244,6 +246,9 @@ class ApplicationServices(Protocol):
 
     @property
     def cockpit(self) -> CockpitService | None: ...
+
+    @property
+    def mcp_servers(self) -> MCPServerSettings | None: ...
 
 
 class UpdatePersonaEntryRequest(BaseModel):
@@ -2255,5 +2260,8 @@ def create_app(
     task_grants = getattr(services, "browser_task_grants", None)
     if settings.browser_task_grants_enabled and task_grants is not None:
         app.include_router(browser_task_grants_router(task_grants, secured))
+    owner_mcp_servers = getattr(services, "mcp_servers", None)
+    if settings.mcp_servers_enabled and owner_mcp_servers is not None:
+        app.include_router(mcp_servers_router(owner_mcp_servers, secured))
 
     return app

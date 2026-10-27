@@ -1,7 +1,8 @@
 # ADR-0248: Attribute-keyed conflicts
 
 - Status: Accepted (owner approved the repair plan containing this half on
-  2026-10-25; the production reconciliation run needs its own authorization)
+  2026-10-25; the owner-authorized production reconciliation ran on
+  2026-10-26 and cleared 9 of 10 pairs)
 - Date: 2026-10-25
 - Related: ADR-0117, ADR-0232, ADR-0245, ADR-0247
 - Detailed design: `docs/plan/memory-formation-and-consolidation.md`,
@@ -58,8 +59,9 @@ formation had no predicate key.
    learned, not an automatically captured sensitive statement). Changed
    beliefs take a fresh store position and a `memory.reviewed` event. A dry
    run reports the same counts and writes nothing. No SQL status edit. The
-   production run, with the home address and its seven partners as the first
-   case, needs the owner's authorization.
+   owner-authorized production run on 2026-10-26 examined 10 pairs and
+   cleared 9, including all seven links on the home address; no review flag
+   needed clearing.
 
 ## Consequences
 

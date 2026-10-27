@@ -124,7 +124,14 @@ def validate_mcp_config(
         f"mcp.{config.server_id}.use"
     }:
         raise ValueError("a Gmail MCP server requires exactly its use scope")
-    if config.transport is MCPTransport.HTTP and not destination_allowed(config.endpoint):
+    # An owner-added server reaches the network through the owner MCP transport,
+    # whose rule is public HTTPS; the sandbox allowlist governs every other row
+    # (ADR-0255 decision 7).
+    if (
+        config.transport is MCPTransport.HTTP
+        and not config.owner_managed
+        and not destination_allowed(config.endpoint)
+    ):
         raise ValueError("MCP endpoint is not permitted by the egress policy")
     if (
         config.auth_scheme is MCPAuthScheme.OAUTH2_CLIENT

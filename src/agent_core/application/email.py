@@ -29,6 +29,7 @@ from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
     EMAIL_HISTORY_DAYS,
+    EMAIL_LEARNING_SHARE,
     EMAIL_POLICY_VERSION,
     EMAIL_SLICE_RESERVATION,
     EmailAccount,
@@ -924,9 +925,18 @@ class EmailExperienceService:
             )
         return session
 
-    async def _check_budget(self, store: EmailStore, principal: Principal, amount: Decimal) -> None:
+    async def _check_budget(
+        self,
+        store: EmailStore,
+        principal: Principal,
+        amount: Decimal,
+        *,
+        share: Decimal = Decimal("1"),
+    ) -> None:
         """Count actual or conservative charges once, and retain live reservations."""
         now = self.clock.now().astimezone(UTC)
+        daily_limit = self.budget_limits.daily_cost * share
+        monthly_limit = self.budget_limits.monthly_cost * share
         daily_spent = Decimal("0")
         monthly_spent = Decimal("0")
         reserved = Decimal("0")
@@ -968,8 +978,8 @@ class EmailExperienceService:
                 if created.date() == now.date():
                     daily_spent += imported.settled_cost
         if (
-            daily_spent + reserved + amount <= self.budget_limits.daily_cost
-            and monthly_spent + reserved + amount <= self.budget_limits.monthly_cost
+            daily_spent + reserved + amount <= daily_limit
+            and monthly_spent + reserved + amount <= monthly_limit
         ):
             return
         midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -992,32 +1002,43 @@ class EmailExperienceService:
                 monthly -= settled[expired][1]
                 expired += 1
             if (
-                daily + reserved + amount <= self.budget_limits.daily_cost
-                and monthly + reserved + amount <= self.budget_limits.monthly_cost
+                daily + reserved + amount <= daily_limit
+                and monthly + reserved + amount <= monthly_limit
             ):
                 retry_at = candidate
                 break
         raise BudgetExceededError(
             "email_aggregate_cost",
             f"Automatic email work is paused. Today: ${daily_spent:.2f} counted, "
-            f"${reserved:.2f} reserved, ${self.budget_limits.daily_cost:.2f} limit. "
+            f"${reserved:.2f} reserved, ${daily_limit:.2f} limit. "
             f"Rolling 30 days: ${monthly_spent:.2f} counted, "
-            f"${self.budget_limits.monthly_cost:.2f} limit. "
+            f"${monthly_limit:.2f} limit. "
             f"The next batch needs ${amount:.2f} available. "
             "Cached mail and editing remain available.",
             details={
                 "daily_spent": str(daily_spent),
                 "daily_estimated": str(daily_estimated),
                 "daily_reserved": str(reserved),
-                "daily_limit": str(self.budget_limits.daily_cost),
+                "daily_limit": str(daily_limit),
                 "monthly_spent": str(monthly_spent),
                 "monthly_estimated": str(monthly_estimated),
                 "monthly_reserved": str(reserved),
-                "monthly_limit": str(self.budget_limits.monthly_cost),
+                "monthly_limit": str(monthly_limit),
                 "next_reservation": str(amount),
                 "retry_at": retry_at.isoformat(),
             },
         )
+
+    async def _refresh_scope(
+        self, store: EmailStore, principal: Principal, amount: Decimal
+    ) -> Literal["full", "new_mail"]:
+        """Hold background learning to its share so new mail keeps the rest (ADR-0256)."""
+        try:
+            await self._check_budget(store, principal, amount, share=EMAIL_LEARNING_SHARE)
+        except BudgetExceededError:
+            await self._check_budget(store, principal, amount)
+            return "new_mail"
+        return "full"
 
     async def submit_task(
         self,
@@ -1213,7 +1234,10 @@ class EmailExperienceService:
                     self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION,
                 )
             )
-            if not gesture:
+            admitted: Literal["full", "new_mail"] = "full"
+            if kind == "refresh":
+                admitted = await self._refresh_scope(uow.email, principal, reservation)
+            elif not gesture:
                 await self._check_budget(uow.email, principal, reservation)
             session = await self._session_in(uow, principal, None if gesture else thread, prepared)
             if await uow.runs.active_for_session(session.id, principal) is not None:
@@ -1265,6 +1289,7 @@ class EmailExperienceService:
                 instruction=instruction,
                 created_at=now,
                 reservation=reservation,
+                scope=admitted,
                 archive_consent=(
                     EmailArchiveConsent(
                         tenant_id=principal.tenant_id,

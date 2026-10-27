@@ -282,6 +282,22 @@ class MCPUnauthorizedError(MCPUnavailableError):
         super().__init__("tool.server_unauthorized")
 
 
+class MCPServerSettingsError(AgentCoreError):
+    """An owner-added MCP server request named an invalid server, URL or access (ADR-0255)."""
+
+
+class MCPServerUnavailableError(AgentCoreError):
+    """An owner-added server or its authorization server could not be used (ADR-0255)."""
+
+
+class MCPSignInUnsupportedError(AgentCoreError):
+    """An owner-added server needs a sign-in Veetbot cannot perform (ADR-0255)."""
+
+
+class MCPGrantRejectedError(AgentCoreError):
+    """An authorization server rejected a code or refresh grant (ADR-0255)."""
+
+
 class ToolLoopDetected(ConflictError):  # noqa: N818 - normative taxonomy name
     """The runtime detected a repeated tool-call loop."""
 

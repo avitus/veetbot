@@ -176,6 +176,11 @@ rate_limited                429  reserved; see "Limits" below
 shape now is free; discovering after release that clients cannot
 distinguish it from `conflict` is not.
 
+ADR-0255 adds `mcp_server_unavailable` with HTTP `502`, for an owner-added MCP
+server or its authorization server that could not be used, and
+`mcp_sign_in_unsupported` with HTTP `422`, for a server whose sign-in the
+platform cannot perform. Both carry empty `details` and no upstream text.
+
 Milestone 32 adds `validation_error` with HTTP `400` and empty `details` for
 invalid requests to `/v1/memory-reconsolidations` and its detail/undo routes
 (ADR-0169). It covers route/body validation and the application-level
@@ -2374,6 +2379,54 @@ revision; an unchanged list does not advance its revision. Disabled routes
 return 404. The server stores even an empty list, and removing scopes ends
 their unended task grants in the same transaction. See
 [browser-automation.md](browser-automation.md) for the retained task limits.
+
+### Owner-added MCP servers (ADR-0255)
+
+Mounted only with `AGENT_MCP_SERVERS_ENABLED=1`, under the existing
+`settings.read` and `settings.write`; no scope enters the vocabulary and no
+model tool exposes these operations. The mechanism is in
+[tool-system.md](tool-system.md).
+
+```text
+GET    /v1/mcp-servers                       settings.read
+POST   /v1/mcp-servers                       settings.write
+PATCH  /v1/mcp-servers/{server_id}           settings.write
+DELETE /v1/mcp-servers/{server_id}           settings.write
+POST   /v1/mcp-servers/{server_id}/sign-in   settings.write
+DELETE /v1/mcp-servers/{server_id}/sign-in   settings.write
+GET    /v1/mcp-oauth/callback                no bearer; the state is the authority
+```
+
+A server view has `server_id`, `url` (null for an operator row),
+`managed_by` (`owner` or `operator`), `access` (`read_only` or `changes`),
+`authentication` (`none`, `sign_in` or `operator`), `status` (`ready` or
+`sign_in_required`), `sign_in_host` and `signed_in_at`. The list is
+`{"servers": [...]}`, every enabled row included.
+
+`POST /v1/mcp-servers` takes exactly `server_id`, `url` and `access` (default
+`changes`). The name matches `^[a-z][a-z0-9_]{0,31}$`; the URL is public HTTPS on
+port 443 without credentials or a fragment; either failing is
+`400 malformed_request` before any network request. A name beginning `gmail_`,
+`bland_` or `svp_`, an operator row's name, a taken name with a different URL or
+access, and a seventeenth server are `409 conflict`. The server is probed next:
+unreachable, or answering with untrusted metadata, is
+`502 mcp_server_unavailable`; a sign-in the platform cannot perform is
+`422 mcp_sign_in_unsupported`. A new server is `201`; an identical replay is `200`
+with the stored view and does not probe again. `PATCH` takes exactly `access`.
+`DELETE` is `204` whether or not the server existed, so a retry is safe. Every
+write to an operator row is `409`, and an unknown server is `404` for `PATCH` and
+the sign-in routes.
+
+`POST .../sign-in` returns `authorization_url`, `callback_scheme` (`veetbot`) and
+`expires_at`, ten minutes ahead; a server that needs no sign-in is `409`.
+`DELETE .../sign-in` is `204`, forgets the tokens, and withdraws a sign-in in
+progress, so a callback still exchanging its code stores nothing. The callback answers
+`303` to `veetbot://mcp-sign-in?server_id=…&outcome=signed_in|failed|expired`,
+or to `veetbot://mcp-sign-in?outcome=expired` for an unknown state, with a
+fixed HTML body; it reflects nothing from the request. Every response carries
+`Cache-Control: private, no-store`. Each add, access change, removal, sign-in
+and sign-out appends a content-free `settings.mcp_servers.*` process event
+naming the server.
 
 
 ## Owner-reviewed dreaming web surface (ADR-0174)

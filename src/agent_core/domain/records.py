@@ -312,6 +312,23 @@ class AppendResult(_Result):
     replayed: bool
 
 
+class RecordDraft(_Result):
+    """One entry as the caller states it, before the service validates it."""
+
+    values: dict[str, Decimal]
+    observed_at: str | None
+    precision: RecordPrecision
+    note: str | None
+
+
+class ImportResult(_Result):
+    series: RecordSeries
+    entries: list[RecordEntry]
+    entry_count: int
+    imported: int
+    replayed: int
+
+
 class QueryResult(_Result):
     series: RecordSeries
     window: Window

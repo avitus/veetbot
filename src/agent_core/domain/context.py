@@ -28,6 +28,8 @@ class ContextClass(StrEnum):
     PERSONA = "persona"
     TOOL_DEFINITIONS = "tool_definitions"
     DEFERRED_TOOL_INDEX = "deferred_tool_index"
+    # ADR-0255: owner-added MCP servers' index entries.
+    OWNER_TOOL_INDEX = "owner_tool_index"
     SKILL_CATALOG = "skill_catalog"
     MEMORY_SNAPSHOT = "memory_snapshot"
     COMPACTED_SUMMARY = "compacted_summary"
@@ -48,6 +50,7 @@ REGION_ASSIGNMENTS: dict[ContextClass, ContextRegion] = {
     ContextClass.PERSONA: ContextRegion.PREFIX,
     ContextClass.TOOL_DEFINITIONS: ContextRegion.PREFIX,
     ContextClass.DEFERRED_TOOL_INDEX: ContextRegion.PREFIX,
+    ContextClass.OWNER_TOOL_INDEX: ContextRegion.PREFIX,
     ContextClass.SKILL_CATALOG: ContextRegion.PREFIX,
     ContextClass.MEMORY_SNAPSHOT: ContextRegion.PREFIX,
     ContextClass.COMPACTED_SUMMARY: ContextRegion.BODY,

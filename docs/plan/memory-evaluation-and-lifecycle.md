@@ -924,7 +924,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:373): the delta is issued for what the
+context engine caps (context-engine.md:374): the delta is issued for what the
 base block left of both the token and item budgets, excluding its already
 returned belief identifiers before candidate limits. It is not issued when either
 allowance is exhausted, so a session with a frozen snapshot cannot carry twice the recall a
@@ -1038,15 +1038,16 @@ formation@5 -> formation@7   deterministic formation, when established facts
 formation@6 -> formation@8   provider-assisted formation, same change
 retrieval@1 -> retrieval@2   ranking, when time decay and the near-duplicate
                              penalty land
-retrieval@4 -> retrieval@6   ranking, for the review-reason penalties and the
-retrieval@5 -> retrieval@7   attention cap (ADR-0249): deferred, see below
+retrieval@5 -> retrieval@7   live relevance ranking, for the review-reason
+                             penalties and the attention cap (ADR-0249)
 ```
 
-ADR-0249 landed its penalties without the bump: the deterministic benchmark
-measured no metric change, and re-recording the baseline cascades into the
-frozen M32 control (its manifest pins the baseline digest; its recording pins
-that manifest and the policy string in every trace). The bump waits for the
-owner's decision on refreshing that control offline.
+ADR-0249 kept the base label `retrieval@4` by the owner's decision: the
+deterministic benchmark measured no metric change, and re-recording the
+baseline cascades into the frozen M32 control (its manifest pins the baseline
+digest; its recording pins that manifest and the policy string in every
+trace). Production recall traces carry the live selector, so `retrieval@7`
+separates them from earlier traces.
 
 Bumping the provider version invalidates the bundled release evidence, whose
 filename and contents are matched against the version. Under the automatic

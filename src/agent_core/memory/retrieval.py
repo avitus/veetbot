@@ -75,13 +75,13 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQueryLookup
 
-# ADR-0249 changes the flag penalty by review reason; the deterministic M16
-# benchmark measured no metric change. The version bump (@4 -> @6, @5 -> @7)
-# is deferred: re-recording the M16 baseline cascades into the frozen M32
-# control, whose manifest pins the baseline digest and whose recording pins
-# that manifest and the policy string, so it waits for the owner's decision.
+# ADR-0249 changes the flag penalty by review reason. The live relevance
+# selector moves @5 -> @7 so production traces name the new ranking. The base
+# label stays @4 by the owner's decision: the deterministic M16 benchmark
+# measured no metric change, and re-recording its baseline would re-pin the
+# frozen M32 control and the owner-reviewed review contract.
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
-RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@5"
+RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@7"
 OWNED_RESOURCE_POLICY_VERSION = "owned-resources@1"
 RECONSOLIDATION_RETRIEVAL_POLICY_VERSION = "retrieval-reconsolidation@2"
 # Episode search reads the session stream in bounded pages: never the whole
