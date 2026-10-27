@@ -2,6 +2,7 @@ import hashlib
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -36,7 +37,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
 from agent_core.domain.skills import SessionSkillCatalog
-from agent_core.domain.tools import ToolSpec
+from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
 from agent_core.memory.profiles import SnapshotProfiles
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.tools.ask_user import AskUserTool
@@ -1425,3 +1426,100 @@ async def test_typed_work_pins_the_full_surface_when_it_creates_a_thread_session
 
     assert created.tool_names == ("system.current_time",)
     assert spy.opened == [session().id] and spy.attached == [session().id]
+
+
+class _OwnerTool:
+    """An owner-added server's tool as discovery registers it (ADR-0255)."""
+
+    def __init__(self, spec: ToolSpec) -> None:
+        self.spec = spec
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        raise AssertionError("the planner never executes a tool")
+
+
+async def test_owner_index_admission_measures_what_the_cap_check_measures() -> None:
+    """PR 201 review: an owner tool is admitted by the tokens it adds to the shared
+    index, the measure the final cap check applies, so a set at the cap plans."""
+    from agent_core.context.rendering import envelope_items
+    from agent_core.domain.mcp import MCPAuthScheme, MCPRemoteTool, MCPServerConfig, MCPTransport
+    from agent_core.mcp.mapping import map_discovered_tools
+
+    clock, factory, _service, _retriever = await formation_stack()
+    owner = MCPServerConfig(
+        tenant_id=principal().tenant_id,
+        server_id="design",
+        transport=MCPTransport.HTTP,
+        endpoint="https://design.example.com/mcp",
+        owner_managed=True,
+        auth_scheme=MCPAuthScheme.NONE,
+    )
+    owner_specs = [
+        mapped.spec
+        for mapped in map_discovered_tools(
+            owner,
+            tuple(
+                MCPRemoteTool(
+                    name=name,
+                    description=f"Read the {name} of a design.",
+                    input_schema={"type": "object", "properties": {"id": {"type": "string"}}},
+                )
+                for name in ("outline", "palette")
+            ),
+        ).accepted
+    ]
+    registry = StaticToolRegistry()
+    registry.register(ToolCallTool())
+    registry.register(WebFetchTool(FakeWebProvider()))
+    registry.register(CurrentTimeTool(clock))
+    for spec in owner_specs:
+        registry.register(_OwnerTool(spec))
+    configured_agent = agent().model_copy(
+        update={
+            "enabled_tools": [
+                "web.fetch",
+                "system.current_time",
+                "tool.call",
+                *(spec.name for spec in owner_specs),
+            ]
+        }
+    )
+    estimator = ConservativeTokenEstimator()
+    model_id = "fake:scripted"
+    shared = [CurrentTimeTool(clock).spec]
+
+    def index_tokens(tools: list[ToolSpec]) -> int:
+        return estimator.estimate(envelope_items(deferred_index_items(tools)), model_id)
+
+    added = index_tokens([*shared, *owner_specs]) - index_tokens(shared)
+    # The owner tools alone also pay for the index's note, so they measure more.
+    assert index_tokens(owner_specs) > added
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    config["classes"]["tool_definitions"]["max_items"] = 2
+    config["classes"]["owner_tool_index"]["max_tokens"] = added
+    planner = EventContextPlanner(
+        factory,
+        registry,
+        estimator,
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        owner_server_ids=lambda _session_id: frozenset({"design"}),
+    )
+
+    plan = await planner.plan(
+        session(),
+        configured_agent,
+        principal(),
+        ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+    )
+
+    assert plan.tool_names == ("tool.call", "web.fetch")
+    assert set(plan.deferred_tool_names) == {
+        "system.current_time",
+        *(spec.name for spec in owner_specs),
+    }
+    assert plan.skipped_tool_names == ()

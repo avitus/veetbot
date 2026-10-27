@@ -700,6 +700,14 @@ class EventContextPlanner:
                 deferred_tools.append(tool)
         shared_index_tools = list(deferred_tools)
         owner_index_config = classes.get("owner_tool_index")
+
+        def index_tokens_of(entries: Sequence[ToolSpec]) -> int:
+            return (
+                self._estimator.estimate(envelope_items(deferred_index_items(entries)), model_id)
+                if entries
+                else 0
+            )
+
         if owner_tools and not deferring:
             # Without tool.call there is no index to hold them.
             skipped_tools.extend(owner_tools)
@@ -707,13 +715,15 @@ class EventContextPlanner:
             if not isinstance(owner_index_config, dict):
                 raise ValueError("owner-tool-index context configuration must be a mapping")
             owner_index: list[ToolSpec] = []
+            shared_tokens = index_tokens_of(shared_index_tools)
             for tool in owner_tools:
                 proposed_owner = [*owner_index, tool]
-                if len(proposed_owner) > int(
-                    owner_index_config["max_items"]
-                ) or self._estimator.estimate(
-                    envelope_items(deferred_index_items(proposed_owner)), model_id
-                ) > int(owner_index_config["max_tokens"]):
+                # An owner entry costs what it adds to the rendered index, the
+                # measure the cap check below applies to the finished plan.
+                if len(proposed_owner) > int(owner_index_config["max_items"]) or (
+                    index_tokens_of([*shared_index_tools, *proposed_owner]) - shared_tokens
+                    > int(owner_index_config["max_tokens"])
+                ):
                     skipped_tools.append(tool)
                     continue
                 owner_index.append(tool)
@@ -817,7 +827,11 @@ class EventContextPlanner:
                 model_id,
             )
         )
-        owner_index_tokens = index_tokens - shared_index_tokens
+        owner_index_tokens = (
+            0
+            if len(shared_index_tools) == len(deferred_tools)
+            else index_tokens_of(deferred_tools) - index_tokens_of(shared_index_tools)
+        )
         skill_catalog_tokens = self._estimator.estimate(
             catalog_prefix[len(index_prefix) :], model_id
         )
