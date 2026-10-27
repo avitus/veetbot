@@ -32,8 +32,12 @@ when nothing has arrived.
    new Gmail changes with all eight full-thread reads. It assesses only current
    Inbox conversations, the newest activity first. It may still re-read expired
    Inbox bodies, prepare eligible automatic drafts and verify unsubscribe
-   evidence. It lists no catch-up page, advances no historical learning,
-   assesses no non-Inbox mail and writes no correspondence summaries.
+   evidence. It still lists and reads the first page of an Inbox pass, which
+   holds the newest mail, so a resynchronization after an expired history
+   cursor recovers new mail. It lists no later catch-up page, does not advance
+   the ninety-day history pass, assesses no non-Inbox mail and writes no
+   correspondence summaries. Importing a thread still records the owner's own
+   Sent replies in it as learning evidence: that step makes no model call.
 3. **The full ceilings are unchanged.** At either ceiling every refresh is still
    refused with ADR-0096's accounting and next check time. Owner-requested
    drafts and People imports remain bounded by the full ceilings, not the share.

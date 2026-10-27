@@ -395,9 +395,10 @@ both the daily and the rolling thirty-day allowance. Above that share and
 within both ceilings it is a new-mail slice: new Gmail changes take all eight
 full-thread reads, and only current Inbox conversations are assessed, newest
 activity first. Expired Inbox bodies, automatic drafts and unsubscribe
-verification proceed as usual. Inbox catch-up, historical learning, non-Inbox
-assessment and correspondence summaries wait until spending falls back under
-the share. Owner-requested drafts and People imports use the full ceilings.
+verification proceed as usual, and so does the first page of an Inbox pass,
+the newest mail, so a resynchronization still recovers new mail. Later
+catch-up pages, the ninety-day history pass, non-Inbox assessment and
+correspondence summaries wait until spending falls back under the share. Owner-requested drafts and People imports use the full ceilings.
 Each refresh task records its admitted `scope`, `full` or `new_mail`; earlier
 tasks read as `full`.
 

@@ -599,16 +599,25 @@ async def test_catch_up_progress_reports_cutoff_and_oldest_inbox_mail_reached(
 
 
 @pytest.mark.parametrize(
-    ("age_days", "spent", "scope"),
-    [(10, "250", "full"), (10, "350", "new_mail"), (0, "35", "new_mail")],
+    ("age_days", "spent", "scope", "resync"),
+    [
+        (10, "250", "full", False),
+        (10, "350", "new_mail", False),
+        (0, "35", "new_mail", False),
+        (10, "350", "new_mail", True),
+    ],
 )
 async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
-    age_days: int, spent: str, scope: str
+    age_days: int, spent: str, scope: str, resync: bool
 ) -> None:
-    """Above 75% of either ceiling, a refresh reads only new mail (ADR-0256)."""
+    """Above 75% of either ceiling, a refresh reads only new mail (ADR-0256).
+
+    A resynchronization restarts the Inbox pass, whose first page is the newest
+    mail, so a new-mail slice still lists and reads it.
+    """
     inbox = {f"inbox-{index}": NOW - timedelta(days=10 + index) for index in range(8)}
     changes = [f"change-{index}" for index in range(6)]
-    factory, reads = await _catching_up_mailbox(inbox, changes)
+    factory, reads = await _catching_up_mailbox(inbox, changes, resync=resync)
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         clock=FixedClock(NOW),
@@ -635,6 +644,28 @@ async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
             await save_value(
                 uow.email, app.principal, "task", str(earlier.run_id), earlier, created
             )
+            # Mid-way through catch-up, as the Work account was in production.
+            await save_value(
+                uow.email,
+                app.principal,
+                "account",
+                "default",
+                EmailAccount(
+                    id="default", label="Mail", history_id="101", inbox_cursor="older-page"
+                ),
+                NOW,
+            )
+            await save_value(
+                uow.email,
+                app.principal,
+                "sync",
+                "default",
+                EmailSyncState(
+                    history_policy="email-history@2:90d",
+                    history_since=int((NOW - timedelta(days=90)).timestamp()),
+                ),
+                NOW,
+            )
         operation = await service.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
         task = await service.get_task(app.principal, operation.run_id)
@@ -646,6 +677,8 @@ async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
         assert reads[:4] == changes[::-1][:4]
         assert any(item.startswith("inbox-") for item in reads)
         assert {"history-0", "history-1"} <= set(reads)
+    elif resync:
+        assert sorted(reads) == sorted(inbox)
     else:
         assert reads == changes[::-1]
         assert sync.payload["change_pending"] == []

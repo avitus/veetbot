@@ -924,7 +924,10 @@ class _TaskIO:
                     # A resync re-lists the inbox below; resume changes from before that listing.
                     account = account.model_copy(update={"history_id": profile["history_id"]})
                     await self._save_sync(account, sync)
-                if not account.inbox_complete and not sync.inbox_page_open and not new_mail_only:
+                # A pass's first page is the newest Inbox mail, which a
+                # resynchronization must recover even in a new-mail slice.
+                catch_up = not new_mail_only or account.inbox_cursor is None
+                if not account.inbox_complete and not sync.inbox_page_open and catch_up:
                     page = await self.call(
                         account_id,
                         "search_threads",
@@ -944,7 +947,7 @@ class _TaskIO:
                     sync.inbox_page_open = True
                     await self._save_sync(account, sync)
                 # Reserve historical progress even if the current inbox stays busy.
-                for provider_id in [] if new_mail_only else list(sync.inbox_pending):
+                for provider_id in list(sync.inbox_pending) if catch_up else []:
                     if self.full_reads.get(account_id, 0) >= 8:
                         break
                     completed, thread = await self._import(account_id, provider_id)
