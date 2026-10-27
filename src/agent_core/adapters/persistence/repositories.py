@@ -3405,6 +3405,8 @@ class PostgresMaintenanceRepository:
     async def checkpoint_runs(self, limit: int) -> list[tuple[UUID, bool]]:
         if not await self._acquire("maintenance.checkpoint_prune"):
             return []
+        terminal = RunRow.status.in_([status.value for status in TERMINAL_RUN_STATUSES])
+        latest_full = func.max(CheckpointRow.version).filter(CheckpointRow.full)
         rows = (
             await self._session.execute(
                 select(
@@ -3414,16 +3416,19 @@ class PostgresMaintenanceRepository:
                 )
                 .join(RunRow, RunRow.id == CheckpointRow.run_id)
                 .group_by(CheckpointRow.run_id, RunRow.status)
-                .having(func.count(CheckpointRow.id) > 1)
+                # Select only chains prune accepts. A terminal chain without a
+                # final full snapshot is retained for diagnosis, not retried.
+                .having(
+                    func.count(CheckpointRow.id) > 1,
+                    latest_full.is_not(None),
+                    or_(~terminal, latest_full == func.max(CheckpointRow.version)),
+                )
                 .order_by(func.min(CheckpointRow.created_at), CheckpointRow.run_id)
                 .limit(limit)
             )
         ).all()
         return [
-            (
-                run_id,
-                RunStatus(status) in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED},
-            )
+            (run_id, RunStatus(status) in TERMINAL_RUN_STATUSES)
             for run_id, status, _oldest_checkpoint in rows
         ]
 

@@ -1544,8 +1544,9 @@ Checkpoint pruning isolates each run's transaction. If pruning fails, the
 transaction rolls back, the run identifier and exception class are logged
 without checkpoint content or exception text, and maintenance continues with
 the other runs and later sweeps, including memory consolidation. A terminal
-run missing its final full snapshot retains its checkpoint chain for diagnosis;
-it cannot block memory formation. Cancellation still stops the pass.
+run missing its final full snapshot retains its checkpoint chain for diagnosis,
+is not selected again, and cannot block memory formation. Cancellation still
+stops the pass.
 
 The lease sweep must exclude suspended invocations by predicate, per the
 tool system: a `tool_invocations` row that is `RUNNING` with
