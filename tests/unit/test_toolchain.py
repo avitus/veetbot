@@ -1050,7 +1050,6 @@ def test_ci_has_the_required_partitions() -> None:
         "integration",
         "sandbox",
         "apple",
-        "apple-ios-device",
         "apple-ios",
         "apple-signing-smoke",
         "apple-testflight",
@@ -1066,16 +1065,15 @@ def test_ci_has_the_required_partitions() -> None:
         if name in {"sandbox", "browser-image"}:
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
-        if name in {"apple", "apple-ios-device", "apple-signing-smoke", "apple-testflight"}:
+        if name in {"apple", "apple-ios", "apple-signing-smoke", "apple-testflight"}:
             assert job["macos"]["xcode"] == "27.0.0"
-            if name in {"apple", "apple-ios-device"}:
+            if name in {"apple", "apple-ios"}:
                 assert job["macos"] == {"xcode": "27.0.0"}
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = {
             "deploy-app": "cimg/base:stable",
             "deploy-nginx": "cimg/base:stable",
-            "apple-ios": "cimg/base:stable",
             "public-site": "cimg/node:22.13",
         }.get(name, "cimg/python:3.12")
         assert job["docker"][0]["image"] == expected_image
@@ -1114,10 +1112,8 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-apple" in commands["apple"]
     assert any("make test-apple-ui-macos" in command for command in commands["apple"])
     assert not any("make test-apple-ui-ios" in command for command in commands["apple"])
-    assert any("make test-apple-ui-ios" in command for command in commands["apple-ios-device"])
-    assert not any(
-        "make test-apple-ui-macos" in command for command in commands["apple-ios-device"]
-    )
+    assert any("make test-apple-ui-ios" in command for command in commands["apple-ios"])
+    assert not any("make test-apple-ui-macos" in command for command in commands["apple-ios"])
     testflight_job = jobs["apple-testflight"]
     assert testflight_job["macos"]["code_signing"] == ["veetbot-app-store"]
     assert "install_signing_bundle" in testflight_job["steps"]
@@ -1212,17 +1208,15 @@ def test_ci_has_the_required_partitions() -> None:
     workflows = config["workflows"]
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}
     verify = workflows["verify"]
-    assert verify["jobs"][:8] == [
+    assert verify["jobs"][:6] == [
         "static",
         "contract",
         "integration",
         "sandbox",
         "apple",
-        {"apple-ios-device": {"name": "apple-ios-iphone", "device": "iphone"}},
-        {"apple-ios-device": {"name": "apple-ios-ipad", "device": "ipad"}},
-        {"apple-ios": {"requires": ["apple-ios-iphone", "apple-ios-ipad"]}},
+        "apple-ios",
     ]
-    assert verify["jobs"][8] == {
+    assert verify["jobs"][6] == {
         "apple-signing-smoke": {
             "context": "veetbot-apple-signing",
             "filters": {
@@ -1236,13 +1230,13 @@ def test_ci_has_the_required_partitions() -> None:
             },
         }
     }
-    assert verify["jobs"][9:12] == [
+    assert verify["jobs"][7:10] == [
         "public-site",
         {"browser-image": {"name": "browser-image-x86_64", "resource_class": "medium"}},
         {"browser-image": {"name": "browser-image-arm64", "resource_class": "arm.medium"}},
     ]
-    assert verify["jobs"][12] == "browser"
-    delivery_jobs = {next(iter(job)): next(iter(job.values())) for job in verify["jobs"][13:]}
+    assert verify["jobs"][10] == "browser"
+    delivery_jobs = {next(iter(job)): next(iter(job.values())) for job in verify["jobs"][11:]}
     assert set(delivery_jobs) == {
         "package-release",
         "deploy-app",
@@ -1357,7 +1351,8 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
     skip_steps = commands["skip_verified_tree"]["steps"]
     assert "git rev-parse 'HEAD^{tree}'" in skip_steps[0]["run"]["command"]
     skip_command = skip_steps[-1]["run"]["command"]
-    assert '"<< pipeline.git.branch >>" == main' in skip_command
+    # Since ADR-0257 the record is honoured on every branch.
+    assert "pipeline.git.branch" not in skip_command
     assert "circleci-agent step halt" in skip_command
 
     # Every verification partition consults the record before its tests and
@@ -1369,7 +1364,7 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
         "integration",
         "sandbox",
         "apple",
-        "apple-ios-device",
+        "apple-ios",
         "browser",
     }
     for name, job in jobs.items():
@@ -1380,9 +1375,9 @@ def test_main_skips_verification_a_tree_already_passed() -> None:
             continue
         skip_index = names.index("skip_verified_tree")
         record_index = names.index("record_verified_tree")
-        recorded = "apple-ios-<< parameters.device >>" if name == "apple-ios-device" else name
-        assert job["steps"][skip_index]["skip_verified_tree"] == {"job": recorded}
-        assert job["steps"][record_index]["record_verified_tree"] == {"job": recorded}
+        # The Apple jobs also name their inputs (test_ci_parallel_partitions.py).
+        assert job["steps"][skip_index]["skip_verified_tree"]["job"] == name
+        assert job["steps"][record_index]["record_verified_tree"] == {"job": name}
         assert names.index("checkout") < skip_index
         run_indexes = [index for index, step in enumerate(names) if step == "run"]
         test_indexes = [
@@ -1485,7 +1480,7 @@ def test_ci_parallelizes_measured_bottlenecks_and_publishes_test_results() -> No
     # bundle files.
     for job_name, family, platform in (
         ("apple", "macos", "macos"),
-        ("apple-ios-device", "ios", "ios-<< parameters.device >>"),
+        ("apple-ios", "ios", "ios"),
     ):
         apple_commands = [
             step["run"]["command"]

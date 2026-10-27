@@ -1,6 +1,8 @@
 # ADR-0230: The longest verify jobs split across executors
 
 - Status: Proposed (requested by the repository owner, 2026-10-20)
+- Amended by: ADR-0257 (2026-10-26), which replaces decisions 1 and 2 with
+  one `apple-ios` job on two nodes, each running both devices
 - Date: 2026-10-20
 - Related: ADR-0107, ADR-0114, ADR-0228
 - Detailed design: `docs/plan/development-toolchain.md`

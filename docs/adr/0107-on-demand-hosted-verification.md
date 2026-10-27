@@ -1,6 +1,8 @@
 # ADR-0107: Hosted verification is automatic on `main` and on request elsewhere
 
 - Status: Proposed
+- Amended by: ADR-0257 (2026-10-26), which replaces the sidecar gate of
+  decision 3 with focused checks and keeps one full run on the final head
 - Date: 2026-09-17
 - Related: ADR-0025, ADR-0035, ADR-0048, ADR-0049, ADR-0074
 - Supersedes in part: ADR-0035's consequence that every branch push receives

@@ -1,4 +1,4 @@
-"""The hosted verify run's longest jobs split across executors (ADR-0230)."""
+"""The hosted verify run's longest jobs split across executors (ADR-0230, ADR-0257)."""
 
 from __future__ import annotations
 
@@ -34,43 +34,37 @@ def _verify_entries() -> dict[str, dict[str, Any]]:
     return entries
 
 
-def test_the_simulator_ui_job_runs_once_per_device_on_its_own_executor() -> None:
-    job = _config()["jobs"]["apple-ios-device"]
-    assert job["parameters"] == {"device": {"type": "enum", "enum": ["iphone", "ipad"]}}
+APPLE_INPUTS = "clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py"
+
+
+def test_one_simulator_job_shards_the_cases_and_runs_both_devices_on_each_node() -> None:
+    """ADR-0257: two nodes, each building once and testing both devices at once."""
+    job = _config()["jobs"]["apple-ios"]
+    assert job["macos"] == {"xcode": "27.0.0"}
+    assert job["resource_class"] == "m4pro.medium"
+    assert job["parallelism"] == 2
     commands = [step["run"]["command"] for step in job["steps"] if "run" in step]
-    assert any(
-        "IOS_UI_DEVICES=<< parameters.device >>" in command and "make test-apple-ui-ios" in command
-        for command in commands
-    )
-    assert {"skip_verified_tree": {"job": "apple-ios-<< parameters.device >>"}} in job["steps"]
-    assert {"record_verified_tree": {"job": "apple-ios-<< parameters.device >>"}} in job["steps"]
-    assert {"store_apple_test_results": {"platform": "ios-<< parameters.device >>"}} in job["steps"]
-
-    entries = _verify_entries()
-    for device in ("iphone", "ipad"):
-        assert entries[f"apple-ios-{device}"] == {
-            "job": "apple-ios-device",
-            "name": f"apple-ios-{device}",
-            "device": device,
-        }
+    test_command = next(command for command in commands if "make test-apple-ui-ios" in command)
+    assert 'IOS_UI_SHARD="$CIRCLE_NODE_INDEX/$CIRCLE_NODE_TOTAL"' in test_command
+    # Unset, the target runs the iPhone and the iPad together.
+    assert "IOS_UI_DEVICES" not in test_command
+    assert {"store_apple_test_results": {"platform": "ios"}} in job["steps"]
+    assert "apple-ios-device" not in _config()["jobs"]
 
 
-def test_the_required_apple_ios_status_passes_only_after_both_devices() -> None:
+def test_the_required_apple_ios_status_is_the_simulator_job_itself() -> None:
     """main's branch protection requires the status named apple-ios."""
-    gate = _config()["jobs"]["apple-ios"]
-    assert [next(iter(step)) for step in gate["steps"]] == ["run"]
     entries = _verify_entries()
-    assert entries["apple-ios"]["requires"] == ["apple-ios-iphone", "apple-ios-ipad"]
+    assert entries["apple-ios"] == {"job": "apple-ios"}
+    assert not {"apple-ios-iphone", "apple-ios-ipad"} & entries.keys()
     assert "apple-ios" in entries["package-release"]["requires"]
 
 
-def test_each_device_splits_its_cases_across_two_executors() -> None:
-    job = _config()["jobs"]["apple-ios-device"]
-    assert job["parallelism"] == 2
-    commands = [step["run"]["command"] for step in job["steps"] if "run" in step]
-    assert any(
-        'IOS_UI_SHARD="$CIRCLE_NODE_INDEX/$CIRCLE_NODE_TOTAL"' in command for command in commands
-    )
+@pytest.mark.parametrize("name", ["apple", "apple-ios"])
+def test_the_apple_jobs_key_their_record_on_the_apple_inputs(name: str) -> None:
+    steps = _config()["jobs"][name]["steps"]
+    assert {"skip_verified_tree": {"job": name, "inputs": APPLE_INPUTS}} in steps
+    assert {"record_verified_tree": {"job": name}} in steps
 
 
 @pytest.mark.parametrize("name", ["static", "integration"])
@@ -87,8 +81,12 @@ def test_static_runs_its_non_test_checks_on_one_node() -> None:
     assert "CIRCLE_NODE_INDEX" not in named["Reading lane floor"]
 
 
-def _shell(command: str, job: str) -> str:
-    return command.replace("<< parameters.job >>", job).replace("<< pipeline.git.branch >>", "main")
+def _shell(command: str, job: str, branch: str = "main", inputs: str = "") -> str:
+    return (
+        command.replace("<< parameters.job >>", job)
+        .replace("<< pipeline.git.branch >>", branch)
+        .replace("<< parameters.inputs >>", inputs)
+    )
 
 
 def test_each_node_records_its_own_pass_of_the_tree() -> None:
@@ -120,9 +118,11 @@ def test_each_node_records_its_own_pass_of_the_tree() -> None:
     ],
     ids=["single-node-passed", "one-of-two-passed", "both-passed", "other-split-passed"],
 )
-def test_main_skips_a_job_only_when_every_node_passed_the_tree(
-    tmp_path: Path, total: str, recorded: list[str], halts: bool
+@pytest.mark.parametrize("branch", ["main", "dev"])
+def test_a_job_skips_on_any_branch_only_when_every_node_passed_its_identity(
+    tmp_path: Path, total: str, recorded: list[str], halts: bool, branch: str
 ) -> None:
+    """ADR-0257: a rerun of a passed identity halts on every branch, not only main."""
     skip = _config()["commands"]["skip_verified_tree"]["steps"]
     command = next(
         step["run"]["command"]
@@ -140,7 +140,11 @@ def test_main_skips_a_job_only_when_every_node_passed_the_tree(
     agent.chmod(0o755)
 
     result = subprocess.run(
-        ["bash", "-c", _shell(command, "static").replace("/tmp/veetbot-verified", str(records))],
+        [
+            "bash",
+            "-c",
+            _shell(command, "static", branch).replace("/tmp/veetbot-verified", str(records)),
+        ],
         env={
             **os.environ,
             "PATH": f"{agent.parent}:{os.environ['PATH']}",
@@ -153,6 +157,60 @@ def test_main_skips_a_job_only_when_every_node_passed_the_tree(
 
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "halted").exists() is halts
+
+
+def _identity(checkout: Path, inputs: str) -> str:
+    """Run the skip command's identity step in a checkout and return what it wrote."""
+    skip = _config()["commands"]["skip_verified_tree"]
+    assert skip["parameters"]["inputs"] == {"type": "string", "default": ""}
+    command = skip["steps"][0]["run"]["command"]
+    records = checkout / "records"
+    subprocess.run(
+        [
+            "bash",
+            "-eo",
+            "pipefail",
+            "-c",
+            _shell(command, "apple", inputs=inputs).replace("/tmp/veetbot-verified", str(records)),
+        ],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+    )
+    return (records / "tree").read_text(encoding="utf-8")
+
+
+def _commit(checkout: Path, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / name).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "change"],
+        cwd=checkout,
+        check=True,
+    )
+
+
+def test_a_named_identity_changes_only_with_its_own_inputs(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _commit(tmp_path, {"clients/apple/App.swift": "a", "Makefile": "m", "src/core.py": "p"})
+    tree = _identity(tmp_path, "")
+    apple = _identity(tmp_path, "clients/apple Makefile")
+
+    _commit(tmp_path, {"src/core.py": "changed"})
+    assert _identity(tmp_path, "clients/apple Makefile") == apple
+    assert _identity(tmp_path, "") != tree
+
+    _commit(tmp_path, {"clients/apple/App.swift": "changed"})
+    assert _identity(tmp_path, "clients/apple Makefile") != apple
+
+
+def test_a_named_identity_fails_when_an_input_is_missing(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _commit(tmp_path, {"Makefile": "m"})
+    with pytest.raises(subprocess.CalledProcessError):
+        _identity(tmp_path, "clients/apple Makefile")
 
 
 _SIMCTL = {

@@ -373,14 +373,14 @@ from a git worktree: plain sync copies the worktree's `.git` pointer file,
 while validate sends a git bundle into a real repository. Xcode suites
 (`make test-apple`, `make test-apple-ui`) need macOS and stay local.
 
-The sidecar is the gate for every branch except `main` (ADR-0107). Hosted
-verification no longer starts when such a branch is pushed, so a change reaches
-`dev` or a feature branch on a passing `chunk validate`, plus the local suites the sidecar cannot
-run when the change touches them: `make test-integration` against a scratch
-PostgreSQL database marked disposable, `make test-sandbox`,
-`make test-browser-image` when an input of the browser image check changes,
-and the Xcode suites. The workflow
-section below defines when the hosted jobs still run.
+A change is verified in full once, on the final head proposed for `main`, by
+the requested hosted run (ADR-0257); that run's jobs cover everything
+`make check` does. While a change is developed or reviewed, and when a small
+change is pushed to `dev`, run the focused tests for what changed plus
+`make lint`, `make typecheck`, and, for documentation, `make docs-check`. Use
+the sidecar for focused browser cases (`make test-browser-cases`) and as the
+fallback for a full `make check` when hosted CI is unavailable, not as a
+per-push gate. The workflow section below defines when the hosted jobs run.
 
 ## Required real-browser verification
 
@@ -526,13 +526,16 @@ Job 6 is an additional native-client gate outside `make check`, split across
 two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it, then runs the macOS UI cases with
-`make test-apple-ui-macos`. Job 6b runs `make test-apple-ui-ios` on available
-iPhone and iPad simulators, as two instances of `apple-ios-device`
-(`apple-ios-iphone` and `apple-ios-ipad`) on separate executors, and a
-step-only `apple-ios` job passes once both have; `IOS_UI_DEVICES` names the
-devices a run builds for, boots, and tests, and defaults to both. Each device
-job runs on two executors, and `IOS_UI_SHARD=INDEX/TOTAL` makes each run every
-second enumerated case (`scripts/ios_ui_shard.py`, ADR-0230). The macOS cases synthesize real pointer and
+`make test-apple-ui-macos`. Job 6b, `apple-ios`, runs `make test-apple-ui-ios`
+on two executors (ADR-0257). Each builds the UI-test products once, boots the
+iPhone and iPad simulators, and with `IOS_UI_SHARD=INDEX/TOTAL` runs every
+second enumerated case on both devices at the same time
+(`scripts/ios_ui_shard.py`, ADR-0230). `IOS_UI_DEVICES` names the devices a
+local run builds for, boots, and tests, and defaults to both. Both Apple jobs
+key their exact-run record on their inputs alone: `clients/apple`, the
+`Makefile`, this configuration, and the shard script. Nothing else reaches
+the Apple suites, so a change outside those paths halts both jobs right
+after checkout. The macOS cases synthesize real pointer and
 keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
 VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
 both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM
@@ -689,10 +692,11 @@ Three workflow-level facts complete the definition:
     other branch, pull-request branches included, a pipeline starts no workflow
     by itself and spends no credits; the workflow runs there only when the
     pipeline is triggered with `run_verify: true` (ADR-0107). Request that run
-    with each push of a change proposed for `main`, alongside its review, so
-    the final head's run is already under way when the review ends; merge
-    `main` into the branch before the final push, so the merge commit's tree
-    matches the verified head and `main` skips re-verification (ADR-0114).
+    once, on the final head of a change proposed for `main`: after CodeRabbit
+    reports no findings and after `main` has been merged into the branch, so
+    the merge commit's tree matches the verified head and `main` skips
+    re-verification (ADR-0114, ADR-0257). A failure there needs a fix, whose
+    push is the new final head.
     Name the pull request's own source branch:
 
     ```text
@@ -714,19 +718,21 @@ Three workflow-level facts complete the definition:
     receive publication credentials.
     Production packaging requires ten verification statuses: `static`, `contract`,
     `integration`, `sandbox`, `apple`, `apple-ios`, `public-site`, `browser`,
-    `browser-image-x86_64`, and `browser-image-arm64`. The `apple-ios` aggregate
-    requires both simulator-device jobs. Current `main` branch protection
+    `browser-image-x86_64`, and `browser-image-arm64`. Current `main` branch protection
     requires the same set except `browser`; packaging still enforces that
-    additional release gate. On `main`, each verification job
+    additional release gate. On every branch, each verification job
     except `public-site` halts
     successfully right after checkout when it finds its own record for the
-    commit's source tree, and otherwise runs in full (ADR-0114). A job writes
+    commit's source tree, or for the Apple jobs their inputs, and otherwise
+    runs in full (ADR-0114, ADR-0257). A job writes
     that CircleCI cache record, keyed by job and tree hash, only after its last
     step has passed, so a merge commit that reproduces the verified head of its
     pull request is not tested a second time, while any tree nothing verified
     is. Each node of a parallel job writes its own record, and the job halts
-    only when every node of the current split has one (ADR-0230). `static` checks the reading-lane floor before it looks for the record,
-    and no branch other than `main` ever skips. On
+    only when every node of the current split has one (ADR-0230). A rerun of
+    a requested pipeline therefore repeats only the jobs that have not passed
+    that tree. `static` checks the reading-lane floor before it looks for the
+    record. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual
     live-model pipelines. The
@@ -753,8 +759,8 @@ Each new feature gets its own branch. Cut it from `origin/main` and name it
 with two lowercase words that describe the feature, joined by one hyphen,
 such as `owner-records`; rename a generated branch such as `claude/<slug>` or
 `codex/<slug>` before its first push. The feature reaches `main` through its
-own pull request and the gate in `AGENTS.md`: sidecar validation as on any
-branch, the CodeRabbit loop, `main` merged in before the final push, one
+own pull request and the gate in `AGENTS.md`: focused tests while it is
+developed, the CodeRabbit loop, `main` merged in before the final push, one
 requested `run_verify` pipeline naming the feature branch on that final head,
 and production delivery after the merge. The signing smoke runs only on
 `dev`, so a feature, like a hotfix, merges without it. A fix to a feature

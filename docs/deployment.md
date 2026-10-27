@@ -1053,8 +1053,8 @@ that counter.
 ## Automatic delivery
 
 A pipeline for any branch other than `main` starts no hosted workflow by
-itself; such a branch is verified on the sidecar and, before it is proposed for
-`main`, by a pipeline requested with `run_verify: true` on its final head (ADR-0107,
+itself; such a branch is verified in full once, by a pipeline requested with
+`run_verify: true` on the final head proposed for `main` (ADR-0107, ADR-0257,
 `docs/plan/development-toolchain.md`). `main` is protected: nine verification
 statuses are required checks (`static`, `contract`, `integration`, `sandbox`,
 `apple`, `apple-ios`, `public-site`, and both browser-image instances), so a pull request cannot merge

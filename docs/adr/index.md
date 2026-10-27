@@ -300,3 +300,4 @@ implementation without one.
 - [ADR-0253: A configured tool past the token cap is deferred, not fatal](0253-configured-tools-past-the-token-cap.md)
 - [ADR-0254: Cockpit feeds refresh every minute to every day, and on entry (Accepted)](0254-cockpit-feed-intervals-and-refresh-on-entry.md)
 - [ADR-0255: Fewer browser approvals in owner research](0255-fewer-browser-approvals-in-owner-research.md)
+- [ADR-0257: One final verification run, and Apple jobs keyed on their inputs](0257-one-final-verification-run.md)

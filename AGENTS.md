@@ -107,8 +107,8 @@ checks it per commit; no trailer means lane A.
 
 ## Verification
 
-Run `make check` once on the final inputs, on the sidecar with `chunk validate`; it includes `docs-check` and the
-website checks. Do not separately rerun passed checks unless their inputs change.
+While iterating, run focused tests plus lint, typecheck, and docs-check for the change; no sidecar `make check`.
+The one full run is hosted CI on the final head before merging (step 4, ADR-0257); `make check` is the fallback.
 Use `make docs-check` for standalone documentation verification, and `make citations-fix` to repair moved citations before the final verification.
 Measure each verification stage and report durations, total wall-clock time, overlap, and the slowest checks before each commit; label estimates explicitly.
 
@@ -148,7 +148,7 @@ A new feature gets its own branch from `main`, named in two lowercase words (`ow
    Fix valid findings; answer inapplicable ones with concrete evidence and resolve the conversation.
 3. Push, wait for the review of the new head commit, and repeat until
    CodeRabbit reports no findings and every conversation is resolved.
-4. Merge `main` into the branch before its final push, so `main` reuses its verification (ADR-0114). Request hosted CI (`run_verify: true`, ADR-0107) with each push, alongside the review, and confirm every required check passes on the final head.
+4. Merge `main` into the branch before its final push, so `main` reuses its verification (ADR-0114). Once CodeRabbit is clean, request hosted CI (`run_verify: true`) once on that final head; confirm every required check passes.
 5. After merging to `main`, follow the merge commit's CircleCI pipeline through production delivery. Verify the application and documentation jobs pass
    and their public release-identity checks report the merged revision, as defined in `docs/deployment.md`. If delivery fails, keep the work active through
    diagnosis and recovery; a merge is not complete until its production deployment succeeds.

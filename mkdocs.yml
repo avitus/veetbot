@@ -390,4 +390,5 @@ nav:
       - 'ADR-0253: Configured tools past the token cap': adr/0253-configured-tools-past-the-token-cap.md
       - 'ADR-0254: Cockpit feed intervals and refresh on entry': adr/0254-cockpit-feed-intervals-and-refresh-on-entry.md
       - 'ADR-0255: Fewer browser approvals in owner research': adr/0255-fewer-browser-approvals-in-owner-research.md
+      - 'ADR-0257: One final verification run': adr/0257-one-final-verification-run.md
   - Changelog: changelog.md
