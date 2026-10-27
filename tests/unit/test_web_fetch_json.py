@@ -73,8 +73,12 @@ def test_the_tool_is_a_bounded_read_only_external_capability() -> None:
 
 @pytest.mark.parametrize(
     "content",
-    [json.dumps(COMPARE, indent=2), "```json\n" + json.dumps(COMPARE, indent=2) + "\n```"],
-    ids=["raw", "markdown-fenced"],
+    [
+        json.dumps(COMPARE, indent=2),
+        "```json\n" + json.dumps(COMPARE, indent=2) + "\n```",
+        "```JSON\n" + json.dumps(COMPARE, indent=2) + "\n```",
+    ],
+    ids=["raw", "markdown-fenced", "uppercase-fence-label"],
 )
 async def test_it_returns_only_the_named_fields(content: str) -> None:
     result = await _fetch(content, ["ahead_by", "behind_by", "commits.0.sha", "merge_base"])

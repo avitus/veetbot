@@ -100,7 +100,7 @@ def _document(content: str) -> Any:
     text = content.strip()
     if text.startswith("```"):
         first, _, rest = text.partition("\n")
-        if rest.rstrip().endswith("```") and first.strip("`").strip() in {"", "json"}:
+        if rest.rstrip().endswith("```") and first.strip("`").strip().casefold() in {"", "json"}:
             text = rest.rstrip()[:-3]
     try:
         return _well_formed(json.loads(text, parse_constant=_non_finite, parse_float=_finite))
