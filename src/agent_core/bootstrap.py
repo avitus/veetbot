@@ -88,8 +88,10 @@ from agent_core.adapters.live_events import (
 )
 from agent_core.adapters.mcp.calls import BlandCallProvider
 from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
+from agent_core.adapters.mcp.oauth import HTTPMCPOAuthGateway
 from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
+from agent_core.adapters.mcp.sealing import AESGCMSecretSealer
 from agent_core.adapters.media.tensorscale import TensorScaleMediaProvider
 from agent_core.adapters.memory.dreaming import InMemoryDreamingSchedule
 from agent_core.adapters.memory.in_memory import (
@@ -331,6 +333,7 @@ from agent_core.application.device_management import (
 )
 from agent_core.application.email import EmailExperienceService
 from agent_core.application.folder_service import PublicFolderService
+from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.application.media_inputs import StoredMediaInputResolver
 from agent_core.application.model_settings import PublicModelSettingsService
 from agent_core.application.notification_dispatcher import (
@@ -549,6 +552,7 @@ from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import (
     WorkerEgressProxy,
+    start_owner_mcp_egress_proxy,
     start_unsubscribe_egress_proxy,
     start_worker_egress_proxy,
 )
@@ -648,7 +652,7 @@ from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.embeddings import LocalEmbeddingProvider as LocalEmbeddingPort
 from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
-from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
+from agent_core.ports.mcp import MCPClientFactory, MCPOAuthGateway, MCPServerRepository
 from agent_core.ports.media import MediaGenerationProvider
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.models import ModelProvider
@@ -866,6 +870,8 @@ class ApplicationServices:
     schedule_runs: ScheduleMaterializer | None = None
     # Milestone 35: present only when AGENT_COCKPIT_ENABLED is set.
     cockpit: CockpitBoard | None = None
+    # ADR-0255: present only when AGENT_MCP_SERVERS_ENABLED is set.
+    mcp_servers: MCPServerSettingsService | None = None
 
 
 class _CockpitMaintenance:
@@ -1028,6 +1034,8 @@ class Composition:
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
     semantic_services: SemanticServices | None = None
+    # ADR-0255: the owner MCP transport, when owner-added servers are enabled.
+    owner_mcp_proxy: WorkerEgressProxy | None = None
     local_import_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     folder_proposals: FolderProposalPass | None = None
     judgment_provider: JudgmentProvider | None = None
@@ -2879,6 +2887,7 @@ async def _compose(
     recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
     cockpit_builder_override: WidgetBuilder | None = None,
     cockpit_local_branch: bool = False,
+    mcp_oauth_gateway: MCPOAuthGateway | None = None,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
 
@@ -2912,6 +2921,7 @@ async def _compose(
         validate_destination(destination)
     egress = EgressPolicy(mode=EgressMode(str(raw_egress["mode"])), destinations=destinations)
     mcp_proxy: WorkerEgressProxy | None = None
+    owner_mcp_proxy: WorkerEgressProxy | None = None
 
     def destination_allowed(url: str) -> bool:
         parsed = urlsplit(url)
@@ -2926,12 +2936,24 @@ async def _compose(
     for config in mcp_server_configs:
         if config.tenant_id != principal.tenant_id:
             raise ConfigurationError("MCP server configuration tenant does not match the runtime")
+        if config.owner_managed:
+            raise ConfigurationError("owner-added MCP servers are added only from Settings")
         validate_mcp_config(config, destination_allowed=destination_allowed)
     async with uow_factory() as uow:
         for config in mcp_server_configs:
+            stored = await uow.mcp_servers.get(config.tenant_id, config.server_id)
+            if stored is not None and stored.owner_managed:
+                raise ConfigurationError(
+                    f"MCP server {config.server_id} is owner-added; rename the configured row"
+                )
             await uow.mcp_servers.put(config)
     async with uow_factory() as uow:
-        effective_mcp_configs = await uow.mcp_servers.list_enabled(principal.tenant_id)
+        effective_mcp_configs = [
+            config
+            for config in await uow.mcp_servers.list_enabled(principal.tenant_id)
+            # ADR-0255: owner-added rows exist only while their feature is on.
+            if settings.mcp_servers_enabled or not config.owner_managed
+        ]
     for config in effective_mcp_configs:
         validate_mcp_config(config, destination_allowed=destination_allowed)
     raw_artifacts = sandbox_config["artifacts"]
@@ -4126,17 +4148,48 @@ async def _compose(
             registry.register(cockpit_tool)
     registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None
+    owner_mcp_servers: MCPServerSettingsService | None = None
     try:
+        uses_sdk_clients = mcp_clients is None and mcp_scripts is None
+        if settings.mcp_servers_enabled and (uses_sdk_clients or mcp_oauth_gateway is None):
+            # ADR-0255 decision 7: owner-added servers and their sign-in have
+            # their own audited public-HTTPS transport.
+            owner_mcp_proxy = await start_owner_mcp_egress_proxy(tenant_id=principal.tenant_id)
         if mcp_clients is None:
             if mcp_scripts is not None:
                 mcp_clients = ScriptedMCPClientFactory(dict(mcp_scripts))
             else:
-                if any(config.transport is MCPTransport.HTTP for config in effective_mcp_configs):
+                if any(
+                    config.transport is MCPTransport.HTTP and not config.owner_managed
+                    for config in effective_mcp_configs
+                ):
                     mcp_proxy = await start_worker_egress_proxy(
                         egress,
                         tenant_id=principal.tenant_id,
                     )
-                mcp_clients = _sdk_mcp_clients(None if mcp_proxy is None else mcp_proxy.url)
+                mcp_clients = _sdk_mcp_clients(
+                    None if mcp_proxy is None else mcp_proxy.url,
+                    None if owner_mcp_proxy is None else owner_mcp_proxy.url,
+                )
+        if settings.mcp_servers_enabled:
+            assert settings.mcp_authorization_key is not None
+            assert settings.mcp_oauth_callback_url is not None
+            owner_mcp_servers = MCPServerSettingsService(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                gateway=(
+                    mcp_oauth_gateway
+                    or HTTPMCPOAuthGateway(
+                        proxy_url=None if owner_mcp_proxy is None else owner_mcp_proxy.url
+                    )
+                ),
+                sealer=AESGCMSecretSealer.from_text(
+                    settings.mcp_authorization_key.get_secret_value()
+                ),
+                callback_url=settings.mcp_oauth_callback_url,
+                tenant_id=principal.tenant_id,
+            )
         call_service = (
             None
             if not settings.call_enabled or settings.call_configuration is None
@@ -4163,6 +4216,8 @@ async def _compose(
             warmup_retry_seconds=float(warmup_limits["warmup_retry_seconds"]),
             warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
+            access_tokens=owner_mcp_servers,
+            owner_servers_enabled=settings.mcp_servers_enabled,
         )
         skill_catalogs = SkillCatalogService(
             uow_factory,
@@ -4246,6 +4301,7 @@ async def _compose(
             attach_device_tools=attach_device_tools,
             snapshot_profiles=memory_profiles.snapshots,
             memory_candidate_selection=memory_profiles.retrieval.candidate_selection,
+            owner_server_ids=mcp_runtime.owner_server_ids,
         )
 
         async def session_project_scope(session_id: UUID) -> str:
@@ -5374,6 +5430,7 @@ async def _compose(
                 if task_grants_enabled
                 else None
             ),
+            mcp_servers=owner_mcp_servers,
             calls=call_service,
             email=EmailExperienceService(
                 uow_factory=uow_factory,
@@ -5597,6 +5654,7 @@ async def _compose(
                 folder_proposals=folder_proposal_pass,
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
+                owner_mcp_proxy=owner_mcp_proxy,
                 local_import_tasks=local_import_tasks,
                 judgment_provider=judgment_provider,
                 people_repair=people_repair,
@@ -5614,6 +5672,9 @@ async def _compose(
         if mcp_proxy is not None:
             with suppress(BaseException):
                 await mcp_proxy.close()
+        if owner_mcp_proxy is not None:
+            with suppress(BaseException):
+                await owner_mcp_proxy.close()
         with suppress(BaseException):
             await sandbox_manager.close()
         if cockpit_sandbox is not None:
@@ -5625,12 +5686,14 @@ async def _compose(
         raise
 
 
-def _sdk_mcp_clients(http_proxy_url: str | None = None) -> MCPClientFactory:
+def _sdk_mcp_clients(
+    http_proxy_url: str | None = None, owner_proxy_url: str | None = None
+) -> MCPClientFactory:
     # Every service role starts by importing this module; the MCP SDK loads
     # only in a role that constructs an MCP client.
     from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
 
-    return SDKMCPClientFactory(http_proxy_url=http_proxy_url)
+    return SDKMCPClientFactory(http_proxy_url=http_proxy_url, owner_proxy_url=owner_proxy_url)
 
 
 class _ModelProviderDescription:
@@ -5995,6 +6058,7 @@ async def build(
     mcp_servers: tuple[MCPServerConfig, ...] = (),
     mcp_client_factory: MCPClientFactory | None = None,
     mcp_scripts: Mapping[str, ScriptedMCPServer] | None = None,
+    mcp_oauth_gateway: MCPOAuthGateway | None = None,
     credential_resolver: CredentialResolver | None = None,
     principal: Principal | None = None,
     policy_profile: str = "default",
@@ -6724,6 +6788,7 @@ async def build(
             skill_store=skill_store,
             mcp_clients=mcp_client_factory,
             mcp_scripts=mcp_scripts,
+            mcp_oauth_gateway=mcp_oauth_gateway,
             credential_resolver=effective_credential_resolver,
             mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
@@ -6819,9 +6884,11 @@ async def build(
                         "cockpit_sandbox_close_failed",
                         extra={"error_class": type(exc).__name__},
                     )
-            if composition.mcp_proxy is not None:
+            for proxy in (composition.mcp_proxy, composition.owner_mcp_proxy):
+                if proxy is None:
+                    continue
                 try:
-                    await composition.mcp_proxy.close()
+                    await proxy.close()
                 except Exception as exc:
                     logger.warning(
                         "mcp_proxy_close_failed",

@@ -274,6 +274,8 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         "device_channel_unavailable",
         "malformed_request",
         "validation_error",  # M32 operation routes; ADR-0169's additive vocabulary.
+        "mcp_server_unavailable",  # ADR-0255 owner-added MCP servers.
+        "mcp_sign_in_unsupported",
         "unsupported_media_type",
         "payload_too_large",
         "rate_limited",

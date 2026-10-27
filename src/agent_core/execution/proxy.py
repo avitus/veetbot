@@ -22,6 +22,7 @@ _MAX_HEADER_BYTES = 64 * 1024
 _PUBLIC_HTTPS_TRANSPORTS = {
     "browser_https": "browser_destination_denied",
     "unsubscribe_https": "unsubscribe_destination_denied",
+    "mcp_https": "mcp_destination_denied",
 }
 
 
@@ -65,6 +66,16 @@ async def start_browser_egress_proxy(
 async def start_unsubscribe_egress_proxy(*, tenant_id: str) -> WorkerEgressProxy:
     """Transport one fixed RFC 8058 request; no operator policy selects this transport."""
     return await _start_proxy(("unsubscribe_https", ()), tenant_id=tenant_id)
+
+
+async def start_owner_mcp_egress_proxy(*, tenant_id: str) -> WorkerEgressProxy:
+    """Transport owner-added MCP servers and their sign-in to public HTTPS (ADR-0255).
+
+    Adding a server is the owner's egress decision, so the sandbox allowlist is
+    not consulted; the destination must still be a public hostname on port 443
+    whose every resolved address is public.
+    """
+    return await _start_proxy(("mcp_https", ()), tenant_id=tenant_id)
 
 
 async def _start_proxy(

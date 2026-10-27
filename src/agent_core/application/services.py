@@ -37,6 +37,12 @@ from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, Forward
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest, LegacyRecoveryResult
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.folders import FolderProposalState
+from agent_core.domain.mcp import (
+    MCPServerAccess,
+    MCPServerList,
+    MCPServerView,
+    MCPSignInStart,
+)
 from agent_core.domain.memory import (
     BeliefType,
     MemoryReviewOutcome,
@@ -792,6 +798,30 @@ class ModelSettingsService(Protocol):
         chat: ModelChoice,
         memory: ModelChoice,
     ) -> ModelSettingsView: ...
+
+
+class MCPServerSettings(Protocol):
+    """Owner-added MCP servers from Settings (ADR-0255)."""
+
+    async def list(self, principal: Principal) -> MCPServerList: ...
+
+    async def add(
+        self, principal: Principal, server_id: str, url: str, access: MCPServerAccess
+    ) -> tuple[MCPServerView, bool]: ...
+
+    async def update_access(
+        self, principal: Principal, server_id: str, access: MCPServerAccess
+    ) -> MCPServerView: ...
+
+    async def remove(self, principal: Principal, server_id: str) -> None: ...
+
+    async def begin_sign_in(self, principal: Principal, server_id: str) -> MCPSignInStart: ...
+
+    async def sign_out(self, principal: Principal, server_id: str) -> None: ...
+
+    async def complete_sign_in(
+        self, state: str | None, code: str | None, error: str | None
+    ) -> tuple[str | None, Literal["signed_in", "failed", "expired"]]: ...
 
 
 class PersonaService(Protocol):

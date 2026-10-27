@@ -364,6 +364,7 @@ ceiling.
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
 | A | Deferred tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
+| A | Owner tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
@@ -440,6 +441,15 @@ set is then sorted by name for stable rendering. Adding an MCP account must not
 evict an explicitly enabled web, clock, or workspace capability merely because
 its name sorts earlier.
 
+An owner-added MCP server's tools
+([ADR-0255](../adr/0255-owner-added-mcp-servers.md)) never take a definition.
+When the agent enables `tool.call` they fill their own Region A class,
+`owner_tool_index`, forty entries and 2,000 tokens, in the same reads-first
+order, rendered after the shared index's entries in its discovered envelope;
+the rest are recorded in `skipped_tool_names`. Each part keeps its own cap, so
+adding a server moves no existing definition or index entry. Without
+`tool.call` the owner-added tools are recorded as skipped.
+
 In a session bound to a website profile, `browser.navigate`,
 `browser.observe` and `browser.act` are required definitions (ADR-0130): they
 rank ahead of every other candidate, neither the agent's deferral list nor
@@ -486,7 +496,8 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 22,000 tokens — 15,000 before
+The prefix classes sum to a hard ceiling of 24,000 tokens — 22,000 before
+ADR-0255 added the 2,000 of the owner-added servers' index, 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
 exactly its own cap, the same move the skill classes made, 17,000 before
 ADR-0105 added the 3,000 tokens it gave the tool class, and 20,000 before

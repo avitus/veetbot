@@ -1,8 +1,9 @@
 # ADR-0250: Learned-memory shape v2 and the reshape of v1 rows
 
-- Status: Proposed (plan decision 4: the production reshape run needs the
-  owner's authorization; the shape itself follows the owner's 2026-10-23
-  decision that website-learned memories surface as attributed tentative facts)
+- Status: Accepted (2026-10-26; the shape follows the owner's 2026-10-23
+  decision that website-learned memories surface as attributed tentative
+  facts, and the owner-authorized production reshape superseded all 55 v1
+  rows on 2026-10-26)
 - Date: 2026-10-25
 - Related: ADR-0233, ADR-0245, ADR-0248, ADR-0249
 - Detailed design: `docs/plan/memory-formation-and-consolidation.md`,
@@ -46,8 +47,8 @@ tentative facts, below owner-stated facts.
    formation from the same source events, confidence and expiry, links the
    same sources, marks the @1 row `superseded` with `superseded_by`, and
    leaves receipts to follow. A dry run counts and writes nothing. The
-   production run (55 rows on 2026-10-23) needs the owner's authorization;
-   the fallback is expiry on 2026-11-20/21 and re-learning.
+   owner-authorized production run on 2026-10-26 examined and reshaped all
+   55 rows, after a dry run with the same counts.
 
 ## Consequences
 

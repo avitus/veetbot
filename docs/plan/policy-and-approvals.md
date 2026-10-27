@@ -643,7 +643,10 @@ They resolve as follows, without changing any outcome the plan states.
   its idempotency is `READ_ONLY`. The stdio command remains operator-owned and
   the remote package confines its own destinations; no model-authored URL field
   satisfies either arm. The exact `mcp.{server_id}.use` scope remains an
-  independent prerequisite.
+  independent prerequisite. An owner-added server (ADR-0255) is classified by
+  the owner in Settings rather than by the operator, satisfies the same arm
+  when the owner chose `read_only`, requires no scope, and otherwise requires
+  approval through `external_write`; no policy document changes.
 - **"Allow only in sandbox"** (execute code) is the same shape, with
   `target.isolated` as the predicate.
 - **"Deny initially"** (install packages, enable sandbox network) is `DENY` in
