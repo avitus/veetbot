@@ -1545,6 +1545,15 @@ four things the owner, not the operator, now decides.
   the server out. Step 2 of the ladder above is a forced refresh. A server that
   is not signed in disconnects with `tool.auth_failed`, and the rest load.
 
+Settings changes reach chats already open. Before every call to an
+owner-added server, in whichever process runs it, the runtime reads the
+server's current row: a removed server, the feature switched off, or an
+access level tightened from `read_only` to `changes` refuse the call with
+`tool.withdrawn`, and a sign-out refuses it with `tool.server_unauthorized`.
+The refusal is terminal for the session's connection, which closes; a level
+loosened to `read_only` keeps working, and a call already dispatched
+finishes.
+
 Secrets are AES-GCM sealed with `MCP_AUTHORIZATION_KEY`, with the tenant,
 server and field as additional data, so a sealed value opens only in its own
 row and column. Owner-added tools take only the `owner_tool_index` context

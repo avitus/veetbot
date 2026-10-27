@@ -903,3 +903,87 @@ async def test_starting_a_sign_in_keeps_a_token_rotated_while_it_registered() ->
         "refresh-1",
         "refresh-2",
     ]
+
+
+async def _live_session(
+    composition: Composition, client: httpx.AsyncClient, *, access: str, sign_in: bool
+) -> tuple[Any, Any]:
+    """A prepared session holding a live connection to the owner server "docs"."""
+    await client.post("/v1/mcp-servers", json=_add(access=access))
+    if sign_in:
+        await _signed_in(client)
+    session_id = await composition.sessions.create()
+    await composition.mcp.prepare(session_id, composition.principal)
+    stored = await _stored(composition)
+    assert stored is not None
+    spec = map_discovered_tools(stored, (_remote("get_design"),)).accepted[0].spec
+    context = replace(tool_context(), session_id=session_id, tenant_id=TENANT)
+    return spec, context
+
+
+def _answers(count: int) -> ScriptedMCPServer:
+    return ScriptedMCPServer(
+        name="docs",
+        discovery=MCPDiscovery(tools=(_remote("get_design"),)),
+        responses=tuple(
+            ScriptedMCPResponse(name="get_design", result=MCPCallResult(content=("design",)))
+            for _ in range(count)
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("authorization", "change", "reason"),
+    [
+        (None, "remove", "tool.withdrawn"),
+        (METADATA, "remove", "tool.withdrawn"),
+        (METADATA, "sign_out", "tool.server_unauthorized"),
+        (METADATA, "require_approval", "tool.withdrawn"),
+        (None, "require_approval", "tool.withdrawn"),
+    ],
+)
+async def test_a_settings_change_reaches_a_live_session_before_its_next_call(
+    authorization: MCPAuthorizationMetadata | None, change: str, reason: str
+) -> None:
+    """PR 201 review: removal, sign-out and a stricter access level apply to chats
+    already open, so no later call keeps the authority the owner withdrew."""
+    factory = ScriptedMCPClientFactory({"docs": _answers(2)})
+    gateway = FakeGateway(authorization=authorization)
+    async with (
+        _composition(gateway=gateway, mcp_client_factory=factory) as composition,
+        _client(composition) as client,
+    ):
+        spec, context = await _live_session(
+            composition, client, access="read_only", sign_in=authorization is not None
+        )
+        before = await composition.mcp.call_tool(context, spec, "get_design", {"id": "a"})
+        if change == "remove":
+            assert (await client.delete("/v1/mcp-servers/docs")).status_code == 204
+        elif change == "sign_out":
+            assert (await client.delete("/v1/mcp-servers/docs/sign-in")).status_code == 204
+        else:
+            patched = await client.patch("/v1/mcp-servers/docs", json={"access": "changes"})
+            assert patched.status_code == 200
+        after = await composition.mcp.call_tool(context, spec, "get_design", {"id": "b"})
+        again = await composition.mcp.call_tool(context, spec, "get_design", {"id": "c"})
+    assert before.ok
+    for refused in (after, again):
+        assert not refused.ok and refused.failure is not None
+        assert refused.failure.reason_code == reason
+    # Nothing after the change reached the server.
+    assert sum(created.call_count for created in factory.created) == 1
+
+
+async def test_loosening_access_keeps_a_live_session_working() -> None:
+    """A call authorized under the stricter level stays valid when access loosens."""
+    factory = ScriptedMCPClientFactory({"docs": _answers(2)})
+    async with (
+        _composition(gateway=FakeGateway(authorization=None), mcp_client_factory=factory) as (
+            composition
+        ),
+        _client(composition) as client,
+    ):
+        spec, context = await _live_session(composition, client, access="changes", sign_in=False)
+        await client.patch("/v1/mcp-servers/docs", json={"access": "read_only"})
+        result = await composition.mcp.call_tool(context, spec, "get_design", {"id": "a"})
+    assert result.ok

@@ -127,6 +127,16 @@ and give owner-added servers their own index budget.
    new or newly signed-in server reaches chats created afterwards, as roster
    changes always have.
 
+9. **Settings changes reach chats already open.** Before every call to an
+   owner-added server, in whichever process runs it, the runtime reads the
+   server's current row. A removed server, the feature switched off, or an
+   access level tightened from `read_only` to `changes` refuse the call with
+   `tool.withdrawn`; a server signed out refuses it with
+   `tool.server_unauthorized`. The refusal is terminal for that session's
+   connection, which closes. A level loosened to `read_only` keeps working,
+   because every call was authorized under the stricter one, and a call
+   already dispatched finishes.
+
 ## Consequences
 
 The owner can add MagicPath by URL and sign in from Settings, and the same

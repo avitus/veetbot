@@ -30,9 +30,11 @@ from agent_core.domain.mcp import (
     MCPAuthScheme,
     MCPCallResult,
     MCPDiscovery,
+    MCPServerAccess,
     MCPServerConfig,
     MCPToolCatalogRecord,
     MCPTransport,
+    server_access,
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, SideEffectClass, TrustLevel
@@ -304,6 +306,41 @@ class MCPRuntime:
             for config in await uow.mcp_servers.list_enabled(tenant_id)
             if self._owner_servers_enabled or not config.owner_managed
         ]
+
+    async def _owner_withdrawal(self, pinned: MCPServerConfig) -> str | None:
+        """Why the owner's current Settings refuse a call the session pinned, if they do.
+
+        Read before every call, in whichever process runs it (ADR-0255): a removed
+        server, the feature switched off, or a stricter access level withdraw the
+        pinned tools; a sign-out leaves the server unauthorized. A looser level
+        keeps them, since each call was authorized under the stricter one.
+        """
+        if not self._owner_servers_enabled:
+            return "tool.withdrawn"
+        async with self._uow_factory() as uow:
+            current = await uow.mcp_servers.get(pinned.tenant_id, pinned.server_id)
+            authorization = (
+                None
+                if current is None
+                else await uow.mcp_servers.get_authorization(pinned.tenant_id, pinned.server_id)
+            )
+        if (
+            current is None
+            or not current.owner_managed
+            or current.endpoint != pinned.endpoint
+            or current.auth_scheme is not pinned.auth_scheme
+        ):
+            return "tool.withdrawn"
+        if (
+            server_access(pinned) is MCPServerAccess.READ_ONLY
+            and server_access(current) is MCPServerAccess.CHANGES
+        ):
+            return "tool.withdrawn"
+        if current.auth_scheme is MCPAuthScheme.OAUTH2_AUTHORIZATION and (
+            authorization is None or not authorization.signed_in
+        ):
+            return "tool.server_unauthorized"
+        return None
 
     def owner_server_ids(self, session_id: UUID) -> frozenset[str]:
         """The session's owner-added servers, whose tools take their own index."""
@@ -880,6 +917,11 @@ class MCPRuntime:
             if connection.unavailable_reason is not None:
                 return self._unavailable(connection.unavailable_reason)
             try:
+                if connection.config.owner_managed:
+                    # Settings changes reach live sessions before their next call.
+                    connection.unavailable_reason = await self._owner_withdrawal(connection.config)
+                    if connection.unavailable_reason is not None:
+                        return self._unavailable(connection.unavailable_reason)
                 if connection.client is None:
                     await self._reconnect(connection)
                 if connection.unavailable_reason is not None:
