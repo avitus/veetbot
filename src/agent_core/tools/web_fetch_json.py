@@ -60,11 +60,17 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 _MISSING = object()
 
 
+def _non_finite(constant: str) -> Any:
+    raise ValueError(f"{constant} is not JSON")
+
+
 def _document(content: str) -> Any:
     """Parse the provider's text, unwrapping one Markdown code fence if present.
 
     Some providers return a JSON answer as it is and others as a fenced block
-    in their Markdown; nothing else about the text is interpreted.
+    in their Markdown; nothing else about the text is interpreted. Only strict
+    JSON parses: NaN and Infinity, which no JSON store accepts, and nesting too
+    deep to decode raise ``ValueError`` like any other invalid document.
     """
 
     text = content.strip()
@@ -72,7 +78,10 @@ def _document(content: str) -> Any:
         first, _, rest = text.partition("\n")
         if rest.rstrip().endswith("```") and first.strip("`").strip() in {"", "json"}:
             text = rest.rstrip()[:-3]
-    return json.loads(text)
+    try:
+        return json.loads(text, parse_constant=_non_finite)
+    except RecursionError as error:
+        raise ValueError("the document is nested too deeply") from error
 
 
 def _select(value: Any, segments: Sequence[str]) -> Any:
