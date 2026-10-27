@@ -125,6 +125,7 @@ OWNER_END = PeopleEndpoint(kind="owner")
         ),
         ("My brother Sam is visiting.", "Sam", "Sam is Andy's brother.", "sibling", True),
         ("My partner is Jules.", "Jules", "Jules is Andy's partner.", "partner", True),
+        ("Erin is my wife.", "Erin", "Erin is Andy's wife, not his sister.", "spouse", True),
     ],
 )
 async def test_owner_stated_kinship_on_a_linked_save_creates_the_owner_relationship(
@@ -147,6 +148,8 @@ async def test_owner_stated_kinship_on_a_linked_save_creates_the_owner_relations
         ("Erin is not my wife.", "Erin", "Erin is not Andy's wife.", "relationship", ()),
         ("Erin is my ex-wife.", "Erin", "Erin is Andy's ex-wife.", "relationship", ()),
         ("Erin was my wife.", "Erin", "Erin was Andy's wife.", "relationship", ()),
+        ("Erin is my wife.", "Erin", "Erin is not Andy's wife.", "relationship", ()),
+        ("Erin is my wife.", "Erin", "Erin is Andy's ex-wife.", "relationship", ()),
         ("Erin is my wife.", "Erin", "Erin likes tea.", "fact", ()),
         ("Erin is my wife.", "Erin", "Andy and Erin went to Paris.", "relationship", ()),
         ("Maya is my friend. Erin is my wife.", "Maya", "Maya is Andy's wife.", "relationship", ()),
@@ -193,6 +196,67 @@ async def test_kinship_edge_is_not_duplicated_when_the_tie_is_saved_again() -> N
     assert edge.object == PeopleEndpoint(kind="person", id=erin.id)
 
 
+async def test_kinship_edge_finds_the_current_tie_past_one_page_of_edges() -> None:
+    """Erin's current tie sorts after a full page of her other edges."""
+
+    clock, factory = await memory_uow_factory()
+    erin = await _person(factory, clock, "Erin")
+    sam = await _person(factory, clock, "Sam")
+    erin_end = PeopleEndpoint(kind="person", id=erin.id)
+    common: dict[str, Any] = {
+        "tenant_id": OWNER.tenant_id,
+        "principal_id": OWNER.principal_id,
+        "created_at": clock.now(),
+        "updated_at": clock.now(),
+        "belief_id": uuid4(),
+    }
+    current = UUID(int=2**128 - 1)
+    async with factory() as uow:
+        for index in range(1, 102):
+            await uow.people.put(
+                RelationshipAssertion(
+                    id=UUID(int=index),
+                    subject=erin_end,
+                    object=PeopleEndpoint(kind="person", id=sam.id),
+                    predicate="friend",
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        await uow.people.put(
+            RelationshipAssertion(
+                id=current, subject=OWNER_END, object=erin_end, predicate="spouse", **common
+            ),
+            expected_revision=0,
+        )
+    await user_event(factory, "Erin is my wife.")
+    result = await PeopleMemoryRememberTool(
+        GovernedMemoryService(factory, clock, ids(), OWNER, people_enabled=True)
+    ).execute(
+        {
+            "scope": "veetbot",
+            "subject": "Erin",
+            "statement": "Erin is Andy's wife.",
+            "belief_type": "relationship",
+            "person_refs": [{"person_id": str(erin.id), "expected_revision": 1}],
+        },
+        replace(tool_context(), principal=OWNER, origin_trust=TrustLevel.MEMORY),
+    )
+    assert result.ok
+    async with factory() as uow:
+        later = await uow.people.query(
+            PeopleQuery(
+                tenant_id=OWNER.tenant_id,
+                principal_id=OWNER.principal_id,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                kinds=["relationship"],
+                after=UUID(int=101),
+                limit=100,
+            )
+        )
+    assert [row.id for row in later] == [current]
+
+
 async def test_kinship_repair_previews_then_records_ties_behind_earlier_saves() -> None:
     """Erin's production shape: a save from before ADR-0259, linked by role
     "object" to an "Erin Vitus" record the owner later merged into "Erin"."""
@@ -203,3 +267,19 @@ async def test_kinship_repair_previews_then_records_ties_behind_earlier_saves() 
     clock, factory = await memory_uow_factory()
     sequence = await user_event(factory, "Erin is my wife. We married in 2005.")
     await kinship_repair_case(factory, clock, OWNER, SESSION_ID, sequence)
+
+
+async def test_kinship_repair_preview_counts_a_restated_tie_once() -> None:
+    from tests.contract.people_kinship_cases import kinship_repair_case
+    from tests.contract.support import SESSION_ID
+
+    clock, factory = await memory_uow_factory()
+    sequence = await user_event(factory, "Erin is my wife. We married in 2005.")
+    await kinship_repair_case(
+        factory,
+        clock,
+        OWNER,
+        SESSION_ID,
+        sequence,
+        restatements=("Andy confirmed that Erin is his wife.",),
+    )

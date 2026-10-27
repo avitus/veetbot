@@ -58,10 +58,12 @@ identifiers, while an overview delivers family as People lines.
    spouse, partner, parent (in either direction) or sibling, supported by that
    message. The tie is read from the owner's message for the name that
    identified the person, never from the model's paraphrase, and the saved
-   statement must name the same tie. A negation, "ex-", "late", "former", a
-   past tense, a possessive chain ("my wife's friend Erin") or two different
-   ties to one name record nothing. An existing current edge of the same kind
-   is not duplicated, and an erased edge is not revived. Identity still comes
+   statement must name the same tie without denying or ending it ("not his
+   wife", "his ex-wife"). A negation, "ex-", "late", "former", a past tense, a
+   possessive chain ("my wife's friend Erin") or two different ties to one
+   name record nothing. An existing current edge of the same kind, on any page
+   of the person's edges, is not duplicated, and an erased edge is not
+   revived. Identity still comes
    only from the owner-selected person reference (ADR-0121); no name is
    matched to a person.
 
@@ -70,7 +72,8 @@ identifiers, while an overview delivers family as People lines.
    owner-confirmed relationship memories already linked to People, reading
    each memory's own cited owner message. A linked person later merged
    contributes its edge to the surviving identity. Without `--confirm` it
-   writes nothing; the report holds counts only.
+   writes nothing, and its pending count is the ties confirmation would write:
+   a tie restated by several saves counts once. The report holds counts only.
 
 4. **Closest family first, `+owner-overview@2`.** Owner overview pages order
    their focal people by the owner relationship: partner or spouse, children,

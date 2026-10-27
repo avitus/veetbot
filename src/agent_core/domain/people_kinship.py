@@ -66,6 +66,13 @@ _KIN_WORD = "|".join(sorted({*_KIN, *_PLURAL}, key=len, reverse=True))
 _DESCRIBED = r"(?:(?!(?:not|no|ex|former|late|future|estranged)\b)[a-z]+[ -]){0,2}"
 _NAME_FIRST = re.compile(rf"^(?P<names>.+?) (?:is|are) my {_DESCRIBED}(?P<kin>{_KIN_WORD})$")
 _KIN_FIRST = re.compile(rf"(?:^|\W)my {_DESCRIBED}(?P<kin>{_KIN_WORD}),? (?:is )?(?P<name>.+)$")
+# A statement that denies or ends a tie does not state it ("Erin is not Andy's
+# wife", "his ex-wife"), though another tie beside it still may ("his wife, not
+# his sister").
+_ENDED = re.compile(
+    rf"\b(?:not|no|never|isn't|aren't|ex|former|late|estranged)[ -]"
+    rf"(?:[a-z]+(?:'s)? ){{0,2}}(?P<kin>{_KIN_WORD})\b"
+)
 
 
 def _normal(text: str) -> str:
@@ -111,7 +118,10 @@ def owner_kinship(text: str, name: str) -> OwnerKinship | None:
 def statement_states_kinship(statement: str, kinship: OwnerKinship) -> bool:
     """Whether the saved statement names the same tie the owner stated."""
 
-    words = set(re.findall(r"[a-z]+", _normal(statement)))
+    statement = _normal(statement)
+    if any(_kinship(match.group("kin")) == kinship for match in _ENDED.finditer(statement)):
+        return False
+    words = set(re.findall(r"[a-z]+", statement))
     return any(_kinship(word) == kinship for word in words & {*_KIN, *_PLURAL})
 
 

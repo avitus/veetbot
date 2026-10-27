@@ -6,7 +6,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.memory import BeliefType, MemoryAuthority, Polarity, Sensitivity
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryAuthority,
+    MemoryRecord,
+    Polarity,
+    Sensitivity,
+)
 from agent_core.domain.people import (
     PeopleEndpoint,
     PeopleQuery,
@@ -44,8 +50,14 @@ async def kinship_repair_case(
     owner: Principal,
     session_id: UUID,
     sequence: int,
+    *,
+    restatements: tuple[str, ...] = (),
 ) -> None:
-    """`sequence` is the owner message "Erin is my wife. We married in 2005."."""
+    """`sequence` is the owner message "Erin is my wife. We married in 2005.".
+
+    Each restatement is a further save of the same tie, linked to Erin herself;
+    the repair still records one tie and its preview counts one.
+    """
 
     owner = owner.model_copy(
         update={"scopes": {"people.read", "people.write", "memory.read", "session.read"}}
@@ -62,26 +74,35 @@ async def kinship_repair_case(
         await uow.people.put(erin, expected_revision=0)
         await uow.people.put(earlier, expected_revision=0)
     service = GovernedMemoryService(factory, clock, ids(), owner, people_enabled=True)
-    belief, _action = await service.remember_formation(
-        session_id=session_id,
-        run_id=None,
-        statement="Andy Vitus says Erin is his wife and they married in 2005.",
-        subject="person::Andy Vitus family: Erin",
-        scope="veetbot",
-        belief_type=BeliefType.RELATIONSHIP,
-        portability=None,
-        sensitivity=Sensitivity.SENSITIVE,
-        source_event_ids=[sequence],
-        origin_trust=TrustLevel.MEMORY,
-        explicit=True,
-        authority=MemoryAuthority.AFFIRMED,
-        polarity=Polarity.ASSERT,
-        confidence=None,
-        valid_from=None,
-        expires_at=None,
-        trigger="explicit",
-        record_audit=True,
+
+    async def save(statement: str, subject: str) -> MemoryRecord:
+        belief, _action = await service.remember_formation(
+            session_id=session_id,
+            run_id=None,
+            statement=statement,
+            subject=subject,
+            scope="veetbot",
+            belief_type=BeliefType.RELATIONSHIP,
+            portability=None,
+            sensitivity=Sensitivity.SENSITIVE,
+            source_event_ids=[sequence],
+            origin_trust=TrustLevel.MEMORY,
+            explicit=True,
+            authority=MemoryAuthority.AFFIRMED,
+            polarity=Polarity.ASSERT,
+            confidence=None,
+            valid_from=None,
+            expires_at=None,
+            trigger="explicit",
+            record_audit=True,
+        )
+        return belief
+
+    belief = await save(
+        "Andy Vitus says Erin is his wife and they married in 2005.",
+        "person::Andy Vitus family: Erin",
     )
+    restated = [await save(statement, "person::Erin") for statement in restatements]
     sid = source_id(owner, session_id, sequence)
     supported = {**common, "sensitivity": Sensitivity.SENSITIVE}
     async with factory() as uow:
@@ -112,11 +133,23 @@ async def kinship_repair_case(
             earlier.model_copy(update={"state": "merged", "merged_into": erin.id, "revision": 2}),
             expected_revision=1,
         )
+        for restatement in restated:
+            await uow.people.put(
+                PersonMemoryLink(
+                    id=uuid4(),
+                    person_id=erin.id,
+                    belief_id=restatement.id,
+                    role="subject",
+                    support_ids=[sid],
+                    **supported,
+                ),
+                expected_revision=0,
+            )
 
     preview = await link_owner_kinship(factory, clock, owner, confirm=False)
     assert (preview.applied, preview.eligible, preview.pending, preview.created) == (
         False,
-        1,
+        1 + len(restatements),
         1,
         0,
     )
@@ -130,7 +163,7 @@ async def kinship_repair_case(
         PeopleEndpoint(kind="owner"),
         PeopleEndpoint(kind="person", id=erin.id),
     )
-    assert edge.belief_id == belief.id
+    assert edge.belief_id in {belief.id, *(row.id for row in restated)}
 
     again = await link_owner_kinship(factory, clock, owner, confirm=True)
     assert (again.pending, again.created) == (0, 0)

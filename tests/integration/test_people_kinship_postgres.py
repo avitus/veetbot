@@ -3,13 +3,18 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from agent_core.bootstrap import build
 from agent_core.domain.events import NewEvent
 from tests.contract.people_kinship_cases import kinship_repair_case
 from tests.integration.test_memory_postgres_m9 import _settings
 
 
-async def test_kinship_repair_records_the_owners_stated_tie_postgres(tmp_path: Path) -> None:
+@pytest.mark.parametrize("restatements", [(), ("Andy confirmed that Erin is his wife.",)])
+async def test_kinship_repair_records_the_owners_stated_tie_postgres(
+    tmp_path: Path, restatements: tuple[str, ...]
+) -> None:
     async with build(
         settings=replace(_settings(tmp_path), people_enabled=True), storage="postgres"
     ) as app:
@@ -26,5 +31,10 @@ async def test_kinship_repair_records_the_owners_stated_tie_postgres(tmp_path: P
                 )
             )
         await kinship_repair_case(
-            app.uow_factory, app.clock, app.principal, session_id, event.sequence
+            app.uow_factory,
+            app.clock,
+            app.principal,
+            session_id,
+            event.sequence,
+            restatements=restatements,
         )

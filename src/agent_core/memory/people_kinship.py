@@ -40,6 +40,7 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 KINSHIP_LINK_VERSION = "owner-kinship@1"
 _PAGE = 200
+_EDGE_PAGE = 100
 _MAX_PAGES = 50
 
 
@@ -77,25 +78,32 @@ async def assert_owner_kinship(
     ):
         return False
     subject, object_ = kinship_endpoints(kinship, person_id)
-    existing = await store.query(
-        PeopleQuery(
-            tenant_id=principal.tenant_id,
-            principal_id=principal.principal_id,
-            kinds=["relationship"],
-            person_id=person_id,
-            sensitivity_ceiling=Sensitivity.RESTRICTED,
-            limit=100,
+    after: UUID | None = None
+    for _page in range(_MAX_PAGES):
+        existing = await store.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kinds=["relationship"],
+                person_id=person_id,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                sort="id",
+                after=after,
+                limit=_EDGE_PAGE,
+            )
         )
-    )
-    if any(
-        isinstance(row, RelationshipAssertion)
-        and not row.unresolved
-        and row.valid_to is None
-        and row.predicate == kinship[0]
-        and (row.subject, row.object) == (subject, object_)
-        for row in existing
-    ):
-        return False
+        if any(
+            isinstance(row, RelationshipAssertion)
+            and not row.unresolved
+            and row.valid_to is None
+            and row.predicate == kinship[0]
+            and (row.subject, row.object) == (subject, object_)
+            for row in existing[:_EDGE_PAGE]
+        ):
+            return False
+        if len(existing) <= _EDGE_PAGE:
+            break
+        after = existing[_EDGE_PAGE - 1].id
     if dry_run:
         return True
     await store.put(
@@ -190,6 +198,8 @@ async def link_owner_kinship(
             "kinship linking requires people.write, memory.read, and session.read"
         )
     scanned = eligible = pending = created = 0
+    # A tie restated by several saves is one edge; the preview counts it once.
+    planned: set[tuple[UUID, OwnerKinship]] = set()
     async with factory() as uow, uow.people.lock(principal):
         cursor: tuple[int, UUID] | None = None
         for _page in range(_MAX_PAGES):
@@ -253,6 +263,8 @@ async def link_owner_kinship(
                         if len(kinships) != 1:
                             continue
                         (kinship,) = kinships
+                        if (survivor.id, kinship) in planned:
+                            break
                         sensitivity = max(
                             (belief.sensitivity, survivor.sensitivity, Sensitivity.SENSITIVE),
                             key=SENSITIVITY_ORDER.__getitem__,
@@ -275,6 +287,7 @@ async def link_owner_kinship(
                                 break
                             if dry_run:
                                 pending += 1
+                                planned.add((survivor.id, kinship))
                             else:
                                 created += 1
                         break

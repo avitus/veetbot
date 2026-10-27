@@ -339,7 +339,7 @@ qualifier when a supported relationship is more nuanced than the vocabulary.
 An explicit person-linked `relationship` save also records the owner's tie
 when the owner's own message states it in a plain present-tense clause ("Erin
 is my wife", "my mother, Cheryl, …", "Kyrri and Riv are my daughters") and the
-saved statement names the same tie
+saved statement names the same tie without denying or ending it
 ([ADR-0259](../adr/0259-owner-places-and-family-ties-reach-recall.md)). The tie
 is read for the name that identified the selected person, never from the
 model's paraphrase; a negation, "ex-", "late", a past tense or a possessive
