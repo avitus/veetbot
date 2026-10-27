@@ -1038,15 +1038,16 @@ formation@5 -> formation@7   deterministic formation, when established facts
 formation@6 -> formation@8   provider-assisted formation, same change
 retrieval@1 -> retrieval@2   ranking, when time decay and the near-duplicate
                              penalty land
-retrieval@4 -> retrieval@6   ranking, for the review-reason penalties and the
-retrieval@5 -> retrieval@7   attention cap (ADR-0249): deferred, see below
+retrieval@5 -> retrieval@7   live relevance ranking, for the review-reason
+                             penalties and the attention cap (ADR-0249)
 ```
 
-ADR-0249 landed its penalties without the bump: the deterministic benchmark
-measured no metric change, and re-recording the baseline cascades into the
-frozen M32 control (its manifest pins the baseline digest; its recording pins
-that manifest and the policy string in every trace). The bump waits for the
-owner's decision on refreshing that control offline.
+ADR-0249 kept the base label `retrieval@4` by the owner's decision: the
+deterministic benchmark measured no metric change, and re-recording the
+baseline cascades into the frozen M32 control (its manifest pins the baseline
+digest; its recording pins that manifest and the policy string in every
+trace). Production recall traces carry the live selector, so `retrieval@7`
+separates them from earlier traces.
 
 Bumping the provider version invalidates the bundled release evidence, whose
 filename and contents are matched against the version. Under the automatic

@@ -212,7 +212,7 @@ def _trace(*, returned: list[UUID], dropped: list[UUID] | None = None) -> Recall
         candidates=len(returned) + len(dropped or []),
         returned=returned,
         dropped_for_budget=dropped or [],
-        retrieval_policy_version="retrieval@5",
+        retrieval_policy_version="retrieval@7",
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
         operator_fields_expire_at=datetime(2026, 1, 31, tzinfo=UTC),
     )

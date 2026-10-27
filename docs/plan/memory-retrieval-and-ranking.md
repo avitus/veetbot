@@ -399,9 +399,9 @@ results rather than delaying the turn.
   their own lexical behavior. These eligibility and matching repairs are
   versioned as `retrieval@4` and re-record the deterministic benchmark. The
   review-reason penalties and the attention cap (ADR-0249) changed no
-  benchmark metric; their bump to `retrieval@6` (`retrieval@7` for the
-  relevance selector) is deferred to the owner's decision, because re-recording
-  the baseline cascades into the frozen M32 control.
+  benchmark metric. They move the live relevance selector to `retrieval@7`;
+  the base label stays `retrieval@4` by the owner's decision, because
+  re-recording the baseline would re-pin the frozen M32 control.
 - **Semantic** (optional, off at first). `pgvector` over statement embeddings. This is
   where paraphrased preferences are found ("keep it brief" vs "prefers concise
   writing") — the case lexical genuinely misses. It is built behind the fusion
