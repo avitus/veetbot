@@ -15,12 +15,14 @@ tool contract.
 
 ## Scope
 
-The first tranche exposes two read-only builtin capability tools:
+The first tranche exposes two read-only builtin capability tools, and
+ADR-0256 adds a third that reads named fields of a JSON document:
 
 | Tool | Purpose | Recommended provider |
 | --- | --- | --- |
 | `web.search` | Discover and rank public pages for a query | Tavily 50%, Keenable 50% |
 | `web.fetch` | Extract readable Markdown from one selected page | Firecrawl 50%, Keenable 50% |
+| `web.fetch_json` | Return named fields of one public JSON document | `web.fetch`'s route |
 
 Tavily, Firecrawl, and Keenable implement the same `WebProvider` port and
 support both operations. The comparison allocation is the initial recommended
@@ -76,6 +78,26 @@ single-label names, and the `.internal`, `.local`, `.localhost`, `.home`, and
 rejected so abbreviated IPv4 forms cannot pass as hostnames. The remote provider
 remains responsible for DNS-resolution and redirect defenses inside its own
 fetch boundary.
+
+`web.fetch_json`
+([ADR-0256](../adr/0256-deferred-definitions-and-truncation-recovery.md))
+accepts one URL under `web.fetch`'s rule and one to thirty-two unique field
+paths. A path is dotted: each segment is an object key, an array index, or
+`*` for every element of an array, which maps the rest of the path over the
+elements and gives `null` where an element lacks it. The tool reads the
+document through the fetch allocation, under its own routing key, so it adds
+no provider and no egress. It unwraps one surrounding Markdown code fence, as
+some providers return JSON inside one, and parses the rest as JSON. It returns
+the provider line, then the canonical URL, the selected values in the order
+asked and the paths that matched nothing. A page that does not parse fails
+with `tool.web.json_invalid` and names `web.fetch`; a selection whose rendered
+output passes the tool's 64 KiB limit fails with
+`tool.web.json_selection_too_large` instead of being cut, because a truncated
+selection would misstate the document. Its classification and output trust
+are `web.fetch`'s, and the policy engine counts it among the fixed provider
+tools. The default agent enables it with `web.fetch` and offers it through the
+deferred tool index: an API answer of many kilobytes then reaches the model
+as the few values it needs.
 
 ## Provider mappings
 

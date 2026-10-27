@@ -97,6 +97,7 @@ from agent_core.domain.tools import (
     ToolResult,
     ToolSource,
     ToolSpec,
+    deferred_definition_text,
 )
 from agent_core.policy.revalidation import revalidation_denial_reason
 from agent_core.ports.artifacts import ArtifactWriterProvider
@@ -928,16 +929,16 @@ class ToolPipeline:
                 call.arguments, tool.spec.input_schema
             )
         except ToolValidationError:
-            # A deferred tool's schema was never sent to the provider, so the
-            # refusal carries it; the model retries with valid arguments.
+            # A deferred tool's definition was never sent to the provider, and
+            # its index entry shows one sentence, so the refusal carries the
+            # whole definition; the model retries with valid arguments (ADR-0256).
             return await self._refusal(
                 run,
                 call,
                 "tool.arguments_invalid",
                 ToolOutcomeStatus.FAILED,
                 lease,
-                input_schema=tool.spec.input_schema if through_index else None,
-                input_schema_untrusted=tool.spec.source is not ToolSource.BUILTIN,
+                definition=tool.spec if through_index else None,
             )
         progress.append(5)
 
@@ -2554,8 +2555,7 @@ class ToolPipeline:
         lease: WorkerLease | None,
         message: str | None = None,
         *,
-        input_schema: Mapping[str, Any] | None = None,
-        input_schema_untrusted: bool = False,
+        definition: ToolSpec | None = None,
     ) -> ToolResultItem:
         outcome = ToolOutcome(
             status=status,
@@ -2568,18 +2568,15 @@ class ToolPipeline:
         event_type = (
             "tool.call.failed" if status is ToolOutcomeStatus.FAILED else "tool.call.denied"
         )
-        schema_text = (
-            None
-            if input_schema is None
-            else "Input schema: "
-            + json.dumps(input_schema, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-        )
+        definition_text = None if definition is None else deferred_definition_text(definition)
+        # A server's or device's definition is its own text: untrusted data.
+        untrusted = definition is not None and definition.source is not ToolSource.BUILTIN
         result_item = _outcome_item(
             call.call_id,
             outcome,
             TrustLevel.INTERNAL_TOOL,
-            schema_text if input_schema_untrusted else None,
-            detail_text=None if input_schema_untrusted else schema_text,
+            definition_text if untrusted else None,
+            detail_text=None if untrusted else definition_text,
         )
         async with self._uow_factory() as uow:
             await self._event_in(

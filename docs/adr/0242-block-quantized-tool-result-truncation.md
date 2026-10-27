@@ -5,6 +5,8 @@
 - Amends: `context-engine.md` "Yield order under pressure" item 3 and "The
   history cache window"
 - Related: ADR-0078, ADR-0130, ADR-0135, ADR-0229
+- Amended by: ADR-0256 (2026-10-26), which keeps definition answers whole and
+  notes truncation; no model-callable tool reads a pointer back
 - Scope: Existing context-builder behavior; no milestone or gate moves
 
 ## Context

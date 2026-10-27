@@ -141,7 +141,7 @@ not find it here should find the reason here.
 
 Nothing in the platform dials an arbitrary public host today. `web.fetch`
 hands its URL to a hosted provider, which owns resolution and redirects
-inside its own boundary (web-access.md:72-78). That is why the egress
+inside its own boundary (web-access.md:74-80). That is why the egress
 decision below is an ADR decision and not an implementation detail.
 
 ## What a message may offer

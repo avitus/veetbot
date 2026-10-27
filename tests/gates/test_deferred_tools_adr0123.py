@@ -36,6 +36,7 @@ from agent_core.domain.mcp import (
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.tools import deferred_definition_text
 from agent_core.mcp.configuration import email_server_configs
 from agent_core.tools.cockpit import COCKPIT_TOOL_NAMES
 from bland_mcp.client import BlandClient
@@ -227,6 +228,8 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     assert "tool.call" in defined
     # The six management tools are deferred by the default agent's configuration.
     assert deferred >= MANAGEMENT_TOOLS | {"memory.learn", "workspace.write_text"}
+    # A JSON field read waits in the index beside web.fetch's definition (ADR-0256).
+    assert "web.fetch" in defined and "web.fetch_json" in deferred
     # Reads take the definition slots before anything that changes the world.
     assert defined >= DISCOVERED_READS
     # Deferring workspace writes admits one additional read while all writes
@@ -282,8 +285,11 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
     advertised = {*plan.tool_names, *plan.deferred_tool_names}
     assert advertised >= {*COCKPIT_TOOL_NAMES, *RECORDS_TOOLS}
     assert "records.append" in plan.deferred_tool_names
-    # The index's own 2,000-token cap is then full (ADR-0253, Consequences).
+    # The index's own 2,000-token cap is then full (ADR-0253, Consequences), and
+    # web.fetch_json, a configured deferral, takes the last Gmail write's room
+    # (ADR-0256, Consequences).
     assert set(plan.skipped_tool_names) == {
+        "mcp.gmail_write.modify_labels",
         "mcp.gmail_write.trash_thread",
         "mcp.gmail_write.untrash_thread",
     }
@@ -434,4 +440,43 @@ async def test_invalid_deferred_arguments_return_the_input_schema(tmp_path: Path
     texts = [part["text"] for part in failure["result_item"]["content"]]
     # A builtin's schema is trusted configuration, so the result keeps its trust.
     assert failure["result_item"]["trust"] == "internal_tool"
-    assert any(text.startswith("Input schema: ") and '"schedule_id"' in text for text in texts)
+    assert any("\nInput schema: " in text and '"schedule_id"' in text for text in texts)
+
+
+@pytest.mark.parametrize(
+    ("name", "trust"),
+    [("schedule.pause", "internal_tool"), (START_CALL, "external_untrusted")],
+)
+async def test_invalid_deferred_arguments_return_the_whole_definition(
+    tmp_path: Path, name: str, trust: str
+) -> None:
+    """ADR-0256: the index shows one sentence, so the refusal carries the rest.
+
+    The production Cockpit chat of 2026-10-26 probed each Cockpit tool with
+    empty arguments and got its schema back, never the description that says
+    to read the kit first or that preview is unavailable.
+    """
+    _factory, context = await _production(
+        tmp_path,
+        [
+            ScriptedTurn(tool_calls=[_tool_call(name, {})], stop_reason=StopReason.TOOL_USE),
+            ScriptedTurn(text="I need more arguments.", stop_reason=StopReason.END_TURN),
+        ],
+    )
+    async with context as app:
+        session_id = await app.sessions.create()
+        run_id = await app.runs.submit("Use that tool.", session_id)
+        terminal = await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=30)
+        events = await _session_events(app, session_id)
+        plan = await app.executor._context_planner.current(session_id)
+
+    assert terminal.status is RunStatus.COMPLETED, terminal.failure
+    assert plan is not None
+    [spec] = [spec for spec in plan.deferred_tool_specs if spec.name == name]
+    [failure] = [event.payload for event in events if event.event_type == "tool.call.failed"]
+    assert failure["reason_code"] == "tool.arguments_invalid"
+    texts = [part["text"] for part in failure["result_item"]["content"]]
+    # A server's or device's definition is its own text, so it stays untrusted data.
+    assert failure["result_item"]["trust"] == trust
+    assert texts[-1] == deferred_definition_text(spec)
+    assert f"\nDescription: {spec.description}\n" in texts[-1]

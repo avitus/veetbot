@@ -780,6 +780,7 @@ from agent_core.tools.skill_load import (
 from agent_core.tools.skill_manage import SkillManageTool
 from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME, ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
+from agent_core.tools.web_fetch_json import WebFetchJsonTool
 from agent_core.tools.web_search import WebSearchTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
@@ -3151,6 +3152,7 @@ async def _compose(
         registry.register(WebSearchTool(web_search_provider))
     if web_fetch_provider is not None:
         registry.register(WebFetchTool(web_fetch_provider))
+        registry.register(WebFetchJsonTool(web_fetch_provider))
     if browser_provider is not None:
         registry.register(LegacyBrowserNavigateTool(browser_provider))
         registry.register(BrowserNavigateTool(browser_provider))
@@ -6333,7 +6335,7 @@ async def build(
         *([] if web_search_enabled and web_fetch_enabled else ["knowledge.ingest"]),
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
-        *(["web.fetch"] if web_fetch_enabled else []),
+        *(["web.fetch", "web.fetch_json"] if web_fetch_enabled else []),
         *(
             [SCHEDULE_CREATE_TOOL_NAME, *SCHEDULE_LIFECYCLE_TOOL_NAMES]
             if effective_settings.schedule_api_enabled
@@ -6382,6 +6384,9 @@ async def build(
         for name in (
             "memory.learn",
             "workspace.write_text",
+            # A JSON read is a narrower web.fetch, chosen once the model knows
+            # the answer is JSON; it waits in the index (ADR-0256).
+            "web.fetch_json",
             SCHEDULE_UPDATE_TOOL_NAME,
             SCHEDULE_PAUSE_TOOL_NAME,
             SCHEDULE_RESUME_TOOL_NAME,

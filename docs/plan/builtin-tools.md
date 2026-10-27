@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Forty more model-callable tools are declared at build time by other
+Forty-one more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -147,6 +147,7 @@ knowledge.ingest              capability  knowledge-documents
 knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
+web.fetch_json                capability  web-access
 browser.navigate              capability  browser-automation
 browser.observe               capability  browser-automation
 browser.act                   capability  browser-automation
@@ -175,8 +176,8 @@ cockpit.configure             capability  cockpit
 cockpit.feed.publish          capability  cockpit
 ```
 
-Fifty model-callable builtin tools in total: the original roster of
-eight, the forty above, and the two media-generation tools in ADR-0140.
+Fifty-one model-callable builtin tools in total: the original roster of
+eight, the forty-one above, and the two media-generation tools in ADR-0140.
 Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
@@ -191,8 +192,8 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty, `skill.manage`, `web.search`,
-`web.fetch`, the three `browser.*` tools, the six `schedule.*` tools, and the
+nothing else.** Of the other forty-one, `skill.manage`, `web.search`,
+`web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
 five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
 three `people.*`, and five `records.*` tools in this document's Milestone 26,
 28, 31, and 34 sections below;

@@ -69,6 +69,10 @@ TOOL_MESSAGES: dict[str, str] = {
     ),
     "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
     "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",
+    "tool.web.json_invalid": ("The page is not a JSON document; read it with web.fetch instead."),
+    "tool.web.json_selection_too_large": (
+        "The selected fields exceed the tool's output limit; select fewer fields or narrower paths."
+    ),
     "tool.media.permission": (
         "The media provider rejected its credential or model access. "
         "Check the configured key and model scopes."

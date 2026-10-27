@@ -5011,6 +5011,8 @@ and general-purpose subagents.
 
 - `web.search` discovers public pages and returns normalized source records.
 - `web.fetch` extracts readable content from one public HTTPS page.
+- `web.fetch_json` returns named fields of one public HTTPS JSON document
+  through the fetch provider route (ADR-0256).
 - Provider-specific request and response fields end at an adapter implementing
   one `WebProvider` port.
 - Search and fetch provider allocations are selected independently. A

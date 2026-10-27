@@ -25,7 +25,7 @@ from agent_core.domain.runs import Run
 from agent_core.mcp.configuration import is_mutating_email_server_id
 from agent_core.policy.hardline import hardline_matches
 
-_WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch"})
+_WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch", "web.fetch_json"})
 _BROWSER_PROVIDER_TOOLS = frozenset({"browser.navigate", "browser.observe"})
 # The "May authorize" column of the trust table in policy-and-approvals.md.
 # Content can inform a decision; only platform configuration and the

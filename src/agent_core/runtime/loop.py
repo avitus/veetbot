@@ -29,7 +29,7 @@ from agent_core.domain.errors import (
     NotFoundError,
     UserInputRequiredError,
 )
-from agent_core.domain.events import NewEvent
+from agent_core.domain.events import TOOL_RESULT_EVENTS, NewEvent
 from agent_core.domain.memory import RecallQuery
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -693,9 +693,10 @@ async def _record_refusals(
 
     if not refused:
         return
+    recorded: list[ToolResultItem] = []
     async with context.uow_factory() as uow:
         for call, result in refused:
-            await uow.events.append(
+            event = await uow.events.append(
                 NewEvent(
                     session_id=context.run.session_id,
                     run_id=context.run.id,
@@ -710,7 +711,41 @@ async def _record_refusals(
                 ),
                 lease=context.lease,
             )
-    context.checkpoint.conversation.extend(result for _call, result in refused)
+            recorded.append(result.model_copy(update={"source_event_sequence": event.sequence}))
+    context.checkpoint.conversation.extend(recorded)
+
+
+async def _with_event_sequences(
+    context: RunContext, results: list[ToolResultItem]
+) -> list[ToolResultItem]:
+    """Give each new result the sequence of the event that recorded it (ADR-0256).
+
+    History rebuilt from the log carries it already. Without it, a result of
+    the current run truncates to ``event:pending`` and a working-state fact
+    has nothing to cite. A replayed result recorded by an earlier attempt
+    keeps none, as before.
+    """
+
+    if all(result.source_event_sequence is not None for result in results):
+        return results
+    async with context.uow_factory() as uow:
+        events = await uow.events.list_after(
+            context.run.session_id,
+            context.checkpoint.last_event_sequence,
+            context.principal,
+            run_id=context.run.id,
+        )
+    recorded = {
+        event.payload.get("call_id"): event.sequence
+        for event in events
+        if event.event_type in TOOL_RESULT_EVENTS
+    }
+    return [
+        result
+        if result.source_event_sequence is not None or result.call_id not in recorded
+        else result.model_copy(update={"source_event_sequence": recorded[result.call_id]})
+        for result in results
+    ]
 
 
 def _denied_outcome(result: ToolResultItem) -> ToolOutcome | None:
@@ -1515,6 +1550,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             )
         step.tool_call_count = len(results)
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
+        results = await _with_event_sequences(context, results)
         context.checkpoint.conversation.extend(results)
         apply_tool_evidence(context.checkpoint.working_state, fitted_calls)
         context.checkpoint.pending_tool_calls = []
