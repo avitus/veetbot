@@ -341,7 +341,7 @@ public struct ConnectionSettingsView: View {
                     }
                     Text("Removing a website ends its active task permissions.")
                         .veetType(.meta).foregroundColor(AppTheme.inkSoft)
-                    TextField("https://www.duolingo.com/lesson", text: $taskScopeURL)
+                    TextField("Website address", text: $taskScopeURL, prompt: .a2Prompt("https://www.duolingo.com/lesson"))
                         .textFieldStyle(.plain)
                         .a2Field(radius: 12)
                         .accessibilityIdentifier("task-scopes.url")
@@ -444,7 +444,7 @@ public struct ConnectionSettingsView: View {
                         help:
                             "HTTPS is required. Queries, fragments, and embedded credentials are not allowed."
                     ) {
-                        TextField("https://agent.example.com", text: $baseURL)
+                        TextField("Server address", text: $baseURL, prompt: .a2Prompt("https://agent.example.com"))
                             .textFieldStyle(.plain)
                             .veetMono()
                             .a2Field(radius: 12)
@@ -462,14 +462,14 @@ public struct ConnectionSettingsView: View {
                         HStack(spacing: 6) {
                             Group {
                                 if showsToken {
-                                    TextField("Static bearer token", text: $token)
+                                    TextField("Static bearer token", text: $token, prompt: .a2Prompt("Static bearer token"))
                                         .veetMono()
                                         .autocorrectionDisabled()
                                         #if os(iOS)
                                         .textInputAutocapitalization(.never)
                                         #endif
                                 } else {
-                                    SecureField("Static bearer token", text: $token)
+                                    SecureField("Static bearer token", text: $token, prompt: .a2Prompt("Static bearer token"))
                                 }
                             }
                             .textContentType(.password)
@@ -522,7 +522,7 @@ public struct ConnectionSettingsView: View {
                             help:
                                 "Enter the website’s home page or login page. Sign in on this device opens it in a private window here; Veetbot's remote browser opens it in an isolated browser instead. HTTPS is added if omitted."
                         ) {
-                            TextField("example.com or https://example.com/login", text: $websiteURL)
+                            TextField("Website URL", text: $websiteURL, prompt: .a2Prompt("example.com or https://example.com/login"))
                                 .textFieldStyle(.plain)
                                 .a2Field(radius: 12)
                                 .accessibilityIdentifier("website-access.url")

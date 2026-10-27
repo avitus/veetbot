@@ -392,12 +392,15 @@ struct MemoryWordingSheet: View {
                     .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField("What should Veetbot remember?", text: $text, axis: .vertical)
-                    .lineLimit(3...8)
-                    .textFieldStyle(.plain)
-                    .a2Field(radius: 12)
-                    .focused($focused)
-                    .accessibilityIdentifier("memory.wording.text")
+                TextField(
+                    "What should Veetbot remember?", text: $text,
+                    prompt: .a2Prompt("What should Veetbot remember?"), axis: .vertical
+                )
+                .lineLimit(3...8)
+                .textFieldStyle(.plain)
+                .a2Field(radius: 12)
+                .focused($focused)
+                .accessibilityIdentifier("memory.wording.text")
                 HStack(alignment: .firstTextBaseline) {
                     Text("Veetbot keeps the earlier wording as history and won\u{2019}t form it again.")
                         .fixedSize(horizontal: false, vertical: true)

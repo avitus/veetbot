@@ -379,7 +379,7 @@ private struct CockpitSettingsFieldView: View {
             TextField(field.title, text: Binding(
                 get: { if case let .string(text)? = value { text } else { "" } },
                 set: { value = $0.isEmpty ? nil : .string($0) }
-            ))
+            ), prompt: .a2Prompt(field.title))
             .textFieldStyle(.plain)
             .padding(VeetSpace.s2)
             .a2Field()
@@ -391,7 +391,7 @@ private struct CockpitSettingsFieldView: View {
                     if let number = Double(text) { value = .number(field.kind == .integer ? number.rounded() : number) }
                     else if text.isEmpty { value = nil }
                 }
-            ))
+            ), prompt: .a2Prompt(field.title))
             .textFieldStyle(.plain)
             .padding(VeetSpace.s2)
             .a2Field()

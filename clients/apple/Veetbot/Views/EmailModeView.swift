@@ -862,7 +862,7 @@ public struct EmailModeView: View {
         #endif
         return HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
-            TextField(prompt, text: Binding(get: { model.searchText }, set: { model.setSearchText($0) }))
+            TextField(prompt, text: Binding(get: { model.searchText }, set: { model.setSearchText($0) }), prompt: .a2Prompt(prompt))
                 .textFieldStyle(.plain).accessibilityLabel("Find mail")
                 .accessibilityIdentifier("email.search")
             if !model.searchText.isEmpty {
@@ -1516,7 +1516,7 @@ private struct EmailThreadScreen: View {
                 }
                 DisclosureGroup {
                     HStack(alignment: .center, spacing: 8) {
-                        TextField("How should the reply change?", text: $refinement).focused(
+                        TextField("How should the reply change?", text: $refinement, prompt: .a2Prompt("How should the reply change?")).focused(
                             $focusedField, equals: .refinement
                         )
                         .textFieldStyle(.plain).veetType(.ui).a2Field()
@@ -1568,7 +1568,7 @@ private struct EmailThreadScreen: View {
             HairlineDivider()
             Group {
                 envelopeRow("To") {
-                    TextField("To", text: editBinding(\.to)).textFieldStyle(.plain).veetType(.ui)
+                    TextField("To", text: editBinding(\.to), prompt: .a2Prompt("To")).textFieldStyle(.plain).veetType(.ui)
                         .focused($focusedField, equals: .to)
                         .accessibilityLabel("To").accessibilityIdentifier("email.draft-to")
                     Button {
@@ -1764,7 +1764,7 @@ private struct EmailThreadScreen: View {
         -> some View
     {
         envelopeRow(title) {
-            TextField(title, text: editBinding(path)).textFieldStyle(.plain).veetType(.ui)
+            TextField(title, text: editBinding(path), prompt: .a2Prompt(title)).textFieldStyle(.plain).veetType(.ui)
                 .focused($focusedField, equals: field)
                 .accessibilityLabel(title).accessibilityIdentifier("email.draft-\(title.lowercased())")
         }
@@ -1864,7 +1864,7 @@ struct EmailTeachCard: View {
                         .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
             }
-            TextField("Explain what matters (optional)", text: $explanation).focused(explanationFocused)
+            TextField("Explain what matters (optional)", text: $explanation, prompt: .a2Prompt("Explain what matters (optional)")).focused(explanationFocused)
                 .textFieldStyle(.plain).a2Field()
             HStack(spacing: 8) {
                 Button("Important") {

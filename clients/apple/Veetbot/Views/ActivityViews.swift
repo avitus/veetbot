@@ -440,7 +440,7 @@ struct DenialReasonField: View {
     @Binding var text: String
 
     var body: some View {
-        TextField("Reason for denial (optional)", text: $text)
+        TextField("Reason for denial (optional)", text: $text, prompt: .a2Prompt("Reason for denial (optional)"))
             .textFieldStyle(.plain)
             .veetType(.ui)
             .padding(.vertical, 6)
@@ -481,7 +481,7 @@ struct ClarifyingQuestionCard: View {
             Text(prompt.question)
                 .veetType(.ui, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("Your answer", text: $answer)
+            TextField("Your answer", text: $answer, prompt: .a2Prompt("Your answer"))
                 .textFieldStyle(.plain)
                 .veetType(.ui)
                 .padding(.vertical, 6)

@@ -174,6 +174,27 @@ struct A2FieldModifier: ViewModifier {
     }
 }
 
+extension Text {
+    /// A field's example or hint, in faint ink as the design system draws
+    /// every placeholder: a plain field's own placeholder grey is nearly as
+    /// strong as typed text. Verbatim, so an example address is not read as
+    /// Markdown and drawn as a blue link.
+    static func a2Prompt(_ text: String) -> Text {
+        Text(verbatim: text).foregroundColor(AppTheme.inkFaint)
+    }
+
+    /// The prompt of a field in a `Form`, which on touch shows its title as
+    /// the placeholder but on the Mac sets it as a label beside the field,
+    /// where repeating it inside the field would say it twice.
+    static func a2FormPrompt(_ text: String) -> Text? {
+        #if os(macOS)
+        nil
+        #else
+        a2Prompt(text)
+        #endif
+    }
+}
+
 extension View {
     /// Draws the view as an A2 field: surface colour, strong hairline, small radius.
     func a2Field(radius: CGFloat = A2Metrics.fieldRadius) -> some View {

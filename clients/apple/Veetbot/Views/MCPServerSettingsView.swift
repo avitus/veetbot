@@ -212,7 +212,7 @@ struct MCPServerSettingsSection: View {
                     ? "Lowercase letters, digits and underscores, starting with a letter."
                     : "Saved as \(normalizedName)."
             ) {
-                TextField("magicpath", text: $name)
+                TextField("Name", text: $name, prompt: .a2Prompt("magicpath"))
                     .textFieldStyle(.plain)
                     .veetMono()
                     .autocorrectionDisabled()
@@ -223,7 +223,7 @@ struct MCPServerSettingsSection: View {
                     #endif
             }
             field("URL", help: "The server's https address, such as https://api.magicpath.ai/mcp.") {
-                TextField("https://example.com/mcp", text: $url)
+                TextField("URL", text: $url, prompt: .a2Prompt("https://example.com/mcp"))
                     .textFieldStyle(.plain)
                     .veetMono()
                     .autocorrectionDisabled()
@@ -295,16 +295,19 @@ struct MCPServerSettingsSection: View {
             .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             .fixedSize(horizontal: false, vertical: true)
-            TextField("{\"mcpServers\": { … }}", text: $configuration, axis: .vertical)
-                .lineLimit(3...8)
-                .textFieldStyle(.plain)
-                .veetMono()
-                .autocorrectionDisabled()
-                .a2Field(radius: 12)
-                .accessibilityIdentifier("mcp-servers.paste.text")
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
+            TextField(
+                "Configuration", text: $configuration,
+                prompt: .a2Prompt("{\"mcpServers\": { … }}"), axis: .vertical
+            )
+            .lineLimit(3...8)
+            .textFieldStyle(.plain)
+            .veetMono()
+            .autocorrectionDisabled()
+            .a2Field(radius: 12)
+            .accessibilityIdentifier("mcp-servers.paste.text")
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            #endif
             if case .success(let drafts) = MCPServerConfiguration.parse(configuration) {
                 Text("Found \(drafts.map(\.name).joined(separator: ", ")).")
                     .veetType(.meta)

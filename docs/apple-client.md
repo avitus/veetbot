@@ -195,6 +195,14 @@ title reaches the toolbar only once the display title has scrolled away.
 Capsule buttons come in three weights (filled teal, hairline, quiet) in
 `A2Controls.swift`.
 
+A field's example or hint is its placeholder, passed as `.a2Prompt(_:)`: verbatim
+text in `inkFaint`, as the design system draws every placeholder. The platform's
+own placeholder grey is nearly as strong as typed text in a plain field, and a
+placeholder written as a localized key turns an example address into a blue
+link. A field in a `Form` passes `.a2FormPrompt(_:)`, which leaves the Mac's
+label beside the field alone. `FieldPromptTests` fails on any field under
+`Views/` that passes neither.
+
 A change the server has confirmed is announced with a toast
 (`ToastCenter`, drawn by `A2Toast.swift`): one short sentence in an ink
 capsule at the bottom centre of the window or sheet, read out by VoiceOver.

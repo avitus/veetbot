@@ -254,7 +254,7 @@ private struct PeopleProfile: View {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let unchanged = trimmed.isEmpty || trimmed == person.displayName
         return VStack(alignment: .leading, spacing: 8) {
-            TextField("Name", text: $name)
+            TextField("Name", text: $name, prompt: .a2Prompt("Name"))
                 .textFieldStyle(.plain)
                 .veetType(.title)
                 .a2Field()
