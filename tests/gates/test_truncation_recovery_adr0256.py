@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 
 from agent_core.bootstrap import build
+from agent_core.config import load_settings
+from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelRequest,
@@ -25,6 +27,8 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunLimits, RunStatus
 from tests.gates.test_runtime_tool_budget import _requests, _settings, _tool_turn
+from tests.unit.test_browser_recovery import InterruptedBrowser, navigation
+from tests.unit.test_config import base_environment
 from tests.unit.test_web_tools import FakeWebProvider
 
 LIMITS = RunLimits(max_steps=20, max_model_calls=20, max_tool_calls=40)
@@ -103,3 +107,51 @@ async def test_live_results_carry_the_event_a_fact_cites() -> None:
     assert listed
     assert listed <= completed
     assert listed <= shown
+
+
+def _results(request: ModelRequest) -> list[ToolResultItem]:
+    return [item for item in request.conversation if isinstance(item, ToolResultItem)]
+
+
+async def test_a_browser_recovery_read_carries_its_event() -> None:
+    # The runtime's own recovery read is appended outside the model's batch.
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[navigation(), ScriptedTurn(text="Report evidence.")]),
+        sequential_ids=True,
+        enabled_tools=["browser.navigate", "browser.observe"],
+        browser_provider_override=InterruptedBrowser(),
+    ) as composition:
+        run_id = await composition.runs.submit("Read the account.")
+        run = await composition.runs.wait_terminal(run_id)
+        requests = _requests(composition)
+
+    assert run.status is RunStatus.COMPLETED, run.failure
+    results = _results(requests[-1])
+    assert [item.call_id.startswith("browser-recovery:") for item in results] == [False, True]
+    assert all(item.source_event_sequence is not None for item in results)
+
+
+async def test_a_batch_resumed_after_approval_carries_its_events() -> None:
+    script = FakeModelScript(
+        turns=[
+            _tool_turn(
+                ScriptedToolCall(
+                    name="demo.external_write",
+                    arguments={"destination": "demo", "content": "hello"},
+                )
+            ),
+            ScriptedTurn(text="The approved write finished."),
+        ]
+    )
+    async with build(settings=_settings(), script=script) as composition:
+        run_id = await composition.runs.submit("Write hello to the demo destination.")
+        assert (await composition.runs.get(run_id)).status is RunStatus.WAITING_FOR_APPROVAL
+        [approval] = await composition.approvals.list_pending(run_id=run_id)
+        await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        run = await composition.runs.wait_terminal(run_id)
+        requests = _requests(composition)
+
+    assert run.status is RunStatus.COMPLETED, run.failure
+    [result] = _results(requests[-1])
+    assert result.source_event_sequence is not None

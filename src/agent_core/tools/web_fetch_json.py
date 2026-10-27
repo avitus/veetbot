@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -58,10 +60,30 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 _MISSING = object()
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
 def _non_finite(constant: str) -> Any:
     raise ValueError(f"{constant} is not JSON")
+
+
+def _finite(number: str) -> float:
+    value = float(number)
+    if not math.isfinite(value):
+        raise ValueError(f"{number} does not fit a finite number")
+    return value
+
+
+def _well_formed(value: Any) -> Any:
+    """Replace lone surrogates, which JSON escapes can spell but UTF-8 cannot."""
+
+    if isinstance(value, str):
+        return _SURROGATE.sub("\ufffd", value)
+    if isinstance(value, list):
+        return [_well_formed(element) for element in value]
+    if isinstance(value, dict):
+        return {_well_formed(key): _well_formed(element) for key, element in value.items()}
+    return value
 
 
 def _document(content: str) -> Any:
@@ -69,8 +91,10 @@ def _document(content: str) -> Any:
 
     Some providers return a JSON answer as it is and others as a fenced block
     in their Markdown; nothing else about the text is interpreted. Only strict
-    JSON parses: NaN and Infinity, which no JSON store accepts, and nesting too
-    deep to decode raise ``ValueError`` like any other invalid document.
+    JSON parses: NaN, Infinity and a number too large for a float, which no
+    JSON store accepts, and nesting too deep to decode raise ``ValueError``
+    like any other invalid document. Lone surrogates are replaced, so every
+    selected value encodes as UTF-8.
     """
 
     text = content.strip()
@@ -79,7 +103,7 @@ def _document(content: str) -> Any:
         if rest.rstrip().endswith("```") and first.strip("`").strip() in {"", "json"}:
             text = rest.rstrip()[:-3]
     try:
-        return json.loads(text, parse_constant=_non_finite)
+        return _well_formed(json.loads(text, parse_constant=_non_finite, parse_float=_finite))
     except RecursionError as error:
         raise ValueError("the document is nested too deeply") from error
 
@@ -173,7 +197,7 @@ class WebFetchJsonTool:
         answer = {"url": page.url, "values": values, "missing": missing}
         part = TextPart(
             text=f"Provider: {provider.name}\n\n"
-            + json.dumps(answer, ensure_ascii=False, separators=(",", ":"))
+            + json.dumps(answer, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
         )
         if len(_rendered_parts_bytes([part])) > self.spec.maximum_output_bytes:
             return _failure(

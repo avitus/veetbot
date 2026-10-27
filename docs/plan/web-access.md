@@ -87,7 +87,9 @@ paths. A path is dotted: each segment is an object key, an array index, or
 elements and gives `null` where an element lacks it. The tool reads the
 document through the fetch allocation, under its own routing key, so it adds
 no provider and no egress. It unwraps one surrounding Markdown code fence, as
-some providers return JSON inside one, and parses the rest as JSON. It returns
+some providers return JSON inside one, and parses the rest as strict JSON:
+NaN, Infinity, a number too large for a float and nesting too deep to decode
+do not parse, and a lone surrogate in a string becomes U+FFFD. It returns
 the provider line, then the canonical URL, the selected values in the order
 asked and the paths that matched nothing. A page that does not parse fails
 with `tool.web.json_invalid` and names `web.fetch`; a selection whose rendered

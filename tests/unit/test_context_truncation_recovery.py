@@ -12,6 +12,7 @@ same pages again in three cycles until the identical-call guard stopped it.
 from __future__ import annotations
 
 import hashlib
+import re
 
 import pytest
 
@@ -136,16 +137,25 @@ class _Conversation:
         )
 
 
-async def _request(conversation: _Conversation, *, working_state: bool = True) -> ModelRequest:
+async def _request(
+    conversation: _Conversation,
+    *,
+    working_state: bool = True,
+    seed: int = 0,
+    summarized_through: int = 0,
+) -> ModelRequest:
+    current = run(status=RunStatus.RUNNING).model_copy(update={"seed_event_sequence": seed})
     checkpoint = RunCheckpoint(
-        run_id=run(status=RunStatus.RUNNING).id,
+        run_id=current.id,
         version=1,
         status=RunStatus.RUNNING,
         conversation=conversation.items,
+        compacted_summary="Summary of the earlier pages." if summarized_through else None,
+        replaced_through_sequence=summarized_through,
         created_at=NOW,
     )
     return await _builder(working_state=working_state).build(
-        run(status=RunStatus.RUNNING), checkpoint, agent(), principal()
+        current, checkpoint, agent(), principal()
     )
 
 
@@ -261,3 +271,32 @@ async def test_truncation_note_without_working_state_only_says_what_happened() -
     assert "no tool reads a truncated result back" in note
     assert "context.update_working_state" not in note
     assert "event " not in note
+
+
+async def test_truncation_note_names_only_results_the_history_cut_kept() -> None:
+    conversation = _Conversation()
+    for index in range(12):
+        conversation.page(index)
+    # A compaction summary replaces these exchanges, so the history cut takes
+    # them although some are among the newest results still whole.
+    summarized = conversation.sequence
+    for index in range(12, 14):
+        conversation.page(index)
+    conversation.sequence += 1
+    conversation.items.append(
+        UserMessage(
+            content=[TextPart(text="And the rest?")], source_event_sequence=conversation.sequence
+        )
+    )
+    seed = conversation.sequence
+    for index in range(14, 16):
+        conversation.page(index)
+
+    request = await _request(conversation, seed=seed, summarized_through=summarized)
+
+    sent = _sequences(request)
+    assert len(sent) == 4, "the fixture must actually cut history"
+    assert _truncated(request) == set()
+    [note] = _notes(request)
+    listed = [int(value) for value in re.findall(r"event (\d+) \(web\.fetch\)", note)]
+    assert listed == list(sent.values())

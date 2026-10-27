@@ -605,6 +605,8 @@ async def test_final_report_has_no_tools_and_only_current_feed_evidence(
     assert "Observed post" not in text
     results = [item for item in captured[0].conversation if isinstance(item, ToolResultItem)]
     assert results and all(item.trust is TrustLevel.EXTERNAL_UNTRUSTED for item in results)
+    # ADR-0256: each workflow read names the event a working-state fact cites.
+    assert all(item.source_event_sequence is not None for item in results)
 
 
 @pytest.mark.parametrize("startup_failures", [0, 1, 2, 3])

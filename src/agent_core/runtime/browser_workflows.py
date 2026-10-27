@@ -25,6 +25,7 @@ from agent_core.runtime.loop import (
     apply_tool_evidence,
     checkpoint,
     recover_browser_failure,
+    with_event_sequences,
 )
 
 
@@ -412,6 +413,7 @@ class BrowserWorkflowRunner:
         elif recorded != len(results):
             raise ConflictError("persisted tool usage does not match the pending workflow call")
         state["calls"] += len(results)
+        results = await with_event_sequences(context, results)
         context.checkpoint.conversation.extend(results)
         apply_tool_evidence(context.checkpoint.working_state, calls)
         context.checkpoint.pending_tool_calls = []

@@ -51,24 +51,28 @@ took 29 steps and 2.31 million input tokens, cost USD 13.70, and kept nothing.
    `tool.arguments_invalid` followed by that tool's pinned definition. A
    tool's own output that copies a definition, or a schema-only answer
    recorded before this decision, truncates as before.
-3. **A result of the current run carries its event number.** After a batch
-   runs, the loop gives each new result the sequence of the event that
-   recorded it, as history rebuilt from the log already does. A replayed
-   result recorded by an earlier attempt keeps none.
+3. **A result of the current run carries its event number.** After tools run,
+   the runtime gives each new result the sequence of the event that recorded
+   it, as history rebuilt from the log already does: the model's batch, a
+   refusal, the runtime's own browser recovery and workflow reads, and a batch
+   resumed after an approval. A replayed result recorded by an earlier attempt
+   keeps none.
 4. **A platform note says when results are truncated.** While anything is
    truncated, the step context gains a platform row: older results are
    pointers that no tool reads back, and a call should not be repeated only to
    recover one. When the plan defines `context.update_working_state`, the row
    also says to keep each needed finding as a fact citing its result's event,
-   and lists the events of the newest twelve results still shown, with the
-   pinned tool that produced each. The row is in the step context, outside the
+   and lists the events of the newest twelve results still shown whole after
+   the history cut, with the pinned tool that produced each. The row is in the step context, outside the
    cached body, and only names tools the plan pins.
 5. **`web.fetch_json` reads named fields of a public JSON document.** It takes
    a URL and one to thirty-two dotted paths of object keys, array indexes and
    `*` for every array element. It reads the document through `web.fetch`'s
    provider route, unwraps one Markdown code fence, and returns the selected
    values and the paths that matched nothing. A page that is not JSON fails
-   with `tool.web.json_invalid`, and a selection past 64 KiB fails with
+   with `tool.web.json_invalid`, as does NaN, Infinity, a number too large for
+   a float or nesting too deep to decode; a lone surrogate in a string becomes
+   U+FFFD. A selection past 64 KiB fails with
    `tool.web.json_selection_too_large`. Its classification is `web.fetch`'s:
    `NETWORK_READ`, `READ_ONLY`, `EXTERNAL_UNTRUSTED`, `web_provider` target,
    and the policy engine treats it as one of the fixed provider tools. The
@@ -108,13 +112,18 @@ and re-plan every chat.
 - `tests/unit/test_context_truncation_recovery.py`: the newest definition
   answer survives truncation while a stale copy, a direct call's copy and a
   schema-only answer truncate; the note appears only while results are
-  truncated and names the events of the results still shown.
+  truncated and names the events of the results still shown, after the
+  history cut.
 - `tests/gates/test_truncation_recovery_adr0256.py`: in a composed run, every
   truncation pointer names a recorded `tool.call.completed` event and the note
-  lists events of results still shown.
+  lists events of results still shown; a browser recovery read and a batch
+  resumed after an approval carry their events.
+- `tests/unit/test_browser_feed_workflow.py`: every browser workflow read in
+  the final report request carries its event.
 - `tests/unit/test_web_fetch_json.py`: field selection from raw and fenced
-  JSON, `*` paths, the two failures, URL refusal, and a deferred call through
-  the default agent that policy allows.
+  JSON, `*` paths, the two failures including non-finite numbers and deep
+  nesting, lone surrogates, URL refusal, and a deferred call through the
+  default agent that policy allows.
 
 Each test failed before its change: the refusal returned only
 `Input schema: …`, the definition answer truncated with the others, no note

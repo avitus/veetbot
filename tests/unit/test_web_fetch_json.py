@@ -107,17 +107,38 @@ async def test_a_page_that_is_not_json_fails_and_names_web_fetch() -> None:
 
 @pytest.mark.parametrize(
     "content",
-    ['{"ahead_by": NaN}', '{"ahead_by": -Infinity}', "[" * 100_000 + "]" * 100_000],
-    ids=["nan", "infinity", "deeply-nested"],
+    [
+        '{"ahead_by": NaN}',
+        '{"ahead_by": -Infinity}',
+        '{"ahead_by": 1e400}',
+        "[" * 100_000 + "]" * 100_000,
+        # Within the C parser's limit, past Python's own recursion limit.
+        "[" * 2_000 + "]" * 2_000,
+    ],
+    ids=["nan", "infinity", "overflowing-number", "deeply-nested", "nested-past-python"],
 )
 async def test_a_document_outside_strict_json_fails_as_invalid(content: str) -> None:
-    # Python's parser accepts NaN and Infinity, which no JSON store accepts,
-    # and raises RecursionError, not ValueError, on deep nesting.
-    result = await _fetch(content, ["ahead_by"])
+    # Python's parser accepts NaN and Infinity and turns an overflowing number
+    # into Infinity, which no JSON store accepts; it raises RecursionError,
+    # not ValueError, on deep nesting.
+    result = await _fetch(content, ["0"] if content.startswith("[") else ["ahead_by"])
 
     assert not result.ok
     assert result.failure is not None
     assert result.failure.reason_code == "tool.web.json_invalid"
+
+
+async def test_a_lone_surrogate_becomes_the_replacement_character() -> None:
+    # JSON escapes can spell a lone surrogate, which UTF-8 cannot encode.
+    document = r'{"name": "a\ud800b", "nested": {"k\udfff": ["\ud83d"]}}'
+
+    result = await _fetch(document, ["name", "nested"])
+
+    answer = _answer(result)
+    assert answer["values"] == {"name": "a\ufffdb", "nested": {"k\ufffd": ["\ufffd"]}}
+    assert result.structured is not None
+    assert result.structured["values"] == answer["values"]
+    cast(TextPart, result.content[0]).text.encode("utf-8")
 
 
 async def test_a_selection_past_the_output_limit_asks_for_narrower_fields() -> None:

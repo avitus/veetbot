@@ -695,6 +695,14 @@ class BudgetedContextBuilder:
             plan.model_id,
         )
         retained_history = [item.model_copy(deep=True) for item in history[cut:]]
+        if note_items:
+            # The note names results still shown, so it is rendered again from
+            # what the cut kept. It can only lose entries, so the fixed body it
+            # was measured in still bounds it (ADR-0256).
+            note_index = len(active_with_context) - (len(active) - active_prefix) - 1
+            active_with_context[note_index] = _truncation_note(
+                combined[cut:], {index - cut for index in truncated_indexes if index >= cut}, plan
+            )
         retained_conversation = [*retained_history, *active_with_context]
         validate_tool_pairs(retained_conversation)
 

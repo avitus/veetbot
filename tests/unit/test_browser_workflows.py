@@ -217,6 +217,9 @@ async def test_reclaimed_workflow_does_not_charge_an_already_recorded_tool_twice
     )
     monkeypatch.setattr(workflows, "checkpoint", AsyncMock())
     monkeypatch.setattr(workflows, "recover_browser_failure", AsyncMock())
+    monkeypatch.setattr(
+        workflows, "with_event_sequences", AsyncMock(side_effect=lambda _context, results: results)
+    )
     runner = workflows.BrowserWorkflowRunner(BrowserWorkflowCatalog(), policy_version="v1")
     await runner._dispatch_pending(context, {"calls": 2})
     record.assert_not_awaited()

@@ -715,7 +715,7 @@ async def _record_refusals(
     context.checkpoint.conversation.extend(recorded)
 
 
-async def _with_event_sequences(
+async def with_event_sequences(
     context: RunContext, results: list[ToolResultItem]
 ) -> list[ToolResultItem]:
     """Give each new result the sequence of the event that recorded it (ADR-0256).
@@ -921,6 +921,7 @@ async def recover_browser_failure(
         lease=context.lease,
     )
     await context.budgets.record_tool_usage(context.run, len(recovered), step=step)
+    recovered = await with_event_sequences(context, recovered)
     context.checkpoint.conversation.extend(recovered)
     apply_tool_evidence(context.checkpoint.working_state, [call])
     context.checkpoint.pending_tool_calls = []
@@ -1550,7 +1551,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             )
         step.tool_call_count = len(results)
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
-        results = await _with_event_sequences(context, results)
+        results = await with_event_sequences(context, results)
         context.checkpoint.conversation.extend(results)
         apply_tool_evidence(context.checkpoint.working_state, fitted_calls)
         context.checkpoint.pending_tool_calls = []

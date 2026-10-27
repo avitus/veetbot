@@ -672,8 +672,8 @@ the cheapest and most recoverable loss first:
    and that a call should not be repeated only to recover one. When the plan
    defines `context.update_working_state`, the note also says to keep each
    needed finding as a fact citing its result's event, and lists the events of
-   the newest twelve results still shown, each with the pinned tool that
-   produced it. The note sits in the step context, after the cached body.
+   the newest twelve results the history cut keeps whole, each with the pinned
+   tool that produced it. The note sits in the step context, after the cached body.
 4. **History compacts.** Deliberately last: it is the only step that costs a model
    call on the critical path, and the only one that loses information the run
    cannot cheaply re-fetch.

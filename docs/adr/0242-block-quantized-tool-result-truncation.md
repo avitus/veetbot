@@ -64,8 +64,9 @@ there, it needs its own evidence and decision.
   between block boundaries. On the run above the thirty-two affected steps
   would have paid for about three uncached reads instead of thirty.
 - A quarter budget of recent tool results may become pointers up to a quarter
-  budget earlier than before. The model asks for a pointer's content through
-  the event or artifact reference it carries, as the ladder already requires.
+  budget earlier than before. No model-callable tool reads a pointer's content
+  back (corrected by ADR-0256): a finding the model still needs belongs in
+  working state, citing the event of the result it came from.
 - `context.budget.pressure` goes on recording `tool_results` on every step on
   which anything is truncated; the event does not distinguish a step that
   moved the boundary from one that repeated it.
