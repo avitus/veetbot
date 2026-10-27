@@ -365,29 +365,46 @@ jobs:
       - store_apple_test_results:
           platform: macos
 
-  # Each node builds once and runs every second case on the iPhone and the
-  # iPad simulator at the same time, which take no longer together than one
-  # alone (ADR-0230, ADR-0257).
-  apple-ios:
+  # One simulator per executor, so the two devices never share a machine, and
+  # a rerun repeats only the failed one (ADR-0230). Both devices on one machine
+  # made two cases fail on hit-testing (ADR-0257).
+  apple-ios-device:
+    parameters:
+      device:
+        type: enum
+        enum: [iphone, ipad]
     macos:
       xcode: "27.0.0"
     resource_class: m4pro.medium
+    # The suite is one XCTest class, so each node takes every second case.
     parallelism: 2
     steps:
       - checkout
       - skip_verified_tree:
-          job: apple-ios
+          job: apple-ios-<< parameters.device >>
           inputs: *apple_inputs
       - run:
-          name: Apple client iOS UI tests
+          name: Apple client << parameters.device >> UI tests
           command: >-
+            IOS_UI_DEVICES=<< parameters.device >>
             IOS_UI_SHARD="$CIRCLE_NODE_INDEX/$CIRCLE_NODE_TOTAL"
             APPLE_TEST_RESULTS_DIR="$PWD/build/apple-test-results"
             make test-apple-ui-ios
       - record_verified_tree:
-          job: apple-ios
+          job: apple-ios-<< parameters.device >>
       - store_apple_test_results:
-          platform: ios
+          platform: ios-<< parameters.device >>
+
+  # The required apple-ios status of main's branch protection: it passes once
+  # both simulator devices have passed (ADR-0230).
+  apple-ios:
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - run:
+          name: Both simulator devices passed
+          command: echo "apple-ios-iphone and apple-ios-ipad passed."
 
   apple-testflight:
     macos:
@@ -751,7 +768,16 @@ workflows:
       - integration
       - sandbox
       - apple
-      - apple-ios
+      - apple-ios-device:
+          name: apple-ios-iphone
+          device: iphone
+      - apple-ios-device:
+          name: apple-ios-ipad
+          device: ipad
+      - apple-ios:
+          requires:
+            - apple-ios-iphone
+            - apple-ios-ipad
       - apple-signing-smoke:
           context: veetbot-apple-signing
           filters:

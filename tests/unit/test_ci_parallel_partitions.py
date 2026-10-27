@@ -37,34 +37,52 @@ def _verify_entries() -> dict[str, dict[str, Any]]:
 APPLE_INPUTS = "clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py"
 
 
-def test_one_simulator_job_shards_the_cases_and_runs_both_devices_on_each_node() -> None:
-    """ADR-0257: two nodes, each building once and testing both devices at once."""
-    job = _config()["jobs"]["apple-ios"]
-    assert job["macos"] == {"xcode": "27.0.0"}
-    assert job["resource_class"] == "m4pro.medium"
-    assert job["parallelism"] == 2
+def test_the_simulator_ui_job_runs_once_per_device_on_its_own_executor() -> None:
+    """ADR-0257 measured both devices on one machine failing two cases on hit-testing."""
+    job = _config()["jobs"]["apple-ios-device"]
+    assert job["parameters"] == {"device": {"type": "enum", "enum": ["iphone", "ipad"]}}
     commands = [step["run"]["command"] for step in job["steps"] if "run" in step]
-    test_command = next(command for command in commands if "make test-apple-ui-ios" in command)
-    assert 'IOS_UI_SHARD="$CIRCLE_NODE_INDEX/$CIRCLE_NODE_TOTAL"' in test_command
-    # Unset, the target runs the iPhone and the iPad together.
-    assert "IOS_UI_DEVICES" not in test_command
-    assert {"store_apple_test_results": {"platform": "ios"}} in job["steps"]
-    assert "apple-ios-device" not in _config()["jobs"]
+    assert any(
+        "IOS_UI_DEVICES=<< parameters.device >>" in command and "make test-apple-ui-ios" in command
+        for command in commands
+    )
+    assert {
+        "skip_verified_tree": {"job": "apple-ios-<< parameters.device >>", "inputs": APPLE_INPUTS}
+    } in job["steps"]
+    assert {"record_verified_tree": {"job": "apple-ios-<< parameters.device >>"}} in job["steps"]
+    assert {"store_apple_test_results": {"platform": "ios-<< parameters.device >>"}} in job["steps"]
 
-
-def test_the_required_apple_ios_status_is_the_simulator_job_itself() -> None:
-    """main's branch protection requires the status named apple-ios."""
     entries = _verify_entries()
-    assert entries["apple-ios"] == {"job": "apple-ios"}
-    assert not {"apple-ios-iphone", "apple-ios-ipad"} & entries.keys()
+    for device in ("iphone", "ipad"):
+        assert entries[f"apple-ios-{device}"] == {
+            "job": "apple-ios-device",
+            "name": f"apple-ios-{device}",
+            "device": device,
+        }
+
+
+def test_the_required_apple_ios_status_passes_only_after_both_devices() -> None:
+    """main's branch protection requires the status named apple-ios."""
+    gate = _config()["jobs"]["apple-ios"]
+    assert [next(iter(step)) for step in gate["steps"]] == ["run"]
+    entries = _verify_entries()
+    assert entries["apple-ios"]["requires"] == ["apple-ios-iphone", "apple-ios-ipad"]
     assert "apple-ios" in entries["package-release"]["requires"]
 
 
-@pytest.mark.parametrize("name", ["apple", "apple-ios"])
-def test_the_apple_jobs_key_their_record_on_the_apple_inputs(name: str) -> None:
-    steps = _config()["jobs"][name]["steps"]
-    assert {"skip_verified_tree": {"job": name, "inputs": APPLE_INPUTS}} in steps
-    assert {"record_verified_tree": {"job": name}} in steps
+def test_each_device_splits_its_cases_across_two_executors() -> None:
+    job = _config()["jobs"]["apple-ios-device"]
+    assert job["parallelism"] == 2
+    commands = [step["run"]["command"] for step in job["steps"] if "run" in step]
+    assert any(
+        'IOS_UI_SHARD="$CIRCLE_NODE_INDEX/$CIRCLE_NODE_TOTAL"' in command for command in commands
+    )
+
+
+def test_the_macos_job_keys_its_record_on_the_apple_inputs() -> None:
+    steps = _config()["jobs"]["apple"]["steps"]
+    assert {"skip_verified_tree": {"job": "apple", "inputs": APPLE_INPUTS}} in steps
+    assert {"record_verified_tree": {"job": "apple"}} in steps
 
 
 @pytest.mark.parametrize("name", ["static", "integration"])

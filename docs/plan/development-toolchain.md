@@ -526,16 +526,18 @@ Job 6 is an additional native-client gate outside `make check`, split across
 two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it, then runs the macOS UI cases with
-`make test-apple-ui-macos`. Job 6b, `apple-ios`, runs `make test-apple-ui-ios`
-on two executors (ADR-0257). Each builds the UI-test products once, boots the
-iPhone and iPad simulators, and with `IOS_UI_SHARD=INDEX/TOTAL` runs every
-second enumerated case on both devices at the same time
-(`scripts/ios_ui_shard.py`, ADR-0230). `IOS_UI_DEVICES` names the devices a
-local run builds for, boots, and tests, and defaults to both. Both Apple jobs
+`make test-apple-ui-macos`. Job 6b runs `make test-apple-ui-ios` on available
+iPhone and iPad simulators, as two instances of `apple-ios-device`
+(`apple-ios-iphone` and `apple-ios-ipad`) on separate executors, and a
+step-only `apple-ios` job passes once both have; `IOS_UI_DEVICES` names the
+devices a run builds for, boots, and tests, and defaults to both. Each device
+job runs on two executors, and `IOS_UI_SHARD=INDEX/TOTAL` makes each run every
+second enumerated case (`scripts/ios_ui_shard.py`, ADR-0230). Running both
+devices on one executor made two cases fail on hit-testing (ADR-0257). The Apple jobs
 key their exact-run record on their inputs alone: `clients/apple`, the
 `Makefile`, this configuration, and the shard script. Nothing else reaches
-the Apple suites, so a change outside those paths halts both jobs right
-after checkout. The macOS cases synthesize real pointer and
+the Apple suites, so a change outside those paths halts them right after
+checkout. The macOS cases synthesize real pointer and
 keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
 VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
 both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM
@@ -718,7 +720,8 @@ Three workflow-level facts complete the definition:
     receive publication credentials.
     Production packaging requires ten verification statuses: `static`, `contract`,
     `integration`, `sandbox`, `apple`, `apple-ios`, `public-site`, `browser`,
-    `browser-image-x86_64`, and `browser-image-arm64`. Current `main` branch protection
+    `browser-image-x86_64`, and `browser-image-arm64`. The `apple-ios` aggregate
+    requires both simulator-device jobs. Current `main` branch protection
     requires the same set except `browser`; packaging still enforces that
     additional release gate. On every branch, each verification job
     except `public-site` halts

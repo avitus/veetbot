@@ -4,7 +4,7 @@
 - Date: 2026-10-26
 - Related: ADR-0107, ADR-0114, ADR-0152, ADR-0230, ADR-0236
 - Amends: ADR-0107 decision 3 (the `dev` gate), ADR-0114 (records honoured on
-  `main` only), ADR-0230 decisions 1 and 2 (the simulator executor layout)
+  `main` only)
 - Detailed design: `docs/plan/development-toolchain.md`
 
 ## Context
@@ -53,20 +53,16 @@ those paths, yet each requested run started both Apple jobs in full.
    `make lint`, `make typecheck`, and `make docs-check` for documentation. The
    sidecar is for focused browser cases (ADR-0236) and is the fallback for a
    full `make check` when hosted CI is unavailable, not a per-push gate.
-2. **One simulator job, two nodes, both devices on each.** `apple-ios` is
-   again the macOS job itself, so the status `main`'s branch protection
-   requires still names it. It runs on two nodes. Each node builds once,
-   boots the iPhone and the iPad simulators, and with
-   `IOS_UI_SHARD=INDEX/TOTAL` runs every second case on both devices at the
-   same time. The per-device jobs `apple-ios-iphone` and `apple-ios-ipad`, and
-   the step-only gate that required them, are removed.
+2. **The simulator layout of ADR-0230 stays.** One executor per device, each
+   on two nodes. A layout with both devices on each of two nodes was tried
+   and withdrawn; see Consequences.
 3. **Apple jobs keyed on their inputs.** `skip_verified_tree` takes an
    optional `inputs` list. Without it, the record's identity is the source
    tree, as before. With it, the identity is a digest of the git objects at
-   those paths, and a missing path fails the step. `apple` and `apple-ios`
-   name `clients/apple`, `Makefile`, `.circleci/config.yml`, and
+   those paths, and a missing path fails the step. `apple` and both
+   simulator-device jobs name `clients/apple`, `Makefile`, `.circleci/config.yml`, and
    `scripts/ios_ui_shard.py`, so a run whose Apple inputs already passed halts
-   both Apple jobs right after checkout.
+   every Apple job right after checkout.
 4. **Records hold on every branch.** A verification job halts on any branch,
    not only on `main`, when it finds its own record for its identity. A job
    writes that record only after its last step passes, so a rerun of a
@@ -77,13 +73,19 @@ those paths, yet each requested run started both Apple jobs in full.
 
 - A run that touches no Apple input bills each Apple job for its start-up and
   checkout only, so its cost falls from about 13,600 macOS credits to roughly
-  the Linux jobs plus about a minute on each of the three Apple executors. Its
-  wall-clock time is set by the Linux jobs, about 12 to 14 minutes, instead of
+  the Linux jobs plus about a minute on each of the five Apple nodes. Its
+  wall-clock time is set by the Linux jobs, about 12 to 15 minutes, instead of
   by the simulator suite.
-- A run that touches the Apple inputs uses two simulator executors instead of
-  four. Each node runs about half the cases on two devices at once, which
-  ADR-0230's measurements put at about the 17 to 18 minutes of the four-node
-  layout. That figure is an estimate until a requested run measures it.
+- A run that touches the Apple inputs costs what it did under ADR-0230.
+- Two nodes that each ran both devices on half the cases were measured and
+  withdrawn. In requested pipeline 1569 (the `dev` head) and pipeline 1572
+  (the same change on `77d013e5`, whose four-node run had passed), each node
+  ran its 39 or 40 cases on each device in 1,104 to 1,193 seconds. The jobs
+  took about 23 minutes, against the predicted 17 to 18. On the green tree,
+  iPhone `testA2MarkdownArtifactRendersAReadableDocument` and iPad
+  `testMemoryWordingIsCorrectedAndTheOwnersWordsAreQuoted` failed on
+  hit-testing. They are the same shards that pass when each device has its
+  own machine, so the shared machine, not the case split, broke them.
 - Fewer hosted runs: one per promotion plus reruns after a final-run failure,
   instead of one per review round. A failure that only hosted jobs can see,
   such as a simulator regression, surfaces at the final run rather than while
@@ -102,11 +104,13 @@ those paths, yet each requested run started both Apple jobs in full.
 
 ## Alternatives considered
 
-- **Keep four simulator executors.** Saves no time over two nodes running both
-  devices at once, and costs about twice as much.
+- **Two nodes, each running both devices.** Half the simulator executors of
+  ADR-0230. Measured, slower than predicted, and two cases failed; see
+  Consequences.
 - **One simulator executor with no sharding.** Cheapest per Apple-changing run
   (about 3,470 credits) but makes the simulator suite, about 30 minutes, the
-  longest job again.
+  longest job again, and it shares one machine between both devices, which
+  pipeline 1572 showed breaks two cases.
 - **Dynamic configuration that never starts the Apple jobs.** Saves the
   start-up minute too. A job that never runs reports no status, so `main`'s
   required `apple` and `apple-ios` statuses would block every merge without a
