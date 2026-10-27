@@ -1797,7 +1797,8 @@ mcp_servers
   transport         TEXT NOT NULL     -- stdio | http
   endpoint          TEXT NOT NULL     -- command or URL
   auth_scheme       TEXT NOT NULL     -- none | bearer | header |
-                                      -- oauth2_client | env
+                                      -- oauth2_client | env |
+                                      -- oauth2_authorization
   auth_name         TEXT NULL         -- header name, or variable name
   credential_ref    TEXT NULL         -- broker reference, never a secret
   token_endpoint    TEXT NULL         -- oauth2_client only
