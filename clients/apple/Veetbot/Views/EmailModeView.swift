@@ -2264,7 +2264,10 @@ struct EmailLearningScreen: View {
                             Button("Reset importance preferences", role: .destructive) { resetScope = "preferences" }
                             Button("Reset writing style", role: .destructive) { resetScope = "style" }
                             Button("Reset all email learning", role: .destructive) { resetScope = "all" }
-                        }.buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red))
+                            if model.isResettingLearning {
+                                ProgressView("Resetting…").controlSize(.small)
+                            }
+                        }.buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red)).disabled(model.isResettingLearning)
                         DisclosureGroup("History by account") {
                             VStack(alignment: .leading, spacing: 16) {
                                 ForEach(model.accounts) { account in

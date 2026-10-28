@@ -55,6 +55,8 @@ public final class PeopleViewModel: ObservableObject {
     @Published public private(set) var counts: PeopleCountsView?
     /// The person whose owed thread is being corrected from its row.
     @Published public private(set) var resolvingThreadOf: UUID?
+    /// The possible duplicate whose answer is being sent, so its row shows progress.
+    @Published public private(set) var resolvingSuggestionID: UUID?
     private var isConnectionValid = true
     private var connectionObserver: AnyCancellable?
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
@@ -79,7 +81,7 @@ public final class PeopleViewModel: ObservableObject {
     }
     private func invalidateConnection() {
         isConnectionValid = false; listRequest = UUID(); searchTask?.cancel(); searchTask = nil
-        items = []; suggestions = []; suggestionSessionID = nil; searchText = ""; nextCursor = nil; seenCursors = []; counts = nil
+        items = []; suggestions = []; suggestionSessionID = nil; resolvingSuggestionID = nil; searchText = ""; nextCursor = nil; seenCursors = []; counts = nil
         isLoading = false; isLoadingMore = false; errorMessage = nil
     }
     deinit { searchTask?.cancel() }
@@ -94,7 +96,9 @@ public final class PeopleViewModel: ObservableObject {
 
     /// Merges a possible duplicate, or keeps the pair apart for good (ADR-0125).
     public func resolveSuggestion(_ suggestion: PeopleMergeSuggestionView, decision: String) async {
-        guard isConnectionValid else { return }
+        guard isConnectionValid, resolvingSuggestionID == nil else { return }
+        resolvingSuggestionID = suggestion.id
+        defer { resolvingSuggestionID = nil }
         do {
             guard let api = await makeAPIClient() else { throw HTTPTransportError.notConfigured }
             let session: UUID

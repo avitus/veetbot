@@ -418,6 +418,23 @@ import Testing
         board.setVisible(false)
     }
 
+    /// Saved settings leave the form looking as it did, so a toast says they were saved.
+    @Test
+    func savingSettingsIsConfirmed() async {
+        let client = FakeClient()
+        client.queueSnapshot(.success(Self.snapshot(cursor: 41)))
+        client.queueStream([])
+        let board = model(client)
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.openDetail("weather")
+        await board.saveSettings("weather", values: ["place": .string("Harbor")])
+        #expect(toasts.current?.text == "Settings saved.")
+        board.setVisible(false)
+    }
+
     @Test
     func anOpenIntentNavigatesOnlyToADeliveredIdentifier() async {
         let delivered = UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!

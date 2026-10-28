@@ -211,6 +211,9 @@ public final class CockpitViewModel: ObservableObject {
     public func saveSettings(_ slug: String, values: [String: JSONValue]) async {
         await perform { client in
             try await client.putCockpitSettings(slug, values: values)
+            // The form already shows the saved values, so only a toast says it took.
+            self.actionMessage = nil
+            self.toasts.show("Settings saved.")
             await self.openDetail(slug)
             return nil
         }
