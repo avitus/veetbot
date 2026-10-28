@@ -150,9 +150,13 @@ async def test_budget_capped() -> None:
     classes = config["classes"]
     assert isinstance(prefix, dict) and isinstance(classes, dict)
     # ADR-0105 added the 3,000 tokens it gave the tool class to this ceiling,
-    # ADR-0123 the 2,000 of the deferred tool index, and ADR-0255 the 2,000 of
-    # the owner-added servers' index.
-    assert prefix["ceiling_tokens"] == 24000
+    # ADR-0123 the 2,000 of the deferred tool index, ADR-0255 the 2,000 of
+    # the owner-added servers' index, and ADR-0262 the index's further 500.
+    assert prefix["ceiling_tokens"] == 24500
+    # It stays the exact sum of the Region A class caps (ADR-0079).
+    assert prefix["ceiling_tokens"] == sum(
+        int(entry["max_tokens"]) for entry in classes.values() if entry.get("region") == "A"
+    )
     assert classes["persona"] == {"region": "A", "max_items": 30, "max_tokens": 2000}
 
 

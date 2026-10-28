@@ -363,7 +363,7 @@ ceiling.
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
-| A | Deferred tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
+| A | Deferred tool index | 40 entries / 2,500 tokens | No | Only at an epoch boundary |
 | A | Owner tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
@@ -418,7 +418,9 @@ the tool pipeline unwraps before resolution, so validation, policy, approval,
 idempotency and events all run under the deferred tool's own name; invalid
 arguments return that tool's input schema. A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
-forty entries and 2,000 tokens, and the prefix ceiling rose by exactly that cap.
+forty entries and 2,500 tokens, and the prefix ceiling rose by exactly that cap:
+2,000 under ADR-0123 and 500 more under
+[ADR-0262](../adr/0262-deferred-index-token-headroom.md).
 An entry lists required parameters in the order of the schema's `required`
 array and optional ones by name, never in the order of the schema's
 properties: the builder re-renders the prefix from the specifications on the
@@ -501,8 +503,9 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 24,000 tokens — 22,000 before
-ADR-0255 added the 2,000 of the owner-added servers' index, 15,000 before
+The prefix classes sum to a hard ceiling of 24,500 tokens — 24,000 before
+ADR-0262 added 500 to the deferred tool index, 22,000 before ADR-0255 added
+the 2,000 of the owner-added servers' index, 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
 exactly its own cap, the same move the skill classes made, 17,000 before
 ADR-0105 added the 3,000 tokens it gave the tool class, and 20,000 before

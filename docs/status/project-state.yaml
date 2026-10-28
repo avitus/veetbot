@@ -33,6 +33,10 @@
 # two reads a step and sixteen a run, with no prompt tokens. Implemented with
 # unit, roster and composed gate tests; delivery is pending. No milestone or
 # gate moves.
+# ADR-0262: Owner asked on 2026-10-27 to raise the deferred tool index from
+# 2,000 to 2,500 tokens so a website-bound chat skips no Gmail write; the
+# prefix ceiling rises to 24,500. Implemented with gate tests; delivery is
+# pending. No milestone, gate or policy profile moves.
 schema_version: 1
 
 project:
@@ -2883,6 +2887,7 @@ open_items_outside_milestones:
 - 'Owner: accept or reject ADR-0104, ADR-0105, ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138, which are still Proposed although their mechanisms are implemented, specified and on main'
 - 'Owner: accept or reject ADR-0146, which is Proposed and implemented: a hosted browser launch repeats the Playwright disabled-feature list, gives push messaging a check-in address it cannot fetch, and leaves one account request to accounts.google.com on'
 - 'Owner decision: the hardline protected_host_path rule blocks .git/config only at the workspace root, so sub/.git/config is not blocked, while .env and ~/.ssh already match at any depth; decide whether it should, knowing that a change to the matcher in policy/hardline.py leaves policy_version unchanged but an edit to hardline.yaml moves it and unbinds the memory-formation release evidence (found in the 2026-09-28 test audit)'
+- 'Startup: bootstrap-and-composition.md Phase 1 says the prefix classes of the configured context plan must sum to at most the prefix ceiling before anything is built, but no startup check exists; the ceiling is enforced only per plan in context/planner.py, and the sum only by the persona gate on the shipped file, so an operator overlay that raises a class cap alone is found at the first plan that uses it; add the Phase 1 refusal or propose an ADR that drops it (found during ADR-0262)'
 
 # Evidence behind changes to the list above: a closed item, or the check that
 # confirmed a newly recorded gap.
@@ -2976,6 +2981,14 @@ outside_milestone_evidence:
     entries also match by path component. policy-and-approvals.md lists
     .git/config among the host paths outside the workspace that writes may
     not reach. Checked on 2026-09-28.
+- check: the startup prefix-sum gap
+  outcome: verified
+  detail: >-
+    At main 3295faf8 and dev a4d55ef0, src/agent_core reads
+    prefix.ceiling_tokens only in
+    context/planner.py, which refuses a plan whose measured prefix passes
+    it; neither bootstrap.py's Phase 1 nor config.py, which validates
+    context/plan.yaml's knobs one by one, adds up the Region A class caps. Checked on 2026-10-27.
 
 # Evidence for completed milestones 0 through 13, 16, 17, 19, 20, 22, 23, and 29
 # lives in docs/status/verification-history.yaml; an in-progress milestone's

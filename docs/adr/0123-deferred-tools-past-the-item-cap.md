@@ -10,7 +10,8 @@
 - Amended by: ADR-0130 (2026-09-25), which ranks `browser.navigate`,
   `browser.observe` and `browser.act` first and never defers them in a chat
   bound to a website profile; ADR-0253 (2026-10-25), which defers a configured
-  tool past the token cap
+  tool past the token cap; ADR-0262 (2026-10-27), which raises the
+  index's token cap to 2,500
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
 

@@ -662,7 +662,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:1188-1190`). The gateway translates those hints into
+(`context-engine.md:1191-1193`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -751,7 +751,7 @@ they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:1162-1164` and the
+The cached-prefix ratio is defined in `context-engine.md:1165-1167` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -1691,7 +1691,7 @@ one, still gets the request without a summary.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:692-696` requires that a
+be answerable by a tool result; `context-engine.md:695-699` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
