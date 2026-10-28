@@ -75,6 +75,10 @@ struct CockpitModeView: View {
                     draggedSidebar = nil
                 }
             )
+            // The grab area reaches into both neighbours, and a later sibling is
+            // hit-tested first: without this the board (a web view) takes every
+            // press on its side of the hairline, as Email's inbox did.
+            .zIndex(1)
             board
             if let slug = model.selectedSlug, model.availability == .available {
                 MacColumnDivider(
@@ -92,6 +96,7 @@ struct CockpitModeView: View {
                         draggedPanel = nil
                     }
                 )
+                .zIndex(1)
                 CockpitWidgetDetailView(model: model, slug: slug, close: model.closeDetail, discuss: discussWidget)
                     .frame(width: panelWidth)
                     .background(AppTheme.paperDeep)
