@@ -1,4 +1,4 @@
-"""ADR-0258: which external ``<use>`` copies a DevTools document read shows inert.
+"""ADR-0263: which external ``<use>`` copies a DevTools document read shows inert.
 
 Real Chromium covers the rendered cases in the hostile-construct suite; these
 synthetic ``DOM.getDocument`` trees cover what Chromium leaves out of a copy

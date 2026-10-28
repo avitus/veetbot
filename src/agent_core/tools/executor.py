@@ -331,7 +331,7 @@ def _action_kind(tool: Tool) -> ActionKind:
     return ActionKind.TOOL_CALL
 
 
-# ADR-0258: calls whose results bring nothing a page could be typed from, so
+# ADR-0263: calls whose results bring nothing a page could be typed from, so
 # G5 does not count them: a file export, which reports platform identifiers,
 # and a question once the owner or the platform has answered it.
 _G5_EXEMPT_TOOL_NAMES = frozenset({"artifact.export"})
@@ -345,7 +345,7 @@ def _active_turn_facts(checkpoint: RunCheckpoint) -> AuthorizationTurn:
     parse counts as ``tool.call``, which is not a browser tool. The loop
     appends a step's calls before running them, so the current step's other
     calls are included. A file export and an answered question are left out
-    (ADR-0258); a pending question, or one answered with other trust, counts.
+    (ADR-0263); a pending question, or one answered with other trust, counts.
     """
 
     names: set[str] = set()
@@ -426,7 +426,7 @@ def _task_grant_not_covered(
 
 def _research_not_covered(standing: StandingAuthorization | None) -> str | None:
     """The closed reason research authorization refused this action, when it
-    was the most specific refusal; nothing otherwise (ADR-0258)."""
+    was the most specific refusal; nothing otherwise (ADR-0263)."""
 
     if (
         standing is None

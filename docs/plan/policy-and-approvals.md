@@ -1285,7 +1285,7 @@ waiting to be discovered. Responses carry `action_summary`, `tool_name`,
 for `browser.act` the optional `task_grant_offer`, `task_grant_id`, and
 `task_grant_not_covered` (ADR-0129); they do not carry the rule that fired.
 The stored record also keeps `research_not_covered`, the closed reason that
-research authorization refused the action (ADR-0258), which responses omit.
+research authorization refused the action (ADR-0263), which responses omit.
 
 **What the card says (ADR-0260).** `action_summary` is a plain-English
 headline. A tool's presenter writes it, and a tool without one, or whose

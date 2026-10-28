@@ -378,7 +378,7 @@ async def test_svg_links_are_read_as_the_browser_follows_them() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Icons drawn from a same-origin sprite file (ADR-0258).
+# Icons drawn from a same-origin sprite file (ADR-0263).
 
 SPRITE = """<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"
  xmlns:xlink="http://www.w3.org/1999/xlink"><defs>
@@ -405,7 +405,7 @@ SPRITE_ICONS = """<!doctype html><html><head><title>Lesson</title></head><body>
 
 
 async def test_a_sprite_icon_is_read_through_the_browser() -> None:
-    """ADR-0258: Chromium shows each same-origin sprite copy outside the page's
+    """ADR-0263: Chromium shows each same-origin sprite copy outside the page's
     script, so an icon whose copy is inert no longer hides a target, while a
     copy holding a link, a cross-origin or missing symbol, and an element
     naming two references stay opaque."""
@@ -453,7 +453,7 @@ SPRITE_RETARGETED = """<!doctype html><html><head><title>Lesson</title></head><b
 
 
 async def test_an_animated_page_inspects_no_sprite() -> None:
-    """ADR-0258: animation can show one copy under another reference's name,
+    """ADR-0263: animation can show one copy under another reference's name,
     so a page with any animation element keeps every sprite icon opaque."""
 
     pages = {"/lesson/1": SPRITE_RETARGETED, "/lesson/icons.svg": SPRITE}
@@ -473,7 +473,7 @@ async def test_an_animated_page_inspects_no_sprite() -> None:
 
 
 async def test_a_sprite_icon_changed_after_observation_is_read_again() -> None:
-    """ADR-0258: the live check inspects the page again, so an icon swapped
+    """ADR-0263: the live check inspects the page again, so an icon swapped
     for a copy holding a link after the observation is refused."""
 
     pages = {"/lesson/1": SPRITE_ICONS, "/lesson/icons.svg": SPRITE}

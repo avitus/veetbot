@@ -1,4 +1,4 @@
-# ADR-0258: Fewer browser approvals in owner research
+# ADR-0263: Fewer browser approvals in owner research
 
 - Status: Proposed. The owner authorized implementation of decisions 1 to 4 on
   2026-10-25; acceptance follows the production check in Validation. A fifth
@@ -10,6 +10,9 @@
   milestone, policy profile or compiled `policy_version` changes
 - Detailed design: `docs/plan/browser-automation.md`,
   `docs/plan/policy-and-approvals.md`
+- Renumbered from ADR-0258 on 2026-10-27, when `main` took that number for
+  deferred definitions and truncation recovery; earlier commits on `dev`
+  call this decision ADR-0258
 
 ## Context
 

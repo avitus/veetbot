@@ -1075,7 +1075,7 @@ inputs cannot use this permission, nor can a turn that called a non-browser tool
 since the owner's message (ADR-0129 G5); profile, revision, effect and budget checks
 remain. Composition requires the default bounded-scroll rule with approval
 otherwise; custom unconditional approval or deny rules retain their behavior.
-ADR-0258 narrows G5's non-browser tools. Two calls do not count:
+ADR-0263 narrows G5's non-browser tools. Two calls do not count:
 `conversation.ask_user` once its result has `user` or `platform` trust (the
 owner's answer, or the server-authored sign-in resumption), and `artifact.export`,
 whose result holds only platform identifiers. A refusal names a closed,
@@ -1132,7 +1132,7 @@ navigation target. The worker applies it to the observation that named the
 element; the isolated runtime applies it again to the live page before a
 grant-authorized dispatch. A label or context that matches the exclusion
 vocabulary yields a named consequence, never `routine` or `unknown`. Two
-descriptive phrases do not match (ADR-0258): `updated` immediately before a
+descriptive phrases do not match (ADR-0263): `updated` immediately before a
 month name or abbreviation, and `report` or `reports` immediately after
 `pathology`, `lab`, `laboratory`, `radiology` or `imaging`. Each text
 is read as written and as displayed: in the order a right-to-left override
@@ -1219,7 +1219,7 @@ eligible run with a `READY` hosted profile.
 A task grant covers click, select, check, press, scroll, and typing into text,
 search, and multi-line fields, including `unknown`-consequence actions, and
 only in a model turn whose tool calls since the owner's newest message are all
-browser tools, apart from the two calls ADR-0258 exempts: an answered question
+browser tools, apart from the two calls ADR-0263 exempts: an answered question
 and a file export. Each grant covers typing only into an input
 or a text area, not a region the page made editable; select in a select; and
 check on a native check box or radio, not a choice control the page built.
@@ -1251,7 +1251,7 @@ opaque (ADR-0129). For a same-origin external reference, such as an icon drawn
 from a site's sprite file, the isolated runtime reads the rendered copies
 through Chromium's DevTools protocol, outside the page's script realm, and reads
 the element again. It does so once per observation or live check, only when an
-element read meets such a reference (ADR-0258). A reference is inspected only
+element read meets such a reference (ADR-0263). A reference is inspected only
 when every `<use>` naming it alone shows a loaded copy that, through nested
 copies, holds no link, frame, object, embed, foreign object, image map or
 animation element, within 2,048 nodes. A `<use>` naming two references vouches

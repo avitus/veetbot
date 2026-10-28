@@ -56,7 +56,7 @@ async def test_named_consequences_still_require_approval(tmp_path: Path) -> None
         assert (await harness.settled(run_id)).status is RunStatus.WAITING_FOR_APPROVAL
         [approval] = await harness.composition.approvals.list_pending(run_id=run_id)
         assert not harness.runtimes[0].actions
-        # ADR-0258: the stored record says why research mode refused.
+        # ADR-0263: the stored record says why research mode refused.
         assert approval.research_not_covered == "excluded.destructive"
 
 
@@ -76,7 +76,7 @@ def _between(name: str) -> ScriptedTurn:
 async def test_an_answered_question_or_an_export_keeps_research_permission(
     tmp_path: Path, between: str
 ) -> None:
-    """ADR-0258: the owner's answer and a saved file bring nothing a page could
+    """ADR-0263: the owner's answer and a saved file bring nothing a page could
     be typed from, so the next ordinary act needs no card. A run parked on a
     question resumes in a fresh browser, so it opens the page again first, as
     the platform's own sign-in resumption does."""

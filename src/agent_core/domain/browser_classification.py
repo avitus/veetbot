@@ -102,7 +102,7 @@ _IRREGULAR_FORMS: dict[str, tuple[str, ...]] = {
     "choose": ("chose", "chosen"),
     "withdraw": ("withdrew", "withdrawn"),
 }
-# ADR-0258: two phrases that describe a record rather than act on it. A token
+# ADR-0263: two phrases that describe a record rather than act on it. A token
 # is read as description only beside the named neighbour, in that reading.
 _MONTHS = frozenset(
     [
@@ -434,7 +434,7 @@ def label_reads_as(text: str, other: str) -> bool:
 
 
 def _descriptive(tokens: Sequence[str], index: int) -> bool:
-    """Whether ``tokens[index]`` describes a record (ADR-0258): "updated"
+    """Whether ``tokens[index]`` describes a record (ADR-0263): "updated"
     immediately before a month, or "report" immediately after a report type."""
 
     token = tokens[index]

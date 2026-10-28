@@ -46,7 +46,7 @@ from agent_core.ports.policies import PolicyEngine
 
 
 def _refused(reason: str) -> StandingAuthorization:
-    """A refusal that names research and its closed reason (ADR-0258)."""
+    """A refusal that names research and its closed reason (ADR-0263)."""
 
     if reason not in RESEARCH_NOT_COVERED_REASONS:
         raise ValueError("research reason is not in the closed list")

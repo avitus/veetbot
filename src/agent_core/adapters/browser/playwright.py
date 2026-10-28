@@ -1125,7 +1125,7 @@ class PythonPlaywrightRuntime:
             return None
         metadata = await handle.evaluate(_ELEMENT_SCRIPT)
         if inspection is not None and _external_uses(metadata):
-            # ADR-0258: an external <use> copy page script cannot see; read it
+            # ADR-0263: an external <use> copy page script cannot see; read it
             # through the browser, then read the element again.
             inspected = await inspection.references()
             if inspected:
@@ -1408,7 +1408,7 @@ class PythonPlaywrightRuntime:
             guard = await handle.evaluate_handle(_GUARDED_READ_SCRIPT)
             metadata = await guard.evaluate("guard => guard.metadata")
             if _external_uses(metadata):
-                # ADR-0258: inspect the live page's copies, then read and arm again.
+                # ADR-0263: inspect the live page's copies, then read and arm again.
                 inspected = await _inspected_use_references(page)
                 if inspected:
                     await _release_guards([guard])
@@ -1760,14 +1760,14 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
 
 
 def _external_uses(metadata: object) -> bool:
-    """Whether an element read met an external ``<use>`` reference (ADR-0258)."""
+    """Whether an element read met an external ``<use>`` reference (ADR-0263)."""
 
     uses = metadata.get("externalUses") if isinstance(metadata, dict) else None
     return isinstance(uses, list) and bool(uses)
 
 
 async def _inspected_use_references(page: Page) -> list[str]:
-    """Same-origin external ``<use>`` references whose copies are inert (ADR-0258).
+    """Same-origin external ``<use>`` references whose copies are inert (ADR-0263).
 
     Chromium's DevTools protocol shows each copy as the element's user-agent
     shadow root, which page script cannot reach or alter. Any failure inspects
@@ -1789,7 +1789,7 @@ async def _inspected_use_references(page: Page) -> list[str]:
 
 class _UseInspection:
     """At most one DevTools read per observation, made only when an element
-    met an external ``<use>`` reference (ADR-0258)."""
+    met an external ``<use>`` reference (ADR-0263)."""
 
     def __init__(self, page: Page) -> None:
         self._page = page
@@ -1812,7 +1812,7 @@ class _UseInspection:
 # too. Past the walk's bounds, or with an embedded document, an image map or an
 # SVG <use> whose copy could hold a link inside, the element is opaque: its
 # targets cannot be listed. An external reference the runtime inspected
-# through the browser is read like a fragment one (ADR-0258). Beside the
+# through the browser is read like a fragment one (ADR-0263). Beside the
 # metadata it returns every
 # element it read: the node, its ancestors and descendants, the controls of
 # labels among them, and the default button of its form.
@@ -1882,7 +1882,7 @@ _READ_ELEMENT_SCRIPT = """(node, inspected) => {
     // something in another document, is opaque; a plain icon is not.
     const copyUnsafe = [...embedders, 'a', 'use', 'foreignObject'];
     // Same-origin external references whose every copy the runtime read
-    // through the browser and found inert (ADR-0258).
+    // through the browser and found inert (ADR-0263).
     const inspectedUses = new Set(Array.isArray(inspected) ? inspected : []);
     const externalUses = new Set();
     const useOpaque = use => [use.getAttribute('href'),

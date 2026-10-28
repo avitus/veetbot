@@ -335,7 +335,7 @@ class CompositeStandingAuthorizer:
 
     The first allow wins. A denial falls back to approval; when the task
     grant was consulted and named a grant, its denial is the most specific,
-    then research's named refusal (ADR-0258).
+    then research's named refusal (ADR-0263).
     """
 
     def __init__(self, authorizers: Sequence[StandingAuthorizer]) -> None:
@@ -381,7 +381,7 @@ class CompositeStandingAuthorizer:
         )
         if specific is not None:
             return specific
-        # ADR-0258: research's named refusal is the next most specific.
+        # ADR-0263: research's named refusal is the next most specific.
         research = next(
             (
                 denial

@@ -243,7 +243,7 @@ class BrowserTaskGrantOffer(BaseModel):
         return require_task_grant_path_prefix(value)
 
 
-# Why research authorization refused an action (ADR-0258): its own checks,
+# Why research authorization refused an action (ADR-0263): its own checks,
 # then each coverage rule a research constraint can fail. Content-free, and
 # kept on the approval record only.
 RESEARCH_NOT_COVERED_REASONS: frozenset[str] = frozenset(
