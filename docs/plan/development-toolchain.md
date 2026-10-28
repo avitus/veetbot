@@ -398,12 +398,16 @@ remains in force; only each synthetic HTTPS harness opens its bounded local
 transport.
 
 Hosted browsers are headed, and only Linux gives each one a private display,
-so the partition runs on the Linux sidecar by default (ADR-0236). There
+so on a Mac the partition runs on Linux elsewhere (ADR-0236). There
 `make test-browser`, and `make test-browser-cases CASES=<paths>` for named
-cases, run on the Linux sidecar through `scripts/run_on_sidecar.sh`; a browser
-case collected on a Mac host skips, which this gate counts as unpassed.
-`test-browser-cases` writes no baseline report. `VEETBOT_BROWSER_ON_HOST=1`
-runs either on the Mac deliberately.
+cases, run on the Linux sidecar through `scripts/run_on_sidecar.sh` by default.
+With `VEETBOT_BROWSER_ROUTE=docker` they run instead in a local linux/amd64
+container through `scripts/run_in_linux_container.sh`, which builds
+`deploy/browser-test.Dockerfile` (Chromium and Xvfb, cached on `uv.lock`) and
+mounts the checkout, so the baseline report lands in it; any other route value
+fails the browser targets. A browser case collected on a Mac host skips, which
+this gate counts as unpassed. `test-browser-cases` writes no baseline report.
+`VEETBOT_BROWSER_ON_HOST=1` runs either on the Mac deliberately.
 
 `make check` includes `test-browser`, which depends on `browser-install`.
 Hosted CI runs a separate browser job and packaging depends on

@@ -85,15 +85,25 @@ test-fast: test-static test-contract
 
 # Hosted browsers are headed. Linux gives each a private Xvfb display; a Mac
 # would open the windows on the owner's desktop, so there both browser targets
-# run on the Linux chunk sidecar instead (ADR-0236). VEETBOT_BROWSER_ON_HOST=1
-# runs them on the Mac deliberately. test-browser-cases runs only the named
-# cases, so it writes no gate report.
+# run on Linux elsewhere (ADR-0236): the chunk sidecar, or with
+# VEETBOT_BROWSER_ROUTE=docker a local linux/amd64 container.
+# VEETBOT_BROWSER_ON_HOST=1 runs them on the Mac deliberately. test-browser-cases
+# runs only the named cases, so it writes no gate report.
+VEETBOT_BROWSER_ROUTE ?= sidecar
+ifeq ($(VEETBOT_BROWSER_ROUTE),sidecar)
+BROWSER_ROUTE_SCRIPT := scripts/run_on_sidecar.sh
+else ifeq ($(VEETBOT_BROWSER_ROUTE),docker)
+BROWSER_ROUTE_SCRIPT := scripts/run_in_linux_container.sh
+else
+# Deferred, so an unknown route fails only the browser targets.
+BROWSER_ROUTE_SCRIPT = $(error VEETBOT_BROWSER_ROUTE must be sidecar or docker, not '$(VEETBOT_BROWSER_ROUTE)')
+endif
 ifeq ($(HOST_OS)$(VEETBOT_BROWSER_ON_HOST),Darwin)
 test-browser:
-	@scripts/run_on_sidecar.sh make test-browser
+	@$(BROWSER_ROUTE_SCRIPT) make test-browser
 
 test-browser-cases:
-	@scripts/run_on_sidecar.sh "make test-browser-cases CASES='$(CASES)'"
+	@$(BROWSER_ROUTE_SCRIPT) "make test-browser-cases CASES='$(CASES)'"
 else
 test-browser: browser-install
 	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 -m browser \

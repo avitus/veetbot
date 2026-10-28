@@ -43,3 +43,28 @@ automation does not take over the desktop.
 - Headless Chromium launched outside the partition (for example the
   authentication-surface typing test) draws no window and keeps running on the
   host.
+
+## Amendment (2026-10-28): a local Docker route
+
+The owner asked for a way to run the partition on the Mac without the sidecar.
+Linux Chromium in a local container draws to Xvfb as it does on the sidecar,
+so no window reaches the desktop.
+
+1. `VEETBOT_BROWSER_ROUTE` picks where a Mac sends both browser targets:
+   `sidecar` (the default, unchanged) or `docker`, which runs the same Make
+   target through `scripts/run_in_linux_container.sh`. Any other value fails
+   the browser targets and nothing else.
+2. The container is linux/amd64, the sidecar's and hosted CI's architecture,
+   emulated on Apple silicon. `deploy/browser-test.Dockerfile` caches the
+   locked dependencies, Chromium and Xvfb on `uv.lock`; the checkout is
+   mounted, so the baseline report lands in it and records the revision.
+3. arm64 is not offered. Native arm64 Linux Chromium ran a module four times
+   faster but crashed the renderer on the deep-page readable-text case that
+   passes on x86_64, so it does not match the gate.
+
+Measured on 2026-10-28 on dev 86d03abc, one run each, not concurrent: the
+container passed all 348 browser cases in 18 min 19 s (18 min 0 s of tests;
+a cold image build adds 96 s once per lock change). A fresh sidecar passed them
+in 12 min 41 s, including creation, sync and install (11 min 15 s of tests).
+The container is slower but uses no CircleCI credits, and each run has its own
+container, so concurrent sessions no longer share one sidecar's install.
