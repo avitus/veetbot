@@ -129,8 +129,12 @@ release evidence bound to it are unchanged.
   the click and is refused, asking instead, when any is no longer inert. That
   second read is not atomic with the click; the window it leaves is the
   runtime's own dispatch, with no page turn in between. An element read lists
-  at most 64 external references; a live read that met more is refused, since
-  a reference past the list was neither inspected nor rechecked.
+  at most 64 external references; a read that met more, or a live read with
+  no overflow flag, is refused before options are read, since the complete
+  reference list was not inspected and rechecked, and such an element reads
+  as opaque in observation facts, so a task grant refuses it before spending
+  a use. A standing grant's ceiling refuses a click or key whose link target
+  the runtime read leaves the origin, or whose element it could not bound.
 - A page with any SMIL animation element inspects no sprite, so its icon
   controls still ask. The portal's sign-in page and sprite have none.
 - Approval records say why research mode refused, so a remaining prompt can

@@ -326,6 +326,51 @@ def test_every_label_source_is_classified_separately() -> None:
     assert (standing.covered, standing.consequence) == (False, C.PAYMENT)
 
 
+@pytest.mark.parametrize(
+    ("target", "covered", "reason"),
+    [
+        pytest.param(
+            BrowserTargetFacts(same_origin=True, first_segment="lesson", sensitive_path=False),
+            True,
+            None,
+            id="same-origin",
+        ),
+        pytest.param(
+            BrowserTargetFacts(same_origin=False, first_segment="go", sensitive_path=False),
+            False,
+            "link_outside_origin",
+            id="elsewhere",
+        ),
+        pytest.param(
+            BrowserTargetFacts(same_origin=False, first_segment=None),
+            False,
+            "link_outside_origin",
+            id="opaque",
+        ),
+    ],
+)
+def test_a_standing_grant_never_covers_a_link_that_leaves_the_origin(
+    target: BrowserTargetFacts, covered: bool, reason: str | None
+) -> None:
+    """ADR-0263: a routine click whose link target the runtime read leaves the
+    origin, or whose element it could not bound (an opaque target), is outside a
+    standing grant's ceiling, which otherwise checks only the page origin."""
+    standing = standing_ceiling_coverage(
+        action=click(),
+        page_url=LESSON,
+        role="button",
+        labels=("Continue",),
+        facts=facts(link_target=target),
+        option_texts=(),
+        origins=(ORIGIN,),
+    )
+
+    assert standing.covered is covered
+    assert standing.reason == reason
+    if covered:
+        assert standing.consequence is C.ROUTINE
+
+
 def test_case_hyphen_zero_width_and_combining_variants_are_normalized() -> None:
     variants = {
         "PAY NOW": C.PAYMENT,

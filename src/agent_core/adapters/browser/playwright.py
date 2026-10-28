@@ -1959,9 +1959,18 @@ _READ_ELEMENT_SCRIPT = """(node, inspected) => {
                         copyUnsafe.includes(element.localName) || element.hasAttribute('usemap'));
                 });
         });
-    if (reached.some(element => embedders.includes(element.localName)
-            || element.hasAttribute('usemap')
-            || (element.localName === 'use' && useOpaque(element)))) {
+    // Every reached element is scanned, so the external-reference count is
+    // complete even after the first opaque copy (ADR-0263).
+    for (const element of reached) {
+        if (embedders.includes(element.localName)
+                || element.hasAttribute('usemap')
+                || (element.localName === 'use' && useOpaque(element))) {
+            opaque = true;
+        }
+    }
+    if (externalUses.size > 64) {
+        // A reference past the 64 the read lists was neither inspected nor
+        // rechecked, so the element may reach a target no one listed.
         opaque = true;
     }
     const flat = [...ancestors, ...descendants];
@@ -2386,9 +2395,10 @@ def _element_facts(metadata: dict[str, Any], *, name: str, page_url: str) -> Bro
         for link in (links if isinstance(links, list) else [])
         if isinstance(link, dict) and (target := _link_target(link, page_url=page_url))
     ]
-    if metadata.get("opaque") is not False:
-        # An embedded document or a walk past its bounds: the element may
-        # reach a target no one listed.
+    if metadata.get("opaque") is not False or metadata.get("externalUsesOverflow") is not False:
+        # An embedded document, a walk past its bounds, or more external
+        # references than the read lists: the element may reach a target no
+        # one listed.
         link_targets.append(_OUTSIDE_EVERY_ORIGIN)
     form_targets = [
         _target_facts(form, page_url=page_url)

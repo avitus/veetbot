@@ -691,6 +691,15 @@ def standing_ceiling_coverage(
     )
     if _origin_of(page_url) not in set(origins):
         return _refused(consequence, "outside_origin")
+    if (
+        action.kind in _NAVIGATING_KINDS
+        and facts is not None
+        and facts.link_target is not None
+        and not facts.link_target.same_origin
+    ):
+        # A link the runtime read leaves the origin, or an element it could
+        # not bound may: the ceiling covers neither (ADR-0263).
+        return _refused(consequence, "link_outside_origin")
     if consequence is not C.ROUTINE:
         return _refused(consequence, f"excluded.{consequence.value}")
     return BrowserCoverage(covered=True, consequence=consequence)

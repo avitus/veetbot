@@ -33,6 +33,7 @@ from agent_core.adapters.browser.playwright import (
     PlaywrightBrowserProvider,
     PythonPlaywrightRuntime,
     _copies_still_inert,
+    _element_facts,
     _inspected_use_references,
 )
 from agent_core.domain.browser import (
@@ -170,6 +171,23 @@ async def test_live_coverage_refuses_a_read_whose_external_references_overflowed
     )
 
     assert covered is False
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+def test_an_element_with_more_external_references_than_the_read_lists_is_opaque(
+    overflow: bool,
+) -> None:
+    """ADR-0263: an element that met more than 64 external references may reach a
+    target no one listed, so its facts carry a target outside every origin and a
+    task grant refuses it before spending a use."""
+    metadata = {"labels": {}, "overlong": False, "opaque": False, "externalUsesOverflow": overflow}
+
+    element = _element_facts(metadata, name="Continue", page_url="https://portal.example/")
+
+    if overflow:
+        assert element.link_target == BrowserTargetFacts(same_origin=False, first_segment=None)
+    else:
+        assert element.link_target is None
 
 
 @pytest.mark.parametrize("stage", ["attach", "identify", "destroy", "confirm"])

@@ -1145,7 +1145,8 @@ alternative text can defeat it, and a task grant's path prefix is then the
 boundary (ADR-0129). A
 standing grant can authorize only `routine` interaction, and only when every
 label source reads as the same routine word; `unknown` stays hard-excluded
-from it. A task grant can authorize `routine` and `unknown` interaction and no
+from it, and so is a click or key whose link target the runtime read leaves the
+origin or whose element it could not bound (ADR-0263). A task grant can authorize `routine` and `unknown` interaction and no
 named consequence (owner-approved 2026-09-25, ADR-0129). Every named
 consequence always requires fresh approval or is denied. Page text can move an
 action toward a named consequence but cannot widen a grant's scope, duration,
