@@ -64,13 +64,15 @@ identifiers, while an overview delivers family as People lines.
    anywhere in the message, or two different ties to one name record nothing.
    An ending (died, passed away, divorced, separated, …) is said of the person
    when their name, a pronoun or the tie itself stands right before or after
-   it: "we divorced last year", "my wife died", "I divorced her". An ending
-   said of someone else ("Erin's father died", "Sam and Beth divorced") or
-   negated ("we never divorced") leaves the tie in place. An existing current
-   edge of the same kind, on any page of the person's edges, is not
-   duplicated, and an erased edge is not revived. Identity still comes only
-   from the owner-selected person reference (ADR-0121); no name is matched to
-   a person.
+   it, or heads the predicate it is joined to by "and" or "but": "we divorced
+   last year", "my wife died", "I divorced her", "she was ill and died". The
+   name is matched in any script. An ending said of someone else ("Erin's
+   father died", "Sam and Beth divorced", "her father was ill and died") or
+   negated in the words leading into it ("we never divorced", but not "I didn't
+   know she died") leaves the tie in place. An existing current edge of the
+   same kind, on any page of the person's edges, is not duplicated, and an
+   erased edge is not revived. Identity still comes only from the
+   owner-selected person reference (ADR-0121); no name is matched to a person.
 
 3. **Repair for earlier saves.** `agent people link-kinship --owner
    TENANT/PRINCIPAL [--confirm]` applies rule 2 to live, direct,

@@ -5,8 +5,9 @@ The tie is read from the owner's message, never from a model's paraphrase,
 and only from the plain present-tense forms: a negation, "ex-", "late" or a
 past tense states no current tie, and a possessive chain ("my wife's friend")
 ties the owner to someone else. An ending said of the person anywhere in the
-message ("we divorced", "my wife died") withdraws the tie; one said of someone
-else ("Erin's father died") or negated ("we never divorced") does not.
+message ("we divorced", "my wife died", "she was ill and died") withdraws the
+tie; one said of someone else ("Erin's father died") or negated ("we never
+divorced") does not.
 """
 
 from __future__ import annotations
@@ -77,13 +78,18 @@ _ENDED = re.compile(
 )
 # An ending is said of the person when their name, a pronoun or the tie itself
 # ("my wife") stands right before it, past linking words ("Erin and I have
-# separated", "my wife, who died"), or right after it ("I divorced her").
+# separated", "my wife, who died"), right after it ("I divorced her"), or heads
+# the predicate it is joined to ("she was ill and died"). A negation counts only
+# among the words leading into the ending ("we never divorced"), never before
+# another verb ("I didn't know she died").
 _ENDING = re.compile(
     r"\b(?:divorc[a-z]*|separated|split up|broke up|passed away|passed on|died|dead|deceased"
     r"|widowed)\b"
 )
-_WORD = re.compile(r"[a-z0-9']+")
+_WORD = re.compile(r"[\w']+")
 _NEGATION = frozenset({"not", "never", "no"})
+_CONJUNCTIONS = frozenset({"and", "but"})
+_RELATIVE = frozenset({"who", "that", "which"})
 _LINKING = frozenset(
     """am is are was were be been being has have had got get getting just recently
     sadly finally both later then eventually officially legally suddenly who that
@@ -92,6 +98,7 @@ _LINKING = frozenset(
 _PRONOUNS = frozenset(
     "we we're we've us he he's she she's they they're they've him her them".split()  # noqa: SIM905
 )
+_SUBJECTS = frozenset("we we're we've he he's she she's they they're they've".split())  # noqa: SIM905
 
 
 def _normal(text: str) -> str:
@@ -115,15 +122,47 @@ def _is_tie(word: str, kinship: OwnerKinship) -> bool:
     return (word in _KIN or word in _PLURAL) and _kinship(word) == kinship
 
 
+def _negates(word: str) -> bool:
+    return word in _NEGATION or word.endswith("n't")
+
+
+def _names_person(words: list[str], name: list[str], kinship: OwnerKinship) -> bool:
+    """Whether the words end with the person's name or "my <the tie>"."""
+
+    return (bool(name) and words[-len(name) :] == name) or (
+        bool(words) and _is_tie(words[-1], kinship) and "my" in words[-4:-1]
+    )
+
+
+def _shares_subject(words: list[str], name: list[str], kinship: OwnerKinship) -> bool:
+    """Whether the predicate the words end with ("she was ill") is said of the person."""
+
+    i = len(words) - 1
+    while i >= 0:
+        word = words[i]
+        if word in _RELATIVE:
+            return _names_person(words[:i], name, kinship)
+        if word == "i" and words[i - 1 : i] == ["and"]:
+            i -= 2
+            continue
+        if word in _SUBJECTS or _names_person(words[: i + 1], name, kinship):
+            return True
+        if word not in _LINKING and i + 1 < len(words) and words[i + 1] in _LINKING:
+            return False  # another subject: "Sam was ill", "her father had cancer"
+        i -= 1
+    return False
+
+
 def _ends(clause: str, name: list[str], kinship: OwnerKinship) -> bool:
     """Whether the clause says the tie to `name` ended."""
 
     for match in _ENDING.finditer(clause):
         before = _WORD.findall(clause[: match.start()])
-        if any(word in _NEGATION or word.endswith("n't") for word in before[-3:]):
+        negated = False
+        while before and (before[-1] in _LINKING or _negates(before[-1])):
+            negated |= _negates(before.pop())
+        if negated:
             continue
-        while before and before[-1] in _LINKING:
-            before.pop()
         if before[-2:] in (["and", "i"], ["and", "me"]):
             del before[-2:]
         after = _WORD.findall(clause[match.end() :])
@@ -134,9 +173,10 @@ def _ends(clause: str, name: list[str], kinship: OwnerKinship) -> bool:
         if (
             last in _PRONOUNS
             or first in _PRONOUNS
-            or (bool(name) and name in (before[-len(name) :], after[: len(name)]))
-            or (_is_tie(last, kinship) and "my" in before[-4:-1])
+            or _names_person(before, name, kinship)
+            or (bool(name) and after[: len(name)] == name)
             or (first == "my" and any(_is_tie(word, kinship) for word in after[1:4]))
+            or (last in _CONJUNCTIONS and _shares_subject(before[:-1], name, kinship))
         ):
             return True
     return False
