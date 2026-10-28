@@ -110,25 +110,35 @@ async def test_use_inspection_reads_the_document_only_within_the_element_bound(
         assert references == ["https://portal.example/sprite.svg#menu"]
 
 
-@pytest.mark.parametrize("still_inert", [True, False])
+@pytest.mark.parametrize("change", [None, "copy_changed", "retargeted", "walk_overflowed"])
 async def test_a_grant_constrained_click_reads_its_inspected_copies_again_before_the_click(
-    monkeypatch: pytest.MonkeyPatch, still_inert: bool
+    monkeypatch: pytest.MonkeyPatch, change: str | None
 ) -> None:
-    """ADR-0263: the click guard cannot see inside a user-agent shadow root, so a
-    copy the live read relied on is read again immediately before the click, and
-    a copy no longer inert refuses the act instead of clicking."""
+    """ADR-0263: the click guard cannot see inside a user-agent shadow root, so
+    immediately before the click the selected element's own external references
+    must still lie within the ones its live read relied on, and every relied-on
+    copy must still be inert; a retargeted ``<use>``, a changed copy, or an
+    element the walk cannot bound refuses the act instead of clicking."""
     sprite = "https://portal.example/sprite.svg#menu"
+    still_inert = change is None
     reads: list[str] = []
 
     async def inspected(page: Any) -> list[str]:
         reads.append("inspect")
-        return [sprite] if still_inert else []
+        return [] if change == "copy_changed" else [sprite]
 
     monkeypatch.setattr(playwright_adapter, "_inspected_use_references", inspected)
-    assert await _copies_still_inert(Mock(), [sprite]) is still_inert
-
     handle = Mock()
     handle.click = AsyncMock()
+    handle.evaluate = AsyncMock(
+        return_value={
+            None: [sprite],
+            "copy_changed": [sprite],
+            "retargeted": ["https://portal.example/other.svg#menu"],
+            "walk_overflowed": None,
+        }[change]
+    )
+    assert await _copies_still_inert(Mock(), handle, [sprite]) is still_inert
     guard = Mock()
     guard.evaluate = AsyncMock(return_value=False)
     guard.dispose = AsyncMock()
@@ -145,7 +155,7 @@ async def test_a_grant_constrained_click_reads_its_inspected_copies_again_before
         assert refused.value.reason_code == "tool.browser.grant_not_applicable"
         assert [call.kwargs.get("trial") for call in handle.click.await_args_list] == [True]
         runtime._forget_observation.assert_awaited_once()
-    assert reads == ["inspect", "inspect"]
+    assert len(reads) == (2 if change in (None, "copy_changed") else 0)
     guard.dispose.assert_awaited()
 
 

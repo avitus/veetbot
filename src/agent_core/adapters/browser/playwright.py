@@ -1339,7 +1339,7 @@ class PythonPlaywrightRuntime:
                     raise BrowserProviderError(
                         "tool.browser.element_not_found", retryable=False
                     ) from exc
-                if relied_copies and not await _copies_still_inert(page, relied_copies):
+                if relied_copies and not await _copies_still_inert(page, handle, relied_copies):
                     await _release_guards(guards)
                     await self._refuse_grant()
                 await handle.click(timeout=CLICK_TIMEOUT_MILLISECONDS)
@@ -1792,16 +1792,68 @@ def _external_uses(metadata: object) -> bool:
     return bool(_external_use_list(metadata))
 
 
-async def _copies_still_inert(page: Page, relied: Sequence[str]) -> bool:
-    """Whether every copy a live read relied on is still inert (ADR-0263).
+# The external ``<use>`` references the selected element and its flat-tree
+# descendants hold right now, resolved as the element read resolves them, or
+# null when the walk passes its bound (ADR-0263).
+_ELEMENT_EXTERNAL_USES_SCRIPT = """node => {
+    const resolve = value => {
+        try { return new URL(value, document.baseURI).href; } catch (error) { return ''; }
+    };
+    const childrenOf = current => [
+        ...current.children,
+        ...(current.shadowRoot ? current.shadowRoot.children : []),
+        ...(typeof current.assignedElements === 'function'
+            ? current.assignedElements({flatten: true}) : []),
+    ];
+    const references = new Set();
+    const seen = new Set([node]);
+    const pending = [node];
+    while (pending.length) {
+        const current = pending.pop();
+        if (seen.size > 2048) {
+            return null;
+        }
+        if (current.localName === 'use') {
+            for (const value of [current.getAttribute('href'),
+                    current.getAttributeNS('http://www.w3.org/1999/xlink', 'href'),
+                    current.href instanceof SVGAnimatedString ? current.href.animVal : null]) {
+                if (typeof value === 'string' && value.trim() && !value.trim().startsWith('#')) {
+                    references.add(resolve(value.trim()));
+                }
+            }
+        }
+        for (const child of childrenOf(current)) {
+            if (!seen.has(child)) {
+                seen.add(child);
+                pending.push(child);
+            }
+        }
+    }
+    return [...references];
+}"""
 
-    A page can point a ``<use>`` elsewhere and back, or its origin can serve
-    the same URL with new content, between the live read and the click, and
-    the click guard cannot see inside a user-agent shadow root. The copies are
-    read again as late as the runtime can, immediately before the click; the
-    read is not atomic with the click, which the ADR records.
+
+async def _copies_still_inert(page: Page, handle: ElementHandle, relied: Sequence[str]) -> bool:
+    """Whether the selected element still names only the copies its live read
+    relied on, and every one of them is still inert (ADR-0263).
+
+    A page can point the selected ``<use>`` elsewhere, or elsewhere and back,
+    or its origin can serve the same URL with new content, between the live
+    read and the click, and the click guard cannot see inside a user-agent
+    shadow root. So the element's own current external references must still
+    lie within the relied-on set, and the page's copies are read again, as
+    late as the runtime can, immediately before the click. Neither read is
+    atomic with the click, which the ADR records.
     """
 
+    try:
+        current = await handle.evaluate(_ELEMENT_EXTERNAL_USES_SCRIPT)
+    except PlaywrightError:
+        return False
+    if not isinstance(current, list) or not all(isinstance(value, str) for value in current):
+        return False
+    if not set(current) <= set(relied):
+        return False
     return set(relied) <= set(await _inspected_use_references(page))
 
 
