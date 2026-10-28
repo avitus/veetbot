@@ -61,16 +61,18 @@ identifiers, while an overview delivers family as People lines.
    statement must name the same tie without denying or ending it ("not his
    wife", "his ex-wife"). A negation, "ex-", "late", "former", a past tense, a
    possessive chain ("my wife's friend Erin"), or two different ties to one
-   name record nothing, and so does any ending word anywhere in the message
-   (died, passed away, divorced, separated, …), whoever it is said of and even
-   negated: "we divorced last year", "my wife died", but also "Erin's father
-   died" and "we never divorced". The rule is deliberately blunt. A missed link
-   costs one restatement, and the memory itself is still saved, while a wrong
-   link would show a former spouse as current; telling who an ending is said of
-   needs grammar that a word-order rule cannot supply. An existing current edge
-   of the same kind, on any page of the person's edges, is not duplicated, and
-   an erased edge is not revived. Identity still comes only from the
-   owner-selected person reference (ADR-0121); no name is matched to a person.
+   name record nothing, and so does any ending word or denied tie anywhere in
+   the message (died, passed away, divorced, separated, "not my wife", "my
+   ex-wife", …), whoever it is said of and even negated: "we divorced last
+   year", "my wife died", "Erin is not my wife", but also "Erin's father died",
+   "my ex-wife lives in Ohio" and "we never divorced". The rule is deliberately
+   blunt. A missed link costs one restatement, and the memory itself is still
+   saved, while a wrong link would show a former spouse as current; telling who
+   an ending is said of needs grammar that a word-order rule cannot supply. An
+   existing current edge of the same kind, on any page of the person's edges,
+   is not duplicated, and an erased edge is not revived. Identity still comes
+   only from the owner-selected person reference (ADR-0121); no name is matched
+   to a person.
 
 3. **Repair for earlier saves.** `agent people link-kinship --owner
    TENANT/PRINCIPAL [--confirm]` applies rule 2 to live, direct,

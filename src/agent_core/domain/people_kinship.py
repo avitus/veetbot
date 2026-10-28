@@ -4,10 +4,10 @@
 The tie is read from the owner's message, never from a model's paraphrase,
 and only from the plain present-tense forms: a negation, "ex-", "late" or a
 past tense states no current tie, and a possessive chain ("my wife's friend")
-ties the owner to someone else. Any ending in the message ("we divorced", "my
-wife died", even "Erin's father died" or "we never divorced") withdraws every
-tie it states: a missed tie costs the owner a restatement, while a wrong one
-would show a former spouse as current.
+ties the owner to someone else. Any ending or denied tie in the message ("we
+divorced", "my wife died", "Erin is not my wife", even "Erin's father died" or
+"we never divorced") withdraws every tie it states: a missed tie costs the
+owner a restatement, while a wrong one would show a former spouse as current.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ _NAME_FIRST = re.compile(rf"^(?P<names>.+?) (?:is|are) my {_DESCRIBED}(?P<kin>{_
 _KIN_FIRST = re.compile(rf"(?:^|\W)my {_DESCRIBED}(?P<kin>{_KIN_WORD}),? (?:is )?(?P<name>.+)$")
 # A statement that denies or ends a tie does not state it ("Erin is not Andy's
 # wife", "his ex-wife"), though another tie beside it still may ("his wife, not
-# his sister").
+# his sister"). In the owner's message, any such tie records none (ADR-0259).
 _ENDED = re.compile(
     rf"\b(?:not|no|never|isn't|aren't|ex|former|late|estranged)[ -]"
     rf"(?:[a-z]+(?:'s)? ){{0,2}}(?P<kin>{_KIN_WORD})\b"
@@ -106,7 +106,7 @@ def owner_kinship(text: str, name: str) -> OwnerKinship | None:
 
     Two different ties to the same name ("Erin is my wife ... Erin is my
     sister") state none reliably, so neither is returned, and nor is any tie
-    in a message that names an ending.
+    in a message that names an ending or denies or ends a tie.
     """
 
     wanted = _normal(name)
@@ -122,7 +122,8 @@ def owner_kinship(text: str, name: str) -> OwnerKinship | None:
             rest = match.group("name")
             if rest == wanted or rest.startswith(f"{wanted} ") or rest.startswith(f"{wanted},"):
                 found.add(_kinship(match.group("kin")))
-    if len(found) != 1 or _ENDING.search(_normal(text)) is not None:
+    normal = _normal(text)
+    if len(found) != 1 or _ENDING.search(normal) is not None or _ENDED.search(normal) is not None:
         return None
     (kinship,) = found
     return kinship
