@@ -170,9 +170,12 @@ Four constraints shape it.
 - The builtin census gains one tool, for fifty-two, and the configuration
   inventory two knobs, for 224. The four new reason codes have fixed messages
   in the checked-in table.
-- PR #204 (truncation recovery, numbered ADR-0258 on its branch) adds a note
-  saying that no tool reads a truncated pointer back. Whichever of the two
-  changes lands second makes that note except readable captures.
+- PR #204 (truncation recovery, ADR-0258) adds a note saying that no tool
+  reads a truncated pointer back. Whichever of the two changes lands second
+  makes that note except readable captures. This one landed second: since
+  `main` was merged into `dev` on 2026-10-27, the note excepts captures when
+  the plan pins the reader and names, newest last, at most twelve truncated
+  results whose marker offered it (`context-engine.md`, yield step 3).
 
 ## Alternatives
 

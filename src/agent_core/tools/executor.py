@@ -47,6 +47,7 @@ from agent_core.domain.captures import (
     CAPTURE_READER_TOOL_NAME,
     CaptureSections,
     capture_text,
+    reader_call,
 )
 from agent_core.domain.delegations import Delegation, DelegationRequest
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND
@@ -168,13 +169,7 @@ _CAPTURE_NOTE = ", kept for the owner; no tool, sandbox or workspace can open it
 def _reader_note(artifact_id: UUID, sections: int) -> str:
     """ADR-0261: the marker is the reader's advertisement, so it prints the call."""
 
-    call = json.dumps(
-        {
-            "name": CAPTURE_READER_TOOL_NAME,
-            "arguments": {"artifact": str(artifact_id), "section": 1},
-        },
-        separators=(",", ":"),
-    )
+    call = reader_call(artifact_id)
     return f', {sections} sections; read one with tool.call {call}, or pass "find" to search it'
 
 

@@ -26,6 +26,22 @@ FIND_MATCH_LIMIT = 20
 FIND_SNIPPET_CHARACTERS = 160
 
 
+def reader_call(artifact_id: UUID) -> str:
+    """The exact ``tool.call`` a marker prints to read a capture's first section.
+
+    Admission prints it and the truncation note looks for it, so one function
+    keeps the two from drifting apart (ADR-0261).
+    """
+
+    return json.dumps(
+        {
+            "name": CAPTURE_READER_TOOL_NAME,
+            "arguments": {"artifact": str(artifact_id), "section": 1},
+        },
+        separators=(",", ":"),
+    )
+
+
 def capture_text(raw: bytes) -> str:
     """The text of a capture's text parts, joined by a blank line.
 

@@ -11,6 +11,10 @@
 - Renumbered from ADR-0256 on 2026-10-27, when `main` took that number for
   the new-mail Email budget reserve; earlier commits and review comments on
   PR #204 call this decision ADR-0256
+- Amended by: ADR-0262 (2026-10-27), which raises the index's token cap to
+  2,500, so the skips recorded under Consequences no longer occur; ADR-0261
+  (2026-10-27), whose readable captures the truncation note now excepts and
+  names
 
 ## Context
 
