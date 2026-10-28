@@ -12,6 +12,103 @@ title: Changelog
 - If the server is still unavailable after three minutes, the error is shown
   as before and your message stays in the composer.
 
+## 2026-10-27 — A chat with many tools starts, and deferred tools stay reachable
+
+- A chat whose configured tools overflowed the definition budget used to fail
+  before its first step; the tools that do not fit are now deferred to the
+  index and reached through `tool.call`, so website-bound chats plan again
+  (pull request 198, ADR-0253).
+- Asking a deferred tool with the wrong arguments returns its whole
+  definition, that answer stays whole when older results are shortened, and a
+  shortened result names the event that recorded it, so a finding is cited
+  rather than fetched again. `web.fetch_json` reads named fields of a public
+  JSON document (pull request 204, ADR-0258).
+
+## 2026-10-27 — Email: new mail is still read when the budget runs low
+
+- Background reading of older mail now stops at three quarters of the daily
+  and thirty-day Email allowances. The remaining quarter is kept for new mail,
+  which is still fetched, assessed and drafted for; catch-up resumes once
+  spending falls back under the share. The full ceilings are unchanged (pull
+  request 205, ADR-0256).
+
+## 2026-10-27 — Add MCP servers from Settings and sign in to them in the app
+
+- A new MCP servers group in Settings lists the servers Veetbot can use, adds
+  one by name and HTTPS address with Read-only or Asks-before-each-call
+  access, signs in to it in the app, signs out, and removes it. Servers are
+  saved on the server and shared across your devices; new chats use one once
+  it is ready. Read-only servers run without asking; the others ask before
+  every call. Off until `AGENT_MCP_SERVERS_ENABLED=1` (pull request 201,
+  ADR-0255).
+
+## 2026-10-27 — Memory: guesses rank below what you said, and the live recall label is `retrieval@7`
+
+- A memory flagged for attention (learned from a website or an automatic
+  sensitive guess) ranks below your own beliefs at equal match and fills at
+  most a third of a recall; a conflict or correction waiting on you costs more.
+  A website-learned memory reads as a tentative fact attributed to its source.
+  Recall traces now carry `retrieval@7`; the ranking is otherwise unchanged
+  (pull requests 197 and 203, ADR-0247, ADR-0249, ADR-0250).
+
+## 2026-10-26 — Cockpit: a board of widgets Veetbot writes for you, off by default
+
+- Cockpit is a third mode beside Chat and Email on iPhone, iPad and Mac. Its
+  board shows widgets Veetbot writes when you ask for one in a chat; they
+  render only inside a sandboxed web view with no network, and their code,
+  which holds no personal values, lives on the public `cockpit/widgets`
+  branch. Platform feeds cover pending approvals, priority email, schedule
+  health, recent calls, people in touch and run activity, and a widget can
+  open an approval, email thread, schedule or chat. On the Mac the widget list
+  and details panel resize and keep their widths (pull requests 187, 192 and
+  193, ADR-0240).
+- A schedule that keeps a feed can run every minute to every day, and entering
+  Cockpit refreshes every feed-keeping schedule at once (pull request 200,
+  ADR-0254). Off until `AGENT_COCKPIT_ENABLED=1`.
+
+## 2026-10-26 — Name a website in a chat and Veetbot offers to connect it
+
+- When a chat that is not connected to a website names one you have a saved
+  login for, the transcript shows a card offering to connect it ("Connect and
+  continue", or "Sign in and continue" when the login needs you) or Not now.
+  Nothing connects on its own: the offer expires at your next message or after
+  24 hours, and Veetbot's reply says the work continues once the site is
+  connected (pull request 197, ADR-0251).
+
+## 2026-10-24 — Chat can draw a chart or diagram and attach it to the reply
+
+- Ask for a chart of numbers you gave or Veetbot observed, or a diagram of
+  named boxes and arrows, and the sandbox renders it offline: a PNG preview
+  with the chart rows as CSV (a diagram includes its editable DOT source), and
+  SVG or PDF when asked. The files attach to the reply like any other
+  artifact, and Veetbot never fabricates a chart's numbers with image
+  generation (pull request 188, ADR-0243).
+
+## 2026-10-24 — On the Mac, Chat and Email get a right panel, and every column remembers its width
+
+- Chat's panel holds Activity (the run's status, working notes and every tool
+  call, grouped under the request that started them) and Artifacts (every
+  file or image the conversation read, with a preview and Download); tool
+  calls no longer expand in the transcript. Email's panel holds Context (the
+  sender's People match, why the thread is prioritised, Teach Veetbot, the
+  attachments and the draft's state) and Activity.
+- The panel opens from the toolbar or ⌥⌘I and drags between 260 and 440
+  points; each mode's width and open state are kept on this Mac, and a window
+  narrower than 1,100 points (Chat) or 1,300 (Email) starts with it collapsed.
+  Email's sidebar and inbox columns resize too (pull requests 183, 185 and
+  187, ADR-0237).
+
+## 2026-10-23 — Veetbot keeps numbers you track over time, off by default
+
+- Ask Veetbot to track a series such as weight, mileage or blood pressure: it
+  declares the series after your approval, appends readings as you report
+  them, and answers questions over a time window with server-computed
+  summaries. An entry carries up to four named numbers, so one reading is one
+  entry. Readings are never appended from untrusted content such as a web page
+  or an email; since pull request 202, `records.import` saves up to fifty
+  readings read elsewhere behind an approval card that lists each one. Off
+  until `AGENT_RECORDS_ENABLED=1` (pull request 186, ADR-0239).
+
 ## 2026-10-23 — Website tasks: a long task no longer spends its budget re-reading
 
 - A chat bound to a website that works through many pages, such as compiling
@@ -22,6 +119,15 @@ title: Changelog
   between them and a step costs what it did before the budget filled.
 - The budget, the final-answer reserve and the message you see when the
   reserve is reached are unchanged.
+
+## 2026-10-21 — Tell Veetbot to learn from a website, and it forms governed memories
+
+- Ask Veetbot to learn or remember from a public web page you name, and it
+  proposes memories grounded in exact excerpts of what it read there. Each is
+  attributed to its source, tentative, flagged for review, capped at low
+  confidence and expires after thirty days unless kept; it never overrides
+  what you told Veetbot yourself. A memory save now reports committed,
+  reinforced, unchanged or rejected separately (pull request 181, ADR-0233).
 
 ## 2026-10-21 — Email: model settings changes no longer re-read your mail
 
@@ -175,6 +281,15 @@ title: Changelog
   Rename, Repair identity and Forget person as hairline or quiet ones. Nothing
   about reviewing, deleting, merging, repairing, importing or forgetting
   changed.
+
+## 2026-10-18 — A call you ask for is placed without a second approval
+
+- When you ask Veetbot to call a number that appears in your own message, the
+  call is placed without an approval prompt, and a schedule can be created to
+  place a call at its time. A call never goes out from a conversation that
+  holds email, web, knowledge, call-record or device-ingested content, and
+  only numbers you typed are dialled. Off with
+  `AGENT_CALL_OWNER_REQUESTS_ENABLED=0` (pull request 173, ADR-0213).
 
 ## 2026-10-18 — Email wears the A2 Dock design
 

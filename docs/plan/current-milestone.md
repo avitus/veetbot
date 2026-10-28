@@ -11,15 +11,17 @@ title: Current Milestone
   registration, keep sealed tokens that refresh at use, reach the network only
   through an audited public-HTTPS transport, and fill their own deferred-index
   class. It is default off behind `AGENT_MCP_SERVERS_ENABLED`; implementation
-  and tests are complete, and review and delivery are pending. No milestone or
-  gate moves.
+  and tests are complete, and pull request 201 delivered it on 2026-10-27 with
+  every review thread resolved (CodeRabbit's conclusion on the final head was
+  NEUTRAL rather than a clean pass). No milestone or gate moves.
 
 - **Static charts and diagrams — ADR-0243:** The owner authorized an independent
   extension on 2026-10-24: offline rendering in the existing Python sandbox,
   PNG previews, optional SVG/PDF downloads, chart CSV and editable diagram source.
   Existing artifact delivery and sandbox authority remain unchanged. Implementation
-  and focused sandbox/artifact/PNG-decoder checks are complete (ADR-0243);
-  production delivery is pending. No milestone or gate moves.
+  and focused sandbox/artifact/PNG-decoder checks are complete (ADR-0243), and
+  pull request 188 delivered it to production on 2026-10-24. No milestone or
+  gate moves.
 
 - **Milestone 35 — Cockpit mode and agent-authored widgets:** authorized by the
   owner on 2026-10-22 as an independent parallel workstream under ADR-0240.
@@ -31,8 +33,10 @@ title: Current Milestone
   App, platform and assistant-published feeds with freshness, a resumable
   per-tenant stream, five deferred tools, and a network-less realm on iPhone,
   iPad and Mac. The `cockpit/` workspace, the stores, the builder sandbox
-  image, the publication path, the routes and the stream are implemented,
-  and gates 1, 2, 4 to 9, 14 and 15 are bound; every other gate is pending.
+  image, the publication path, the routes and the stream are implemented and
+  reached `main` in pull requests 186, 187, 188, 193, 195 and 200 (by
+  2026-10-26); gates 1, 2, 4 to 9, 14 to 18 and 21 are bound; every other
+  gate is pending.
 
 - **Milestone 34 — Owner records (ADR-0239):** On 2026-10-22 the owner
   authorized roadmap item B14. [Owner records](owner-records.md) specifies five
@@ -40,24 +44,27 @@ title: Current Milestone
   deletion, an append refused in untrusted turns, a formation rule that keeps
   readings out of beliefs, and a body-region catalog, with ten registered
   gates. The build sequence is implemented test-first behind
-  `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its test;
-  nothing is activated, and review and delivery are pending.
+  `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its test.
+  Pull requests 186 (2026-10-23), 193 (2026-10-25) and 202 (2026-10-26)
+  delivered it to production behind the flag; nothing is activated, and the
+  production flag and the approval `tool_rules` entry remain with the owner.
 
 - **Owner-directed source learning — ADR-0233:** On 2026-10-21 the owner
   authorized governed website learning, tentative-memory reinforcement and
   truthful manual-save reporting. This extends Milestone 21 without changing
   frozen extraction policies or moving gates. Pull request 181 delivered the initial
-  path on 2026-10-22; the owner-reported deferred-format repair is authorized and
-  awaits release, as does the 2026-10-22 repair admitting owner-named sites as
-  typed. Governed recovery retained 23 observations from the motivating chat and
-  verified them through the production memory API.
+  path on 2026-10-22; pull request 182 (2026-10-22) delivered the owner-reported
+  deferred-format repair and pull request 186 (2026-10-23) the repair admitting
+  owner-named sites as typed. Governed recovery retained 23 observations from
+  the motivating chat and verified them through the production memory API.
 
 - **Independent reliability repair — ADR-0205:** The owner authorized safe
   failure diagnostics, bounded recovery, cleanup isolation and scoped reliability
   reporting on `codex/app-reliability`, with its own pull request to `main`.
   This repairs existing app behavior without importing the parallel memory
-  retrieval workstream or changing its activation gates. Milestone 15 remains
-  incomplete; monitoring activation and production delivery remain separate steps.
+  retrieval workstream or changing its activation gates. Pull requests 171
+  (2026-10-17) and 158 (2026-10-18) delivered it to production. Milestone 15
+  remains incomplete; monitoring activation remains a separate owner step.
 
 - **Milestone 33 — General memory search and recall:** the owner authorized
   the six-stage plan on 2026-10-11 under ADR-0178.
@@ -274,8 +281,8 @@ title: Current Milestone
   deferred with no proposals or provider calls; its next claim is due October 12
   at 01:30 UTC. The second run also deferred without provider calls. The October 11
   diagnosis found legacy erased People heads with missing reverse attribution;
-  their existing source refusal remains intact. ADR-0186 implements persistent
-  review sign-in and explicit blocker/deferral reporting, pending delivery.
+  their existing source refusal remains intact. ADR-0186's persistent review
+  sign-in and blocker/deferral reporting were delivered in pull request 159.
   Authorized metadata-only recovery found no complete surviving identifiers.
   On October 13 the owner authorized forward-only dreaming (ADR-0202): a durable
   cutover excludes existing memories and source events while allowing new evidence
@@ -397,12 +404,13 @@ title: Current Milestone
   server-derived destination, `mailto:` unsubscribe, Report spam and sender
   cleanup as fixed label actions, owner-gesture consent for a bounded batch,
   scoped routes behind a default-off flag, two Chat tools, and the native
-  Subscriptions view. It is implemented with nineteen gates bound to passing
-  checks and reached `main` in pull request 131; its flag was on in production
-  by 2026-09-21, ahead of the owner's real-mailbox smoke, and simulator UI
-  journeys and the release evidence remain open. On 2026-10-08 ADR-0165
-  extended it to twenty-three gates with a suspected-spam flag that never
-  touches Gmail and thread-level Report spam and Not spam.
+  Subscriptions view. It reached `main` in pull request 131; its flag was on
+  in production by 2026-09-21, ahead of the owner's real-mailbox smoke. On
+  2026-10-08 ADR-0165 extended it to twenty-three gates with a suspected-spam
+  flag that never touches Gmail and thread-level Report spam and Not spam.
+  Twenty-two of its twenty-three gates bind passing checks (the simulator
+  journeys joined hosted CI in pull requests 142 and 154); the owner's
+  real-mailbox smoke and the integrated release-evidence gate remain open.
 - **Verified gate ceiling:** Milestone 14 (289 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -437,10 +445,10 @@ title: Current Milestone
   engineering plan's roadmap subsection. Milestone 21 removes only adaptive
   memory distillation from that residue and Milestone 22 removes only the
   persona surface. Milestone 32 now admits bounded whole-store consolidation,
-  belief merging and grounded connections; learned memory policies, semantic
-  retrieval, external memory providers, and the remaining roadmap items stay
-  unauthorized.
-- **Project status:** Milestones 0 through 13 are complete. Through Milestone
+  belief merging and grounded connections, and Milestone 33 admits measured
+  semantic retrieval behind evidence; learned memory policies, external memory
+  providers, and the remaining roadmap items stay unauthorized.
+- **Project status:** Milestones 0 through 14 are complete. Through Milestone
   12, all 247 cumulative gates, the full local and PostgreSQL lanes, Apple
   package and simulator lanes, and hosted CI passed on the candidate head, and
   the completed integration was delivered directly to `dev`; code review is
@@ -493,9 +501,9 @@ title: Current Milestone
   the milestone. On 2026-09-28 `agent eval gates --milestone 13` confirmed all
   twenty-one delegation gates and the cumulative registry, with the seven
   Milestone 6 sandbox gates passing in the hosted real-Docker lane. Milestone
-  14 is implemented and in progress with twenty-one registered gates passing
-  locally; Milestone 15 remains authorized and specified with sixteen and has
-  not started. Milestone 16, the parallel memory-evaluation
+  14 completed on 2026-10-07 (recorded 2026-10-09), advancing the verified
+  ceiling to 289 gates; Milestone 15 remains authorized and specified with
+  sixteen and has not started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the
   provider evidence at `formation@8`, and re-recorded its baseline, and completed on 2026-08-23 when hosted CI and
   the CodeRabbit review loop finished clean on the `dev` to `main` pull
@@ -699,6 +707,9 @@ plan's acceptance criteria and the [persona-surface design](persona-surface.md).
 - [Milestone 29 — Chat thread folders](engineering-plan.md#milestone-29-chat-thread-folders)
 - [Milestone 30 — Advisory approval layer](engineering-plan.md#milestone-30-advisory-approval-layer)
 - [Milestone 31 — Email unsubscribe assistance](engineering-plan.md#milestone-31-email-unsubscribe-assistance)
+- [Milestone 32 — Memory reconsolidation (dreaming)](engineering-plan.md#milestone-32-memory-reconsolidation-dreaming)
+- [Milestone 33 — General memory search and recall](engineering-plan.md#milestone-33-general-memory-search-and-recall)
+- [Milestone 34 — Owner records](engineering-plan.md#milestone-34-owner-records)
 - [Milestone 35 — Cockpit mode and agent-authored widgets](engineering-plan.md#milestone-35-cockpit-mode-and-agent-authored-widgets)
 
 ## Completion rule
@@ -893,10 +904,11 @@ account's send server; Report spam, Not spam and sender cleanup as fixed label
 deltas; owner-gesture consent for a batch of at most twenty-five senders and
 one by-value approval per batch in Chat; four routes behind a default-off
 flag; and the native Subscriptions view and thread action. The owner directed
-implementation on 2026-09-19. Nineteen gates bind passing checks, and pull
-request 131 delivered it with hosted CI and a clean review; its flag was on in
-production by 2026-09-21. Simulator UI journeys, the owner's real-mailbox
-smoke and integrated release evidence remain open. On 2026-10-08 the owner
+implementation on 2026-09-19. Pull request 131 delivered it with hosted CI and
+a clean review; its flag was on in production by 2026-09-21. Twenty-two of its
+twenty-three gates bind passing checks (the simulator journeys joined hosted
+CI in pull requests 142 and 154); the owner's real-mailbox smoke and the
+integrated release-evidence gate remain open. On 2026-10-08 the owner
 extended the milestone under ADR-0165 with three more gates: a spam verdict in
 the importance assessment, informed by Gmail's own DMARC result, flags
 suspected spam without touching Gmail; the owner clears a flag or reports one

@@ -26,7 +26,8 @@ make test-cockpit
 ```
 
 That installs the locked dependencies and Chromium, builds the runtime into
-`dist/`, runs the kit, builder and realm tests, and lints. The realm tests also
+`dist/`, runs every test under `tests/` (kit, builder, manifest, fixture,
+screen and realm among them), and lints. The realm tests also
 run in WebKit wherever Playwright has it installed.
 
 Build one widget package:

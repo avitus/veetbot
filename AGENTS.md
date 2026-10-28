@@ -49,9 +49,9 @@ checks it per commit; no trailer means lane A.
 | --- | --- |
 | Startup, config, composition root, CLI | `bootstrap-and-composition.md` |
 | Makefile, compose, CI, local development | `development-toolchain.md` |
-| The run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
+| Run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
 | Tool registration, validation, execution, MCP | `tool-system.md` |
-| Builtin tools and their classification | `builtin-tools.md` |
+| Builtin tools, classification | `builtin-tools.md` |
 | Provider adapters, streaming, usage, cost | `model-gateway.md` |
 | Policy decisions, hardline rules, approvals | `policy-and-approvals.md` |
 | Events, projections, persistence, queue | `event-log-and-persistence.md` |
@@ -68,11 +68,12 @@ checks it per commit; no trailer means lane A.
 | Scheduled runs and recurrence | `scheduling.md` |
 | Notifications, device identity, push | `notifications-and-devices.md` |
 | Subagents, delegation, child runs | `subagents-and-delegation.md` |
-| Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
+| Inbound surfaces, pairing, Telegram | `inbound-surfaces.md` |
 | Backups, restore, alerts, firewall, rollback | `operational-hardening.md` |
 | Memory evaluation and lifecycle | `memory-evaluation-and-lifecycle.md` |
-| Episodes, high-recall formation, evidence-based forgetting | `adaptive-memory-distillation.md` |
-| Persona surface, nominations, curated promotion | `persona-surface.md` |
+| Episodes, high-recall formation, forgetting | `adaptive-memory-distillation.md` |
+| Memory reconsolidation, dreaming | `memory-reconsolidation.md` |
+| Persona surface, nominations, promotion | `persona-surface.md` |
 | Memory read API and browser | `memory-read-api-and-browser.md` |
 | Gmail MCP servers, email tools, bootstrap | `email-integration.md` |
 | Client modes, foreground email, priority/style, drafts, mail memories | `email-experience.md` |
@@ -85,8 +86,8 @@ checks it per commit; no trailer means lane A.
 | Email unsubscribe, bulk-sender census | `email-unsubscribe.md` |
 | Owner records: numeric series, the catalog | `owner-records.md` |
 | Cockpit, agent-authored widgets | `cockpit.md` |
-| Which milestone each gate belongs to | `milestone-map.md` |
-| What the corpus does and does not cover | `readiness.md` |
+| Milestone of each gate | `milestone-map.md` |
+| Corpus coverage and gaps | `readiness.md` |
 
 ## Authority and conflicts
 - The **engineering plan** holds the normative requirements and acceptance criteria; **project state** (`docs/status/project-state.yaml`) determines what work is authorized; **code and tests** describe actual behavior.

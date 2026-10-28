@@ -4,15 +4,6 @@ title: Architecture
 
 # Architecture
 
-Image and video generation use the provider-neutral `MediaGenerationProvider`
-port. `image.generate` and `video.generate` initially use TensorScale and write
-external-untrusted PNG/MP4 streams through the existing run-bound artifact
-writer. The ordinary approval, scope, non-idempotent recovery and reply-file
-retention boundaries apply ([ADR-0140](adr/0140-tensorscale-media-generation.md)).
-`MediaInputResolver` releases checksum-verified, bounded PNG/JPEG/WebP images
-from the caller's own conversation after approval, under `artifact.read`.
-The provider adapter alone encodes input bytes; tool arguments carry IDs only.
-
 The platform is an explicitly bounded modular monolith. The normative module
 layout and dependency rules are defined by the
 [engineering plan](plan/engineering-plan.md#4-repository-structure), expanded
@@ -150,8 +141,7 @@ by the detailed-design document the routing table in `AGENTS.md` names.
 - `agent_core.application.delegations` owns the delegation ledger and the
   one-transaction child-run materializer behind the suspending
   `agent_core.tools.delegate_run` control tool; the runtime added child-run
-  suspension, join, and the downward-only cancel cascade (Milestone 13, in
-  progress).
+  suspension, join, and the downward-only cancel cascade (Milestone 13).
 - `agent_core.memory` grew Milestone 16's deterministic benchmark arm,
   established-fact admission, decay sweep, and usage feedback, and the
   read-only `/v1/memories` list and detail routes entered `agent_core.api`
@@ -160,7 +150,7 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   `memory.write`.
 - `agent_core.tools.schedule_create` is the model-callable, approval-gated
   one-time creation bridge over the existing
-  `agent_core.application.schedule_service` (Milestone 19, in progress);
+  `agent_core.application.schedule_service` (Milestone 19);
   `agent_core.domain.recurrence` adds pure calendar recurrence (Milestone 20),
   and `agent_core.tools.schedule_lifecycle` the governed list, update, pause,
   resume, and cancel tools (Milestone 23).
@@ -199,6 +189,34 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   handoff (ADR-0128) and the API browser task grants (ADR-0129); and
   `agent_core.observability.latency` derives the content-free `agent run
   latency` report from the event log (ADR-0131).
+- Image and video generation use the provider-neutral `MediaGenerationProvider`
+  port. `image.generate` and `video.generate` initially use TensorScale and
+  write external-untrusted PNG/MP4 streams through the existing run-bound
+  artifact writer. The ordinary approval, scope, non-idempotent recovery and
+  reply-file retention boundaries apply
+  ([ADR-0140](adr/0140-tensorscale-media-generation.md)). `MediaInputResolver`
+  releases checksum-verified, bounded PNG/JPEG/WebP images from the caller's
+  own conversation after approval, under `artifact.read`. The provider adapter
+  alone encodes input bytes; tool arguments carry IDs only. The sandbox command
+  tool also renders static charts and diagrams as reply files (ADR-0243).
+- `agent_core.titles` generates and revises conversation titles from the
+  transcript (ADR-0155); `agent_core.application.browser_offers` records the
+  offer an unconnected chat makes to connect a website the owner names
+  (ADR-0251); `agent_core.tools.memory_learn` forms governed memories from a
+  source the owner points at (ADR-0233); and `agent_core.tools.web_fetch_json`
+  reads one field of a JSON response alongside the deferred tool definitions
+  and recoverable truncation of ADR-0258.
+- `agent_core.memory` grew the general recall path and the release-bound
+  semantic index behind the `AGENT_MEMORY_SEMANTIC_INDEX_*` settings
+  (Milestone 33, ADR-0178; activation stays evidence-gated).
+- `agent_core.application.records` and `agent_core.tools.records` are the
+  owner's named numeric series behind `AGENT_RECORDS_ENABLED` (Milestone 34,
+  ADR-0239). `agent_core.cockpit`, `agent_core.application.cockpit*` and the
+  `/v1/cockpit` routes in `agent_core.api` are the Cockpit board, its
+  agent-authored widgets and feeds behind `AGENT_COCKPIT_ENABLED`
+  (Milestone 35, ADR-0240). `agent_core.application.mcp_servers` and the
+  `/v1/mcp-servers` routes are owner-added MCP servers with in-app sign-in
+  behind `AGENT_MCP_SERVERS_ENABLED` (ADR-0255).
 
 Milestone 15, operational hardening, is authorized and adds nothing to this
 page until its implementation lands. Each workstream's status and open items

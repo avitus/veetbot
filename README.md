@@ -46,9 +46,10 @@ box.
   turn agent quality, safety, and recovery into things a team can verify.
 
 Veetbot is under active development. The durable agent core and the workflows
-through Milestone 12 are complete, along with the memory evaluation and memory
-browser workstreams; newer capabilities continue to move through explicit
-release gates. See the
+through Milestone 14 are complete, along with seven parallel workstreams
+(memory evaluation and the memory browser, conversational schedules and their
+lifecycle, the persona surface, and chat folders); newer capabilities continue
+to move through explicit release gates. See the
 [current project state](docs/status/project-state.yaml) for the exact status of
 each milestone.
 
@@ -186,7 +187,7 @@ its own [setup guide](clients/apple/README.md).
 
 | Command | What it does |
 | --- | --- |
-| `make check` | Run formatting, lint, types, fast tests, deployment, documentation, and website checks with two concurrent jobs |
+| `make check` | Run formatting, lint, types, fast tests, the real-browser partition, deployment, documentation, website, and Cockpit checks with two concurrent jobs |
 | `make format` | Apply Ruff formatting and safe lint fixes |
 | `make test` | Run every non-live Python test |
 | `make test-static` | Run unit and structural tests with two workers |
@@ -239,7 +240,9 @@ docker compose exec postgres dropdb -U agent agent_scratch
 Secrets, addresses, and deployment identity belong in Doppler, from which
 `make env-pull` generates `.env`; reviewed tuning values belong in the YAML
 file owned by the relevant package. Optional web, browser, typed-judgment,
-scheduling, notification, email, and trajectory-export features are disabled by default. Their available environment switches are documented in
+scheduling, notification, email, trajectory-export, memory API, Scale VP,
+owner-added MCP server, records, and Cockpit features are disabled by default.
+Their available environment switches are documented in
 [`.env.example`](.env.example).
 
 The initial public-web comparison keeps the incumbent provider for half of each

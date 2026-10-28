@@ -32,7 +32,11 @@ Milestone 18 is operationally complete only when all of these are true:
 
 ## Verified starting point
 
-This was checked on 2026-09-03 and must be rechecked before activation:
+This checkpoint was recorded on 2026-09-03, before the first activation, and
+is kept as the list of preconditions to recheck before any re-activation;
+the release identity and the Gmail state it names are historical, not the
+current state (the live mailbox work in the later phases of this runbook
+followed it):
 
 - The Gmail implementation reached `main` in [GitHub pull request 73](https://github.com/avitus/veetbot/pull/73)
   ([Glen review](https://app.tryglen.com/avitus/veetbot/pull/73)). Its final
@@ -47,7 +51,8 @@ This was checked on 2026-09-03 and must be rechecked before activation:
 - The schedule API, schedule worker, notification API, notification dispatcher,
   and APNs provider are enabled. All application and notification units are
   active.
-- Gmail remains disabled and `/etc/veetbot/gmail` does not exist.
+- Gmail was disabled and `/etc/veetbot/gmail` did not exist (at the time of
+  the checkpoint; recheck the actual state before changing it).
 - On the current Droplet, the active release owner and application service user
   are both `veetbot`. Recheck this identity assumption in phase 3.
 
@@ -510,8 +515,9 @@ Checkpoint:
 ## Phase 5 — Scheduled triage smoke
 
 Do not create this schedule through the conversational `schedule.create` tool.
-That tool intentionally fixes `requested_scopes` to an empty set, so its runs
-cannot use Gmail. Create the smoke schedule through `POST /v1/schedules` with
+That tool derives scopes only from its own flags (website, call, Cockpit feed;
+ADR-0213) and never grants a Gmail scope, so its runs cannot use Gmail.
+Create the smoke schedule through `POST /v1/schedules` with
 the exact read and write scopes.
 
 First create a fresh session through the API and copy its returned `agent_id`
@@ -712,13 +718,18 @@ drafts, feedback and learning of the
 above and needs no new Google permission.
 
 1. Confirm the Phase 4 smoke passed for every connected account.
-2. In `/etc/veetbot/veetbot.env`, set `AGENT_EMAIL_MODE_ENABLED=1` and append
-   `email.read,email.write` to `AUTH_SCOPES`. The flag grants no authority;
-   the scopes and the existing account authority do.
+2. In `/etc/veetbot/veetbot.env`, set `AGENT_EMAIL_MODE_ENABLED=1`. The
+   `email.read` and `email.write` grants ship in `deploy/veetbot.env.example`,
+   so every release provisions them (ADR-0149); no `AUTH_SCOPES` edit is
+   needed. The flag grants no authority; the scopes and the existing account
+   authority do.
 3. Automatic email work spends at most USD 20 per UTC day and USD 200 per
    rolling 30 days. A reviewed `runtime/limits.yaml` overlay under
    `AGENT_CONFIG_DIR` can set other finite `email.daily_cost` and
-   `email.monthly_cost` allowances.
+   `email.monthly_cost` allowances. Each refresh slice reserves USD 1 against
+   that aggregate allowance, and new mail keeps the remaining quarter of it:
+   once the usual full refresh would pass 75% of either ceiling, a refresh is
+   admitted as a new-mail slice until the full ceiling (ADR-0256).
 4. Restart `veetbot-api`, `veetbot-worker`, `veetbot-async-worker`, and
    `veetbot-maintenance`, confirm each is active, then open Email in the app
    and confirm each account reports a completed update.

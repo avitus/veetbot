@@ -460,7 +460,7 @@ trustworthy.
    (`bootstrap-and-composition.md:1301-1309`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
-   processor already uses (`development-toolchain.md:153-155`) run over
+   processor already uses (`development-toolchain.md:154-156`) run over
    structured tool arguments and results, where a value's key is better
    evidence than the value's shape. A tenant may add patterns; it may not
    remove one.

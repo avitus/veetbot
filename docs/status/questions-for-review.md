@@ -11,7 +11,8 @@ decisions for review.
 
 This file is that record. Each entry states what was decided, why, what the
 alternative was, and what it costs to reverse. Nothing here is settled; every
-item is open for a different answer.
+item is open for a different answer. The opening paragraph is the historical
+framing; later decisions are appended below in date order.
 
 The reversal cost is the only column that should drive urgency. Items marked
 **cheap** are prose changes. Items marked **moderate** touch a migration or a
@@ -7095,6 +7096,15 @@ designs, and on `main`.
 
 **Reversal cost:** cheap for an acceptance; a rejection means reverting the
 mechanism or writing a replacement ADR.
+
+**Update (2026-10-27):** all eight still say Proposed, and fifty-seven ADRs
+carry that status in all. Among the others whose mechanisms are on `main`:
+ADR-0146 (hosted Chromium's vendor requests), ADR-0153 (the Scale VP bridge,
+pull request 152), ADR-0186 (dreaming review sign-in, pull request 159),
+ADR-0228 (`.circleci/test-suites.yml`), ADR-0230 (`parallelism: 2` in
+`.circleci/config.yml`), ADR-0236 (the Makefile's sidecar branch for browser
+targets) and ADR-0253 (pull request 198). `grep -l "Status: Proposed"
+docs/adr/*.md` lists the current set; a batch acceptance is requested.
 
 ### The `.git/config` hardline blocks only the workspace root
 

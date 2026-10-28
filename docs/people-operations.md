@@ -10,8 +10,13 @@ The governing contract is [People and relationships](plan/people-and-relationshi
 
 ## Installation and rollback
 
-The schema revision is `c28d52ea7301`. Apply it using the existing deployment
-migration step during a maintenance window. Its four GIN indexes on existing
+The People schema began at revision `c28d52ea7301` and was extended by
+`524f16dfc8f9` (merge suggestions, ADR-0125), `ea3210a1b005` (attribution
+keys retained after erasure) and `e6a3c9d4b217` (source memory links,
+ADR-0233); a rollback artifact must support the newest People revision in the
+database, not only the first. Apply the revisions using the existing
+deployment migration step during a maintenance window. The first revision's
+four GIN indexes on existing
 event, invocation, recall-trace, and email tables use ordinary transactional
 `CREATE INDEX`, which blocks writes while each index is built. Quiesce application
 writers before starting the release and keep them stopped through migration;
@@ -24,8 +29,9 @@ People is enabled by default under ADR-0101. Leave
 `AGENT_MEMORY_FORMATION_POLICY_PIN` empty (or select `formation@11`) and use
 `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` or `required` with the configured
 memory provider. No People or Email semantic evidence artifact is required.
-Existing Email setup and exact source scopes still apply. Add `people.read` and
-`people.write` to the owner's authenticated scopes for the browser and tools.
+Existing Email setup and exact source scopes still apply. `people.read` and
+`people.write` ship in the owner template `deploy/veetbot.env.example` and are
+provisioned by every release (ADR-0149).
 Open a new conversation to receive the current tool catalog.
 
 Automatic Chat formation, attributed Email formation, contextual recall, native
@@ -43,7 +49,8 @@ For an application rollback:
 1. Stop new imports and cancel active imports through their original job IDs.
    Wait for in-flight calls to settle; unresolved reservations remain held.
 2. Under the deployment lock, stop application writers and export the database.
-3. Select an artifact that explicitly supports `c28d52ea7301`, turn People off,
+3. Select an artifact that explicitly supports the newest People revision in
+   the database (`c28d52ea7301` and its extensions above), turn People off,
    and restore its compatible, evidenced memory configuration. Use the
    [deployment rollback procedure](deployment.md#manual-rollback).
 4. Keep the People tables and memory revisions intact. Verify schema agreement,

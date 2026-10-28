@@ -64,7 +64,7 @@ From the owner's Mac, pipe the token from Doppler to the host. It never
 appears in a command line or in either shell's history:
 
 ```bash
-doppler secrets get TELEGRAM_BOT_TOKEN --project veetbot --config prd --plain | ssh root@api.veetbot.com 'set -e; d=/etc/veetbot/secrets; test -d "$d" || install -d -o veetbot -g veetbot -m 0700 "$d"; umask 077; t=$(mktemp "$d/.telegram.XXXXXX"); cat > "$t"; chown veetbot:veetbot "$t"; chmod 0600 "$t"; mv -f "$t" "$d/telegram-bot-token"; stat -c "%a %U:%G %s bytes %n" "$d/telegram-bot-token"; runuser -u veetbot -- test -r "$d/telegram-bot-token" && echo "readable by veetbot"'
+doppler secrets get TELEGRAM_BOT_TOKEN --project veetbot --config prd --plain | ssh root@api.veetbot.com 'set -e; d=/etc/veetbot/secrets; test -d "$d" || install -d -m 0711 "$d"; umask 077; t=$(mktemp "$d/.telegram.XXXXXX"); cat > "$t"; chown veetbot:veetbot "$t"; chmod 0600 "$t"; mv -f "$t" "$d/telegram-bot-token"; stat -c "%a %U:%G %s bytes %n" "$d/telegram-bot-token"; runuser -u veetbot -- test -r "$d/telegram-bot-token" && echo "readable by veetbot"'
 ```
 
 It must print `600 veetbot:veetbot`, a size of about 46 bytes, and
@@ -262,8 +262,8 @@ Use harmless text and record only timestamps, results, and identifiers:
 - **"The daily surface budget is exhausted."** Surface runs today have spent,
   or are reserving, the USD 25 daily ceiling; each run in flight reserves
   USD 10, so a third concurrent run is refused this way. It resets at 00:00 UTC.
-- **"Too many requests are running"** Four surface runs are in flight. Wait
-  for one to finish.
+- **"Too many requests are running; try again when one finishes."** Four
+  surface runs are in flight. Wait for one to finish.
 - **"The agent has a question" or "Approval needed" without detail.** The
   pairing lacks `run.read` or `approval.read`; pair again with them.
 - **No approval prompt at all.** Check both notification flags in Phase 3.

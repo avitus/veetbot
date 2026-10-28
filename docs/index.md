@@ -61,8 +61,9 @@ as an archival record.
 
 ## Guides
 
-- [Apple client](apple-client.md) — the Mac, iPhone, and iPad app: chat,
-  attachments, Website Access, Memory and People, Email mode, and settings.
+- [Apple client](apple-client.md) — the Mac, iPhone, and iPad app: the
+  Cockpit, Chat, and Email modes, attachments, Website Access, Memory, People,
+  Schedules, Persona, and settings.
 - [Downloadable client](client.md) — the terminal client's build, connection,
   and security guidance.
 - [Production deployment](deployment.md) — host preparation, release,
@@ -94,7 +95,8 @@ relevant sections of the engineering plan.
 ## For humans
 
 Use the navigation and search here to read the plan. A single self-contained HTML
-version of the full documentation is produced by `make docs` and written to
+version of the plan-of-record bundle (the nine documents listed in
+`docs-manifest.yaml`) is produced by `make docs` and written to
 `dist/engineering-documentation.html`; it opens locally without any other file.
 
 ## How the documentation is organized

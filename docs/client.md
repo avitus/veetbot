@@ -87,7 +87,7 @@ python veetbot-client.pyz --once "Summarize the current project state."
 
 Inside the interactive client, `/new` creates a new session, `/session ID`
 switches to an existing session, `/download ARTIFACT_ID [PATH]` saves an
-artifact, `/help` lists commands, and `/quit` exits.
+artifact, `/help` lists commands, and `/quit` (or `/exit`) exits.
 
 ## Runtime behavior
 

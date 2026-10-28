@@ -14,13 +14,13 @@ The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
 were written. The present answer is different: Milestones 0 through 14 are
-complete, and Milestone 15 operational hardening is the next sequential,
-fully specified milestone. Milestones 16, 17, 19, 20, 22, 23, and 29 completed
-as separately authorized parallel workstreams; Milestones 18, 21, and 24
-through 31 are authorized parallel workstreams in progress, each with a
-complete design and registered gates. Milestone 32 was authorized on 2026-10-02
-with a proposal; Phase 1 on 2026-10-03 added its detailed contracts and twenty-four
-registered gates. Runtime operations and offline comparisons are implemented; verification remains incomplete.
+complete, and Milestone 15 operational hardening is the next sequential, fully
+specified milestone; its independent reliability repair began under ADR-0205 and
+reached `main` in October 2026. Milestones 16, 17, 19, 20, 22, 23, and 29 completed
+as separately authorized parallel workstreams; Milestones 18, 21, 24 through 28,
+and 30 through 35 are authorized parallel workstreams in progress, each with a
+complete design and registered gates (Milestone 32 since 2026-10-02, 33 since
+2026-10-11, 34 and 35 since 2026-10-22). Milestone 34 is delivered behind its flag.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -91,7 +91,7 @@ rather than smoothed.
 | 11 | Scheduled runs | Complete | 23 | Nothing |
 | 12 | Notifications and device identity | Complete | 20 | The Apple push key and capability are owner actions outside the corpus |
 | 13 | General-purpose subagents and delegation | Complete | 21 | Nothing; the delegating re-run scored above the failed single-agent trajectory, and tenant activation stays default-off |
-| 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
+| 14 | Inbound surfaces and pairing | Complete | 21 | Nothing; the owner's production Telegram smoke passed on 2026-10-06 |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
 | 16 | Memory evaluation and lifecycle | Complete | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
 | 17 | Memory read API and browser | Complete | 10 | Nothing; the owner decided on 2026-08-23 to expose the three provenance fields, so the projection carries twenty-six fields |
@@ -108,7 +108,11 @@ rather than smoothed.
 | 28 | People and relationship memory | Authorized | 36 | Nothing in the corpus; every gate binding is still pending, and quality evaluation needs the owner |
 | 29 | Chat thread folders | Complete | 17 | Nothing; ADR-0110 adds the typed-judgment port and its matcher |
 | 30 | Advisory approval layer | Authorized | 5 | Nothing in the corpus; threshold calibration and the enforce decision need the owner |
-| 31 | Email unsubscribe assistance | Authorized | 20 | Nothing in the corpus; the real-mailbox smoke is an owner action outside it |
+| 31 | Email unsubscribe assistance | Authorized | 23 | Nothing in the corpus; the real-mailbox smoke is an owner action outside it |
+| 32 | Memory reconsolidation (dreaming) | Implemented; verification incomplete | 24 | Nothing in the corpus; twenty-two runtime and release gates await executable bindings and supervised production evidence |
+| 33 | General memory search and recall | Authorized; implementation in progress | 12 | Nothing in the corpus; optional-channel activation and production delivery need evidence |
+| 34 | Owner records | Implemented behind its flag | 10 | Nothing in the corpus; activation of `AGENT_RECORDS_ENABLED` is an owner action outside it |
+| 35 | Cockpit mode and agent-authored widgets | Authorized; implementation in progress | 23 | Nothing in the corpus; nine gate bindings await executable implementation evidence |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -245,7 +249,7 @@ specification, and recorded as
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
     `engineering-plan.md:1769` says *"Create Alembic migrations for at
-    least these tables"* and `development-toolchain.md:218` supplies
+    least these tables"* and `development-toolchain.md:219` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
     schema migrations, and no design for how the composition root
@@ -2026,8 +2030,9 @@ refusal of untrusted-turn appends (no policy profile change), two tables with
 forced row-level security, four events, the `recorded_elsewhere` formation
 rule and the body-region catalog item. The build sequence is implemented and
 every gate's check in `evals/gates/records.yaml` is its test; the five tools
-and the catalog stay off until `AGENT_RECORDS_ENABLED` is set, and review,
-hosted CI and production delivery are pending.
+and the catalog stay off until `AGENT_RECORDS_ENABLED` is set. Pull requests
+186, 193 and 202 delivered it to production behind the flag by 2026-10-26;
+setting the flag and accepting the records approval rule remain with the owner.
 
 ## Milestone 35: Cockpit mode and agent-authored widgets
 

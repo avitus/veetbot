@@ -95,7 +95,7 @@ const features = [
 const steps = [
   {
     title: "Just ask",
-    body: "Tell Veetbot what you need in your own words, from your iPhone or Mac.",
+    body: "Tell Veetbot what you need in your own words, from your iPhone, iPad or Mac.",
   },
   {
     title: "It gets to work",
@@ -229,7 +229,7 @@ export default function Home() {
       <section className="closing shell" aria-labelledby="closing-title">
         <Image src="/veetbot-icon.svg" width={64} height={64} alt="" />
         <h2 id="closing-title">Less busywork. More of your day.</h2>
-        <p>Veetbot is your personal AI assistant for iPhone and Mac.</p>
+        <p>Veetbot is your personal AI assistant for iPhone, iPad and Mac.</p>
       </section>
 
       <SiteFooter />

@@ -64,7 +64,6 @@ nav:
   - Home: index.md
   - Milestones: status/milestones.md
   - Current Milestone: plan/current-milestone.md
-  - Bland Calling Proposal: bland-calling-proposal.md
   - Bland Calling Setup: bland-setup.md
   - People Memory Operations: people-operations.md
   - Recall Production Trial: recall-production-trial.md
@@ -115,6 +114,7 @@ nav:
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
   - Proposals:
+      - Bland Calling: bland-calling-proposal.md
       - Client Modes and Email Experience: email-mode-proposal.md
       - Self-hosted Browser Automation: browser-automation-improvement-proposal.md
   - Implementation:
