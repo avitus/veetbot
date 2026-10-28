@@ -321,6 +321,38 @@ import Testing
         board.setVisible(false)
     }
 
+    /// Undo is anchored to the removal's revision: an arrangement saved while the
+    /// toast is up makes the server refuse the undo instead of being overwritten.
+    @Test
+    func undoOfARemovalCompareAndSetsOnTheRemovalsOwnRevision() async {
+        let client = FakeClient()
+        let weather = CockpitWidget(
+            slug: "weather", revisionID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            bundleSHA256: String(repeating: "d", count: 64),
+            manifest: ["title": .string("Weather"), "sizes": .array([.string("md")])], changedAt: Self.now
+        )
+        client.queueSnapshot(.success(CockpitSnapshot(
+            cursor: 41, runtime: nil, widgets: [weather],
+            layouts: [.wide: CockpitLayout(revision: 3, placements: [CockpitPlacement(slug: "weather", size: "md")])]
+        )))
+        client.queueStream([])
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let board = model(client)
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.removeFromScreen("weather", deviceClass: .wide)
+        // Another arrangement lands while Undo is still offered (revision 4 -> 5).
+        await board.saveLayout(.wide, placements: [])
+        await toasts.performUndo()
+        #expect(client.calls == [
+            "layout wide [] after 3",
+            "layout wide [] after 4",
+            "layout wide [\"weather\"] after 4",
+        ], "Undo sends the removal's revision, not the newer arrangement's")
+        board.setVisible(false)
+    }
+
     @Test
     func theOwnersChangesGoThroughTheRoutesAndRefreshTheBoard() async {
         let client = FakeClient()

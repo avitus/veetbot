@@ -1259,7 +1259,9 @@ animation element, within 2,048 nodes. A `<use>` naming two references vouches
 for neither, and a page with any animation element inspects nothing. The
 page-side read then treats an inspected reference like a fragment reference
 whose target it can see. Any other external reference stays opaque, and so does
-every one when the DevTools read fails.
+every one when the DevTools read fails. A grant-constrained click whose live read
+relied on inspected copies reads them again immediately before the click, and a
+copy no longer inert refuses the act so it asks.
 
 `browser.task_grant.created`, `tool.call.authorized` (with the grant id, use
 ordinal, and the approval view of the action), and exactly one

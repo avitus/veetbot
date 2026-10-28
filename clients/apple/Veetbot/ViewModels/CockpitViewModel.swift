@@ -46,10 +46,13 @@ public final class CockpitViewModel: ObservableObject {
         let title = snapshot.widgets.first { $0.slug == slug }?.title ?? slug
         await saveLayout(deviceClass, placements: before.filter { $0.slug != slug })
         guard errorMessage == nil else { return }
+        // Undo compares against the removal's own revision, so an arrangement
+        // saved in the meantime is refused by the server rather than overwritten.
+        let removalRevision = self.snapshot?.layouts[deviceClass]?.revision
         closeDetail()
         toasts.show("Removed \(title) from this screen", restored: "\(title) is back on this screen") { [weak self] in
             guard let self else { return false }
-            await self.saveLayout(deviceClass, placements: before)
+            await self.saveLayout(deviceClass, placements: before, expectedRevision: removalRevision)
             return self.errorMessage == nil
         }
     }
@@ -214,9 +217,12 @@ public final class CockpitViewModel: ObservableObject {
         }
     }
 
-    /// Arrange this device class's board, compare-and-set on the layout's revision.
-    public func saveLayout(_ deviceClass: CockpitDeviceClass, placements: [CockpitPlacement]) async {
-        let expected = snapshot?.layouts[deviceClass]?.revision
+    /// Arrange this device class's board, compare-and-set on the layout's revision
+    /// (the snapshot's unless the caller anchors the save to an earlier one).
+    public func saveLayout(
+        _ deviceClass: CockpitDeviceClass, placements: [CockpitPlacement], expectedRevision: Int? = nil
+    ) async {
+        let expected = expectedRevision ?? snapshot?.layouts[deviceClass]?.revision
         await perform { client in
             let layout = try await client.putCockpitLayout(deviceClass, placements: placements, expectedRevision: expected)
             // The next save compares against this revision until the stream refetches the board.

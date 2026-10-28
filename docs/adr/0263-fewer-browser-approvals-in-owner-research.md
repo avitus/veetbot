@@ -122,6 +122,13 @@ release evidence bound to it are unchanged.
   The read grows with the page, about 0.05 ms and 400 bytes per element
   (20,000 elements in 0.4 s as 8 MB; 200,000 in 11.6 s as 79 MB), so a page
   past 20,000 elements is not read and its external references stay opaque.
+  The click guard cannot see inside a user-agent shadow root, and a page can
+  point a `<use>` elsewhere and back, or its origin can serve the same URL
+  with new content, after the live read. So a grant-constrained click whose
+  live read relied on inspected copies reads them again immediately before
+  the click and is refused, asking instead, when any is no longer inert. That
+  second read is not atomic with the click; the window it leaves is the
+  runtime's own dispatch, with no page turn in between.
 - A page with any SMIL animation element inspects no sprite, so its icon
   controls still ask. The portal's sign-in page and sprite have none.
 - Approval records say why research mode refused, so a remaining prompt can

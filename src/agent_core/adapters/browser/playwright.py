@@ -7,7 +7,7 @@ import os
 import re
 import secrets
 import tempfile
-from collections.abc import Awaitable, Callable, Iterable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
 from datetime import datetime
 from typing import Any, Literal, NoReturn, Protocol, cast
@@ -1205,11 +1205,13 @@ class PythonPlaywrightRuntime:
             raise BrowserProviderError("tool.browser.action_not_allowed", retryable=False)
 
         guards: list[JSHandle] = []
+        relied_copies: list[str] = []
         if constraint is not None:
             assert now is not None
-            guards.append(
-                await self._require_live_coverage(page, handle, action, constraint, now=now)
+            guard, relied_copies = await self._require_live_coverage(
+                page, handle, action, constraint, now=now
             )
+            guards.append(guard)
             if action.kind in _KEYBOARD_KINDS:
                 try:
                     guards.append(await self._hold_focus(handle))
@@ -1239,7 +1241,7 @@ class PythonPlaywrightRuntime:
                 return new WeakRef(node);
             }""")
         try:
-            await self._dispatch(page, handle, action, guards)
+            await self._dispatch(page, handle, action, guards, relied_copies=relied_copies)
             if draft_binding is not None and self._main_frame_navigations == documents_before:
                 await self._forget_draft()
                 self._known_draft = (draft_binding, action.value or "", documents_before)
@@ -1313,12 +1315,19 @@ class PythonPlaywrightRuntime:
         handle: ElementHandle,
         action: BrowserAction,
         guards: list[JSHandle],
+        *,
+        relied_copies: Sequence[str] = (),
     ) -> None:
         """Check click actionability, then send one action without automatic replay.
 
         ``guards`` are a grant-constrained act's click guard and, for a key or
         text, its focus guard, released once the action is sent. Only a trial
         click timeout is a definite refusal; dispatch failures remain uncertain.
+
+        ``relied_copies`` are the external ``<use>`` references the live read
+        treated as inspected (ADR-0263). The click guard cannot see inside a
+        user-agent shadow root, so the copies are read again immediately before
+        the click; a copy no longer inert refuses the act instead.
         """
         try:
             if action.kind is BrowserActionKind.CLICK:
@@ -1330,6 +1339,9 @@ class PythonPlaywrightRuntime:
                     raise BrowserProviderError(
                         "tool.browser.element_not_found", retryable=False
                     ) from exc
+                if relied_copies and not await _copies_still_inert(page, relied_copies):
+                    await _release_guards(guards)
+                    await self._refuse_grant()
                 await handle.click(timeout=CLICK_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.TYPE:
                 await handle.fill(action.value or "", timeout=ACTION_TIMEOUT_MILLISECONDS)
@@ -1395,15 +1407,18 @@ class PythonPlaywrightRuntime:
         constraint: BrowserDispatchConstraint,
         *,
         now: datetime,
-    ) -> JSHandle:
+    ) -> tuple[JSHandle, list[str]]:
         """Recheck a grant-authorized act against the live page before dispatch (ADR-0129).
 
         The worker decided from the observation it was shown; this reads the
         live URL, every live label source at full length and live facts, and
         runs the same coverage rules. A constraint can only narrow. The read
-        arms the click guard, which is returned armed for dispatch to release.
+        arms the click guard, which is returned armed for dispatch to release,
+        with the external ``<use>`` references the read relied on as inspected
+        (ADR-0263), for dispatch to read again before the click.
         """
         guard: JSHandle | None = None
+        relied: list[str] = []
         try:
             guard = await handle.evaluate_handle(_GUARDED_READ_SCRIPT)
             metadata = await guard.evaluate("guard => guard.metadata")
@@ -1415,6 +1430,7 @@ class PythonPlaywrightRuntime:
                     guard = None
                     guard = await handle.evaluate_handle(_GUARDED_READ_SCRIPT, inspected)
                     metadata = await guard.evaluate("guard => guard.metadata")
+                    relied = sorted(set(inspected) & set(_external_use_list(metadata)))
             covered = await self._live_coverage(page, handle, action, constraint, metadata, now=now)
         except PlaywrightError:
             covered = False
@@ -1424,7 +1440,7 @@ class PythonPlaywrightRuntime:
         if not covered or guard is None:
             await _release_guards([guard] if guard is not None else [])
             await self._refuse_grant()
-        return guard
+        return guard, relied
 
     async def _live_coverage(
         self,
@@ -1759,11 +1775,30 @@ async def _dispose(handles: Iterable[ElementHandle], *, keep: Iterable[ElementHa
     await asyncio.gather(*(release(handle) for handle in released.values()))
 
 
+def _external_use_list(metadata: object) -> list[str]:
+    """The external ``<use>`` references an element read met (ADR-0263)."""
+
+    uses = metadata.get("externalUses") if isinstance(metadata, dict) else None
+    return [str(use) for use in uses] if isinstance(uses, list) else []
+
+
 def _external_uses(metadata: object) -> bool:
     """Whether an element read met an external ``<use>`` reference (ADR-0263)."""
 
-    uses = metadata.get("externalUses") if isinstance(metadata, dict) else None
-    return isinstance(uses, list) and bool(uses)
+    return bool(_external_use_list(metadata))
+
+
+async def _copies_still_inert(page: Page, relied: Sequence[str]) -> bool:
+    """Whether every copy a live read relied on is still inert (ADR-0263).
+
+    A page can point a ``<use>`` elsewhere and back, or its origin can serve
+    the same URL with new content, between the live read and the click, and
+    the click guard cannot see inside a user-agent shadow root. The copies are
+    read again as late as the runtime can, immediately before the click; the
+    read is not atomic with the click, which the ADR records.
+    """
+
+    return set(relied) <= set(await _inspected_use_references(page))
 
 
 # ADR-0263: the pierced document read is linear in the page's size, about
