@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -70,6 +71,19 @@ class ToolSpec(BaseModel):
     device_id: str | None = None
     deprecated: bool = False
     model_visible: bool = True
+
+
+def deferred_definition_text(spec: ToolSpec) -> str:
+    """The definition a deferred tool's one-line index entry abbreviates (ADR-0258).
+
+    An invalid call through ``tool.call`` answers with it, and the context
+    builder keeps a definition answer whole by recognizing exactly this text.
+    """
+
+    schema = json.dumps(
+        spec.input_schema, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
+    return f"Definition of {spec.name}.\nDescription: {spec.description}\nInput schema: {schema}"
 
 
 class ToolFailureKind(StrEnum):

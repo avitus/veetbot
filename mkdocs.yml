@@ -391,4 +391,5 @@ nav:
       - 'ADR-0254: Cockpit feed intervals and refresh on entry': adr/0254-cockpit-feed-intervals-and-refresh-on-entry.md
       - 'ADR-0255: Owner-added MCP servers': adr/0255-owner-added-mcp-servers.md
       - 'ADR-0256: New mail keeps a reserved Email budget share': adr/0256-new-mail-keeps-a-reserved-email-budget-share.md
+      - 'ADR-0258: Deferred definitions and truncation recovery': adr/0258-deferred-definitions-and-truncation-recovery.md
   - Changelog: changelog.md

@@ -416,7 +416,9 @@ parameter names with optional ones marked, and the first sentence of its
 description. The model reaches it through the control tool `tool.call`, which
 the tool pipeline unwraps before resolution, so validation, policy, approval,
 idempotency and events all run under the deferred tool's own name; invalid
-arguments return that tool's input schema. A tool is **advertised** by its
+arguments return that tool's whole definition, its description and its input
+schema ([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)).
+A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
 forty entries and 2,000 tokens, and the prefix ceiling rose by exactly that cap.
 An entry lists required parameters in the order of the schema's `required`
@@ -658,9 +660,9 @@ the cheapest and most recoverable loss first:
 3. **Tool results truncate to pointers, oldest first, in blocks.** The full result
    is already in the event log and, above the inline threshold, in the artifact
    store. What remains is a typed pointer with the byte count and reference, so the
-   model can see that content exists and ask for it rather than concluding it never
-   existed. Once the aggregate exceeds its budget, the builder truncates the oldest
-   results until the aggregate fits, then continues to the next quarter-budget
+   model can see that content existed rather than concluding it never did; no
+   model-callable tool reads a pointer back. Once the aggregate exceeds its
+   budget, the builder truncates the oldest results until the aggregate fits, then continues to the next quarter-budget
    boundary of truncated tokens (ADR-0242). The truncated prefix therefore moves at
    most once per quarter budget of new results. A minimal truncation would move by
    one result on every step of a long tool loop, rewriting the oldest bytes of the
@@ -669,6 +671,24 @@ the cheapest and most recoverable loss first:
    on each of thirty-two consecutive steps that way. The block is a function of the
    budget alone, so `build()` stays pure, and the pointer still names the event or
    artifact that holds the content.
+
+   Three rules keep a long loop from repeating its calls to recover what
+   truncation took (ADR-0258). The newest answer that carries a deferred tool's
+   definition stays whole and still counts against the budget: it replies to
+   `tool.call` for a tool the plan defers, and its content is exactly the
+   `tool.arguments_invalid` outcome and that tool's pinned definition. Kept
+   answers together stay within the budget, newest first; an older one past it
+   truncates in its turn, and once every other result is a pointer the oldest
+   kept answers give way until they and the pointers fit. A result
+   of the current run carries the sequence of the event that recorded it, so
+   its pointer names that event, beside the artifact when one holds the
+   content. While anything is truncated, the step context
+   gains a platform note that older results are pointers no tool reads back
+   and that a call should not be repeated only to recover one. When the plan
+   defines `context.update_working_state`, the note also says to keep each
+   needed finding as a fact citing its result's event, and lists the events of
+   the newest twelve results the history cut keeps whole, each with the pinned
+   tool that produced it. The note sits in the step context, after the cached body.
 4. **History compacts.** Deliberately last: it is the only step that costs a model
    call on the critical path, and the only one that loses information the run
    cannot cheaply re-fetch.

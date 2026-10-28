@@ -87,6 +87,7 @@ from agent_core.runtime.loop import (
     prepare_recall,
     recover_browser_failure,
     run_loop,
+    with_event_sequences,
 )
 from agent_core.runtime.scheduled_browser import (
     ScheduledBrowserUnavailableError,
@@ -1341,7 +1342,11 @@ class RunExecutor:
             elif recorded != len(results):
                 raise ConflictError("persisted tool usage does not match the pending batch")
         # A result the log already holds was adopted with the history.
-        restored.conversation.extend(result for result in results if result.call_id not in answered)
+        restored.conversation.extend(
+            await with_event_sequences(
+                context, [result for result in results if result.call_id not in answered]
+            )
+        )
         # ADR-0130: a batch completed after an approval restarts counts too.
         apply_tool_evidence(restored.working_state, calls)
         restored.pending_tool_calls = []

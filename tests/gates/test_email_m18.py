@@ -1257,12 +1257,13 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
     assert plan is not None
     # Fifteen configured tools, tool.call and the account's eight Gmail tools.
     # The default agent no longer advertises workspace.list_files (ADR-0124)
-    # and offers schedule management, source learning and workspace writes
-    # through the deferred tool index (ADRs 0123 and 0233).
+    # and offers schedule management, source learning, workspace writes and
+    # JSON field reads through the deferred tool index (ADRs 0123, 0233, 0256).
     assert len(plan.tool_specs) == 24
     assert set(plan.deferred_tool_names) == {
         "memory.learn",
         "workspace.write_text",
+        "web.fetch_json",
         "schedule.update",
         "schedule.pause",
         "schedule.resume",

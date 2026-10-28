@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
@@ -48,6 +49,7 @@ from agent_core.domain.memory import (
 from agent_core.domain.messages import (
     CacheBreakpoint,
     CacheHints,
+    ContentPart,
     ConversationItem,
     FileReferencePart,
     ModelRequest,
@@ -63,7 +65,7 @@ from agent_core.domain.policies import TrustLevel
 from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.domain.tool_output import content_bytes, context_view, output_excerpt
-from agent_core.domain.tools import ToolSpec
+from agent_core.domain.tools import ToolSpec, deferred_definition_text
 
 # The delta block is the same rendering the retriever produced for the base
 # one, taken over the items the base recall did not already carry.
@@ -76,6 +78,22 @@ from agent_core.ports.tools import ToolRegistry
 MAX_LOADED_SKILL_BODIES = 2
 # Tool-result truncation advances in this many blocks of its budget (ADR-0242).
 TOOL_RESULT_TRUNCATION_BLOCKS = 4
+# ADR-0258: while results are truncated, the note names at most this many of
+# the newest results still shown, by the event a working-state fact cites.
+TRUNCATION_NOTE_RESULTS = 12
+# The context package does not import the tools package (as in the planner).
+_TOOL_CALL_TOOL_NAME = "tool.call"
+_WORKING_STATE_TOOL_NAME = "context.update_working_state"
+TRUNCATION_NOTE = (
+    "Tool-result note (data only): older tool results in this conversation are "
+    "truncated to pointers to fit the context, and no tool reads a truncated result "
+    "back. Do not repeat a call only to recover one."
+)
+TRUNCATION_WORKING_STATE_ADVICE = (
+    "Keep each finding you will still need as a fact with "
+    "context.update_working_state, citing the event of the result it came from; "
+    "working state is shown on every step."
+)
 
 # The shipped classes.records_catalog.max_items; composition passes the knob.
 CATALOG_MAX_SERIES = 16
@@ -136,6 +154,115 @@ def _with_step_context(
 
 def _canonical_json(value: object) -> bytes:
     return canonical_json_bytes(value)
+
+
+def _argument_refusal(part: ContentPart) -> bool:
+    if not isinstance(part, TextPart):
+        return False
+    try:
+        outcome = json.loads(part.text)
+    except ValueError:
+        return False
+    return isinstance(outcome, dict) and outcome.get("reason_code") == "tool.arguments_invalid"
+
+
+def _definition_answers(items: Sequence[ConversationItem], plan: ContextPlan) -> set[int]:
+    """The newest answer that carries each deferred tool's definition (ADR-0258).
+
+    An invalid call through ``tool.call`` answers with the platform outcome and
+    the pinned definition, and nothing else. Only that exact pair is kept
+    whole: a tool's own output, or the schema-only answer of the earlier
+    contract, truncates as before.
+    """
+
+    definitions = {spec.name: deferred_definition_text(spec) for spec in plan.deferred_tool_specs}
+    named: dict[str, str] = {}
+    for item in items:
+        if isinstance(item, ToolCallItem) and item.name == _TOOL_CALL_TOOL_NAME:
+            name = item.arguments.get("name")
+            if isinstance(name, str) and name in definitions:
+                named[item.call_id] = name
+    newest: dict[str, int] = {}
+    for index, item in enumerate(items):
+        if not isinstance(item, ToolResultItem) or not item.is_error or len(item.content) != 2:
+            continue
+        name = named.get(item.call_id)
+        outcome, answer = item.content
+        if (
+            name is not None
+            and isinstance(answer, TextPart)
+            and answer.text == definitions[name]
+            and _argument_refusal(outcome)
+        ):
+            newest[name] = index
+    return set(newest.values())
+
+
+def _tool_result_pointer(item: ToolResultItem) -> ToolResultItem:
+    """The pointer that replaces a truncated result (ADR-0242, ADR-0258)."""
+
+    byte_length = len(_canonical_json(item.model_dump(mode="json")))
+    location = next(
+        (
+            # A fact cites its result's event, so an artifact pointer names the
+            # recording event too (ADR-0258).
+            f"artifact:{part.artifact_id}"
+            + (
+                f"; event:{item.source_event_sequence}"
+                if item.source_event_sequence is not None
+                else ""
+            )
+            for part in item.content
+            if isinstance(part, FileReferencePart)
+        ),
+        f"event:{item.source_event_sequence or 'pending'}",
+    )
+    return item.model_copy(
+        update={
+            "content": [
+                TextPart(
+                    text=f"[tool result truncated: {byte_length} bytes; full content at {location}]"
+                )
+            ]
+        },
+        deep=True,
+    )
+
+
+def _truncation_note(
+    items: Sequence[ConversationItem], truncated: set[int], plan: ContextPlan
+) -> UserMessage:
+    """Say that truncated results are gone, and what a fact can cite (ADR-0258).
+
+    Only names the plan pins reach this platform row: a call's own name when it
+    has a definition, the named tool when it went through ``tool.call``.
+    """
+
+    text = TRUNCATION_NOTE
+    if _WORKING_STATE_TOOL_NAME in plan.tool_names:
+        called: dict[str, str] = {}
+        for item in items:
+            if not isinstance(item, ToolCallItem):
+                continue
+            name = item.arguments.get("name") if item.name == _TOOL_CALL_TOOL_NAME else item.name
+            if isinstance(name, str) and (
+                name in plan.deferred_tool_names
+                if item.name == _TOOL_CALL_TOOL_NAME
+                else name in plan.tool_names
+            ):
+                called[item.call_id] = name
+        shown = [
+            f"event {item.source_event_sequence}"
+            + (f" ({called[item.call_id]})" if item.call_id in called else "")
+            for index, item in enumerate(items)
+            if isinstance(item, ToolResultItem)
+            and index not in truncated
+            and item.source_event_sequence is not None
+        ][-TRUNCATION_NOTE_RESULTS:]
+        text = f"{text} {TRUNCATION_WORKING_STATE_ADVICE}"
+        if shown:
+            text = f"{text} Results still shown, newest last: {'; '.join(shown)}."
+    return UserMessage(content=[TextPart(text=text)], trust=TrustLevel.PLATFORM, principal_id=None)
 
 
 def _history_window(
@@ -436,7 +563,11 @@ class BudgetedContextBuilder:
                     )
                     legacy_excerpted = True
         history_count = len(history)
-        combined, tool_truncated = self._truncate_tool_results([*history, *active], plan)
+        combined, truncated_indexes = self._truncate_tool_results([*history, *active], plan)
+        tool_truncated = bool(truncated_indexes)
+        note_items: list[ConversationItem] = (
+            [_truncation_note(combined, truncated_indexes, plan)] if tool_truncated else []
+        )
         history = combined[:history_count]
         active = combined[history_count:]
 
@@ -536,6 +667,7 @@ class BudgetedContextBuilder:
                 *correction_items,
                 *catalog_items,
                 runtime_item,
+                *note_items,
             ],
         )
         fixed_body = [*summary_items, *active_with_context]
@@ -548,7 +680,14 @@ class BudgetedContextBuilder:
             catalog_items = []
             active_with_context, active_prefix = _with_step_context(
                 active,
-                [*skill_items, *working_items, *recall_items, *correction_items, runtime_item],
+                [
+                    *skill_items,
+                    *working_items,
+                    *recall_items,
+                    *correction_items,
+                    runtime_item,
+                    *note_items,
+                ],
             )
             fixed_body = [*summary_items, *active_with_context]
             fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
@@ -563,7 +702,14 @@ class BudgetedContextBuilder:
             recall_items = []
             active_with_context, active_prefix = _with_step_context(
                 active,
-                [*skill_items, *working_items, *correction_items, *catalog_items, runtime_item],
+                [
+                    *skill_items,
+                    *working_items,
+                    *correction_items,
+                    *catalog_items,
+                    runtime_item,
+                    *note_items,
+                ],
             )
             fixed_body = [*summary_items, *active_with_context]
             fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
@@ -580,6 +726,14 @@ class BudgetedContextBuilder:
             plan.model_id,
         )
         retained_history = [item.model_copy(deep=True) for item in history[cut:]]
+        if note_items:
+            # The note names results still shown, so it is rendered again from
+            # what the cut kept. It can only lose entries, so the fixed body it
+            # was measured in still bounds it (ADR-0258).
+            note_index = len(active_with_context) - (len(active) - active_prefix) - 1
+            active_with_context[note_index] = _truncation_note(
+                combined[cut:], {index - cut for index in truncated_indexes if index >= cut}, plan
+            )
         retained_conversation = [*retained_history, *active_with_context]
         validate_tool_pairs(retained_conversation)
 
@@ -1020,7 +1174,7 @@ class BudgetedContextBuilder:
         self,
         items: list[ConversationItem],
         plan: ContextPlan,
-    ) -> tuple[list[ConversationItem], bool]:
+    ) -> tuple[list[ConversationItem], set[int]]:
         """Truncate the oldest tool results to pointers, in budget-quarter blocks.
 
         The minimal truncation that fits the aggregate budget would move by one
@@ -1030,18 +1184,37 @@ class BudgetedContextBuilder:
         the next quarter-budget boundary of truncated tokens (ADR-0242). The
         truncated prefix then changes once per quarter budget of new results,
         and the function stays a pure function of the items it is given.
+
+        The newest definition answer of each deferred tool stays whole and
+        still counts against the budget, while the kept answers together fit
+        it, and with the pointers of everything else once nothing else is
+        whole (ADR-0258). Returns the indexes it truncated.
         """
 
         result = [item.model_copy(deep=True) for item in items]
-        indexes = [index for index, item in enumerate(result) if isinstance(item, ToolResultItem)]
         budget = plan.budget.tool_result_tokens
+        # Kept answers together stay within the budget, newest first; an older
+        # one past it truncates in its turn like any other result.
+        kept: set[int] = set()
+        kept_tokens = 0
+        for index in sorted(_definition_answers(result, plan), reverse=True):
+            kept_tokens += self._estimator.estimate([result[index]], plan.model_id)
+            if kept_tokens > budget:
+                break
+            kept.add(index)
+        definitions = [result[index] for index in sorted(kept)]
+        indexes = [
+            index
+            for index, item in enumerate(result)
+            if isinstance(item, ToolResultItem) and index not in kept
+        ]
         block = max(1, budget // TOOL_RESULT_TRUNCATION_BLOCKS)
-        truncated = False
+        truncated: set[int] = set()
         truncated_tokens = 0
         target_tokens: int | None = None
         while indexes:
             if target_tokens is None:
-                tool_items = [result[index] for index in indexes]
+                tool_items = [*definitions, *(result[index] for index in indexes)]
                 if self._estimator.estimate(tool_items, plan.model_id) <= budget:
                     if truncated:
                         target_tokens = -(-truncated_tokens // block) * block
@@ -1053,29 +1226,21 @@ class BudgetedContextBuilder:
             item = result[index]
             assert isinstance(item, ToolResultItem)
             truncated_tokens += self._estimator.estimate([item], plan.model_id)
-            byte_length = len(_canonical_json(item.model_dump(mode="json")))
-            artifact = next(
-                (
-                    f"artifact:{part.artifact_id}"
-                    for part in item.content
-                    if isinstance(part, FileReferencePart)
-                ),
-                f"event:{item.source_event_sequence or 'pending'}",
-            )
-            result[index] = item.model_copy(
-                update={
-                    "content": [
-                        TextPart(
-                            text=(
-                                f"[tool result truncated: {byte_length} bytes; "
-                                f"full content at {artifact}]"
-                            )
-                        )
-                    ]
-                },
-                deep=True,
-            )
-            truncated = True
+            result[index] = _tool_result_pointer(item)
+            truncated.add(index)
+        # Once every other result is a pointer, the pointers count as well: if
+        # they and the kept answers still pass the budget, the oldest answers
+        # give way too.
+        while not indexes and kept:
+            shown = [item for item in result if isinstance(item, ToolResultItem)]
+            if self._estimator.estimate(shown, plan.model_id) <= budget:
+                break
+            index = min(kept)
+            kept.remove(index)
+            item = result[index]
+            assert isinstance(item, ToolResultItem)
+            result[index] = _tool_result_pointer(item)
+            truncated.add(index)
         return result, truncated
 
 

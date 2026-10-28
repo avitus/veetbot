@@ -29,7 +29,7 @@ from agent_core.domain.errors import (
     NotFoundError,
     UserInputRequiredError,
 )
-from agent_core.domain.events import NewEvent
+from agent_core.domain.events import TOOL_RESULT_EVENTS, NewEvent
 from agent_core.domain.memory import RecallQuery
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -693,9 +693,10 @@ async def _record_refusals(
 
     if not refused:
         return
+    recorded: list[ToolResultItem] = []
     async with context.uow_factory() as uow:
         for call, result in refused:
-            await uow.events.append(
+            event = await uow.events.append(
                 NewEvent(
                     session_id=context.run.session_id,
                     run_id=context.run.id,
@@ -710,7 +711,52 @@ async def _record_refusals(
                 ),
                 lease=context.lease,
             )
-    context.checkpoint.conversation.extend(result for _call, result in refused)
+            recorded.append(result.model_copy(update={"source_event_sequence": event.sequence}))
+    context.checkpoint.conversation.extend(recorded)
+
+
+async def with_event_sequences(
+    context: RunContext, results: list[ToolResultItem]
+) -> list[ToolResultItem]:
+    """Give each new result the sequence of the event that recorded it (ADR-0258).
+
+    History rebuilt from the log carries it already. Without it, a result of
+    the current run truncates to ``event:pending`` and a working-state fact
+    has nothing to cite. A replayed result recorded by an earlier attempt
+    keeps none, as before.
+    """
+
+    if all(result.source_event_sequence is not None for result in results):
+        return results
+    async with context.uow_factory() as uow:
+        events = await uow.events.list_after(
+            context.run.session_id,
+            context.checkpoint.last_event_sequence,
+            context.principal,
+            run_id=context.run.id,
+        )
+    recorded: dict[object, int] = {}
+    # A repeated call identifier picks out no one event, so its results keep
+    # none; the duplicate still fails the run before the next model request.
+    ambiguous: set[object] = {
+        result.call_id
+        for index, result in enumerate(results)
+        if any(other.call_id == result.call_id for other in results[:index])
+    }
+    for event in events:
+        if event.event_type in TOOL_RESULT_EVENTS:
+            call_id = event.payload.get("call_id")
+            if call_id in recorded:
+                ambiguous.add(call_id)
+            recorded[call_id] = event.sequence
+    return [
+        result
+        if result.source_event_sequence is not None
+        or result.call_id not in recorded
+        or result.call_id in ambiguous
+        else result.model_copy(update={"source_event_sequence": recorded[result.call_id]})
+        for result in results
+    ]
 
 
 def _denied_outcome(result: ToolResultItem) -> ToolOutcome | None:
@@ -886,6 +932,7 @@ async def recover_browser_failure(
         lease=context.lease,
     )
     await context.budgets.record_tool_usage(context.run, len(recovered), step=step)
+    recovered = await with_event_sequences(context, recovered)
     context.checkpoint.conversation.extend(recovered)
     apply_tool_evidence(context.checkpoint.working_state, [call])
     context.checkpoint.pending_tool_calls = []
@@ -1515,6 +1562,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             )
         step.tool_call_count = len(results)
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
+        results = await with_event_sequences(context, results)
         context.checkpoint.conversation.extend(results)
         apply_tool_evidence(context.checkpoint.working_state, fitted_calls)
         context.checkpoint.pending_tool_calls = []

@@ -5,6 +5,8 @@
 - Amends: `context-engine.md` "Yield order under pressure" item 3 and "The
   history cache window"
 - Related: ADR-0078, ADR-0130, ADR-0135, ADR-0229
+- Amended by: ADR-0258 (2026-10-26), which keeps definition answers whole and
+  notes truncation; no model-callable tool reads a pointer back
 - Scope: Existing context-builder behavior; no milestone or gate moves
 
 ## Context
@@ -49,8 +51,9 @@ produce the same request on every rebuild. The pointer text, the artifact or
 event reference it names, the never-yield set, the yield order, and the
 budgets are unchanged. Nothing is frozen or suppressed to improve caching: the
 model loses up to one quarter budget of old tool results a little earlier than
-the minimal rule would have taken them, and every one of them remains
-reachable through its pointer.
+the minimal rule would have taken them. Each pointer still names the event or
+artifact that keeps its content, but no model-callable tool reads it back
+(corrected by ADR-0258).
 
 The history cut and compaction are not changed by this decision. The history
 cut did not bind in the run above; if a long run shows the same rolling loss
@@ -62,8 +65,9 @@ there, it needs its own evidence and decision.
   between block boundaries. On the run above the thirty-two affected steps
   would have paid for about three uncached reads instead of thirty.
 - A quarter budget of recent tool results may become pointers up to a quarter
-  budget earlier than before. The model asks for a pointer's content through
-  the event or artifact reference it carries, as the ladder already requires.
+  budget earlier than before. No model-callable tool reads a pointer's content
+  back (corrected by ADR-0258): a finding the model still needs belongs in
+  working state, citing the event of the result it came from.
 - `context.budget.pressure` goes on recording `tool_results` on every step on
   which anything is truncated; the event does not distinguish a step that
   moved the boundary from one that repeated it.
