@@ -1758,24 +1758,11 @@ def _load_settings(
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
     policy_advisory_observe_enabled = _parse_flag(values, "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED")
     raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
-    legacy_memory_enablement = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip()
-    if raw_memory_mode and legacy_memory_enablement:
-        raise ConfigurationError(
-            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE and the legacy enablement flag "
-            "are mutually exclusive"
-        )
-    if legacy_memory_enablement:
-        memory_provider_extraction_mode = (
-            MemoryProviderExtractionMode.REQUIRED
-            if _parse_flag(values, "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED")
-            else MemoryProviderExtractionMode.OFF
-        )
-    else:
-        memory_provider_extraction_mode = _parse_enum(
-            MemoryProviderExtractionMode,
-            raw_memory_mode or MemoryProviderExtractionMode.AUTO.value,
-            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE",
-        )
+    memory_provider_extraction_mode = _parse_enum(
+        MemoryProviderExtractionMode,
+        raw_memory_mode or MemoryProviderExtractionMode.AUTO.value,
+        "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE",
+    )
     raw_memory_evidence = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE", "").strip()
     memory_provider_extraction_evidence = (
         Path(raw_memory_evidence).expanduser().resolve() if raw_memory_evidence else None

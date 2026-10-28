@@ -49,4 +49,3 @@ def test_builder_version_moved_with_the_framing_text() -> None:
     """A changed framing row is a changed prefix: every live plan re-plans once."""
 
     assert planner_module.BUILDER_VERSION == "context-builder@14"
-    assert "context-builder@13" not in planner_module._EQUIVALENT_EARLIER_BUILDERS

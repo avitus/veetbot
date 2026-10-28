@@ -236,16 +236,12 @@ tracked metric and its target is 1.0**; a deployment averaging materially more t
 one has a configuration problem, and because the counter exists, it has one
 visibly.
 
-One rotation reason rebuilds nothing. Before
-[ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's hash
-covered each tool's scope set in whatever order its worker's hash seed gave
-it, and its plan event recorded the scopes as they stood when it was written.
-When such a plan's hash matches its prefix rendered with those recorded
-orders, and nothing else about the plan changed, the planner appends the same
-plan as a new epoch with its canonical hashes and reason
-`prefix_hash_canonicalized`. It does not rebuild the plan under a run that
-may be parked on an approval, and the provider receives the same bytes, so
-nothing is re-cached.
+Before [ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's
+hash covered each tool's scope set in whatever order its worker's hash seed
+gave it. Scope sets now serialize sorted, so the hash is canonical; the
+re-key that once absorbed the recorded order was retired by
+[ADR-0266](../adr/0266-spent-one-time-repairs-are-retired.md) once no plan
+could still match it, and such a plan rotates like any other.
 
 ### The history cache window
 
@@ -285,8 +281,7 @@ session: its markers move every step, so a one-hour write there would pay the
 premium on each request, and a shorter entry after a longer one is the order
 the provider requires. The TTL is not prefix identity either. It never rotates
 an epoch, and a plan built before ADR-0132 keeps the default until a rotation
-for another reason rebuilds it; a `prefix_hash_canonicalized` epoch copies the
-plan and keeps its breakpoints.
+for another reason rebuilds it.
 
 ### Session identity and OpenAI history lookback
 
@@ -470,13 +465,11 @@ a definition slot, and every candidate without a definition becomes an index
 entry: the configured deferrals first, then the overflow in the order above.
 What fits in neither is skipped, and its name is recorded on the plan event as
 `skipped_tool_names`. An agent without `tool.call` defers nothing and records
-its skips the same way, so no tool leaves the roster silently. Builder version
-`context-builder@12` treats a `context-builder@11` plan as current, because it
-renders the same bytes: re-planning it could move the selection under a run
-parked on an approval. From `context-builder@13` the framing's records catalog
-sentence changes those bytes, so such a plan fails its prefix-hash recheck and
-re-plans once
-([Milestone 34 records catalog framing](#milestone-34-records-catalog-framing)). Earlier versions rebuild through the ordinary logged
+its skips the same way, so no tool leaves the roster silently. A plan from
+any earlier builder version re-plans once through the ordinary logged epoch
+rotation (ADR-0266 retired the builder equivalence that spared
+`context-builder@11` plans until `context-builder@13` changed the framing,
+[Milestone 34 records catalog framing](#milestone-34-records-catalog-framing)). Earlier versions rebuild through the ordinary logged
 epoch rotation, so existing sessions recover the configured capabilities
 without replacing their history. A snapshot containing People context is
 retained even when it contains no ordinary beliefs; the epoch rotation also

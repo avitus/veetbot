@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-10-28 — Spent one-time repairs retired (ADR-0266)
+
+- Five pieces of code that existed only to bridge a state production no
+  longer has are gone: the plan re-key for scope order recorded before
+  ADR-0134, fourteen retained previous tool versions, `agent memory reshape`,
+  `agent email exclude-bulk`, and the `AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED`
+  shim. Read-only production queries settled each one; the ADR records the
+  counts.
+- A chat whose plan still pins a retired version re-plans once at its next
+  message, as a plan from any earlier builder already does. Nothing changes
+  for chats planned since 2026-10-24.
+
 ## 2026-10-27 — Chat: a message sent during an update no longer fails with "Bad Gateway"
 
 - Each update to Veetbot's server restarts it, and for a minute or two the

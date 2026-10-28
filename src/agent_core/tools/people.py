@@ -8,7 +8,6 @@ from typing import Any
 from agent_core.application.authorization import require_scope
 from agent_core.application.people import PublicPeopleService
 from agent_core.application.people_context import PeopleContextService
-from agent_core.domain import people_tools_v1
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.hazards import is_safe_text
@@ -276,32 +275,3 @@ class PeopleHistoryTool:
             if result.next_cursor is None:
                 break
         return result
-
-
-class LegacyPeopleHistoryTool(PeopleHistoryTool):
-    """The 1.0.0 contract for chats pinned before ADR-0126; its spec is unchanged."""
-
-    spec = _spec(
-        "people.history",
-        "Page a person's attributed interactions.",
-        people_tools_v1.PeopleHistoryArgs.model_json_schema(),
-        people_tools_v1.PeopleHistoryResult.model_json_schema(),
-    )
-
-    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
-        request = people_tools_v1.PeopleHistoryArgs.model_validate(arguments)
-        try:
-            result = await self._history(
-                PeopleHistoryArgs.model_validate(request.model_dump()), context, email=False
-            )
-        except NotFoundError:
-            return _not_found()
-        legacy = people_tools_v1.PeopleHistoryResult.model_validate(
-            result.model_dump(exclude={"source": True, "items": {"__all__": {"email"}}})
-        )
-        return ToolResult(
-            ok=True,
-            content=[TextPart(text=legacy.model_dump_json())],
-            structured=legacy.model_dump(mode="json"),
-            output_trust=TrustLevel.MEMORY,
-        )

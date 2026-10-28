@@ -943,9 +943,9 @@ itself, the subject is the model's grounded subject of at most 64 characters
 or the authorized host when omitted, the host is the belief's
 `attribution_host` rather than text inside the statement, and portability is
 `contextual`; recall prints `(learned from <host>)` beside the identifier.
-Rows learned under `@1` keep their embedded citation until
-`agent memory reshape --policy owner-source-learning@1 --confirm` supersedes
-each with its `@2` shape through formation, citing the same source events;
+The rows learned under `@1` were superseded with their `@2` shape through
+formation on 2026-10-26, citing the same source events (ADR-0250; ADR-0266
+retired the reshape command);
 receipts follow `superseded_by`, a `@1` deletion or correction still blocks
 the `@2` identity, and an expired claim may be learned again from a fresh read;
 a retired claim still refuses, even once its expiry has passed.

@@ -625,9 +625,9 @@ records a content-free `email.semantic.skipped` event naming the reason, so
 memory diagnostics can explain why nothing formed. Importance assessment is
 unchanged, and the assessment prompt is not revised for this rule. Memories
 that bulk mail already formed leave through governed deletion of each derived
-belief; `agent email exclude-bulk` previews and, with `--confirm`, applies
-source exclusion across every census-indexed retained source, which is a
-coarser operation because it also drops those threads from the mailbox view.
+belief; the census-wide exclusion command ADR-0116 kept in reserve was never
+run and ADR-0266 withdrew it, because exclusion also drops those threads from
+the mailbox view.
 
 Each observed exchange in People history also carries a short generated
 summary (ADR-0126).

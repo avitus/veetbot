@@ -32,6 +32,11 @@
 # owner is already tied to, and a first overview page reaches the first member
 # of every family tier, three to eight people (+owner-overview@3). Proposed;
 # no milestone or gate moves.
+# ADR-0266: On 2026-10-28 the owner retired five spent one-time repairs after
+# read-only production queries: the ADR-0134 plan re-key and builder@11
+# equivalence, fourteen retained previous tool versions, `agent memory
+# reshape`, `agent email exclude-bulk`, and the legacy extraction-flag shim.
+# No milestone or gate moves.
 # ADR-0251: Owner accepted on 2026-10-25 an app-offered card that connects an
 # unconnected chat to an owned website the owner names; a match never connects
 # by itself, and an offer expires at the next owner message or after 24 hours.
@@ -149,7 +154,8 @@ project:
   # verification job whose exact source tree already passed it.
   # ADR-0116 records the owner's non-milestone repair on 2026-09-22: bulk mail
   # never forms communication memory; the census and the bulk verdict gate
-  # formation and `agent email exclude-bulk` erases what already formed.
+  # formation; what already formed left through governed deletion (the
+  # census-wide exclusion command was withdrawn unused by ADR-0266).
   # ADR-0117 records the owner's non-milestone extension on 2026-09-22: memory
   # review and deletion over HTTP under memory.write, superseding ADR-0070
   # decision 3, with the native review actions and the flagged filter.

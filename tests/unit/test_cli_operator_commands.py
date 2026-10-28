@@ -135,7 +135,6 @@ async def _suspended_run(composition: Composition, seen: dict[str, Any]) -> None
         (["surface", "pairings", str(UUID(int=1))], 1),
         (["surface", "revoke", str(UUID(int=1))], 1),
         (["session", "export-consent", "grant"], 1),
-        (["email", "exclude-bulk"], 1),
     ],
 )
 def test_refused_configuration_exits_without_a_traceback(
@@ -250,24 +249,6 @@ def test_export_consent_grants_withdraws_and_rejects_unknown_actions(
 
     unknown = runner.invoke(cli_main.app, ["session", "export-consent", "maybe"])
     assert unknown.exit_code == 2
-
-
-def test_email_exclude_bulk_previews_unless_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[bool] = []
-
-    async def exclude(confirm: bool) -> Any:
-        calls.append(confirm)
-        from agent_core.domain.email import EmailBulkExclusionReport
-
-        return EmailBulkExclusionReport(confirmed=confirm, candidates=[], excluded=[])
-
-    monkeypatch.setattr(cli_main, "_email_exclude_bulk", exclude)
-    preview = runner.invoke(cli_main.app, ["email", "exclude-bulk"])
-    applied = runner.invoke(cli_main.app, ["email", "exclude-bulk", "--confirm"])
-    assert preview.exit_code == applied.exit_code == 0
-    assert calls == [False, True]
-    assert json.loads(preview.stdout)["confirmed"] is False
-    assert json.loads(applied.stdout)["confirmed"] is True
 
 
 def test_persona_history_and_nominations_print_json_pages(

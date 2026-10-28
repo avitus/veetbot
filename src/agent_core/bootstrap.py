@@ -691,19 +691,17 @@ from agent_core.skills.package import SkillPackageValidator
 from agent_core.titles.generator import ConversationTitleGenerator
 from agent_core.titles.profiles import TitleProfiles
 from agent_core.titles.titling import ConversationTitlePass, request_title_after_run
-from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
+from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.artifact_read_capture import ArtifactReadCaptureTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
     BrowserActTool,
-    LegacyBrowserActTool,
 )
-from agent_core.tools.browser_navigate import BrowserNavigateTool, LegacyBrowserNavigateTool
+from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
     ArticleBrowserObserveTool,
     BrowserObserveTool,
-    LegacyBrowserObserveTool,
     PagedBrowserObserveTool,
 )
 from agent_core.tools.browser_upload import BrowserUploadTool
@@ -717,7 +715,7 @@ from agent_core.tools.cockpit import (
 from agent_core.tools.cockpit import WIDGET_WRITE_TOOL as COCKPIT_WIDGET_WRITE_TOOL
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
-from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
+from agent_core.tools.delegate_run import DelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolRuntime
 from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
@@ -727,21 +725,17 @@ from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
 from agent_core.tools.media_generation import (
     ImageGenerationTool,
-    LegacyImageGenerationTool,
-    LegacyVideoGenerationTool,
     VideoGenerationTool,
 )
-from agent_core.tools.memory_learn import LegacyMemoryLearnTool, MemoryLearnTool
+from agent_core.tools.memory_learn import MemoryLearnTool
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
 from agent_core.tools.memory_remember import (
-    LegacyMemoryRememberTool,
     MemoryRememberTool,
     PeopleMemoryRememberTool,
     SessionScopedMemoryRememberTool,
 )
 from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.people import (
-    LegacyPeopleHistoryTool,
     PeopleContextTool,
     PeopleHistoryTool,
     PeopleSearchTool,
@@ -760,9 +754,7 @@ from agent_core.tools.schedule_create import (
     COCKPIT_FEED_SCOPES,
     SCHEDULE_CREATE_TOOL_NAME,
     CockpitScheduleCreateTool,
-    LegacyScheduleCreateTool,
     PreviousCockpitScheduleCreateTool,
-    PreviousScheduleCreateTool,
     ScheduleCreateTool,
     SingleCallScheduleCreateTool,
 )
@@ -773,7 +765,6 @@ from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_RESUME_TOOL_NAME,
     SCHEDULE_UPDATE_TOOL_NAME,
     CockpitScheduleUpdateTool,
-    LegacyScheduleListTool,
     PreviousScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
@@ -783,7 +774,6 @@ from agent_core.tools.schedule_lifecycle import (
 )
 from agent_core.tools.skill_load import (
     SKILL_LOAD_TOOL_NAME,
-    LegacySkillLoadTool,
     SkillLoadTool,
 )
 from agent_core.tools.skill_manage import SkillManageTool
@@ -3167,16 +3157,11 @@ async def _compose(
     registry.register(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
-    # A session keeps the exact tool version it was shown, and the registry
-    # treats the last registration as latest: 1.0.0 stays for pinned sessions.
-    registry.register(LegacyArtifactExportTool())
     registry.register(ArtifactExportTool())
     if media_provider is not None:
         media_inputs = StoredMediaInputResolver(
             uow_factory=uow_factory, store=FilesystemArtifactStore(artifact_root), clock=clock
         )
-        registry.register(LegacyImageGenerationTool(media_provider))
-        registry.register(LegacyVideoGenerationTool(media_provider))
         registry.register(ImageGenerationTool(media_provider, image_resolver=media_inputs))
         registry.register(VideoGenerationTool(media_provider, image_resolver=media_inputs))
     if web_search_provider is not None:
@@ -3185,9 +3170,7 @@ async def _compose(
         registry.register(WebFetchTool(web_fetch_provider))
         registry.register(WebFetchJsonTool(web_fetch_provider))
     if browser_provider is not None:
-        registry.register(LegacyBrowserNavigateTool(browser_provider))
         registry.register(BrowserNavigateTool(browser_provider))
-        registry.register(LegacyBrowserObserveTool(browser_provider))
         registry.register(
             PagedBrowserObserveTool(browser_provider, inline_output_bytes=inline_output_bytes)
         )
@@ -3207,17 +3190,6 @@ async def _compose(
         # ADR-0129: the approval card describes the action whatever the flag;
         # it offers a task grant only when task grants are enabled.
         registry.register(
-            LegacyBrowserActTool(
-                browser_provider,
-                presenter=BrowserActApprovalPresenter(
-                    browser_provider,
-                    context_reader=_task_grant_context_reader(uow_factory, clock),
-                    enabled=_task_grants_composed(settings, browser_provider),
-                    now=clock.now,
-                ),
-            )
-        )
-        registry.register(
             BrowserActTool(
                 browser_provider,
                 presenter=BrowserActApprovalPresenter(
@@ -3229,17 +3201,8 @@ async def _compose(
             )
         )
     if settings.delegation_enabled:
-        registry.register(LegacyDelegateRunTool())
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
-        registry.register(
-            LegacyScheduleCreateTool(schedule_service, agent, schedule_definition_limits)
-        )
-        registry.register(
-            PreviousScheduleCreateTool(
-                schedule_service, agent, schedule_definition_limits, uow_factory=uow_factory
-            )
-        )
         registry.register(
             SingleCallScheduleCreateTool(
                 schedule_service,
@@ -3269,7 +3232,6 @@ async def _compose(
                         calling_enabled=settings.call_enabled,
                     )
                 )
-        registry.register(LegacyScheduleListTool(schedule_service))
         registry.register(PreviousScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
@@ -3803,10 +3765,8 @@ async def _compose(
         usage=memory_profiles.retrieval.usage,
         people_enabled=settings.people_enabled,
     )
-    registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
     source_learning = SourceLearningService(memory_service, uow_factory, clock)
-    registry.register(LegacyMemoryLearnTool(source_learning))
     registry.register(MemoryLearnTool(source_learning))
     if settings.people_enabled:
         registry.register(PeopleMemoryRememberTool(memory_service))
@@ -4137,8 +4097,6 @@ async def _compose(
         people_retriever = PeopleAwareMemoryRetriever(people_context, principal)
         registry.register(PeopleSearchTool(uow_factory, clock))
         registry.register(PeopleContextTool(people_context))
-        # Chats pinned before ADR-0126 keep 1.0.0; the latest registration wins.
-        registry.register(LegacyPeopleHistoryTool(people_service))
         registry.register(PeopleHistoryTool(people_service))
     records_service: RecordsService | None = None
     try:
@@ -4240,10 +4198,6 @@ async def _compose(
             maximum_loaded=int(skill_bodies_config["max_items"]),
             maximum_body_tokens=int(skill_bodies_config["max_tokens"]),
         )
-        # A session keeps the exact tool version it was shown. Retain compatible
-        # builtin history so the 1.1.0 revision cannot turn an advertised
-        # skill.load into an unknown capability for an existing session.
-        registry.register(LegacySkillLoadTool(skill_catalogs))
         registry.register(SkillLoadTool(skill_catalogs))
         if settings.skill_authoring_enabled:
             registry.register(SkillManageTool(uow_factory, skill_store))

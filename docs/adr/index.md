@@ -310,3 +310,4 @@ implementation without one.
 - [ADR-0263: Fewer browser approvals in owner research (Proposed)](0263-fewer-browser-approvals-in-owner-research.md)
 - [ADR-0264: An owner-stated name reaches the person the owner is already tied to (Proposed)](0264-owner-stated-names-reach-the-tied-person.md)
 - [ADR-0265: The first family page reaches every tier of the family (Proposed)](0265-the-first-family-page-reaches-every-tier.md)
+- [ADR-0266: Spent one-time repairs are retired (Accepted)](0266-spent-one-time-repairs-are-retired.md)

@@ -7,10 +7,7 @@ from tests.unit.test_source_learning import (
     observation,
     read_archive,
 )
-from tests.unit.test_source_learning_v2 import (
-    assert_relearned_claim_unchanged,
-    assert_reshape_carries_support,
-)
+from tests.unit.test_source_learning_v2 import assert_relearned_claim_unchanged
 
 
 async def test_postgres_source_learning_is_persisted_and_idempotent() -> None:
@@ -51,10 +48,6 @@ async def test_postgres_supporting_chat_erasure_fences_cross_chat_memory() -> No
 
 async def test_postgres_relearned_claim_from_another_website_is_unchanged() -> None:
     await assert_relearned_claim_unchanged("postgres")
-
-
-async def test_postgres_reshape_carries_another_websites_support() -> None:
-    await assert_reshape_carries_support("postgres")
 
 
 async def test_source_learning_downgrade_refuses_to_erase_attribution() -> None:

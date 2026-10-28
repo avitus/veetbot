@@ -115,8 +115,8 @@ Provider observations and full approval facts stay unchanged. Metadata or a
 single complete reference that cannot fit produces `tool.browser.output_invalid`.
 Pagination is read-only, stays under the same profile and origin authority,
 and changes neither the generic output admission cap nor artifact access.
-Version 1.0.0 remains registered for pinned chats; a new profile-bound chat
-selects the new schema. Navigate, act and upload keep their existing versions.
+Version 1.0.0 is retired (ADR-0266); a profile-bound chat selects the new
+schema. Navigate, act and upload keep their existing versions.
 
 ## Tool contract
 
@@ -1559,9 +1559,9 @@ also use version 1.7.0 for their additive observation output contract. No
 selector, script, offset, or profile is model selectable. An adapter without
 expansion support returns `tool.browser.action_not_allowed`.
 
-The published `browser.observe` 1.0.0 and offset-paged 1.1.0 contracts remain
-registered for pinned chats, alongside `browser.navigate` and `browser.act`
-1.0.0. New chats receive 1.7.0 and its provider-bound continuations. The older
+The offset-paged `browser.observe` 1.1.0 contract remains registered; the
+1.0.0 contracts of `browser.observe`, `browser.navigate` and `browser.act` are
+retired (ADR-0266). New chats receive 1.7.0 and its provider-bound continuations. The older
 offset pages continue to fit the configured inline budget. All ephemeral
 expansion and extraction calls share the page-operation lock used by navigation,
 actions and uploads.
