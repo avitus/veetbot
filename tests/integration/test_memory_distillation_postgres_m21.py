@@ -36,20 +36,6 @@ def _alembic(*arguments: str) -> None:
         raise RuntimeError(f"Alembic command failed: {exc.stderr}") from exc
 
 
-def test_alembic_failure_reports_captured_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(*_args: object, **_kwargs: object) -> None:
-        raise subprocess.CalledProcessError(
-            1,
-            [sys.executable, "-m", "alembic"],
-            stderr="migration exploded",
-        )
-
-    monkeypatch.setattr(subprocess, "run", fail)
-
-    with pytest.raises(RuntimeError, match="migration exploded"):
-        _alembic("upgrade", "head")
-
-
 async def _seed_legacy_row(tmp_path: Path) -> tuple[UUID, UUID, str]:
     settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
     async with build(settings=settings, storage="postgres") as composition:

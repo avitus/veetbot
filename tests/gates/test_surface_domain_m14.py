@@ -184,24 +184,21 @@ def test_surface_receipts_are_content_free_and_string_keyed() -> None:
     }
 
 
-def test_reply_chunking_preserves_text_and_channel_bound() -> None:
-    text = "a" * 4080 + "\n\n" + "b" * 40 + "\n" + "c" * 4097
-
-    chunks = surfaces.chunk_surface_text(text, limit=4096)
-
-    assert all(0 < len(chunk) <= 4096 for chunk in chunks)
-    assert "".join(chunks) == text
-
-
 @pytest.mark.parametrize(
     "text",
     [
+        # Mixed separators with a run longer than the channel bound.
+        "a" * 4080 + "\n\n" + "b" * 40 + "\n" + "c" * 4097,
         # A paragraph break that starts on the last character a chunk may hold.
         "a" * 4095 + "\n\n" + "b" * 10,
         # A line break exactly one past the last character a chunk may hold.
         "a" * 4096 + "\n" + "b" * 10,
     ],
-    ids=["paragraph_break_at_limit_minus_one", "line_break_at_limit"],
+    ids=[
+        "mixed_separators_and_overlong_run",
+        "paragraph_break_at_limit_minus_one",
+        "line_break_at_limit",
+    ],
 )
 def test_reply_chunking_never_exceeds_the_limit_at_a_separator_boundary(text: str) -> None:
     chunks = surfaces.chunk_surface_text(text, limit=4096)

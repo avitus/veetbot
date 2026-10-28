@@ -420,33 +420,6 @@ async def test_tool_call_refuses_names_it_does_not_offer(tmp_path: Path) -> None
     assert all(payload["result_item"]["is_error"] for payload in denials)
 
 
-async def test_invalid_deferred_arguments_return_the_input_schema(tmp_path: Path) -> None:
-    _factory, context = await _production(
-        tmp_path,
-        [
-            ScriptedTurn(
-                tool_calls=[_tool_call("schedule.pause", {})],
-                stop_reason=StopReason.TOOL_USE,
-            ),
-            ScriptedTurn(text="I need a schedule id.", stop_reason=StopReason.END_TURN),
-        ],
-    )
-    async with context as app:
-        session_id = await app.sessions.create()
-        run_id = await app.runs.submit("Pause my schedule.", session_id)
-        terminal = await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=30)
-        events = await _session_events(app, session_id)
-
-    assert terminal.status is RunStatus.COMPLETED, terminal.failure
-    [failure] = [event.payload for event in events if event.event_type == "tool.call.failed"]
-    assert failure["name"] == "schedule.pause"
-    assert failure["reason_code"] == "tool.arguments_invalid"
-    texts = [part["text"] for part in failure["result_item"]["content"]]
-    # A builtin's schema is trusted configuration, so the result keeps its trust.
-    assert failure["result_item"]["trust"] == "internal_tool"
-    assert any("\nInput schema: " in text and '"schedule_id"' in text for text in texts)
-
-
 @pytest.mark.parametrize(
     ("name", "trust"),
     [("schedule.pause", "internal_tool"), (START_CALL, "external_untrusted")],

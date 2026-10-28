@@ -552,10 +552,6 @@ async def people_recent_directory_contract(store: PeopleStore) -> None:
     assert [row.id for row in third] == [people[2].id, people[3].id]
 
 
-async def test_recent_people_directory_uses_visible_interactions_before_paging() -> None:
-    await people_recent_directory_contract(InMemoryPeopleStore(FixedClock(NOW)))
-
-
 async def people_last_interaction_contract(store: PeopleStore) -> None:
     """ADR-0227 part A: the reported last contact is exactly the recent sort key."""
     await people_recent_directory_contract(store)

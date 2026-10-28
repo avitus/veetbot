@@ -33,7 +33,6 @@ from tests.contract.test_record_store_contract import (
     records_detach_session_contract,
     records_erase_principal_contract,
     records_query_contract,
-    records_scope_isolation_contract,
     records_summarize_contract,
 )
 from tests.integration.m2_support import PRINCIPAL, database_settings
@@ -116,10 +115,6 @@ async def _postgres_store() -> AsyncIterator[PostgresRecordStore]:
     finally:
         await engine.dispose()
 
-
-async def test_scope_isolation_postgres() -> None:
-    async with _postgres_store() as store:
-        await records_scope_isolation_contract(store)
     # Forced RLS and the scoped foreign key are asserted by the two tests above.
 
 

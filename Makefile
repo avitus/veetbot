@@ -236,6 +236,12 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSubscriptionsStayHiddenWhereNoAccountAdvertisesThem \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSuspectedSpamNotSpamClearsTheFlag \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSuspectedSpamReportSpamRemovesTheConversation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatPanelHoldsTheRunAndRevealsAWorkStripsCalls \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testPanelWidthPersistsAcrossApplicationRestart \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testBriefingAboutAWindowTallIsDrawnAfterAShortReport \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingViewCanRevealOriginal \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testBrowserApprovalAllowsForThisTaskAfterConfirmation \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailBudgetPauseKeepsAccountingCollapsed \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 

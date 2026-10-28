@@ -679,10 +679,6 @@ async def assert_allowed_task_authorizes_the_next_acts(tmp_path: Path) -> None:
     assert [payload["grant_id"] for payload in created] == [str(grant_id)]
 
 
-async def test_allowed_task_authorizes_the_next_acts(tmp_path: Path) -> None:
-    await assert_allowed_task_authorizes_the_next_acts(tmp_path)
-
-
 async def assert_the_two_hundred_and_first_act_asks(tmp_path: Path) -> None:
     turns = [*allow_turns(), FINAL, navigate(), act(1, CONTINUE), act(2, CONTINUE)]
     async with pipeline(tmp_path, turns) as harness:
@@ -707,10 +703,6 @@ async def assert_the_two_hundred_and_first_act_asks(tmp_path: Path) -> None:
     assert [payload["reason"] for payload in ended] == ["exhausted"]
     # The grant ended, so the card offers a new one instead of naming it.
     assert approval.task_grant_not_covered is None
-
-
-async def test_the_two_hundred_and_first_act_asks(tmp_path: Path) -> None:
-    await assert_the_two_hundred_and_first_act_asks(tmp_path)
 
 
 async def assert_text_past_the_grant_budget_asks(tmp_path: Path) -> None:
@@ -740,15 +732,6 @@ async def asked_after_one_use(harness: Pipeline, run_id: UUID) -> ApprovalReques
     assert run.status is RunStatus.WAITING_FOR_APPROVAL, run.status
     assert len(await harness.authorizations(run_id)) == 1
     return await harness.pending(run_id)
-
-
-async def test_text_past_the_grant_budget_asks(tmp_path: Path) -> None:
-    await assert_text_past_the_grant_budget_asks(tmp_path)
-
-
-@pytest.mark.parametrize("ending", ["revoked", "expired"])
-async def test_a_revoked_or_expired_grant_asks(tmp_path: Path, ending: str) -> None:
-    await assert_a_revoked_or_expired_grant_asks(tmp_path, ending)
 
 
 async def assert_a_revoked_or_expired_grant_asks(tmp_path: Path, ending: str) -> None:
@@ -808,10 +791,6 @@ async def assert_another_or_scheduled_session_asks(tmp_path: Path) -> None:
     assert grant.actions_used == 0
 
 
-async def test_another_or_scheduled_session_asks(tmp_path: Path) -> None:
-    await assert_another_or_scheduled_session_asks(tmp_path)
-
-
 async def assert_another_tool_in_the_turn_asks(tmp_path: Path) -> None:
     turns = [*allow_turns(), FINAL, navigate(), current_time(), act(1, CONTINUE)]
     async with pipeline(tmp_path, turns) as harness:
@@ -823,10 +802,6 @@ async def assert_another_tool_in_the_turn_asks(tmp_path: Path) -> None:
     assert approval.task_grant_not_covered is not None
     assert approval.task_grant_not_covered.reason == "browser.task_grant.turn_not_browser_only"
     assert grant.actions_used == 0
-
-
-async def test_another_tool_in_the_turn_asks(tmp_path: Path) -> None:
-    await assert_another_tool_in_the_turn_asks(tmp_path)
 
 
 async def assert_a_destructive_button_asks(tmp_path: Path) -> None:
@@ -841,10 +816,6 @@ async def assert_a_destructive_button_asks(tmp_path: Path) -> None:
     assert approval.task_grant_not_covered.grant_id == grant_id
     assert approval.task_grant_not_covered.reason == "browser.task_grant.excluded.destructive"
     assert grant.actions_used == 0
-
-
-async def test_a_destructive_button_asks(tmp_path: Path) -> None:
-    await assert_a_destructive_button_asks(tmp_path)
 
 
 @dataclass
@@ -901,10 +872,6 @@ async def assert_a_sign_in_ends_the_grant(tmp_path: Path) -> None:
     assert ended == ["profile_changed"]
     assert grant.actions_used == 0
     assert approval.task_grant_not_covered is None
-
-
-async def test_a_sign_in_ends_the_grant(tmp_path: Path) -> None:
-    await assert_a_sign_in_ends_the_grant(tmp_path)
 
 
 async def assert_allow_for_task_waits_for_the_sign_in_outcome(tmp_path: Path) -> None:
@@ -991,10 +958,6 @@ async def assert_a_credential_shaped_type_is_denied_not_granted(tmp_path: Path) 
     assert (grant.actions_used, grant.typed_characters) == (0, 0)
 
 
-async def test_a_credential_shaped_type_is_denied_not_granted(tmp_path: Path) -> None:
-    await assert_a_credential_shaped_type_is_denied_not_granted(tmp_path)
-
-
 async def assert_a_standing_grant_answers_first(tmp_path: Path) -> None:
     """With both authorizers, a routine click uses the standing grant and
     consumes no task-grant use (D18)."""
@@ -1054,10 +1017,6 @@ def standing_grant(harness: Pipeline) -> BrowserGrant:
     )
 
 
-async def test_a_standing_grant_answers_first(tmp_path: Path) -> None:
-    await assert_a_standing_grant_answers_first(tmp_path)
-
-
 async def assert_a_runtime_refusal_keeps_the_lease_and_forces_an_observe(tmp_path: Path) -> None:
     """The worker saw a lesson page, but the live page moved to settings: the
     runtime refuses before dispatch, the lease and its sequence stay, and
@@ -1104,10 +1063,6 @@ async def assert_a_runtime_refusal_keeps_the_lease_and_forces_an_observe(tmp_pat
         ("Continue", BrowserActionKind.CLICK)
     ]
     assert grant.actions_used == 1
-
-
-async def test_a_runtime_refusal_keeps_the_lease_and_forces_an_observe(tmp_path: Path) -> None:
-    await assert_a_runtime_refusal_keeps_the_lease_and_forces_an_observe(tmp_path)
 
 
 async def test_allowed_task_on_postgresql(tmp_path: Path) -> None:

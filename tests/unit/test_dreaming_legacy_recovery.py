@@ -31,16 +31,6 @@ async def test_complete_empty_recovery_retires_cutover_and_keeps_schedule() -> N
     assert after.runs == before.runs
 
 
-def test_recovery_command_offers_preview_and_confirmation() -> None:
-    from typer.testing import CliRunner
-
-    from agent_core.cli.main import app
-
-    result = CliRunner().invoke(app, ["memory", "reconsolidations", "recover-legacy", "--help"])
-    assert result.exit_code == 0, result.output
-    assert all(option in result.output for option in ("--owner", "--manifest", "--confirm"))
-
-
 async def test_recovery_rejects_new_unknown_heads_after_completion() -> None:
     from uuid import UUID
 

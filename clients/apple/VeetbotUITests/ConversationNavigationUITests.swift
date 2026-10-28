@@ -2333,21 +2333,28 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(allowForTask.label, "Allow all actions for this task")
         let scope = app.staticTexts["approval.task-scope"]
         XCTAssertTrue(scope.exists)
-        XCTAssertTrue(scope.label.contains("www.duolingo.com/lesson"))
-        XCTAssertTrue(scope.label.contains("asks again"))
+        XCTAssertTrue(text(of: scope).contains("www.duolingo.com/lesson"))
+        XCTAssertTrue(text(of: scope).contains("asks again"))
         XCTAssertTrue(app.buttons["approval.allow-once"].exists)
         XCTAssertTrue(app.staticTexts["Text from the website"].exists)
         activate(allowForTask)
 
         let summary = app.staticTexts["task-grant.confirm.summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 5))
-        XCTAssertTrue(summary.label.hasPrefix("Clicks and typing on www.duolingo.com/lesson"))
+        XCTAssertTrue(text(of: summary).hasPrefix("Clicks and typing on www.duolingo.com/lesson"))
         activate(app.buttons["task-grant.confirm.allow"])
 
         let banner = app.staticTexts["task-grant.banner.text"]
         XCTAssertTrue(banner.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(banner.label.hasPrefix("Allowed on www.duolingo.com/lesson · 0 of 200"))
+        XCTAssertTrue(text(of: banner).hasPrefix("Allowed on www.duolingo.com/lesson · 0 of 200"))
+        #if os(macOS)
+        // The settled title sits inside the details button's label, which the Mac folds.
+        let settled = app.buttons["approval.details"]
+        XCTAssertTrue(settled.waitForExistence(timeout: 5))
+        XCTAssertTrue(settled.label.contains("Allowed for this task"), settled.label)
+        #else
         XCTAssertTrue(app.staticTexts["Allowed for this task"].waitForExistence(timeout: 5))
+        #endif
 
         activate(app.buttons["task-grant.banner.stop"])
         XCTAssertTrue(banner.waitForNonExistence(timeout: 10))

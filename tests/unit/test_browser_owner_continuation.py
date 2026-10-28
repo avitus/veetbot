@@ -22,9 +22,16 @@ def test_owner_reply_to_schedule_can_use_task_permission() -> None:
     )
 
 
-def test_scheduled_occurrence_cannot_use_owner_task_permission() -> None:
+@pytest.mark.parametrize(
+    "principal_scopes", [None, {"run.write", "browser.profile.read"}], ids=["default", "run_write"]
+)
+def test_scheduled_occurrence_cannot_use_owner_task_permission_even_with_run_write(
+    principal_scopes: set[str] | None,
+) -> None:
+    """A scheduled occurrence is never owner consent, whatever scopes its principal holds."""
+    scheduled = run() if principal_scopes is None else run(principal_scopes=principal_scopes)
     assert not session_allows_task_grant(
-        run(),
+        scheduled,
         session_tenant_id=owner().tenant_id,
         session_principal_id=owner().principal_id,
         session_metadata={"schedule_id": "weekly", "browser_profile_id": str(PROFILE)},
@@ -519,17 +526,6 @@ async def test_disabled_browser_never_creates_an_unresolvable_connection_wait() 
         assert "browser_access_wait" not in checkpoint.working_state
         completed = await app.runs.wait_terminal(submitted.run_id)
         assert completed.status == RunStatus.COMPLETED
-
-
-def test_scheduled_occurrence_with_run_write_scope_is_not_owner_consent() -> None:
-    assert not session_allows_task_grant(
-        run(principal_scopes={"run.write", "browser.profile.read"}),
-        session_tenant_id=owner().tenant_id,
-        session_principal_id=owner().principal_id,
-        session_metadata={"schedule_id": "weekly", "browser_profile_id": str(PROFILE)},
-        tenant_id=owner().tenant_id,
-        principal_id=owner().principal_id,
-    )
 
 
 async def test_owner_reply_can_use_a_task_permission_in_a_schedule_chat(tmp_path: Path) -> None:

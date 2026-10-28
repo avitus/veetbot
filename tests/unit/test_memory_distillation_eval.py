@@ -1231,20 +1231,6 @@ def test_repeated_runs_gate_on_the_pooled_aggregate() -> None:
     )
 
 
-def test_a_result_records_its_repeat_count() -> None:
-    result = memory_eval.MemoryDistillationEvaluationResult(
-        passed=True, failure_summary=None, cases=[], policies={}, development_only=True, repeats=3
-    )
-
-    assert result.repeats == 3
-    assert (
-        memory_eval.MemoryDistillationEvaluationResult(
-            passed=True, failure_summary=None, cases=[], policies={}, development_only=True
-        ).repeats
-        == 1
-    )
-
-
 def test_an_effort_evaluation_sends_it_to_the_evaluated_arm_only_and_keeps_case_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

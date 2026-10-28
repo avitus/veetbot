@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
@@ -65,12 +66,21 @@ async def test_a_failing_cockpit_sweep_leaves_the_round_standing(
     assert "Cockpit branch import sweep failed" in caplog.text
 
 
-def test_the_import_interval_must_be_positive() -> None:
-    with pytest.raises(ValueError, match="Cockpit import interval"):
+@pytest.mark.parametrize(
+    ("interval", "message"),
+    [
+        ({"cockpit_import_interval_seconds": 0}, "Cockpit import interval"),
+        ({"cockpit_feed_interval_seconds": 0}, "Cockpit feed interval"),
+    ],
+)
+def test_the_import_and_feed_intervals_must_be_positive(
+    interval: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
         MaintenanceWorker(
             uow_factory=None,  # type: ignore[arg-type]
             clock=None,  # type: ignore[arg-type]
-            cockpit_import_interval_seconds=0,
+            **interval,
         )
 
 
@@ -124,12 +134,3 @@ async def test_the_feed_projector_runs_on_its_own_interval_and_history_on_the_im
         clock.advance(timedelta(seconds=15))
 
     assert calls == ["feeds", "history", "feeds", "feeds", "history"]
-
-
-def test_the_feed_interval_must_be_positive() -> None:
-    with pytest.raises(ValueError, match="Cockpit feed interval"):
-        MaintenanceWorker(
-            uow_factory=None,  # type: ignore[arg-type]
-            clock=None,  # type: ignore[arg-type]
-            cockpit_feed_interval_seconds=0,
-        )

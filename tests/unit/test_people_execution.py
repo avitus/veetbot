@@ -311,11 +311,23 @@ async def test_uncertain_call_retains_safe_failure_class(tmp_path: Path) -> None
     assert budget.failed and budget.held > 0
 
 
-@pytest.mark.parametrize("consumer_stops_at_failure", [False, True])
+@pytest.mark.parametrize("consumer", ["stops_at_failure", "drains", "collect_turn"])
 async def test_failed_terminal_keeps_diagnostics_without_forgiving_uncertain_usage(
-    tmp_path: Path, consumer_stops_at_failure: bool
+    tmp_path: Path, consumer: str
 ) -> None:
+    """Whichever consumer reads a failed terminal, the journal keeps its diagnostics only."""
     from agent_core.domain.messages import ModelFailedEvent, ModelTransientError
+    from agent_core.model.streaming import ModelStreamError, collect_turn
+
+    request, resolved, attempt = request_model_attempt()
+    failure = ModelTransientError(
+        provider=resolved.provider,
+        model=resolved.model,
+        attempt_id=attempt.attempt_id,
+        message="Private provider detail must not enter the journal",
+        provider_code="transport_error",
+        http_status=503,
+    )
 
     class FailedProvider(CompletingProvider):
         async def stream(
@@ -327,38 +339,37 @@ async def test_failed_terminal_keeps_diagnostics_without_forgiving_uncertain_usa
                 run_id=attempt.run_id,
                 step_number=attempt.step_number,
                 sequence=0,
-                error=ModelTransientError(
-                    provider=resolved.provider,
-                    model=resolved.model,
-                    attempt_id=attempt.attempt_id,
-                    message="Private provider detail must not enter the journal",
-                    provider_code="transport_error",
-                    http_status=503,
-                ),
+                error=failure,
             )
 
     budget = EvaluationBudget(Decimal("1"), tmp_path / "failed.jsonl")
     inner = FailedProvider(None)
     provider = BudgetedProvider(inner, budget)
-    stream = provider.stream(*request_model_attempt())
-    assert isinstance(stream, AsyncGenerator)
-    event = await anext(stream)
-    assert isinstance(event, ModelFailedEvent)
-    assert budget.failed, "A terminal failure must prohibit another send immediately"
-    if consumer_stops_at_failure:
-        await stream.aclose()
+    if consumer == "collect_turn":
+        with pytest.raises(ModelStreamError) as caught:
+            await collect_turn(provider.stream(request, resolved, attempt))
+        assert caught.value.failure == failure
     else:
-        with pytest.raises(StopAsyncIteration):
-            await anext(stream)
+        stream = provider.stream(request, resolved, attempt)
+        assert isinstance(stream, AsyncGenerator)
+        event = await anext(stream)
+        assert isinstance(event, ModelFailedEvent)
+        assert budget.failed, "A terminal failure must prohibit another send immediately"
+        if consumer == "stops_at_failure":
+            await stream.aclose()
+        else:
+            with pytest.raises(StopAsyncIteration):
+                await anext(stream)
     row = json.loads(budget.journal.read_text().splitlines()[-1])
     assert row["outcome"] == "uncertain"
     assert row["failure_kind"] == "transient"
     assert row["provider_code"] == "transport_error"
     assert row["http_status"] == 503
-    assert "Private provider detail" not in budget.journal.read_text()
-    assert budget.held == Decimal("0.11") and budget.spent == 0
-    with pytest.raises(BudgetExceededError):
-        _ = [event async for event in provider.stream(*request_model_attempt())]
+    assert failure.message not in budget.journal.read_text()
+    assert budget.failed and budget.held == Decimal("0.11") and budget.spent == 0
+    for retry in ((request, resolved, attempt), request_model_attempt()):
+        with pytest.raises(BudgetExceededError):
+            _ = [event async for event in provider.stream(*retry)]
     assert inner.calls == 1
 
 
@@ -577,47 +588,3 @@ async def test_ordinary_comparison_keeps_transport_open_and_journals_every_arm(
     assert not closed
     await provider.close()
     assert closed
-
-
-async def test_failed_terminal_preserves_provider_diagnostics_and_uncertain_usage(
-    tmp_path: Path,
-) -> None:
-    from agent_core.domain.messages import ModelFailedEvent, ModelTransientError
-    from agent_core.model.streaming import ModelStreamError, collect_turn
-
-    request, resolved, attempt = request_model_attempt()
-    failure = ModelTransientError(
-        provider="test",
-        model="test",
-        attempt_id=attempt.attempt_id,
-        message="Private provider response must not enter the journal",
-        provider_code="transport_error",
-        http_status=503,
-    )
-
-    class FailedProvider(CompletingProvider):
-        async def stream(
-            self, request: ModelRequest, resolved: ResolvedModel, attempt: ModelAttempt
-        ) -> AsyncIterator[ModelEvent]:
-            yield ModelFailedEvent(
-                attempt_id=attempt.attempt_id,
-                run_id=attempt.run_id,
-                step_number=1,
-                sequence=0,
-                error=failure,
-            )
-
-    budget = EvaluationBudget(Decimal("1"), tmp_path / "costs.jsonl")
-    provider = BudgetedProvider(FailedProvider(None), budget)
-    with pytest.raises(ModelStreamError) as caught:
-        await collect_turn(provider.stream(request, resolved, attempt))
-    assert caught.value.failure == failure
-    rows = [json.loads(line) for line in budget.journal.read_text().splitlines()]
-    assert rows[-1]["outcome"] == "uncertain"
-    assert rows[-1]["provider_code"] == "transport_error"
-    assert rows[-1]["failure_kind"] == "transient"
-    assert rows[-1]["http_status"] == 503
-    assert failure.message not in budget.journal.read_text()
-    assert budget.failed and budget.held == Decimal("0.11") and budget.spent == 0
-    with pytest.raises(BudgetExceededError):
-        _ = [event async for event in provider.stream(request, resolved, attempt)]

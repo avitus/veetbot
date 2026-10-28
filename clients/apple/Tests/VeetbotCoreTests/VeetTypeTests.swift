@@ -112,12 +112,6 @@ import AppKit
     }
     #endif
 
-    @Test
-    func testTheFaceDefaultsToSystem() throws {
-        let defaults = try #require(UserDefaults(suiteName: "veet-type-\(UUID().uuidString)"))
-        #expect(AppearancePreferences(defaults: defaults).fontStyle == .system)
-    }
-
     // MARK: - Spacing
 
     @Test

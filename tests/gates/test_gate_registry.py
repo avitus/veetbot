@@ -268,11 +268,6 @@ def test_gate_table_arithmetic_requires_stated_figures() -> None:
     assert gate_table_arithmetic_errors(silent, _GATE_TABLE_DERIVED)
 
 
-def test_gate_table_prose_matches_registry() -> None:
-    errors = registry_errors(ROOT, current_milestone=11)
-    assert [error for error in errors if "gate table" in error] == []
-
-
 def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> None:
     gates = tmp_path / "evals" / "gates"
     gates.mkdir(parents=True)

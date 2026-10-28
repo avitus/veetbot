@@ -35,7 +35,7 @@ from tests.gates.test_email_spam_m31 import _seed
 from tests.unit.test_config import base_environment
 
 
-@pytest.mark.parametrize("mode", ["off", "shadow", "filter"])
+@pytest.mark.parametrize("mode", ["off", "shadow", "filter", "pilot", "owner_filter"])
 def test_junk_mode_accepts_surrounding_whitespace(mode: str) -> None:
     """Normalize padded environment values without changing the selected mode."""
     settings = load_settings({**base_environment(), "AGENT_EMAIL_JUNK_FILTER_MODE": f" {mode}\t"})

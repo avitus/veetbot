@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import tomllib
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -17,7 +18,6 @@ from uuid import UUID
 
 import pytest
 import yaml
-from alembic.config import Config
 from typer.testing import CliRunner
 
 import agent_core.cli.main as cli_main
@@ -124,6 +124,26 @@ def test_required_make_targets_exist() -> None:
     assert "docker compose ps --status healthy" not in text
 
 
+def test_migrations_env_escapes_percent_signs_in_database_url() -> None:
+    """``migrations/env.py`` hands ``DATABASE_URL`` to Alembic's ConfigParser-backed
+    config, whose ``%`` interpolation would reject a percent-encoded password; the
+    offline run exercises that binding without a database."""
+    completed = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "--sql", "head"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "DATABASE_URL": "postgresql+asyncpg://" + "agent:p%40ss@localhost:5432/agent",
+        },
+        timeout=120,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "COMMIT;" in completed.stdout
+
+
 def _make_target(makefile: str, target: str) -> str:
     match = re.search(rf"^{re.escape(target)}:.*?(?=^\S|\Z)", makefile, re.M | re.S)
     assert match is not None, f"{target} is not a Makefile target"
@@ -141,6 +161,39 @@ def test_local_mac_ui_lane_runs_the_unchanged_target_inside_a_vm() -> None:
     # The guest runs the same target CI runs; the host never opens a VM window.
     assert "set -- make test-apple-ui-macos" in script
     assert "tart run --no-graphics" in script
+
+
+def test_every_mac_capable_ui_journey_is_in_the_mac_lane() -> None:
+    """The Mac lane is an explicit allowlist; a journey left off it runs nowhere.
+
+    Six journeys added between 2026-09-25 and 2026-10-21 were never listed, so
+    three `#if os(macOS)` journeys (the Chat right panel, the Email budget
+    pause) had no lane at all. Every journey the macOS build compiles must be
+    named here; only `#if os(iOS)` journeys belong to the iOS lane alone.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    lane = _make_target(makefile, "test-apple-ui-macos")
+    listed = set(re.findall(r"ConversationNavigationUITests/(test\w+)", lane))
+    source = (
+        ROOT / "clients" / "apple" / "VeetbotUITests" / "ConversationNavigationUITests.swift"
+    ).read_text(encoding="utf-8")
+    guards: list[str] = []
+    mac_capable: set[str] = set()
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#if"):
+            guards.append(stripped)
+        elif stripped.startswith("#else"):
+            guards[-1] = "#else " + guards[-1]
+        elif stripped.startswith("#endif"):
+            guards.pop()
+        elif (match := re.match(r"func (test\w+)\(", stripped)) and not any(
+            "os(iOS)" in guard and not guard.startswith("#else") for guard in guards
+        ):
+            mac_capable.add(match.group(1))
+    assert mac_capable, "the journey file lost its tests"
+    assert mac_capable - listed == set(), sorted(mac_capable - listed)
+    assert listed - mac_capable == set(), sorted(listed - mac_capable)
 
 
 def test_env_pull_writes_the_dotenv_from_doppler_without_exposing_values() -> None:
@@ -2223,13 +2276,6 @@ async def test_submit_uses_one_total_timeout_for_status_and_event_replay(
     assert completed.status is RunStatus.COMPLETED
     assert [event.event for event in events] == ["run.completed"]
     assert observed_timeouts == [12.5]
-
-
-def test_alembic_config_accepts_percent_encoded_database_url() -> None:
-    database_url = "postgresql+asyncpg://" + "agent:p%40ss@localhost/agent"
-    config = Config()
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    assert config.get_main_option("sqlalchemy.url") == database_url
 
 
 def test_eval_command_normalizes_lazy_import_failure(monkeypatch: pytest.MonkeyPatch) -> None:

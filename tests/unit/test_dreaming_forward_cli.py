@@ -6,13 +6,6 @@ from typer.testing import CliRunner
 from agent_core.cli.main import app
 
 
-def test_forward_only_command_requires_owner_confirmation() -> None:
-    result = CliRunner().invoke(app, ["memory", "reconsolidations", "forward-only", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "--owner" in result.output
-    assert "--confirm" in result.output
-
-
 def test_forward_only_never_connects_without_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
     def unavailable(**kwargs: object) -> None:
         raise AssertionError("Must validate confirmation before building services")

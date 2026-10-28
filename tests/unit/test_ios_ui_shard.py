@@ -68,12 +68,21 @@ def test_an_empty_enumeration_is_refused() -> None:
         shard_options({"values": [{"enabledTests": []}]}, "0/2")
 
 
-def test_the_command_prints_one_option_per_case(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("shard", "names", "report"),
+    [
+        ("1/2", ["testB", "testD"], "shard 1/2 runs 2 of 5 enabled cases"),
+        ("0/2", ["testA", "testC", "testE"], "shard 0/2 runs 3 of 5 enabled cases"),
+    ],
+)
+def test_the_command_prints_one_option_per_case_and_reports_its_share(
+    tmp_path: Path, shard: str, names: list[str], report: str
+) -> None:
     enumeration = tmp_path / "tests.json"
     enumeration.write_text(json.dumps(ENUMERATION), encoding="utf-8")
 
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.ios_ui_shard", str(enumeration), "1/2"],
+        [sys.executable, "-m", "scripts.ios_ui_shard", str(enumeration), shard],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -81,7 +90,8 @@ def test_the_command_prints_one_option_per_case(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert _names(result.stdout.split()) == ["testB", "testD"]
+    assert _names(result.stdout.split()) == names
+    assert report in result.stderr
 
 
 def test_a_swift_call_suffix_is_dropped_from_xctest_names() -> None:
@@ -99,18 +109,3 @@ def test_a_swift_call_suffix_is_dropped_from_xctest_names() -> None:
     assert shard_options(enumeration, "0/1") == [
         "-only-testing:VeetbotUITests/ConversationNavigationUITests/testA"
     ]
-
-
-def test_the_command_reports_its_share_of_the_cases(tmp_path: Path) -> None:
-    enumeration = tmp_path / "tests.json"
-    enumeration.write_text(json.dumps(ENUMERATION), encoding="utf-8")
-
-    result = subprocess.run(
-        [sys.executable, "-m", "scripts.ios_ui_shard", str(enumeration), "0/2"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert "shard 0/2 runs 3 of 5 enabled cases" in result.stderr

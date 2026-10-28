@@ -396,7 +396,13 @@ async def test_web_provider_rejects_unsuccessful_success_shaped_bodies(
     provider_name: str,
     factory: ProviderFactory,
 ) -> None:
-    """A 200 body that reports failure or the wrong arity is a permanent rejection."""
+    """A 200 body that reports failure, the wrong arity, or no payload never becomes output.
+
+    Tavily and Firecrawl carry a success flag or an arity, so a failure-shaped body
+    is a permanent provider rejection. Keenable has neither: its failure-shaped 200
+    is a body without the documented ``results`` or ``content`` field, which the
+    adapter refuses as invalid provider output.
+    """
 
     bodies: list[dict[str, object]] = []
 
@@ -424,6 +430,23 @@ async def test_web_provider_rejects_unsuccessful_success_shaped_bodies(
                 await provider.fetch("https://example.org/ada")
             assert fetch_raised.value.reason_code == "tool.web.provider_rejected"
             assert fetch_raised.value.retryable is False
+        else:
+            assert provider_name == "keenable"
+            bodies.append({"status": "ok"})
+            with pytest.raises(WebProviderError) as search_raised:
+                await provider.search(WebSearchRequest(query="Ada Lovelace"))
+            assert search_raised.value.reason_code == "tool.web.output_invalid"
+            assert search_raised.value.retryable is False
+            fetch_bodies: tuple[dict[str, object], ...] = (
+                {"url": "https://example.org/ada", "title": "Ada Lovelace"},
+                {"url": None, "title": "Ada Lovelace", "content": "# Ada"},
+            )
+            for fetch_body in fetch_bodies:
+                bodies.append(fetch_body)
+                with pytest.raises(WebProviderError) as fetch_raised:
+                    await provider.fetch("https://example.org/ada")
+                assert fetch_raised.value.reason_code == "tool.web.output_invalid"
+                assert fetch_raised.value.retryable is False
 
 
 @pytest.mark.parametrize(("provider_name", "factory"), provider_factories())

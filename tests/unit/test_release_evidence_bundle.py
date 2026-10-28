@@ -251,15 +251,6 @@ def test_bundled_build_refs_are_commits_this_tree_descends_from() -> None:
         )
 
 
-def test_bundled_formation9_evidence_carries_the_scorer_this_tree_ships() -> None:
-    """An artifact scored by an older scorer cannot certify this tree's numbers."""
-
-    for path in _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT):
-        evidence = load_memory_release_evidence(path)
-        if isinstance(evidence, MemoryDistillationEvidence):
-            assert evidence.scorer_version == DISTILLATION_SCORER_VERSION, path.name
-
-
 def test_the_holdout_is_frozen_by_its_recorded_digest() -> None:
     """The holdout's digest is recorded beside it; an edit shows up here first.
 

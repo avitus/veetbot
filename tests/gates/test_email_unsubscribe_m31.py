@@ -449,7 +449,7 @@ async def _assert_a_non_public_address_is_never_stored() -> None:
 
 async def test_unsubscribe_recovery_is_idempotent() -> None:
     """A re-executed invocation never dials an accepted target again."""
-    await test_a_dead_run_never_strands_a_sender_in_pending()
+    await _assert_a_dead_run_never_strands_a_sender_in_pending()
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
     async with _app(mailbox, transport) as app:
@@ -664,7 +664,7 @@ def _target(row: dict[str, Any]) -> dict[str, Any]:
 
 async def test_unsubscribe_gesture_consent_is_exact() -> None:
     """One tap is one exact approval; nothing else it could authorize exists."""
-    await test_an_expired_or_foreign_consent_authorizes_nothing()
+    await _assert_an_expired_or_foreign_consent_authorizes_nothing()
     await test_revoked_authority_reaches_no_sender("approval.resolve", "before_dispatch")
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
@@ -745,7 +745,7 @@ async def test_revoked_authority_reaches_no_sender(scope: str, stage: str) -> No
         assert after["operation"]["status"] == "failed"
 
 
-async def test_an_expired_or_foreign_consent_authorizes_nothing() -> None:
+async def _assert_an_expired_or_foreign_consent_authorizes_nothing() -> None:
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
     async with _app(mailbox, transport) as app:
@@ -778,7 +778,7 @@ async def test_an_expired_or_foreign_consent_authorizes_nothing() -> None:
             )
 
 
-async def test_a_dead_run_never_strands_a_sender_in_pending() -> None:
+async def _assert_a_dead_run_never_strands_a_sender_in_pending() -> None:
     """A worker that never ran leaves the sender actionable, not stuck."""
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
@@ -814,7 +814,7 @@ async def test_a_dead_run_never_strands_a_sender_in_pending() -> None:
 
 
 async def test_unsubscribe_mailto_path_is_closed() -> None:
-    await test_an_uncertain_mailto_send_is_never_sent_again()
+    await _assert_an_uncertain_mailto_send_is_never_sent_again()
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox, mechanism="mailto")
     async with _app(mailbox, transport) as app:
@@ -850,7 +850,7 @@ async def test_unsubscribe_mailto_path_is_closed() -> None:
         assert (after["state"], after["operation"]["code"]) == ("unsubscribed", "unsubscribe.sent")
 
 
-async def test_an_uncertain_mailto_send_is_never_sent_again() -> None:
+async def _assert_an_uncertain_mailto_send_is_never_sent_again() -> None:
     mailbox, transport = Mailbox(send_result="disconnect"), Transport()
     _shop(mailbox, mechanism="mailto")
     async with _app(mailbox, transport) as app:
@@ -870,9 +870,9 @@ async def test_an_uncertain_mailto_send_is_never_sent_again() -> None:
 
 async def test_unsubscribe_label_actions_are_fixed_deltas() -> None:
     """Spam, its reversal and cleanup touch only server-selected threads of that sender."""
-    await test_cleanup_archives_only_an_accepted_sender()
-    await test_an_uncertain_label_write_is_never_retried()
-    test_a_crafted_identity_never_reaches_a_query()
+    await _assert_cleanup_archives_only_an_accepted_sender()
+    await _assert_an_uncertain_label_write_is_never_retried()
+    _assert_a_crafted_identity_never_reaches_a_query()
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
     async with _app(mailbox, transport) as app, _client(app) as client:
@@ -908,7 +908,7 @@ async def test_unsubscribe_label_actions_are_fixed_deltas() -> None:
         assert final["state"] == "active"
 
 
-async def test_cleanup_archives_only_an_accepted_sender() -> None:
+async def _assert_cleanup_archives_only_an_accepted_sender() -> None:
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
     async with _app(mailbox, transport) as app:
@@ -941,7 +941,7 @@ async def test_cleanup_archives_only_an_accepted_sender() -> None:
         assert refused.named("modify_labels") == []
 
 
-def test_a_crafted_identity_never_reaches_a_query() -> None:
+def _assert_a_crafted_identity_never_reaches_a_query() -> None:
     for kind, identity in (
         ("sender", "a@b.example OR in:anywhere"),
         ("sender", 'a"@b.example'),
@@ -952,7 +952,7 @@ def test_a_crafted_identity_never_reaches_a_query() -> None:
     assert identity_query("list", "news.example.com") == "list:news.example.com in:inbox"
 
 
-async def test_an_uncertain_label_write_is_never_retried() -> None:
+async def _assert_an_uncertain_label_write_is_never_retried() -> None:
     mailbox, transport = Mailbox(write_result="disconnect"), Transport()
     _shop(mailbox)
     async with _app(mailbox, transport) as app:
@@ -967,7 +967,7 @@ async def test_an_uncertain_label_write_is_never_retried() -> None:
 
 
 async def test_unsubscribe_owner_decisions_are_durable() -> None:
-    await test_protected_senders_sort_last_and_stay_actionable()
+    await _assert_protected_senders_sort_last_and_stay_actionable()
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
     async with _app(mailbox, transport) as app, _client(app) as client:
@@ -998,7 +998,7 @@ async def test_unsubscribe_owner_decisions_are_durable() -> None:
         assert restored.status_code == 200 and restored.json()["state"] == "active"
 
 
-async def test_protected_senders_sort_last_and_stay_actionable() -> None:
+async def _assert_protected_senders_sort_last_and_stay_actionable() -> None:
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
     mailbox.inbox.append(_summary("vc-0", "vc-m0", "Partner <partner@fund.example>", days_ago=2))

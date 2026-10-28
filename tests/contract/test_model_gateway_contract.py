@@ -1529,6 +1529,41 @@ async def test_anthropic_error_type_drives_retry_and_sdk_validation_is_protocol(
     assert normalized[0].error.provider_code == "sdk_response_invalid"
 
 
+async def test_anthropic_status_error_preserves_only_safe_diagnostics() -> None:
+    async def rejected(_request: dict[str, Any]) -> Any:
+        request_value = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        raise APIStatusError(
+            "invalid request",
+            response=httpx.Response(400, request=request_value),
+            body={
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "param": "messages[3].content",
+                    "message": "unsafe provider body must not be retained",
+                },
+            },
+        )
+        yield {}
+
+    provider = AnthropicMessagesProvider(event_source=rejected)
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved("anthropic"), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+    assert len(events) == 1
+    assert isinstance(events[0], ModelFailedEvent)
+    assert events[0].error.kind == "permanent"
+    assert events[0].error.http_status == 400
+    assert events[0].error.provider_code == "invalid_request_error"
+    assert events[0].error.provider_parameter == "messages[3].content"
+    assert "unsafe provider body" not in events[0].model_dump_json()
+
+
 class _StubResolver:
     """Release fixed bytes and record every read the adapter asked for."""
 

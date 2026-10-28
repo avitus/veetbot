@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,14 +34,15 @@ from tests.unit.test_email_junk_pilot import (
 )
 
 
-def test_standing_filter_mode_is_explicit_and_default_stays_off() -> None:
-    """A permanent work-inbox authorization is distinct from the expiring pilot."""
+@pytest.mark.parametrize("mode", ["pilot", "owner_filter"])
+def test_pilot_and_standing_modes_are_explicit_and_default_stays_off(mode: str) -> None:
+    """Both approved modes are exposed explicitly without changing default activation."""
     assert load_settings(base_environment()).email_junk_filter_mode.value == "off"
     assert (
         load_settings(
-            {**base_environment(), "AGENT_EMAIL_JUNK_FILTER_MODE": "owner_filter"}
+            {**base_environment(), "AGENT_EMAIL_JUNK_FILTER_MODE": mode}
         ).email_junk_filter_mode.value
-        == "owner_filter"
+        == mode
     )
 
 
@@ -73,6 +75,12 @@ def standing_settings(tmp_path: Path) -> Any:
     settings = pilot_settings(tmp_path)
     settings.email_junk_filter_evidence.write_text(json.dumps(standing_packet()))
     return replace(settings, email_junk_filter_mode=EmailJunkMode.OWNER_FILTER)
+
+
+SETTINGS_FACTORIES = [
+    pytest.param(pilot_settings, id="pilot"),
+    pytest.param(standing_settings, id="standing"),
+]
 
 
 @pytest.mark.parametrize(
@@ -172,11 +180,14 @@ async def test_standing_invalid_evidence_makes_no_paid_calls(tmp_path: Path, fai
 
 
 @pytest.mark.parametrize("keep", [False, True])
-async def test_standing_uses_reviewed_choice_and_preserves_keep(tmp_path: Path, keep: bool) -> None:
-    """Only the scoped pilot bypasses a valid raw bulk choice below the general cutoff."""
+@pytest.mark.parametrize("settings_factory", SETTINGS_FACTORIES)
+async def test_pilot_and_standing_use_reviewed_choice_and_preserve_keep(
+    tmp_path: Path, settings_factory: Callable[[Path], Any], keep: bool
+) -> None:
+    """Only the scoped filter bypasses a valid raw bulk choice below the general cutoff."""
     judge = FakeJudgmentProvider([pilot_decision(keep=keep)])
     async with build(
-        settings=standing_settings(tmp_path),
+        settings=settings_factory(tmp_path),
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await work_factory(),
@@ -192,15 +203,32 @@ async def test_standing_uses_reviewed_choice_and_preserves_keep(tmp_path: Path, 
         assert bool(assessment.payload.get("junk_bypassed")) is not keep
 
 
-@pytest.mark.parametrize("stop", ["off", "evidence", "important"])
-async def test_stopping_standing_filter_restores_cached_bypass(tmp_path: Path, stop: str) -> None:
+@pytest.mark.parametrize(
+    ("settings_factory", "stop"),
+    [
+        pytest.param(pilot_settings, "expiry", id="pilot-expiry"),
+        pytest.param(pilot_settings, "off", id="pilot-off"),
+        pytest.param(pilot_settings, "evidence", id="pilot-evidence"),
+        pytest.param(pilot_settings, "important", id="pilot-important"),
+        pytest.param(standing_settings, "off", id="standing-off"),
+        pytest.param(standing_settings, "evidence", id="standing-evidence"),
+        pytest.param(standing_settings, "important", id="standing-important"),
+    ],
+)
+async def test_stopping_pilot_or_standing_filter_restores_cached_bypass(
+    tmp_path: Path, settings_factory: Callable[[Path], Any], stop: str
+) -> None:
     """The bounded cached-mail refresh restores ordinary assessment after revocation."""
     from uuid import UUID
 
     from agent_core.adapters.determinism import FixedClock
 
-    settings = standing_settings(tmp_path)
+    settings = settings_factory(tmp_path)
     now = datetime.now(UTC)
+    if settings_factory is pilot_settings:
+        data = pilot_packet(now)
+        data["expires_at"] = (now + timedelta(minutes=2)).isoformat()
+        settings.email_junk_filter_evidence.write_text(json.dumps(data))
     clock = FixedClock(now)
     judge = FakeJudgmentProvider([pilot_decision()])
     async with build(
@@ -214,7 +242,9 @@ async def test_stopping_standing_filter_restores_cached_bypass(tmp_path: Path, s
         async with app.uow_factory() as uow:
             [first] = await uow.email.list(app.principal, "assessment")
         assert first.payload["junk_bypassed"]
-        if stop == "off":
+        if stop == "expiry":
+            clock.advance(timedelta(minutes=2))
+        elif stop == "off":
             object.__setattr__(settings, "email_junk_filter_mode", EmailJunkMode.OFF)
         elif stop == "evidence":
             settings.email_junk_filter_evidence.unlink()
@@ -231,13 +261,16 @@ async def test_stopping_standing_filter_restores_cached_bypass(tmp_path: Path, s
         assert not last.payload.get("junk_bypassed")
 
 
-async def test_standing_reuses_full_pilot_daily_cap_before_call(tmp_path: Path) -> None:
+@pytest.mark.parametrize("settings_factory", SETTINGS_FACTORIES)
+async def test_pilot_and_standing_full_daily_cap_avoids_provider_call(
+    tmp_path: Path, settings_factory: Callable[[Path], Any]
+) -> None:
     """An already full durable UTC-day allowance goes directly to normal assessment."""
     from agent_core.domain.email import EmailRecord
 
     judge = FakeJudgmentProvider([])
     async with build(
-        settings=standing_settings(tmp_path),
+        settings=settings_factory(tmp_path),
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await work_factory(),

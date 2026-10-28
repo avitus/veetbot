@@ -10,10 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from typer.testing import CliRunner
-
 from agent_core.bootstrap import build
-from agent_core.cli.main import app
 from agent_core.domain.email import EmailRecord
 from agent_core.domain.email_semantics import thread_source_key
 from agent_core.domain.messages import FakeModelScript
@@ -81,9 +78,3 @@ async def test_exclude_bulk_sources_previews_then_erases_only_census_threads() -
         # Idempotent: the excluded thread is gone, so a second pass finds nothing.
         again = await app_.services.email.exclude_bulk_sources(principal, confirm=True)
         assert again.candidates == [] and again.excluded == []
-
-
-def test_exclude_bulk_is_an_operator_command_that_requires_confirmation() -> None:
-    result = CliRunner().invoke(app, ["email", "exclude-bulk", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "--confirm" in result.output

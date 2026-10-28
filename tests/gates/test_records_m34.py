@@ -619,11 +619,6 @@ def _body_bytes(request: ModelRequest) -> bytes:
     return canonical_json_bytes([item.model_dump(mode="json") for item in _body(request)])
 
 
-def test_every_context_class_has_a_region() -> None:
-    assert set(REGION_ASSIGNMENTS) == set(ContextClass)
-    assert REGION_ASSIGNMENTS[ContextClass.RECORDS_CATALOG] is ContextRegion.BODY
-
-
 async def test_catalog_region_bytes_and_trust() -> None:
     assert set(REGION_ASSIGNMENTS) == set(ContextClass)
     assert REGION_ASSIGNMENTS[ContextClass.RECORDS_CATALOG] is ContextRegion.BODY

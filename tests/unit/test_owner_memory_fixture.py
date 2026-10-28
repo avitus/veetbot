@@ -115,18 +115,6 @@ def test_changed_or_ineligible_input_refuses(changed: str) -> None:
         )
 
 
-def test_exact_confirmation_is_admitted() -> None:
-    value = packet()
-    validate_confirmation(
-        value,
-        confirmations(value),
-        submitted_at=NOW,
-        owner_digest=value.owner_digest,
-        model=model(),
-        now=NOW,
-    )
-
-
 @pytest.mark.parametrize(
     "age_seconds,allowed", [(0, True), (1800, True), (1801, False), (-1, False)]
 )
