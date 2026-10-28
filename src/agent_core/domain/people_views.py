@@ -84,6 +84,20 @@ class PeoplePage(PeopleValue):
     next_cursor: str | None = None
 
 
+class OwnerKinshipRepairReport(PeopleValue):
+    """Counts only (ADR-0259): no names, statements or identifiers."""
+
+    applied: bool
+    scanned: int = Field(ge=0)
+    eligible: int = Field(ge=0)
+    pending: int = Field(ge=0)
+    created: int = Field(ge=0)
+    coverage: str = (
+        "Live owner-confirmed relationship memories linked to People, whose own "
+        "owner message states the tie in plain present-tense words."
+    )
+
+
 class LegacyPeopleLinkResult(PeopleValue):
     scanned: int = Field(ge=0)
     linked: int = Field(ge=0)

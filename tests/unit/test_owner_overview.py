@@ -191,3 +191,21 @@ async def test_preupgrade_chat_keeps_pinned_tools_and_gains_family_context() -> 
         assert (
             next(tool for tool in request.tools if tool.name == "memory.search").version == "2.1.0"
         )
+
+
+async def test_production_overview_first_page_is_the_closest_family() -> None:
+    from tests.contract.owner_overview_cases import closeness_overview_run
+
+    async with build(
+        settings=replace(_settings(), people_enabled=True), script=script(True)
+    ) as app:
+        await closeness_overview_run(app)
+
+
+async def test_production_overview_says_when_a_group_exceeds_what_it_reads() -> None:
+    from tests.contract.owner_overview_cases import overflow_overview_run
+
+    async with build(
+        settings=replace(_settings(), people_enabled=True), script=script(True)
+    ) as app:
+        await overflow_overview_run(app)

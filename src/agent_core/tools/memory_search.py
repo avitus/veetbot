@@ -26,7 +26,11 @@ from agent_core.domain.tools import (
     ToolResult,
     ToolSpec,
 )
-from agent_core.memory.retrieval import HybridMemoryRetriever, recalls_owned_resources
+from agent_core.memory.retrieval import (
+    HybridMemoryRetriever,
+    recalls_home_location,
+    recalls_owned_resources,
+)
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -176,6 +180,10 @@ class MemorySearchTool:
                 "subjects": arguments.get("subjects", []),
                 "include_owned_resources": recalls_owned_resources(
                     arguments["text"], deliberate=True
+                ),
+                "include_home_location": (
+                    self._retriever.retrieval_profile.candidate_selection == "relevance"
+                    and recalls_home_location(arguments["text"], deliberate=True)
                 ),
                 "belief_types": [] if self._model_planning else arguments.get("belief_types", []),
                 "structured_belief_types": arguments.get("type_hints", [])

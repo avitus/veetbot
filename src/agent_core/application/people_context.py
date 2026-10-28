@@ -43,6 +43,25 @@ from agent_core.domain.recall_execution import recall_search
 from agent_core.ports.people_runtime import PeopleRecall
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
+# How close an owner relationship is, for overview paging: lower is closer.
+_RANK = ("partner", "child", "parent", "sibling", "relative")
+# Bounds one overview's identity reads per relationship group; a larger group
+# is named as incomplete rather than paged (ADR-0259).
+_OVERVIEW_CANDIDATES = 50
+
+
+def _closeness(edge: RelationshipAssertion) -> int:
+    owner_first = edge.subject.kind == "owner"
+    role = {
+        "spouse": "partner",
+        "partner": "partner",
+        # owner --parent--> X makes X a child; X --parent--> owner a parent.
+        "parent": "child" if owner_first else "parent",
+        "child": "parent" if owner_first else "child",
+        "sibling": "sibling",
+    }.get(edge.predicate, "relative")
+    return _RANK.index(role)
+
 
 class PeopleContextService:
     def __init__(
@@ -492,6 +511,7 @@ class PeopleContextService:
         async with self._factory() as uow, uow.people.lock(principal):
             await uow.sessions.get(session_id, principal)
             people: dict[UUID, Person] = {}
+            overflow = False
             for key in groups:
                 page = await uow.people.query(
                     PeopleQuery(
@@ -502,17 +522,16 @@ class PeopleContextService:
                         states=["active", "provisional"],
                         as_of=query.as_of,
                         known_at=query.known_at,
-                        after=query.people_after,
-                        limit=3,
+                        limit=_OVERVIEW_CANDIDATES,
                     )
                 )
-                people.update((row.id, row) for row in page if isinstance(row, Person))
-            ordered = sorted(people)
-            next_after = ordered[2] if len(ordered) > 3 else None
-            for person_id in ordered[:3]:
-                person = people[person_id]
-                if not _safe(person.display_name):
-                    continue
+                # The repository returns one row past the limit when more exist.
+                overflow = overflow or len(page) > _OVERVIEW_CANDIDATES
+                people.update(
+                    (row.id, row) for row in page[:_OVERVIEW_CANDIDATES] if isinstance(row, Person)
+                )
+            owner_edges: dict[UUID, list[RelationshipAssertion]] = {}
+            for person_id in people:
                 rows = await uow.people.query(
                     PeopleQuery(
                         tenant_id=principal.tenant_id,
@@ -525,7 +544,7 @@ class PeopleContextService:
                         limit=100,
                     )
                 )
-                edges = [
+                owner_edges[person_id] = [
                     row
                     for row in rows[:100]
                     if isinstance(row, RelationshipAssertion)
@@ -533,6 +552,28 @@ class PeopleContextService:
                     and row.predicate in predicates
                     and any(endpoint.kind == "owner" for endpoint in (row.subject, row.object))
                 ]
+            # ADR-0259: pages run closest first (partner, children, parents,
+            # siblings, other relatives), so the automatic first page holds the
+            # owner's household rather than whoever has the lowest identifier.
+            ordered = sorted(
+                people,
+                key=lambda key: (
+                    min((_closeness(edge) for edge in owner_edges[key]), default=len(_RANK)),
+                    key,
+                ),
+            )
+            if query.people_after is not None:
+                ordered = (
+                    ordered[ordered.index(query.people_after) + 1 :]
+                    if query.people_after in ordered
+                    else [key for key in ordered if key > query.people_after]
+                )
+            next_after = ordered[2] if len(ordered) > 3 else None
+            for person_id in ordered[:3]:
+                person = people[person_id]
+                if not _safe(person.display_name):
+                    continue
+                edges = owner_edges[person_id]
                 # Exact linked IDs still pass every ordinary memory visibility predicate.
                 eligible = await uow.memories.query(
                     query.model_copy(
@@ -541,6 +582,7 @@ class PeopleContextService:
                             "subjects": [],
                             "structured_belief_types": [],
                             "include_owned_resources": False,
+                            "include_home_location": False,
                             "expand_ids": (),
                             "include_ids": tuple(
                                 sorted(
@@ -579,6 +621,7 @@ class PeopleContextService:
                 update={
                     "relationship_group": group,
                     "next_people_after": next_after,
+                    "people_overflow": overflow,
                     "expand_ids": tuple(sorted(evidence)),
                     "sensitivity_ceiling": ceiling,
                     "budget_tokens": min(query.budget_tokens, 2000),
@@ -613,6 +656,7 @@ class PeopleContextService:
                 "belief_types": [BeliefType.RELATIONSHIP],
                 "structured_belief_types": [],
                 "include_owned_resources": False,
+                "include_home_location": False,
                 "expand_ids": (),
                 "subjects": [],
                 "sensitivity_ceiling": ceiling,

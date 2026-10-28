@@ -9,7 +9,13 @@ from agent_core.bootstrap import Composition
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import BeliefType, MemoryAuthority, MemoryRecord, MemoryStatus
 from agent_core.domain.messages import TextPart, ToolResultItem
-from agent_core.domain.people import PeopleEndpoint, PeopleQuery, Person, RelationshipAssertion
+from agent_core.domain.people import (
+    PeopleEndpoint,
+    PeopleQuery,
+    Person,
+    RelationshipAssertion,
+    RelationshipPredicate,
+)
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.tool_output import content_bytes
 from tests.contract.memory_fixtures import memory
@@ -216,6 +222,119 @@ async def paged_overview_run(app: Composition, *, relatives: int = 5) -> None:
         session_id=session_id,
         run_id=run_id,
     ), "An erased backing belief must invalidate retained People evidence"
+
+
+CLOSENESS: tuple[tuple[int, str, RelationshipPredicate, bool], ...] = (
+    # (id, name, predicate, owner holds the subject end); ids sort far from closeness.
+    (90010, "Sib", "sibling", True),
+    (90011, "Cousin", "relative", True),
+    (90012, "Riv", "parent", True),
+    (90013, "Mom", "parent", False),
+    (90014, "Kyrri", "parent", True),
+    (90015, "Erin", "spouse", True),
+)
+
+
+async def seed_closeness(
+    app: Composition,
+    members: tuple[tuple[int, str, RelationshipPredicate, bool], ...] = CLOSENESS,
+) -> None:
+    """The owner's family in `members`: a relationship memory and edge each."""
+
+    source_session_id = await app.sessions.create()
+    async with app.uow_factory() as uow:
+        for number, name, predicate, owner_first in members:
+            source = await uow.events.append(
+                NewEvent(
+                    session_id=source_session_id,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=app.principal.principal_id,
+                    payload={"content": f"{name} is family."},
+                )
+            )
+            record = memory(belief_id=number - 10000, statement=f"{name} is family.").model_copy(
+                update={
+                    "tenant_id": app.principal.tenant_id,
+                    "principal_id": app.principal.principal_id,
+                    "source_session_id": source_session_id,
+                    "source_event_ids": [source.sequence],
+                    "scope": "general",
+                    "subject": f"family-{name}",
+                    "belief_type": BeliefType.RELATIONSHIP,
+                    "valid_from": app.clock.now(),
+                    "created_at": app.clock.now(),
+                    "updated_at": app.clock.now(),
+                    "last_evidence_at": app.clock.now(),
+                    "store_position": await uow.memories.next_position(),
+                }
+            )
+            await uow.memories.upsert_belief(MemoryRecord.model_validate(record.model_dump()))
+            common: dict[str, Any] = {
+                "tenant_id": app.principal.tenant_id,
+                "principal_id": app.principal.principal_id,
+                "created_at": app.clock.now(),
+                "updated_at": app.clock.now(),
+            }
+            person = Person(id=UUID(int=number), display_name=name, state="active", **common)
+            await uow.people.put(person, expected_revision=0)
+            owner = PeopleEndpoint(kind="owner")
+            endpoint = PeopleEndpoint(kind="person", id=person.id)
+            await uow.people.put(
+                RelationshipAssertion(
+                    id=uuid4(),
+                    subject=owner if owner_first else endpoint,
+                    object=endpoint if owner_first else owner,
+                    predicate=predicate,
+                    belief_id=record.id,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+
+
+async def closeness_overview_run(app: Composition) -> None:
+    """ADR-0259: the first overview page holds the closest family, not the lowest ids.
+
+    Production: Riv was on page 2 because pages held three people in id order,
+    and the automatic path only ever renders page 1.
+    """
+
+    session_id = await app.sessions.create()
+    await seed_closeness(app)
+    run_id = await app.runs.submit("Tell me everything you know about me.", session_id=session_id)
+    assert (await finish(app, run_id)).status is RunStatus.COMPLETED
+    initial = html.unescape(_requests(app)[-1].model_dump_json())
+    for edge in ("owner --spouse--> Erin", "owner --parent--> Riv", "owner --parent--> Kyrri"):
+        assert edge in initial, edge
+    for name in ("Sib", "Cousin", "Mom"):
+        assert f"--> {name}" not in initial and f"{name} --" not in initial, name
+    # The continuation names the last person shown, in closeness order.
+    assert str(UUID(int=90014)) in initial and "people_after" in initial
+    assert OVERFLOW_NOTE not in initial
+
+
+OVERFLOW_NOTE = "ask about a person by name"
+
+
+async def overflow_overview_run(app: Composition) -> None:
+    """A group larger than one overview reads says so instead of looking complete.
+
+    Each relationship group reads at most 50 people; the page must not imply
+    that the people it can reach are all there are.
+    """
+
+    session_id = await app.sessions.create()
+    await seed_closeness(
+        app,
+        tuple((91000 + index, f"Kin{index}", "relative", True) for index in range(52)),
+    )
+    run_id = await app.runs.submit("Tell me everything you know about me.", session_id=session_id)
+    assert (await finish(app, run_id)).status is RunStatus.COMPLETED
+    initial = html.unescape(_requests(app)[-1].model_dump_json())
+    assert "--relative--> Kin" in initial
+    assert OVERFLOW_NOTE in initial
 
 
 async def finish(app: Composition, run_id: UUID) -> Run:

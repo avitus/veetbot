@@ -26,6 +26,9 @@ Fields: `id`, `incident`, `family` (one of the general-recall families),
 text; defaults to the question), `scope`, `paths` (`automatic`, `deliberate`),
 `expected` (`belief_id` or `statement_contains`, `required`),
 `min_required_rendered`, `forbidden` (`statement_contains`),
+`delivered_must_contain` (whole words or names the delivered recall must
+render, such as the family an overview delivers as People lines; reported as
+one flag each, never the text),
 `answer_must_contain` / `answer_must_not_contain` (live-model mode only),
 `latency_ceiling_ms`, `write` (`statement`, `subject`, `web_results`) for the
 Saved stage, and `notes`.

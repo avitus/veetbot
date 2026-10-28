@@ -15,6 +15,7 @@ from agent_core.domain.memory import (
     MemoryAuthority,
     MemoryClaimKind,
     MemoryDerivation,
+    MemoryRecord,
     MemoryStatus,
     Polarity,
     Portability,
@@ -26,7 +27,8 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn, TextPart, UserMessage
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.retrieval import DeterministicQueryFormer, _score
+from agent_core.memory.profiles import DEFAULT_RETRIEVAL_PROFILE
+from agent_core.memory.retrieval import DeterministicQueryFormer, _arm_match, _score
 from agent_core.tools.memory_search import MemorySearchTool
 from tests.contract.memory_fixtures import formation_stack, memory, recall_query
 from tests.contract.support import NOW, SESSION_ID, principal, run, tool_context
@@ -95,8 +97,8 @@ async def test_personal_advice_recalls_older_owned_model_before_candidate_flood(
         assert target.id in [item.belief_id for item in recalled.items]
         async with factory() as uow:
             trace = await uow.traces.get(recalled.trace_id, principal())
-        assert trace.retrieval_policy_version == "retrieval@7+owned-resources@1"
-        assert 'policy="retrieval@7+owned-resources@1"' in recalled.rendered
+        assert trace.retrieval_policy_version == "retrieval@8+owned-resources@1"
+        assert 'policy="retrieval@8+owned-resources@1"' in recalled.rendered
 
 
 @pytest.mark.parametrize(
@@ -416,12 +418,20 @@ def test_recall_filter_preserves_negation_names_and_non_english_terms() -> None:
 
 def test_historical_trace_queries_load_without_new_fields() -> None:
     payload = recall_query().model_dump(
-        exclude={"include_provisional", "structured_belief_types", "include_owned_resources"}
+        exclude={
+            "include_provisional",
+            "structured_belief_types",
+            "include_owned_resources",
+            "include_home_location",
+            "people_overflow",
+        }
     )
     loaded = RecallQuery.model_validate(payload)
     assert loaded.include_provisional is True
     assert loaded.structured_belief_types == []
     assert loaded.include_owned_resources is False
+    assert loaded.model_dump().get("include_home_location") is False
+    assert loaded.people_overflow is False
 
 
 async def test_structured_profile_preserves_scope_ceiling_and_ranking() -> None:
@@ -480,3 +490,201 @@ async def test_personal_intent_survives_unrelated_type_candidate_flood(
     query = DeterministicQueryFormer(principal()).form(run(), WorkingState(), question)[0]
     result = await retriever.recall(query, session_id=SESSION_ID)
     assert [item.belief_id for item in result.items] == [target.id]
+
+
+GARDEN_QUESTION = "Maintain a gardening calendar based on what you know about our garden."
+
+
+def _home(statement: str, *, subject: str = "home location") -> MemoryRecord:
+    return memory(belief_id=7000, statement=statement).model_copy(
+        update={
+            "subject": subject,
+            "belief_type": BeliefType.USER_MODEL_ATTR,
+            "claim_kind": MemoryClaimKind.RECURRING_STATE,
+            "status": MemoryStatus.PROVISIONAL,
+            "authority": MemoryAuthority.INFERRED,
+            "confidence": 0.6,
+            "flagged_for_review": True,
+            "sensitivity": Sensitivity.SENSITIVE,
+            "scope": "general",
+            "origin_scopes": ["general"],
+        }
+    )
+
+
+async def _recalled_home(question: str, home: MemoryRecord) -> tuple[bool, str]:
+    """Recall `question` over the home fact and a calendar-word candidate flood."""
+
+    _clock, factory, _service, retriever = await formation_stack()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(home)
+        for index in range(161):
+            await uow.memories.upsert_belief(
+                home.model_copy(
+                    update={
+                        "id": UUID(int=21000 + index),
+                        "subject": f"calendar entry {index}",
+                        "statement": f"Calendar entry {index} was added to the shared calendar.",
+                        "belief_type": BeliefType.FACT,
+                        "flagged_for_review": False,
+                        "store_position": index + 2,
+                    }
+                )
+            )
+    query = DeterministicQueryFormer(principal(), current_scope="general").from_text(question)[0]
+    recalled = await retriever.recall(query, session_id=SESSION_ID)
+    async with factory() as uow:
+        trace = await uow.traces.get(recalled.trace_id, principal())
+    return home.id in [item.belief_id for item in recalled.items], trace.retrieval_policy_version
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        GARDEN_QUESTION,
+        "When should I prune the roses in my yard?",
+        "What grows well around our house?",
+        "Plan the planting calendar for my backyard.",
+    ],
+)
+async def test_household_task_recalls_the_home_location_before_candidate_flood(
+    question: str,
+) -> None:
+    """A task about the owner's own place needs where that place is.
+
+    "Our garden" shares no word with "User lives in Exampleville", and no
+    owner-question form names it, so only a residence anchor reaches it.
+    """
+
+    found, policy = await _recalled_home(question, _home("User lives in Exampleville, CA."))
+    assert found
+    assert policy.endswith("+home-location@1")
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "User lives in Exampleville, CA.",
+        "The user resides at 1 Example Lane, Exampleville.",
+        "Example Owner's home mailing address is 1 Example Lane, Exampleville.",
+        "The home address is 123 Example Lane, Exampleville.",
+    ],
+)
+async def test_home_location_anchor_recognizes_residence_shapes(statement: str) -> None:
+    found, _policy = await _recalled_home(
+        GARDEN_QUESTION, _home(statement, subject="Example Owner")
+    )
+    assert found
+
+
+@pytest.mark.parametrize(
+    ("statement", "subject"),
+    [
+        ("User no longer lives in Oldtown.", "home location"),
+        ("User lives to garden on weekends.", "home location"),
+        ("Cheryl's home address is 4 Example Road.", f"person:{UUID(int=9)}:Cheryl"),
+        ("User wants to visit Exampleville.", "travel"),
+    ],
+)
+async def test_home_location_anchor_ignores_past_third_party_and_non_residence(
+    statement: str, subject: str
+) -> None:
+    found, _policy = await _recalled_home(GARDEN_QUESTION, _home(statement, subject=subject))
+    assert not found
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How do I start a vegetable garden?",
+        "What is the best garden hose?",
+        "Where is Cheryl's house?",
+        "Which house should we buy?",
+    ],
+)
+async def test_generic_or_third_party_places_do_not_anchor_the_home_location(
+    question: str,
+) -> None:
+    found, policy = await _recalled_home(question, _home("User lives in Exampleville, CA."))
+    assert not found
+    assert "home-location" not in policy
+
+
+async def test_hypothesized_residence_does_not_anchor() -> None:
+    home = _home("User lives in Exampleville, CA.").model_copy(
+        update={"derivation": MemoryDerivation.HYPOTHESIS}
+    )
+    found, _policy = await _recalled_home(GARDEN_QUESTION, home)
+    assert not found
+
+
+BOARD_QUESTION = "Which company boards do I sit on?"
+
+
+@pytest.mark.parametrize(
+    ("asked", "stored", "folds"),
+    [
+        ("boards", "board", True),
+        ("board", "boards", True),
+        ("sit", "sits", True),
+        ("company", "companies", True),
+        ("class", "classes", True),
+        ("box", "boxes", True),
+        ("sit", "sites", False),
+        ("status", "statu", False),
+        ("analysis", "analysi", False),
+        ("glass", "glas", False),
+    ],
+)
+def test_relevance_recall_folds_a_plural_or_third_person_s(
+    asked: str, stored: str, folds: bool
+) -> None:
+    """ADR-0259: "boards" finds "board" and "sit" finds "sits", in relevance mode only."""
+
+    record = memory(statement=f"Example {stored} note.")
+    relevance = recall_query(text=asked).model_copy(update={"candidate_selection": "relevance"})
+    recent = recall_query(text=asked)
+    profile = DEFAULT_RETRIEVAL_PROFILE
+    folded, _arms = _arm_match(
+        record, relevance, profile=profile, semantic_rank=None, semantic_only=False
+    )
+    exact, _arms = _arm_match(
+        record, recent, profile=profile, semantic_rank=None, semantic_only=False
+    )
+    assert folded == (1.0 if folds else 0.0)
+    # The frozen base selector keeps whole-lexeme matching.
+    assert exact == 0.0
+
+
+async def test_folded_words_rank_a_board_seat_claim_above_a_one_word_flood() -> None:
+    """2026-10-26 probe: the learned board-seat claim ranked 53rd.
+
+    It shared only "boards" with the question; a flood sharing only "company"
+    tied it and won on recency. Folded, it shares "boards" and "sit".
+    """
+
+    _clock, factory, _service, retriever = await formation_stack()
+    claim = memory(
+        belief_id=7100, statement="He sits on the boards of Northwind, Contoso and Fabrikam."
+    ).model_copy(update={"subject": "example.com", "scope": "general"})
+    async with factory() as uow:
+        await uow.memories.upsert_belief(claim)
+        for index in range(161):
+            await uow.memories.upsert_belief(
+                claim.model_copy(
+                    update={
+                        "id": UUID(int=22000 + index),
+                        "subject": f"portfolio note {index}",
+                        "statement": f"Company {index} hired a new finance lead.",
+                        "store_position": index + 2,
+                    }
+                )
+            )
+    query = DeterministicQueryFormer(principal(), current_scope="general").from_text(
+        BOARD_QUESTION
+    )[0]
+    recalled = await retriever.recall(query, session_id=SESSION_ID)
+    assert [item.belief_id for item in recalled.items][:1] == [claim.id]
+    async with factory() as uow:
+        trace = await uow.traces.get(recalled.trace_id, principal())
+    assert trace.retrieval_policy_version.startswith("retrieval@8")

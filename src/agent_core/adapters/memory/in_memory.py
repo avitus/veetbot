@@ -42,11 +42,11 @@ from agent_core.domain.memory import (
     TracedPassage,
     TracedPersonContext,
     decay_eligible_lifecycle,
-    is_owned_resource,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
-    recall_query_terms,
+    owner_anchored,
+    recall_term_lexemes,
     review_reason,
 )
 from agent_core.domain.memory_candidates import select_candidates
@@ -285,7 +285,14 @@ class InMemoryMemoryStore:
         self, query: RecallQuery, *, lexical: bool = True
     ) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
-        term_lexemes = lexical_term_lexemes(recall_query_terms(query.text))
+        # Any form of any term makes a candidate; relevance folds (ADR-0259).
+        term_lexemes = [
+            lexemes
+            for forms in recall_term_lexemes(
+                query.text, fold=query.candidate_selection == "relevance"
+            )
+            for lexemes in forms
+        ]
         subjects = {subject.casefold() for subject in query.subjects}
         async with self._transaction.owner((query.tenant_id, query.principal_id)):
             changed_members: set[UUID] = set()
@@ -390,12 +397,13 @@ class InMemoryMemoryStore:
                         or subjects
                         or query.structured_belief_types
                         or query.include_owned_resources
+                        or query.include_home_location
                     )
                     and query.include_ids is None
                     and record.id not in query.expand_ids
                     and record.subject.casefold() not in subjects
                     and record.belief_type not in query.structured_belief_types
-                    and not (query.include_owned_resources and is_owned_resource(record))
+                    and not owner_anchored(record, query)
                 ):
                     text = f"{record.subject} {record.statement}"
                     if not lexical_text_matches(term_lexemes, text):
