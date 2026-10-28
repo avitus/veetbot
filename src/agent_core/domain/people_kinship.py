@@ -4,7 +4,8 @@
 The tie is read from the owner's message, never from a model's paraphrase,
 and only from the plain present-tense forms: a negation, "ex-", "late" or a
 past tense states no current tie, and a possessive chain ("my wife's friend")
-ties the owner to someone else.
+ties the owner to someone else. A clause anywhere in the message that says
+the tie ended ("we divorced", "she passed away") withdraws it.
 """
 
 from __future__ import annotations
@@ -73,6 +74,13 @@ _ENDED = re.compile(
     rf"\b(?:not|no|never|isn't|aren't|ex|former|late|estranged)[ -]"
     rf"(?:[a-z]+(?:'s)? ){{0,2}}(?P<kin>{_KIN_WORD})\b"
 )
+# A clause that ends a tie ("we divorced last year", "my wife Erin passed
+# away") withdraws it when it names the person or speaks of them by pronoun.
+_ENDING = re.compile(
+    r"\b(?:divorc[a-z]*|separated|split up|broke up|passed away|passed on|died|dead|deceased"
+    r"|widowed)\b"
+)
+_PRONOUN = re.compile(r"\b(?:we|us|he|she|they|him|her|them)\b")
 
 
 def _normal(text: str) -> str:
@@ -96,12 +104,16 @@ def owner_kinship(text: str, name: str) -> OwnerKinship | None:
     """The one tie the owner's text states to `name`, or None.
 
     Two different ties to the same name ("Erin is my wife ... Erin is my
-    sister") state none reliably, so neither is returned.
+    sister") state none reliably, so neither is returned, and nor is a tie
+    the message says ended.
     """
 
     wanted = _normal(name)
+    named = re.compile(rf"(?:^|\W){re.escape(wanted)}(?:\W|$)")
     found: set[OwnerKinship] = set()
     for clause in _clauses(text):
+        if _ENDING.search(clause) and (named.search(clause) or _PRONOUN.search(clause)):
+            return None
         # "<name> is my wife", "Kyrri and Riv are my daughters".
         if (match := _NAME_FIRST.match(clause)) is not None and wanted in _names(
             match.group("names")

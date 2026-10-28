@@ -60,12 +60,12 @@ identifiers, while an overview delivers family as People lines.
    identified the person, never from the model's paraphrase, and the saved
    statement must name the same tie without denying or ending it ("not his
    wife", "his ex-wife"). A negation, "ex-", "late", "former", a past tense, a
-   possessive chain ("my wife's friend Erin") or two different ties to one
-   name record nothing. An existing current edge of the same kind, on any page
-   of the person's edges, is not duplicated, and an erased edge is not
-   revived. Identity still comes
-   only from the owner-selected person reference (ADR-0121); no name is
-   matched to a person.
+   possessive chain ("my wife's friend Erin"), a clause anywhere in the
+   message saying the tie ended ("we divorced last year", "she passed away")
+   or two different ties to one name record nothing. An existing current edge
+   of the same kind, on any page of the person's edges, is not duplicated, and
+   an erased edge is not revived. Identity still comes only from the
+   owner-selected person reference (ADR-0121); no name is matched to a person.
 
 3. **Repair for earlier saves.** `agent people link-kinship --owner
    TENANT/PRINCIPAL [--confirm]` applies rule 2 to live, direct,

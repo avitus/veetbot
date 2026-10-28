@@ -11,9 +11,16 @@ from tests.contract.people_kinship_cases import kinship_repair_case
 from tests.integration.test_memory_postgres_m9 import _settings
 
 
-@pytest.mark.parametrize("restatements", [(), ("Andy confirmed that Erin is his wife.",)])
+@pytest.mark.parametrize(
+    ("message", "restatements", "ended"),
+    [
+        ("Erin is my wife. We married in 2005.", (), False),
+        ("Erin is my wife. We married in 2005.", ("Andy confirmed that Erin is his wife.",), False),
+        ("Erin is my wife; we divorced last year.", (), True),
+    ],
+)
 async def test_kinship_repair_records_the_owners_stated_tie_postgres(
-    tmp_path: Path, restatements: tuple[str, ...]
+    tmp_path: Path, message: str, restatements: tuple[str, ...], ended: bool
 ) -> None:
     async with build(
         settings=replace(_settings(tmp_path), people_enabled=True), storage="postgres"
@@ -27,7 +34,7 @@ async def test_kinship_repair_records_the_owners_stated_tie_postgres(
                     event_type="user.message.created",
                     actor_type="principal",
                     actor_id=app.principal.principal_id,
-                    payload={"content": "Erin is my wife. We married in 2005."},
+                    payload={"content": message},
                 )
             )
         await kinship_repair_case(
@@ -37,4 +44,5 @@ async def test_kinship_repair_records_the_owners_stated_tie_postgres(
             session_id,
             event.sequence,
             restatements=restatements,
+            ended=ended,
         )

@@ -266,7 +266,7 @@ async def post_snapshot_home_case(app: Composition, *, finish: Finish = _wait) -
     assert delta.query.include_home_location is False
     assert delta.query.min_store_position == plan.snapshot_watermark
     assert deploys.id in delta.returned
-    assert residence.id in {*base.returned, *delta.returned}
+    assert residence.id in base.returned
 
 
 def assert_delivery_report(report: ProbeReport, car: MemoryRecord) -> None:

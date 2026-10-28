@@ -52,11 +52,14 @@ async def kinship_repair_case(
     sequence: int,
     *,
     restatements: tuple[str, ...] = (),
+    ended: bool = False,
 ) -> None:
     """`sequence` is the owner message "Erin is my wife. We married in 2005.".
 
     Each restatement is a further save of the same tie, linked to Erin herself;
-    the repair still records one tie and its preview counts one.
+    the repair still records one tie and its preview counts one. With `ended`
+    the message instead says the tie ended ("we divorced last year"), and the
+    repair finds the saves but records nothing.
     """
 
     owner = owner.model_copy(
@@ -150,10 +153,15 @@ async def kinship_repair_case(
     assert (preview.applied, preview.eligible, preview.pending, preview.created) == (
         False,
         1 + len(restatements),
-        1,
+        0 if ended else 1,
         0,
     )
     assert await edges(factory, owner) == []
+    if ended:
+        applied = await link_owner_kinship(factory, clock, owner, confirm=True)
+        assert (applied.pending, applied.created) == (0, 0)
+        assert await edges(factory, owner) == []
+        return
 
     applied = await link_owner_kinship(factory, clock, owner, confirm=True)
     assert (applied.pending, applied.created) == (1, 1)
