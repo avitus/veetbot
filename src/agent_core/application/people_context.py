@@ -48,6 +48,10 @@ _RANK = ("partner", "child", "parent", "sibling", "relative")
 # Bounds one overview's identity reads per relationship group; a larger group
 # is named as incomplete rather than paged (ADR-0259).
 _OVERVIEW_CANDIDATES = 50
+# Focal people per page (ADR-0238), and the most a first page may hold while it
+# reaches the first member of every family tier present (ADR-0265).
+_PAGE_FOCAL = 3
+_FIRST_PAGE_FOCAL = 8
 
 
 def _closeness(edge: RelationshipAssertion) -> int:
@@ -568,8 +572,21 @@ class PeopleContextService:
                     if query.people_after in ordered
                     else [key for key in ordered if key > query.people_after]
                 )
-            next_after = ordered[2] if len(ordered) > 3 else None
-            for person_id in ordered[:3]:
+            # ADR-0265: a first page runs, closest first, until it has reached the
+            # first member of every tier present, so a parent or sibling is not left
+            # on a page the model never asks for; continuation pages hold three.
+            size = _PAGE_FOCAL
+            if query.people_after is None:
+                tiers: set[int] = set()
+                for index, focal in enumerate(ordered[:_FIRST_PAGE_FOCAL]):
+                    tier = min(
+                        (_closeness(edge) for edge in owner_edges[focal]), default=len(_RANK)
+                    )
+                    if tier not in tiers:
+                        tiers.add(tier)
+                        size = max(size, index + 1)
+            next_after = ordered[size - 1] if len(ordered) > size else None
+            for person_id in ordered[:size]:
                 person = people[person_id]
                 if not is_safe_text(person.display_name):
                     continue

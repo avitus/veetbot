@@ -25,6 +25,13 @@
 # plural or third-person "-s" (retrieval@8), and probes can check delivered
 # names. Delivered in PR 206, merged 2026-10-28; the production
 # `agent people link-kinship` repair run is pending. No milestone or gate moves.
+# ADR-0264/0265: On 2026-10-28 the owner's family question omitted their
+# mother (parents sat on overview page 2 behind the household) and the owner's
+# correction formed a duplicate person (an owner-stated name never matched
+# email-context aliases). An owner-stated name now selects the one person the
+# owner is already tied to, and a first overview page reaches the first member
+# of every family tier, three to eight people (+owner-overview@3). Proposed;
+# no milestone or gate moves.
 # ADR-0251: Owner accepted on 2026-10-25 an app-offered card that connects an
 # unconnected chat to an owned website the owner names; a match never connects
 # by itself, and an offer expires at the next owner message or after 24 hours.
