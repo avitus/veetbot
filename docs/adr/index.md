@@ -301,4 +301,5 @@ implementation without one.
 - [ADR-0254: Cockpit feeds refresh every minute to every day, and on entry (Accepted)](0254-cockpit-feed-intervals-and-refresh-on-entry.md)
 - [ADR-0255: Owner-added MCP servers with in-app sign-in (Accepted)](0255-owner-added-mcp-servers.md)
 - [ADR-0256: New mail keeps a reserved share of the Email budget (Accepted)](0256-new-mail-keeps-a-reserved-email-budget-share.md)
+- [ADR-0258: Deferred definitions, recoverable truncation, and JSON field reads (Accepted)](0258-deferred-definitions-and-truncation-recovery.md)
 - [ADR-0259: Owner places and family ties reach recall (Proposed)](0259-owner-places-and-family-ties-reach-recall.md)

@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Forty-one more model-callable tools are declared at build time by other
+Forty-two more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -147,6 +147,7 @@ knowledge.ingest              capability  knowledge-documents
 knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
+web.fetch_json                capability  web-access
 browser.navigate              capability  browser-automation
 browser.observe               capability  browser-automation
 browser.act                   capability  browser-automation
@@ -176,8 +177,8 @@ cockpit.configure             capability  cockpit
 cockpit.feed.publish          capability  cockpit
 ```
 
-Fifty-one model-callable builtin tools in total: the original roster of
-eight, the forty-one above, and the two media-generation tools in ADR-0140.
+Fifty-two model-callable builtin tools in total: the original roster of
+eight, the forty-two above, and the two media-generation tools in ADR-0140.
 Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
@@ -192,8 +193,8 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty-one, `skill.manage`, `web.search`,
-`web.fetch`, the three `browser.*` tools, the six `schedule.*` tools, and the
+nothing else.** Of the other forty-two, `skill.manage`, `web.search`,
+`web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
 five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
 three `people.*`, and six `records.*` tools in this document's Milestone 26,
 28, 31, and 34 sections below;
@@ -216,8 +217,8 @@ that is a function of the deployment. Eighteen identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the four `memory.*` tools,
-`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-three register only
-with their flag or provider: `skill.manage` with skill authoring, the two
+`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-four register only
+with their flag or provider: `skill.manage` with skill authoring, the three
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
 and worker, the three `people.*` tools with People, `email.context` and
@@ -1676,9 +1677,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; fifty-one model-callable builtin tools
-    are declared at build time across the corpus, and forty-one of them
-    belong to other specifications. Resolved by naming those forty-one here,
+    is the original roster; fifty-two model-callable builtin tools
+    are declared at build time across the corpus, and forty-two of them
+    belong to other specifications. Resolved by naming those forty-two here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
