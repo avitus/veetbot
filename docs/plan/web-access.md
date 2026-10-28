@@ -15,12 +15,14 @@ tool contract.
 
 ## Scope
 
-The first tranche exposes two read-only builtin capability tools:
+The first tranche exposes two read-only builtin capability tools, and
+ADR-0258 adds a third that reads named fields of a JSON document:
 
 | Tool | Purpose | Recommended provider |
 | --- | --- | --- |
 | `web.search` | Discover and rank public pages for a query | Tavily 50%, Keenable 50% |
 | `web.fetch` | Extract readable Markdown from one selected page | Firecrawl 50%, Keenable 50% |
+| `web.fetch_json` | Return named fields of one public JSON document | `web.fetch`'s route |
 
 Tavily, Firecrawl, and Keenable implement the same `WebProvider` port and
 support both operations. The comparison allocation is the initial recommended
@@ -76,6 +78,28 @@ single-label names, and the `.internal`, `.local`, `.localhost`, `.home`, and
 rejected so abbreviated IPv4 forms cannot pass as hostnames. The remote provider
 remains responsible for DNS-resolution and redirect defenses inside its own
 fetch boundary.
+
+`web.fetch_json`
+([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md))
+accepts one URL under `web.fetch`'s rule and one to thirty-two unique field
+paths. A path is dotted: each segment is an object key, an array index, or
+`*` for every element of an array, which maps the rest of the path over the
+elements and gives `null` where an element lacks it. The tool reads the
+document through the fetch allocation, under its own routing key, so it adds
+no provider and no egress. It unwraps one surrounding Markdown code fence, as
+some providers return JSON inside one, and parses the rest as strict JSON:
+NaN, Infinity, a number too large for a float and nesting too deep to decode
+do not parse, and a lone surrogate in a string becomes U+FFFD. It returns
+the provider line, then the canonical URL, the selected values in the order
+asked and the paths that matched nothing. A page that does not parse fails
+with `tool.web.json_invalid` and names `web.fetch`; a selection whose rendered
+output passes the tool's 64 KiB limit fails with
+`tool.web.json_selection_too_large` instead of being cut, because a truncated
+selection would misstate the document. Its classification and output trust
+are `web.fetch`'s, and the policy engine counts it among the fixed provider
+tools. The default agent enables it with `web.fetch` and offers it through the
+deferred tool index: an API answer of many kilobytes then reaches the model
+as the few values it needs.
 
 ## Provider mappings
 
@@ -154,7 +178,7 @@ rewritten. This is bootstrap curation, not runtime or model-directed routing.
 
 ## Policy, egress, and trust
 
-Both tools declare `NETWORK_READ`, `LOW`, `READ_ONLY`, parallel execution,
+All three tools declare `NETWORK_READ`, `LOW`, `READ_ONLY`, parallel execution,
 bounded time and output, and `target_kind: web_provider`. Registration accepts
 that target only for builtin `web.*` tools with this exact read-only
 classification and `EXTERNAL_UNTRUSTED` output.
@@ -166,9 +190,10 @@ adapter hard-codes its HTTPS API endpoint. A model-authored `url` or
 Sandbox networking remains default-deny, and model-generated code receives no
 provider credential.
 
-Every search snippet and fetched page is `EXTERNAL_UNTRUSTED`. The label is
-declared on the tool specification, returned on the `ToolResult`, and persisted
-on the invocation result. Page text therefore cannot become policy,
+Every search snippet, fetched page and selected JSON value is
+`EXTERNAL_UNTRUSTED`. The label is declared on the tool specification, returned
+on the `ToolResult`, and persisted on the invocation result. Page text and JSON
+values therefore cannot become policy,
 configuration, a credential, or a trusted skill-authoring source.
 
 ## Bounds and failures
@@ -177,8 +202,9 @@ Provider HTTP responses are streamed into a two-MiB hard bound before JSON
 decoding; a larger response is invalid provider output. Search snippets,
 titles, result counts, fetched content, and final tool outputs have lower
 contract bounds: `web.fetch` truncates page content to its declared tool
-output limit, and `web.search` drops trailing results until its rendered
-output fits the declared acquisition limit. The tool pipeline then applies
+output limit, `web.search` drops trailing results until its rendered
+output fits the declared acquisition limit, and `web.fetch_json` fails a
+selection past its 64 KiB limit rather than cutting it. The tool pipeline then applies
 its separate inline admission ceiling: large pages become a persisted excerpt
 and an owner-readable artifact containing the acquired result. The acquisition
 limit is unchanged; the excerpt does not replace the full capture.
@@ -189,9 +215,10 @@ the page is not fetched again
 Redirect following is disabled for provider API calls so a bearer
 credential cannot be forwarded to another host.
 
-Search has a 30-second total tool deadline. Fetch has a 60-second total tool
-deadline so an extraction that continues to make bounded read progress is not
-cut off by the provider clients' 30-second per-I/O limits. Both tools place a
+Search has a 30-second total tool deadline. Fetch and the JSON read have a
+60-second total tool deadline so an extraction that continues to make bounded
+read progress is not cut off by the provider clients' 30-second per-I/O
+limits. All three tools place a
 provider-attribution deadline just inside the effective pipeline deadline; an
 expiry is therefore normalized as a retryable provider-unavailable result that
 names the already-selected provider instead of falling through to an

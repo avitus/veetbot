@@ -371,8 +371,8 @@ holds only `tool.call` (ADR-0123).
 `schedule.list` and approval-gated `schedule.update`, `schedule.pause`,
 `schedule.resume`, and `schedule.cancel` capabilities; their registration
 remains conditional on the scheduling deployment flags.
-`web` holds the read-only `web.search` and `web.fetch` capabilities designed in
-[web-access.md](web-access.md). Their `web_provider` target is valid only with
+`web` holds the read-only `web.search`, `web.fetch` and `web.fetch_json`
+capabilities designed in [web-access.md](web-access.md). Their `web_provider` target is valid only with
 `NETWORK_READ`, `READ_ONLY`, and `EXTERNAL_UNTRUSTED`; registration refuses any
 other use of that target.
 
@@ -1049,7 +1049,11 @@ own name, and the result still answers the `tool.call` the provider replays. A
 malformed wrapper fails with `tool.arguments_invalid`, and a name the run does
 not offer is denied with `tool.not_found.not_offered`, both under
 `tool.call`'s name. Invalid arguments for the named tool return that tool's
-input schema, because its definition never reached the provider. The
+whole definition, because it never reached the provider and its index entry
+shows one sentence: `Definition of <name>.`, the full description and the
+input schema
+([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)). A
+server's or device's definition is returned as untrusted data. The
 parallel-batch check unwraps the same way, so a batch's parallelism is decided
 by the tools it actually runs.
 

@@ -302,6 +302,7 @@ implementation without one.
 - [ADR-0255: Owner-added MCP servers with in-app sign-in (Accepted)](0255-owner-added-mcp-servers.md)
 - [ADR-0256: New mail keeps a reserved share of the Email budget (Accepted)](0256-new-mail-keeps-a-reserved-email-budget-share.md)
 - [ADR-0257: One final verification run, and Apple jobs keyed on their inputs](0257-one-final-verification-run.md)
+- [ADR-0258: Deferred definitions, recoverable truncation, and JSON field reads (Accepted)](0258-deferred-definitions-and-truncation-recovery.md)
 - [ADR-0260: Plain approval cards and an honest capture marker](0260-plain-approval-cards.md)
 - [ADR-0261: Read a long tool result in sections](0261-read-a-capture-in-sections.md)
 - [ADR-0262: The deferred tool index holds 2,500 tokens (Accepted)](0262-deferred-index-token-headroom.md)

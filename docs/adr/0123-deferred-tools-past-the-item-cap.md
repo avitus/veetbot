@@ -10,7 +10,8 @@
 - Amended by: ADR-0130 (2026-09-25), which ranks `browser.navigate`,
   `browser.observe` and `browser.act` first and never defers them in a chat
   bound to a website profile; ADR-0253 (2026-10-25), which defers a configured
-  tool past the token cap; ADR-0262 (2026-10-27), which raises the
+  tool past the token cap; ADR-0258 (2026-10-26), which returns the whole
+  definition on invalid arguments; ADR-0262 (2026-10-27), which raises the
   index's token cap to 2,500
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
@@ -62,9 +63,10 @@ one account's tools beat the other's.
    - The named tool must be in the run's pinned set and must not be a control
      tool. Otherwise the call is denied with `tool.not_found.not_offered`. A
      malformed wrapper fails with `tool.arguments_invalid`.
-   - Invalid arguments for the named tool return its input schema, because
-     its definition never reached the provider. A schema from a server or
-     device is returned as untrusted data.
+   - Before ADR-0258, invalid arguments for the named tool returned its input
+     schema, because its definition never reached the provider. A schema from
+     a server or device was returned as untrusted data. ADR-0258 returns the
+     whole definition, description included, under the same trust split.
    - `tool.call` is advertised only while the plan defers something. It is
      classified `NONE`, so every policy decision uses the deferred tool's own
      classification, and the policy files do not change.

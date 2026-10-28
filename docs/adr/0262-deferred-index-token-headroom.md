@@ -20,10 +20,10 @@ label, trash or restore a personal-account thread. A chat without a website
 profile skipped nothing.
 
 Measured on the production-shaped roster gate, the complete index for that
-chat is 39 entries and 2,088 estimated tokens on `main`, and 39 entries and
-2,059 on `dev`. The two lists differ by one entry each: `main` has
-`web.fetch_json`, and `dev` has `artifact.read_capture` (ADR-0261). The three
-Gmail writes add 45, 29 and 31 tokens.
+chat is 39 entries and 2,088 estimated tokens on `main`, and 38 entries and
+2,059 on `dev`, which lacks `web.fetch_json` and pins `artifact.read_capture`
+without an entry (ADR-0261). With both merged it is 39 entries and 2,088
+tokens. The three Gmail writes add 45, 29 and 31 tokens.
 
 ## Decision
 
@@ -44,10 +44,9 @@ the index rendering and the rank order are unchanged.
   already recorded are unchanged.
 - The larger index costs up to 500 more Region A tokens per request in the
   chats that use it. Region A is the cached prefix.
-- That chat leaves about 400 tokens of headroom. Once `main` and `dev` are
-  merged it holds forty entries, exactly the forty-item cap, so the item cap
-  is the next limit: any new deferred entry there skips the lowest-ranked one
-  again.
+- That chat leaves 412 tokens of headroom but only one free entry, so the
+  forty-item cap is the next limit: a second new index entry there skips the
+  lowest-ranked one again.
 - The planner multiplies the estimate, three UTF-8 bytes per token, by the
   model's learned correction factor, which never falls below one
   (`context-engine.md`). The headroom absorbs a factor of up to about 1.19 for

@@ -128,12 +128,12 @@ already follow.
 - **Fixed egress.** The adapter dials exactly one HTTPS endpoint, the vendor's
   documented System One endpoint, held as a module constant, and follows no
   redirect. No setting, request field, or response changes the destination.
-  This is the fixed-endpoint arrangement web-access.md:162-167 describes: the
+  This is the fixed-endpoint arrangement web-access.md:186-191 describes: the
   composition root selects the adapter and the adapter hard-codes its host.
   The egress policy governs sandbox traffic and tenant-supplied URLs
   (sandbox-isolation.md:810-821) and gains no entry.
 - **Call-time credential.** `TYPESAFE_API_KEY` enters the existing credential
-  broker as the reference `typesafe`, as web-access.md:140-146 describes for
+  broker as the reference `typesafe`, as web-access.md:164-170 describes for
   the web providers. The adapter resolves it on every call, sends it only as
   the bearer authorization header of that one request, and holds it on no
   object. A resolver refusal is `judgment.auth_failed` with nothing dialed.

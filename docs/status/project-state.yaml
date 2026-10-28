@@ -24,6 +24,10 @@
 # budget runs low: background learning stops at 75% of each ceiling and new
 # mail keeps the rest. Implemented with focused tests; delivery is pending.
 # No milestone or gate moves.
+# ADR-0258: Owner asked on 2026-10-26 for whole deferred-tool definitions,
+# truncation recovery (definition answers kept whole, live event numbers, a
+# truncation note) and web.fetch_json. Implemented with tests; delivery is
+# pending. No milestone, gate or policy profile moves.
 # ADR-0260: Owner authorized plain approval cards and an honest capture marker
 # on 2026-10-27, declining a sandbox exemption and a model-written purpose line.
 # Implemented with server and native tests; delivery is pending. No milestone,
