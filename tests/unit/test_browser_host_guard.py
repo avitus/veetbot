@@ -69,8 +69,13 @@ def _dry_run(*arguments: str, check: bool = True) -> str:
 
 
 @pytest.mark.parametrize("target", ["test-browser", "test-browser-cases"])
-def test_a_mac_sends_the_browser_targets_to_the_sidecar(target: str) -> None:
-    commands = _dry_run(target, "HOST_OS=Darwin", "CASES=tests/unit/test_browser_rich_text.py")
+def test_a_mac_sends_the_browser_targets_to_the_sidecar_when_asked(target: str) -> None:
+    commands = _dry_run(
+        target,
+        "HOST_OS=Darwin",
+        f"{ROUTE_SETTING}=sidecar",
+        "CASES=tests/unit/test_browser_rich_text.py",
+    )
 
     assert "scripts/run_on_sidecar.sh" in commands
     assert "playwright install" not in commands
@@ -139,8 +144,15 @@ def test_browser_dry_run_is_independent_of_parent_make_settings(
 
     commands = _dry_run("test-browser", "HOST_OS=Darwin")
 
-    assert "scripts/run_on_sidecar.sh" in commands
+    assert "scripts/run_in_linux_container.sh" in commands
     assert "playwright install" not in commands
+
+
+def test_a_mac_defaults_to_the_local_container_with_parallel_workers() -> None:
+    commands = _dry_run("test-browser", "HOST_OS=Darwin")
+
+    assert "scripts/run_in_linux_container.sh" in commands
+    assert "BROWSER_TEST_WORKERS=8" in commands
 
 
 def test_linux_runs_the_browser_partition_in_place() -> None:
@@ -148,7 +160,14 @@ def test_linux_runs_the_browser_partition_in_place() -> None:
 
     assert "scripts/run_on_sidecar.sh" not in commands
     assert "playwright install --with-deps chromium" in commands
-    assert "pytest -n 0 -m browser" in commands
+    assert "pytest -n 0 --dist loadfile -m browser" in commands
+
+
+def test_linux_can_spread_the_browser_partition_over_workers() -> None:
+    commands = _dry_run("test-browser", "HOST_OS=Linux", "BROWSER_TEST_WORKERS=8")
+
+    assert "pytest -n 8 --dist loadfile -m browser" in commands
+    assert "--browser-report" in commands
 
 
 def test_linux_runs_named_browser_cases_without_writing_the_gate_report() -> None:

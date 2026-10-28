@@ -380,10 +380,10 @@ A change is verified in full once, on the final head proposed for `main`, by
 the requested hosted run (ADR-0257); that run's jobs cover everything
 `make check` does. While a change is developed or reviewed, and when a small
 change is pushed to `dev`, run the focused tests for what changed plus
-`make lint`, `make typecheck`, and, for documentation, `make docs-check`. Use
-the sidecar for focused browser cases (`make test-browser-cases`) and as the
-fallback for a full `make check` when hosted CI is unavailable, not as a
-per-push gate. The workflow section below defines when the hosted jobs run.
+`make lint`, `make typecheck`, and, for documentation, `make docs-check`. Run
+focused browser cases with `make test-browser-cases`, which a Mac sends to a
+local container (below); use the sidecar as the fallback for a full
+`make check` when hosted CI is unavailable, not as a per-push gate. The workflow section below defines when the hosted jobs run.
 
 ## Required real-browser verification
 
@@ -391,7 +391,8 @@ ADR-0156 adds the `browser` partition for the existing real Chromium runtime,
 hostile-page, device-handoff, and hosted task-grant modules. Those modules are
 excluded from static, contract, and PostgreSQL selections. `make browser-install`
 installs the lockfile-matched Chromium and its platform dependencies;
-`make test-browser` requires it, runs the partition serially, and writes a
+`make test-browser` requires it, runs the partition serially unless
+`BROWSER_TEST_WORKERS` names xdist workers (each takes whole files), and writes a
 content-free baseline report. Missing browsers, skipped or filtered browser
 cases, and an empty partition fail this gate. The normal suite socket guard
 remains in force; only each synthetic HTTPS harness opens its bounded local
@@ -400,14 +401,17 @@ transport.
 Hosted browsers are headed, and only Linux gives each one a private display,
 so on a Mac the partition runs on Linux elsewhere (ADR-0236). There
 `make test-browser`, and `make test-browser-cases CASES=<paths>` for named
-cases, run on the Linux sidecar through `scripts/run_on_sidecar.sh` by default.
-With `VEETBOT_BROWSER_ROUTE=docker` they run instead in a local linux/amd64
-container through `scripts/run_in_linux_container.sh`, which builds
-`deploy/browser-test.Dockerfile` (Chromium and Xvfb, cached on `uv.lock`) and
-mounts the checkout, so the baseline report lands in it; any other route value
-fails the browser targets. A browser case collected on a Mac host skips, which
-this gate counts as unpassed. `test-browser-cases` writes no baseline report.
-`VEETBOT_BROWSER_ON_HOST=1` runs either on the Mac deliberately.
+cases, run by default in a local linux/amd64 container through
+`scripts/run_in_linux_container.sh`, which builds
+`deploy/browser-test.Dockerfile` (Chromium and Xvfb, cached on `uv.lock`),
+mounts the checkout so the baseline report lands in it, and spreads the
+partition over `CONTAINER_BROWSER_TEST_WORKERS` (8). The report merges each
+worker's evidence, so a parallel run meets the same gate. With
+`VEETBOT_BROWSER_ROUTE=sidecar` both run serially on the Linux sidecar through
+`scripts/run_on_sidecar.sh`; any other route value fails the browser targets.
+Linux, CI included, runs them in place. A browser case collected on a Mac host
+skips, which this gate counts as unpassed. `test-browser-cases` writes no
+baseline report. `VEETBOT_BROWSER_ON_HOST=1` runs either on the Mac deliberately.
 
 `make check` includes `test-browser`, which depends on `browser-install`.
 Hosted CI runs a separate browser job and packaging depends on

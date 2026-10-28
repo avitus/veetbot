@@ -44,16 +44,17 @@ automation does not take over the desktop.
   authentication-surface typing test) draws no window and keeps running on the
   host.
 
-## Amendment (2026-10-28): a local Docker route
+## Amendment (2026-10-28): a local Docker route, parallel, by default
 
-The owner asked for a way to run the partition on the Mac without the sidecar.
-Linux Chromium in a local container draws to Xvfb as it does on the sidecar,
-so no window reaches the desktop.
+The owner asked for a way to run the partition on the Mac without the sidecar,
+then made it the default once it ran in parallel. Linux Chromium in a local
+container draws to Xvfb as it does on the sidecar, so no window reaches the
+desktop.
 
 1. `VEETBOT_BROWSER_ROUTE` picks where a Mac sends both browser targets:
-   `sidecar` (the default, unchanged) or `docker`, which runs the same Make
-   target through `scripts/run_in_linux_container.sh`. Any other value fails
-   the browser targets and nothing else.
+   `docker` (the default) runs the same Make target through
+   `scripts/run_in_linux_container.sh`; `sidecar` keeps decision 1's route.
+   Any other value fails the browser targets and nothing else.
 2. The container is linux/amd64, the sidecar's and hosted CI's architecture,
    emulated on Apple silicon. `deploy/browser-test.Dockerfile` caches the
    locked dependencies, Chromium and Xvfb on `uv.lock`; the checkout is
@@ -61,10 +62,24 @@ so no window reaches the desktop.
 3. arm64 is not offered. Native arm64 Linux Chromium ran a module four times
    faster but crashed the renderer on the deep-page readable-text case that
    passes on x86_64, so it does not match the gate.
+4. `BROWSER_TEST_WORKERS` spreads the partition over xdist workers, each taking
+   whole files; it defaults to 0, so CI and the sidecar stay serial. The
+   container route passes `CONTAINER_BROWSER_TEST_WORKERS` (8). Each worker
+   ships its observed builds, scripted-task outcomes and filtered cases to the
+   controller, which writes the one baseline, so the gate's conditions are
+   unchanged.
 
-Measured on 2026-10-28 on dev 86d03abc, one run each, not concurrent: the
-container passed all 348 browser cases in 18 min 19 s (18 min 0 s of tests;
-a cold image build adds 96 s once per lock change). A fresh sidecar passed them
-in 12 min 41 s, including creation, sync and install (11 min 15 s of tests).
-The container is slower but uses no CircleCI credits, and each run has its own
-container, so concurrent sessions no longer share one sidecar's install.
+Measured on 2026-10-28 on dev 86d03abc, one route at a time, all 348 cases
+passing each run:
+
+| Route | Wall clock | Tests |
+| --- | --- | --- |
+| Fresh sidecar, serial, including creation, sync and install | 12 min 41 s | 11 min 15 s |
+| Container, serial | 18 min 19 s | 18 min 0 s |
+| Container, 4 workers | 5 min 44 s | 5 min 33 s |
+| Container, 8 workers (`make test-browser`, twice, verified report) | 4 min 39 s, 4 min 40 s | 4 min 30 s, 4 min 27 s |
+
+A cold image build adds 96 s once per lock change. The longest file takes about
+3 minutes alone, which bounds further workers. The container uses no CircleCI
+credits, and each run has its own container, so concurrent sessions no longer
+share one sidecar's install.
