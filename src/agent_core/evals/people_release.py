@@ -14,7 +14,12 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from agent_core.domain.people_evidence import Digest, PeopleFormationEvidence, PeopleQualityMetrics
+from agent_core.domain.people_evidence import (
+    PEOPLE_LINKER_VERSION,
+    Digest,
+    PeopleFormationEvidence,
+    PeopleQualityMetrics,
+)
 from agent_core.evals.memory_distillation import (
     DistillationArmResult,
     DistillationCaseResult,
@@ -134,7 +139,7 @@ def assemble_evidence(
         schema_version=1,
         formation_policy_version="formation@11",
         extractor_version="people-assisted-v1",
-        linker_version="people-linker@1",
+        linker_version=PEOPLE_LINKER_VERSION,
         resolver_version="people-resolver@1",
         scorer_version=scores["scorer_version"],
         corpus_sha256=metadata["corpus_sha256"]["development"],

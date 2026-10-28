@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 from typing import Literal
@@ -17,6 +16,7 @@ from agent_core.domain.general_recall_release import (
     RecallReleaseIdentity,
     ReleaseValue,
 )
+from agent_core.domain.hashing import sha256_hex
 from agent_core.evals.general_recall_collection import compile_collection
 from agent_core.evals.general_recall_composition import system_clock
 from agent_core.evals.memory_distillation import require_committed_tree
@@ -62,10 +62,6 @@ class GateReport(ReleaseValue):
     identity_sha256: Digest
     gate: int = Field(ge=1, le=11)
     checks: tuple[GateCheck, ...] = Field(min_length=1, max_length=20000)
-
-
-def _digest(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
 
 
 def _require(condition: bool, reason: str) -> None:
@@ -119,7 +115,7 @@ def publish_release(
     _require(
         collected.scenarios == bundle.scenarios
         and collected.observations == bundle.observations
-        and collected.manifest_sha256 == _digest(raw[collection_manifest]),
+        and collected.manifest_sha256 == sha256_hex(raw[collection_manifest]),
         "bundle differs from original runtime observations or reviewed corpus",
     )
     _require(collected.confirmed, "original pre-execution confirmation is required")
@@ -132,7 +128,7 @@ def publish_release(
     )
     scenarios = {scenario.id: scenario for scenario in bundle.scenarios}
     _require(
-        _digest(raw[independence_review]) == expected.independence_review_sha256
+        sha256_hex(raw[independence_review]) == expected.independence_review_sha256
         and independence.corpus_sha256 == expected.corpus_sha256
         and independence.scenario_manifest_sha256 == expected.scenario_manifest_sha256
         and len(set(independence.reviewed_scenarios)) == len(independence.reviewed_scenarios)
@@ -140,8 +136,8 @@ def publish_release(
         and independence.reviewed_at <= bundle.preregistration.registered_at,
         "independence review is missing, late or bound to different scenarios",
     )
-    identity = _digest(expected.model_dump_json().encode())
-    observed = _digest(
+    identity = sha256_hex(expected.model_dump_json().encode())
+    observed = sha256_hex(
         b"".join(row.model_dump_json().encode() + b"\n" for row in bundle.observations)
     )
     difficult = {
@@ -176,7 +172,7 @@ def publish_release(
         receipt = receipts[report.gate]
         _require(
             report.identity_sha256 == identity
-            and _digest(raw[path]) == receipt.report_sha256
+            and sha256_hex(raw[path]) == receipt.report_sha256
             and len({check.id for check in report.checks}) == len(report.checks)
             and sum(check.passed for check in report.checks) == receipt.passed
             and sum(not check.passed for check in report.checks) == receipt.failed,
@@ -189,7 +185,7 @@ def publish_release(
         "input changed during publication",
     )
     _require(
-        all(_digest(_read_bounded(path)) == digest for path, digest in collected.artifacts),
+        all(sha256_hex(_read_bounded(path)) == digest for path, digest in collected.artifacts),
         "original runtime input changed during publication",
     )
     require_committed_tree(root, expected.build_ref)
@@ -213,10 +209,11 @@ def publish_release(
                 "observations_sha256": observed,
                 "collection_manifest_sha256": collected.manifest_sha256,
                 "actual_provider_cost_usd": str(collected.actual_cost_usd),
-                "independence_review_sha256": _digest(raw[independence_review]),
-                "failure_review_sha256": _digest(raw[failure_review]),
+                "independence_review_sha256": sha256_hex(raw[independence_review]),
+                "failure_review_sha256": sha256_hex(raw[failure_review]),
                 "gate_report_sha256": {
-                    str(r.gate): _digest(raw[p]) for p, r in zip(gate_reports, reports, strict=True)
+                    str(r.gate): sha256_hex(raw[p])
+                    for p, r in zip(gate_reports, reports, strict=True)
                 },
             },
             indent=2,

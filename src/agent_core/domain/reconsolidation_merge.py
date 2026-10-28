@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import unicodedata
 from datetime import datetime
 from itertools import combinations
@@ -14,6 +12,7 @@ from pydantic import AwareDatetime, Field, model_validator
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.hashing import canonical_json_sha256
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.reconsolidation import (
@@ -191,7 +190,9 @@ def undo_merge(
         raise ValueError("undo requires a bounded idempotency key and positive revision")
     if now < operation.committed_at:
         raise ValueError("merge cannot be undone before its commit")
-    key_digest = _digest([principal.tenant_id, principal.principal_id, idempotency_key])
+    key_digest = canonical_json_sha256(
+        [principal.tenant_id, principal.principal_id, idempotency_key]
+    )
     if prior_receipt is not None:
         if (
             prior_receipt.operation_id != operation.id
@@ -313,12 +314,6 @@ def prepare_merge(
     )
 
 
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
 def normalize_claim(value: str) -> str:
     return " ".join(unicodedata.normalize("NFC", value).split())
 
@@ -330,7 +325,7 @@ def source_dependency(source: MergeSource) -> MergeDependency:
         source_event_ids=tuple(sorted(set(source.record.source_event_ids))),
         evidence_at=utc_now(source.record.last_evidence_at),
         content_digest=content_signature(source.record),
-        attribution_digest=_digest(sorted(source.attribution)),
+        attribution_digest=canonical_json_sha256(sorted(source.attribution)),
     )
 
 
@@ -338,7 +333,7 @@ def _pair_signatures(principal: Principal, sources: tuple[MergeSource, ...]) -> 
     owner = [principal.tenant_id, principal.principal_id]
     signatures: set[str] = set()
     identities = {
-        source.record.id: _digest(
+        source.record.id: canonical_json_sha256(
             [
                 normalize_claim(source.record.statement),
                 source.record.belief_type,
@@ -353,10 +348,12 @@ def _pair_signatures(principal: Principal, sources: tuple[MergeSource, ...]) -> 
     }
     for left, right in combinations(sources, 2):
         signatures.add(
-            _digest(["members", owner, sorted([str(left.record.id), str(right.record.id)])])
+            canonical_json_sha256(
+                ["members", owner, sorted([str(left.record.id), str(right.record.id)])]
+            )
         )
         signatures.add(
-            _digest(
+            canonical_json_sha256(
                 [
                     "evidence",
                     owner,

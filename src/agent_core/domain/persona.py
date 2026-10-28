@@ -24,7 +24,6 @@ from agent_core.domain.memory import (
 
 PERSONA_MAX_ENTRIES = 30
 PERSONA_ENTRY_MAX_CHARS = 500
-PERSONA_MAX_OPEN_NOMINATIONS = 5
 # ADR-0226 part A: how the owner wants Veetbot to talk, and up to three tones.
 PERSONA_VOICE_MAX_CHARS = 1000
 PERSONA_MAX_TRAITS = 3

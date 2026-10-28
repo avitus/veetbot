@@ -32,3 +32,9 @@ def contains_injection_pattern(value: str) -> bool:
     """True when a statement carries an instruction-injection pattern."""
 
     return INJECTION_PATTERN.search(value) is not None
+
+
+def is_safe_text(value: str) -> bool:
+    """True when a statement carries neither an injection pattern nor a secret."""
+
+    return not contains_injection_pattern(value) and not contains_secret_material(value)

@@ -14,7 +14,7 @@ from agent_core.domain.errors import (
     NotFoundError,
     ToolValidationError,
 )
-from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
+from agent_core.domain.hazards import is_safe_text
 from agent_core.domain.memory import (
     SENSITIVITY_ORDER,
     MemoryAuthority,
@@ -32,10 +32,6 @@ from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 
-def _safe(text: str) -> bool:
-    return not contains_injection_pattern(text) and not contains_secret_material(text)
-
-
 async def _link(
     uow: RepositoryUnitOfWork, clock: Clock, owner: Principal, belief: MemoryRecord
 ) -> bool:
@@ -47,8 +43,8 @@ async def _link(
         or (belief.valid_to is not None and belief.valid_to <= now)
         or (belief.expires_at is not None and belief.expires_at <= now)
         or not 1 <= len(belief.source_event_ids) <= 32
-        or not _safe(belief.statement)
-        or not _safe(belief.subject)
+        or not is_safe_text(belief.statement)
+        or not is_safe_text(belief.subject)
     ):
         return False
     link_id = uuid5(belief.id, "people-legacy@1:subject")
@@ -83,7 +79,7 @@ async def _link(
         if (
             source is None
             or source.kind != FormationSourceKind.OWNER_ASSERTION
-            or not _safe(source.text)
+            or not is_safe_text(source.text)
             or not identifier_occurs(source.text, belief.subject, "name")
         ):
             return False

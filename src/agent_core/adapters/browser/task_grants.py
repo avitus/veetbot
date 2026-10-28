@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import UUID
 
-from agent_core.domain.agents import Principal
+from agent_core.domain.agents import Principal, owned_by
 from agent_core.domain.browser_task_grants import (
     TASK_GRANT_MAX_TYPED_CHARACTERS,
     BrowserTaskGrant,
@@ -63,7 +63,7 @@ class InMemoryBrowserTaskGrantRepository:
 
     async def get(self, grant_id: UUID, principal: Principal) -> BrowserTaskGrant:
         grant = self._grants.get(grant_id)
-        if grant is None or not _owned(grant, principal):
+        if grant is None or not owned_by(grant, principal):
             raise NotFoundError("browser task grant not found")
         return grant.model_copy(deep=True)
 
@@ -74,7 +74,7 @@ class InMemoryBrowserTaskGrantRepository:
             (
                 grant.model_copy(deep=True)
                 for grant in self._grants.values()
-                if _owned(grant, principal)
+                if owned_by(grant, principal)
                 and grant.session_id == session_id
                 and _active(grant, now)
             ),
@@ -97,7 +97,7 @@ class InMemoryBrowserTaskGrantRepository:
         grants = [
             grant.model_copy(deep=True)
             for grant in self._grants.values()
-            if _owned(grant, principal)
+            if owned_by(grant, principal)
             and (session_id is None or grant.session_id == session_id)
             and (not active_only or _active(grant, now))
         ]
@@ -123,7 +123,7 @@ class InMemoryBrowserTaskGrantRepository:
             grant = self._grants.get(grant_id)
             if (
                 grant is None
-                or not _owned(grant, principal)
+                or not owned_by(grant, principal)
                 or grant.session_id != session_id
                 or grant.ended_at is not None
                 or grant.revoked_at is not None
@@ -157,7 +157,7 @@ class InMemoryBrowserTaskGrantRepository:
     ) -> tuple[BrowserTaskGrant, bool]:
         async with self._lock:
             grant = self._grants.get(grant_id)
-            if grant is None or not _owned(grant, principal):
+            if grant is None or not owned_by(grant, principal):
                 raise NotFoundError("browser task grant not found")
             if grant.ended_at is not None:
                 return grant.model_copy(deep=True), False
@@ -196,17 +196,13 @@ class InMemoryBrowserTaskGrantRepository:
             ended = [
                 _ended(grant, reason, now)
                 for grant in self._grants.values()
-                if _owned(grant, principal)
+                if owned_by(grant, principal)
                 and grant.profile_id == profile_id
                 and grant.ended_at is None
             ]
             for grant in ended:
                 self._grants[grant.id] = grant
             return [grant.model_copy(deep=True) for grant in ended]
-
-
-def _owned(grant: BrowserTaskGrant, principal: Principal) -> bool:
-    return grant.tenant_id == principal.tenant_id and grant.principal_id == principal.principal_id
 
 
 def _active(grant: BrowserTaskGrant, now: datetime) -> bool:

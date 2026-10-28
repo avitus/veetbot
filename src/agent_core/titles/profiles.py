@@ -10,20 +10,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import Field, ValidationError
 
 from agent_core.config import ConfigurationError
+from agent_core.domain.profiles import FrozenProfileModel
 
 TITLE_PROFILE_DOCUMENT = "titles/profiles.yaml"
 
 
-class _ProfileModel(BaseModel):
-    """Reject unknown knobs and refuse mutation after validation."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class TitleGenerationProfile(_ProfileModel):
+class TitleGenerationProfile(FrozenProfileModel):
     """Whether the title pass runs, on which model, and how much it reads."""
 
     enabled: bool = True
@@ -33,7 +28,7 @@ class TitleGenerationProfile(_ProfileModel):
     message_chars: int = Field(default=400, ge=40, le=2_000)
 
 
-class TitleProfiles(_ProfileModel):
+class TitleProfiles(FrozenProfileModel):
     """The whole `titles/profiles.yaml` document."""
 
     schema_version: Literal[1] = 1

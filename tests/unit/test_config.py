@@ -61,8 +61,6 @@ def test_loads_frozen_settings() -> None:
     assert settings.trajectory_export_enabled is False
     assert settings.artifact_root == Path(".agent/artifacts")
     assert settings.release_id is None
-    assert settings.web_search_provider is WebProviderKind.DISABLED
-    assert settings.web_fetch_provider is WebProviderKind.DISABLED
     assert settings.browser_provider.value == "disabled"
     assert settings.browser_allowed_origins == ()
 
@@ -687,8 +685,12 @@ def test_web_provider_selection_is_per_capability() -> None:
             "WEB_FETCH_PROVIDER": "firecrawl",
         }
     )
-    assert settings.web_search_provider is WebProviderKind.TAVILY
-    assert settings.web_fetch_provider is WebProviderKind.FIRECRAWL
+    assert [(entry.provider, entry.weight) for entry in settings.web_search_providers] == [
+        (WebProviderKind.TAVILY, 100)
+    ]
+    assert [(entry.provider, entry.weight) for entry in settings.web_fetch_providers] == [
+        (WebProviderKind.FIRECRAWL, 100)
+    ]
 
 
 def test_weighted_web_provider_selection_is_per_capability() -> None:

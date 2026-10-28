@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID, uuid5
 
 from pydantic import BaseModel, Field
@@ -83,3 +83,19 @@ class Principal(BaseModel):
     principal_id: str
     roles: set[str] = Field(default_factory=set)
     scopes: set[str] = Field(default_factory=set)
+
+
+class OwnedRecord(Protocol):
+    """Any record stamped with the tenant and principal that own it."""
+
+    @property
+    def tenant_id(self) -> str: ...
+
+    @property
+    def principal_id(self) -> str: ...
+
+
+def owned_by(record: OwnedRecord, principal: Principal) -> bool:
+    """Whether a record belongs to the principal acting on it."""
+
+    return record.tenant_id == principal.tenant_id and record.principal_id == principal.principal_id

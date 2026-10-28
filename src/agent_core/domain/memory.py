@@ -112,7 +112,6 @@ class RejectionKind(StrEnum):
 
 
 ReviewReason = Literal["conflict", "correction", "source_learned", "sensitive_automatic"]
-DOUBT_REASONS: frozenset[str] = frozenset({"conflict", "correction"})
 ATTENTION_REASONS: frozenset[str] = frozenset({"source_learned", "sensitive_automatic"})
 
 

@@ -22,7 +22,8 @@ from agent_core.domain.correspondence import RetainedEmailMessage
 from agent_core.domain.email import EmailThread
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.events import NewEvent
-from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
+from agent_core.domain.hashing import canonical_json_sha256
+from agent_core.domain.hazards import is_safe_text
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     SENSITIVITY_ORDER,
@@ -86,20 +87,12 @@ from agent_core.ports.people_runtime import PeopleOwnerCorrections
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
 def _key(principal: Principal, key: str) -> str:
     if not key or len(key) > 200:
         raise ToolValidationError("People idempotency key is invalid")
-    return "people-write:" + _digest([principal.tenant_id, principal.principal_id, key])
-
-
-def _safe(text: str) -> bool:
-    return not contains_injection_pattern(text) and not contains_secret_material(text)
+    return "people-write:" + canonical_json_sha256(
+        [principal.tenant_id, principal.principal_id, key]
+    )
 
 
 # ADR-0227 part C: an owed reply joins Needs you when it is overdue or due
@@ -387,10 +380,12 @@ class PublicPeopleService:
         if SENSITIVITY_ORDER[request.sensitivity] > SENSITIVITY_ORDER[ceiling]:
             raise NotFoundError("person not found")
         name = request.display_name.strip()
-        if not name or not _safe(name):
+        if not name or not is_safe_text(name):
             raise ToolValidationError("People label contains refused content")
         operation_key = _key(principal, key)
-        request_hash = _digest({"operation": "create", **request.model_dump(mode="json")})
+        request_hash = canonical_json_sha256(
+            {"operation": "create", **request.model_dump(mode="json")}
+        )
         async with self._uow_factory() as uow:
             await uow.sessions.get(request.session_id, principal)
             async with uow.people.lock(principal):
@@ -454,11 +449,11 @@ class PublicPeopleService:
         request = UpdatePerson.model_validate(request.model_dump())
         ceiling = self._ceiling(ceiling)
         operation_key = _key(principal, key)
-        request_hash = _digest(
+        request_hash = canonical_json_sha256(
             {"operation": "update", "person_id": str(person_id), **request.model_dump(mode="json")}
         )
         if request.display_name is not None and (
-            not request.display_name.strip() or not _safe(request.display_name)
+            not request.display_name.strip() or not is_safe_text(request.display_name)
         ):
             raise ToolValidationError("People label contains refused content")
         async with self._uow_factory() as uow:
@@ -483,7 +478,7 @@ class PublicPeopleService:
                     )
                 alias = None
                 if request.alias is not None:
-                    if not _safe(request.alias.model_dump_json()):
+                    if not is_safe_text(request.alias.model_dump_json()):
                         raise ToolValidationError("People alias contains refused content")
                     if isinstance(request.alias, AddPersonAlias):
                         try:
@@ -656,7 +651,7 @@ class PublicPeopleService:
         ceiling = self._ceiling(ceiling)
         async with self._uow_factory() as uow, uow.people.lock(principal):
             person = await uow.people.get(principal, person_id, ceiling=ceiling)
-            if not isinstance(person, Person) or not _safe(person.display_name):
+            if not isinstance(person, Person) or not is_safe_text(person.display_name):
                 raise NotFoundError("person not found")
             profile = PersonProfile(person=person)
             # Identifiers are read once per distinct assignment below; correspondence
@@ -676,7 +671,7 @@ class PublicPeopleService:
             profile.aliases.extend(
                 row
                 for row in aliases[:100]
-                if isinstance(row, PersonIdentifier) and _safe(row.model_dump_json())
+                if isinstance(row, PersonIdentifier) and is_safe_text(row.model_dump_json())
             )
             aliases_truncated = len(aliases) > 100
             query = PeopleQuery(
@@ -691,7 +686,7 @@ class PublicPeopleService:
             for _ in range(10):
                 rows = await uow.people.query(query)
                 for row in rows[:100]:
-                    if not _safe(row.model_dump_json()):
+                    if not is_safe_text(row.model_dump_json()):
                         continue
                     belief = None
                     if isinstance(row, (PersonMemoryLink, RelationshipAssertion, PeopleCommitment)):
@@ -750,7 +745,7 @@ class PublicPeopleService:
             )
             for related_id in sorted(related_ids)[:40]:
                 related = await uow.people.get(principal, related_id, ceiling=ceiling)
-                if isinstance(related, (Person, OrganizationReference)) and _safe(
+                if isinstance(related, (Person, OrganizationReference)) and is_safe_text(
                     related.display_name
                 ):
                     profile.related_labels[related.id] = related.display_name
@@ -786,7 +781,7 @@ class PublicPeopleService:
             or belief.valid_from > now
             or (belief.valid_to is not None and belief.valid_to <= now)
             or (belief.expires_at is not None and belief.expires_at <= now)
-            or not _safe(belief.statement)
+            or not is_safe_text(belief.statement)
         ):
             return None
         return belief
@@ -817,7 +812,7 @@ class PublicPeopleService:
                     not isinstance(row, PeopleCommitment)
                     or row.unresolved
                     or not _owed_soon(row, horizon)
-                    or not _safe(row.model_dump_json())
+                    or not is_safe_text(row.model_dump_json())
                     or await self._live_belief(uow, principal, row.belief_id, ceiling) is None
                 ):
                     continue
@@ -942,7 +937,7 @@ class PublicPeopleService:
                 and row.person_ids[-1] == person.id
             ):
                 merged = await uow.people.get(principal, row.person_ids[0], ceiling=ceiling)
-                if isinstance(merged, Person) and _safe(merged.display_name):
+                if isinstance(merged, Person) and is_safe_text(merged.display_name):
                     automatic.append(
                         AutomaticMergeDetail(
                             operation_id=row.id,
@@ -968,8 +963,8 @@ class PublicPeopleService:
         if not (
             isinstance(source, Person)
             and isinstance(target, Person)
-            and _safe(source.display_name)
-            and _safe(target.display_name)
+            and is_safe_text(source.display_name)
+            and is_safe_text(target.display_name)
         ):
             return None
         return MergeSuggestionDetail(
@@ -1154,7 +1149,7 @@ class PublicPeopleService:
             sensitivity_ceiling=ceiling,
             limit=min(max(limit, 1), 100),
         )
-        binding = _digest(
+        binding = canonical_json_sha256(
             {
                 "query": query.model_dump(mode="json", exclude={"as_of"}),
                 "requested_as_of": as_of.isoformat() if as_of else None,
@@ -1191,7 +1186,9 @@ class PublicPeopleService:
                 await uow.memories.head_position(principal),
             ] != before:
                 raise ConflictError("People changed; restart the list")
-        items = [r for r in rows[: query.limit] if isinstance(r, Person) and _safe(r.display_name)]
+        items = [
+            r for r in rows[: query.limit] if isinstance(r, Person) and is_safe_text(r.display_name)
+        ]
         next_cursor = None
         if len(rows) > query.limit:
             next_cursor = base64.urlsafe_b64encode(
@@ -1268,7 +1265,7 @@ class PublicPeopleService:
             if (
                 isinstance(person, Person)
                 and person.state in {"active", "provisional"}
-                and _safe(person.display_name)
+                and is_safe_text(person.display_name)
             ):
                 people.append(person)
         return people
@@ -1375,7 +1372,7 @@ class PublicPeopleService:
             unknown_time=request.unknown_time,
             sort="history" if request.section == "history" else "id",
         )
-        binding = _digest(
+        binding = canonical_json_sha256(
             [query.model_dump(mode="json"), request.model_dump(mode="json", exclude={"cursor"})]
         )
         watermark = None
@@ -1406,7 +1403,7 @@ class PublicPeopleService:
             person = await uow.people.get(
                 principal, person_id, ceiling=ceiling, known_at=request.known_at
             )
-            if not isinstance(person, Person) or not _safe(person.display_name):
+            if not isinstance(person, Person) or not is_safe_text(person.display_name):
                 raise NotFoundError("person not found")
             before = [
                 await uow.people.watermark(principal),
@@ -1417,7 +1414,7 @@ class PublicPeopleService:
             for _ in range(10):
                 rows = await uow.people.query(query)
                 for row in rows[:100]:
-                    if not _safe(row.model_dump_json()):
+                    if not is_safe_text(row.model_dump_json()):
                         continue
                     view: (
                         RelationshipAssertion
@@ -1450,7 +1447,7 @@ class PublicPeopleService:
                         instant = request.as_of or self._clock.now()
                         if (
                             SENSITIVITY_ORDER[belief.sensitivity] > SENSITIVITY_ORDER[ceiling]
-                            or not _safe(belief.statement)
+                            or not is_safe_text(belief.statement)
                             or (
                                 request.known_at is not None
                                 and belief.created_at > request.known_at
@@ -1549,9 +1546,9 @@ class PublicPeopleService:
                 )
             except NotFoundError:
                 return None
-            if SENSITIVITY_ORDER[belief.sensitivity] > SENSITIVITY_ORDER[ceiling] or not _safe(
-                belief.statement
-            ):
+            if SENSITIVITY_ORDER[belief.sensitivity] > SENSITIVITY_ORDER[
+                ceiling
+            ] or not is_safe_text(belief.statement):
                 return None
             label = belief.statement
             belief_id = belief.id
@@ -1675,7 +1672,7 @@ class PublicPeopleService:
             source = await uow.people.get(principal, reference, ceiling=ceiling)
             if (
                 not isinstance(person, Person)
-                or not _safe(person.display_name)
+                or not is_safe_text(person.display_name)
                 or not isinstance(source, PeopleSource)
                 or source.source_kind != "email"
                 or not source.account_id
@@ -1768,7 +1765,7 @@ class PublicPeopleService:
             if (
                 not request.statement
                 or not request.statement.strip()
-                or not _safe(request.statement)
+                or not is_safe_text(request.statement)
             ):
                 raise ToolValidationError("correction requires a safe statement")
         elif request.statement is not None:
@@ -1777,7 +1774,7 @@ class PublicPeopleService:
             raise ToolValidationError("structured replacement requires a correction or change")
         ceiling = self._ceiling(ceiling)
         operation_key = _key(principal, key) + ":correction"
-        digest = _digest([str(person_id), request.model_dump(mode="json")])
+        digest = canonical_json_sha256([str(person_id), request.model_dump(mode="json")])
         async with (
             self._uow_factory() as uow,
             uow.email.lock(principal),
@@ -1833,7 +1830,7 @@ class PublicPeopleService:
                     exclude={"id", "expected_revision", "kind"}
                 )
                 projection = type(selected).model_validate(values)
-                if person_id not in referenced_people(projection) or not _safe(
+                if person_id not in referenced_people(projection) or not is_safe_text(
                     projection.model_dump_json()
                 ):
                     raise ToolValidationError("replacement must describe this person safely")

@@ -62,8 +62,8 @@ from agent_core.evals.memory_benchmark_driver import (
     run_deterministic_benchmark,
     scenario_composition,
 )
+from agent_core.evals.memory_distillation import _evaluation_settings
 from agent_core.evals.memory_formation import (
-    _evaluation_settings,
     _normalized,
     _write_evidence,
 )

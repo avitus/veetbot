@@ -24,7 +24,6 @@ from sqlalchemy import (
     MetaData,
     Numeric,
     PrimaryKeyConstraint,
-    Sequence,
     SmallInteger,
     String,
     Text,
@@ -36,8 +35,6 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from agent_core.adapters.persistence.people_reference_index import INVOCATION_REFERENCE_TEXT
-
-MEMORY_POSITION_SEQUENCE = Sequence("memory_store_position_seq")
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",

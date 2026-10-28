@@ -110,15 +110,3 @@ class BrowserAuthenticationControlPlane(Protocol):
         ceremony_id: UUID,
         principal: Principal,
     ) -> BrowserAuthenticationView: ...
-
-
-class HostedBrowserControlPlane(
-    BrowserSessionControlPlane,
-    BrowserAuthenticationControlPlane,
-    Protocol,
-):
-    async def refresh_authentication(
-        self,
-        ceremony_id: UUID,
-        principal: Principal,
-    ) -> BrowserAuthenticationView: ...

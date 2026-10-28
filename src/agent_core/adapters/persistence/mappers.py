@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from pydantic import SecretStr
 
@@ -21,7 +21,6 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     EmailRecordRow,
     EventRow,
     IdempotencyKeyRow,
-    ModelCallRow,
     NotificationDeliveryRow,
     NotificationOutboxRow,
     RunRow,
@@ -53,11 +52,8 @@ from agent_core.domain.email import EmailRecord
 from agent_core.domain.erasure import erased_email_payload
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import (
-    CostSource,
-    ModelUsage,
     ProviderMetadata,
     ProviderPin,
-    StopReason,
     ToolResultItem,
 )
 from agent_core.domain.notifications import (
@@ -657,54 +653,6 @@ def idempotency_to_domain(row: IdempotencyKeyRow) -> IdempotencyRecord:
 
 def idempotency_values(record: IdempotencyRecord) -> dict[str, Any]:
     return record.model_dump()
-
-
-def model_call_to_domain(row: ModelCallRow) -> ModelCallRecord:
-    return ModelCallRecord(
-        attempt_id=row.attempt_id,
-        run_id=row.run_id,
-        session_id=row.session_id,
-        tenant_id=row.tenant_id,
-        step_number=row.step_number,
-        attempt_number=row.attempt_number,
-        provider=row.provider,
-        model=row.model,
-        model_policy=row.model_policy,
-        registry_version=row.registry_version,
-        prefix_sha256=row.prefix_sha256,
-        usage=ModelUsage(
-            input_tokens=row.input_tokens,
-            cached_input_tokens=row.cached_input_tokens,
-            cache_write_input_tokens=row.cache_write_tokens,
-            output_tokens=row.output_tokens,
-            reasoning_tokens=row.reasoning_tokens,
-            cost=row.cost,
-            cost_source=CostSource(row.cost_source),
-            provider=row.provider,
-            model=row.model,
-        ),
-        cost=row.cost,
-        cost_source=CostSource(row.cost_source),
-        price_id=row.price_id,
-        stop_reason=None if row.stop_reason is None else StopReason(row.stop_reason),
-        error_kind=cast(
-            Literal["transient", "permanent", "protocol"] | None,
-            row.error_kind,
-        ),
-        metadata=ProviderMetadata(
-            provider_api=cast(
-                Literal["responses", "messages", "chat_completions"],
-                row.provider_api,
-            ),
-            response_id=row.response_id,
-            request_id=row.request_id,
-            resolved_model=row.resolved_model,
-            cache_breakpoints_sent=row.cache_breakpoints_sent,
-            cache_breakpoints_dropped=row.cache_breakpoints_dropped,
-        ),
-        started_at=row.started_at,
-        finished_at=row.finished_at,
-    )
 
 
 def flatten_provider_metadata(

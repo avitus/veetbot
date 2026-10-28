@@ -45,7 +45,6 @@ from agent_core.memory.distillation import DISTILLATION_CALLS_PER_SEGMENT, assig
 from agent_core.memory.equivalence import (
     DISTILLATION_SCORER_VERSION,
     is_generic_subject,
-    normalized_statement,
     statement_matches_claim,
     statement_supports_clause,
     subject_matches,
@@ -65,10 +64,6 @@ PolicyVersion = Literal["formation@7", "formation@8", "formation@9", "formation@
 _POLICIES: tuple[PolicyVersion, ...] = ("formation@7", "formation@8", "formation@9")
 
 _BUILD_REF = re.compile(r"^[0-9a-f]{40}$")
-
-
-def _normalized(value: str) -> str:
-    return normalized_statement(value)
 
 
 class DistillationEvent(BaseModel):
@@ -599,7 +594,7 @@ def _policy_metrics(
 
 def _evaluation_settings(settings: Settings, artifact_root: Path) -> Settings:
     if settings.deployment_mode is DeploymentMode.PRODUCTION:
-        raise ValueError("memory distillation evaluation is unavailable in production")
+        raise ValueError("memory evaluation is unavailable in production")
     return replace(
         settings,
         deployment_mode=DeploymentMode.DEVELOPMENT,

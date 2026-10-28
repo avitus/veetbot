@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from agent_core.domain.agents import Principal
+from agent_core.domain.agents import Principal, owned_by
 from agent_core.domain.browser import BrowserGrant
 from agent_core.domain.errors import ConflictError, NotFoundError
 
@@ -22,7 +22,7 @@ class InMemoryBrowserGrantRepository:
 
     async def get(self, grant_id: UUID, principal: Principal) -> BrowserGrant:
         grant = self._grants.get(grant_id)
-        if grant is None or not _owned(grant, principal):
+        if grant is None or not owned_by(grant, principal):
             raise NotFoundError("browser grant not found")
         return grant.model_copy(deep=True)
 
@@ -40,7 +40,7 @@ class InMemoryBrowserGrantRepository:
         grants = [
             grant.model_copy(deep=True)
             for grant in self._grants.values()
-            if _owned(grant, principal) and (profile_id is None or grant.profile_id == profile_id)
+            if owned_by(grant, principal) and (profile_id is None or grant.profile_id == profile_id)
         ]
         ordered = sorted(grants, key=lambda grant: (grant.created_at, str(grant.id)))
         if after_created_at is not None and after_id is not None:
@@ -69,10 +69,6 @@ class InMemoryBrowserGrantRepository:
 
     async def delete(self, grant_id: UUID, principal: Principal) -> None:
         grant = self._grants.get(grant_id)
-        if grant is None or not _owned(grant, principal):
+        if grant is None or not owned_by(grant, principal):
             return
         del self._grants[grant_id]
-
-
-def _owned(grant: BrowserGrant, principal: Principal) -> bool:
-    return grant.tenant_id == principal.tenant_id and grant.principal_id == principal.principal_id

@@ -74,7 +74,7 @@ from agent_core.evals.general_recall_stages import (
     recovered_source_witnesses,
     rendered_noise_items,
 )
-from agent_core.evals.memory_formation import _evaluation_settings
+from agent_core.evals.memory_distillation import _evaluation_settings
 from agent_core.evals.people_execution import BorrowedProvider, BudgetedProvider
 from agent_core.memory.general_recall_evidence import source_labels
 from agent_core.memory.profiles import MemoryProfiles

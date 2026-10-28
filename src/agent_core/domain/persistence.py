@@ -16,7 +16,7 @@ from agent_core.domain.messages import (
     ProviderMetadata,
     StopReason,
 )
-from agent_core.domain.runs import Run, RunStatus
+from agent_core.domain.runs import Run
 
 type ModelErrorKind = Literal["transient", "permanent", "protocol"]
 
@@ -101,10 +101,3 @@ class UsageRollup(BaseModel):
     output_tokens: int = 0
     reasoning_tokens: int | None = None
     cost: Decimal = Decimal("0")
-
-
-class ReclaimedRun(BaseModel):
-    run_id: UUID
-    session_id: UUID
-    previous_epoch: int
-    status: RunStatus

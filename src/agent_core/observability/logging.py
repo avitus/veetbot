@@ -195,31 +195,3 @@ def configure_logging(
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
-
-
-def bind_request_context(request_id: str) -> None:
-    """Bind the request identifier for every log in the current context."""
-
-    structlog.contextvars.bind_contextvars(request_id=request_id)
-
-
-def bind_run_context(run_id: str, session_id: str, tenant_id: str) -> None:
-    """Bind the run-scoped identifiers for every log in the current context."""
-
-    structlog.contextvars.bind_contextvars(
-        run_id=run_id,
-        session_id=session_id,
-        tenant_id=tenant_id,
-    )
-
-
-def bind_tool_context(tool_invocation_id: str) -> None:
-    """Bind the current tool invocation identifier."""
-
-    structlog.contextvars.bind_contextvars(tool_invocation_id=tool_invocation_id)
-
-
-def clear_log_context() -> None:
-    """Clear bound context when a request or run scope ends."""
-
-    structlog.contextvars.clear_contextvars()

@@ -24,11 +24,9 @@ from agent_core.domain.browser_classification import path_is_within_prefix, segm
 # constraints enforce the same numbers.
 TASK_GRANT_DURATION = timedelta(minutes=30)
 TASK_GRANT_MAX_ACTIONS: Final = 200
-TASK_GRANT_MAX_TEXT_CHARACTERS: Final = 256
 TASK_GRANT_MAX_TYPED_CHARACTERS: Final = 4096
 TASK_GRANT_ACTION_KINDS: tuple[BrowserActionKind, ...] = tuple(BrowserActionKind)
 MAXIMUM_TASK_GRANT_SCOPES: Final = 16
-PATH_SEGMENT = TASK_GRANT_PATH_SEGMENT
 
 # Why an active task grant did not cover an approval's action: the closed list
 # of the server-client contract. A client maps an unknown value to a generic

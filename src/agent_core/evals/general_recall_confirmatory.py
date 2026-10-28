@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 from dataclasses import dataclass, field, replace
@@ -15,6 +14,7 @@ from pydantic import Field
 
 from agent_core.config import PACKAGE_ROOT, DeploymentMode, Settings
 from agent_core.domain.general_recall_release import RecallPreregistration, RecallReleaseIdentity
+from agent_core.domain.hashing import sha256_hex
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig
 from agent_core.domain.messages import ResolvedModel
 from agent_core.evals.general_recall_confirmation import (
@@ -184,7 +184,7 @@ async def prepare_confirmation(
             raise ValueError("Measured formation differs from the intended deployment")
     preregistration = RecallPreregistration(
         registered_at=system_clock().now(),
-        baseline_report_sha256=_digest(baseline),
+        baseline_report_sha256=sha256_hex(baseline),
         context_tokens=options.context_tokens,
         p95_latency_ms=options.p95_latency_ms,
         maximum_case_usd=options.maximum_case_usd,
@@ -197,8 +197,8 @@ async def prepare_confirmation(
         scorer_sha256=scorer_digest(root),
         **deployment["dependencies"],
         index_manifest_sha256=configuration_digest(schema),
-        independence_review_sha256=_digest(review_bytes),
-        preregistration_sha256=_digest(preregistration.model_dump_json().encode()),
+        independence_review_sha256=sha256_hex(review_bytes),
+        preregistration_sha256=sha256_hex(preregistration.model_dump_json().encode()),
         frozen_controls_sha256=configuration_digest(controls),
         execution_manifest_sha256=manifest.digest,
     )
@@ -208,7 +208,7 @@ async def prepare_confirmation(
     scenarios = scenario_manifest(cases)
     if (
         corpus_digest(cases) != review.corpus_sha256
-        or _digest(b"".join(s.model_dump_json().encode() + b"\n" for s in scenarios))
+        or sha256_hex(b"".join(s.model_dump_json().encode() + b"\n" for s in scenarios))
         != review.scenario_manifest_sha256
         or len(set(review.reviewed_scenarios)) != len(review.reviewed_scenarios)
         or set(review.reviewed_scenarios) != {case.id for case in cases}
@@ -230,15 +230,11 @@ async def prepare_confirmation(
             "frozen_controls": controls,
             "evaluated_inputs": evaluated.model_dump(mode="json"),
             "review": json.loads(review_bytes),
-            "baseline_sha256": _digest(baseline),
+            "baseline_sha256": sha256_hex(baseline),
         },
         {"independence-review.json": review_bytes, "baseline-report.json": baseline},
         worker_settings,
     )
-
-
-def _digest(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
 
 
 def capture_frozen_controls(root: Path) -> dict[str, str]:
@@ -267,7 +263,7 @@ def capture_frozen_controls(root: Path) -> dict[str, str]:
         for path in (root / "evals/observations/memory-reconsolidation").rglob("*")
         if path.is_file()
     )
-    return {str(path.relative_to(root)): _digest(_read_bounded(path)) for path in sorted(paths)}
+    return {str(path.relative_to(root)): sha256_hex(_read_bounded(path)) for path in sorted(paths)}
 
 
 async def verify_external_inputs(
@@ -362,7 +358,7 @@ async def run_confirmation(
         "version": "general-recall-confirmation@1",
         "state": "registered",
         "activation_evidence": False,
-        "identity_sha256": _digest(identity.model_dump_json().encode()),
+        "identity_sha256": sha256_hex(identity.model_dump_json().encode()),
         "maximum_cost_usd": str(options.maximum_cost_usd),
         "completed": 0,
         "expected_observations": len(prepared.cases) * 12,
@@ -402,7 +398,7 @@ async def run_confirmation(
                 raise
 
         async def measure(case: RecallFixture, index: int) -> None:
-            key = _digest(case.id.encode())
+            key = sha256_hex(case.id.encode())
             with (output / "observations" / f"{key}.jsonl").open("x") as stream:
                 for variant in confirmation.manifest.variants:
                     if budget.failed:
@@ -466,7 +462,7 @@ async def run_confirmation(
                 {
                     "role": role,
                     "path": str(path.relative_to(output)),
-                    "sha256": _digest(path.read_bytes()),
+                    "sha256": sha256_hex(path.read_bytes()),
                 }
             )
             for role, paths in (

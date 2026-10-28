@@ -277,10 +277,6 @@ def _is_count(term: str) -> bool:
     return term.isdecimal() and len(term) <= 3 and int(term) < 100
 
 
-def negation_terms(value: str) -> frozenset[str]:
-    return frozenset(term for term in _tokens(value) if term in _NEGATIONS)
-
-
 def negated(value: str) -> bool:
     """Whether a statement denies its claim.
 

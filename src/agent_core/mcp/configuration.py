@@ -35,8 +35,6 @@ _EMAIL_CLASSIFICATIONS = {
 }
 _EMAIL_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _EMAIL_SERVER_ID = re.compile(r"^gmail_(?:[a-z][a-z0-9_]{0,31}_)?(?:read|write|send)$")
-EMAIL_SERVER_IDS = frozenset(f"gmail_{mode}" for mode in _EMAIL_CLASSIFICATIONS)
-MUTATING_EMAIL_SERVER_IDS = frozenset({"gmail_write", "gmail_send"})
 
 
 def is_email_server_id(server_id: str | None) -> bool:

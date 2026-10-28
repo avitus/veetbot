@@ -1,10 +1,14 @@
 """Content-free, version-bound evidence required for People policy activation."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+# The linker identity an evidence artifact binds to; the constant is typed by the
+# literal so the two cannot drift.
+PeopleLinkerVersion = Literal["people-linker@1"]
+PEOPLE_LINKER_VERSION: Final[PeopleLinkerVersion] = "people-linker@1"
 
 
 class PeopleQualityMetrics(BaseModel):
@@ -45,7 +49,7 @@ class PeopleFormationEvidence(BaseModel):
     schema_version: Literal[1]
     formation_policy_version: Literal["formation@11"]
     extractor_version: Literal["people-assisted-v1"]
-    linker_version: Literal["people-linker@1"]
+    linker_version: PeopleLinkerVersion
     resolver_version: Literal["people-resolver@1"]
     scorer_version: Literal["people-scorer@1"]
     schema_sha256: Digest
