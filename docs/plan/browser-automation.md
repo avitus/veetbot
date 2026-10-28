@@ -1261,10 +1261,13 @@ for neither, and a page with any animation element inspects nothing. The
 page-side read then treats an inspected reference like a fragment reference
 whose target it can see. Any other external reference stays opaque, and so does
 every one when the DevTools read fails. Immediately before a grant-constrained
-click whose live read relied on inspected copies, the selected element's own
-external references are read again and must still lie within those the read
-relied on, and the copies are read again and must still be inert; otherwise the
-act is refused so it asks.
+click whose live read relied on inspected copies, the runtime runs two checks.
+First, it re-reads the selected element's own external references. Each must
+still lie within the references the live read relied on. The walk stops at 2,048
+nodes, and a walk that passes this bound fails the check. Second, it re-inspects
+the page's copies. Each relied-on copy must still be inert. If either check
+fails, the runtime refuses the act with `tool.browser.grant_not_applicable` and
+forgets the observation.
 
 `browser.task_grant.created`, `tool.call.authorized` (with the grant id, use
 ordinal, and the approval view of the action), and exactly one
