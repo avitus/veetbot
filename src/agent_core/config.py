@@ -224,14 +224,6 @@ class Settings:
     browser_grant_id: UUID | None = None
     browser_run_purpose: str | None = None
 
-    @property
-    def web_search_provider(self) -> WebProviderKind:
-        return _legacy_web_provider(self.web_search_providers)
-
-    @property
-    def web_fetch_provider(self) -> WebProviderKind:
-        return _legacy_web_provider(self.web_fetch_providers)
-
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT = PACKAGE_ROOT / "memory" / "release_evidence"
@@ -276,7 +268,7 @@ SHIPPED_CONFIGS = (
     "titles/profiles.yaml",
     "cockpit/profiles.yaml",
 )
-# The design corpus declares 199 operator-reviewable knobs. Metadata such as
+# The design corpus declares 224 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -358,6 +350,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "circuit_breaker.identical_call_threshold",
             "circuit_breaker.uncertain_threshold",
             "parallel.maximum_calls",
+            "capture.step_maximum_reads",
+            "capture.run_maximum_reads",
             "mcp.connect_timeout_seconds",
             "mcp.request_timeout_seconds",
             "mcp.idle_timeout_seconds",
@@ -530,6 +524,8 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
     {
         "runtime/limits.yaml:model.max_internal_attempts": 1,
         "tools/limits.yaml:output.inline_maximum_bytes": 1024,
+        "tools/limits.yaml:capture.step_maximum_reads": 1,
+        "tools/limits.yaml:capture.run_maximum_reads": 1,
         "tools/limits.yaml:mcp.warmup_connect_timeout_seconds": 1,
         "tools/limits.yaml:mcp.warmup_retry_seconds": 1,
         "tools/limits.yaml:mcp.warmup_attempts": 1,
@@ -655,16 +651,6 @@ def _parse_enum[T: StrEnum](enum_type: type[T], value: str, name: str) -> T:
     except ValueError as exc:
         choices = ", ".join(member.value for member in enum_type)
         raise ConfigurationError(f"{name} must be one of: {choices}") from exc
-
-
-def _legacy_web_provider(
-    allocations: tuple[WebProviderAllocation, ...],
-) -> WebProviderKind:
-    if not allocations:
-        return WebProviderKind.DISABLED
-    if len(allocations) == 1 and allocations[0].weight == 100:
-        return allocations[0].provider
-    raise ConfigurationError("weighted web-provider selection has no singular provider")
 
 
 def _parse_web_provider_allocations(

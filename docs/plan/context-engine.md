@@ -363,7 +363,7 @@ ceiling.
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
-| A | Deferred tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
+| A | Deferred tool index | 40 entries / 2,500 tokens | No | Only at an epoch boundary |
 | A | Owner tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
@@ -420,7 +420,9 @@ arguments return that tool's whole definition, its description and its input
 schema ([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)).
 A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
-forty entries and 2,000 tokens, and the prefix ceiling rose by exactly that cap.
+forty entries and 2,500 tokens, and the prefix ceiling rose by exactly that cap:
+2,000 under ADR-0123 and 500 more under
+[ADR-0262](../adr/0262-deferred-index-token-headroom.md).
 An entry lists required parameters in the order of the schema's `required`
 array and optional ones by name, never in the order of the schema's
 properties: the builder re-renders the prefix from the specifications on the
@@ -449,6 +451,13 @@ order, rendered after the shared index's entries in its discovered envelope;
 the rest are recorded in `skipped_tool_names`. Each part keeps its own cap, so
 adding a server moves no existing definition or index entry. Without
 `tool.call` the owner-added tools are recorded as skipped.
+
+[ADR-0261](../adr/0261-read-a-capture-in-sections.md) adds one *unindexed
+deferral*, `artifact.read_capture`. It is pinned with the deferred tools and
+resolved by `tool.call`, but the index renders no entry for it, and it counts
+against neither index cap. Its only useful advertisement is the capture marker
+that names it, so it adds no bytes to the prefix. It never takes a
+definition; a plan without `tool.call` records it as skipped.
 
 In a session bound to a website profile, `browser.navigate`,
 `browser.observe` and `browser.act` are required definitions (ADR-0130): they
@@ -496,8 +505,9 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 24,000 tokens — 22,000 before
-ADR-0255 added the 2,000 of the owner-added servers' index, 15,000 before
+The prefix classes sum to a hard ceiling of 24,500 tokens — 24,000 before
+ADR-0262 added 500 to the deferred tool index, 22,000 before ADR-0255 added
+the 2,000 of the owner-added servers' index, 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
 exactly its own cap, the same move the skill classes made, 17,000 before
 ADR-0105 added the 3,000 tokens it gave the tool class, and 20,000 before
@@ -561,7 +571,10 @@ modify the checkpoint or source event. Selection is independent of later tool
 results; a deployment or operator limit change can change these bytes once.
 The aggregate tool-result budget and its oldest-first yield still apply after
 this normalization, including to active results from a resumed older run.
-`legacy_tool_excerpts` records this normalization in the pressure event.
+`legacy_tool_excerpts` records this normalization in the pressure event. A
+section from `artifact.read_capture` (ADR-0261) is admitted whole at up to
+16 KiB in its own run. Carried into a later run, it gets this excerpt like any
+other carried result over the limit.
 
 **At assembly, the retained set is a suffix, never a subset.** History is selected
 as a contiguous tail of the ordered item list — one cut index, everything at or
@@ -670,7 +683,9 @@ the cheapest and most recoverable loss first:
    the Kindle run of 2026-10-23 paid a full uncached read of about 60,000 tokens
    on each of thirty-two consecutive steps that way. The block is a function of the
    budget alone, so `build()` stays pure, and the pointer still names the event or
-   artifact that holds the content.
+   artifact that holds the content. Under ADR-0261, the model can follow a
+   pointer that names a capture the chat can open, using
+   `artifact.read_capture`; the pointer's bytes did not change.
 
    Three rules keep a long loop from repeating its calls to recover what
    truncation took (ADR-0258). The newest answer that carries a deferred tool's
@@ -685,6 +700,10 @@ the cheapest and most recoverable loss first:
    content. While anything is truncated, the step context
    gains a platform note that older results are pointers no tool reads back
    and that a call should not be repeated only to recover one. When the plan
+   pins `artifact.read_capture` and defines `tool.call`, captures are the
+   exception (ADR-0261): the note names, newest last, the artifact of each
+   truncated result whose capture marker offered that reader, at most twelve
+   and only among the results the history cut keeps. When the plan
    defines `context.update_working_state`, the note also says to keep each
    needed finding as a fact citing its result's event, and lists the events of
    the newest twelve results the history cut keeps whole, each with the pinned

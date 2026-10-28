@@ -7,6 +7,8 @@
 - Amends: ADR-0123 decision 4, which deferred configured tools past the item
   cap but not past the token cap
 - Detailed design: `docs/plan/context-engine.md`
+- Amended by: ADR-0262 (2026-10-27), which raises the index's token cap to
+  2,500, so the skips recorded under Consequences no longer occur
 
 ## Context
 

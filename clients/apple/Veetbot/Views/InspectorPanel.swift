@@ -27,6 +27,11 @@ private struct InspectorColumn<Content: View, Panel: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if inspector.isOpen(mode) {
                 InspectorResizeHandle(inspector: inspector, mode: mode)
+                    // The grab area reaches into the panel, a later sibling SwiftUI
+                    // hit-tests first; on a 1x display the hairline's own centre
+                    // rounds into it. Above both neighbours it takes the drag from
+                    // either side, as the Cockpit and Email hairlines do.
+                    .zIndex(1)
                 panel()
                     .frame(width: inspector.width(mode))
                     .frame(maxHeight: .infinity)

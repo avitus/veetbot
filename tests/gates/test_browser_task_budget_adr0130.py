@@ -104,11 +104,13 @@ async def _bound_run(
 
 
 async def test_bound_production_chat_defines_every_browser_tool(tmp_path: Path) -> None:
+    """A bound chat defines every browser tool and runs under the browser-task limits."""
     run, plan, _events = await _bound_run(
         tmp_path, [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)]
     )
 
     assert run.status is RunStatus.COMPLETED, run.failure
+    assert run.limits == BROWSER_TASK_LIMITS
     assert plan is not None
     defined = set(plan.tool_names)
     assert BROWSER_TOOLS | {"tool.call"} <= defined
@@ -163,14 +165,6 @@ async def test_a_bound_plan_read_back_from_jsonb_keeps_its_browser_tools_and_pre
     )
     encoded = prefix_bytes(prefix, stored.tool_specs, stored.deferred_tool_specs)
     assert hashlib.sha256(encoded).hexdigest() == stored.prefix_sha256
-
-
-async def test_bound_production_chat_runs_under_the_browser_task_limits(tmp_path: Path) -> None:
-    run, _plan, _events = await _bound_run(
-        tmp_path, [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)]
-    )
-
-    assert run.limits == BROWSER_TASK_LIMITS
 
 
 async def test_bound_run_view_shows_the_cost_limit(tmp_path: Path) -> None:

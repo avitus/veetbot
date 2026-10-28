@@ -61,8 +61,6 @@ def test_loads_frozen_settings() -> None:
     assert settings.trajectory_export_enabled is False
     assert settings.artifact_root == Path(".agent/artifacts")
     assert settings.release_id is None
-    assert settings.web_search_provider is WebProviderKind.DISABLED
-    assert settings.web_fetch_provider is WebProviderKind.DISABLED
     assert settings.browser_provider.value == "disabled"
     assert settings.browser_allowed_origins == ()
 
@@ -687,8 +685,12 @@ def test_web_provider_selection_is_per_capability() -> None:
             "WEB_FETCH_PROVIDER": "firecrawl",
         }
     )
-    assert settings.web_search_provider is WebProviderKind.TAVILY
-    assert settings.web_fetch_provider is WebProviderKind.FIRECRAWL
+    assert [(entry.provider, entry.weight) for entry in settings.web_search_providers] == [
+        (WebProviderKind.TAVILY, 100)
+    ]
+    assert [(entry.provider, entry.weight) for entry in settings.web_fetch_providers] == [
+        (WebProviderKind.FIRECRAWL, 100)
+    ]
 
 
 def test_weighted_web_provider_selection_is_per_capability() -> None:
@@ -1217,13 +1219,18 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_222_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_224_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 222
+    assert len(qualified_paths) == 224
+    # ADR-0261 adds the capture reader's step and run read limits.
+    assert {
+        "tools/limits.yaml:capture.step_maximum_reads",
+        "tools/limits.yaml:capture.run_maximum_reads",
+    } <= qualified_paths
     # ADR-0247 adds the decay sweep's evidence-of-non-use bound; ADR-0249 the
     # two review-reason penalties.
     # Milestone 35 adds Cockpit's commit rate limits, the importer's poll interval, the

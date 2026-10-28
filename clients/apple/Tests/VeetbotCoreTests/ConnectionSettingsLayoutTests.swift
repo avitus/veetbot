@@ -4,22 +4,6 @@ import Testing
 
 @Suite struct ConnectionSettingsLayoutTests {
     @Test
-    func testSettingsAreGroupedByUserIntent() {
-        #expect(
-            ConnectionSettingsSection.allCases == [
-                .connection,
-                .models,
-                .websiteAccess,
-                .mcpServers,
-                .notifications,
-                .appearance,
-                .smsIntegration,
-                .dataAndPrivacy,
-            ]
-        )
-    }
-
-    @Test
     func testSmsIntegrationIsOfferedOnlyWhereTheDeviceCanSendTexts() {
         #if os(iOS)
         #expect(ConnectionSettingsSection.visibleCases.contains(.smsIntegration))

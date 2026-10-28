@@ -145,6 +145,22 @@ def test_every_lean_role_refuses_the_wrong_topology_or_foreign_credentials(
             {"auth_scopes": frozenset({"run.write", "surface.read"})},
             "requires run.write, surface.read, and surface.write",
         ),
+        (
+            "notify",
+            {
+                "push_provider": PushProviderKind.DISABLED,
+                "apns_key_file": None,
+                "apns_key_id": None,
+                "apns_team_id": None,
+                "apns_topic": None,
+            },
+            "requires PUSH_PROVIDER=apns",
+        ),
+        (
+            "notify",
+            {"apns_key_file": Path("relative/AuthKey.p8")},
+            "APNS_KEY_FILE must be an absolute",
+        ),
     ],
 )
 def test_each_lean_role_refuses_its_own_missing_enablement_or_authority(
@@ -153,22 +169,3 @@ def test_each_lean_role_refuses_its_own_missing_enablement_or_authority(
     settings, validate = ROLES[role]
     with pytest.raises(ConfigurationError, match=message):
         validate(replace(settings(tmp_path), **override))  # type: ignore[arg-type]
-
-
-def test_the_notify_role_requires_the_apns_provider(tmp_path: Path) -> None:
-    unconfigured = replace(
-        _notify(tmp_path),
-        push_provider=PushProviderKind.DISABLED,
-        apns_key_file=None,
-        apns_key_id=None,
-        apns_team_id=None,
-        apns_topic=None,
-    )
-    with pytest.raises(ConfigurationError, match="requires PUSH_PROVIDER=apns"):
-        _validate_notification_role(unconfigured)
-
-
-def test_the_notify_role_refuses_a_relative_apns_key_file(tmp_path: Path) -> None:
-    relative = replace(_notify(tmp_path), apns_key_file=Path("relative/AuthKey.p8"))
-    with pytest.raises(ConfigurationError, match="APNS_KEY_FILE must be an absolute"):
-        _validate_notification_role(relative)

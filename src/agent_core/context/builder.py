@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -37,6 +37,7 @@ from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import WEBSITE_OFFER_STATE_KEY
 from agent_core.domain.cache import session_cache_key
+from agent_core.domain.captures import CAPTURE_READER_TOOL_NAME, reader_call
 from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure, WorkingState
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.memory import (
@@ -88,6 +89,14 @@ TRUNCATION_NOTE = (
     "Tool-result note (data only): older tool results in this conversation are "
     "truncated to pointers to fit the context, and no tool reads a truncated result "
     "back. Do not repeat a call only to recover one."
+)
+# ADR-0261: a capture is the one truncated result a tool reads back, so while
+# the plan pins the reader the note excepts captures and names them.
+TRUNCATION_CAPTURE_NOTE = (
+    "Tool-result note (data only): older tool results in this conversation are "
+    "truncated to pointers to fit the context, and no tool reads a truncated result "
+    "back except the captures this note names: tool.call reads each in sections as "
+    "artifact.read_capture with its artifact ID. Do not repeat a call only to recover one."
 )
 TRUNCATION_WORKING_STATE_ADVICE = (
     "Keep each finding you will still need as a fact with "
@@ -229,16 +238,57 @@ def _tool_result_pointer(item: ToolResultItem) -> ToolResultItem:
     )
 
 
+def _readable_captures(items: Sequence[ConversationItem]) -> dict[int, UUID]:
+    """The results whose capture marker offered the reader, by index (ADR-0261).
+
+    A marker prints the reader's call with the capture's own ID. A page can
+    print any text, but not the ID of the reference admission attached to it.
+    """
+
+    captures: dict[int, UUID] = {}
+    for index, item in enumerate(items):
+        if not isinstance(item, ToolResultItem):
+            continue
+        text = "".join(part.text for part in item.content if isinstance(part, TextPart))
+        offered = next(
+            (
+                part.artifact_id
+                for part in item.content
+                if isinstance(part, FileReferencePart) and reader_call(part.artifact_id) in text
+            ),
+            None,
+        )
+        if offered is not None:
+            captures[index] = offered
+    return captures
+
+
 def _truncation_note(
-    items: Sequence[ConversationItem], truncated: set[int], plan: ContextPlan
+    items: Sequence[ConversationItem],
+    truncated: set[int],
+    plan: ContextPlan,
+    captures: Mapping[int, UUID],
 ) -> UserMessage:
     """Say that truncated results are gone, and what a fact can cite (ADR-0258).
 
     Only names the plan pins reach this platform row: a call's own name when it
-    has a definition, the named tool when it went through ``tool.call``.
+    has a definition, the named tool when it went through ``tool.call``. A
+    truncated capture the plan's reader opens is the exception (ADR-0261).
     """
 
-    text = TRUNCATION_NOTE
+    readable = (
+        [f"artifact:{captures[index]}" for index in sorted(truncated) if index in captures][
+            -TRUNCATION_NOTE_RESULTS:
+        ]
+        if CAPTURE_READER_TOOL_NAME in plan.deferred_tool_names
+        and _TOOL_CALL_TOOL_NAME in plan.tool_names
+        else []
+    )
+    text = (
+        f"{TRUNCATION_CAPTURE_NOTE} Readable captures, newest last: {'; '.join(readable)}."
+        if readable
+        else TRUNCATION_NOTE
+    )
     if _WORKING_STATE_TOOL_NAME in plan.tool_names:
         called: dict[str, str] = {}
         for item in items:
@@ -563,10 +613,14 @@ class BudgetedContextBuilder:
                     )
                     legacy_excerpted = True
         history_count = len(history)
+        # Pointers drop the marker, so captures are found before truncation.
+        captures = _readable_captures([*history, *active])
         combined, truncated_indexes = self._truncate_tool_results([*history, *active], plan)
         tool_truncated = bool(truncated_indexes)
         note_items: list[ConversationItem] = (
-            [_truncation_note(combined, truncated_indexes, plan)] if tool_truncated else []
+            [_truncation_note(combined, truncated_indexes, plan, captures)]
+            if tool_truncated
+            else []
         )
         history = combined[:history_count]
         active = combined[history_count:]
@@ -732,7 +786,10 @@ class BudgetedContextBuilder:
             # was measured in still bounds it (ADR-0258).
             note_index = len(active_with_context) - (len(active) - active_prefix) - 1
             active_with_context[note_index] = _truncation_note(
-                combined[cut:], {index - cut for index in truncated_indexes if index >= cut}, plan
+                combined[cut:],
+                {index - cut for index in truncated_indexes if index >= cut},
+                plan,
+                {index - cut: capture for index, capture in captures.items() if index >= cut},
             )
         retained_conversation = [*retained_history, *active_with_context]
         validate_tool_pairs(retained_conversation)

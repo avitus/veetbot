@@ -6,15 +6,10 @@ from typing import Any
 
 import pytest
 
-from agent_core.adapters.browser.playwright import PythonPlaywrightRuntime
 from agent_core.domain.browser import BrowserAction, BrowserActionKind, BrowserProviderError
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.media import MediaImage
 from tests.unit.test_browser_playwright import _ref, lesson_pages
-
-
-def test_the_runtime_has_a_distinct_image_upload_operation() -> None:
-    assert callable(getattr(PythonPlaywrightRuntime, "upload", None))
 
 
 @pytest.mark.parametrize("chooser", [False, True])

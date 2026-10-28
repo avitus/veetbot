@@ -1,10 +1,7 @@
-"""Convention entry point for the shared surface session contract."""
+"""Convention entry point for the shared surface contract.
 
-from tests.contract.test_surface_repository_contract import (
-    assert_surface_repositories_contract,
-    in_memory_surface_repositories,
-)
-
-
-async def test_in_memory_surface_session_repository_contract() -> None:
-    await assert_surface_repositories_contract(in_memory_surface_repositories())
+The in-memory suite runs once, in
+``tests/contract/test_surface_repositories_contract.py``; the PostgreSQL suite
+in ``tests/integration/test_surface_persistence_m14.py``. This module exists so the
+port keeps a contract module of its own (``contract_coverage_errors``).
+"""

@@ -187,7 +187,12 @@ Copy `deploy/veetbot-call.env.example` and
 Use role-specific `DATABASE_URL` values. The owner tenant/principal, configuration
 path and three calling flags must match the application environment. Do not copy
 the full application environment into either role. Use the ingress-specific
-secret directory for `BLAND_WEBHOOK_SECRET_FILE`.
+secret directory for `BLAND_WEBHOOK_SECRET_FILE`. When scheduled calls are
+wanted, also mirror `AGENT_CALL_ENABLED` and the non-secret
+`BLAND_CONFIGURATION_FILE` path into `/etc/veetbot/veetbot-schedule.env`
+(`deploy/veetbot-schedule.env.example` carries both): the scheduler derives a
+call schedule's two calling scopes from `AGENT_CALL_ENABLED` and never reads
+the Bland key (ADR-0213).
 
 Write the webhook signing secret to
 `/etc/veetbot-call-ingress/bland-webhook-secret` without echoing it or putting
@@ -230,6 +235,7 @@ secret ownership and provider-side admission limits are verified:
 | `AGENT_CALL_ENABLED=1` | Add the fixed Bland tool rosters, owner call API and reconciliation worker |
 | `AGENT_CALL_INGRESS_ENABLED=1` | Add the separate signed callback listener and exact public proxy route |
 | `AGENT_CALL_NOTIFICATIONS_ENABLED=1` | Enqueue `call_finished`; requires the existing notification API and delivery setup |
+| `AGENT_CALL_OWNER_REQUESTS_ENABLED=0` | Require the approval card for the owner's own call requests (default `1`: with calling enabled, a call the owner asks for dials without a second confirmation, ADR-0213) |
 
 Enabling the third flag touches all three environments. Each calling role
 validates on its own, so the application environment and both calling role files
@@ -242,8 +248,9 @@ fails on the first finished call. A role whose environment fails validation exit
 and its unit stops, so change the three files together and restart both calling
 units with the application and worker units.
 
-Give the owner API credential `call.read`, `call.cancel`, and `call.delete` as
-needed. The model's Bland tools use separately installed MCP scopes. Incoming
+`call.read`, `call.cancel` and `call.delete` ship in the owner template
+`deploy/veetbot.env.example` and are provisioned by every release (ADR-0149);
+nothing to grant by hand. The model's Bland tools use separately installed MCP scopes. Incoming
 callers receive none of these scopes. Notifications say only “New call result”
 and contain call and notification IDs. Tapping one opens an authenticated result
 sheet in Chat. The owner can also ask Chat to list or read retained calls.

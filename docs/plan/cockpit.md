@@ -89,7 +89,7 @@ The owner decided these on 2026-10-22:
   (`email-experience.md:52-53`), and that a mode confers no authority.
 - **The execution service.** It runs gVisor containers with a read-only root,
   networking off, an empty environment and run leases. Its one-image
-  assumption is an open question in `sandbox-isolation.md:1735-1739`. This
+  assumption is an open question in `sandbox-isolation.md:1740-1744`. This
   design answers it for exactly one additional, platform-owned image.
 - **The tool pipeline.** Classification decides policy, and a `tool_rules`
   entry can allow one tool by exact name. The trust overlay escalates an
@@ -407,7 +407,7 @@ root commit if it is absent and the App is allowed to.
 
 Repository rulesets enforce three things:
 
-- only admins may create, update or delete any other branch or any tag;
+- people are exempt; the App may not write any other branch or any tag;
 - nobody may force-push or delete `cockpit/widgets`;
 - the App's installation is limited to this repository with `contents:write`.
 
@@ -908,10 +908,28 @@ interpolation.
 
 - **Mac**
   - Supports full screen.
-  - The Cockpit right panel follows the ADR-0237 pattern. It shows the
-    selected widget's purpose, feeds and their freshness, a settings form
-    generated from the settings schema, revision history with commit links,
-    import failures, and Revert, Delete and Restore.
+  - The chrome follows "Mac — Cockpit · A2": the window toolbar carries
+    "Cockpit", a Live pill (or "Reconnecting · last update … ago") and what
+    needs the owner, then how many widgets are stale; then Memory, People,
+    Schedules, Persona and Settings, an appearance button that steps light,
+    dark and night watch, Arrange, and the details panel's toggle. The left
+    pane leads with the mode switch, then Needs you, the widgets with each
+    one's freshness ("6 s", "Stale · 47 min") and This screen.
+  - The left pane (200 to 340 points, 260 to start) and the details panel
+    (280 to 440, 320 to start) resize from their hairlines and keep their
+    widths on this Mac; the board takes the rest, in three columns while the
+    panel is open (the snapshot message's optional `columns`).
+  - The Cockpit right panel follows the ADR-0237 pattern and the A2 design's
+    details panel. It shows the selected widget's purpose; **Feed**: each
+    declared feed by name and source, then the stalest feed's last value,
+    expected interval and when it goes stale; **Private settings**: a form
+    generated from the settings schema, kept on the owner's server;
+    **History**: each revision's state, who made it, when and its commit, with
+    Live beside the live one and Revert beside the others; import failures;
+    then **Discuss in Chat** (a new conversation with an editable opener naming
+    the widget, never sent for the owner), **Remove from this screen** (this
+    device class's layout without the widget, with Undo; the widget stays
+    live elsewhere), and Delete or Restore.
 - **iPad**
   - Uses the Mac layout at touch sizes, with a keep-screen-on toggle that
     sets the idle timer only while Cockpit is visible.
@@ -1015,7 +1033,9 @@ contract suite.
 
 ### Configuration
 
-- **Flag.** `AGENT_COCKPIT_ENABLED`, exactly `0` or `1`, default `0`.
+- **Flag.** `AGENT_COCKPIT_ENABLED`, exactly `0` or `1`, default `0`. The
+  scheduler environment mirrors it, so a feed-keeping schedule's occurrences
+  keep `cockpit.read` and `cockpit.write` ([scheduling](scheduling.md)).
 - **Settings.** The settings are:
   - `AGENT_COCKPIT_BUILDER_IMAGE`;
   - `AGENT_COCKPIT_GITHUB_REPOSITORY`;

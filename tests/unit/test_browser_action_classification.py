@@ -237,6 +237,45 @@ def test_inflected_and_irregular_forms_name_the_consequence() -> None:
     assert {text: classify(text) for text in expected} == expected
 
 
+def test_two_record_descriptions_name_no_consequence() -> None:
+    """ADR-0263: a past-tense "updated" before a month dates a record, and
+    "report" after a clinical report type names a document."""
+    descriptive = [
+        "H&P, Updated Oct 16, 2026, 2:22 PM, A. Clinician, MD",
+        "Progress note, updated January 5, 2024",
+        "Lab PATHOLOGY REPORT Sep 09, 2022 A. Clinician, MD",
+        "Radiology report",
+        "Imaging reports",
+        "Laboratory Report",
+        "Lab rep0rt",
+    ]
+    still = {
+        "Update email": C.SECURITY_CHANGE,
+        "Updated": C.SECURITY_CHANGE,
+        "Updated settings": C.SECURITY_CHANGE,
+        "Update Oct 16": C.SECURITY_CHANGE,
+        "Updated 10/16/2026": C.SECURITY_CHANGE,
+        "Report": C.PUBLICATION,
+        "Report spam": C.PUBLICATION,
+        "Report lab results": C.PUBLICATION,
+        "Spam report": C.PUBLICATION,
+        "Send lab report": C.PUBLICATION,
+        "Messages from care team": C.PUBLICATION,
+        "Request Refills": C.PAYMENT,
+    }
+    reported = facts(
+        link_target=BrowserTargetFacts(
+            same_origin=True, first_segment="report", sensitive_path=False
+        )
+    )
+
+    assert {text: classify(text, role="link") for text in descriptive} == dict.fromkeys(
+        descriptive, C.UNKNOWN
+    )
+    assert {text: classify(text, role="link") for text in still} == still
+    assert classify("Lab report", role="link", element=reported) is C.PUBLICATION
+
+
 def test_the_old_hard_exclusions_are_named_consequences() -> None:
     expected = {
         "accept": C.LEGAL_ACCEPTANCE,
@@ -285,6 +324,51 @@ def test_every_label_source_is_classified_separately() -> None:
         origins=(ORIGIN,),
     )
     assert (standing.covered, standing.consequence) == (False, C.PAYMENT)
+
+
+@pytest.mark.parametrize(
+    ("target", "covered", "reason"),
+    [
+        pytest.param(
+            BrowserTargetFacts(same_origin=True, first_segment="lesson", sensitive_path=False),
+            True,
+            None,
+            id="same-origin",
+        ),
+        pytest.param(
+            BrowserTargetFacts(same_origin=False, first_segment="go", sensitive_path=False),
+            False,
+            "link_outside_origin",
+            id="elsewhere",
+        ),
+        pytest.param(
+            BrowserTargetFacts(same_origin=False, first_segment=None),
+            False,
+            "link_outside_origin",
+            id="opaque",
+        ),
+    ],
+)
+def test_a_standing_grant_never_covers_a_link_that_leaves_the_origin(
+    target: BrowserTargetFacts, covered: bool, reason: str | None
+) -> None:
+    """ADR-0263: a routine click whose link target the runtime read leaves the
+    origin, or whose element it could not bound (an opaque target), is outside a
+    standing grant's ceiling, which otherwise checks only the page origin."""
+    standing = standing_ceiling_coverage(
+        action=click(),
+        page_url=LESSON,
+        role="button",
+        labels=("Continue",),
+        facts=facts(link_target=target),
+        option_texts=(),
+        origins=(ORIGIN,),
+    )
+
+    assert standing.covered is covered
+    assert standing.reason == reason
+    if covered:
+        assert standing.consequence is C.ROUTINE
 
 
 def test_case_hyphen_zero_width_and_combining_variants_are_normalized() -> None:

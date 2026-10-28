@@ -19,10 +19,15 @@ from typing import Any, Protocol, cast
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approval_copy import approval_reason, generic_action_summary
 from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest, ApprovalStatus
 from agent_core.domain.argument_views import approval_argument_digests, approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
-from agent_core.domain.browser_act_views import TASK_GRANT_AUTHORIZATION_KIND
+from agent_core.domain.browser_act_views import (
+    RESEARCH_AUTHORIZATION_KIND,
+    RESEARCH_REASON_PREFIX,
+    TASK_GRANT_AUTHORIZATION_KIND,
+)
 from agent_core.domain.browser_diagnostics import (
     BrowserDiagnostics,
     browser_failure_category,
@@ -32,9 +37,17 @@ from agent_core.domain.browser_diagnostics import (
 )
 from agent_core.domain.browser_projection import browser_context_projection
 from agent_core.domain.browser_task_grants import (
+    RESEARCH_NOT_COVERED_REASONS,
     TASK_GRANT_NOT_COVERED_REASONS,
     BrowserTaskGrantOffer,
     TaskGrantNotCovered,
+)
+from agent_core.domain.captures import (
+    CAPTURE_METADATA_KEY,
+    CAPTURE_READER_TOOL_NAME,
+    CaptureSections,
+    capture_text,
+    reader_call,
 )
 from agent_core.domain.delegations import Delegation, DelegationRequest
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND
@@ -148,6 +161,25 @@ class DelegationStarter(Protocol):
 # remain for the modules and tests that read them from here.
 _approval_argument_view = approval_argument_view
 _approval_argument_digests = approval_argument_digests
+# No model-callable tool reads a capture back (tool-system.md); a marker that
+# only names the artifact sent a model hunting for it in the sandbox (ADR-0260).
+_CAPTURE_NOTE = ", kept for the owner; no tool, sandbox or workspace can open it"
+
+
+def _reader_note(artifact_id: UUID, sections: int) -> str:
+    """ADR-0261: the marker is the reader's advertisement, so it prints the call."""
+
+    call = reader_call(artifact_id)
+    return f', {sections} sections; read one with tool.call {call}, or pass "find" to search it'
+
+
+def _capture_reader_reachable(checkpoint: RunCheckpoint, agent: AgentSpec) -> bool:
+    """Whether this run can call artifact.read_capture through tool.call."""
+
+    return all(
+        name in checkpoint.pinned_tool_specs and name in agent.enabled_tools
+        for name in (CAPTURE_READER_TOOL_NAME, TOOL_CALL_TOOL_NAME)
+    )
 
 
 class _UnavailableCollaborator:
@@ -295,23 +327,41 @@ def _action_kind(tool: Tool) -> ActionKind:
     return ActionKind.TOOL_CALL
 
 
+# ADR-0263: calls whose results bring nothing a page could be typed from, so
+# G5 does not count them: a file export, which reports platform identifiers,
+# and a question once the owner or the platform has answered it.
+_G5_EXEMPT_TOOL_NAMES = frozenset({"artifact.export"})
+_G5_EXEMPT_ANSWER_TRUSTS = frozenset({TrustLevel.USER, TrustLevel.PLATFORM})
+
+
 def _active_turn_facts(checkpoint: RunCheckpoint) -> AuthorizationTurn:
     """ADR-0129: the newest user message's trust and the tools called since.
 
     A ``tool.call`` wrapper counts as the tool it names; one that does not
     parse counts as ``tool.call``, which is not a browser tool. The loop
     appends a step's calls before running them, so the current step's other
-    calls are included.
+    calls are included. A file export and an answered question are left out
+    (ADR-0263); a pending question, or one answered with other trust, counts.
     """
 
     names: set[str] = set()
+    answers: dict[str, TrustLevel] = {}
     newest_user_trust = TrustLevel.EXTERNAL_UNTRUSTED
     for item in reversed(checkpoint.conversation):
         if isinstance(item, UserMessage):
             newest_user_trust = item.trust
             break
-        if isinstance(item, ToolCallItem):
-            names.add(_unwrapped_call_name(item))
+        if isinstance(item, ToolResultItem):
+            # Walking backwards, a result comes before the call it answers.
+            answers[item.call_id] = item.trust
+        elif isinstance(item, ToolCallItem):
+            name = _unwrapped_call_name(item)
+            if name in _G5_EXEMPT_TOOL_NAMES or (
+                name == "conversation.ask_user"
+                and answers.get(item.call_id) in _G5_EXEMPT_ANSWER_TRUSTS
+            ):
+                continue
+            names.add(name)
     # ADR-0213 looks past the active turn: origin trust resets at each user
     # message, so an email read earlier must still count.
     owner_texts = tuple(
@@ -368,6 +418,21 @@ def _task_grant_not_covered(
         )
     except ValueError:
         return None
+
+
+def _research_not_covered(standing: StandingAuthorization | None) -> str | None:
+    """The closed reason research authorization refused this action, when it
+    was the most specific refusal; nothing otherwise (ADR-0263)."""
+
+    if (
+        standing is None
+        or standing.allowed
+        or standing.authorization_kind != RESEARCH_AUTHORIZATION_KIND
+        or not standing.reason_code.startswith(RESEARCH_REASON_PREFIX)
+    ):
+        return None
+    reason = standing.reason_code.removeprefix(RESEARCH_REASON_PREFIX)
+    return reason if reason in RESEARCH_NOT_COVERED_REASONS else None
 
 
 def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive") -> TrustLevel:
@@ -1649,6 +1714,7 @@ class ToolPipeline:
                         tool=tool,
                         run=run,
                         principal=principal,
+                        capture_reader=_capture_reader_reachable(checkpoint, agent),
                     )
                     if progress[-1] == 11:
                         progress.append(12)
@@ -1780,10 +1846,17 @@ class ToolPipeline:
         tool: Tool,
         run: Run,
         principal: Principal,
+        capture_reader: bool = False,
     ) -> ToolResult:
         result = result.model_copy(update={"context_content": None})
         rendered = content_bytes(result.content)
-        budget = min(tool.spec.maximum_output_bytes, self._inline_output_bytes)
+        # ADR-0261: a section is already a bounded read of a capture, so the reader
+        # is admitted at its own limit; capturing it again would capture a capture.
+        budget = (
+            tool.spec.maximum_output_bytes
+            if tool.spec.name == CAPTURE_READER_TOOL_NAME
+            else min(tool.spec.maximum_output_bytes, self._inline_output_bytes)
+        )
         if len(rendered) <= budget:
             result.metrics["output_bytes"] = len(rendered)
             return result
@@ -1836,6 +1909,19 @@ class ToolPipeline:
             if partial_capture
             else "full output"
         )
+        # Only an untrusted capture opens for the reader (ADR-0261); any other
+        # marker says that nothing can open it (ADR-0260).
+        sections = (
+            CaptureSections(
+                capture_text(artifact_bytes), artifact_id=UUID(int=0), tool=tool.spec.name
+            ).count
+            if capture_reader and trust is TrustLevel.EXTERNAL_UNTRUSTED
+            else None
+        )
+
+        def note(artifact_id: UUID) -> str:
+            return _CAPTURE_NOTE if sections is None else _reader_note(artifact_id, sections)
+
         # Reject a tiny per-tool limit before creating an orphaned capture.
         try:
             output_excerpt(
@@ -1843,6 +1929,7 @@ class ToolPipeline:
                 budget=budget,
                 location=f"artifact:{UUID(int=0)}",
                 capture_label=capture_label,
+                note=note(UUID(int=0)),
                 reference=FileReferencePart(
                     artifact_id=UUID(int=0), media_type=media_type, filename=filename
                 ),
@@ -1858,7 +1945,18 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        ref = await writer.create(stream(), filename, media_type, trust)
+        ref = await writer.create(
+            stream(),
+            filename,
+            media_type,
+            trust,
+            metadata={
+                CAPTURE_METADATA_KEY: {
+                    "tool": tool.spec.name,
+                    "required_scopes": sorted(tool.spec.required_scopes),
+                }
+            },
+        )
         reference = FileReferencePart(
             artifact_id=ref.artifact_id,
             media_type=ref.media_type,
@@ -1870,6 +1968,7 @@ class ToolPipeline:
             budget=budget,
             location=f"artifact:{ref.artifact_id}",
             capture_label=capture_label,
+            note=note(ref.artifact_id),
             reference=reference,
         )
         if (
@@ -2021,7 +2120,7 @@ class ToolPipeline:
         if invocation.normalized_arguments is None or invocation.normalized_arguments_hash is None:
             raise ConflictError("approval action has no normalized arguments")
         token.raise_if_cancelled()
-        action_summary = f"Run {tool.spec.name} with validated arguments."
+        action_summary = generic_action_summary(tool.spec)
         approval_arguments = dict(invocation.normalized_arguments)
         offer: BrowserTaskGrantOffer | None = None
         not_covered = _task_grant_not_covered(standing)
@@ -2055,7 +2154,7 @@ class ToolPipeline:
                 "approval_view_failed",
                 extra={"tool_name": tool.spec.name},
             )
-            action_summary = f"Run {tool.spec.name} with validated arguments."
+            action_summary = generic_action_summary(tool.spec)
             approval_arguments = dict(invocation.normalized_arguments)
             offer = None
         token.raise_if_cancelled()
@@ -2079,6 +2178,7 @@ class ToolPipeline:
             agent_version=agent.version,
             risk=tool.spec.risk,
             policy_reason=decision.reason_code,
+            policy_reason_text=approval_reason(decision, tool.spec.side_effect),
             policy_decision=decision,
             policy_version=decision.policy_version,
             expires_at=min(
@@ -2088,6 +2188,7 @@ class ToolPipeline:
             created_at=now,
             task_grant_offer=offer,
             task_grant_not_covered=not_covered,
+            research_not_covered=_research_not_covered(standing),
         )
         waiting = invocation.model_copy(
             update={

@@ -7,7 +7,8 @@ let rows = [],
   schedule = null,
   busy = false,
   pending = null,
-  generation = 0;
+  generation = 0,
+  conversationGeneration = 0;
 const labels = {
   merge: "Equivalent merge",
   summary: "Related summary",
@@ -104,6 +105,7 @@ function clearPrivate() {
   $("disconnect").hidden = true;
   $("refresh").hidden = true;
   $("confirm").close();
+  closeConversation();
 }
 function paint() {
   const cards = $("cards");
@@ -189,6 +191,16 @@ function paint() {
       ),
     );
     source.append(details);
+    if (!s.omitted && s.session_id) {
+      const link = node("a", "View source conversation", "source-link");
+      link.href = "#source-conversation";
+      link.setAttribute("aria-controls", "conversation");
+      link.onclick = (event) => {
+        event.preventDefault();
+        openConversation(r, s);
+      };
+      source.append(link);
+    }
     inner.append(source);
   }
   inner.append(
@@ -223,6 +235,76 @@ function paint() {
   }
   if (actions.children.length) detail.append(actions);
 }
+function closeConversation() {
+  conversationGeneration++;
+  $("conversation").close();
+  $("conversation-title").textContent = "Source conversation";
+  $("conversation-date").textContent = "";
+  $("conversation-messages").replaceChildren();
+  $("conversation-error").textContent = "";
+  $("conversation-error").hidden = true;
+  $("conversation-more").hidden = true;
+  $("conversation-more").onclick = null;
+}
+function openConversation(operation, source) {
+  closeConversation();
+  const ticket = conversationGeneration;
+  let nextCursor = null;
+  let loading = false;
+  const more = $("conversation-more");
+  const messages = $("conversation-messages");
+  $("conversation").showModal();
+  async function fetchPage() {
+    if (loading) return;
+    loading = true;
+    more.disabled = true;
+    $("conversation-error").hidden = true;
+    try {
+      const path = "/v1/dreaming/" + encodeURIComponent(operation.id) +
+        "/sources/" + encodeURIComponent(source.belief_id) +
+        "/conversation?ceiling=restricted&limit=50" +
+        (nextCursor ? "&cursor=" + encodeURIComponent(nextCursor) : "");
+      const data = await api(path);
+      if (ticket !== conversationGeneration) return;
+      $("conversation-title").textContent = data.session.title || "Untitled conversation";
+      $("conversation-date").textContent = "Started " + date(data.session.created_at);
+      for (const message of data.messages.items) {
+        const cited = data.source_event_ids.includes(message.sequence);
+        const item = node("article", undefined, "conversation-message" + (cited ? " supporting-message" : ""));
+        item.append(node("h3", (message.role === "user" ? "You" : "Veetbot") +
+          (cited ? " · Supporting message" : "")));
+        for (const part of message.content) {
+          item.append(node("p", part.type === "text" ? part.text : "[Non-text content]", "statement"));
+        }
+        messages.append(item);
+      }
+      if (!messages.children.length) messages.append(node("p", "No retained messages are available."));
+      nextCursor = data.messages.next_cursor;
+      more.textContent = "Load more messages";
+      more.hidden = !nextCursor;
+    } catch (e) {
+      if (ticket !== conversationGeneration) return;
+      if (e.status === 404 || e.status === 403) messages.replaceChildren();
+      $("conversation-error").textContent = e.status === 403
+        ? "Your access does not include reading source conversations."
+        : e.status === 404 ? "This source conversation is no longer available." : e.message;
+      $("conversation-error").hidden = false;
+      more.textContent = "Retry loading conversation";
+      more.hidden = false;
+    } finally {
+      loading = false;
+      if (ticket === conversationGeneration) more.disabled = false;
+    }
+  }
+  more.onclick = fetchPage;
+  fetchPage();
+}
+$("close-conversation").onclick = closeConversation;
+$("conversation").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeConversation();
+});
+
 async function load(append = false) {
   const ticket = generation;
   const [status, page] = await Promise.all([

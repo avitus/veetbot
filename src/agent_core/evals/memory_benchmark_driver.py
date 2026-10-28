@@ -55,9 +55,9 @@ from agent_core.evals.memory_benchmark import (
     score_formation,
     score_probe,
 )
+from agent_core.evals.memory_distillation import _evaluation_settings
 from agent_core.evals.memory_formation import (
     EvaluationBelief,
-    _evaluation_settings,
     _write_evidence,
 )
 from agent_core.memory.formation import FORMATION_POLICY_VERSION

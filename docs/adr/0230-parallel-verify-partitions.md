@@ -1,6 +1,8 @@
 # ADR-0230: The longest verify jobs split across executors
 
 - Status: Proposed (requested by the repository owner, 2026-10-20)
+- Amended by: ADR-0257 (2026-10-26), which keys the Apple jobs' records on
+  their inputs and honours them on every branch; decisions 1 and 2 stand
 - Date: 2026-10-20
 - Related: ADR-0107, ADR-0114, ADR-0228
 - Detailed design: `docs/plan/development-toolchain.md`

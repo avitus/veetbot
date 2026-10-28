@@ -378,6 +378,124 @@ async def test_svg_links_are_read_as_the_browser_follows_them() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Icons drawn from a same-origin sprite file (ADR-0263).
+
+SPRITE = """<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"
+ xmlns:xlink="http://www.w3.org/1999/xlink"><defs>
+<symbol id="_base"><path d="M0 0h10v10z"/></symbol>
+<symbol id="menu"><use xlink:href="#_base"/></symbol>
+<symbol id="hidden"><a href="/courses/remove-course"><rect width="200" height="40"/></a></symbol>
+</defs></svg>"""
+SPRITE_ICONS = """<!doctype html><html><head><title>Lesson</title></head><body>
+<button type="button" aria-label="Menu" onclick="window.clicks.push('menu')">
+<svg width="20" height="20"><use xlink:href="/lesson/icons.svg#menu"></use></svg></button>
+<a href="/lesson/2" aria-label="Next"><svg width="20" height="20">
+<use href="/lesson/icons.svg#menu"></use></svg> Next</a>
+<button type="button" aria-label="Skip" onclick="window.clicks.push('skip')">
+<svg width="200" height="40"><use href="/lesson/icons.svg#hidden"></use></svg></button>
+<button type="button" aria-label="Start" onclick="window.clicks.push('start')">
+<svg width="20" height="20"><use href="https://elsewhere.example/icons.svg#menu"></use></svg></button>
+<button type="button" aria-label="Done" onclick="window.clicks.push('done')">
+<svg width="20" height="20"><use href="/lesson/icons.svg#nothing"></use></svg></button>
+<button type="button" aria-label="Both" onclick="window.clicks.push('both')">
+<svg width="20" height="20"><use href="/lesson/icons.svg#menu"
+ xlink:href="/lesson/icons.svg#hidden"></use></svg></button>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+async def test_a_sprite_icon_is_read_through_the_browser() -> None:
+    """ADR-0263: Chromium shows each same-origin sprite copy outside the page's
+    script, so an icon whose copy is inert no longer hides a target, while a
+    copy holding a link, a cross-origin or missing symbol, and an element
+    naming two references stay opaque."""
+
+    pages = {"/lesson/1": SPRITE_ICONS, "/lesson/2": BLANK, "/lesson/icons.svg": SPRITE}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        page = await visit("/lesson/1")
+        await _pause(runtime)
+        page = await runtime.observe()
+        facts = runtime.facts(page.revision)
+        assert facts is not None
+        menu = facts.elements[_ref(page, "Menu")]
+        skip = facts.elements[_ref(page, "Skip")]
+        await _covered(runtime, _click_named(page, "Menu"))
+        clicks = await _page_value(runtime, "window.clicks")
+        refused = await _each(
+            runtime,
+            visit,
+            "/lesson/1",
+            [_click("Skip"), _click("Start"), _click("Done"), _click("Both")],
+        )
+        page = await visit("/lesson/1")
+        await _pause(runtime)
+        page = await runtime.observe()
+        moved = await _covered(runtime, _click_named(page, "Next"))
+
+    assert menu.link_target is None
+    assert skip.link_target is not None and not skip.link_target.same_origin
+    assert clicks == ["menu"]
+    assert refused == [GRANT_NOT_APPLICABLE] * 4
+    assert moved.url.endswith("/lesson/2")
+    assert left == []
+
+
+SPRITE_RETARGETED = """<!doctype html><html><head><title>Lesson</title></head><body>
+<svg width="20" height="20"><use href="/lesson/icons.svg#hidden">
+<set attributeName="href" to="/lesson/icons.svg#menu" begin="0s" fill="freeze"></set>
+</use></svg>
+<button type="button" aria-label="Skip" onclick="window.clicks.push('skip')">
+<svg width="200" height="40"><use href="/lesson/icons.svg#hidden"></use></svg></button>
+<button type="button" aria-label="Menu" onclick="window.clicks.push('menu')">
+<svg width="20" height="20"><use href="/lesson/icons.svg#menu"></use></svg></button>
+<script>window.clicks = [];</script>
+</body></html>"""
+
+
+async def test_an_animated_page_inspects_no_sprite() -> None:
+    """ADR-0263: animation can show one copy under another reference's name,
+    so a page with any animation element keeps every sprite icon opaque."""
+
+    pages = {"/lesson/1": SPRITE_RETARGETED, "/lesson/icons.svg": SPRITE}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        await visit("/lesson/1")
+        await _pause(runtime)
+        page = await runtime.observe()
+        outcomes = [
+            await _outcome(runtime, _click_named(page, "Skip")),
+            await _outcome(runtime, _click_named(await runtime.observe(), "Menu")),
+        ]
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert outcomes == [GRANT_NOT_APPLICABLE] * 2
+    assert clicks == []
+    assert left == []
+
+
+async def test_a_sprite_icon_changed_after_observation_is_read_again() -> None:
+    """ADR-0263: the live check inspects the page again, so an icon swapped
+    for a copy holding a link after the observation is refused."""
+
+    pages = {"/lesson/1": SPRITE_ICONS, "/lesson/icons.svg": SPRITE}
+    async with lesson_pages(pages) as (runtime, visit, left):
+        await visit("/lesson/1")
+        await _pause(runtime)
+        page = await runtime.observe()
+        await _page_value(
+            runtime,
+            "document.querySelector('[aria-label=Menu] use')"
+            ".setAttribute('href', '/lesson/icons.svg#hidden')",
+        )
+        await _pause(runtime)
+        outcome = await _outcome(runtime, _click_named(page, "Menu"))
+        clicks = await _page_value(runtime, "window.clicks")
+
+    assert outcome == GRANT_NOT_APPLICABLE
+    assert clicks == []
+    assert left == []
+
+
+# ---------------------------------------------------------------------------
 # Same-origin, srcdoc and sandboxed frames.
 
 FRAMES = """<!doctype html><html><head><title>Lesson</title></head><body>

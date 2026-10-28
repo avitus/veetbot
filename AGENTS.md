@@ -49,9 +49,9 @@ checks it per commit; no trailer means lane A.
 | --- | --- |
 | Startup, config, composition root, CLI | `bootstrap-and-composition.md` |
 | Makefile, compose, CI, local development | `development-toolchain.md` |
-| The run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
+| Run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
 | Tool registration, validation, execution, MCP | `tool-system.md` |
-| Builtin tools and their classification | `builtin-tools.md` |
+| Builtin tools, classification | `builtin-tools.md` |
 | Provider adapters, streaming, usage, cost | `model-gateway.md` |
 | Policy decisions, hardline rules, approvals | `policy-and-approvals.md` |
 | Events, projections, persistence, queue | `event-log-and-persistence.md` |
@@ -68,11 +68,12 @@ checks it per commit; no trailer means lane A.
 | Scheduled runs and recurrence | `scheduling.md` |
 | Notifications, device identity, push | `notifications-and-devices.md` |
 | Subagents, delegation, child runs | `subagents-and-delegation.md` |
-| Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
+| Inbound surfaces, pairing, Telegram | `inbound-surfaces.md` |
 | Backups, restore, alerts, firewall, rollback | `operational-hardening.md` |
 | Memory evaluation and lifecycle | `memory-evaluation-and-lifecycle.md` |
-| Episodes, high-recall formation, evidence-based forgetting | `adaptive-memory-distillation.md` |
-| Persona surface, nominations, curated promotion | `persona-surface.md` |
+| Episodes, high-recall formation, forgetting | `adaptive-memory-distillation.md` |
+| Memory reconsolidation, dreaming | `memory-reconsolidation.md` |
+| Persona surface, nominations, promotion | `persona-surface.md` |
 | Memory read API and browser | `memory-read-api-and-browser.md` |
 | Gmail MCP servers, email tools, bootstrap | `email-integration.md` |
 | Client modes, foreground email, priority/style, drafts, mail memories | `email-experience.md` |
@@ -85,8 +86,8 @@ checks it per commit; no trailer means lane A.
 | Email unsubscribe, bulk-sender census | `email-unsubscribe.md` |
 | Owner records: numeric series, the catalog | `owner-records.md` |
 | Cockpit, agent-authored widgets | `cockpit.md` |
-| Which milestone each gate belongs to | `milestone-map.md` |
-| What the corpus does and does not cover | `readiness.md` |
+| Milestone of each gate | `milestone-map.md` |
+| Corpus coverage and gaps | `readiness.md` |
 
 ## Authority and conflicts
 - The **engineering plan** holds the normative requirements and acceptance criteria; **project state** (`docs/status/project-state.yaml`) determines what work is authorized; **code and tests** describe actual behavior.
@@ -107,8 +108,8 @@ checks it per commit; no trailer means lane A.
 
 ## Verification
 
-Run `make check` once on the final inputs, on the sidecar with `chunk validate`; it includes `docs-check` and the
-website checks. Do not separately rerun passed checks unless their inputs change.
+While iterating, run focused tests plus lint, typecheck, and docs-check for the change; no sidecar `make check`.
+The one full run is hosted CI on the final head before merging (step 4, ADR-0257); `make check` is the fallback.
 Use `make docs-check` for standalone documentation verification, and `make citations-fix` to repair moved citations before the final verification.
 Measure each verification stage and report durations, total wall-clock time, overlap, and the slowest checks before each commit; label estimates explicitly.
 
@@ -148,7 +149,7 @@ A new feature gets its own branch from `main`, named in two lowercase words (`ow
    Fix valid findings; answer inapplicable ones with concrete evidence and resolve the conversation.
 3. Push, wait for the review of the new head commit, and repeat until
    CodeRabbit reports no findings and every conversation is resolved.
-4. Merge `main` into the branch before its final push, so `main` reuses its verification (ADR-0114). Request hosted CI (`run_verify: true`, ADR-0107) with each push, alongside the review, and confirm every required check passes on the final head.
+4. Merge `main` into the branch before its final push, so `main` reuses its verification (ADR-0114). Once CodeRabbit is clean, request hosted CI (`run_verify: true`) once on that final head; confirm every required check passes.
 5. After merging to `main`, follow the merge commit's CircleCI pipeline through production delivery. Verify the application and documentation jobs pass
    and their public release-identity checks report the merged revision, as defined in `docs/deployment.md`. If delivery fails, keep the work active through
    diagnosis and recovery; a merge is not complete until its production deployment succeeds.

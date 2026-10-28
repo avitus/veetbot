@@ -10,21 +10,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from agent_core.config import ConfigurationError
 from agent_core.domain.cockpit import FEED_HISTORY_MAX
+from agent_core.domain.profiles import FrozenProfileModel
 
 COCKPIT_PROFILE_DOCUMENT = "cockpit/profiles.yaml"
 
 
-class _ProfileModel(BaseModel):
-    """Reject unknown knobs and refuse mutation after validation."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class CockpitPublicationProfile(_ProfileModel):
+class CockpitPublicationProfile(FrozenProfileModel):
     """How often widgets may be committed and how often the branch is imported."""
 
     commits_per_widget_per_hour: int = Field(default=12, ge=1)
@@ -41,14 +36,14 @@ class CockpitPublicationProfile(_ProfileModel):
         return self
 
 
-class CockpitStreamProfile(_ProfileModel):
+class CockpitStreamProfile(FrozenProfileModel):
     """How long one stream lives and how far back a client may resume."""
 
     max_seconds: int = Field(default=600, ge=1)
     event_retention_seconds: int = Field(default=86_400, ge=60)
 
 
-class CockpitFeedsProfile(_ProfileModel):
+class CockpitFeedsProfile(FrozenProfileModel):
     """How much history each feed keeps, and the platform projector's two timers."""
 
     history_max: int = Field(default=FEED_HISTORY_MAX, ge=1, le=FEED_HISTORY_MAX)
@@ -63,7 +58,7 @@ class CockpitFeedsProfile(_ProfileModel):
         return self
 
 
-class CockpitProfiles(_ProfileModel):
+class CockpitProfiles(FrozenProfileModel):
     """The whole `cockpit/profiles.yaml` document."""
 
     schema_version: Literal[1] = 1

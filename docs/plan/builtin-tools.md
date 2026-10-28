@@ -138,6 +138,7 @@ delegate.run                  control     tool-system
 context.update_working_state  control     context-engine
 skill.load                    control     skills
 tool.call                     control     tool-system
+artifact.read_capture         capability  tool-system
 skill.manage                  capability  skills
 memory.remember               capability  memory-formation
 memory.learn                  capability  memory-formation
@@ -177,8 +178,11 @@ cockpit.configure             capability  cockpit
 cockpit.feed.publish          capability  cockpit
 ```
 
-Fifty-two model-callable builtin tools in total: the original roster of
-eight, the forty-two above, and the two media-generation tools in ADR-0140.
+Fifty-three model-callable builtin tools in total: the original roster of
+eight, the forty-three above, and the two media-generation tools in ADR-0140.
+ADR-0261 added `artifact.read_capture`, which
+[tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
+declares and classifies.
 Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
 that keeps both numbers right is
@@ -193,7 +197,7 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty-two, `skill.manage`, `web.search`,
+nothing else.** Of the other forty-three, `artifact.read_capture`, `skill.manage`, `web.search`,
 `web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
 five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
 three `people.*`, and six `records.*` tools in this document's Milestone 26,
@@ -213,10 +217,10 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is every builtin the composition root registers, and
-that is a function of the deployment. Eighteen identities are always
+that is a function of the deployment. Nineteen identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
-`artifact.export`, `context.update_working_state`, the four `memory.*` tools,
+`artifact.export`, `artifact.read_capture`, `context.update_working_state`, the four `memory.*` tools,
 `skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-four register only
 with their flag or provider: `skill.manage` with skill authoring, the three
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with
@@ -1536,7 +1540,9 @@ two still owe:
     Section 28, ADR-0008, and
     [sandbox-isolation.md](sandbox-isolation.md), which gives the tool
     its full `ToolSpec`. The one thing fixed here is that its
-    `output_trust` is `EXTERNAL_UNTRUSTED` and cannot be raised.
+    `output_trust` is `EXTERNAL_UNTRUSTED` and cannot be raised. When it
+    asks for approval, its card's headline names the command, redacted
+    like the arguments view and cut to 160 characters (ADR-0260).
 2.  **`artifact.export`, at Milestone 6.** The argument shape, the
     `ArtifactRef` it returns, the size ceiling, and the
     same-path-same-run identity that makes its `IDEMPOTENT`
@@ -1677,9 +1683,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; fifty-two model-callable builtin tools
-    are declared at build time across the corpus, and forty-two of them
-    belong to other specifications. Resolved by naming those forty-two here,
+    is the original roster; fifty-three model-callable builtin tools
+    are declared at build time across the corpus, and forty-three of them
+    belong to other specifications. Resolved by naming those forty-three here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not

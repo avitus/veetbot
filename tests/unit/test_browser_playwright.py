@@ -29,8 +29,12 @@ from agent_core.adapters.browser import playwright as playwright_adapter
 from agent_core.adapters.browser.page_structure import REGION_SCRIPT
 from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
 from agent_core.adapters.browser.playwright import (
+    USE_INSPECTION_ELEMENT_BOUND,
     PlaywrightBrowserProvider,
     PythonPlaywrightRuntime,
+    _copies_still_inert,
+    _element_facts,
+    _inspected_use_references,
 )
 from agent_core.domain.browser import (
     BrowserAction,
@@ -48,6 +52,152 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
 from tests.real_browser_support import RealBrowserRuntime, local_https_site, require_real_browser
+
+
+@pytest.mark.parametrize(
+    "elements", [USE_INSPECTION_ELEMENT_BOUND, USE_INSPECTION_ELEMENT_BOUND + 1]
+)
+async def test_use_inspection_reads_the_document_only_within_the_element_bound(
+    elements: int,
+) -> None:
+    """ADR-0263: the pierced document read grows with the page, so a page past the
+    bound is never read and every external reference on it stays opaque."""
+    session = Mock()
+    session.detach = AsyncMock()
+    session.send = AsyncMock(
+        return_value={
+            "root": {
+                "nodeType": 9,
+                "documentURL": "https://portal.example/",
+                "baseURL": "https://portal.example/",
+                "children": [
+                    {
+                        "nodeType": 1,
+                        "localName": "use",
+                        "attributes": ["href", "/sprite.svg#menu"],
+                        "children": [],
+                        "shadowRoots": [
+                            {
+                                "nodeType": 11,
+                                "shadowRootType": "user-agent",
+                                "children": [
+                                    {
+                                        "nodeType": 1,
+                                        "localName": "symbol",
+                                        "attributes": [],
+                                        "children": [],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+    )
+    page = Mock()
+    page.evaluate = AsyncMock(return_value=elements)
+    page.context.new_cdp_session = AsyncMock(return_value=session)
+
+    references = await _inspected_use_references(page)
+
+    if elements > USE_INSPECTION_ELEMENT_BOUND:
+        assert references == []
+        page.context.new_cdp_session.assert_not_awaited()
+    else:
+        page.context.new_cdp_session.assert_awaited_once_with(page)
+        session.send.assert_awaited_once_with("DOM.getDocument", {"depth": -1, "pierce": True})
+        assert references == ["https://portal.example/sprite.svg#menu"]
+
+
+@pytest.mark.parametrize("change", [None, "copy_changed", "retargeted", "walk_overflowed"])
+async def test_a_grant_constrained_click_reads_its_inspected_copies_again_before_the_click(
+    monkeypatch: pytest.MonkeyPatch, change: str | None
+) -> None:
+    """ADR-0263: the click guard cannot see inside a user-agent shadow root, so
+    immediately before the click the selected element's own external references
+    must still lie within the ones its live read relied on, and every relied-on
+    copy must still be inert; a retargeted ``<use>``, a changed copy, or an
+    element the walk cannot bound refuses the act instead of clicking."""
+    sprite = "https://portal.example/sprite.svg#menu"
+    still_inert = change is None
+    reads: list[str] = []
+
+    async def inspected(page: Any) -> list[str]:
+        reads.append("inspect")
+        return [] if change == "copy_changed" else [sprite]
+
+    monkeypatch.setattr(playwright_adapter, "_inspected_use_references", inspected)
+    handle = Mock()
+    handle.click = AsyncMock()
+    handle.evaluate = AsyncMock(
+        return_value={
+            None: [sprite],
+            "copy_changed": [sprite],
+            "retargeted": ["https://portal.example/other.svg#menu"],
+            "walk_overflowed": None,
+        }[change]
+    )
+    assert await _copies_still_inert(Mock(), handle, [sprite]) is still_inert
+    guard = Mock()
+    guard.evaluate = AsyncMock(return_value=False)
+    guard.dispose = AsyncMock()
+    runtime = PythonPlaywrightRuntime()
+    runtime._forget_observation = AsyncMock()  # type: ignore[method-assign]
+    action = BrowserAction(kind=BrowserActionKind.CLICK, ref="e1", expected_revision="r1")
+
+    if still_inert:
+        await runtime._dispatch(Mock(), handle, action, [guard], relied_copies=[sprite])
+        assert [call.kwargs.get("trial") for call in handle.click.await_args_list] == [True, None]
+    else:
+        with pytest.raises(BrowserProviderError) as refused:
+            await runtime._dispatch(Mock(), handle, action, [guard], relied_copies=[sprite])
+        assert refused.value.reason_code == "tool.browser.grant_not_applicable"
+        assert [call.kwargs.get("trial") for call in handle.click.await_args_list] == [True]
+        runtime._forget_observation.assert_awaited_once()
+    assert len(reads) == (2 if change in (None, "copy_changed") else 0)
+    guard.dispose.assert_awaited()
+
+
+@pytest.mark.parametrize("overflow", [True, None])
+async def test_live_coverage_refuses_a_read_whose_external_references_overflowed(
+    overflow: bool | None,
+) -> None:
+    """ADR-0263: the element read lists at most 64 external references; one past
+    them was neither inspected nor rechecked, so the live check refuses the act
+    rather than trusting the truncated list (a missing flag is the same refusal)."""
+    runtime = PythonPlaywrightRuntime()
+    handle = Mock()
+    handle.evaluate = AsyncMock(side_effect=AssertionError("the overflow refuses before any read"))
+    metadata = {"overlong": False, "externalUsesOverflow": overflow}
+
+    covered = await runtime._live_coverage(
+        Mock(),
+        handle,
+        BrowserAction(kind=BrowserActionKind.CLICK, ref="e1", expected_revision="r1"),
+        Mock(),
+        metadata,
+        now=datetime(2026, 10, 28, tzinfo=UTC),
+    )
+
+    assert covered is False
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+def test_an_element_with_more_external_references_than_the_read_lists_is_opaque(
+    overflow: bool,
+) -> None:
+    """ADR-0263: an element that met more than 64 external references may reach a
+    target no one listed, so its facts carry a target outside every origin and a
+    task grant refuses it before spending a use."""
+    metadata = {"labels": {}, "overlong": False, "opaque": False, "externalUsesOverflow": overflow}
+
+    element = _element_facts(metadata, name="Continue", page_url="https://portal.example/")
+
+    if overflow:
+        assert element.link_target == BrowserTargetFacts(same_origin=False, first_segment=None)
+    else:
+        assert element.link_target is None
 
 
 @pytest.mark.parametrize("stage", ["attach", "identify", "destroy", "confirm"])
@@ -2015,7 +2165,11 @@ async def lesson_pages(
     left: list[str] = []
 
     async def page(request: Request) -> Response:
-        return HTMLResponse(pages[request.url.path])
+        path = request.url.path
+        if path.endswith(".svg"):
+            # A sprite a page draws its icons from (ADR-0263).
+            return Response(pages[path], media_type="image/svg+xml")
+        return HTMLResponse(pages[path])
 
     async def elsewhere(request: Request) -> Response:
         if request.url.path != "/favicon.ico":

@@ -1836,3 +1836,18 @@ async def test_postgres_people_duplicate_pass() -> None:
         assert (await service.merge_suggestions(owner, ceiling=Sensitivity.SENSITIVE)).items == []
         again = await service.dedupe(owner, apply=True)
         assert again.merges == [] and again.suggestions == []
+
+
+async def test_postgres_contextual_formation_preserves_prior_source_provenance() -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, session
+    from tests.unit.test_people_context_distillation import context_formation_contract
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await context_formation_contract(clock, app.uow_factory)

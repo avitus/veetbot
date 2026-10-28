@@ -1084,7 +1084,9 @@ async def test_approval_presentation_failure_falls_back_and_still_waits(
         async with app.uow_factory() as uow:
             waiting = (await uow.invocations.list_for_run(run_id, app.principal))[0]
 
-    assert created.action_summary == "Run demo.approval_fallback with validated arguments."
+    # ADR-0260: the fallback names the kind of action and why it asks.
+    assert created.action_summary == "Make a change outside Veetbot with demo.approval_fallback"
+    assert created.policy_reason_text == "Veetbot asks before changing anything outside Veetbot."
     assert created.arguments == {}
     assert waiting.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
     assert tool.approval_view_called

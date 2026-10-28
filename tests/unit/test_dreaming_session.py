@@ -100,3 +100,41 @@ def test_review_cookie_refuses_changed_authority_or_invalid_request(change: str)
         request = scope(cookie, path="/v1/dreaming/schedule", method="POST")
     with pytest.raises(AuthenticationError):
         Authenticator(settings, principal, clock).authenticate(Request(request))
+
+
+@pytest.mark.parametrize("has_session_scope", [True, False])
+def test_source_cookie_preserves_only_existing_session_read_authority(
+    has_session_scope: bool,
+) -> None:
+    settings = replace(
+        memory_settings(),
+        auth_mode=AuthMode.TOKEN,
+        auth_token=SecretStr("synthetic-review-secret"),
+        memory_api_enabled=True,
+        memory_reconsolidation_api_enabled=True,
+        memory_dreaming_review_enabled=True,
+    )
+    principal = owner().model_copy(
+        update={
+            "scopes": {"memory.read", "memory.write"}
+            | ({"session.read", "session.write"} if has_session_scope else set())
+        }
+    )
+    clock = FixedClock(datetime.fromtimestamp(1800000000, UTC))
+    response = Response()
+    dreaming_session.issue(response, settings, principal, clock)
+    cookie = response.headers["set-cookie"].split(";", 1)[0]
+    path = (
+        "/v1/dreaming/00000000-0000-0000-0000-000000000001/sources/"
+        "00000000-0000-0000-0000-000000000002/conversation"
+    )
+    authenticated = dreaming_session.authenticate(
+        scope(cookie, path=path), settings, principal, clock
+    )
+    assert ("session.read" in authenticated.scopes) is has_session_scope
+    assert "session.write" not in authenticated.scopes
+    normal = dreaming_session.authenticate(scope(cookie), settings, principal, clock)
+    assert "session.read" not in normal.scopes
+    for invalid in ("/v1/sessions", path + "/extra"):
+        with pytest.raises(AuthenticationError):
+            dreaming_session.authenticate(scope(cookie, path=invalid), settings, principal, clock)

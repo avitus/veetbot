@@ -800,7 +800,7 @@ The rules:
   acquire. ADR-0137 records the production history/cache failure this repairs.
 
 ```text
-[... 41,882 bytes elided; full output: artifact:a/9d02 ...]
+[... 41,882 bytes elided; full output: artifact:a/9d02, kept for the owner; no tool, sandbox or workspace can open it ...]
 ```
 
 Head *and* tail rather than head alone because the two things most often
@@ -814,12 +814,18 @@ last line is `FAILED: 3 tests` is unreadable if only its first 8 KB survives.
 - `truncated = true`, `output_bytes`, and `artifact_id` are recorded on the
   invocation. Truncation is a metric, not an implementation detail; a tenant
   whose results are truncated constantly is paying for output nobody reads.
-- The artifact inherits the result's trust label and is tenant-scoped. No
-  model-callable tool reads an artifact back: `artifact.export` moves bytes into
-  the store rather than out of it, and the `workspace.*` readers see only the
-  run's workspace. The elided span therefore never re-enters context outside
-  its envelope; a client reads the whole capture through the owner-scoped
-  artifact routes.
+- The artifact inherits the result's trust label and is tenant-scoped. One
+  model-callable tool reads a capture back: `artifact.read_capture` returns a
+  chat's own untrusted capture in bounded sections, under the same label
+  ([Reading a capture in sections](#reading-a-capture-in-sections-adr-0261)).
+  Nothing else does: `artifact.export` moves bytes into the store rather than
+  out of it, and the `workspace.*` readers see only the run's workspace. The
+  elided span therefore re-enters context only inside an untrusted envelope; a
+  client reads the whole capture through the owner-scoped artifact routes. The
+  marker says which applies, because a marker that only named the artifact
+  sent a model searching the sandbox for it (ADR-0260). The excerpt context
+  assembly makes for sessions older than admission-time excerpts keeps its
+  `event:<sequence>` marker unchanged.
 
 Section 8.1's `maximum_output_bytes` is per-tool. The registry additionally
 enforces a global ceiling from configuration, and a `ToolSpec` declaring more
@@ -2454,3 +2460,194 @@ if the service issued a refresh token and the API neither refused the token
 nor failed. It prints the path and the number of read operations, and nothing
 secret. A document that is missing or unusable is reported with its HTTP
 status after the grant is saved.
+
+## Reading a capture in sections (ADR-0261)
+
+[ADR-0261](../adr/0261-read-a-capture-in-sections.md) designs this section.
+The owner approved it on 2026-10-27; its production check is pending.
+
+A *capture* is the artifact that admission writes when a result exceeds the
+inline ceiling. It holds the whole acquired result up to the hard ceiling and
+carries the result's trust label. `artifact.read_capture` returns one bounded
+section of a capture, or a literal search over it, as an ordinary tool result
+labeled `EXTERNAL_UNTRUSTED`. It never summarizes, never copies bytes into the
+workspace or sandbox, and opens nothing but this chat's own untrusted captures.
+
+**Arguments.**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "artifact": {
+      "type": "string",
+      "pattern": "^(artifact:)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "section": {"type": "integer", "minimum": 1, "maximum": 65536, "default": 1},
+    "find": {"type": "string", "minLength": 1, "maxLength": 200}
+  },
+  "required": ["artifact"],
+  "additionalProperties": false
+}
+```
+
+`artifact` accepts the form that the marker and truncation pointers print, so
+the model can copy either one. Without `find`, the call returns `section`.
+With `find`, it searches from `section` onward.
+
+**Which artifacts open.** When admission writes a capture, it marks the
+artifact row with a `capture` metadata entry holding the producing tool's name
+and its `required_scopes`, sorted. The reader opens an artifact only when the
+row carries that mark, its tenant, principal and session are the run's, its
+`expires_at` has not passed, its `trust` is `EXTERNAL_UNTRUSTED`, and the run's
+principal holds every recorded scope. Any other case returns
+`tool.capture.not_found`. That covers another session's capture, a
+`SANDBOX_EXPORT`, `MODEL_OUTPUT`, `UPLOAD` or `KNOWLEDGE_SOURCE` artifact, a
+tool's own `TOOL_OUTPUT` file such as a chart, a capture of a tool whose
+output is trusted, a capture written before the mark existed, and a capture
+whose producing tool's scope has been revoked. A single code means the reader
+is never an existence oracle. Revoking a tool's scope closes its captures to
+the model as well as its calls. Session deletion cascades to the artifact row,
+and the retention sweeper removes expired captures, so neither needs a rule of
+its own here.
+
+**Text and sections.** A capture's text is the `text` of its text parts in
+order, joined by a blank line. A partial capture is not valid JSON, so it is
+read as UTF-8, with invalid sequences replaced. Sections are a pure function
+of that text. Section 1 starts at offset zero. Each section is the longest run
+of whole lines from its start whose rendered result, header included, fits
+16,384 bytes, measured as `content_bytes` measures admission. The header is
+measured at its widest numbering, so where a section ends never depends on its
+own number. A line that alone exceeds that is cut at the last character
+boundary that fits. The next section starts where the previous one ends.
+Sections therefore cover the text exactly once and in order. The result is
+one text part:
+
+```text
+artifact:<id> section <n> of <total>, from <tool>
+
+<section text>
+```
+
+Its structured form is `{artifact, section, sections, tool, text}`. The
+16,384 bytes are the tool's `maximum_output_bytes` and part of its pinned
+specification, so changing them is a new tool version, never a renumbering
+under a pinned session.
+
+**Find.** `find` is a literal string, never a pattern. It is matched
+case-insensitively under Unicode case folding against the capture's text,
+starting at the first character of `section`. The result states the total
+number of matches from that point and lists the first twenty, in order, as
+`§<section>: <snippet>`. A snippet is up to 160 characters centered on the
+match, with runs of whitespace collapsed to one space. Its structured form is
+`{artifact, sections, tool, find, total, matches: [{section, snippet}]}`. The
+same 16,384-byte bound applies: trailing matches leave the listing, never the
+total, until the result fits.
+
+**Admission.** The admission ceiling of every other tool is
+`min(maximum_output_bytes, output.inline_maximum_bytes)`. For this tool it is
+`maximum_output_bytes` alone. A section is already a bounded read of a
+capture, and capturing it again would make a capture of a capture. The result
+carries no `context_content`, and admission writes no artifact for it. Context
+assembly treats a carried section like any other carried result over the
+inline limit and gives it the deterministic head-and-tail excerpt with its
+`event:<sequence>` marker
+([context-engine.md](context-engine.md#what-history-selection-retains)). The header line
+survives in the head and names the section to read again.
+
+**Budgets.** `capture.step_maximum_reads` (shipped 2) and
+`capture.run_maximum_reads` (shipped 16) in `tools/limits.yaml` bound the
+calls. A search counts as a read. A call over either limit is refused before
+anything is read, with `tool.capture.step_limit` or `tool.capture.run_limit`,
+and does not count toward the limit. The counts come from the run's completed
+`artifact.read_capture` invocations, other than the call itself, so a
+resumed run counts the reads it already made. `allow_parallel` is false, so a batch's reads run, and are
+counted, in batch order. At 16 KiB a section, two sections are about 8,000 to
+11,000 tokens. On the production window, a quarter of the tool-result budget
+is about 14,000 tokens, so a step of reads moves the truncated prefix at most
+once, which keeps the ADR-0242 cache property: with the prefix at its
+24,000-token ceiling, two sections estimate at 11,025 tokens against a
+14,481-token block. A run reads at most 256 KiB. On a window whose tool-result
+budget is smaller than a section, such as the 32k-token deterministic model,
+a section is truncated to a pointer like any other result; its call stays in
+context, so it can be read again.
+
+**Classification.**
+
+```text
+name                   side_effect  risk  idempotency  target      output_trust
+---------------------  -----------  ----  -----------  ----------  ------------------
+artifact.read_capture  NONE         LOW   READ_ONLY    in_process  EXTERNAL_UNTRUSTED
+```
+
+It requires no scopes, because each capture checks its own recorded scopes. It
+has a 10-second timeout, 16,384 bytes of output and no parallel execution. The
+matrix row `none: allow` admits it, and the trust overlay does not escalate
+`NONE`, so a read after untrusted content needs no approval. A read also adds
+untrusted content to the turn, as its fetch did, so later code execution,
+workspace writes and external actions escalate exactly as before.
+`_effective_output_trust` returns `EXTERNAL_UNTRUSTED` for every result,
+because the declared trust is `EXTERNAL_UNTRUSTED`. No policy file changes,
+and `policy_version` does not move.
+
+**Failures.** These are the stable codes, each with a fixed message in the
+checked-in table:
+
+- `tool.capture.not_found`: no capture this run can open.
+- `tool.capture.section_out_of_range`: the section is past the end. The
+  message says that the marker and every section header give the count.
+- `tool.capture.step_limit` and `tool.capture.run_limit`: the budgets above.
+
+Schema failures return the ordinary `tool.arguments_invalid`.
+
+**Roster.** The tool is the one *unindexed deferral*. The default agent
+enables and defers it. The planner pins it with the deferred tools, and
+`tool.call` resolves it like any of them, but the index renders no entry for
+it, and it counts against neither index cap
+([context-engine.md](context-engine.md#only-history-scales-with-the-window)). It adds no bytes to the
+prefix, takes no definition slot and moves nothing into `skipped_tool_names`.
+It is never ranked for a definition, even when an agent enables it without
+deferring it. When it is the only deferral, `tool.call` takes a definition
+slot so the reader stays reachable. A plan without `tool.call` records it as
+skipped. The capture marker is its advertisement.
+
+**The marker.** When the run pins `artifact.read_capture` and the capture
+would open for it, admission writes:
+
+```text
+[... 520,402 bytes elided; full output: artifact:<id>, 33 sections; read one with tool.call {"name":"artifact.read_capture","arguments":{"artifact":"<id>","section":1}}, or pass "find" to search it ...]
+```
+
+In every other case it writes the ADR-0260 marker. The section count comes
+from the same function the reader uses. The excerpt keeps the same inline
+budget and shrinks by the roughly 200 bytes the longer marker costs.
+Truncation pointers (`full content at artifact:<id>`) do not change. The
+reader accepts their form, so a pointer to a capture that opens can be
+followed.
+
+**What does not change.** `artifact.export` still only writes, and the
+`workspace.*` readers still see only the workspace. A client still reads a
+whole capture through the owner-scoped artifact routes. `memory.learn` does
+not admit this tool as a source read: a quote found in a section is cited
+against the original read, whose canonical content is the complete result
+whenever that result fit the tool's own limit (ADR-0233).
+
+**Gates.** Each item was a red test before its change
+(`tests/unit/test_capture_sections.py`, `test_artifact_read_capture.py`,
+`test_capture_admission_adr0261.py`, `test_capture_reader_roster.py`, and the
+composed gate below):
+
+- A property test shows that sections cover the text exactly once, end at
+  line breaks and fit 16,384 bytes.
+- Every case listed under *Which artifacts open* returns
+  `tool.capture.not_found`.
+- The step and run limits hold, and a resumed run counts its earlier reads.
+- The marker names the reader exactly when the reader would open the capture.
+- A read is allowed without approval after a web fetch, and a sandbox command
+  after it still records `untrusted_escalation`, with `policy_version`
+  unchanged.
+- The production-shaped roster's rendered prefix, definitions, index entries
+  and `skipped_tool_names` are the same with and without the reader.
+- `tests/gates/test_capture_reader_adr0261.py` runs a composed fetch, search
+  and read. It shows untrusted envelopes in the next request and a refused
+  third read in one step.

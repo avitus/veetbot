@@ -19,6 +19,7 @@ from agent_core.ports.determinism import Clock
 COOKIE = "__Host-veetbot-dreaming"
 MAX_AGE = 30 * 24 * 60 * 60
 _UUID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+_SOURCE_READ = re.compile(rf"/v1/dreaming/{_UUID}/sources/{_UUID}/conversation")
 _READ = re.compile(rf"/v1/(?:dreaming|memory-reconsolidations(?:/{_UUID})?)")
 _WRITE = re.compile(
     rf"/v1/(?:dreaming/(?:schedule|{_UUID}/decision)|memory-reconsolidations/{_UUID}/undo)"
@@ -65,7 +66,7 @@ def issue(response: Response, settings: Settings, principal: Principal, clock: C
 def authenticate(scope: Scope, settings: Settings, principal: Principal, clock: Clock) -> Principal:
     path, method = scope["path"], scope["method"]
     allowed = (
-        (method == "GET" and _READ.fullmatch(path))
+        (method == "GET" and (_READ.fullmatch(path) or _SOURCE_READ.fullmatch(path)))
         or (method == "POST" and _WRITE.fullmatch(path))
         or (method == "DELETE" and path == "/v1/dreaming/session")
     )
@@ -92,9 +93,10 @@ def authenticate(scope: Scope, settings: Settings, principal: Principal, clock: 
             raise ValueError
     except (CookieError, KeyError, ValueError):
         raise AuthenticationError("authentication failed") from None
-    return principal.model_copy(
-        update={"scopes": principal.scopes & {"memory.read", "memory.write"}}, deep=True
-    )
+    scopes = {"memory.read", "memory.write"}
+    if method == "GET" and _SOURCE_READ.fullmatch(path):
+        scopes.add("session.read")
+    return principal.model_copy(update={"scopes": principal.scopes & scopes}, deep=True)
 
 
 def require_browser(request: Request) -> None:

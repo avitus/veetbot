@@ -1092,6 +1092,65 @@ import UserNotifications
         }
     }
 
+    /// A follow-up sent while a deploy restarts the API reaches it: the proxy's
+    /// Bad Gateway answers to the session read and the submission are waited
+    /// out under one idempotency key instead of being shown to the owner.
+    @Test
+    func testFollowUpSentWhileTheServerRestartsIsDelivered() async throws {
+        let sessionID = UUID(), runID = UUID()
+        let lock = NSLock()
+        var restarting = false
+        var gatewayAnswers = ["read": 1, "submit": 3]
+        var submissionKeys: [String?] = []
+        let sessionBody = """
+            {"id":"\(sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Saved chat","metadata":{},"created_at":"2026-10-27T16:51:00Z","updated_at":"2026-10-27T16:54:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let model = try configuredModel { request in
+            func answersBadGateway(_ route: String) -> Bool {
+                lock.withLock {
+                    guard restarting, let left = gatewayAnswers[route], left > 0 else { return false }
+                    gatewayAnswers[route] = left - 1
+                    return true
+                }
+            }
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(for: request, statusCode: 200, body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}")
+            case ("GET", "/v1/sessions/\(sessionID)"):
+                if answersBadGateway("read") { return try proxyBadGateway(for: request) }
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID)/messages"):
+                return try response(for: request, statusCode: 200, body: """
+                    {"items":[{"sequence":2,"role":"assistant","content":[{"type":"text","text":"Saved answer"}]}],"next_cursor":null}
+                    """)
+            case ("POST", "/v1/sessions/\(sessionID)/messages"):
+                lock.withLock { submissionKeys.append(request.value(forHTTPHeaderField: "Idempotency-Key")) }
+                if answersBadGateway("submit") { return try proxyBadGateway(for: request) }
+                return try response(for: request, statusCode: 202, body: "{\"run_id\":\"\(runID)\",\"status\":\"QUEUED\"}")
+            case ("GET", "/v1/runs/\(runID)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
+            default:
+                Issue.record("Unexpected request: \(request.httpMethod ?? "") \(request.url?.path ?? "")")
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        defer { model.newSession() }
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        await model.selectSession(try #require(model.history.first))
+        lock.withLock { restarting = true }
+
+        #expect(await model.send("And their growth rate?"))
+
+        #expect(model.errorMessage == nil)
+        #expect(model.runState.activeRunID == runID)
+        #expect(model.runState.timeline.map(\.text) == ["Saved answer", "And their growth rate?"])
+        let keys = lock.withLock { submissionKeys }
+        #expect(keys.count == 4)
+        #expect(Set(keys).count == 1)
+    }
+
     /// Reopening a chat whose answer followed three approved commands lands on
     /// the answer, with the commands in one collapsed summary above it.
     @Test(arguments: [3, 12])
@@ -1879,9 +1938,12 @@ import UserNotifications
         var listedStatus: String?
         /// Whether the source run's stream carries the offer (ADR-0251).
         var offered = true
+        /// Whether accepting continues the source run parked on a question.
+        var continuesSourceRun = false
 
         final class Log: @unchecked Sendable {
             var connections: [URLRequest] = []
+            var answers: [URLRequest] = []
             var offerReads = 0
             var sourceReplays = 0
             var accepted = false
@@ -1889,6 +1951,7 @@ import UserNotifications
         let log = Log()
 
         var connections: [URLRequest] { lock.withLock { log.connections } }
+        var answers: [URLRequest] { lock.withLock { log.answers } }
         var offerReads: Int { lock.withLock { log.offerReads } }
         var sourceReplays: Int { lock.withLock { log.sourceReplays } }
 
@@ -1939,7 +2002,11 @@ import UserNotifications
                     log.connections.append(request)
                     log.accepted = true
                 }
-                return (200, "{\"run_id\":\"\(runID.uuidString)\"}", [:])
+                let continued = continuesSourceRun ? sourceRunID : runID
+                return (200, "{\"run_id\":\"\(continued.uuidString)\"}", [:])
+            case ("POST", "/v1/runs/\(sourceRunID.uuidString)/input"):
+                lock.withLock { log.answers.append(request) }
+                return (202, "{\"run_id\":\"\(sourceRunID.uuidString)\",\"status\":\"QUEUED\"}", [:])
             case ("GET", "/v1/runs/\(runID.uuidString)/events"):
                 return (200, "", ["Content-Type": "text/event-stream"])
             case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
@@ -2110,6 +2177,69 @@ import UserNotifications
 
         // The server closes every open offer on any connection.
         #expect(server.connections.count == 1)
+        #expect(model.websiteOffer == nil)
+    }
+
+    /// The source run parks on a question about the offer (ADR-0251 owner decision 3).
+    private func askAboutTheOffer(_ model: ChatViewModel, _ server: WebsiteOfferServer) {
+        model.runState.begin(runID: server.sourceRunID, status: .running)
+        model.runState.reduce(
+            SSEFrame(
+                id: 70,
+                event: "run.waiting_for_user",
+                data: [
+                    "run_id": .string(server.sourceRunID.uuidString),
+                    "question_id": .string(UUID().uuidString),
+                    "question": .string("Tap Connect so I can sign in."),
+                ]
+            )
+        )
+    }
+
+    @Test
+    func testTheCardShowsWhileTheSourceRunAsksAQuestion() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        #expect(model.showsWebsiteOffer)
+
+        model.runState.begin(runID: server.sourceRunID, status: .running)
+        // A working run still hides it.
+        #expect(!model.showsWebsiteOffer)
+
+        askAboutTheOffer(model, server)
+        #expect(model.runState.clarifyingQuestion != nil)
+        #expect(model.showsWebsiteOffer)
+    }
+
+    @Test
+    func testAcceptingWhileTheSourceRunAsksContinuesThatRun() async throws {
+        var server = WebsiteOfferServer()
+        server.continuesSourceRun = true
+        let model = try await websiteOfferModel(server)
+        askAboutTheOffer(model, server)
+        let website = try #require(model.websiteOffer?.websites.first)
+
+        await model.acceptWebsiteOffer(website)
+
+        let request = try #require(server.connections.first)
+        #expect(try requestJSONObject(request)["offer_id"] as? String == server.offerID.uuidString)
+        // The tap answers the question; the app sends no typed answer of its own.
+        #expect(server.answers.isEmpty)
+        #expect(model.runState.activeRunID == server.sourceRunID)
+        #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testATypedAnswerToTheQuestionClearsTheOffer() async throws {
+        let server = WebsiteOfferServer()
+        let model = try await websiteOfferModel(server)
+        askAboutTheOffer(model, server)
+        #expect(model.showsWebsiteOffer)
+
+        #expect(await model.send("Switch") == true)
+
+        // The server closes the offer when it records the owner's answer.
+        #expect(server.answers.count == 1)
         #expect(model.websiteOffer == nil)
     }
 
@@ -3866,6 +3996,16 @@ import UserNotifications
             )
         )
         return (response, Data(body.utf8))
+    }
+
+    /// What nginx answers while the API behind it is not listening.
+    private func proxyBadGateway(for request: URLRequest) throws -> (HTTPURLResponse, Data) {
+        try response(
+            for: request,
+            statusCode: 502,
+            body: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center></body></html>",
+            headers: ["Content-Type": "text/html"]
+        )
     }
 }
 

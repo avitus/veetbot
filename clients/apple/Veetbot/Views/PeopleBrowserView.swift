@@ -94,7 +94,7 @@ struct PeopleLookupSheet: View {
                     if !dynamicTypeSize.isAccessibilitySize {
                         Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
                     }
-                    TextField("Search people", text: Binding(get: { model.searchText }, set: model.setSearchText))
+                    TextField("Search people", text: Binding(get: { model.searchText }, set: model.setSearchText), prompt: .a2Prompt("Search people"))
                         .textFieldStyle(.plain)
                         .accessibilityLabel("Search people")
                         .accessibilityIdentifier("people.search")
@@ -366,7 +366,7 @@ struct AddPersonView: View {
     var body: some View {
         NavigationView {
             Form {
-                TextField("Name", text: $name).disabled(pendingName != nil)
+                TextField("Name", text: $name, prompt: .a2FormPrompt("Name")).disabled(pendingName != nil)
                 Text("Use a name or a description you recognize, such as ‘my sister in Canada’.").foregroundColor(AppTheme.inkSoft)
                 if let error { Text(error).foregroundColor(AppTheme.red) }
             }
@@ -436,7 +436,7 @@ struct PeopleImportHistoryView: View {
                     if job.state == "preview" { Button("Start import") { Task { await model.start() } } }
                     if ["budget_paused", "failed", "cancelled"].contains(job.state) {
                         if Decimal(string: job.reservedUSD) == 0 {
-                            TextField("Total budget in USD", text: $budget)
+                            TextField("Total budget in USD", text: $budget, prompt: .a2FormPrompt("Total budget in USD"))
                             Button("Resume import") { Task { await model.start(maxCost: budget) } }
                         } else {
                             Text("An earlier model call has unresolved charges. Its reservation must be settled before this import can resume.").foregroundColor(.secondary)
@@ -486,7 +486,7 @@ struct PeopleImportHistoryView: View {
                     DatePicker("Until", selection: $until, displayedComponents: .date)
                     Text("The end date is excluded.").veetType(.meta).foregroundColor(.secondary)
                     Stepper("Up to \(maximum) records", value: $maximum, in: 100...10000, step: 100)
-                    TextField("Maximum cost in USD", text: $budget)
+                    TextField("Maximum cost in USD", text: $budget, prompt: .a2FormPrompt("Maximum cost in USD"))
                     Button("Preview import") { Task { await model.preview(sessionIDs: selected, accountIDs: selectedAccounts, fetchMailbox: fetchMailbox, since: since, until: until, maxRecords: maximum, maxCost: budget) } }.disabled(selected.isEmpty && selectedAccounts.isEmpty)
                 }.disabled(model.canRetry)
             }
@@ -689,7 +689,7 @@ struct PeopleDirectorySidebar: View {
                 Text("People").veetType(.display)
                 Text("The people you know or have written to.")
                     .veetType(.meta).foregroundColor(AppTheme.inkSoft)
-                TextField("Search people", text: Binding(get: { model.searchText }, set: model.setSearchText))
+                TextField("Search people", text: Binding(get: { model.searchText }, set: model.setSearchText), prompt: .a2Prompt("Search people"))
                     .textFieldStyle(.plain).a2Field().padding(.vertical, 12)
                     .accessibilityIdentifier("people.sidebar.search")
                     .accessibilityLabel("Search people")

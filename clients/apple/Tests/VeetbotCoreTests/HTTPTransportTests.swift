@@ -523,6 +523,170 @@ import Testing
         #expect(await client.transport.authorizationState() == .authenticated)
     }
 
+    /// A deploy restart outlasts the ordinary retries: the proxy's own 502 page
+    /// keeps a submission retrying under its key until the API answers.
+    @Test
+    func testSubmitWaitsOutAServerRestartUnderOneIdempotencyKey() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            let count = lock.withLock {
+                requests.append(request)
+                return requests.count
+            }
+            if count <= 8 { return try Self.proxyBadGateway(for: request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 202,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (
+                response,
+                Data(#"{"run_id":"00000000-0000-0000-0000-000000000002","status":"QUEUED"}"#.utf8)
+            )
+        }
+        let sleeper = RecordingSleeper()
+        let client = try makeClient(token: "valid", sleep: sleeper.sleep)
+
+        let result = try await client.submitMessage(
+            sessionID: UUID(),
+            content: [.text("and their growth rate?")],
+            idempotencyKey: "follow-up-key"
+        )
+
+        #expect(result.status == .queued)
+        let captured = lock.withLock { requests }
+        #expect(captured.count == 9)
+        #expect(
+            captured.allSatisfy {
+                $0.value(forHTTPHeaderField: "Idempotency-Key") == "follow-up-key"
+            })
+        #expect(sleeper.total <= TransportRequest.serverRestartWindow)
+    }
+
+    /// The wait is bounded: a server that never comes back is reported once the
+    /// window's backoff is spent, with the proxy's status.
+    @Test
+    func testServerRestartWaitEndsWhenItsWindowIsSpent() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requestCount = 0
+        StubURLProtocol.handler = { request in
+            lock.withLock { requestCount += 1 }
+            return try Self.proxyBadGateway(for: request)
+        }
+        let sleeper = RecordingSleeper()
+        let client = try makeClient(token: "valid", sleep: sleeper.sleep)
+
+        do {
+            _ = try await client.submitMessage(sessionID: UUID(), content: [.text("hello")])
+            Issue.record("expected the restart wait to end")
+        } catch let HTTPTransportError.api(error) {
+            #expect(error.statusCode == 502)
+        }
+
+        #expect(lock.withLock { requestCount } > 3)
+        #expect(sleeper.total <= TransportRequest.serverRestartWindow)
+        #expect(sleeper.total > TransportRequest.serverRestartWindow - 2)
+    }
+
+    /// Only the proxy's answer means the API is restarting. The API's own 502
+    /// and 503 errors keep the ordinary retry bound, and a read with no
+    /// restart window keeps its single attempt.
+    @Test(arguments: [
+        (502, #"{"error":{"code":"mcp_server_unavailable","message":"unreachable","details":{},"request_id":"r"}}"#),
+        (503, #"{"error":{"code":"service_unavailable","message":"unavailable","details":{},"request_id":"r"}}"#),
+    ])
+    func testApplicationErrorsAreNotWaitedOutAsARestart(status: Int, body: String) async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: status,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid", sleep: RecordingSleeper().sleep)
+
+        await #expect(throws: HTTPTransportError.self) {
+            _ = try await client.submitMessage(sessionID: UUID(), content: [.text("hello")])
+        }
+        await #expect(throws: HTTPTransportError.self) {
+            _ = try await client.getSession(UUID(), restartWindow: TransportRequest.serverRestartWindow)
+        }
+
+        #expect(lock.withLock { requests.map(\.httpMethod) } == ["POST", "POST", "POST", "GET"])
+    }
+
+    /// The session read a follow-up makes before it submits waits out a
+    /// restart only when its caller asks; other reads fail fast as before.
+    @Test
+    func testSessionReadWaitsOutARestartOnlyWithARestartWindow() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let sessionID = UUID()
+        let lock = NSLock()
+        var proxyAnswersLeft = 0
+        StubURLProtocol.handler = { request in
+            let restarting = lock.withLock {
+                guard proxyAnswersLeft > 0 else { return false }
+                proxyAnswersLeft -= 1
+                return true
+            }
+            if restarting { return try Self.proxyBadGateway(for: request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            let body = #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{},"created_at":"2026-10-27T16:55:00Z","updated_at":"2026-10-27T17:02:00Z","active_run_id":null,"last_run_id":null}"#
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid", sleep: RecordingSleeper().sleep)
+
+        lock.withLock { proxyAnswersLeft = 1 }
+        do {
+            _ = try await client.getSession(sessionID)
+            Issue.record("expected a read without a restart window to fail fast")
+        } catch let HTTPTransportError.api(error) {
+            #expect(error.statusCode == 502)
+        }
+
+        lock.withLock { proxyAnswersLeft = 5 }
+        let session = try await client.getSession(
+            sessionID, restartWindow: TransportRequest.serverRestartWindow)
+        #expect(session.id == sessionID)
+        #expect(lock.withLock { proxyAnswersLeft } == 0)
+    }
+
+    private static func proxyBadGateway(for request: URLRequest) throws -> (HTTPURLResponse, Data) {
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 502,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/html"]
+            )
+        )
+        return (
+            response,
+            Data("<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center></body></html>".utf8)
+        )
+    }
+
     /// Cancellation before or during token lookup must never invalidate a valid session.
     @Test(arguments: [false, true])
     func testCancelledTokenLookupPreservesAuthorization(cancelBeforeLookup: Bool) async throws {
@@ -2112,7 +2276,12 @@ import Testing
         #expect(sent.body.map { String(decoding: $0, as: UTF8.self) } == #"{"folder_id":null}"#)
     }
 
-    private func makeClient(token: String) throws -> VeetbotAPIClient {
+    private func makeClient(
+        token: String,
+        sleep: @escaping @Sendable (UInt64) async throws -> Void = {
+            try await Task.sleep(nanoseconds: $0)
+        }
+    ) throws -> VeetbotAPIClient {
         let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [StubURLProtocol.self]
@@ -2120,9 +2289,22 @@ import Testing
         let transport = HTTPTransport(
             configuration: configuration,
             tokenStore: InMemoryTokenStore(token: token),
-            session: session
+            session: session,
+            sleep: sleep
         )
         return VeetbotAPIClient(transport: transport)
+    }
+}
+
+/// Records retry backoff instead of sleeping through it.
+private final class RecordingSleeper: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nanoseconds: UInt64 = 0
+
+    var total: TimeInterval { lock.withLock { TimeInterval(nanoseconds) / 1_000_000_000 } }
+
+    var sleep: @Sendable (UInt64) async throws -> Void {
+        { [self] delay in lock.withLock { nanoseconds += delay } }
     }
 }
 

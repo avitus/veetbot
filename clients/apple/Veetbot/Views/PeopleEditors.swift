@@ -83,7 +83,7 @@ struct PeopleIdentityRepairView: View {
                 Section("Destination person") {
                     if let target { Label("Selected: \(target.displayName)", systemImage: "checkmark.circle") }
                     if operation == "split" { Button("Create a separate person") { showingAdd = true } }
-                    TextField("Search people", text: Binding(get: { people.searchText }, set: { people.setSearchText($0) }))
+                    TextField("Search people", text: Binding(get: { people.searchText }, set: { people.setSearchText($0) }), prompt: .a2Prompt("Search people"))
                     ForEach(people.items.filter { $0.id != model.personID }) { person in
                         Button { target = person } label: { HStack { Text(person.displayName); Spacer(); if target?.id == person.id { Image(systemName: "checkmark") } } }
                             .accessibilityAddTraits(target?.id == person.id ? .isSelected : [])
@@ -249,8 +249,8 @@ struct PeopleAliasEditor: View {
                     Text("Channel handle").tag("handle")
                     Text("Role").tag("role")
                 }
-                TextField("Name or contact", text: $value)
-                TextField("Context", text: $context)
+                TextField("Name or contact", text: $value, prompt: .a2FormPrompt("Name or contact"))
+                TextField("Context", text: $context, prompt: .a2FormPrompt("Context"))
                 Text("This confirms that the alias belongs to this person in the stated context. Phone numbers need an international prefix. End an assignment when an address or number changes hands.").veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 if let error = model.errorMessage { Text(error).foregroundColor(AppTheme.red) }
                 if model.canRetrySave { Button("Retry save") { Task { await model.retrySave(); if model.errorMessage == nil { dismiss() } } } }

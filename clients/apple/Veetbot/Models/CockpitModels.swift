@@ -29,6 +29,14 @@ public struct CockpitSnapshot: Decodable, Equatable, Sendable {
         self.feeds = feeds
     }
 
+    /// The same snapshot with one device class's layout replaced by a saved one.
+    public func replacingLayouts(_ layouts: [CockpitDeviceClass: CockpitLayout]) -> CockpitSnapshot {
+        CockpitSnapshot(
+            cursor: cursor, serverTime: serverTime, runtime: runtime, widgets: widgets,
+            layouts: layouts, feeds: feeds
+        )
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         cursor = try container.decode(Int.self, forKey: .cursor)

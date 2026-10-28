@@ -49,6 +49,7 @@ from agent_core.domain.agents import (
     chat_model_variant,
     run_limits_for_session,
 )
+from agent_core.domain.approval_copy import legacy_approval_reason
 from agent_core.domain.approvals import (
     ApprovalCursor,
     ApprovalRequest,
@@ -65,6 +66,7 @@ from agent_core.domain.artifacts import (
 )
 from agent_core.domain.attachments import upload_key, upload_media_type, upload_name
 from agent_core.domain.browser import (
+    WEBSITE_OFFER_STATE_KEY,
     BrowserAuthenticationStatus,
     BrowserAuthenticationWait,
     BrowserProfileStatus,
@@ -140,7 +142,7 @@ from agent_core.domain.persona import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.reconsolidation_summary import SummaryMemory
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunCheckpoint, RunStatus
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
     SESSION_RESERVED_METADATA_KEYS,
@@ -279,7 +281,9 @@ def _approval_view(approval: ApprovalRequest) -> ApprovalView:
         arguments=dict(approval.arguments),
         argument_digests=dict(approval.argument_digests),
         risk=approval.risk.value.upper(),
-        policy_reason=approval.policy_reason,
+        # The API spec defines this field as a plain statement of why approval
+        # was needed; the stored code stays on the record (ADR-0260).
+        policy_reason=approval.policy_reason_text or legacy_approval_reason(approval.policy_reason),
         expires_at=approval.expires_at,
         created_at=approval.created_at,
         resolved_at=approval.resolved_at,
@@ -405,6 +409,18 @@ def _decode_message_cursor(value: str | None) -> int:
         json.JSONDecodeError,
     ) as exc:
         raise SessionMessageCursorError("session message cursor is malformed") from exc
+
+
+def _start_capability_epoch(checkpoint: RunCheckpoint) -> None:
+    """A website connected to a waiting run starts a new capability epoch, not a
+    replay: tools are planned again and the provider continuation is dropped."""
+
+    checkpoint.version += 1
+    checkpoint.tool_pins_initialized = False
+    checkpoint.pinned_tool_names = []
+    checkpoint.pinned_tool_versions = {}
+    checkpoint.pinned_tool_specs = {}
+    checkpoint.provider_continuation = None
 
 
 class PublicSessionService:
@@ -951,13 +967,8 @@ class PublicRunService:
             assert refreshed is not None
             # This preflight wait performed no model work or browser actions.
             # The owner's connection starts a new capability epoch, not a replay.
-            refreshed.version += 1
             refreshed.working_state.pop("browser_access_wait", None)
-            refreshed.tool_pins_initialized = False
-            refreshed.pinned_tool_names = []
-            refreshed.pinned_tool_versions = {}
-            refreshed.pinned_tool_specs = {}
-            refreshed.provider_continuation = None
+            _start_capability_epoch(refreshed)
             await uow.checkpoints.write(active.id, refreshed, full=True)
         if resumed is not None:
             await self._dispatcher.resume(resumed.run_id)
@@ -986,12 +997,13 @@ class PublicRunService:
             if existing is not None and existing.session_id == session_id and existing.run_id:
                 replayed = await uow.runs.get(existing.run_id, principal)
                 return SubmitResult(run_id=replayed.id, status=replayed.status, replayed=True)
-            if await uow.runs.active_for_session(session_id, principal) is not None:
+            active = await uow.runs.active_for_session(session_id, principal)
+            offer = await open_website_offer(uow, principal, session, self._clock.now())
+            if active is not None and not await self._asks_about_offer(uow, active, offer):
                 raise ConflictError(
                     "Finish or cancel the current run before connecting a website.",
                     reason="active_run_exists",
                 )
-            offer = await open_website_offer(uow, principal, session, self._clock.now())
             website = (
                 None
                 if offer is None or offer.offer_id != offer_id
@@ -1001,7 +1013,23 @@ class PublicRunService:
                 raise ConflictError(
                     "This website offer is no longer open.", reason="browser_offer_not_open"
                 )
-            session = await bind_chat_website(uow, principal, session, profile_id)
+            session = await bind_chat_website(
+                uow,
+                principal,
+                session,
+                profile_id,
+                parked_run_id=None if active is None else active.id,
+            )
+            if active is not None:
+                # Owner decision 3: the parked source run continues under the
+                # limits a run admitted in the connected chat gets (ADR-0130).
+                agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+                limits = run_limits_for_session(agent, session).model_copy(
+                    update={"deadline_at": active.deadline_at}
+                )
+                if limits != active.limits:
+                    await uow.runs.set_waiting_limits(active.id, limits)
+            # With the source run parked on the owner's question, this answers it.
             prepared = await self._submit_in(
                 uow,
                 principal,
@@ -1018,8 +1046,36 @@ class PublicRunService:
                 derivation_namespace=CONTINUATION_KIND,
                 derivation_suffix=derivation_suffix,
             )
+            if active is not None:
+                answered = await uow.checkpoints.latest(active.id)
+                assert answered is not None
+                answered.working_state.pop(WEBSITE_OFFER_STATE_KEY, None)
+                _start_capability_epoch(answered)
+                await uow.checkpoints.write(active.id, answered, full=True)
         await self._dispatch_prepared(prepared)
         return SubmitResult(run_id=prepared.run.id, status=prepared.run.status)
+
+    async def _asks_about_offer(
+        self, uow: RepositoryUnitOfWork, run: Run, offer: WebsiteOfferView | None
+    ) -> bool:
+        """ADR-0251 owner decision 3: the offer's source run, parked on the
+        owner's answer to a question with nothing else pending."""
+
+        if (
+            offer is None
+            or run.status is not RunStatus.WAITING_FOR_USER
+            or run.seed_event_sequence != offer.source_sequence
+            or run.cancel_requested_at is not None
+            or (run.deadline_at is not None and run.deadline_at <= self._clock.now())
+            or "run.write" not in run.principal_scopes
+        ):
+            return False
+        checkpoint = await uow.checkpoints.latest(run.id)
+        return (
+            checkpoint is not None
+            and len(checkpoint.pending_tool_calls) == 1
+            and not {"browser_access_wait", "browser_auth_wait"} & checkpoint.working_state.keys()
+        )
 
     async def _submit_in(
         self,

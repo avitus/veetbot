@@ -157,7 +157,7 @@ uses the deployment identity's existing Docker trust boundary; application
 identities still receive no Docker access.
 
 Image retention runs only after every verification above has passed. For each
-of the two repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
+of the three repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
 first and removes every tag after the second, which keeps the active release's
 image and its predecessor, the manual rollback target. It never removes the tag
 just released, a tag that `docker ps` reports a container running, or a tag
@@ -358,13 +358,16 @@ remain valid for one-provider deployments, and both capabilities stay disabled
 when neither form enables them.
 
 To enable image and video generation (ADR-0140), provision `TENSORSCALE_API_KEY`
-in the API and worker environment and grant `media.generate` plus
-`artifact.write` in the owner's `AUTH_SCOPES`. Doppler's development key cache
-does not update the production root-owned environment file. Permit SenseNova
-U1.5 and LTX-2.5 Fast (`ltx2-5-fast`) on the key, restart the API and workers,
-and open a new Chat: old sessions retain their pinned tool roster. No additional
-feature flag is needed for generation. To upload reference pictures, enable
-`AGENT_ATTACHMENT_UPLOADS_ENABLED=1` and grant `artifact.read` for input reads.
+in the API and worker environment. The `media.generate` and `artifact.write`
+grants ship in `deploy/veetbot.env.example`, so every release provisions them
+(ADR-0149); no host `AUTH_SCOPES` edit is needed. Doppler's development key
+cache does not update the production root-owned environment file. Permit
+SenseNova U1.5 and LTX-2.5 Fast (the adapter calls the vendor's
+`ltx-2.5/fast` endpoint) on the key, restart the API and workers, and open a
+new Chat: old sessions retain their pinned tool roster. No additional feature
+flag is needed for generation. To upload reference pictures, enable
+`AGENT_ATTACHMENT_UPLOADS_ENABLED=1`; `artifact.read` for input reads ships in
+the template as well.
 Version 1.1.0 accepts PNG/JPEG/WebP references from the same chat: up to eight
 for image edits (20 MiB each, 64 MiB total), or first/last frames for video
 (10 MiB each). Each approved call creates one PNG or MP4 attachment;
@@ -421,6 +424,18 @@ owner workers load it after the host environment; restricted service roles
 never load it. Deployment does not rewrite `/etc/veetbot/veetbot.env` or copy
 its credentials. Promotion activates the file with the release; rollback uses
 the target's file, or the host grants for older targets without one.
+
+Delegation (Milestone 13) is off until `AGENT_DELEGATION_ENABLED=1` in the
+application environment; the `run.delegate` scope alone enables nothing. The
+other default-off switches without a section of their own on this page are
+`AGENT_TRAJECTORY_EXPORT_ENABLED` (governed trajectory export,
+[events.md](events.md)), `AGENT_MEMORY_API_ENABLED` (the `/v1/memories`
+routes), `AGENT_PERSONA_API_ENABLED` (the persona routes),
+`AGENT_THREAD_FOLDERS_API_ENABLED` (the chat-folder routes),
+`AGENT_SKILL_AUTHORING_ENABLED` (the `skill.manage` tool) and
+`AGENT_SKILL_BACKGROUND_REVIEW_ENABLED` (background skill review);
+`AGENT_SCHEDULE_DRAFTS_ENABLED` (plain-words schedule drafts) defaults to
+`1`. Each takes effect for the API and the workers after a restart.
 
 New platform scopes must be classified in `test_deployment_scopes.py` and
 added to the template when owner-facing, so adding a feature cannot silently
@@ -479,6 +494,20 @@ environment. For named accounts also mirror the non-secret
 path empty. Do not copy any `GMAIL_*_CREDENTIAL_FILE` variable. The schedule
 loader reads the manifest's account ids to derive current Gmail scopes but
 never opens the referenced OAuth credential documents.
+The schedule environment mirrors these application flags, and the release
+preflight refuses a mismatch where it checks one: `AGENT_SCHEDULE_API_ENABLED`
+and `AGENT_SCHEDULE_WORKER_ENABLED` (each `0` or `1` in the application
+environment, which fails with "schedule API and worker flags must be enabled
+or disabled together" when they differ); `AGENT_NOTIFICATION_API_ENABLED` and
+`AGENT_NOTIFICATION_DISPATCH_ENABLED` ("schedule worker notification API and
+dispatch flags must change together" and "schedule worker notification flags
+must match the application notification flags"); `AGENT_COCKPIT_ENABLED`
+("schedule worker AGENT_COCKPIT_ENABLED must match the application
+environment"); `AGENT_EMAIL_ENABLED` with `GMAIL_ACCOUNTS_FILE` as above; and
+`AGENT_CALL_ENABLED` with the non-secret `BLAND_CONFIGURATION_FILE` path,
+because the scheduler derives a schedule's calling scopes from
+`AGENT_CALL_ENABLED` (ADR-0213). The template
+`deploy/veetbot-schedule.env.example` carries every one of them.
 The tenant-scoped database role must not have PostgreSQL `BYPASSRLS` authority:
 schedule child-table isolation depends on the forced row-level-security policy
 on `schedules` applying inside each child-policy lookup. Reserve `BYPASSRLS`
@@ -565,7 +594,10 @@ sudo chmod 0640 /etc/veetbot/veetbot-schedule.env
 ```
 
 Do not add `VEETBOT_RELEASE_ID` to that shared file. The release script writes
-it and the fixed host-native execution-service socket to
+it, the fixed host-native execution-service socket, and the two webhook-route
+flags `AGENT_SURFACE_WHATSAPP_ENABLED` and `AGENT_CALL_INGRESS_ENABLED` (which
+the `deploy-nginx` job reads to decide whether the `/webhooks/whatsapp` and
+`/webhooks/bland` locations are rendered) to
 `/opt/veetbot/current/.release.env`, which every credential-bearing application
 unit loads after the shared environment. This release-local wiring lets an
 existing host adopt the execution service without rewriting the protected
@@ -796,14 +828,18 @@ misidentified documentation endpoint.
 
 The API virtual host keeps `client_max_body_size 1m` for every path except
 the chat attachment upload (ADR-0120), whose location allows `33m` and
-streams the body to the application unbuffered. Activating attachments needs
-three changes together: set `AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, add
-`artifact.write` and `knowledge.write` to the owner principal's
-`AUTH_SCOPES`, and let `deploy-nginx` publish the location after the release.
+streams the body to the application unbuffered, and the Bland webhook, which
+is lowered to `256k`. Activating attachments needs two changes together: set
+`AGENT_ATTACHMENT_UPLOADS_ENABLED=1`, and let `deploy-nginx` publish the
+location after the release. The `artifact.write` and `knowledge.write` grants
+ship in `deploy/veetbot.env.example`, so every release provisions them
+(ADR-0149); no host `AUTH_SCOPES` edit is needed.
 Until the Nginx job lands, an upload above 1 MiB receives Nginx's own `413`.
 
 The `browser.veetbot.com` virtual host keeps `client_max_body_size 64k`
-except on the device sign-in handoff (ADR-0128). That location allows `1m`,
+except on two locations: the ADR-0148 browser-session image upload
+(`/v1/browser-sessions:upload`, `7m`, streamed to the service unbuffered) and
+the device sign-in handoff (ADR-0128). The handoff location allows `1m`,
 streams the body to the browser-profile service unbuffered through an
 in-memory buffer, so it is never written to disk, allows ten seconds between
 body reads, and waits sixty seconds while the service verifies the session.
@@ -891,9 +927,10 @@ exec 9>&-
 
 Browser task grants (ADR-0129) are off until the owner turns them on, and
 only after every device the owner uses runs a client build that understands
-`approve_for_task`. Turning them on takes three changes together in
-`/etc/veetbot/veetbot.env`: add `browser.grant.read` and
-`browser.grant.write` to the owner principal's `AUTH_SCOPES`, set
+`approve_for_task`. The `browser.grant.read` and `browser.grant.write` grants
+ship in `deploy/veetbot.env.example`, so every release provisions them
+(ADR-0149); no host `AUTH_SCOPES` edit is needed. Turning the grants on takes
+two changes together in `/etc/veetbot/veetbot.env`: set
 `BROWSER_TASK_GRANT_SCOPES` optionally to initial exact site scopes (one
 public-HTTPS origin and one path segment each, comma-separated; production
 initially used `https://www.duolingo.com/lesson`), and set
@@ -1053,8 +1090,8 @@ that counter.
 ## Automatic delivery
 
 A pipeline for any branch other than `main` starts no hosted workflow by
-itself; such a branch is verified on the sidecar and, before it is proposed for
-`main`, by a pipeline requested with `run_verify: true` on its final head (ADR-0107,
+itself; such a branch is verified in full once, by a pipeline requested with
+`run_verify: true` on the final head proposed for `main` (ADR-0107, ADR-0257,
 `docs/plan/development-toolchain.md`). `main` is protected: nine verification
 statuses are required checks (`static`, `contract`, `integration`, `sandbox`,
 `apple`, `apple-ios`, `public-site`, and both browser-image instances), so a pull request cannot merge
@@ -1170,7 +1207,13 @@ Milestone 24 ([device-channel-and-sms.md](plan/device-channel-and-sms.md)) lets
 the owner's iPhone act as a Veetbot SMS channel: outbound texts ride the
 system compose sheet, and inbound texts reach Veetbot only because the owner
 wires a Shortcuts personal automation to the app's "Forward Message to
-Veetbot" App Intent. Nothing enables this by default. The owner completes the
+Veetbot" App Intent. Nothing enables this by default: the device channel
+routes are mounted only with `AGENT_DEVICE_CHANNEL_ENABLED=1`, and the
+`device.sms.send` capability and its tooling only when
+`AGENT_DEVICE_SMS_ENABLED=1` is set as well. Set both in the application
+environment and restart the API and both run workers before the ceremony;
+without both, `POST /v1/devices/{device_id}/messages` and the SMS capability
+do not exist. The owner then completes the
 following one-time, per-device ceremony after the app is installed and paired
 ([apple-client.md](apple-client.md)), on the Milestone 18 bootstrap-ceremony
 precedent (`plan/email-integration.md`, "Credentials and the bootstrap
@@ -1587,8 +1630,9 @@ other unit failure. These probes use the calling rules in
 provisioned before calling support.
 
 
-For ADR-0143 notification reconciliation, include `notification.write` in the
-owner client's `AUTH_SCOPES` and bearer-token grants. Apply the migration before
+For ADR-0143 notification reconciliation, the `notification.write` grant ships
+in `deploy/veetbot.env.example`, so every release provisions it (ADR-0149); no
+host `AUTH_SCOPES` edit is needed. Apply the migration before
 starting the new API and dispatcher. The API database role needs SELECT and
 INSERT on `notification_run_receipts`; the notify and surface dispatcher roles
 need SELECT (the surface allowlist above includes it). Check these privileges for the deployed database roles and grant any missing
@@ -1602,9 +1646,11 @@ puts the records catalog in the request body
 ([owner records](plan/owner-records.md)). The migration that adds
 `record_series` and `record_entries` applies with every release whether or
 not the flag is on. To enable records, set `AGENT_RECORDS_ENABLED=1` in the
-application environment file for the API and the workers, add
-`records.read,records.write` to the owner's `AUTH_SCOPES`, and restart the
-API and the workers. The schedule environment's `AUTH_SCOPES` may carry
+application environment file for the API and the workers and restart the
+API and the workers. The `records.read` and `records.write` grants ship in
+`deploy/veetbot.env.example`, so every release provisions them (ADR-0149);
+no host `AUTH_SCOPES` edit is needed. The schedule environment's
+`AUTH_SCOPES` may carry
 `records.read`, but scheduled records access is not wired in this slice: a
 scheduled run carries only its revision's requested scopes and no schedule
 requests a records scope, so no scheduled run sees the catalog; wiring it is
@@ -1636,8 +1682,8 @@ it on `avitus/veetbot` only, then note the App id and the installation id.
 
 **Rulesets.** On the repository, add three rulesets:
 
-- only admins may create, update or delete any branch except
-  `cockpit/widgets`, and any tag;
+- outside `cockpit/widgets`, no branch or tag may be created, updated or
+  deleted, with the admin and write roles exempt, so only the App is fenced;
 - nobody may force-push or delete `cockpit/widgets`;
 - no CircleCI workflow and no CodeRabbit review applies to `cockpit/widgets`.
 
@@ -1681,8 +1727,11 @@ revert it from its details.
 2. Add the exact-name `cockpit.widget.write` `tool_rules` entry to
    `policy/default.yaml`, and regenerate the formation release evidence on the
    new policy version (the owner deferred this to activation on 2026-10-24).
-3. Set `AGENT_COCKPIT_ENABLED=1` and restart the API, both run workers and
-   the maintenance unit.
+3. Set `AGENT_COCKPIT_ENABLED=1` in the application environment and in
+   `/etc/veetbot/veetbot-schedule.env`. Restart the API, both run workers,
+   the maintenance unit and `veetbot-schedule`. The scheduler needs the flag
+   to vouch for a feed schedule's Cockpit scopes, and the release refuses a
+   schedule environment whose flag differs.
 4. Check that `GET /v1/cockpit` answers `200` with a non-null `runtime`, and
    that Cockpit in the Apple client shows an empty board.
 

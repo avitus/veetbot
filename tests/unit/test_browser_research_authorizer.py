@@ -28,6 +28,29 @@ from tests.unit.test_browser_task_grant_authorizer import (
     run,
 )
 
+REFUSAL_REASONS = {
+    "untrusted_turn": "untrusted_turn",
+    "untrusted_seed": "not_owner_seed",
+    "different_actor": "not_owner_seed",
+    "child": "ineligible_run",
+    "agent_changed": "ineligible_run",
+    "missing_scope": "ineligible_run",
+    "missing_binding": "profile_unavailable",
+    "revoked": "profile_unavailable",
+    "foreign_profile": "profile_unavailable",
+    "foreign_origin": "outside_profile_origin",
+    "stale_page": "observation_unavailable",
+    "policy_changed": "policy_changed",
+    "policy_denied": "policy_changed",
+    "expired": "deadline_passed",
+    "sensitive_page": "sensitive_path",
+    "named_consequence": "excluded.publication",
+    "incomplete_facts": "facts_unavailable",
+    "cross_origin_link": "link_outside_prefix",
+    "typed_text_after_email": "turn_not_browser_only",
+    "after_other_tool": "turn_not_browser_only",
+}
+
 
 @pytest.mark.parametrize(
     "problem",
@@ -172,6 +195,11 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
         turn=turn,
     )
     assert result.allowed is (problem in {None, "scheduler", "dated_post_link", "typed_text"})
+    if not result.allowed:
+        # ADR-0263: each refusal names its closed, content-free reason.
+        assert problem is not None
+        assert result.authorization_kind == "browser_research"
+        assert result.reason_code == f"browser.research.{REFUSAL_REASONS[problem]}"
     if result.allowed:
         assert result.dispatch_constraint is not None
         assert result.dispatch_constraint.grant_kind == "research"

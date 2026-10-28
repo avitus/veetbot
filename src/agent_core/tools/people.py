@@ -6,11 +6,12 @@ import json
 from typing import Any
 
 from agent_core.application.authorization import require_scope
-from agent_core.application.people import PublicPeopleService, _safe
+from agent_core.application.people import PublicPeopleService
 from agent_core.application.people_context import PeopleContextService
 from agent_core.domain import people_tools_v1
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent
+from agent_core.domain.hazards import is_safe_text
 from agent_core.domain.memory import RecallQuery, Sensitivity
 from agent_core.domain.messages import TextPart
 from agent_core.domain.people import PeopleInteraction, Person
@@ -108,7 +109,7 @@ class PeopleSearchTool:
                 person = await uow.people.get(
                     context.principal, person_id, ceiling=Sensitivity.SENSITIVE
                 )
-                if isinstance(person, Person) and _safe(person.display_name):
+                if isinstance(person, Person) and is_safe_text(person.display_name):
                     candidates.append(
                         {
                             "id": str(person.id),

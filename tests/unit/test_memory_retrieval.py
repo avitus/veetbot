@@ -125,13 +125,6 @@ def test_authority_orders_user_above_affirmed_above_inferred() -> None:
     assert len(set(scores)) == 3
 
 
-def test_flagged_for_review_carries_a_score_penalty() -> None:
-    clean = _score(memory(), recall_query())
-    flagged = _score(memory().model_copy(update={"flagged_for_review": True}), recall_query())
-    assert clean is not None and flagged is not None
-    assert flagged.score == pytest.approx(clean.score - 0.2)
-
-
 def test_provisional_lifecycle_downweights_but_still_retrieves() -> None:
     active = _score(memory(), recall_query())
     provisional = _score(

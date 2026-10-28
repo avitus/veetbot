@@ -1706,6 +1706,16 @@ The dashboard uses
 current owner-filtered source views and never persists private browser content.
 ADR-0174 defines the authorized boundary and required regression coverage.
 
+Each visible supporting memory links to a read-only conversation viewer in the
+review page. The source-scoped route revalidates the operation and source under
+`memory.read`, requires existing `session.read` authority, and uses the ordinary
+owned-session message projection with bounded pagination. It displays the session
+title and creation date, highlights cited messages, and renders text without HTML
+interpretation. Missing, hidden or erased supporting sources cannot open a
+conversation. The review cookie permits this source-scoped GET only when its owner
+already has `session.read`; it never admits general session APIs or session writes.
+Messages are private/no-store, fetched on demand, and cleared on close or sign-out.
+
 ### Persistent review sign-in and actionable deferrals (ADR-0186)
 
 The owner requested persistent access on 2026-10-11. The dashboard now exchanges

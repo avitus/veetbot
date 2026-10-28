@@ -1964,7 +1964,9 @@ def create_app(
             app.include_router(reconsolidation_router(services.reconsolidation, secured))
             if settings.memory_dreaming_review_enabled:
                 app.include_router(
-                    dreaming_router(services.reconsolidation, secured, settings, clock)
+                    dreaming_router(
+                        services.reconsolidation, secured, settings, clock, services.sessions
+                    )
                 )
 
     persona_router = APIRouter()

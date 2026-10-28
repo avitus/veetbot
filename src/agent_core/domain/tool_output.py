@@ -28,11 +28,13 @@ def output_excerpt(
     location: str,
     capture_label: str = "full output",
     reference: FileReferencePart | None = None,
+    note: str = "",
 ) -> list[ContentPart]:
     """Keep 60% head / 20% tail, shrinking to fit JSON, marker and reference.
 
     Callers retain the source bytes at ``location``. This is a mechanical
-    excerpt, never a summary or a change to the source's trust label.
+    excerpt, never a summary or a change to the source's trust label. ``note``
+    follows the location inside the marker.
     """
 
     def candidate(allowance: int) -> list[ContentPart]:
@@ -41,7 +43,7 @@ def output_excerpt(
         head = rendered[:head_bytes].decode("utf-8", errors="ignore")
         tail = rendered[-tail_bytes:].decode("utf-8", errors="ignore") if tail_bytes else ""
         elided = len(rendered) - len(head.encode()) - len(tail.encode())
-        marker = f"\n[... {elided:,} bytes elided; {capture_label}: {location} ...]\n"
+        marker = f"\n[... {elided:,} bytes elided; {capture_label}: {location}{note} ...]\n"
         return [TextPart(text=head + marker + tail), *([] if reference is None else [reference])]
 
     if len(content_bytes(candidate(0))) > budget:

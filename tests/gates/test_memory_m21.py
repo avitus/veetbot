@@ -4312,39 +4312,56 @@ async def test_automatic_selection_prefers_the_newest_evidenced_policy_and_honor
 
 
 @pytest.mark.parametrize(
-    "statement",
+    ("statement", "match"),
     [
-        "User trimmed the hedge in about an hour.",
-        "User replaced a failing router at work this week.",
-        "User spent the weekend repainting the hallway.",
-        "The user's electrician is coming at 4 p.m. today.",
-        "User recorded the first episode of the podcast yesterday.",
-        "User just finished the quarterly report this afternoon.",
-        "User did the dishes for an hour.",
-        "User's electrician is coming at 4 p.m. today.",
-        "User's brother visited yesterday.",
+        *[
+            (statement, "transient event")
+            for statement in (
+                "User trimmed the hedge in about an hour.",
+                "User replaced a failing router at work this week.",
+                "User spent the weekend repainting the hallway.",
+                "The user's electrician is coming at 4 p.m. today.",
+                "User recorded the first episode of the podcast yesterday.",
+                "User just finished the quarterly report this afternoon.",
+                "User did the dishes for an hour.",
+                "User's electrician is coming at 4 p.m. today.",
+                "User's brother visited yesterday.",
+            )
+        ],
+        *[
+            (statement, "recallable content")
+            for statement in (
+                "User works at an organization.",
+                "User now leads an unspecified work area.",
+                "User lives in a city.",
+                "User has an undisclosed employer.",
+            )
+        ],
     ],
 )
-def test_one_off_events_are_rejected_whatever_their_verb(statement: str) -> None:
-    """A completed occasion is not memory, and its verb is not a whitelist.
+def test_one_off_events_and_generalized_claims_are_rejected(statement: str, match: str) -> None:
+    """A completed occasion is not memory, and a placeholder object says nothing recallable.
 
     The first holdout run stored a patched kernel module, a weekend of
     rewiring, a mowed lawn, a plumber due at three, and a recorded episode:
     each a single occasion the old rule missed because its verb was not one
     of a dozen listed. A past-tense verb with a single-occasion marker, or an
     appointment due today, is a one-off unless the verb begins a lasting
-    state.
+    state. Told that the user's employer was already known, the provider
+    restated the seed as "works at an organization" under the same key,
+    which would have replaced the specific belief with a vacuous one.
     """
 
     from agent_core.memory.distillation import _canonical_provider_statement
 
-    with pytest.raises(ValueError, match="transient event"):
+    with pytest.raises(ValueError, match=match):
         _canonical_provider_statement(statement, MemoryDerivation.DIRECT)
 
 
 @pytest.mark.parametrize(
     "statement",
     [
+        # A lasting change with a date is not a one-off.
         "User adopted a rescue cat last month.",
         "User moved to Porto last week.",
         "User started composting last spring.",
@@ -4352,47 +4369,14 @@ def test_one_off_events_are_rejected_whatever_their_verb(statement: str) -> None
         "User restarted the 5x5 routine about a year ago.",
         "User bought a split keyboard yesterday.",
         "User is learning Japanese this year.",
-    ],
-)
-def test_a_lasting_change_with_a_date_is_not_a_one_off(statement: str) -> None:
-    from agent_core.memory.distillation import _canonical_provider_statement
-
-    assert _canonical_provider_statement(statement, MemoryDerivation.DIRECT) == statement
-
-
-@pytest.mark.parametrize(
-    "statement",
-    [
-        "User works at an organization.",
-        "User now leads an unspecified work area.",
-        "User lives in a city.",
-        "User has an undisclosed employer.",
-    ],
-)
-def test_a_generalized_or_unspecified_claim_is_rejected(statement: str) -> None:
-    """A claim whose object is a placeholder says nothing recallable.
-
-    Told that the user's employer was already known, the provider restated
-    the seed as "works at an organization" under the same key, which would
-    have replaced the specific belief with a vacuous one.
-    """
-
-    from agent_core.memory.distillation import _canonical_provider_statement
-
-    with pytest.raises(ValueError, match="recallable content"):
-        _canonical_provider_statement(statement, MemoryDerivation.DIRECT)
-
-
-@pytest.mark.parametrize(
-    "statement",
-    [
+        # A specific claim with a quantifier survives.
         "User runs on some days.",
         "User works at Northwind.",
         "User has some experience with Rust.",
         "User leads a team of six data engineers.",
     ],
 )
-def test_a_specific_claim_with_a_quantifier_survives(statement: str) -> None:
+def test_a_dated_lasting_change_or_a_quantified_specific_claim_survives(statement: str) -> None:
     from agent_core.memory.distillation import _canonical_provider_statement
 
     assert _canonical_provider_statement(statement, MemoryDerivation.DIRECT) == statement

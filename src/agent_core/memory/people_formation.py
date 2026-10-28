@@ -51,7 +51,6 @@ from agent_core.memory.people import resolve_identity
 from agent_core.ports.people import PeopleStore
 
 PEOPLE_FORMATION_VERSION = "formation@11"
-PEOPLE_LINKER_VERSION = "people-linker@1"
 
 
 class _Common(TypedDict):

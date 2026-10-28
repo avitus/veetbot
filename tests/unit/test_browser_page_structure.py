@@ -98,8 +98,23 @@ def test_canonical_bounding_counts_region_omissions_and_progress_ignores_referen
     assert observation_evidence_key(first) != observation_evidence_key(changed)
 
 
-@pytest.mark.parametrize("malformation", ["missing_coverage", "duplicate_ref", "control_ref"])
-def test_region_records_cannot_lose_coverage_or_alias_action_references(malformation: str) -> None:
+@pytest.mark.parametrize(
+    "malformation",
+    [
+        "missing_coverage",
+        "duplicate_ref",
+        "control_ref",
+        "unknown_kind",
+        "extra_field",
+        "text_bound",
+        "count_bound",
+        "scan_bound",
+    ],
+)
+def test_region_records_refuse_lost_coverage_aliased_references_and_overbound_evidence(
+    malformation: str,
+) -> None:
+    """Region evidence is rejected whole when malformed, aliased, or over its bounds."""
     from pydantic import ValidationError
 
     raw = structured_page().model_dump(mode="json")
@@ -107,20 +122,9 @@ def test_region_records_cannot_lose_coverage_or_alias_action_references(malforma
         raw.pop("region_coverage")
     elif malformation == "duplicate_ref":
         raw["regions"][1]["ref"] = raw["regions"][0]["ref"]
-    else:
+    elif malformation == "control_ref":
         raw["regions"][0]["ref"] = raw["elements"][0]["ref"]
-    with pytest.raises(ValidationError):
-        BrowserObservation.model_validate(raw)
-
-
-@pytest.mark.parametrize(
-    "malformation", ["unknown_kind", "extra_field", "text_bound", "count_bound", "scan_bound"]
-)
-def test_region_boundary_refuses_malformed_or_overbound_evidence(malformation: str) -> None:
-    from pydantic import ValidationError
-
-    raw = structured_page().model_dump(mode="json")
-    if malformation == "unknown_kind":
+    elif malformation == "unknown_kind":
         raw["regions"][0]["kind"] = "script"
     elif malformation == "extra_field":
         raw["regions"][0]["html"] = "untrusted canary"

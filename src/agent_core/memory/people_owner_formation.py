@@ -4,17 +4,18 @@ import re
 
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import BeliefType, MemoryCandidate, MemoryClaimKind, MemoryDerivation
-from agent_core.memory.distillation import PeopleAssistedCandidateExtractor, _DistilledCandidate
+from agent_core.memory.distillation import _DistilledCandidate
+from agent_core.memory.people_context_distillation import ContextualPeopleCandidateExtractor
 
 
-class OwnerPeopleCandidateExtractor(PeopleAssistedCandidateExtractor):
+class OwnerPeopleCandidateExtractor(ContextualPeopleCandidateExtractor):
     """Retain People evidence while classifying direct possessions as owner attributes."""
 
     @staticmethod
     def _normalize_candidate(
         candidate: _DistilledCandidate, *, by_sequence: dict[int, EventEnvelope], scope: str
     ) -> MemoryCandidate:
-        result = PeopleAssistedCandidateExtractor._normalize_candidate(
+        result = ContextualPeopleCandidateExtractor._normalize_candidate(
             candidate, by_sequence=by_sequence, scope=scope
         )
         if (

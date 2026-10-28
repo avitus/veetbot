@@ -5,11 +5,14 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Request, Response
+from fastapi import APIRouter, Header, Query, Request, Response
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from agent_core.api import dreaming_session
-from agent_core.application.services import ReconsolidationService
+from agent_core.api.boundary import MalformedRequestError
+from agent_core.application.errors import SessionMessageCursorError
+from agent_core.application.services import ReconsolidationService, SessionService
 from agent_core.config import AuthMode, Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import (
@@ -18,9 +21,20 @@ from agent_core.domain.dreaming import (
     DreamingSchedule,
     DreamingStatus,
 )
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.reconsolidation_views import OperationView
+from agent_core.domain.views import Page, SessionMessageView, SessionView
 from agent_core.ports.determinism import Clock
+
+
+class SourceConversationView(BaseModel):
+    """An owned conversation page with the operation's cited message identifiers."""
+
+    session: SessionView
+    source_event_ids: list[int]
+    messages: Page[SessionMessageView]
+
 
 _ASSETS = Path(__file__).with_name("dreaming_web")
 _HEADERS = {
@@ -40,6 +54,7 @@ def dreaming_router(
     secured: Callable[..., object],
     settings: Settings,
     clock: Clock | None,
+    sessions: SessionService,
 ) -> APIRouter:
     if settings.auth_mode is AuthMode.TOKEN and clock is None:
         raise ValueError("review sessions require the composition clock")
@@ -123,6 +138,39 @@ def dreaming_router(
             expected_revision=body.expected_revision,
             decision=body.decision,
             key=idempotency_key,
+        )
+
+    @router.get(
+        "/v1/dreaming/{operation_id}/sources/{belief_id}/conversation",
+        openapi_extra={"required_scope": "session.read"},
+    )
+    async def conversation(
+        operation_id: UUID,
+        belief_id: UUID,
+        response: Response,
+        authenticated: Annotated[Principal, secured("session.read")],
+        ceiling: Sensitivity,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        cursor: str | None = None,
+    ) -> SourceConversationView:
+        """Read only a currently visible operation's owned supporting conversation."""
+        response.headers["Cache-Control"] = "private, no-store"
+        operation = await service.get(authenticated, operation_id, ceiling=ceiling)
+        source = next(
+            (s for s in operation.sources if s.belief_id == belief_id and not s.omitted), None
+        )
+        if source is None or source.session_id is None:
+            raise NotFoundError("source conversation unavailable")
+        session = await sessions.get(authenticated, source.session_id)
+        try:
+            messages = await sessions.messages(authenticated, source.session_id, limit, cursor)
+        except SessionMessageCursorError as exc:
+            raise MalformedRequestError("session message cursor is malformed") from exc
+        current = await service.get(authenticated, operation_id, ceiling=ceiling)
+        if source not in current.sources:
+            raise NotFoundError("source conversation changed")
+        return SourceConversationView(
+            session=session, source_event_ids=list(source.event_ids), messages=messages
         )
 
     return router

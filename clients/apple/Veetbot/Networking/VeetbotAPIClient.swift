@@ -67,9 +67,16 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
-    public func getSession(_ sessionID: UUID) async throws -> SessionView {
+    public func getSession(
+        _ sessionID: UUID,
+        restartWindow: TimeInterval = 0
+    ) async throws -> SessionView {
         try await transport.send(
-            TransportRequest(method: .get, path: "/v1/sessions/\(sessionID.uuidString)")
+            TransportRequest(
+                method: .get,
+                path: "/v1/sessions/\(sessionID.uuidString)",
+                restartWindow: restartWindow
+            )
         )
     }
 
@@ -139,7 +146,8 @@ public struct VeetbotAPIClient: Sendable {
                 path: "/v1/sessions/\(sessionID.uuidString)/messages",
                 body: try JSONEncoder.server.encode(MessageBody(content: content, browserProfileID: browserProfileID)),
                 headers: ["Idempotency-Key": idempotencyKey],
-                retryAttempts: 3
+                retryAttempts: 3,
+                restartWindow: TransportRequest.serverRestartWindow
             )
         )
     }
@@ -270,7 +278,11 @@ public struct VeetbotAPIClient: Sendable {
                 TransportRequest(method: .get, path: "/v1/browser-task-grants", queryItems: query)
             )
         } catch {
-            throw taskGrantCompatibilityError(from: error) ?? error
+            // Task grants are default-off (ADR-0129 D20): without the flag the routes
+            // are not mounted and answer the generic 404, or a method miss. A missing
+            // grant or session carries the service's own message and stays an API error.
+            throw defaultOffRouteError(from: error, as: VeetbotAPIClientError.taskGrantsUnavailable)
+                ?? error
         }
     }
 
@@ -278,7 +290,9 @@ public struct VeetbotAPIClient: Sendable {
         do {
             return try await transport.send(TransportRequest(method: .get, path: "/v1/browser-task-scopes"))
         } catch {
-            throw taskGrantCompatibilityError(from: error) ?? error
+            // Default-off task-grant routes; see listBrowserTaskGrants.
+            throw defaultOffRouteError(from: error, as: VeetbotAPIClientError.taskGrantsUnavailable)
+                ?? error
         }
     }
 
@@ -289,7 +303,9 @@ public struct VeetbotAPIClient: Sendable {
                 body: try JSONEncoder.server.encode(policy), retryAttempts: 2
             ))
         } catch {
-            throw taskGrantCompatibilityError(from: error) ?? error
+            // Default-off task-grant routes; see listBrowserTaskGrants.
+            throw defaultOffRouteError(from: error, as: VeetbotAPIClientError.taskGrantsUnavailable)
+                ?? error
         }
     }
 
@@ -301,7 +317,9 @@ public struct VeetbotAPIClient: Sendable {
                 )
             )
         } catch {
-            throw taskGrantCompatibilityError(from: error) ?? error
+            // Default-off task-grant routes; see listBrowserTaskGrants.
+            throw defaultOffRouteError(from: error, as: VeetbotAPIClientError.taskGrantsUnavailable)
+                ?? error
         }
     }
 
@@ -317,7 +335,9 @@ public struct VeetbotAPIClient: Sendable {
                 )
             )
         } catch {
-            throw taskGrantCompatibilityError(from: error) ?? error
+            // Default-off task-grant routes; see listBrowserTaskGrants.
+            throw defaultOffRouteError(from: error, as: VeetbotAPIClientError.taskGrantsUnavailable)
+                ?? error
         }
     }
 
@@ -454,7 +474,11 @@ public struct VeetbotAPIClient: Sendable {
             )
             return try JSONDecoder.server.decode(ArtifactView.self, from: body)
         } catch {
-            throw attachmentCompatibilityError(from: error) ?? error
+            // Attachments are default-off (ADR-0120): a server without the upload route
+            // answers the generic 404 or a method miss, never the service's own message
+            // for a missing conversation, which stays a plain API error.
+            throw defaultOffRouteError(from: error, as: VeetbotAPIClientError.attachmentsUnavailable)
+                ?? error
         }
     }
 
@@ -615,7 +639,8 @@ public struct VeetbotAPIClient: Sendable {
                 TransportRequest(method: .get, path: "/v1/memories", queryItems: query)
             )
         } catch {
-            throw memoryBrowsingCompatibilityError(from: error) ?? error
+            throw unmountedRouteError(from: error, as: VeetbotAPIClientError.memoryBrowsingUnavailable)
+                ?? error
         }
     }
 
@@ -821,7 +846,10 @@ public struct VeetbotAPIClient: Sendable {
                 TransportRequest(method: .get, path: "/v1/settings/models")
             )
         } catch {
-            throw modelSettingsCompatibilityError(from: error) ?? error
+            // Model settings are a single resource with no per-item 404, so any 404 or
+            // 405 on it means the server predates the feature.
+            throw unmountedRouteError(from: error, as: VeetbotAPIClientError.modelSettingsUnavailable)
+                ?? error
         }
     }
 
@@ -847,7 +875,9 @@ public struct VeetbotAPIClient: Sendable {
                 )
             )
         } catch {
-            throw modelSettingsCompatibilityError(from: error) ?? error
+            // A single resource with no per-item 404; see getModelSettings.
+            throw unmountedRouteError(from: error, as: VeetbotAPIClientError.modelSettingsUnavailable)
+                ?? error
         }
     }
 
@@ -859,7 +889,11 @@ public struct VeetbotAPIClient: Sendable {
                 TransportRequest(method: .get, path: "/v1/folders", queryItems: query)
             )
         } catch {
-            throw folderCompatibilityError(from: error) ?? error
+            // Folders are an optional, default-off surface: a server that lacks the
+            // router answers 404 or 405 on the list routes, and the client degrades to
+            // the flat history rather than demanding an upgrade.
+            throw unmountedRouteError(from: error, as: VeetbotAPIClientError.foldersUnavailable)
+                ?? error
         }
     }
 
@@ -919,7 +953,9 @@ public struct VeetbotAPIClient: Sendable {
                 TransportRequest(method: .get, path: "/v1/folders/proposals", queryItems: query)
             )
         } catch {
-            throw folderCompatibilityError(from: error) ?? error
+            // Default-off folder router; see listFolders.
+            throw unmountedRouteError(from: error, as: VeetbotAPIClientError.foldersUnavailable)
+                ?? error
         }
     }
 
@@ -961,7 +997,8 @@ public struct VeetbotAPIClient: Sendable {
                 TransportRequest(method: .get, path: "/v1/schedules", queryItems: query)
             )
         } catch {
-            throw scheduleBrowsingCompatibilityError(from: error) ?? error
+            throw unmountedRouteError(from: error, as: VeetbotAPIClientError.scheduleBrowsingUnavailable)
+                ?? error
         }
     }
 
@@ -1168,10 +1205,26 @@ private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientErr
     return nil
 }
 
-private func memoryBrowsingCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+/// A route the server does not mount answers 404 or 405 with no per-item
+/// meaning; the caller names the error that stands for the absent feature.
+func unmountedRouteError<Failure: Error>(
+    from error: Error, as unavailable: Failure
+) -> Failure? {
     guard case HTTPTransportError.api(let apiError) = error else { return nil }
-    if apiError.statusCode == 404 || apiError.statusCode == 405 {
-        return .memoryBrowsingUnavailable
+    if apiError.statusCode == 404 || apiError.statusCode == 405 { return unavailable }
+    return nil
+}
+
+/// A default-off route answers a method miss or the generic 404 "The requested
+/// resource was not found."; a 404 that carries the service's own message is a
+/// missing item and stays a plain API error the caller acts on by its body.
+func defaultOffRouteError<Failure: Error>(
+    from error: Error, as unavailable: Failure
+) -> Failure? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 405 { return unavailable }
+    if apiError.statusCode == 404, apiError.message == "The requested resource was not found." {
+        return unavailable
     }
     return nil
 }
@@ -1210,65 +1263,6 @@ func encodedHeaderFilename(_ filename: String) -> String {
     var allowed = CharacterSet.alphanumerics.intersection(.init(charactersIn: "\u{0}"..."\u{7F}"))
     allowed.insert(charactersIn: "-._~")
     return filename.addingPercentEncoding(withAllowedCharacters: allowed) ?? "attachment"
-}
-
-/// Attachments are default-off (ADR-0120): a server without the upload route
-/// answers the generic 404 or a method miss, never the service's own message for
-/// a missing conversation, which stays a plain API error.
-private func attachmentCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
-    guard case HTTPTransportError.api(let apiError) = error else { return nil }
-    if apiError.statusCode == 405 {
-        return .attachmentsUnavailable
-    }
-    if apiError.statusCode == 404,
-        apiError.message == "The requested resource was not found."
-    {
-        return .attachmentsUnavailable
-    }
-    return nil
-}
-
-/// Folders are an optional, default-off surface: a server that lacks the
-/// router answers 404 or 405 on the list routes, and the client degrades to
-/// the flat history rather than demanding an upgrade.
-private func folderCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
-    guard case HTTPTransportError.api(let apiError) = error else { return nil }
-    if apiError.statusCode == 404 || apiError.statusCode == 405 {
-        return .foldersUnavailable
-    }
-    return nil
-}
-
-/// Model settings are a single resource with no per-item 404, so any 404 or
-/// 405 on it means the server predates the feature.
-private func modelSettingsCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
-    guard case HTTPTransportError.api(let apiError) = error else { return nil }
-    if apiError.statusCode == 404 || apiError.statusCode == 405 {
-        return .modelSettingsUnavailable
-    }
-    return nil
-}
-
-/// Task grants are default-off (ADR-0129 D20): without the flag the routes
-/// are not mounted and answer the generic 404, or a method miss. A missing
-/// grant or session carries the service's own message and stays an API error.
-private func taskGrantCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
-    guard case HTTPTransportError.api(let apiError) = error else { return nil }
-    if apiError.statusCode == 405 {
-        return .taskGrantsUnavailable
-    }
-    if apiError.statusCode == 404, apiError.message == "The requested resource was not found." {
-        return .taskGrantsUnavailable
-    }
-    return nil
-}
-
-private func scheduleBrowsingCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
-    guard case HTTPTransportError.api(let apiError) = error else { return nil }
-    if apiError.statusCode == 404 || apiError.statusCode == 405 {
-        return .scheduleBrowsingUnavailable
-    }
-    return nil
 }
 
 private struct CreateSessionBody: Encodable {

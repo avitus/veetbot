@@ -179,7 +179,7 @@ struct SidebarSearchField: View {
                 .veetIcon(.small, weight: .semibold)
                 .foregroundColor(AppTheme.inkFaint)
                 .accessibilityHidden(true)
-            TextField("Search", text: $text)
+            TextField("Search", text: $text, prompt: .a2Prompt("Search"))
                 .textFieldStyle(.plain)
                 .veetType(.ui)
                 .accessibilityLabel("Search chats")

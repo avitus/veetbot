@@ -37,8 +37,9 @@ compact-trait navigation on both simulator families.
 runs `make test-apple-ui-ios`. Set the VM up once with
 `tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:27 veetbot-macos-ui`.
 CircleCI runs `make test-apple` and the Mac cases in
-the required `apple` job, and the simulator cases in the required `apple-ios`
-job at the same time.
+the required `apple` job, and the simulator cases in the `apple-ios-iphone`
+and `apple-ios-ipad` jobs at the same time, one device per executor and two
+shards each (ADR-0230); the required `apple-ios` status passes once both have.
 
 The connection screen accepts an HTTPS base URL and a static bearer token.
 Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
@@ -85,7 +86,8 @@ above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 
 Settings are A2 pages, one per group: Connection, Models, Website access,
-Notifications, Appearance, iOS's SMS integration, and Data & privacy. On the
+MCP servers, Notifications, Appearance, iOS's SMS integration, and Data &
+privacy. On the
 Mac and iPad a sidebar on deep paper lists the groups under "Settings" in the
 serif face, the chosen row in the selected tint and Website access marked with
 an amber dot while a login needs the owner; the iPhone lists the groups with a
@@ -104,7 +106,16 @@ the routes says so. Muting kinds per device has no update route and is not
 offered. Appearance adds a System, Light or Dark theme, applied to every window.
 Data & privacy adds Clear local cache, which asks first and then empties this
 device's cached chat list and artifacts and reloads them from the server; chats
-stay on the server. Website rows offer "Use for new chats".
+stay on the server. Website rows offer "Use for new chats". MCP servers
+(ADR-0255) lists the servers from `GET /v1/mcp-servers`, operator rows marked
+Built in, each with its status and access; adds one by name, HTTPS address and
+access (Read-only, or Asks before each call) through `POST /v1/mcp-servers`,
+or from a pasted configuration; signs in to it in the app through
+`POST /v1/mcp-servers/{id}/sign-in` and an authentication session that returns
+on the `veetbot://mcp-sign-in` callback; signs out; and removes it after a
+confirmation. New chats use a server once it is ready. The group needs
+`settings.read` and `settings.write`; a server without the routes says the
+feature is not enabled.
 
 First-run setup is Connect: step 1 is the Connection group under "Connect this
 Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token is
@@ -194,6 +205,14 @@ title reaches the toolbar only once the display title has scrolled away.
 
 Capsule buttons come in three weights (filled teal, hairline, quiet) in
 `A2Controls.swift`.
+
+A field's example or hint is its placeholder, passed as `.a2Prompt(_:)`: verbatim
+text in `inkFaint`, as the design system draws every placeholder. The platform's
+own placeholder grey is nearly as strong as typed text in a plain field, and a
+placeholder written as a localized key turns an example address into a blue
+link. A field in a `Form` passes `.a2FormPrompt(_:)`, which leaves the Mac's
+label beside the field alone. `FieldPromptTests` fails on any field under
+`Views/` that passes neither.
 
 A change the server has confirmed is announced with a toast
 (`ToastCenter`, drawn by `A2Toast.swift`): one short sentence in an ink
@@ -327,9 +346,14 @@ external states visible in App Store Connect and TestFlight.
 ## Runtime behavior
 
 One submitted message creates one run. A stable idempotency key is reused across
-connection retries. If the server reports `active_run_exists`, the UI attaches
-to the named run and does not queue a second message. A waiting user's answer is
-routed to run input with the displayed question identifier. Stop requests use
+connection retries. While a deploy restarts the API, the proxy in front of it
+answers with its own 502, 503 or 504 page; a follow-up's session read and the
+submission keep retrying through those answers for up to three minutes of
+backoff, the release's readiness bound, before a failure is shown. The API's
+own error responses keep the ordinary retry bound. If the server reports
+`active_run_exists`, the UI attaches to the named run and does not queue a
+second message. A waiting user's answer is routed to run input with the
+displayed question identifier. Stop requests use
 the run-cancel route. The native composer uses padded multiline input; Return
 sends its contents, while Command-Return inserts a newline. The composer floats
 over the end of the transcript, which keeps the composer's measured height free
@@ -441,7 +465,9 @@ closes the other; without it every folder starts open. Create, rename, and
 accepting under a new name use a sheet whose refused or duplicate name is
 shown inline, never in the global error banner; deleting a folder uses the
 same confirmation idiom as deleting a conversation and says that the
-conversations return to history.
+conversations return to history. `uv run pytest
+tests/native/test_folders_m29.py -q` is the native bridge for the folder
+journeys.
 Unfiling sends an explicit null, so an omitted field can never unfile a
 conversation. Every folder mutation — a move, a create, a rename, or a delete —
 fences reconciliation when its answer arrives, and a move or a delete also when
@@ -560,6 +586,14 @@ clipboard and confirms the completed copy. Wide code blocks and tables scroll
 horizontally rather than compressing their contents past readability. Messages
 and tool calls retain their first-seen event order as later status events update
 an existing tool card. Approval rule internals are intentionally not shown.
+
+When an unconnected chat names a website the owner has a saved login for, the
+server records an offer and the transcript shows a card ("Connect and
+continue", or "Sign in and continue" when the login needs the owner) with Not
+now. The app reads the offer from `GET /v1/sessions/{session_id}/website-offer`;
+accepting connects that profile to the chat through the existing Website Access
+flow, after a device sign-in when the login needs the owner, and nothing
+connects on its own (ADR-0251).
 
 Approved checkpoints collapse automatically to a summary showing the action and
 whether it was approved once or allowed for the task. Selecting the summary
@@ -762,8 +796,15 @@ thing in each mode's left pane (MagicPath merry-moon-8243, cozy-evening-6871,
 merrily-city-4157): above Chat's search and New chat, above Email's Search
 mail, and above Cockpit's widget list; the mode bar returns only while that
 pane is hidden. Cockpit shows its native unavailable state ("Cockpit isn't
-available yet", `cockpit.unavailable`) until a server offers its routes; the
-board, its web view and its stream arrive with the native Cockpit mode. Email uses the Chat connection's authenticated
+available yet", `cockpit.unavailable`) until a server offers its routes. On
+the Mac its chrome follows "Mac — Cockpit · A2" (MagicPath merrily-city-4157;
+docs/plan/cockpit.md, "Per platform"): the toolbar's title, Live pill and
+summary, shortcuts, three-step appearance, Arrange and details toggle; a left
+pane of Needs you, Widgets with their freshness and This screen; and a
+details panel. Both side columns resize and keep their widths on this Mac
+(`veetbot.cockpit.sidebarWidth`, `veetbot.cockpit.panelWidth`).
+`uv run pytest tests/native/test_cockpit_m35.py -q` is the native bridge for
+the Cockpit acceptance checks. Email uses the Chat connection's authenticated
 transport. Its compact navigation opens a thread from the inbox; regular iPad
 and Mac layouts keep a mailbox sidebar beside the list and thread detail.
 Inbox is the initial collection; Needs you and Handled are distinct server

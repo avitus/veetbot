@@ -219,7 +219,7 @@ struct FolderNameSheet: View {
         VStack(alignment: .leading, spacing: VeetSpace.s3) {
             Text(title)
                 .veetType(.title)
-            TextField("Folder name", text: $name)
+            TextField("Folder name", text: $name, prompt: .a2Prompt("Folder name"))
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if canSave { save() } }
                 .accessibilityIdentifier("folder.name")
@@ -252,7 +252,7 @@ struct FolderNameSheet: View {
         NavigationView {
             Form {
                 Section {
-                    TextField("Folder name", text: $name)
+                    TextField("Folder name", text: $name, prompt: .a2FormPrompt("Folder name"))
                         .accessibilityIdentifier("folder.name")
                     if let error = model.folderEditorError {
                         errorText(error)

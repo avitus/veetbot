@@ -11,7 +11,6 @@ from uuid import UUID
 
 from agent_core.domain.artifacts import AttachmentContent, KnowledgeState
 from agent_core.domain.messages import (
-    AssistantMessage,
     ContentPart,
     FileReferencePart,
     ImageReferencePart,
@@ -189,10 +188,6 @@ def text_content(parts: list[ContentPart]) -> str:
         elif isinstance(part, (ImageReferencePart, FileReferencePart)):
             rendered.append(reference_marker(part, MarkerReason.REFERENCE))
     return "\n".join(rendered)
-
-
-def assistant_text(message: AssistantMessage) -> str:
-    return text_content(message.content)
 
 
 def failed_event(

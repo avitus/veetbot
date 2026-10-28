@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Self
@@ -14,18 +14,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from agent_core.domain.devices import PushProvider
+from agent_core.domain.instants import aware_utc
 from agent_core.domain.runs import RunLimits
 from agent_core.domain.sessions import SessionStatus
 
 PAIRING_CODE_BYTES = 8
 PAIRING_SALT_BYTES = 16
 SURFACE_EXTERNAL_KEY_MAX_LENGTH = 255
-
-
-def _aware_utc(value: datetime, subject: str) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{subject} must be aware")
-    return value.astimezone(UTC)
 
 
 def _hash_pairing_code(code: str, salt: bytes) -> bytes:
@@ -201,7 +196,7 @@ class SurfaceInboundMessage(BaseModel):
     @field_validator("received_at")
     @classmethod
     def received_at_is_aware_utc(cls, value: datetime) -> datetime:
-        return _aware_utc(value, "surface update received_at")
+        return aware_utc(value, "surface update received_at")
 
     @model_validator(mode="after")
     def content_matches_kind(self) -> Self:
@@ -265,7 +260,7 @@ class PairingCode(BaseModel):
     @field_validator("expires_at", "consumed_at", "created_at")
     @classmethod
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else _aware_utc(value, "pairing code instant")
+        return None if value is None else aware_utc(value, "pairing code instant")
 
     @model_validator(mode="after")
     def lifecycle_is_consistent(self) -> Self:
@@ -305,7 +300,7 @@ class Pairing(BaseModel):
     @field_validator("paired_at", "revoked_at", "last_message_at")
     @classmethod
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else _aware_utc(value, "pairing instant")
+        return None if value is None else aware_utc(value, "pairing instant")
 
     @model_validator(mode="after")
     def revocation_is_consistent(self) -> Self:
@@ -330,7 +325,7 @@ class SenderLockout(BaseModel):
     @field_validator("window_started_at", "locked_until")
     @classmethod
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else _aware_utc(value, "sender lockout instant")
+        return None if value is None else aware_utc(value, "sender lockout instant")
 
 
 class SurfaceSession(BaseModel):
@@ -349,7 +344,7 @@ class SurfaceSession(BaseModel):
     @field_validator("created_at", "last_inbound_at", "rotated_at")
     @classmethod
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else _aware_utc(value, "surface session instant")
+        return None if value is None else aware_utc(value, "surface session instant")
 
     @model_validator(mode="after")
     def lifecycle_is_consistent(self) -> Self:
@@ -378,7 +373,7 @@ class InboundReceipt(BaseModel):
     @field_validator("received_at")
     @classmethod
     def received_at_is_aware_utc(cls, value: datetime) -> datetime:
-        return _aware_utc(value, "receipt received_at")
+        return aware_utc(value, "receipt received_at")
 
 
 class SurfaceReply(BaseModel):
@@ -405,7 +400,7 @@ class SurfaceReply(BaseModel):
     @field_validator("next_attempt_at", "claimed_until", "created_at", "settled_at")
     @classmethod
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else _aware_utc(value, "surface reply instant")
+        return None if value is None else aware_utc(value, "surface reply instant")
 
     @model_validator(mode="after")
     def lifecycle_is_consistent(self) -> Self:
@@ -435,7 +430,7 @@ def issue_pairing_code(
     code: str | None = None,
     salt: bytes | None = None,
 ) -> IssuedPairingCode:
-    instant = _aware_utc(now, "pairing code creation")
+    instant = aware_utc(now, "pairing code creation")
     if expires_after <= timedelta(0):
         raise ValueError("pairing code lifetime must be positive")
     plaintext = secrets.token_urlsafe(PAIRING_CODE_BYTES) if code is None else code
@@ -489,7 +484,7 @@ def rotation_reason(
     force_new: bool = False,
     pairing_revoked: bool = False,
 ) -> SessionRotationReason | None:
-    instant = _aware_utc(now, "surface session rotation check")
+    instant = aware_utc(now, "surface session rotation check")
     if mapping is None or session_status is None:
         return SessionRotationReason.SESSION_MISSING if mapping is not None else None
     if mapping.rotated_at is not None:
@@ -502,7 +497,7 @@ def rotation_reason(
         return SessionRotationReason.SESSION_CLOSED
     if (
         last_message_at is not None
-        and instant - _aware_utc(last_message_at, "surface last message") >= idle_after
+        and instant - aware_utc(last_message_at, "surface last message") >= idle_after
     ):
         return SessionRotationReason.IDLE
     if mapped_agent_version != current_agent_version:
@@ -513,7 +508,7 @@ def rotation_reason(
 def rotate_surface_session(mapping: SurfaceSession, at: datetime) -> SurfaceSession:
     if mapping.rotated_at is not None:
         raise ValueError("surface session is already rotated")
-    return mapping.model_copy(update={"rotated_at": _aware_utc(at, "surface rotation")})
+    return mapping.model_copy(update={"rotated_at": aware_utc(at, "surface rotation")})
 
 
 def chunk_surface_text(text: str, *, limit: int = 4096) -> tuple[str, ...]:

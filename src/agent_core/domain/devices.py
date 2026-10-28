@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
 from typing import Any
@@ -19,13 +19,8 @@ from pydantic import (
     model_validator,
 )
 
+from agent_core.domain.instants import aware_utc
 from agent_core.domain.notifications import NotificationKind
-
-
-def _aware_utc(value: datetime, subject: str) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{subject} must be aware")
-    return value.astimezone(UTC)
 
 
 class DeviceKind(StrEnum):
@@ -195,7 +190,7 @@ class DeviceRegistrationIdempotencyRecord(BaseModel):
     @field_validator("created_at")
     @classmethod
     def created_at_is_aware_utc(cls, value: datetime) -> datetime:
-        return _aware_utc(value, "device idempotency created_at")
+        return aware_utc(value, "device idempotency created_at")
 
 
 class Device(BaseModel):
@@ -236,7 +231,7 @@ class Device(BaseModel):
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
         if value is None:
             return None
-        return _aware_utc(value, "device instants")
+        return aware_utc(value, "device instants")
 
     @field_validator("push_token")
     @classmethod
@@ -299,7 +294,7 @@ class Device(BaseModel):
             raise ValueError("only an active surface accepts a surface delivery route")
         if provider not in {PushProvider.TELEGRAM, PushProvider.WHATSAPP}:
             raise ValueError("surface delivery route requires a surface provider")
-        instant = _aware_utc(at, "surface route update")
+        instant = aware_utc(at, "surface route update")
         return self.model_copy(
             update={
                 "platform": provider.value,
@@ -316,7 +311,7 @@ class Device(BaseModel):
     def without_push_route(self, at: datetime) -> Device:
         """Return this device with its secret delivery route invalidated."""
 
-        instant = _aware_utc(at, "push route invalidation")
+        instant = aware_utc(at, "push route invalidation")
         return self.model_copy(
             update={
                 "push_provider": None,
@@ -339,7 +334,7 @@ class DeviceCursor(BaseModel):
     @field_validator("created_at")
     @classmethod
     def created_at_is_aware_utc(cls, value: datetime) -> datetime:
-        return _aware_utc(value, "device cursor created_at")
+        return aware_utc(value, "device cursor created_at")
 
 
 class DeviceInvocation(BaseModel):
@@ -362,7 +357,7 @@ class DeviceInvocation(BaseModel):
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
         if value is None:
             return None
-        return _aware_utc(value, "device invocation instants")
+        return aware_utc(value, "device invocation instants")
 
 
 class DeviceIngestReceipt(BaseModel):
@@ -382,7 +377,7 @@ class DeviceIngestReceipt(BaseModel):
     @field_validator("received_at", "accepted_at")
     @classmethod
     def received_at_is_aware_utc(cls, value: datetime) -> datetime:
-        return _aware_utc(value, "device ingest instant")
+        return aware_utc(value, "device ingest instant")
 
 
 class DeviceTriageMapping(BaseModel):

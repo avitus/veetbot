@@ -3220,7 +3220,28 @@ class GovernedMemoryService:
         provider_failure = (
             extracted.provider_failure if isinstance(extracted, MemoryExtractionResult) else None
         )
-        admitted_sources = formation_sources(extraction_events, self._principal)
+        context_events: list[EventEnvelope] = []
+        if (
+            self._policy_version == "formation@11"
+            and source_window is None
+            and isinstance(extracted, MemoryExtractionResult)
+            and extracted.context_event_ids
+            and extraction_events
+        ):
+            first_sequence = min(event.sequence for event in extraction_events)
+            requested_context = set(extracted.context_event_ids)
+            if len(requested_context) <= 8 and all(
+                max(0, first_sequence - 257) < sequence < first_sequence
+                for sequence in requested_context
+            ):
+                async with self._uow_factory() as uow:
+                    history = await uow.events.list_after(
+                        session_id, max(0, first_sequence - 257), self._principal, limit=256
+                    )
+                    context_events = [
+                        event for event in history if event.sequence in requested_context
+                    ]
+        admitted_sources = formation_sources([*context_events, *extraction_events], self._principal)
         recorded = recorded_value_sets(extraction_events)
         trusted_user_sources = {
             sequence
@@ -3262,7 +3283,8 @@ class GovernedMemoryService:
             displacement_counts = (
                 Counter({"displaced_global": displaced_count}) if displaced_count else Counter()
             )
-        by_sequence = {event.sequence: event for event in events}
+        by_sequence = {event.sequence: event for event in [*context_events, *events]}
+        current_source_ids = {event.sequence for event in extraction_events}
         after = max((event.sequence for event in events), default=watermark)
         retry_attempts = [
             attempt
@@ -3381,6 +3403,13 @@ class GovernedMemoryService:
                     )
                     self_references = await owner_references(uow.email, self._principal)
                 for candidate, authority in [] if should_retry else candidates:
+                    if (
+                        self._policy_version == "formation@11"
+                        and not set(candidate.source_event_ids) & current_source_ids
+                    ):
+                        rejected += 1
+                        decisions["rejected_context_only"] += 1
+                        continue
                     suppressed = False
                     for sequence in candidate.source_event_ids:
                         if await uow.people.source_suppressed(
@@ -4230,7 +4259,10 @@ class GovernedMemoryService:
         sensitive statement) has its review flag cleared. A dry run reports the
         same counts and writes nothing. Never a status edit in SQL.
         """
-        async with self._uow_factory() as uow:
+        # The repair writes full records. Serialize its reads with owner review
+        # as well as its writes, so a concurrent correction cannot be replaced
+        # by the pre-review snapshot. PostgreSQL holds this guard to commit.
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
             records = await self._live_conflicted(uow)
             by_id = {record.id: record for record in records}
             pairs = {

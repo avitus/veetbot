@@ -1379,7 +1379,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             let session: SessionView
             if let selectedSessionID {
-                session = try await api.getSession(selectedSessionID)
+                // A follow-up sent while a deploy restarts the API waits for it.
+                session = try await api.getSession(
+                    selectedSessionID, restartWindow: TransportRequest.serverRestartWindow)
             } else {
                 session = try await createSelectedSession(suggestedTitle: suggestedTitle)
             }
@@ -1657,6 +1659,8 @@ public final class ChatViewModel: ObservableObject {
                 content: [.text(answer)],
                 questionID: prompt.questionID
             )
+            // The answer is the owner's next message, which closes the offer.
+            websiteOffer = nil
             runState.begin(runID: result.runID, status: result.status)
             try await touchSelectedHistory(lastRunID: result.runID)
             // The existing SSE connection remains open while the run is suspended.
@@ -2579,6 +2583,14 @@ public final class ChatViewModel: ObservableObject {
             pendingWebsiteOffer = nil
             return
         }
+    }
+
+    /// ADR-0251 decision 4: the card shows once the source run has ended, or
+    /// while it waits for the owner's answer to a question (owner decision 3).
+    public var showsWebsiteOffer: Bool {
+        guard websiteOffer != nil else { return false }
+        return !runState.isRunActive
+            || (runState.runStatus == .waitingForUser && runState.clarifyingQuestion != nil)
     }
 
     /// Not now: this device stops showing the offer; the server's offer simply expires.

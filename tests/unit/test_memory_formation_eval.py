@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 import agent_core.evals.memory_formation as memory_eval
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
-from agent_core.evals.memory_distillation import SeedBelief
+from agent_core.evals.memory_distillation import SeedBelief, _evaluation_settings
 from agent_core.evals.memory_formation import (
     EvaluationBelief,
     ExpectedBelief,
@@ -169,7 +169,7 @@ def test_evaluation_settings_do_not_downgrade_a_production_identity(tmp_path: Pa
     settings = replace(_settings(), deployment_mode=DeploymentMode.PRODUCTION)
 
     with pytest.raises(ValueError, match="unavailable in production"):
-        memory_eval._evaluation_settings(settings, tmp_path / "artifacts")
+        _evaluation_settings(settings, tmp_path / "artifacts")
 
 
 class TestProviderEvidencePublicationGate:

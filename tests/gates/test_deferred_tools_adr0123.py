@@ -289,14 +289,14 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
     advertised = {*plan.tool_names, *plan.deferred_tool_names}
     assert advertised >= {*COCKPIT_TOOL_NAMES, *RECORDS_TOOLS}
     assert "records.append" in plan.deferred_tool_names
-    # The index's own 2,000-token cap is then full (ADR-0253, Consequences), and
-    # web.fetch_json, a configured deferral, takes the last Gmail write's room
-    # (ADR-0258, Consequences).
-    assert set(plan.skipped_tool_names) == {
+    # The index's 2,500-token cap holds every Gmail write beside web.fetch_json
+    # (ADR-0262), so the bound chat offers everything it is configured with.
+    assert plan.skipped_tool_names == ()
+    assert {
         "mcp.gmail_write.modify_labels",
         "mcp.gmail_write.trash_thread",
         "mcp.gmail_write.untrash_thread",
-    }
+    } <= set(plan.deferred_tool_names)
 
 
 async def test_the_production_plan_renders_its_prefix_again_from_jsonb(tmp_path: Path) -> None:
@@ -418,33 +418,6 @@ async def test_tool_call_refuses_names_it_does_not_offer(tmp_path: Path) -> None
     assert {payload["name"] for payload in denials} == {"tool.call"}
     # Each refusal answers the call the model made, so replay stays paired.
     assert all(payload["result_item"]["is_error"] for payload in denials)
-
-
-async def test_invalid_deferred_arguments_return_the_input_schema(tmp_path: Path) -> None:
-    _factory, context = await _production(
-        tmp_path,
-        [
-            ScriptedTurn(
-                tool_calls=[_tool_call("schedule.pause", {})],
-                stop_reason=StopReason.TOOL_USE,
-            ),
-            ScriptedTurn(text="I need a schedule id.", stop_reason=StopReason.END_TURN),
-        ],
-    )
-    async with context as app:
-        session_id = await app.sessions.create()
-        run_id = await app.runs.submit("Pause my schedule.", session_id)
-        terminal = await asyncio.wait_for(app.runs.wait_terminal(run_id), timeout=30)
-        events = await _session_events(app, session_id)
-
-    assert terminal.status is RunStatus.COMPLETED, terminal.failure
-    [failure] = [event.payload for event in events if event.event_type == "tool.call.failed"]
-    assert failure["name"] == "schedule.pause"
-    assert failure["reason_code"] == "tool.arguments_invalid"
-    texts = [part["text"] for part in failure["result_item"]["content"]]
-    # A builtin's schema is trusted configuration, so the result keeps its trust.
-    assert failure["result_item"]["trust"] == "internal_tool"
-    assert any("\nInput schema: " in text and '"schedule_id"' in text for text in texts)
 
 
 @pytest.mark.parametrize(

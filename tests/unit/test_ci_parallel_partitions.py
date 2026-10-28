@@ -1,4 +1,4 @@
-"""The hosted verify run's longest jobs split across executors (ADR-0230)."""
+"""The hosted verify run's longest jobs split across executors (ADR-0230, ADR-0257)."""
 
 from __future__ import annotations
 
@@ -34,7 +34,11 @@ def _verify_entries() -> dict[str, dict[str, Any]]:
     return entries
 
 
+APPLE_INPUTS = "clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py"
+
+
 def test_the_simulator_ui_job_runs_once_per_device_on_its_own_executor() -> None:
+    """ADR-0257 measured both devices on one machine failing two cases on hit-testing."""
     job = _config()["jobs"]["apple-ios-device"]
     assert job["parameters"] == {"device": {"type": "enum", "enum": ["iphone", "ipad"]}}
     commands = [step["run"]["command"] for step in job["steps"] if "run" in step]
@@ -42,7 +46,9 @@ def test_the_simulator_ui_job_runs_once_per_device_on_its_own_executor() -> None
         "IOS_UI_DEVICES=<< parameters.device >>" in command and "make test-apple-ui-ios" in command
         for command in commands
     )
-    assert {"skip_verified_tree": {"job": "apple-ios-<< parameters.device >>"}} in job["steps"]
+    assert {
+        "skip_verified_tree": {"job": "apple-ios-<< parameters.device >>", "inputs": APPLE_INPUTS}
+    } in job["steps"]
     assert {"record_verified_tree": {"job": "apple-ios-<< parameters.device >>"}} in job["steps"]
     assert {"store_apple_test_results": {"platform": "ios-<< parameters.device >>"}} in job["steps"]
 
@@ -73,6 +79,12 @@ def test_each_device_splits_its_cases_across_two_executors() -> None:
     )
 
 
+def test_the_macos_job_keys_its_record_on_the_apple_inputs() -> None:
+    steps = _config()["jobs"]["apple"]["steps"]
+    assert {"skip_verified_tree": {"job": "apple", "inputs": APPLE_INPUTS}} in steps
+    assert {"record_verified_tree": {"job": "apple"}} in steps
+
+
 @pytest.mark.parametrize("name", ["static", "integration"])
 def test_the_longest_python_partitions_split_across_two_executors(name: str) -> None:
     assert _config()["jobs"][name]["parallelism"] == 2
@@ -87,8 +99,12 @@ def test_static_runs_its_non_test_checks_on_one_node() -> None:
     assert "CIRCLE_NODE_INDEX" not in named["Reading lane floor"]
 
 
-def _shell(command: str, job: str) -> str:
-    return command.replace("<< parameters.job >>", job).replace("<< pipeline.git.branch >>", "main")
+def _shell(command: str, job: str, branch: str = "main", inputs: str = "") -> str:
+    return (
+        command.replace("<< parameters.job >>", job)
+        .replace("<< pipeline.git.branch >>", branch)
+        .replace("<< parameters.inputs >>", inputs)
+    )
 
 
 def test_each_node_records_its_own_pass_of_the_tree() -> None:
@@ -120,9 +136,11 @@ def test_each_node_records_its_own_pass_of_the_tree() -> None:
     ],
     ids=["single-node-passed", "one-of-two-passed", "both-passed", "other-split-passed"],
 )
-def test_main_skips_a_job_only_when_every_node_passed_the_tree(
-    tmp_path: Path, total: str, recorded: list[str], halts: bool
+@pytest.mark.parametrize("branch", ["main", "dev"])
+def test_a_job_skips_on_any_branch_only_when_every_node_passed_its_identity(
+    tmp_path: Path, total: str, recorded: list[str], halts: bool, branch: str
 ) -> None:
+    """ADR-0257: a rerun of a passed identity halts on every branch, not only main."""
     skip = _config()["commands"]["skip_verified_tree"]["steps"]
     command = next(
         step["run"]["command"]
@@ -140,7 +158,11 @@ def test_main_skips_a_job_only_when_every_node_passed_the_tree(
     agent.chmod(0o755)
 
     result = subprocess.run(
-        ["bash", "-c", _shell(command, "static").replace("/tmp/veetbot-verified", str(records))],
+        [
+            "bash",
+            "-c",
+            _shell(command, "static", branch).replace("/tmp/veetbot-verified", str(records)),
+        ],
         env={
             **os.environ,
             "PATH": f"{agent.parent}:{os.environ['PATH']}",
@@ -153,6 +175,60 @@ def test_main_skips_a_job_only_when_every_node_passed_the_tree(
 
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "halted").exists() is halts
+
+
+def _identity(checkout: Path, inputs: str) -> str:
+    """Run the skip command's identity step in a checkout and return what it wrote."""
+    skip = _config()["commands"]["skip_verified_tree"]
+    assert skip["parameters"]["inputs"] == {"type": "string", "default": ""}
+    command = skip["steps"][0]["run"]["command"]
+    records = checkout / "records"
+    subprocess.run(
+        [
+            "bash",
+            "-eo",
+            "pipefail",
+            "-c",
+            _shell(command, "apple", inputs=inputs).replace("/tmp/veetbot-verified", str(records)),
+        ],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+    )
+    return (records / "tree").read_text(encoding="utf-8")
+
+
+def _commit(checkout: Path, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / name).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "change"],
+        cwd=checkout,
+        check=True,
+    )
+
+
+def test_a_named_identity_changes_only_with_its_own_inputs(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _commit(tmp_path, {"clients/apple/App.swift": "a", "Makefile": "m", "src/core.py": "p"})
+    tree = _identity(tmp_path, "")
+    apple = _identity(tmp_path, "clients/apple Makefile")
+
+    _commit(tmp_path, {"src/core.py": "changed"})
+    assert _identity(tmp_path, "clients/apple Makefile") == apple
+    assert _identity(tmp_path, "") != tree
+
+    _commit(tmp_path, {"clients/apple/App.swift": "changed"})
+    assert _identity(tmp_path, "clients/apple Makefile") != apple
+
+
+def test_a_named_identity_fails_when_an_input_is_missing(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _commit(tmp_path, {"Makefile": "m"})
+    with pytest.raises(subprocess.CalledProcessError):
+        _identity(tmp_path, "clients/apple Makefile")
 
 
 _SIMCTL = {

@@ -65,6 +65,55 @@ struct InspectorLayoutStore {
     }
 }
 
+/// One side column's width, kept on this device and never sent to the server:
+/// the owner's drag within the column's bounds, or the design's starting width
+/// before any drag. Every resizable column that keeps no other state uses one.
+struct MacColumnWidthStore {
+    let key: String
+    let bounds: ClosedRange<CGFloat>
+    let defaultWidth: CGFloat
+    var defaults: UserDefaults = .standard
+
+    var width: CGFloat {
+        guard let stored = defaults.object(forKey: key) as? Double, stored.isFinite, stored > 0 else {
+            return defaultWidth
+        }
+        return clamped(CGFloat(stored))
+    }
+
+    func remember(_ width: CGFloat) {
+        guard width.isFinite, width > 0 else { return }
+        defaults.set(Double(clamped(width)), forKey: key)
+    }
+
+    /// A double-click on the column's hairline returns it to its starting width.
+    func forget() {
+        defaults.removeObject(forKey: key)
+    }
+
+    func clamped(_ width: CGFloat) -> CGFloat {
+        min(max(width, bounds.lowerBound), bounds.upperBound)
+    }
+
+    /// This launch's defaults for column widths: the owner's, or a UI journey's own suite.
+    static var appDefaults: UserDefaults {
+        #if DEBUG && !SWIFT_PACKAGE && os(macOS)
+        if let defaults = ConversationNavigationUITestFixture.columnWidthDefaultsIfRequested() { return defaults }
+        #endif
+        return .standard
+    }
+
+    /// Cockpit's left pane (MagicPath merrily-city-4157: 260 to start).
+    static func cockpitSidebar(defaults: UserDefaults = appDefaults) -> Self {
+        Self(key: "veetbot.cockpit.sidebarWidth", bounds: 200...340, defaultWidth: 260, defaults: defaults)
+    }
+
+    /// Cockpit's widget details panel (the design's 320 to start).
+    static func cockpitPanel(defaults: UserDefaults = appDefaults) -> Self {
+        Self(key: "veetbot.cockpit.panelWidth", bounds: 280...440, defaultWidth: 320, defaults: defaults)
+    }
+}
+
 enum ChatInspectorTab: String, CaseIterable, Identifiable {
     case activity, artifacts
     var id: String { rawValue }

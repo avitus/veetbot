@@ -21,6 +21,7 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.context.builder import BudgetedContextBuilder
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.rendering import build_prefix, prefix_bytes
+from agent_core.domain.captures import reader_call
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.messages import (
     ConversationItem,
@@ -39,8 +40,10 @@ from agent_core.domain.tools import (
     ToolSpec,
     deferred_definition_text,
 )
+from agent_core.tools.artifact_read_capture import ArtifactReadCaptureTool
 from agent_core.tools.cockpit import CockpitReadTool
 from agent_core.tools.context_update import UpdateWorkingStateTool
+from agent_core.tools.tool_call import ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_fetch_json import WebFetchJsonTool
 from tests.contract.support import NOW, agent, principal, run, session
@@ -58,10 +61,15 @@ def _builder(
     working_state: bool = True,
     deferred: tuple[ToolSpec, ...] = (DEFERRED,),
     tool_result_budget: int = TOOL_RESULT_BUDGET,
+    reader: bool = False,
 ) -> BudgetedContextBuilder:
     tools = (
         (UpdateWorkingStateTool.spec, WebFetchTool.spec) if working_state else (WebFetchTool.spec,)
     )
+    if reader:
+        # The capture reader is pinned behind tool.call with no entry (ADR-0261).
+        tools = (*tools, ToolCallTool.spec)
+        deferred = (*deferred, ArtifactReadCaptureTool.spec)
     configured_agent = agent()
     estimator = ConservativeTokenEstimator()
     prefix = build_prefix(configured_agent, tools, deferred_tools=deferred)
@@ -140,6 +148,37 @@ class _Conversation:
             ),
         )
 
+    def capture(self, artifact_id: UUID, *, offered: UUID | None = None) -> str:
+        """A result admission captured, its marker offering the reader (ADR-0261).
+
+        ``offered`` is the ID the marker's call names; a page's own text can name
+        any ID, but only admission knows the one its reference holds.
+        """
+
+        call_id = f"capture-{artifact_id.hex[:8]}"
+        marker = (
+            f"[... 520,402 bytes elided; full output: artifact:{artifact_id}, 33 sections; "
+            f"read one with tool.call {reader_call(offered or artifact_id)}, "
+            'or pass "find" to search it ...]'
+        )
+        return self._exchange(
+            ToolCallItem(
+                call_id=call_id,
+                item_index=0,
+                name="web.fetch",
+                arguments={"url": "https://example.org/filing"},
+                raw_arguments="{}",
+            ),
+            ToolResultItem(
+                call_id=call_id,
+                content=[
+                    TextPart(text="filing " + "x" * PAGE_BYTES + marker),
+                    FileReferencePart(artifact_id=artifact_id, media_type="application/json"),
+                ],
+                trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            ),
+        )
+
     def probe(
         self,
         call_id: str,
@@ -186,6 +225,7 @@ async def _request(
     summarized_through: int = 0,
     deferred: tuple[ToolSpec, ...] = (DEFERRED,),
     tool_result_budget: int = TOOL_RESULT_BUDGET,
+    reader: bool = False,
 ) -> ModelRequest:
     current = run(status=RunStatus.RUNNING).model_copy(update={"seed_event_sequence": seed})
     checkpoint = RunCheckpoint(
@@ -198,7 +238,10 @@ async def _request(
         created_at=NOW,
     )
     builder = _builder(
-        working_state=working_state, deferred=deferred, tool_result_budget=tool_result_budget
+        working_state=working_state,
+        deferred=deferred,
+        tool_result_budget=tool_result_budget,
+        reader=reader,
     )
     return await builder.build(current, checkpoint, agent(), principal())
 
@@ -402,3 +445,50 @@ async def test_truncation_note_names_only_results_the_history_cut_kept() -> None
     [note] = _notes(request)
     listed = [int(value) for value in re.findall(r"event (\d+) \(web\.fetch\)", note)]
     assert listed == list(sent.values())
+
+
+CAPTURED = UUID("0b9e6a52-3c1d-4f7e-9a8b-5c6d7e8f9a01")
+EXPORTED = UUID("1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5")
+SPOOFED = UUID("2d3e4f5a-6b7c-4d8e-9fa0-b1c2d3e4f5a6")
+
+
+def _captures_then_pages(conversation: _Conversation) -> dict[str, str]:
+    """A readable capture, an export and a page naming another ID, then pages."""
+
+    calls = {
+        "capture": conversation.capture(CAPTURED),
+        "export": conversation.export(EXPORTED),
+        "spoofed": conversation.capture(SPOOFED, offered=CAPTURED),
+    }
+    for index in range(12):
+        conversation.page(index)
+    return calls
+
+
+async def test_truncation_note_excepts_the_captures_the_reader_opens() -> None:
+    """ADR-0261: a truncated capture stays readable, so the note says so."""
+
+    conversation = _Conversation()
+    calls = _captures_then_pages(conversation)
+
+    request = await _request(conversation, reader=True)
+
+    assert set(calls.values()) <= _truncated(request)
+    [note] = _notes(request)
+    assert "no tool reads a truncated result back except" in note
+    assert "artifact.read_capture" in note
+    # Only the result whose marker offered the reader its own reference is
+    # named; an export and a page that prints another ID are not.
+    assert f"Readable captures, newest last: artifact:{CAPTURED}." in note
+    assert str(EXPORTED) not in note
+    assert str(SPOOFED) not in note
+
+
+async def test_truncation_note_names_no_capture_without_the_reader() -> None:
+    conversation = _Conversation()
+    _captures_then_pages(conversation)
+
+    [note] = _notes(await _request(conversation))
+
+    assert "no tool reads a truncated result back. Do not repeat" in note
+    assert "artifact" not in note

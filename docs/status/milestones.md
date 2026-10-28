@@ -19,27 +19,32 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
 
 ## At a glance
 
-State reviewed on 2026-09-28 against `main` at `e55551fa`, which production
-runs as release `20260928-202932-e55551f`; Milestone 14's completion was
-recorded on 2026-10-09. With Milestone 32 authorized, twenty-two of thirty-three milestones are complete; ten
-were in progress and one was authorized but not started at that review.
-The independent reliability repair now begins Milestone 15 under ADR-0205.
-Milestone 32 has implemented components and registered gates;
-comparative quality and complete runtime/release evidence remain pending.
+State reviewed on 2026-10-27 against `main` at `3295faf8`, which production
+runs as release `20261028-010041-3295faf`; Milestone 14's completion was
+recorded on 2026-10-09. Of the thirty-six milestones (0 through 35),
+twenty-two are complete and fourteen are in progress; none is authorized but
+unstarted. Milestone 15's independent reliability repair under ADR-0205 reached
+`main` in pull requests 171 and 158. Milestone 32 has implemented components and
+registered gates; comparative quality and complete runtime/release evidence
+remain pending. Milestone 34 is delivered behind its flag and awaits owner
+activation.
 
 | Milestone | State | What remains | Who acts |
 | --- | --- | --- | --- |
-| 15 Operational hardening | In progress | All sixteen gates; independent reliability repair under ADR-0205 | Engineering, then owner |
+| 15 Operational hardening | In progress | All sixteen gates; the ADR-0205 reliability repair is delivered | Engineering, then owner |
 | 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
-| 21 Memory distillation | In progress | Final-head review; production formation@9 check; Sol/Astra study | Engineering; owner |
+| 21 Memory distillation | In progress | Final-head review; production formation@9 selection audit; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | Physical-iPhone verification | Owner |
 | 25 WhatsApp | In progress | Meta ceremony, live smoke | Owner |
 | 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance | Owner with engineering |
 | 27 Bland calling | In progress | Dashboard and live checks; final-head review | Owner; engineering |
 | 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
 | 30 Advisory approval | In progress | Threshold calibration and enforce decision; final-head review | Owner; engineering |
-| 31 Email unsubscribe | In progress | Simulator journeys, mailbox smoke; final-head review | Engineering; owner |
+| 31 Email unsubscribe | In progress | iPad detail layout, mailbox smoke; final-head review | Engineering; owner |
 | 32 Memory reconsolidation | In progress | Measured quality failures, remaining integrated gates and release evidence | Engineering |
+| 33 General memory recall | In progress | Staged implementation and comparative activation evidence; reviewed release | Engineering; owner |
+| 34 Owner records | In progress | Production flag and the approval tool_rules entry | Owner |
+| 35 Cockpit | In progress | Builder canary, build steps 10 and 11, owner activation | Engineering; owner |
 
 ## Complete
 
@@ -95,9 +100,10 @@ hosted-CI records.
 
 The independent ADR-0205 repair adds safe failure references, worker backoff,
 cleanup isolation and scoped reliability reporting. Focused failure-injection
-and PostgreSQL regressions pass; production delivery remains pending. All
-sixteen operational-hardening gates remain open, including off-host backups,
-restore rehearsals, watchdogs and independent outage alerts.
+and PostgreSQL regressions pass, and pull requests 171 (2026-10-17) and 158
+(2026-10-18) delivered it to production with hosted CI and every review thread
+resolved. All sixteen operational-hardening gates remain open, including
+off-host backups, restore rehearsals, watchdogs and independent outage alerts.
 
 - [ ] Complete all sixteen Milestone 15 gates and reviewed production delivery
 - [ ] Implement encrypted off-host backups and verify restore rehearsals
@@ -176,11 +182,12 @@ and precision. The owner then set a recall-first bar (`distillation-scorer@7`,
 a 0.75 holdout precision floor) and gating over three pooled repeats; the run
 at `0e3ca2f` passed and its `formation@9` artifact is bundled. It reached
 `main` in pull request 104 and was first deployed by the next merge; the
-artifact stays bound to the unchanged shipped policy, but no production
-selection audit naming `formation@9` has been recorded since. Remaining:
+artifact stays bound to the unchanged shipped policy, and the 2026-10-09
+policy-bound refresh reached `main` in pull request 156 (2026-10-10), but no
+production selection audit naming `formation@9` has been recorded since. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
+- [ ] Verify from a production selection audit that the deploy selects formation@9 for the production tuple; the refreshed evidence reached main in pull request 156 on 2026-10-10
 - [ ] Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093; audit scorer semantics and compare Sol/Astra under controlled reasoning settings before changing the memory tuple with new activation evidence.
 
 ### Milestone 24 — SMS through the owner's iPhone
@@ -210,7 +217,6 @@ verified ceiling. Remaining:
 - [ ] Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
 - [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
 - [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
-- [ ] Deliver the independently verified expired-source drafting repair (ADR-0205)
 
 ### Milestone 27 — Bland calling and public reception
 
@@ -222,7 +228,9 @@ Chat and announced to every device. Reaching that point took two fixes: ADR-0105
 tool-definition budget and the missing `call_finished` lock-screen alert. Bland's
 signed post-call webhook has been verified in production against the raw bytes.
 Every pull request that carried calling to `main` passed hosted CI and a clean
-review; the final-head review waits for the two pending gates,
+review, most recently pull request 173 (owner-requested calls, 2026-10-18) and
+pull request 179 (call plans with retries and a follow-up, and the call-result
+intake repair, 2026-10-20); the final-head review waits for the two pending gates,
 `gate.call.admission_bounds` and `gate.call.live_release`, to be bound.
 
 - [ ] Verify provider-side admission controls and account-level memory or persona attachments in the Bland dashboard
@@ -268,13 +276,16 @@ ADR-0165. A header-derived census of bulk senders, the authenticated one-click
 unsubscribe request to a server-derived destination through a dedicated
 public-HTTPS transport, and Report spam, `mailto:` and sender-cleanup
 fallbacks, each behind the owner's tap; and a suspected-spam flag that never
-touches Gmail, with thread-level Report spam and Not spam. Nineteen gates bind passing checks. The milestone reached `main` in pull
+touches Gmail, with thread-level Report spam and Not spam. Twenty-two of the
+twenty-three gates bind passing checks; only the release-evidence gate is
+pending. The milestone reached `main` in pull
 request 131 with a clean review, and its flag was switched on in production by
-2026-09-21, ahead of the owner's real-mailbox smoke.
+2026-09-21, ahead of the owner's real-mailbox smoke. The five native
+Subscriptions journeys (pull request 142, 2026-09-28) and the two suspected-spam
+journeys (pull request 154, 2026-10-08) run in the hosted Mac, iPhone and iPad
+UI lanes on every `main` merge.
 
-- [ ] Pass the five native Subscriptions journeys (added 2026-09-28 and passing locally on the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
 - [ ] Show the Subscriptions detail beside its list on regular-width iPad as email-unsubscribe.md requires; the iPad sheet is a 580-point compact-width form sheet, so the detail pushes as on iPhone
-- [ ] Pass the two native suspected-spam journeys (added 2026-10-08 and passing locally on the Mac and the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
 - [ ] Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, sender and thread spam each with Not spam, and cleanup
 - [ ] Exact-head hosted CI and explicitly authorized review and production delivery evidence
 
@@ -363,9 +374,11 @@ because a profile edit would unbind the formation release evidence), a
 formation rule so that a reading never becomes a belief, and a body-region
 catalog of the series in every request. The build sequence is implemented
 behind `AGENT_RECORDS_ENABLED`, off by default, and every gate's check is its
-test; review, hosted CI and production delivery are pending.
+test. It reached `main` with hosted CI and every review thread resolved in pull
+requests 186 (2026-10-23), 193 (2026-10-25) and 202 (2026-10-26), and runs in
+production behind the flag; activation is the owner's.
 
-- [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
+- [ ] Owner: set AGENT_RECORDS_ENABLED in production and accept the records approval tool_rules entry with one formation-evidence regeneration on the new policy version
 
 ### Milestone 35 — Cockpit mode and agent-authored widgets
 
@@ -398,7 +411,7 @@ Every other gate is pending.
 - [ ] Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image
 - [ ] Build step 10 remainder: the discuss intent, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19's preflight rebuild of live widgets
 - [ ] Build step 11: preview rendering
-- [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; hosted CI, review and production delivery
+- [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; then the activation release (build steps 2 to 10 reached main in pull requests 186, 187, 188, 193, 195 and 200 by 2026-10-26)
 
 ## Outside a milestone
 
@@ -419,6 +432,7 @@ mirrors `open_items_outside_milestones` in
 - [ ] Owner: accept or reject ADR-0104, ADR-0105, ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138, which are still Proposed although their mechanisms are implemented, specified and on main
 - [ ] Owner: accept or reject ADR-0146, which is Proposed and implemented: a hosted browser launch repeats the Playwright disabled-feature list, gives push messaging a check-in address it cannot fetch, and leaves one account request to accounts.google.com on
 - [ ] Owner decision: the hardline protected_host_path rule blocks .git/config only at the workspace root, so sub/.git/config is not blocked, while .env and ~/.ssh already match at any depth; decide whether it should, knowing that a change to the matcher in policy/hardline.py leaves policy_version unchanged but an edit to hardline.yaml moves it and unbinds the memory-formation release evidence (found in the 2026-09-28 test audit)
+- [ ] Startup: bootstrap-and-composition.md Phase 1 says the prefix classes of the configured context plan must sum to at most the prefix ceiling before anything is built, but no startup check exists; the ceiling is enforced only per plan in context/planner.py, and the sum only by the persona gate on the shipped file, so an operator overlay that raises a class cap alone is found at the first plan that uses it; add the Phase 1 refusal or propose an ADR that drops it (found during ADR-0262)
 
 The earlier item asking the owner to confirm the ADR-0127 to ADR-0130 deploy
 is closed: after the owner reran the workflow, deploy-app and deploy-nginx

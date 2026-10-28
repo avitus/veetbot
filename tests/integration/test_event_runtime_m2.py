@@ -32,7 +32,14 @@ from agent_core.domain.messages import (
     ScriptedTurn,
     StopReason,
 )
-from agent_core.domain.runs import Run, RunCheckpoint, RunLimits, RunStatus, Step
+from agent_core.domain.runs import (
+    FailureReason,
+    Run,
+    RunCheckpoint,
+    RunLimits,
+    RunStatus,
+    Step,
+)
 from agent_core.domain.views import TextContentBlock
 from agent_core.runtime import loop as runtime_loop
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
@@ -621,6 +628,82 @@ async def test_terminal_delta_checkpoint_preserves_chain_and_allows_memory_sweep
                 with pytest.raises(ConflictError, match="final full snapshot"):
                     await uow.checkpoints.prune(failed_id, terminal=True)
                 assert (await uow.checkpoints.latest(failed_id)) is not None
+    finally:
+        await engine.dispose()
+
+
+async def test_terminal_chain_without_final_full_is_not_reselected_for_pruning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Production runs 4ace0a05, c8848d73, 4ec6804b and 728c0637 ended their
+    # chains in a delta, so every maintenance pass selected them again and logged
+    # "checkpoint prune failed (ConflictError)" about every 33 seconds. The lease
+    # sweep still fails a run this way when it exhausts its attempts.
+    clock = FixedClock(NOW)
+    script = FakeModelScript(turns=[ScriptedTurn(text="done")])
+    settings = database_settings()
+    engine = create_engine(settings.database_url)
+    try:
+        async with build(
+            settings=settings, storage="postgres", script=script, clock=clock
+        ) as composition:
+            maintenance = MaintenanceWorker(uow_factory=composition.uow_factory, clock=clock)
+            worker = DurableWorker(
+                uow_factory=composition.uow_factory,
+                executor=composition.executor,
+                clock=clock,
+                worker_id="expiring-worker",
+            )
+            failed_id = await composition.runs.submit("exhaust the worker attempts")
+            for attempt in range(3):
+                claimed = await worker.claim()
+                assert claimed is not None
+                if attempt == 0:
+                    async with composition.uow_factory() as uow:
+                        await uow.checkpoints.write(
+                            failed_id,
+                            RunCheckpoint(
+                                run_id=failed_id,
+                                version=2,
+                                status=RunStatus.RUNNING,
+                                created_at=NOW,
+                            ),
+                            full=False,
+                            lease=claimed.lease,
+                        )
+                clock.advance(timedelta(seconds=31))
+                await maintenance.run_once()
+                clock.advance(timedelta(seconds=5))
+            failed = await composition.runs.get(failed_id)
+            assert failed.status is RunStatus.FAILED
+            assert failed.failure is not None
+            assert failed.failure.reason is FailureReason.MAX_ATTEMPTS_EXCEEDED
+
+            healthy_id = await composition.runs.submit("complete with a final snapshot")
+            assert await worker.run_once()
+            assert (await composition.runs.get(healthy_id)).status is RunStatus.COMPLETED
+
+            caplog.clear()
+            await maintenance.run_once()
+            await maintenance.run_once()
+
+            assert "checkpoint prune failed" not in caplog.text
+            async with composition.uow_factory() as uow:
+                assert await uow.maintenance.checkpoint_runs(100) == []
+            async with engine.connect() as connection:
+                counts = dict(
+                    (
+                        await connection.execute(
+                            select(CheckpointRow.run_id, func.count()).group_by(
+                                CheckpointRow.run_id
+                            )
+                        )
+                    )
+                    .tuples()
+                    .all()
+                )
+            # The failed run keeps its chain for diagnosis; the completed one is pruned.
+            assert counts == {failed_id: 2, healthy_id: 1}
     finally:
         await engine.dispose()
 

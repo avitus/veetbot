@@ -21,6 +21,14 @@ public struct TransportRequest: Sendable {
     public let headers: [String: String]
     public let requiresAuthentication: Bool
     public let retryAttempts: Int
+    /// Seconds of backoff a request that is safe to repeat may spend waiting
+    /// out a server restart, beyond `retryAttempts`.
+    public let restartWindow: TimeInterval
+
+    /// A deploy restarts the API and gives it three minutes to report ready
+    /// (`HEALTH_TIMEOUT_SECS` in `deploy/app/release.sh`); until it binds, the
+    /// proxy answers every request with its own 502 page.
+    public static let serverRestartWindow: TimeInterval = 180
 
     public init(
         method: HTTPMethod,
@@ -29,7 +37,8 @@ public struct TransportRequest: Sendable {
         body: Data? = nil,
         headers: [String: String] = [:],
         requiresAuthentication: Bool = true,
-        retryAttempts: Int = 1
+        retryAttempts: Int = 1,
+        restartWindow: TimeInterval = 0
     ) {
         self.method = method
         self.path = path
@@ -38,6 +47,7 @@ public struct TransportRequest: Sendable {
         self.headers = headers
         self.requiresAuthentication = requiresAuthentication
         self.retryAttempts = max(1, retryAttempts)
+        self.restartWindow = max(0, restartWindow)
     }
 }
 
@@ -115,15 +125,20 @@ public actor HTTPTransport {
     public let configuration: ConnectionConfiguration
     private let tokenStore: any TokenStore
     private let session: URLSession
+    private let sleep: @Sendable (UInt64) async throws -> Void
     private var state: AuthorizationState = .authenticated
 
     public init(
         configuration: ConnectionConfiguration,
         tokenStore: any TokenStore,
-        session: URLSession? = nil
+        session: URLSession? = nil,
+        sleep: @escaping @Sendable (UInt64) async throws -> Void = {
+            try await Task.sleep(nanoseconds: $0)
+        }
     ) {
         self.configuration = configuration
         self.tokenStore = tokenStore
+        self.sleep = sleep
         if let session {
             self.session = session
         } else {
@@ -154,6 +169,9 @@ public actor HTTPTransport {
 
     /// Sends within the request's retry bound, keeping cancellation separate from authorization failures.
     ///
+    /// A request with a restart window keeps retrying past that bound while the
+    /// proxy answers for a restarting API, until the window's backoff is spent.
+    ///
     /// An `uploading` body is sent as an upload task so its progress can be
     /// reported; the request's own `body` must then be nil and its headers carry
     /// the file's type (ADR-0120).
@@ -165,8 +183,11 @@ public actor HTTPTransport {
     ) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         let urlRequest = try await makeURLRequest(request)
-        var lastConnectionError: URLError?
-        for attempt in 1...request.retryAttempts {
+        let restartWindow = UInt64(request.restartWindow * 1_000_000_000)
+        var restartWait: UInt64 = 0
+        var attempt = 0
+        while true {
+            attempt += 1
             do {
                 try Task.checkCancellation()
                 let (data, response): (Data, URLResponse)
@@ -189,16 +210,16 @@ public actor HTTPTransport {
                     state = .authenticated
                     return (data, http)
                 }
-                if http.statusCode.isRetryableHTTPStatus,
-                    attempt < request.retryAttempts
-                {
-                    try await Task.sleep(
-                        nanoseconds: Self.retryDelayNanoseconds(
-                            response: http,
-                            attempt: attempt
-                        )
-                    )
-                    continue
+                if http.statusCode.isRetryableHTTPStatus {
+                    let delay = Self.retryDelayNanoseconds(response: http, attempt: attempt)
+                    let restarting = Self.isServerRestart(data: data, response: http)
+                    if attempt < request.retryAttempts
+                        || (restarting && restartWait + delay <= restartWindow)
+                    {
+                        if restarting { restartWait += delay }
+                        try await self.sleep(delay)
+                        continue
+                    }
                 }
                 try throwAPIError(data: data, response: http)
             } catch is CancellationError {
@@ -207,17 +228,20 @@ public actor HTTPTransport {
                 throw error
             } catch let error as URLError {
                 if error.code == .cancelled || Task.isCancelled { throw CancellationError() }
-                lastConnectionError = error
                 guard attempt < request.retryAttempts, error.isRetryableConnectionFailure else {
                     throw HTTPTransportError.connection(error)
                 }
                 let delay = UInt64(min(0.25 * pow(2, Double(attempt - 1)), 2) * 1_000_000_000)
-                try await Task.sleep(nanoseconds: delay)
+                try await self.sleep(delay)
             }
         }
-        throw HTTPTransportError.connection(
-            lastConnectionError ?? URLError(.unknown)
-        )
+    }
+
+    /// A 502, 503 or 504 without the API's error envelope is the proxy's own
+    /// page: the API behind it is not listening, as while a deploy restarts it.
+    private static func isServerRestart(data: Data, response: HTTPURLResponse) -> Bool {
+        [502, 503, 504].contains(response.statusCode)
+            && (try? JSONDecoder.server.decode(APIError.self, from: data)) == nil
     }
 
     public func makeSSERequest(path: String, lastEventID: Int?) async throws -> URLRequest {

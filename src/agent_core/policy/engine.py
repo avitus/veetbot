@@ -215,7 +215,7 @@ def evaluate_deterministic(
         # sends, telephone calls, or unsubscribe requests into standing allows. A
         # standing-grant design must own any relaxation rather than hiding it in a profile.
         decision = PolicyDecisionType.REQUIRE_APPROVAL
-    if (
+    escalated = (
         decision
         in {
             PolicyDecisionType.ALLOW,
@@ -229,7 +229,8 @@ def evaluate_deterministic(
             SideEffectClass.WORKSPACE_READ,
             SideEffectClass.NETWORK_READ,
         }
-    ):
+    )
+    if escalated:
         decision = PolicyDecisionType.REQUIRE_APPROVAL
     reason = (
         f"policy.tool.{action.name}" if tool_rules else f"policy.matrix.{action.side_effect.value}"
@@ -239,6 +240,7 @@ def evaluate_deterministic(
         reason_code=reason,
         explanation=f"The {ruleset.profile_name} profile evaluated {action.side_effect.value}.",
         policy_version=ruleset.policy_version,
+        untrusted_escalation=escalated,
     )
 
 

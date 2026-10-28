@@ -276,7 +276,13 @@ public struct RootView: View {
                     CockpitModeView(
                         model: coordinator.cockpit,
                         isVisible: coordinator.mode == .cockpit && scenePhase == .active,
-                        chooseMode: { coordinator.mode = $0 }
+                        chooseMode: { coordinator.mode = $0 },
+                        attention: attentionRows,
+                        openAttention: { sessionID in
+                            coordinator.mode = .chat
+                            Task { await model.openSharedSession(sessionID) }
+                        },
+                        discussWidget: { coordinator.discussWidget(title: $0) }
                     )
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
@@ -303,8 +309,7 @@ public struct RootView: View {
                         openSchedules: { showingGlobalSchedules = true },
                         openPersona: { showingGlobalPersona = true },
                         openSettings: presentSettings,
-                        chatAttention: SidebarAttention.rows(history: model.history,
-                            sessionsAwaitingApproval: model.sessionsNeedingApproval, hasUnreadReport: model.hasUnreadReport),
+                        chatAttention: attentionRows,
                         openAttention: { sessionID in
                             coordinator.mode = .chat
                             Task { await model.openSharedSession(sessionID) }
@@ -349,14 +354,19 @@ public struct RootView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 switch coordinator.mode {
                 case .cockpit:
-                    // Cockpit's board actions arrive with the board itself.
-                    Button(action: presentSettings) {
-                        Image(systemName: "gearshape")
-                            .foregroundColor(AppTheme.inkSoft)
+                    // The toolbar of "Mac — Cockpit · A2": the shortcuts, then
+                    // appearance, Arrange and the details panel.
+                    cockpitShortcut("Memory", "brain", "cockpit.memory") { showingGlobalMemory = true }
+                    cockpitShortcut("People", "person.2", "cockpit.people") {
+                        globalPeopleLookup = PeopleLookup(text: "", asOf: nil)
                     }
-                    .accessibilityLabel("Settings")
-                    .accessibilityIdentifier("cockpit.settings")
-                    EmailAppearanceButton()
+                    cockpitShortcut("Schedules", "calendar.badge.clock", "cockpit.schedules") { showingGlobalSchedules = true }
+                    cockpitShortcut("Persona", "sparkles", "cockpit.persona") { showingGlobalPersona = true }
+                    cockpitShortcut("Settings", "gearshape", "cockpit.settings", action: presentSettings)
+                    Rectangle().fill(AppTheme.hairline).frame(width: 1, height: 18).accessibilityHidden(true)
+                    CockpitAppearanceButton()
+                    CockpitArrangeButton(model: coordinator.cockpit)
+                    CockpitPanelToggle(model: coordinator.cockpit)
                 case .chat:
                     Button(action: presentSettings) {
                         Image(systemName: "gearshape")
@@ -413,7 +423,7 @@ public struct RootView: View {
             // Plain text, as the design's toolbar draws it, not a glass control.
             ToolbarItem(placement: .navigation) {
                 switch coordinator.mode {
-                case .cockpit: CockpitToolbarTitle()
+                case .cockpit: CockpitToolbarTitle(model: coordinator.cockpit, needYou: attentionRows.count)
                 case .chat: EmptyView()
                 case .email: EmailToolbarTitle(model: coordinator.email)
                 }
@@ -565,6 +575,25 @@ public struct RootView: View {
         showingSettings = true
         #endif
     }
+
+    /// What needs the owner: Email's and Cockpit's sidebars and Cockpit's toolbar list it.
+    private var attentionRows: [SidebarAttention.Row] {
+        SidebarAttention.rows(history: model.history,
+            sessionsAwaitingApproval: model.sessionsNeedingApproval, hasUnreadReport: model.hasUnreadReport)
+    }
+
+    #if os(macOS)
+    private func cockpitShortcut(
+        _ title: String, _ symbol: String, _ identifier: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).foregroundColor(AppTheme.inkSoft)
+        }
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(identifier)
+    }
+    #endif
 
     /// The mode bar above the content carries the switch wherever the active
     /// mode's left pane does not: on the Mac each pane leads with it, so the

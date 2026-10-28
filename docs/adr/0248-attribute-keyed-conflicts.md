@@ -62,6 +62,13 @@ formation had no predicate key.
    owner-authorized production run on 2026-10-26 examined 10 pairs and
    cleared 9, including all seven links on the home address; no review flag
    needed clearing.
+   Reconciliation takes the existing principal owner guard before reading any
+   belief or rejection and keeps it through the unit of work, including dry
+   runs. Taking the guard only when writing permits a stale full-record copy
+   to undo an intervening owner's `not_here` portability restriction or
+   `untrue` retirement. PostgreSQL interleaving regressions cover both outcomes;
+   this serialization repair changes neither the predicate rule nor the
+   requirement for explicit confirmation before a production repair.
 
 ## Consequences
 

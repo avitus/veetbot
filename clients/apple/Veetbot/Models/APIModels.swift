@@ -588,6 +588,14 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
 }
 
 extension ApprovalView {
+    /// Why the server asked, as the sentence the card shows (ADR-0260). An older
+    /// server sends a policy code such as `policy.matrix.code_execution` here; a
+    /// code has no spaces and tells the owner nothing, so it shows no line.
+    public var ownerReason: String? {
+        let reason = policyReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return reason.contains(" ") ? reason : nil
+    }
+
     /// A decision this build does not know decodes as no decision instead of
     /// failing the whole approval, so a newer server's resolution never hides
     /// the card (ADR-0129 D27). The task-grant fields are optional, for older

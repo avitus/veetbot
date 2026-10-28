@@ -8,6 +8,7 @@ import secrets
 from pathlib import PurePosixPath
 from typing import Any, cast
 
+from agent_core.domain.argument_views import approval_argument_value
 from agent_core.domain.errors import ExecutionUnavailable, ToolValidationError, WorkspaceEscape
 from agent_core.domain.execution import ExecutionCommand
 from agent_core.domain.messages import ContentPart, TextPart
@@ -24,6 +25,11 @@ from agent_core.ports.execution import WorkspaceHandle
 from agent_core.tools.bridge import BridgeDispatch, ProgrammaticBridgeSession
 
 _MAX_VECTOR_BYTES = 64 * 1024
+# An approval card shows `sh -c SCRIPT` as its script, cut to fit a glance.
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash"})
+_SCRIPT_FLAGS = frozenset({"-c", "-lc", "-cl"})
+_SUMMARY_PREFIX = "Run a command in Veetbot's sandbox: "
+_SUMMARY_LIMIT = 160
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -97,6 +103,19 @@ class SandboxRunCommandTool:
             raise ValueError("hard ceiling multiplier must be positive")
         self._manager = manager
         self._hard_ceiling_multiplier = hard_ceiling_multiplier
+
+    async def approval_view(
+        self, arguments: dict[str, Any], *, tenant_id: str
+    ) -> tuple[str, dict[str, Any]]:
+        """ADR-0260: the card names the command itself, masked like the arguments view."""
+        del tenant_id
+        argv = [approval_argument_value(part) for part in cast(list[str], arguments["command"])]
+        if len(argv) == 3 and PurePosixPath(argv[0]).name in _SHELLS and argv[1] in _SCRIPT_FLAGS:
+            argv = argv[2:]
+        summary = _SUMMARY_PREFIX + " ".join(" ".join(argv).split())
+        if len(summary) > _SUMMARY_LIMIT:
+            summary = summary[: _SUMMARY_LIMIT - 1] + "…"
+        return summary, arguments
 
     def _command(
         self, arguments: dict[str, Any], context: ToolExecutionContext

@@ -4,6 +4,8 @@
 - Date: 2026-09-21
 - Related: ADR-0035, ADR-0048, ADR-0049, ADR-0074, ADR-0107
 - Amends: ADR-0107 decision 1, which reran every verification job on `main`
+- Amended by: ADR-0257 (2026-10-26), which honours the record on every
+  branch and keys the Apple jobs on their inputs
 - Detailed design: `docs/plan/development-toolchain.md`
 
 ## Context

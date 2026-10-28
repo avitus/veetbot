@@ -35,7 +35,6 @@ from agent_core.domain.memory import (
 from agent_core.evals.general_memory_recall import FAMILIES
 
 PROBE_REPORT_VERSION: Final = "owner-recall-probes@1"
-PROBE_PATH_KINDS = ("automatic", "deliberate")
 STAGE_ORDER = (
     "not_stored",
     "stored_but_retired",

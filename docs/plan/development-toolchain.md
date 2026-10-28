@@ -61,6 +61,7 @@ settle.
 requires-python      >=3.12
 build backend        hatchling, src layout
 console script       agent = agent_core.cli.main:app
+console script       browser-profile-service = agent_core.browser_control_plane.main:main
 dependency groups    dev, test, docs
 lockfile             uv.lock, committed
 ```
@@ -210,10 +211,10 @@ target      runs
 install     uv sync --all-groups
 format      uv run ruff format . && uv run ruff check --fix .
 lint        uv run ruff format --check . && uv run ruff check .
-typecheck   uv run mypy src tests
-test        uv run pytest -m "not live"
-check       lint typecheck test-fast test-browser test-deploy docs-check test-website
-            test-cockpit
+typecheck   uv run mypy src client tests scripts/build_client.py
+test        uv run pytest -m "not live and not browser_image"
+check       test-fast test-browser test-website test-cockpit lint typecheck
+            test-deploy docs-check
 db-up       docker compose up -d postgres && wait-for-healthy
 migrate     uv run alembic upgrade head
 ```
@@ -230,7 +231,8 @@ test-contract     pytest -m "not static and not integration
 test-fast         test-static then test-contract
 browser-install   playwright install --with-deps chromium
 test-browser      required Chromium partition with content-free baseline
-test-integration  pytest -m integration
+test-integration  pytest -m "integration and not sandbox
+                  and not browser_image"
 test-live         RUN_LIVE_MODEL_TESTS=1 pytest -m live
 docs              mkdocs build --strict
 website-install   validated local reuse or npm ci; always npm ci in CI
@@ -240,7 +242,8 @@ test-cockpit      cockpit-install, Chromium, kit, builder and realm
                   tests, then ESLint and tsc
 ```
 
-Eleven more serve checks, CI steps, or operators. `docs-check` runs
+Twenty more serve checks, CI steps, or operators; the Apple lanes and
+`env-pull` are described below. `docs-check` runs
 `scripts/check_docs.py` and `test-deploy` the release, rollback, and Nginx
 deployment script tests; both are inside `make check` and CI's static job,
 which also runs `client-build` to build the downloadable client zipapp.
@@ -258,8 +261,8 @@ image, and `test-browser-image` measures what its browser asks for on its own
 `cockpit-runtime` exports the board's runtime to the local artifact root, as a
 release does, so a local server can serve Cockpit.
 
-`make check` is `lint typecheck test-fast test-browser test-deploy docs-check
-test-website test-cockpit`. `test-fast` is `test-static` followed by `test-contract`;
+`make check` is `test-fast test-browser test-website test-cockpit lint
+typecheck test-deploy docs-check`. `test-fast` is `test-static` followed by `test-contract`;
 those Python checks plus the independent browser lane and the Node website and
 Cockpit lanes are
 CI jobs 1, 2, 9, and 11 exactly — everything that needs neither a database nor a
@@ -373,14 +376,14 @@ from a git worktree: plain sync copies the worktree's `.git` pointer file,
 while validate sends a git bundle into a real repository. Xcode suites
 (`make test-apple`, `make test-apple-ui`) need macOS and stay local.
 
-The sidecar is the gate for every branch except `main` (ADR-0107). Hosted
-verification no longer starts when such a branch is pushed, so a change reaches
-`dev` or a feature branch on a passing `chunk validate`, plus the local suites the sidecar cannot
-run when the change touches them: `make test-integration` against a scratch
-PostgreSQL database marked disposable, `make test-sandbox`,
-`make test-browser-image` when an input of the browser image check changes,
-and the Xcode suites. The workflow
-section below defines when the hosted jobs still run.
+A change is verified in full once, on the final head proposed for `main`, by
+the requested hosted run (ADR-0257); that run's jobs cover everything
+`make check` does. While a change is developed or reviewed, and when a small
+change is pushed to `dev`, run the focused tests for what changed plus
+`make lint`, `make typecheck`, and, for documentation, `make docs-check`. Use
+the sidecar for focused browser cases (`make test-browser-cases`) and as the
+fallback for a full `make check` when hosted CI is unavailable, not as a
+per-push gate. The workflow section below defines when the hosted jobs run.
 
 ## Required real-browser verification
 
@@ -423,7 +426,7 @@ One service at Milestone 0.
 ```text
 service     postgres
 image       veetbot-postgres:16-alpine-vector0.8.7
-port        5432 published on 5432
+port        5432 published on 127.0.0.1:5432
 database    agent
 user        agent
 password    agent (development only, in .env.example)
@@ -474,7 +477,8 @@ the public-site verification and publication lane.
 job           target invoked         needs     runs on
 ------------  ---------------------  --------  ----------------
 1 static      make lint typecheck    nothing   main, on request
-              test-static test-deploy docs
+              test-static test-deploy
+              docs-check client-build
 2 contract    make test-contract     nothing   main, on request
 3 integration make test-integration  postgres  main, on request
 4 live        make test-live         secrets   schedule, manual
@@ -532,7 +536,12 @@ iPhone and iPad simulators, as two instances of `apple-ios-device`
 step-only `apple-ios` job passes once both have; `IOS_UI_DEVICES` names the
 devices a run builds for, boots, and tests, and defaults to both. Each device
 job runs on two executors, and `IOS_UI_SHARD=INDEX/TOTAL` makes each run every
-second enumerated case (`scripts/ios_ui_shard.py`, ADR-0230). The macOS cases synthesize real pointer and
+second enumerated case (`scripts/ios_ui_shard.py`, ADR-0230). Running both
+devices on one executor made two cases fail on hit-testing (ADR-0257). The Apple jobs
+key their exact-run record on their inputs alone: `clients/apple`, the
+`Makefile`, this configuration, and the shard script. Nothing else reaches
+the Apple suites, so a change outside those paths halts them right after
+checkout. The macOS cases synthesize real pointer and
 keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
 VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
 both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM
@@ -689,10 +698,11 @@ Three workflow-level facts complete the definition:
     other branch, pull-request branches included, a pipeline starts no workflow
     by itself and spends no credits; the workflow runs there only when the
     pipeline is triggered with `run_verify: true` (ADR-0107). Request that run
-    with each push of a change proposed for `main`, alongside its review, so
-    the final head's run is already under way when the review ends; merge
-    `main` into the branch before the final push, so the merge commit's tree
-    matches the verified head and `main` skips re-verification (ADR-0114).
+    once, on the final head of a change proposed for `main`: after CodeRabbit
+    reports no findings and after `main` has been merged into the branch, so
+    the merge commit's tree matches the verified head and `main` skips
+    re-verification (ADR-0114, ADR-0257). A failure there needs a fix, whose
+    push is the new final head.
     Name the pull request's own source branch:
 
     ```text
@@ -717,16 +727,19 @@ Three workflow-level facts complete the definition:
     `browser-image-x86_64`, and `browser-image-arm64`. The `apple-ios` aggregate
     requires both simulator-device jobs. Current `main` branch protection
     requires the same set except `browser`; packaging still enforces that
-    additional release gate. On `main`, each verification job
+    additional release gate. On every branch, each verification job
     except `public-site` halts
     successfully right after checkout when it finds its own record for the
-    commit's source tree, and otherwise runs in full (ADR-0114). A job writes
+    commit's source tree, or for the Apple jobs their inputs, and otherwise
+    runs in full (ADR-0114, ADR-0257). A job writes
     that CircleCI cache record, keyed by job and tree hash, only after its last
     step has passed, so a merge commit that reproduces the verified head of its
     pull request is not tested a second time, while any tree nothing verified
     is. Each node of a parallel job writes its own record, and the job halts
-    only when every node of the current split has one (ADR-0230). `static` checks the reading-lane floor before it looks for the record,
-    and no branch other than `main` ever skips. On
+    only when every node of the current split has one (ADR-0230). A rerun of
+    a requested pipeline therefore repeats only the jobs that have not passed
+    that tree. `static` checks the reading-lane floor before it looks for the
+    record. On
     `main`, macOS TestFlight delivery follows the successful application deploy
     in its own serial group; it does not run for pull requests or manual
     live-model pipelines. The
@@ -753,8 +766,8 @@ Each new feature gets its own branch. Cut it from `origin/main` and name it
 with two lowercase words that describe the feature, joined by one hyphen,
 such as `owner-records`; rename a generated branch such as `claude/<slug>` or
 `codex/<slug>` before its first push. The feature reaches `main` through its
-own pull request and the gate in `AGENTS.md`: sidecar validation as on any
-branch, the CodeRabbit loop, `main` merged in before the final push, one
+own pull request and the gate in `AGENTS.md`: focused tests while it is
+developed, the CodeRabbit loop, `main` merged in before the final push, one
 requested `run_verify` pipeline naming the feature branch on that final head,
 and production delivery after the merge. The signing smoke runs only on
 `dev`, so a feature, like a hotfix, merges without it. A fix to a feature
@@ -778,13 +791,23 @@ each carries, and therefore which of the four CI jobs runs it.
 directory           category        marker      first milestone
 ------------------  --------------  ----------  ---------------
 tests/unit          unit            static      M0
+tests/gates         registry gates  static      M0
 tests/contract      contract        (none)      M1
 tests/integration   integration     integration M2
 tests/resilience    interventions   integration M2
 tests/security      security        integration M2
 tests/live          live            live        M3
 tests/eval_cases    case fixtures   n/a         M1
+tests/native        Apple journeys  (none)      M26
+tests/corpora       data            n/a         M16
+tests/fixtures      data            n/a         M0
 ```
+
+`tests/gates` holds the registry-bound gate checks and takes `static` from
+the same directory routing as `tests/unit`. `tests/native` drives the Apple
+journeys through `tests/native_mac_vm.py` or a simulator and skips, an
+unpassed gate, when neither is available; `tests/corpora` and
+`tests/fixtures` hold data only.
 
 Three of the six carry the `integration` marker because all three need
 a database, and the marker exists to answer "can this run without
@@ -914,13 +937,14 @@ secret scanner and the egress block are both security controls.
 **This documentation repository** publishes two artifacts from the
 same canonical Markdown: the MkDocs site, which is the complete
 corpus, and a single self-contained HTML file listed in
-`docs-manifest.yaml`. The manifest names four sources — the index, the
-current milestone, the engineering plan, and the changelog — and that
-is deliberate rather than an oversight. Those four are the documents
-that are read start to finish. The seventeen specifications, the
-milestone map, the readiness review, and the thirty-four ADRs are
-reference material reached by cross-reference, and the site is where
-cross-references work.
+`docs-manifest.yaml`. The manifest names nine sources — the index, the
+current milestone, the engineering plan, and the changelog, plus the
+deployment runbook, the client guide and the three delivery ADRs they
+cite — and that is deliberate rather than an oversight. The first four
+are the documents that are read start to finish. The forty-two
+specifications, the milestone map, the readiness review, and the two
+hundred and sixty-two ADRs are reference material reached by
+cross-reference, and the site is where cross-references work.
 
 Widening the manifest is not free, and the reason is worth recording
 because it will be proposed again. Concatenating fifty
@@ -976,11 +1000,11 @@ done badly.
     exact union of the four CI jobs that need neither a database nor a
     credential. The Python lanes select by pytest marker, and the independent
     public-site lane runs the pinned Node build through its Make target.
-2.  **Ten targets are added to Section 21's eight.** `test-static`,
+2.  **Twelve targets are added to Section 21's eight.** `test-static`,
     `test-contract`, `test-fast`, `test-integration`, `test-live`, and
-    `docs`, plus `website-install`, `test-website`, `browser-install`, and
-    `test-browser`. Each exists because a CI
-    job invokes it; none exists
+    `docs`, plus `website-install`, `test-website`, `browser-install`,
+    `test-browser`, `cockpit-install`, and `test-cockpit`. Each exists
+    because a CI job invokes it; none exists
     because it seemed useful.
 3.  **`test-static` and `test-contract` partition `test-fast`.** The
     contract selector is a negation — not static, not integration, not
@@ -1044,10 +1068,10 @@ done badly.
     reauthored.** Numbering continues from the highest number carried
     over. New ADRs begin at the first decision this corpus did not
     already record.
-17. **`docs-manifest.yaml` stays at four sources.** The single-file
-    HTML is the plan-of-record bundle; the site is the complete
-    corpus. Widening the manifest requires per-document anchor
-    prefixing first, and is recorded as an open question rather than
+17. **`docs-manifest.yaml` stays at the nine sources that are read start
+    to finish.** The single-file HTML is the plan-of-record bundle; the
+    site is the complete corpus. Widening the manifest requires
+    per-document anchor prefixing first, and is recorded as an open question rather than
     done with silently colliding anchors.
 18. **Doppler is the source of the development secrets and `.env` is a
     generated cache of them.** `make env-pull` replaces `.env` atomically
@@ -1061,7 +1085,7 @@ done badly.
 
 1.  **Should the combined HTML publication include the specifications
     and ADRs?** Doing it correctly needs per-document anchor prefixing
-    in `scripts/build_docs.py`, because thirty-seven documents share
+    in `scripts/build_docs.py`, because more than seventy documents share
     heading names like "Decisions" and the generator resolves
     duplicates to the first occurrence. Cost is perhaps an afternoon;
     reversal cost is near zero, since the manifest and the script are

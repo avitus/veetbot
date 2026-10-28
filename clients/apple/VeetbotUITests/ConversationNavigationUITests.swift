@@ -2333,21 +2333,28 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(allowForTask.label, "Allow all actions for this task")
         let scope = app.staticTexts["approval.task-scope"]
         XCTAssertTrue(scope.exists)
-        XCTAssertTrue(scope.label.contains("www.duolingo.com/lesson"))
-        XCTAssertTrue(scope.label.contains("asks again"))
+        XCTAssertTrue(text(of: scope).contains("www.duolingo.com/lesson"))
+        XCTAssertTrue(text(of: scope).contains("asks again"))
         XCTAssertTrue(app.buttons["approval.allow-once"].exists)
         XCTAssertTrue(app.staticTexts["Text from the website"].exists)
         activate(allowForTask)
 
         let summary = app.staticTexts["task-grant.confirm.summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 5))
-        XCTAssertTrue(summary.label.hasPrefix("Clicks and typing on www.duolingo.com/lesson"))
+        XCTAssertTrue(text(of: summary).hasPrefix("Clicks and typing on www.duolingo.com/lesson"))
         activate(app.buttons["task-grant.confirm.allow"])
 
         let banner = app.staticTexts["task-grant.banner.text"]
         XCTAssertTrue(banner.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(banner.label.hasPrefix("Allowed on www.duolingo.com/lesson · 0 of 200"))
+        XCTAssertTrue(text(of: banner).hasPrefix("Allowed on www.duolingo.com/lesson · 0 of 200"))
+        #if os(macOS)
+        // The settled title sits inside the details button's label, which the Mac folds.
+        let settled = app.buttons["approval.details"]
+        XCTAssertTrue(settled.waitForExistence(timeout: 5))
+        XCTAssertTrue(settled.label.contains("Allowed for this task"), settled.label)
+        #else
         XCTAssertTrue(app.staticTexts["Allowed for this task"].waitForExistence(timeout: 5))
+        #endif
 
         activate(app.buttons["task-grant.banner.stop"])
         XCTAssertTrue(banner.waitForNonExistence(timeout: 10))
@@ -3676,6 +3683,34 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["mode.cockpit"].exists, "Email's sidebar offers Cockpit too")
         app.buttons["mode.chat"].click()
         XCTAssertTrue(app.descendants(matching: .any)["chat.composer"].waitForExistence(timeout: 10))
+    }
+
+    /// Cockpit's left pane resizes from its hairline and reopens at that width.
+    func testCockpitSidebarWidthPersistsAcrossApplicationRestart() {
+        app.launchEnvironment["VEETBOT_UI_TEST_MAIN_WINDOW_FRAME"] = "1200,900"
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.cockpit"].waitForExistence(timeout: 10))
+        app.buttons["mode.cockpit"].click()
+        let handle = app.descendants(matching: .any)["cockpit.sidebar.resize"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 10), app.debugDescription)
+        let before = handle.frame.midX
+        // Press on the board's side of the hairline: the grab area reaches into
+        // the board, a later sibling, which must not take the drag.
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.8125, dy: 0.5))
+        start.press(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 40, dy: 0)))
+        XCTAssertTrue(waitForFrame(of: handle, timeout: 5) { abs($0.midX - (before + 40)) <= 4 },
+                      "Dragging the hairline must widen Cockpit's left pane\n\(app.debugDescription)")
+        let dragged = handle.frame.midX
+
+        app.launchEnvironment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] = "1"
+        defer { app.launchEnvironment.removeValue(forKey: "VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH") }
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.cockpit"].waitForExistence(timeout: 10))
+        app.buttons["mode.cockpit"].click()
+        let relaunched = app.descendants(matching: .any)["cockpit.sidebar.resize"]
+        XCTAssertTrue(relaunched.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForFrame(of: relaunched, timeout: 5) { abs($0.midX - dragged) <= 3 },
+                      "Cockpit's left pane must reopen at its dragged width, not \(relaunched.frame)")
     }
 
     /// The mailbox sidebar's hairline widens it, and the next launch opens it at that width.

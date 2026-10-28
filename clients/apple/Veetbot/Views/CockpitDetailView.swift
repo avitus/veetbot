@@ -1,13 +1,17 @@
 import SwiftUI
 
-/// A widget's details (docs/plan/cockpit.md, per platform): its purpose, feeds
-/// and their freshness, a settings form generated from its settings schema,
-/// revision history with commit links, import failures, and Revert, Delete and
-/// Restore. The Mac shows it in the right panel; the iPad and iPhone in a sheet.
+/// A widget's details (docs/plan/cockpit.md, per platform; MagicPath
+/// merrily-city-4157): its purpose; Feed, with its last value, expected
+/// interval and when it goes stale; Private settings; History with the live
+/// revision and Revert; import failures; then Discuss in Chat, Remove from
+/// this screen, and Delete or Restore. The Mac shows it in the right panel;
+/// the iPad and iPhone in a sheet.
 struct CockpitWidgetDetailView: View {
     @ObservedObject var model: CockpitViewModel
     let slug: String
     let close: () -> Void
+    /// Discuss in Chat: a new conversation about this widget, staged, not sent.
+    var discuss: (String) -> Void = { _ in }
     @State private var values: [String: JSONValue] = [:]
     @State private var confirmingDelete = false
 
@@ -16,35 +20,35 @@ struct CockpitWidgetDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: VeetSpace.s4) {
+            VStack(alignment: .leading, spacing: 0) {
                 header
                 if let message = model.errorMessage {
                     Text(message).veetType(.meta).foregroundColor(AppTheme.red)
+                        .padding(.top, VeetSpace.s3)
                         .accessibilityIdentifier("cockpit.detail.error")
                 } else if let message = model.actionMessage {
                     Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                        .padding(.top, VeetSpace.s3)
                         .accessibilityIdentifier("cockpit.detail.message")
                 }
                 if model.quarantined.contains(slug) {
-                    paused
+                    paused.padding(.top, VeetSpace.s3)
                 }
                 if let widget, let snapshot = model.snapshot, !widget.declaredFeeds.isEmpty {
-                    feeds(widget, snapshot: snapshot)
+                    feed(widget, snapshot: snapshot)
                 }
-                if let schema = detail?.settingsSchema, let fields = CockpitSettingsField.fields(in: schema), !fields.isEmpty {
-                    settings(fields)
-                }
+                privateSettings
                 if let detail {
                     history(detail)
                     if !detail.importFailures.isEmpty { failures(detail) }
                     actions(detail)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity)
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, VeetSpace.s5)
                 }
             }
             .padding(VeetSpace.s4)
         }
-        .background(AppTheme.paper)
+        .background(AppTheme.paperDeep)
         .task(id: slug) {
             if model.detail?.slug != slug { await model.openDetail(slug) }
         }
@@ -53,20 +57,22 @@ struct CockpitWidgetDetailView: View {
         .accessibilityIdentifier("cockpit.detail")
     }
 
+    /// The design's head: the widget's name in the title role and a close
+    /// button, then its purpose.
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: VeetSpace.s1) {
+        VStack(alignment: .leading, spacing: VeetSpace.s2) {
+            HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
                 Text(widget?.title ?? slug).veetType(.title)
-                if let purpose = widget?.purpose {
-                    Text(purpose).veetType(.ui).foregroundColor(AppTheme.inkSoft)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Spacer(minLength: 0)
+                Button(action: close) { Image(systemName: "xmark") }
+                    .buttonStyle(QuietIconButtonStyle())
+                    .accessibilityLabel("Close details")
+                    .accessibilityIdentifier("cockpit.detail.close")
             }
-            Spacer()
-            Button(action: close) { Image(systemName: "xmark") }
-                .buttonStyle(QuietIconButtonStyle())
-                .accessibilityLabel("Close details")
-                .accessibilityIdentifier("cockpit.detail.close")
+            if let purpose = widget?.purpose {
+                Text(purpose).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -81,53 +87,96 @@ struct CockpitWidgetDetailView: View {
         }
     }
 
-    private func feeds(_ widget: CockpitWidget, snapshot: CockpitSnapshot) -> some View {
-        section("Feeds") {
-            ForEach(widget.declaredFeeds, id: \.id) { declared in
-                let current = snapshot.feeds[declared.id]?.current
-                HStack(spacing: VeetSpace.s2) {
-                    CockpitFreshnessDot(level: current?.freshness(at: Date()) ?? .pending)
-                    Text(declared.id).veetType(.meta).foregroundColor(AppTheme.ink)
-                    Spacer()
-                    Text(current.map { CockpitDevice.age(from: $0.observedAt, to: Date()) } ?? "Waiting")
-                        .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+    /// Each declared feed by name and source, then the stalest one's facts:
+    /// its last value, how often it is expected, and when it goes stale.
+    private func feed(_ widget: CockpitWidget, snapshot: CockpitSnapshot) -> some View {
+        let now = Date()
+        let entries = widget.declaredFeeds.map { (declared: $0, feed: snapshot.feeds[$0.id]) }
+        let level = CockpitDevice.freshness(of: widget, in: snapshot, now: now)
+        let interval = entries.compactMap { $0.feed?.current?.expectedIntervalSeconds }.max()
+        return section("Feed") {
+            ForEach(entries, id: \.declared.id) { entry in
+                HStack(alignment: .top, spacing: VeetSpace.s2) {
+                    CockpitFreshnessDot(level: entry.feed?.current?.freshness(at: now) ?? .pending)
+                        .padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(entry.declared.id).veetMono().foregroundColor(AppTheme.ink)
+                        Text(CockpitDetailText.source(trust: entry.feed?.trust ?? "platform"))
+                            .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    }
                 }
             }
+            facts([
+                ("Last value", CockpitDetailText.lastValue(level, age: CockpitDevice.age(of: widget, in: snapshot, now: now)),
+                 level == .error ? AppTheme.red : level == .stale ? AppTheme.amberText : AppTheme.ink),
+            ] + (interval.map { [
+                ("Expected", CockpitDetailText.expected($0), AppTheme.ink),
+                ("Stale after", CockpitDetailText.staleAfter($0), AppTheme.ink),
+            ] } ?? []))
         }
     }
 
-    private func settings(_ fields: [CockpitSettingsField]) -> some View {
-        section("Settings") {
-            ForEach(fields) { field in
-                CockpitSettingsFieldView(field: field, value: binding(field.key))
+    /// The widget's own settings, editable where its schema allows; they stay
+    /// on the owner's server.
+    @ViewBuilder
+    private var privateSettings: some View {
+        let fields = detail?.settingsSchema.flatMap(CockpitSettingsField.fields(in:)) ?? []
+        let stored = (detail?.settings ?? [:]).sorted { $0.key < $1.key }
+        if !fields.isEmpty || !stored.isEmpty {
+            section("Private settings", symbol: "lock") {
+                if fields.isEmpty {
+                    facts(stored.map { ($0.key, CockpitDetailText.display($0.value), AppTheme.ink) })
+                } else {
+                    ForEach(fields) { field in
+                        CockpitSettingsFieldView(field: field, value: binding(field.key))
+                    }
+                    Button("Save settings") {
+                        Task { await model.saveSettings(slug, values: values) }
+                    }
+                    .buttonStyle(PrimaryCapsuleButtonStyle())
+                    .disabled(model.isSaving || values == (detail?.settings ?? [:]))
+                    .accessibilityIdentifier("cockpit.detail.save")
+                }
+                Text("Kept on your server, never in the public repo.")
+                    .veetType(.meta).foregroundColor(AppTheme.inkFaint)
             }
-            Button("Save settings") {
-                Task { await model.saveSettings(slug, values: values) }
-            }
-            .buttonStyle(PrimaryCapsuleButtonStyle())
-            .disabled(model.isSaving || values == (detail?.settings ?? [:]))
-            .accessibilityIdentifier("cockpit.detail.save")
         }
     }
 
+    /// Each revision: what it is, who made it and when, its commit, and
+    /// Live beside the one the board shows, Revert beside the others.
     private func history(_ detail: CockpitWidgetDetail) -> some View {
         section("History") {
             ForEach(detail.revisions) { revision in
-                HStack(alignment: .firstTextBaseline, spacing: VeetSpace.s2) {
+                HStack(alignment: .top, spacing: VeetSpace.s2) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .veetIcon(.small)
+                        .foregroundColor(AppTheme.inkFaint)
+                        .padding(.top, 2)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(revision.state.replacingOccurrences(of: "_", with: " ").capitalized)
+                        Text(CockpitDetailText.revisionTitle(revision.state))
                             .veetType(.ui).foregroundColor(AppTheme.ink)
-                        Text("\(revision.source.replacingOccurrences(of: "_", with: " ")) · \(revision.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                            .veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                        HStack(spacing: 0) {
+                            Text("\(CockpitDetailText.revisionSource(revision.source)) · \(revision.createdAt.formatted(.relative(presentation: .named)))")
+                            if let sha = revision.commitSHA {
+                                Text(" · ")
+                                if let url = revision.commitURL {
+                                    Link(destination: url) { Text(CockpitDetailText.shortSHA(sha)).veetMono() }
+                                } else {
+                                    Text(CockpitDetailText.shortSHA(sha)).veetMono()
+                                }
+                            }
+                        }
+                        .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                         if let first = revision.diagnostics.first {
                             Text(first.message).veetType(.meta).foregroundColor(AppTheme.red).lineLimit(3)
                         }
                     }
-                    Spacer()
-                    if let url = revision.commitURL {
-                        Link("Commit", destination: url).veetType(.meta)
-                    }
-                    if revision.id != detail.liveRevisionID, revision.commitSHA != nil, detail.state == "active" {
+                    Spacer(minLength: 0)
+                    if revision.id == detail.liveRevisionID {
+                        Text("Live").veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    } else if revision.commitSHA != nil, detail.state == "active" {
                         Button("Revert") { Task { await model.revert(slug, to: revision.id) } }
                             .buttonStyle(QuietCapsuleButtonStyle())
                             .disabled(model.isSaving)
@@ -144,42 +193,139 @@ struct CockpitWidgetDetailView: View {
                     Text(failure.diagnostics.first?.message ?? "This commit could not be imported.")
                         .veetType(.meta).foregroundColor(AppTheme.red)
                     if let url = failure.commitURL {
-                        Link(String(failure.commitSHA.prefix(7)), destination: url).veetType(.meta)
+                        Link(destination: url) { Text(CockpitDetailText.shortSHA(failure.commitSHA)).veetMono() }
                     }
                 }
             }
         }
     }
 
+    /// The design's two actions, then deleting the widget everywhere (or
+    /// restoring a deleted one), which the design leaves to Chat.
     private func actions(_ detail: CockpitWidgetDetail) -> some View {
-        HStack {
+        VStack(alignment: .leading, spacing: VeetSpace.s2) {
+            Button {
+                discuss(widget?.title ?? slug)
+            } label: {
+                Label("Discuss in Chat", systemImage: "bubble.left.and.bubble.right")
+            }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
+            .accessibilityIdentifier("cockpit.detail.discuss")
             if detail.state == "deleted" {
                 Button("Restore") { Task { await model.restore(slug) } }
                     .buttonStyle(SecondaryCapsuleButtonStyle())
                     .accessibilityIdentifier("cockpit.detail.restore")
             } else {
-                Button("Delete widget", role: .destructive) { confirmingDelete = true }
-                    .buttonStyle(QuietCapsuleButtonStyle())
+                Button {
+                    Task { await model.removeFromScreen(slug, deviceClass: CockpitDevice.deviceClass) }
+                } label: {
+                    // The design's quiet danger action.
+                    Text("Remove from this screen").foregroundColor(AppTheme.red)
+                }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                .accessibilityIdentifier("cockpit.detail.remove")
+                Button("Delete widget…", role: .destructive) { confirmingDelete = true }
+                    .buttonStyle(.plain)
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkFaint)
                     .accessibilityIdentifier("cockpit.detail.delete")
             }
         }
+        .padding(.top, VeetSpace.s5)
         .disabled(model.isSaving)
         .confirmationDialog("Delete \(widget?.title ?? slug)?", isPresented: $confirmingDelete) {
             Button("Delete", role: .destructive) { Task { await model.delete(slug) } }
         } message: {
-            Text("Its directory is removed from the widget branch. You can restore it later.")
+            Text("It leaves every screen, and its directory is removed from the widget branch. You can restore it later.")
         }
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    /// The design's definition list: a faint term beside its value.
+    private func facts(_ rows: [(String, String, Color)]) -> some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: VeetSpace.s3, verticalSpacing: VeetSpace.s1) {
+            ForEach(rows, id: \.0) { row in
+                GridRow {
+                    Text(row.0).foregroundColor(AppTheme.inkFaint)
+                    Text(row.1).foregroundColor(row.2).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .veetType(.meta)
+        .padding(.top, VeetSpace.s1)
+    }
+
+    /// A section of the panel: its label 20 below the section before it.
+    private func section<Content: View>(
+        _ title: String, symbol: String? = nil, @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: VeetSpace.s2) {
-            Text(title).veetType(.label).foregroundColor(AppTheme.inkFaint)
+            HStack(spacing: 6) {
+                Text(title).veetType(.label)
+                if let symbol { Image(systemName: symbol).veetIcon(.small).accessibilityHidden(true) }
+            }
+            .foregroundColor(AppTheme.inkFaint)
             content()
         }
+        .padding(.top, 20)
     }
 
     private func binding(_ key: String) -> Binding<JSONValue?> {
         Binding(get: { values[key] }, set: { values[key] = $0 })
+    }
+}
+
+/// The details panel's words, as the design writes them.
+enum CockpitDetailText {
+    /// The stalest feed's last value, in the design's long freshness.
+    static func lastValue(_ level: CockpitFreshness, age: TimeInterval?) -> String {
+        let text = age.map(CockpitDevice.shortAge) ?? ""
+        switch level {
+        case .pending: return "Waiting for the first update"
+        case .error: return "Feed failed · last good \(text) ago"
+        case .stale: return "Stale · last update \(text) ago"
+        case .aging, .live: return text == "now" ? "Updated just now" : "Updated \(text) ago"
+        }
+    }
+
+    static func interval(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds) s" }
+        if seconds >= 3600, seconds % 3600 == 0 { return "\(seconds / 3600) h" }
+        return "\(seconds / 60) min"
+    }
+
+    static func expected(_ seconds: Int) -> String { "Every \(interval(seconds))" }
+
+    /// A feed is stale after three intervals without an update.
+    static func staleAfter(_ seconds: Int) -> String { "\(interval(seconds * 3)) without an update" }
+
+    static func source(trust: String) -> String {
+        trust == "platform" ? "Veetbot" : "Written by the assistant"
+    }
+
+    static func revisionTitle(_ state: String) -> String {
+        let words = state.replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+
+    static func revisionSource(_ source: String) -> String {
+        switch source {
+        case "assistant": return "Veetbot"
+        case "owner_import": return "You"
+        default: return source.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    static func shortSHA(_ sha: String) -> String { String(sha.prefix(7)) }
+
+    /// A stored setting the schema gives no field for.
+    static func display(_ value: JSONValue) -> String {
+        switch value {
+        case .string(let text): return text
+        case .number(let number): return CockpitSettingsField.format(number, integer: false)
+        case .bool(let on): return on ? "On" : "Off"
+        case .null: return "None"
+        default: return "Set"
+        }
     }
 }
 
@@ -233,7 +379,7 @@ private struct CockpitSettingsFieldView: View {
             TextField(field.title, text: Binding(
                 get: { if case let .string(text)? = value { text } else { "" } },
                 set: { value = $0.isEmpty ? nil : .string($0) }
-            ))
+            ), prompt: .a2Prompt(field.title))
             .textFieldStyle(.plain)
             .padding(VeetSpace.s2)
             .a2Field()
@@ -245,7 +391,7 @@ private struct CockpitSettingsFieldView: View {
                     if let number = Double(text) { value = .number(field.kind == .integer ? number.rounded() : number) }
                     else if text.isEmpty { value = nil }
                 }
-            ))
+            ), prompt: .a2Prompt(field.title))
             .textFieldStyle(.plain)
             .padding(VeetSpace.s2)
             .a2Field()

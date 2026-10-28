@@ -1,21 +1,32 @@
 """ADR-0251: an unconnected chat offers to connect a website the owner names."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 import pytest
 
 from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.application.browser_offers import OwnedWebsite, match_websites
 from agent_core.bootstrap import Composition, build
-from agent_core.config import load_settings
+from agent_core.config import Settings, load_settings
+from agent_core.domain.agents import run_limits_for_session
 from agent_core.domain.browser import BrowserProfileStatus
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.events import EventEnvelope
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn, StopReason
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    StopReason,
+    TextPart,
+    UserMessage,
+)
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import TextContentBlock
+from agent_core.runtime.worker import DurableWorker
 from tests.gates.test_schedule_api_m11 import _client
 from tests.unit.test_browser_composition import (
     PROFILE_ID,
@@ -440,6 +451,197 @@ async def test_connecting_the_chat_another_way_closes_the_offer() -> None:
         offer = await composition.services.runs.website_offer(composition.principal, chat_id)
 
     assert offer is None
+
+
+# A source run that asks the owner a question (owner decision 3) -------------
+
+
+def ask_then_continue() -> FakeModelScript:
+    return FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="conversation.ask_user",
+                        arguments={"question": "Tap Connect so I can sign in to Example."},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Continued", stop_reason=StopReason.END_TURN),
+        ]
+    )
+
+
+def _worker(composition: Composition) -> DurableWorker:
+    # PostgreSQL compositions queue runs; the test drives one worker by hand.
+    return DurableWorker(
+        uow_factory=composition.uow_factory,
+        executor=composition.executor,
+        clock=composition.clock,
+        worker_id="website-offer-fixture",
+    )
+
+
+async def _asking_chat(
+    composition: Composition, worker: DurableWorker | None = None
+) -> tuple[UUID, UUID]:
+    await seed_browser_authority(composition)
+    chat = await composition.services.sessions.create(composition.principal, "general", {})
+    submitted = await composition.services.runs.submit(
+        composition.principal,
+        chat.id,
+        [TextContentBlock(text="Sign in to Example and get my readings")],
+        "source",
+        None,
+    )
+    if worker is not None:
+        assert await worker.run_once()
+    for _ in range(200):
+        current = await composition.services.runs.get(composition.principal, submitted.run_id)
+        if current.status is RunStatus.WAITING_FOR_USER:
+            break
+        await asyncio.sleep(0.01)
+    assert current.status is RunStatus.WAITING_FOR_USER, current.failure
+    return chat.id, submitted.run_id
+
+
+def _runtime_rows(composition: Composition, request: int) -> str:
+    provider = cast(FakeModelProvider, composition.executor._model_provider)
+    return "\n".join(
+        part.text
+        for item in provider.requests[request].conversation
+        if isinstance(item, UserMessage)
+        for part in item.content
+        if isinstance(part, TextPart) and part.text.startswith("Runtime metadata")
+    )
+
+
+async def test_accepting_while_the_source_run_asks_answers_it_in_that_run(
+    *, settings: Settings | None = None, storage: Literal["memory", "postgres"] = "memory"
+) -> None:
+    async with build(
+        settings=settings or session_bound_hosted_settings(),
+        script=ask_then_continue(),
+        storage=storage,
+    ) as composition:
+        worker = _worker(composition) if storage == "postgres" else None
+        chat_id, source_run = await _asking_chat(composition, worker)
+        offer = await composition.services.runs.website_offer(composition.principal, chat_id)
+        assert offer is not None
+        accepted = await composition.services.runs.connect_browser(
+            composition.principal, chat_id, PROFILE_ID, offer_id=offer.offer_id
+        )
+        assert accepted is not None
+        if worker is not None:
+            assert await worker.run_once()
+        ended = await composition.runs.wait_terminal(accepted.run_id)
+        stored = await composition.services.sessions.get(composition.principal, chat_id)
+        events = await _events(composition, chat_id)
+        after = await composition.services.runs.website_offer(composition.principal, chat_id)
+        async with composition.uow_factory() as uow:
+            continued = await uow.runs.get(source_run, composition.principal)
+            bound = await uow.sessions.get(chat_id, composition.principal)
+            agent = await uow.agents.get_version(bound.agent_id, bound.agent_version)
+        first_row, last_row = _runtime_rows(composition, 0), _runtime_rows(composition, -1)
+
+    assert accepted.run_id == source_run and not accepted.replayed
+    assert ended.status is RunStatus.COMPLETED, ended.failure
+    assert stored.metadata["browser_profile_id"] == str(PROFILE_ID)
+    asked = next(event for event in events if event.event_type == "run.waiting_for_user")
+    [answer] = [
+        event
+        for event in events
+        if event.event_type == "user.message.created" and event.sequence > asked.sequence
+    ]
+    # The owner's tap answers the question: owner authority, in the same run.
+    assert answer.run_id == source_run
+    assert answer.actor_type == "principal"
+    assert answer.payload["question_id"] == asked.payload["question_id"]
+    assert answer.payload["origin"] == {
+        "kind": "browser_offer",
+        "offer_id": str(offer.offer_id),
+        "source_sequence": offer.source_sequence,
+    }
+    assert answer.derivation_key == f"browser_offer:{offer.offer_id}"
+    assert "example.org" in answer.payload["content"][0]["text"]
+    assert {event.run_id for event in events if event.event_type == "run.queued"} == {source_run}
+    # A new capability epoch: the resumed run plans again with browser tools.
+    replanned = [
+        event
+        for event in events
+        if event.event_type in {"context.plan.created", "context.epoch.rotated"}
+        and event.sequence > answer.sequence
+    ]
+    assert any("browser.navigate" in event.payload["plan"]["tool_names"] for event in replanned)
+    assert continued.limits == run_limits_for_session(agent, bound)
+    assert "website_offer=" in first_row and "website_offer=" not in last_row
+    assert after is None
+
+
+async def test_replaying_an_answering_acceptance_returns_the_same_run() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=ask_then_continue()
+    ) as composition:
+        chat_id, source_run = await _asking_chat(composition)
+        offer = await composition.services.runs.website_offer(composition.principal, chat_id)
+        assert offer is not None
+        first = await composition.services.runs.connect_browser(
+            composition.principal, chat_id, PROFILE_ID, offer_id=offer.offer_id
+        )
+        assert first is not None
+        await composition.runs.wait_terminal(first.run_id)
+        replay = await composition.services.runs.connect_browser(
+            composition.principal, chat_id, PROFILE_ID, offer_id=offer.offer_id
+        )
+        events = await _events(composition, chat_id)
+
+    assert replay is not None and replay.run_id == source_run and replay.replayed
+    assert sum(event.event_type == "user.message.created" for event in events) == 2
+
+
+async def test_a_typed_answer_to_the_source_question_closes_the_offer() -> None:
+    async with build(
+        settings=session_bound_hosted_settings(), script=ask_then_continue()
+    ) as composition:
+        chat_id, source_run = await _asking_chat(composition)
+        offer = await composition.services.runs.website_offer(composition.principal, chat_id)
+        assert offer is not None
+        await composition.services.runs.submit(
+            composition.principal, chat_id, [TextContentBlock(text="Switch")], "typed", None
+        )
+        await composition.runs.wait_terminal(source_run)
+        with pytest.raises(ConflictError) as refused:
+            await composition.services.runs.connect_browser(
+                composition.principal, chat_id, PROFILE_ID, offer_id=offer.offer_id
+            )
+        stored = await composition.services.sessions.get(composition.principal, chat_id)
+
+    assert refused.value.reason == "browser_offer_not_open"
+    assert "browser_profile_id" not in stored.metadata
+
+
+async def test_any_other_active_run_still_refuses_an_acceptance() -> None:
+    async with build(settings=session_bound_hosted_settings(), script=two_turns()) as composition:
+        chat_id = await _offered_chat(composition)
+        offer = await composition.services.runs.website_offer(composition.principal, chat_id)
+        assert offer is not None
+        async with composition.uow_factory() as uow:
+            source = await uow.runs.latest_for_session(chat_id, composition.principal)
+            assert source is not None
+            await uow.runs.create(
+                source.model_copy(
+                    update={"id": uuid4(), "status": RunStatus.RUNNING, "seed_event_sequence": 0}
+                )
+            )
+        with pytest.raises(ConflictError) as refused:
+            await composition.services.runs.connect_browser(
+                composition.principal, chat_id, PROFILE_ID, offer_id=offer.offer_id
+            )
+        stored = await composition.services.sessions.get(composition.principal, chat_id)
+
+    assert refused.value.reason == "active_run_exists"
+    assert "browser_profile_id" not in stored.metadata
 
 
 # The HTTP boundary (ADR-0251 decision 5) ------------------------------------

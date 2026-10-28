@@ -484,6 +484,7 @@ struct ScheduleCreateSheet: View {
                 TextField(
                     "Every weekday at 7 am, tell me what needs me today.",
                     text: $text,
+                    prompt: .a2Prompt("Every weekday at 7 am, tell me what needs me today."),
                     axis: .vertical
                 )
                 .lineLimit(3...6)

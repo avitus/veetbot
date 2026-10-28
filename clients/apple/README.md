@@ -79,8 +79,9 @@ has Copy, which writes formatted text (RTF and HTML, plus plain text without
 Markdown symbols), and Select Text, which opens the message in a native text view
 where any range can be selected.
 
-The settings surface groups Connection, Models, Website Access, Appearance, and
-Data & Privacy, plus SMS Integration on iOS, in a scrolling layout. The Connect or Update Connection action sits in
+Settings shows one group at a time — Connection, Models, Website access, MCP
+servers, Notifications, Appearance, SMS integration (iOS) and Data & privacy —
+from a sidebar on Mac and iPad and a list on iPhone. The Connect or Update Connection action sits in
 the Connection card, while device-local text-size and font-style controls save
 automatically and apply immediately throughout the client. The Models card reads
 and writes the server's `/v1/settings/models` resource (scopes `settings.read`
@@ -92,8 +93,8 @@ a server without the resource hides them. On macOS, configured
 clients use a separate settings window that resizes in both dimensions and
 remembers its frame. The main and settings windows persist their sizes and
 positions independently; system text sizing remains the default.
-On Mac, sheets open at readable widths: 640 points for Persona, 600 for email
-draft history and send review, and 540 for call results and email learning.
+On Mac, sheets open at readable widths: 1000 points for Persona, 600 for email
+draft history and send review, 560 for call results and 540 for email learning.
 On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
 an explicit accessible More menu so every destination remains usable at narrow
 split-view widths.
@@ -102,7 +103,14 @@ recently active chats, including those inside closed folders; a schedule with
 two or more sessions collapses into one row in the Scheduled section
 (ADR-0113). In Memory, the flag toggle shows memories that need review, and a
 memory's Review menu marks it reviewed, not true, or not relevant here, or
-deletes it after a confirmation (ADR-0117).
+deletes it after a confirmation (ADR-0117), or, since ADR-0224, replaces its
+wording with yours (Fix the wording on a memory that asks "Is this right?",
+Edit wording on any memory) and shows where it came from.
+The mode shell has three modes, Cockpit · Chat · Email; Cockpit's board, the
+Notifications group (devices and Send test), the System, Light or Dark theme,
+Clear local cache, in-app schedule creation (ADR-0225), toasts and the A2
+design tokens (`AppTheme.swift`, `VeetType.swift`) are described in
+`docs/apple-client.md`.
 
 Website Access creates and lists dedicated browser profiles from one Website URL.
 Enter a homepage such as `example.com` or a full login link such as
@@ -185,9 +193,10 @@ conversation, and the `--ui-testing-folders` journeys file, rename, accept and
 decline conversation folders while the default fixture proves an older server
 stays flat. Its launch fixture is debug-only, suppresses notification
 authorization, and uses an isolated in-process transport, so it needs no server
-or credential. It runs `make test-apple-ui-macos` and then
-`make test-apple-ui-ios`; either target runs alone when only one platform
-family changed. Each simulator is a device on the newest iOS runtime that
+or credential. It runs `make test-apple-ui-macos-vm` (the Mac cases inside the local Tart
+VM) and then `make test-apple-ui-ios`; `make test-apple-ui-macos` runs the Mac
+cases on the host, as CI does. Either platform target runs alone when only one
+platform family changed. Each simulator is a device on the newest iOS runtime that
 offers one, ties broken by udid. The iPhone pick skips the foldable iPhone Duo
 by its device type, so a renamed Duo is skipped too, and the pick is a standard
 iPhone: the iOS 27.1 runtime offers only the Duo, so it falls to iOS 27.0.
@@ -286,11 +295,9 @@ platform: a header with initials, name, relationship to the owner, main
 address and actions, then cards for names and contact details, relationships,
 a history timeline, open threads, facts and evidence, and Manage person.
 Sections with nothing recorded collapse into one note. Its palette in
-`PeopleProfileComponents.swift` reuses Email's adaptive accent and surfaces and
-adds an attention orange and a destructive red that keep 4.5:1 contrast in both
-appearances. People views set that adaptive accent as their tint: under the
-app's fixed turquoise tint, bordered buttons were unreadable in dark
-appearance. At accessibility sizes the header stacks, row symbols drop out,
+`PeopleProfileComponents.swift` draws on the A2 tokens (`AppTheme`): teal text
+for links and actions, amber for what waits on the owner and red for removals,
+on paper and surface, in both appearances. At accessibility sizes the header stacks, row symbols drop out,
 and buttons use rounded rectangles so a wrapped label is not clipped.
 
 SwiftData stores local history behind the `SessionHistoryStore` contract. The

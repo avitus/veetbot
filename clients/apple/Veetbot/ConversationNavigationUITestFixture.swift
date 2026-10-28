@@ -121,6 +121,20 @@ enum ConversationNavigationUITestFixture {
         return EmailInboxWidthStore(defaults: defaults)
     }
 
+    /// Cockpit's column widths, kept like the inbox width: one suite, emptied
+    /// at launch unless a relaunch journey keeps it. Read once per launch.
+    static let columnWidthDefaults: UserDefaults? = {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        let suiteName = "com.veetbot.apple.ui-tests.column-widths"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_KEEP_EMAIL_INBOX_WIDTH"] != "1" {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return defaults
+    }()
+
+    static func columnWidthDefaultsIfRequested() -> UserDefaults? { columnWidthDefaults }
+
     /// The mailbox sidebar width, kept like the inbox width: its own suite,
     /// emptied at launch unless a relaunch journey keeps it.
     static func makeEmailSidebarWidthIfRequested() -> EmailSidebarWidthStore? {

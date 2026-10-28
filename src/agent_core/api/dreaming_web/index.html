@@ -166,6 +166,17 @@
           </section>
         </div>
         <div class="toast" id="toast" role="status" hidden></div>
+        <dialog id="conversation" aria-labelledby="conversation-title">
+          <div class="actions conversation-toolbar">
+            <button class="btn" id="close-conversation">Close conversation</button>
+          </div>
+          <h2 id="conversation-title">Source conversation</h2>
+          <p id="conversation-date"></p>
+          <p>Cited messages are highlighted. Other messages provide conversation context.</p>
+          <div id="conversation-messages"></div>
+          <p id="conversation-error" role="alert" hidden></p>
+          <button class="btn" id="conversation-more" hidden>Load more messages</button>
+        </dialog>
         <dialog id="confirm">
           <h2 id="confirm-title">Approve and apply?</h2>
           <p id="confirm-copy"></p>

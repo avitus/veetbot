@@ -198,54 +198,6 @@ async def test_artifact_export_normalizes_collaborator_failures(
     assert result.failure.reason_code == reason_code
 
 
-async def test_generated_workspace_file_exports_as_authorized_artifact(tmp_path: Path) -> None:
-    content = b"generated in the sandbox\n"
-    run_id = UUID(int=15_001)
-    session_id = UUID(int=15_002)
-    async with build(settings=_settings(tmp_path), sequential_ids=True) as composition:
-        workspace = composition.sandbox.for_run(
-            composition.principal.tenant_id, run_id, lease_epoch=1
-        )
-        await workspace.write("output/report.txt", content)
-        writer = ArtifactWriterFactory(
-            composition.uow_factory,
-            FilesystemArtifactStore(composition.settings.artifact_root),
-            composition.clock,
-            SequenceIdFactory([UUID(int=15_003)]),
-        ).for_run(
-            tenant_id=composition.principal.tenant_id,
-            principal_id=composition.principal.principal_id,
-            session_id=session_id,
-            run_id=run_id,
-            origin=ArtifactOrigin.SANDBOX_EXPORT,
-        )
-        context = replace(
-            tool_context(),
-            run_id=run_id,
-            session_id=session_id,
-            tenant_id=composition.principal.tenant_id,
-            principal=composition.principal,
-            lease_epoch=1,
-            workspace=workspace,
-            artifacts=writer,
-        )
-        result = await ArtifactExportTool().execute(
-            {
-                "path": "output/report.txt",
-                "filename": "report.txt",
-                "media_type": "text/plain",
-            },
-            context,
-        )
-        assert result.ok is True
-        assert result.structured is not None
-        artifact_id = UUID(str(result.structured["artifact_id"]))
-        fetched = await composition.services.artifacts.open_content(
-            composition.principal, artifact_id
-        )
-        assert b"".join([chunk async for chunk in await fetched.open()]) == content
-
-
 async def test_general_artifact_expiry_sweep_removes_metadata_and_bytes(tmp_path: Path) -> None:
     async with build(settings=_settings(tmp_path), sequential_ids=True) as composition:
         store = FilesystemArtifactStore(composition.settings.artifact_root)

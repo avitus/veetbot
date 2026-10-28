@@ -83,24 +83,24 @@ async def consume(*events: ModelEvent) -> None:
         pass
 
 
-async def test_stream_invariant_1_sequence_starts_at_zero_and_is_gapless() -> None:
+async def _assert_stream_invariant_1_sequence_starts_at_zero_and_is_gapless() -> None:
     with pytest.raises(ModelStreamError, match="sequence"):
         await consume(text(1, 0), completed(2))
 
 
-async def test_stream_invariant_2_exactly_one_terminal_event_ends_the_stream() -> None:
+async def _assert_stream_invariant_2_exactly_one_terminal_event_ends_the_stream() -> None:
     with pytest.raises(ModelStreamError, match="without exactly one terminal"):
         await consume(text(0, 0))
     with pytest.raises(ModelStreamError, match="followed the terminal"):
         await consume(completed(0), completed(1))
 
 
-async def test_stream_invariant_3_item_deltas_are_contiguous() -> None:
+async def _assert_stream_invariant_3_item_deltas_are_contiguous() -> None:
     with pytest.raises(ModelStreamError, match="contiguous"):
         await consume(text(0, 0), text(1, 1), text(2, 0), completed(3))
 
 
-async def test_stream_invariant_4_tool_identity_is_stable_and_present() -> None:
+async def _assert_stream_invariant_4_tool_identity_is_stable_and_present() -> None:
     with pytest.raises(ModelStreamError, match="identity changed"):
         await consume(tool(0, 0), tool(1, 0, call_id="call-2"), completed(2))
     with pytest.raises(ModelStreamError, match="identity was absent"):
@@ -108,7 +108,7 @@ async def test_stream_invariant_4_tool_identity_is_stable_and_present() -> None:
         await consume(missing, completed(1))
 
 
-async def test_stream_invariant_5_usage_is_advisory_and_never_terminal() -> None:
+async def _assert_stream_invariant_5_usage_is_advisory_and_never_terminal() -> None:
     invalid = UsageEvent.model_construct(
         attempt_id=ATTEMPT_ID,
         run_id=RUN_ID,
@@ -141,11 +141,11 @@ async def test_stream_invariant_6_credential_shaped_content_is_rejected(
 async def test_all_six_stream_invariants() -> None:
     """Give the registry one target that executes every individually named invariant."""
 
-    await test_stream_invariant_1_sequence_starts_at_zero_and_is_gapless()
-    await test_stream_invariant_2_exactly_one_terminal_event_ends_the_stream()
-    await test_stream_invariant_3_item_deltas_are_contiguous()
-    await test_stream_invariant_4_tool_identity_is_stable_and_present()
-    await test_stream_invariant_5_usage_is_advisory_and_never_terminal()
+    await _assert_stream_invariant_1_sequence_starts_at_zero_and_is_gapless()
+    await _assert_stream_invariant_2_exactly_one_terminal_event_ends_the_stream()
+    await _assert_stream_invariant_3_item_deltas_are_contiguous()
+    await _assert_stream_invariant_4_tool_identity_is_stable_and_present()
+    await _assert_stream_invariant_5_usage_is_advisory_and_never_terminal()
     await test_stream_invariant_6_credential_shaped_content_is_rejected(
         "sk-" + "not-a-real-provider-key"
     )

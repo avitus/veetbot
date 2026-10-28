@@ -225,6 +225,23 @@ page summarizes and does not claim a milestone complete.
   deletion over HTTP need the exact `memory.write` scope and an idempotency key
   (ADR-0117); a file attached to a chat message is uploaded under
   `artifact.write` and stays `EXTERNAL_UNTRUSTED` (ADR-0120).
+- Owner-added MCP servers (ADR-0255) are default-off behind
+  `AGENT_MCP_SERVERS_ENABLED`; each server is the owner's own egress decision
+  made in Settings, never the model's, reached over HTTPS only, and its
+  sign-in secrets and tokens are sealed in PostgreSQL under
+  `MCP_AUTHORIZATION_KEY`, without which startup fails closed.
+- Cockpit widget publication (ADR-0240) uses one GitHub App credential,
+  delivered only to the maintenance unit, that can write nothing outside the
+  fenced `cockpit/widgets` branch.
+- Owner records (ADR-0239) are default-off behind `AGENT_RECORDS_ENABLED`;
+  `records.import` is classified `EXTERNAL_WRITE` and stores values read from
+  elsewhere only after the owner approves a card that renders every one of
+  them.
+- With calling enabled, a call the owner asks for in Chat dials without a
+  second confirmation card because the owner's request is its authorization
+  (ADR-0213); `AGENT_CALL_OWNER_REQUESTS_ENABLED=0` restores the card, and a
+  scheduled call carries calling authority only when its schedule was
+  created with `place_call`.
 
 ## Production delivery controls
 
@@ -244,7 +261,8 @@ promotion, and requires the health probe to report the same release identity
 locally and through the public TLS endpoint.
 
 Application services run without Docker-group membership or a container-runtime
-socket. A separate `veetbot-exec` systemd service owns gVisor sandbox lifecycle,
+socket. The separate `veetbot-execution` systemd service, running as
+`veetbot-exec`, owns gVisor sandbox lifecycle,
 loads no application environment file, and accepts the existing
 `ExecutionEnvironment` operations over a group-restricted Unix socket. The
 separate `veetbot-deploy` identity owns immutable application and documentation

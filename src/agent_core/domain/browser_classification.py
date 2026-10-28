@@ -102,6 +102,42 @@ _IRREGULAR_FORMS: dict[str, tuple[str, ...]] = {
     "choose": ("chose", "chosen"),
     "withdraw": ("withdrew", "withdrawn"),
 }
+# ADR-0263: two phrases that describe a record rather than act on it. A token
+# is read as description only beside the named neighbour, in that reading.
+_MONTHS = frozenset(
+    [
+        "jan",
+        "january",
+        "feb",
+        "february",
+        "mar",
+        "march",
+        "apr",
+        "april",
+        "may",
+        "jun",
+        "june",
+        "jul",
+        "july",
+        "aug",
+        "august",
+        "sep",
+        "sept",
+        "september",
+        "oct",
+        "october",
+        "nov",
+        "november",
+        "dec",
+        "december",
+    ]
+)
+_REPORT_TYPES = frozenset({"pathology", "lab", "laboratory", "radiology", "imaging"})
+_DESCRIPTIVE_AFTER: dict[str, frozenset[str]] = {"updated": _MONTHS}
+_DESCRIPTIVE_BEFORE: dict[str, frozenset[str]] = {
+    "report": _REPORT_TYPES,
+    "reports": _REPORT_TYPES,
+}
 _ROUTINE_NAMES = frozenset(
     {"continue", "done", "finish", "got it", "next", "practice", "review", "skip", "start"}
     | {"try again"}
@@ -397,6 +433,18 @@ def label_reads_as(text: str, other: str) -> bool:
     )
 
 
+def _descriptive(tokens: Sequence[str], index: int) -> bool:
+    """Whether ``tokens[index]`` describes a record (ADR-0263): "updated"
+    immediately before a month, or "report" immediately after a report type."""
+
+    token = tokens[index]
+    after = _DESCRIPTIVE_AFTER.get(token)
+    if after is not None and index + 1 < len(tokens) and tokens[index + 1] in after:
+        return True
+    before = _DESCRIPTIVE_BEFORE.get(token)
+    return before is not None and index > 0 and tokens[index - 1] in before
+
+
 def _named_consequence(text: str) -> BrowserActionConsequence | None:
     """The first category whose vocabulary ``text`` hits, or a currency symbol."""
 
@@ -405,7 +453,10 @@ def _named_consequence(text: str) -> BrowserActionConsequence | None:
     readings = [reading.split() for reading in _readings(text)]
     for consequence, words, phrases in _CATEGORIES:
         for tokens in readings:
-            if any(token in words for token in tokens):
+            if any(
+                token in words and not _descriptive(tokens, index)
+                for index, token in enumerate(tokens)
+            ):
                 return consequence
             for first_forms, rest in phrases:
                 width = len(rest)
@@ -640,6 +691,15 @@ def standing_ceiling_coverage(
     )
     if _origin_of(page_url) not in set(origins):
         return _refused(consequence, "outside_origin")
+    if (
+        action.kind in _NAVIGATING_KINDS
+        and facts is not None
+        and facts.link_target is not None
+        and not facts.link_target.same_origin
+    ):
+        # A link the runtime read leaves the origin, or an element it could
+        # not bound may: the ceiling covers neither (ADR-0263).
+        return _refused(consequence, "link_outside_origin")
     if consequence is not C.ROUTINE:
         return _refused(consequence, f"excluded.{consequence.value}")
     return BrowserCoverage(covered=True, consequence=consequence)

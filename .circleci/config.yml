@@ -31,19 +31,29 @@ commands:
             - ~/.cache/uv
 
   skip_verified_tree:
-    # On main, halt a verification job whose exact source tree already passed
-    # it, normally in the requested pipeline for the pull request's head
-    # (ADR-0114). The record is keyed by tree, so a merge that produces any
-    # tree nothing verified runs the full job.
+    # Halt a verification job whose identity already passed it, on any branch
+    # (ADR-0114, ADR-0257). The identity is the source tree, so a merge that
+    # produces a tree nothing verified runs the full job, or, for a job that
+    # names its inputs, the git objects of those paths alone.
     parameters:
       job:
         type: string
+      inputs:
+        type: string
+        default: ""
     steps:
       - run:
-          name: Identify the source tree
+          name: Identify the verified inputs
           command: |
             mkdir -p /tmp/veetbot-verified
-            git rev-parse 'HEAD^{tree}' > /tmp/veetbot-verified/tree
+            inputs="<< parameters.inputs >>"
+            if [[ -z "$inputs" ]]; then
+              git rev-parse 'HEAD^{tree}' > /tmp/veetbot-verified/tree
+            else
+              # A missing path fails the step rather than shrinking the identity.
+              for path in $inputs; do git rev-parse --verify "HEAD:$path"; done \
+                | git hash-object --stdin > /tmp/veetbot-verified/tree
+            fi
       # Each node of a parallel job records its own pass (ADR-0230); a job
       # runs on at most two nodes.
       - restore_cache:
@@ -57,13 +67,12 @@ commands:
           command: |
             tree="$(cat /tmp/veetbot-verified/tree)"
             total="${CIRCLE_NODE_TOTAL:-1}"
-            [[ "<< pipeline.git.branch >>" == main ]] || exit 0
             # Halt only when every node of this split passed the tree; together
             # they ran the whole partition.
             for ((node = 0; node < total; node++)); do
               [[ -f "/tmp/veetbot-verified/<< parameters.job >>-$node-of-$total-$tree" ]] || exit 0
             done
-            echo "<< parameters.job >> already passed on tree $tree; skipping."
+            echo "<< parameters.job >> already passed on $tree; skipping."
             circleci-agent step halt
 
   record_verified_tree:
@@ -340,8 +349,11 @@ jobs:
     resource_class: m4pro.medium
     steps:
       - checkout
+      # Nothing outside these paths reaches the Apple suites, so a run whose
+      # Apple inputs already passed halts on any branch (ADR-0257).
       - skip_verified_tree:
           job: apple
+          inputs: &apple_inputs clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py
       - run:
           name: Native Apple client tests
           command: make test-apple
@@ -353,8 +365,9 @@ jobs:
       - store_apple_test_results:
           platform: macos
 
-  # One simulator per executor, so the two devices run at the same time
-  # without sharing a machine, and a rerun repeats only the failed one (ADR-0230).
+  # One simulator per executor, so the two devices never share a machine, and
+  # a rerun repeats only the failed one (ADR-0230). Both devices on one machine
+  # made two cases fail on hit-testing (ADR-0257).
   apple-ios-device:
     parameters:
       device:
@@ -369,6 +382,7 @@ jobs:
       - checkout
       - skip_verified_tree:
           job: apple-ios-<< parameters.device >>
+          inputs: *apple_inputs
       - run:
           name: Apple client << parameters.device >> UI tests
           command: >-

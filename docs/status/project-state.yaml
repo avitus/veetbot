@@ -3,38 +3,56 @@
 # does not move.
 # ADR-0233: Owner authorized governed source learning and save reporting on
 # 2026-10-21; PR 181 delivered it on 2026-10-22. The owner-reported deferred-format
-# repair is authorized and awaits release; so does the 2026-10-22 owner-named site
-# repair (scheme-less names, www. and bare domain as one host). No milestone or gate moves.
+# repair reached main in PR 182 (merged 2026-10-22) and the owner-named site repair
+# (scheme-less names, www. and bare domain as one host) in PR 186 (merged
+# 2026-10-23); both run in production. No milestone or gate moves.
 # ADR-0243: Owner authorized static charts and diagrams on 2026-10-24,
 # with PNG previews, optional SVG/PDF and chart CSV through existing artifacts.
 # Implemented with focused sandbox/artifact/PNG-decoder evidence in ADR-0243.
-# Production delivery is pending; no milestone moves.
+# Delivered in PR 188, merged 2026-10-24 and running in production; no milestone moves.
 # ADR-0255: Owner asked on 2026-10-26 to connect MagicPath and to add MCP
 # servers from Settings: owner-added HTTP servers with in-app OAuth sign-in,
 # per-server access, an audited public-HTTPS transport and their own index
 # budget, default off behind AGENT_MCP_SERVERS_ENABLED. Implemented with gate,
-# unit, PostgreSQL and native tests; review and delivery are pending. No
-# milestone or gate moves.
+# unit, PostgreSQL and native tests; delivered in PR 201, merged 2026-10-27 with
+# every review thread resolved (CodeRabbit's conclusion on the final head was
+# NEUTRAL, not a clean pass). No milestone or gate moves.
 # ADR-0259: Owner asked on 2026-10-27 to repair three recall probe misses:
 # "our garden" tasks anchor the owner's residence (+home-location@1); an
 # owner-stated tie on a person-linked save records the People edge, with an
 # `agent people link-kinship` repair for earlier saves; overview pages run
 # closest family first (+owner-overview@2). Relevance matching folds a
 # plural or third-person "-s" (retrieval@8), and probes can check delivered
-# names. Proposed; delivery and the production repair run are pending. No
-# milestone or gate moves.
+# names. Delivered in PR 206, merged 2026-10-28; the production
+# `agent people link-kinship` repair run is pending. No milestone or gate moves.
 # ADR-0251: Owner accepted on 2026-10-25 an app-offered card that connects an
 # unconnected chat to an owned website the owner names; a match never connects
 # by itself, and an offer expires at the next owner message or after 24 hours.
-# Implemented 2026-10-25 with server, native and spec tests; delivery is
-# pending. No milestone, gate or policy profile moves.
+# Implemented 2026-10-25 with server, native and spec tests; delivered in PR
+# 197, merged 2026-10-26. Its follow-up, the card answering the source run's
+# question, is on dev only and still awaits delivery. No milestone, gate or
+# policy profile moves.
 # ADR-0256: Owner asked on 2026-10-26 that new mail keep working when the Email
 # budget runs low: background learning stops at 75% of each ceiling and new
-# mail keeps the rest. Implemented with focused tests; delivery is pending.
-# No milestone or gate moves.
+# mail keeps the rest. Implemented with focused tests; delivered in PR 205,
+# merged 2026-10-27. No milestone or gate moves.
 # ADR-0258: Owner asked on 2026-10-26 for whole deferred-tool definitions,
 # truncation recovery (definition answers kept whole, live event numbers, a
-# truncation note) and web.fetch_json. Implemented with tests; delivery is
+# truncation note) and web.fetch_json. Implemented with tests; delivered in
+# PR 204, merged 2026-10-27, which production runs as release
+# 20261028-010041-3295faf. No milestone, gate or policy profile moves.
+# ADR-0260: Owner authorized plain approval cards and an honest capture marker
+# on 2026-10-27, declining a sandbox exemption and a model-written purpose line.
+# Implemented with server and native tests; delivery is pending. No milestone,
+# gate or policy version moves.
+# ADR-0261: Owner approved on 2026-10-27 reading a long tool result in
+# sections: artifact.read_capture opens only a chat's own untrusted captures,
+# two reads a step and sixteen a run, with no prompt tokens. Implemented with
+# unit, roster and composed gate tests; delivery is pending. No milestone or
+# gate moves.
+# ADR-0262: Owner asked on 2026-10-27 to raise the deferred tool index from
+# 2,000 to 2,500 tokens so a website-bound chat skips no Gmail write; the
+# prefix ceiling rises to 24,500. Implemented with gate tests; delivery is
 # pending. No milestone, gate or policy profile moves.
 schema_version: 1
 
@@ -49,7 +67,8 @@ project:
   # and the ceiling's advance to Milestone 14 (289 gates) were recorded on
   # 2026-10-09. Milestone 13 completed on 2026-08-27 (recorded 2026-09-28).
   # ADR-0205 authorizes safe diagnostics, bounded recovery, failure isolation and
-  # operational reliability reporting on the owner-requested reliability branch.
+  # operational reliability reporting on the owner-requested reliability branch;
+  # PR 171 (merged 2026-10-17) and PR 158 (merged 2026-10-18) delivered it.
   # Production activation and the verified milestone ceiling are unchanged.
   current_milestone: 14
   # ADR-0205: independently authorized existing-app reliability repair; no M33
@@ -57,18 +76,25 @@ project:
   active_milestone: 15
   # ADR-0221 records the owner's 2026-10-20 acceptance of unattended call plans:
   # the platform places a one-time call schedule's retries and follow-up from
-  # each call's closed result. No milestone or gate moves; delivery is pending.
+  # each call's closed result. No milestone or gate moves; PR 179 delivered it on
+  # 2026-10-20.
   # ADR-0209 records the owner-authorized browser approval, native feedback and
-  # deadline repair on 2026-10-16. No milestone or gate moves; delivery is pending.
+  # deadline repair on 2026-10-16. No milestone or gate moves; PR 174 delivered
+  # it on 2026-10-18.
+  # ADR-0263 (Proposed) records the owner's 2026-10-25 authorization to cut
+  # research approvals: answered questions and file exports no longer end
+  # research authority, refusals name a reason, same-origin sprite icons are
+  # inspected through DevTools, and two record phrases stop matching. No
+  # milestone, gate or policy version moves; production acceptance follows delivery.
   # ADR-0178 authorizes parallel Milestone 33 on 2026-10-11: general recall,
   # measured semantic search and bounded source recovery; activation needs evidence.
   # ADR-0172 records the owner-approved same-chat website continuation repair,
   # interactive authority for owner replies, and specific single-action X follow
-  # consent. No milestone or gate moves; production acceptance awaits delivery.
+  # consent. No milestone or gate moves; PR 155 delivered it on 2026-10-10.
   # ADR-0168 records the owner's 2026-10-09 browser approval repair: the
   # default policy permits a bounded scroll in an owner-originated task,
   # including schedules, while other actions retain their approval rules.
-  # No milestone or gate moves; production acceptance follows delivery.
+  # No milestone or gate moves; PR 156 delivered it on 2026-10-10.
   # ADR-0165 records the owner's 2026-10-08 extension of Milestone 31: a
   # suspected-spam flag from the importance assessment, informed by Gmail's
   # own DMARC result, that never touches Gmail, plus thread-level Report spam
@@ -347,7 +373,7 @@ milestones:
     - 'Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image'
     - 'Build step 10 remainder: the discuss intent, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19''s preflight rebuild of live widgets'
     - 'Build step 11: preview rendering'
-    - "Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; hosted CI, review and production delivery"
+    - "Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; then the activation release (build steps 2 to 10 reached main in pull requests 186, 187, 188, 193, 195 and 200 by 2026-10-26)"
     deferred_scope:
     - Deterministic collectors that fetch outside data without a model run, and their egress allowlist
     - A browser or television rendering, WidgetKit, Lock Screen widgets and Live Activities
@@ -375,7 +401,7 @@ milestones:
     - Publish matching upstream, comparative and exact-revision release evidence before unattended production activation
     evidence:
     - check: Supervised verification input isolation repair (2026-10-25)
-      outcome: implemented_pending_delivery
+      outcome: delivered
       detail: >-
         The October 24 evening run reached the proposal provider but deferred
         verification after its near-limit group left no room for the proposed
@@ -389,9 +415,10 @@ milestones:
         The same read-only synthetic pair preflight improves verification from
         six to eight of eight otherwise admitted queued groups; the remaining
         privacy-refused group stays refused. No provider call or production
-        mutation was used for that diagnostic; live delivery remains pending.
+        mutation was used for that diagnostic. Pull request 196 delivered the
+        repair on 2026-10-25 with no review findings and hosted CI passing.
     - check: Supervised source-clock and retry fairness repair (2026-10-24)
-      outcome: implemented_pending_delivery
+      outcome: delivered
       detail: >-
         Production metadata recovery completed on October 23 with all 469 proofs
         validated and originals unchanged. The next daily run exposed historical
@@ -402,8 +429,10 @@ milestones:
         the remaining claims. Shared in-memory/PostgreSQL regression coverage must
         demonstrate a reviewable proposal behind four failed groups, unchanged
         originals and privacy boundaries, and the same two-call daily limit.
+        Pull request 188 delivered it on 2026-10-24 with every review thread
+        resolved and hosted CI passing.
     - check: Owner-authorized verified legacy recovery (2026-10-22, ADR-0241)
-      outcome: implemented_pending_production_recovery
+      outcome: delivered_production_recovery_complete
       detail: >-
         The owner authorized metadata-only recovery and full-bank supervised
         dreaming after a read-only investigation matched missing attribution
@@ -411,11 +440,14 @@ milestones:
         recovery must validate every unknown erased head, preserve deleted
         content and all existing privacy checks, retain the cutover as history,
         and restart inventory without resetting budgets or decisions. Production
-        retains the forward-only cutoff until verified recovery is delivered.
+        retained the forward-only cutoff until the verified recovery was delivered.
         The bounded operator command previews before confirmation, validates all
         proofs atomically, and preserves daily scheduling, spending and erased
         sources. Read-only validation matched all 469 uncertain heads (142
         attribution-bearing), without restoring content or writing production.
+        Pull request 186 delivered the command on 2026-10-23, and the production
+        recovery completed the same day with all 469 proofs validated and
+        originals unchanged, as the next entry records.
     - check: Independent supervised dreaming delivery and cutover (2026-10-15, ADR-0202)
       outcome: delivered_supervised_cutover_verified
       detail: >-
@@ -1246,12 +1278,27 @@ milestones:
     - Standing or automatic unsubscribe rules (B8), background or scheduled cleanup
     - Gmail filters and blocked senders (new OAuth scope), a durable Keep from Chat, another provider
     open_items:
-    - Pass the five native Subscriptions journeys (added 2026-09-28 and passing locally on the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
     - Show the Subscriptions detail beside its list on regular-width iPad as email-unsubscribe.md requires; the iPad sheet is a 580-point compact-width form sheet, so the detail pushes as on iPhone
-    - Pass the two native suspected-spam journeys (added 2026-10-08 and passing locally on the Mac and the iPhone and iPad simulators) in the hosted Mac, iPhone and iPad UI lanes
     - Owner-authorized real-mailbox smoke on both accounts covering one-click, mailto, sender and thread spam each with Not spam, and cleanup
     - Exact-head hosted CI and explicitly authorized review and production delivery evidence
     evidence:
+    - check: Native Subscriptions and suspected-spam journeys in the hosted UI lanes
+      outcome: passed
+      detail: >-
+        All seven journeys run in hosted CI. The Mac lane, make
+        test-apple-ui-macos, names them in its -only-testing list, and the
+        iPhone and iPad lane, make test-apple-ui-ios, runs every enabled
+        VeetbotUITests case sharded across executors. The five Subscriptions
+        journeys joined the lanes in pull request 142 (merged 2026-09-28) and
+        the two suspected-spam journeys in pull request 154 (merged
+        2026-10-08). The apple, apple-ios-iphone and apple-ios-ipad jobs belong
+        to the verify workflow, and package-release and deploy-app require
+        apple and apple-ios, so every main merge since, through pull request
+        204 (release 20261028-010041-3295faf), has passed them. Twenty-two of
+        the twenty-three gates bind passing checks; only
+        gate.email.unsubscribe_release_evidence still points at the pending
+        check. Verified from the Makefile, the CircleCI configuration and the
+        public release endpoints on 2026-10-27.
     - check: Milestone 31 spam extension registry red phase (ADR-0165)
       outcome: observed_expected_failure
       detail: >-
@@ -1607,6 +1654,18 @@ milestones:
       - Complete host health probes and an independent outage alert channel
       - Verify firewall, SSH, proxy, rollback and worker watchdog hardening
       - Measure production reliability and explicitly activate reviewed monitoring
+    evidence:
+      - check: ADR-0205 reliability repair delivery
+        outcome: delivered
+        detail: >-
+          Pull request 171 (merged 2026-10-17) carried safe failure references,
+          worker backoff, cleanup isolation and scoped reliability reporting to
+          main, and pull request 158 (merged 2026-10-18) its bounded recovery
+          follow-up; each passed hosted CI with every review thread resolved,
+          and production runs release 20261028-010041-3295faf, which carries
+          both. All sixteen operational-hardening gates still point at the
+          pending check, and monitoring activation remains a separate owner
+          step.
   "16":
     title: Memory evaluation and lifecycle
     status: complete
@@ -1814,14 +1873,14 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Promote the bundled formation@9 evidence to main through the CodeRabbit loop and verify the deploy selects formation@9 for the production tuple
+        Verify from a production selection audit that the deploy selects formation@9 for the production tuple; the refreshed evidence reached main in pull request 156 on 2026-10-10
       - >-
         Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093;
         audit scorer semantics and compare Sol/Astra under controlled reasoning
         settings before changing the memory tuple with new activation evidence.
     evidence:
       - check: Policy-bound memory evidence refresh after the scrolling repair (2026-10-09)
-        outcome: passed_locally
+        outcome: delivered_selection_audit_pending
         detail: >-
           ADR-0168 records the first comparison's attribution and recall failures
           and the owner's instruction to repair formation@9 without a fallback
@@ -1833,7 +1892,10 @@ milestones:
           representation in every repeat and zero boundary failures. The 1,134
           calls cost USD 6.49. Both formation@9 and the existing formation@10
           companion artifact are refreshed for default@96f9a6f2bfce+hb03f69cf;
-          formation@9 remains the selected policy. Production delivery is pending.
+          formation@9 remains the selected policy. Pull request 156 delivered
+          the refreshed artifacts on 2026-10-10 with every review thread
+          resolved and hosted CI passing; a production selection audit naming
+          formation@9 for the production tuple is still to be recorded.
       - check: Astra/Fable integration with dev e8d3fb1 (2026-09-11)
         outcome: passed_locally
         detail: >-
@@ -2386,17 +2448,18 @@ milestones:
       - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
       - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
-      - Deliver the independently verified expired-source drafting repair (ADR-0205)
     evidence:
       - check: reply drafting after the retained body expires
-        outcome: passed_on_sidecar
+        outcome: delivered
         detail: >-
           The independent ADR-0205 regression first failed on production main
           with internal_error before any model request, then passed with bounded
           fresh reads and a completed draft. Three unavailable, partial and
           wrong-account cases preserve edits and return dependency_unavailable.
-          The reliability partition passed 61 tests on the sidecar. Production
-          delivery remains pending; no memory quality gate is claimed.
+          The reliability partition passed 61 tests on the sidecar. Pull
+          request 171 delivered the repair on 2026-10-17 with every review
+          thread resolved and hosted CI passing; no memory quality gate is
+          claimed.
       - check: uv run pytest tests/unit/test_email_importance_replay.py tests/gates/test_email_privacy_m26.py
         outcome: pass
         detail: >-
@@ -2725,7 +2788,11 @@ milestones:
         open because gate.call.admission_bounds and gate.call.live_release
         still point at the pending check, and binding them to the dashboard
         and live evidence above will change the milestone's head. Verified
-        from GitHub on 2026-09-28.
+        from GitHub on 2026-09-28. Pull request 173 (owner-requested calls,
+        ADR-0213, merged 2026-10-18) and pull request 179 (call plans under
+        ADR-0221 and the call-result intake repair, merged 2026-10-20) have
+        changed calling source since, each with every review thread resolved
+        and hosted CI passing.
 
   "33":
     title: General memory search and recall
@@ -2826,7 +2893,7 @@ milestones:
       - The owner approved a release-specific bounded rollout with revised acceptance criteria and compatibility review (ADRs 0218 and 0220); actual human failure findings, final source verification and production admission remain pending
       - On 2026-10-20 the owner explicitly approved the exact 37-case scope and stated residual risk (ADR-0222); version-two review requirements and an offline shorter packet are prepared separately, with actual findings and hosted release verification still pending and no activation or new PR authorization
       - The owner subsequently requested rollout with periodic review of real production use (ADR-0223); a separate version-three trial replaces pre-activation synthetic findings with actual owner authorization and daily check-ins, preserves original failed evidence and release gates, and awaits verification and explicit PR instruction before production delivery
-      - The owner authorized the recall release PR and verified production delivery on 2026-10-18; integration proceeds on codex/recall-production-release while the measured branch and the dev push hold remain unchanged
+      - The owner authorized the recall release PR and verified production delivery on 2026-10-18; pull request 178 merged codex/recall-production-release on 2026-10-19 and pull request 203 moved the live label to retrieval@7 on 2026-10-27, while the measured branch remains unchanged
       - Current production differs from the evaluated inputs, including retained recall validation and run-loop time reserves; full deployment equivalence has not been established and no activation is claimed
       - Native CPU historical indexing and 480 synthetic load samples completed through 100000 competing records; every target ranked first and rendered, but this is not independent answer-quality evidence
       - Foundation PR159 deployed as 81062c5b with application, docs, website and TestFlight upload passing; the owner authorized coordination with reliability PR163 for one combined release, final review, exact-head CI and production delivery
@@ -2850,7 +2917,7 @@ milestones:
     design: docs/plan/owner-records.md
     adr: docs/adr/0239-owner-records-and-numeric-series.md
     gates_registered: 10
-    implementation_status: implemented_behind_flag_off_by_default_review_and_delivery_pending
+    implementation_status: delivered_behind_flag_activation_pending
     implementation_evidence:
       - tests/gates/test_records_m34.py
       - tests/unit/test_records_domain.py
@@ -2862,7 +2929,21 @@ milestones:
       - tests/gates/test_context_m7.py::test_prefix_stability
       - tests/unit/test_memory_formation.py::test_recorded_values_never_form_beliefs
     open_items:
-      - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
+      - 'Owner: set AGENT_RECORDS_ENABLED in production and accept the records approval tool_rules entry with one formation-evidence regeneration on the new policy version'
+    evidence:
+      - check: dev-to-main review, hosted CI and production delivery
+        outcome: delivered
+        detail: >-
+          The records build sequence reached main in pull request 186 (merged
+          2026-10-23), the default agent's records tools in pull request 193
+          (merged 2026-10-25) and reviewed records.import in pull request 202
+          (merged 2026-10-26); each passed hosted CI with every review thread
+          resolved, and production runs release 20261028-010041-3295faf, which
+          carries all three. AGENT_RECORDS_ENABLED stays off in production and
+          the approval tool_rules entry is deferred until the owner accepts one
+          formation-evidence regeneration, so activation remains with the
+          owner. Verified from GitHub and the public release endpoints on
+          2026-10-27.
 
 # Open work that no active milestone owns: owner-only steps of non-milestone
 # ADRs, and specification-versus-code gaps found in completed milestones.
@@ -2881,6 +2962,7 @@ open_items_outside_milestones:
 - 'Owner: accept or reject ADR-0104, ADR-0105, ADR-0106, ADR-0107, ADR-0114, ADR-0135, ADR-0137 and ADR-0138, which are still Proposed although their mechanisms are implemented, specified and on main'
 - 'Owner: accept or reject ADR-0146, which is Proposed and implemented: a hosted browser launch repeats the Playwright disabled-feature list, gives push messaging a check-in address it cannot fetch, and leaves one account request to accounts.google.com on'
 - 'Owner decision: the hardline protected_host_path rule blocks .git/config only at the workspace root, so sub/.git/config is not blocked, while .env and ~/.ssh already match at any depth; decide whether it should, knowing that a change to the matcher in policy/hardline.py leaves policy_version unchanged but an edit to hardline.yaml moves it and unbinds the memory-formation release evidence (found in the 2026-09-28 test audit)'
+- 'Startup: bootstrap-and-composition.md Phase 1 says the prefix classes of the configured context plan must sum to at most the prefix ceiling before anything is built, but no startup check exists; the ceiling is enforced only per plan in context/planner.py, and the sum only by the persona gate on the shipped file, so an operator overlay that raises a class cap alone is found at the first plan that uses it; add the Phase 1 refusal or propose an ADR that drops it (found during ADR-0262)'
 
 # Evidence behind changes to the list above: a closed item, or the check that
 # confirmed a newly recorded gap.
@@ -2974,6 +3056,14 @@ outside_milestone_evidence:
     entries also match by path component. policy-and-approvals.md lists
     .git/config among the host paths outside the workspace that writes may
     not reach. Checked on 2026-09-28.
+- check: the startup prefix-sum gap
+  outcome: verified
+  detail: >-
+    At main 3295faf8 and dev a4d55ef0, src/agent_core reads
+    prefix.ceiling_tokens only in
+    context/planner.py, which refuses a plan whose measured prefix passes
+    it; neither bootstrap.py's Phase 1 nor config.py, which validates
+    context/plan.yaml's knobs one by one, adds up the Region A class caps. Checked on 2026-10-27.
 
 # Evidence for completed milestones 0 through 13, 16, 17, 19, 20, 22, 23, and 29
 # lives in docs/status/verification-history.yaml; an in-progress milestone's
@@ -3016,8 +3106,10 @@ readiness:
     the owner's production Telegram smoke and pull request 153's clean hosted
     review; recorded on 2026-10-09, it moves the verified ceiling to
     Milestone 14 and 289 gates. Milestone 15, specified by
-    operational-hardening.md with sixteen, is the next sequential work and
-    has not started; every authorized milestone has a
+    operational-hardening.md with sixteen, is the next sequential work; its
+    independent reliability repair began under ADR-0205 and reached main in
+    pull requests 171 and 158 (October 2026), while all sixteen gates remain
+    pending. Every authorized milestone has a
     design document and the census reports no zero row. Milestone 16 memory
     evaluation and lifecycle completed on 2026-08-23 as a parallel
     workstream: all twenty registered gates pass and hosted review on the
@@ -3077,15 +3169,18 @@ readiness:
     detailed design and ADR-0169 are recorded. Phase 1 registered twenty-four
     gates and froze the evaluation yardstick on 2026-10-03. Runtime operations
     are implemented; runtime verification and comparative release evidence remain
-    pending, with no ceiling change.
+    pending, with no ceiling change. Milestones 33 (ADR-0178, 2026-10-11), 34
+    (ADR-0239, 2026-10-22) and 35 (ADR-0240, 2026-10-22) are authorized with
+    design documents and registered gates; Milestone 34 is delivered behind its
+    flag and awaits owner activation.
     Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
   documents_required_before_coding_reaches_them: []
 
-last_updated: '2026-10-23T03:30:00Z'
-last_reviewed_commit: e55551fa
+last_updated: '2026-10-28T07:00:00Z'
+last_reviewed_commit: 3295faf8

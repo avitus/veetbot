@@ -284,6 +284,106 @@ import Testing
         board.setVisible(false)
     }
 
+    /// "Remove from this screen" (MagicPath merrily-city-4157) takes the widget
+    /// off this device class's board only, closes its details, and offers Undo,
+    /// which puts the board back as it was. The widget itself stays live.
+    @Test
+    func removingAWidgetFromThisScreenSavesTheLayoutWithoutItAndCanBeUndone() async {
+        let client = FakeClient()
+        // A placed widget: the board shows only sizes its manifest offers.
+        let weather = CockpitWidget(
+            slug: "weather", revisionID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            bundleSHA256: String(repeating: "d", count: 64),
+            manifest: ["title": .string("Weather"), "sizes": .array([.string("md")])], changedAt: Self.now
+        )
+        client.queueSnapshot(.success(CockpitSnapshot(
+            cursor: 41, runtime: nil, widgets: [weather],
+            layouts: [.wide: CockpitLayout(revision: 3, placements: [CockpitPlacement(slug: "weather", size: "md")])]
+        )))
+        client.queueStream([])
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let board = model(client)
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.openDetail("weather")
+        await board.removeFromScreen("weather", deviceClass: .wide)
+        #expect(board.selectedSlug == nil, "The details close once the widget leaves the screen")
+        #expect(toasts.current?.text == "Removed Weather from this screen")
+        #expect(toasts.current?.undo?.label == "Undo")
+        await toasts.performUndo()
+        #expect(client.calls == [
+            "detail weather",
+            "layout wide [] after 3",
+            "layout wide [\"weather\"] after 4",
+        ])
+        #expect(!client.calls.contains { $0.hasPrefix("delete") }, "Removing from a screen never deletes the widget")
+        board.setVisible(false)
+    }
+
+    /// Undo is anchored to the removal's revision: an arrangement saved while the
+    /// toast is up makes the server refuse the undo instead of being overwritten.
+    @Test
+    func undoOfARemovalCompareAndSetsOnTheRemovalsOwnRevision() async {
+        let client = FakeClient()
+        let weather = CockpitWidget(
+            slug: "weather", revisionID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            bundleSHA256: String(repeating: "d", count: 64),
+            manifest: ["title": .string("Weather"), "sizes": .array([.string("md")])], changedAt: Self.now
+        )
+        client.queueSnapshot(.success(CockpitSnapshot(
+            cursor: 41, runtime: nil, widgets: [weather],
+            layouts: [.wide: CockpitLayout(revision: 3, placements: [CockpitPlacement(slug: "weather", size: "md")])]
+        )))
+        client.queueStream([])
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let board = model(client)
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.removeFromScreen("weather", deviceClass: .wide)
+        // Another arrangement lands while Undo is still offered (revision 4 -> 5).
+        await board.saveLayout(.wide, placements: [])
+        await toasts.performUndo()
+        #expect(client.calls == [
+            "layout wide [] after 3",
+            "layout wide [] after 4",
+            "layout wide [\"weather\"] after 4",
+        ], "Undo sends the removal's revision, not the newer arrangement's")
+        board.setVisible(false)
+    }
+
+    /// Undo reports success only when a layout save happened: with no connection
+    /// to send it on, nothing is saved and the toast reports the failure.
+    @Test
+    func undoWithoutAConnectionSavesNothingAndReportsFailure() async {
+        let client = FakeClient()
+        let weather = CockpitWidget(
+            slug: "weather", revisionID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            bundleSHA256: String(repeating: "d", count: 64),
+            manifest: ["title": .string("Weather"), "sizes": .array([.string("md")])], changedAt: Self.now
+        )
+        client.queueSnapshot(.success(CockpitSnapshot(
+            cursor: 41, runtime: nil, widgets: [weather],
+            layouts: [.wide: CockpitLayout(revision: 3, placements: [CockpitPlacement(slug: "weather", size: "md")])]
+        )))
+        client.queueStream([])
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        var connected = true
+        let board = CockpitViewModel(
+            makeClient: { connected ? client : nil }, now: { Self.now }, sleep: { _ in await Task.yield() }
+        )
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.removeFromScreen("weather", deviceClass: .wide)
+        connected = false
+        let restored = await board.saveLayout(.wide, placements: [], expectedRevision: 4)
+        #expect(restored == nil, "No connection means nothing was saved")
+        #expect(client.calls == ["layout wide [] after 3"])
+        board.setVisible(false)
+    }
+
     @Test
     func theOwnersChangesGoThroughTheRoutesAndRefreshTheBoard() async {
         let client = FakeClient()

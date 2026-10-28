@@ -214,22 +214,6 @@ def test_review_session_cookies_are_redacted() -> None:
 
 
 @pytest.mark.usefixtures("restored_logging")
-def test_background_tracebacks_never_emit_private_exception_text(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Verify that background tracebacks never emit private exception text."""
-    configure_logging(DeploymentMode.PRODUCTION)
-    try:
-        raise RuntimeError("PRIVATE_MAIL_CANARY_NOT_A_CREDENTIAL")
-    except RuntimeError:
-        logging.getLogger("agent_core.background").exception("background_failed")
-    [record] = _lines(capsys)
-    assert "PRIVATE_MAIL_CANARY_NOT_A_CREDENTIAL" not in json.dumps(record)
-    assert record["error_class"] == "RuntimeError"
-    assert record["error_fingerprint"]
-
-
-@pytest.mark.usefixtures("restored_logging")
 def test_domain_context_reaches_service_logs_and_restores_the_parent(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

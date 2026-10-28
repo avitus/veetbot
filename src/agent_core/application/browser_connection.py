@@ -11,9 +11,15 @@ from agent_core.ports.persistence import RepositoryUnitOfWork
 
 
 async def bind_chat_website(
-    uow: RepositoryUnitOfWork, principal: Principal, session: Session, profile_id: UUID
+    uow: RepositoryUnitOfWork,
+    principal: Principal,
+    session: Session,
+    profile_id: UUID,
+    *,
+    parked_run_id: UUID | None = None,
 ) -> Session:
-    """Caller holds the session admission lock; no live run can change accounts."""
+    """Caller holds the session admission lock; no live run can change accounts,
+    except the parked source run an accepted website offer continues (ADR-0251)."""
     if not {"session.write", "browser.profile.read"} <= principal.scopes:
         raise AuthorizationError(
             "website selection requires session.write and browser.profile.read"
@@ -29,7 +35,8 @@ async def bind_chat_website(
         raise InvalidStateTransition("website is unavailable", reason="browser_profile_not_ready")
     if session.metadata.get("browser_profile_id") == str(profile_id):
         return session
-    if await uow.runs.active_for_session(session.id, principal) is not None:
+    active = await uow.runs.active_for_session(session.id, principal)
+    if active is not None and active.id != parked_run_id:
         raise ConflictError(
             "Finish or cancel the current run before changing its website.",
             reason="active_run_exists",

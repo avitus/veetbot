@@ -7,7 +7,6 @@ import importlib
 import os
 import re
 import tempfile
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -16,10 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.config import (
     MEMORY_FORMATION_CORPUS_PATH,
-    AuthMode,
-    DeploymentMode,
-    MemoryProviderExtractionMode,
-    SandboxMechanism,
     Settings,
     load_settings,
 )
@@ -31,6 +26,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.evals.memory_distillation import (
     SeedBelief,
+    _evaluation_settings,
     require_committed_tree,
     seed_prior_beliefs,
 )
@@ -243,21 +239,6 @@ def _belief_key(belief: EvaluationBelief) -> tuple[str, str, str]:
         belief.belief_type.casefold(),
         _normalized(belief.subject),
         _normalized(belief.statement),
-    )
-
-
-def _evaluation_settings(settings: Settings, artifact_root: Path) -> Settings:
-    if settings.deployment_mode is DeploymentMode.PRODUCTION:
-        raise ValueError("provider memory extraction evaluation is unavailable in production")
-    return replace(
-        settings,
-        deployment_mode=DeploymentMode.DEVELOPMENT,
-        auth_mode=AuthMode.DEV,
-        auth_token=None,
-        sandbox=SandboxMechanism.FAKE,
-        memory_provider_extraction_mode=MemoryProviderExtractionMode.OFF,
-        memory_provider_extraction_evidence=None,
-        artifact_root=artifact_root,
     )
 
 

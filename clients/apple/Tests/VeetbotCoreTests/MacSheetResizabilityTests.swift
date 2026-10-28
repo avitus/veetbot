@@ -95,6 +95,11 @@ import Testing
 }
 
 /// Hosts `host` in a desktop-sized window and returns its settled sheet window.
+/// The sheet gets its final frame before SwiftUI applies its size limits, and
+/// while the display sleeps that update can trail the frame by several polls
+/// of a busy full run, leaving AppKit's defaults (a zero minimum) to be read.
+/// So the sheet has settled only once its frame and limits hold still and its
+/// minimum is set.
 @MainActor
 private func presentedSheetWindow<Host: View>(@ViewBuilder _ host: () -> Host) async throws -> NSWindow {
     _ = NSApplication.shared
@@ -108,14 +113,17 @@ private func presentedSheetWindow<Host: View>(@ViewBuilder _ host: () -> Host) a
         window.orderOut(nil)
         window.contentView = nil
     }
-    var previous: NSSize?
-    for _ in 0..<60 {
+    var settled: NSWindow?
+    var previous: [NSSize]?
+    let deadline = Date().addingTimeInterval(10)
+    while settled == nil, Date() < deadline {
         try await Task.sleep(nanoseconds: 50_000_000)
-        let size = window.attachedSheet?.frame.size
-        if let size, size == previous { break }
-        previous = size
+        guard let sheet = window.attachedSheet else { continue }
+        let sizes = [sheet.frame.size, sheet.contentMinSize, sheet.contentMaxSize]
+        if sizes == previous, sheet.contentMinSize != .zero { settled = sheet }
+        previous = sizes
     }
-    return try #require(window.attachedSheet, "the sheet never presented")
+    return try #require(settled, "the sheet never presented with its size limits")
 }
 
 private final class EmptyListURLProtocol: URLProtocol {

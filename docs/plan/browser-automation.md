@@ -176,8 +176,9 @@ label of seven or more letters other than `www`; or one word of five or more
 letters that begins a domain label of five or more. At most three profiles are
 offered, longest matched text first. The app reads the offer only when the
 source run's stream carries `session.browser.offered`, and shows the card once
-that run has ended. The native card connects the chat and
-admits one continuation run through
+that run has ended or while it waits for the owner's answer to a question. The
+native card connects the chat and admits one continuation run, or answers the
+waiting source run's question in that run, through
 [http-api-and-streaming.md](http-api-and-streaming.md); "Not now" hides an
 offer on that device. Website Access opened from a chat offers "Use in this
 chat" separately from the device default for new chats.
@@ -1074,6 +1075,12 @@ inputs cannot use this permission, nor can a turn that called a non-browser tool
 since the owner's message (ADR-0129 G5); profile, revision, effect and budget checks
 remain. Composition requires the default bounded-scroll rule with approval
 otherwise; custom unconditional approval or deny rules retain their behavior.
+ADR-0263 narrows G5's non-browser tools. Two calls do not count:
+`conversation.ask_user` once its result has `user` or `platform` trust (the
+owner's answer, or the server-authored sign-in resumption), and `artifact.export`,
+whose result holds only platform identifiers. A refusal names a closed,
+content-free reason, `browser.research.<reason>`. The approval record keeps it
+as `research_not_covered`.
 
 Two durable grants can also
 stand in for approval, and neither is ever created through conversation text or
@@ -1124,7 +1131,10 @@ name, a selected option, its field kind, and every path segment of its
 navigation target. The worker applies it to the observation that named the
 element; the isolated runtime applies it again to the live page before a
 grant-authorized dispatch. A label or context that matches the exclusion
-vocabulary yields a named consequence, never `routine` or `unknown`. Each text
+vocabulary yields a named consequence, never `routine` or `unknown`. Two
+descriptive phrases do not match (ADR-0263): `updated` immediately before a
+month name or abbreviation, and `report` or `reports` immediately after
+`pathology`, `lab`, `laboratory`, `radiology` or `imaging`. Each text
 is read as written and as displayed: in the order a right-to-left override
 shows it, and with Cyrillic, Greek, and Armenian letters, Latin small capitals
 and IPA letters, and the digits 0 and 1 that look like Latin letters read as
@@ -1135,7 +1145,8 @@ alternative text can defeat it, and a task grant's path prefix is then the
 boundary (ADR-0129). A
 standing grant can authorize only `routine` interaction, and only when every
 label source reads as the same routine word; `unknown` stays hard-excluded
-from it. A task grant can authorize `routine` and `unknown` interaction and no
+from it, and so is a click or key whose link target the runtime read leaves the
+origin or whose element it could not bound (ADR-0263). A task grant can authorize `routine` and `unknown` interaction and no
 named consequence (owner-approved 2026-09-25, ADR-0129). Every named
 consequence always requires fresh approval or is denied. Page text can move an
 action toward a named consequence but cannot widen a grant's scope, duration,
@@ -1209,7 +1220,8 @@ eligible run with a `READY` hosted profile.
 A task grant covers click, select, check, press, scroll, and typing into text,
 search, and multi-line fields, including `unknown`-consequence actions, and
 only in a model turn whose tool calls since the owner's newest message are all
-browser tools. Each grant covers typing only into an input
+browser tools, apart from the two calls ADR-0263 exempts: an answered question
+and a file export. Each grant covers typing only into an input
 or a text area, not a region the page made editable; select in a select; and
 check on a native check box or radio, not a choice control the page built.
 Typed text is covered only when it is at most 256 characters
@@ -1234,6 +1246,28 @@ consumes a use, which is never refunded, so on a page that has not changed it
 covers nothing the runtime refuses; the exceptions are what the observation
 cannot show, an element that does not hold focus once focused and the options
 a selection reads, and each can still cost a use.
+
+An SVG `<use>` whose copy page script cannot see makes its element's target
+opaque (ADR-0129). For a same-origin external reference, such as an icon drawn
+from a site's sprite file, the isolated runtime reads the rendered copies
+through Chromium's DevTools protocol, outside the page's script realm, and reads
+the element again. It does so once per observation or live check, only when an
+element read meets such a reference and the page holds at most 20,000
+elements, since the read grows with the page (ADR-0263). A reference is inspected only
+when every `<use>` naming it alone shows a loaded copy that, through nested
+copies, holds no link, frame, object, embed, foreign object, image map or
+animation element, within 2,048 nodes. A `<use>` naming two references vouches
+for neither, and a page with any animation element inspects nothing. The
+page-side read then treats an inspected reference like a fragment reference
+whose target it can see. Any other external reference stays opaque, and so does
+every one when the DevTools read fails. Immediately before a grant-constrained
+click whose live read relied on inspected copies, the runtime runs two checks.
+First, it re-reads the selected element's own external references. Each must
+still lie within the references the live read relied on. The walk stops at 2,048
+nodes, and a walk that passes this bound fails the check. Second, it re-inspects
+the page's copies. Each relied-on copy must still be inert. If either check
+fails, the runtime refuses the act with `tool.browser.grant_not_applicable` and
+forgets the observation.
 
 `browser.task_grant.created`, `tool.call.authorized` (with the grant id, use
 ordinal, and the approval view of the action), and exactly one

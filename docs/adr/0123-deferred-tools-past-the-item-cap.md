@@ -11,7 +11,8 @@
   `browser.observe` and `browser.act` first and never defers them in a chat
   bound to a website profile; ADR-0253 (2026-10-25), which defers a configured
   tool past the token cap; ADR-0258 (2026-10-26), which returns the whole
-  definition on invalid arguments
+  definition on invalid arguments; ADR-0262 (2026-10-27), which raises the
+  index's token cap to 2,500
 - Detailed design: `docs/plan/context-engine.md`, `docs/plan/tool-system.md`,
   `docs/plan/builtin-tools.md`
 

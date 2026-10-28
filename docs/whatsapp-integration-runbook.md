@@ -68,7 +68,7 @@ Transfer the three secrets to temporary owner-only files out of band, then
 install them without printing their contents:
 
 ```bash
-sudo install -d -o veetbot -g veetbot -m 0700 /etc/veetbot/secrets
+sudo install -d -m 0711 /etc/veetbot/secrets
 sudo install -o veetbot -g veetbot -m 0600 \
   /secure/input/whatsapp-access-token \
   /etc/veetbot/secrets/whatsapp-access-token
@@ -97,11 +97,17 @@ AGENT_SURFACE_WHATSAPP_ENABLED=1
 
 Create `/etc/veetbot/veetbot-surface.env` as the
 [Telegram surface runbook](telegram-surface-runbook.md) does, or from
-`deploy/veetbot-surface.env.example`. Set the same flags, the application
-database login, tenant and principal identity, phone-number ID, current
-reviewed Graph API version, and these paths:
+`deploy/veetbot-surface.env.example`. Set the same flags, the `veetbot_surface`
+database login the Telegram runbook's Phase 3 command creates (never the
+application login: the release runs
+`scripts/check_surface_database_permissions.py` through this file and refuses
+any login whose privileges differ from the surface allowlist), tenant and
+principal identity, the phone-number ID and current reviewed Graph API version
+(the release refuses to proceed without both), and these paths:
 
 ```text
+AGENT_SURFACE_WHATSAPP_PHONE_NUMBER_ID=<phone-number id>
+AGENT_SURFACE_WHATSAPP_GRAPH_API_VERSION=<reviewed Graph API version>
 AGENT_SURFACE_TELEGRAM_TOKEN_FILE=/etc/veetbot/secrets/telegram-bot-token
 AGENT_SURFACE_WHATSAPP_TOKEN_FILE=/etc/veetbot/secrets/whatsapp-access-token
 AGENT_SURFACE_WHATSAPP_APP_SECRET_FILE=/etc/veetbot/secrets/whatsapp-app-secret

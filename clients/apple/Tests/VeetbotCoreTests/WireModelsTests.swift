@@ -67,6 +67,33 @@ import Testing
         #expect(approval.toolName == "sandbox.run_command")
     }
 
+    /// ADR-0260: the card states the server's reason; a bare policy code from an
+    /// older server tells the owner nothing, so it shows no reason line.
+    @Test(arguments: [
+        ("This chat has read web pages or other outside content, so Veetbot asks before running code.",
+         "This chat has read web pages or other outside content, so Veetbot asks before running code."),
+        ("policy.matrix.code_execution", nil),
+        ("  ", nil),
+    ] as [(String, String?)])
+    func testApprovalOwnerReasonHidesPolicyCodes(reason: String, shown: String?) throws {
+        let approval: [String: Any] = [
+            "id": "00000000-0000-0000-0000-000000000003",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "status": "PENDING",
+            "tool_name": "sandbox.run_command",
+            "action_summary": "Run a command in Veetbot's sandbox: ls -la /mnt/data",
+            "arguments": ["command": ["ls", "-la", "/mnt/data"]],
+            "risk": "HIGH",
+            "policy_reason": reason,
+            "created_at": "2026-10-27T16:55:41Z",
+        ]
+        let decoded = try JSONDecoder.server.decode(
+            ApprovalView.self, from: JSONSerialization.data(withJSONObject: approval)
+        )
+        #expect(decoded.ownerReason == shown)
+    }
+
     @Test
     func testAPIErrorPreservesConflictReasonAndUnknownDetails() throws {
         let data = Data(

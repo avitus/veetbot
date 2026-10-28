@@ -20,7 +20,6 @@ from agent_core.domain.people_imports import (
 )
 from agent_core.domain.people_time import SourceTimezone
 
-PEOPLE_SCHEMA_VERSION = "people-schema@1"
 PEOPLE_RESOLVER_VERSION = "people-resolver@1"
 
 

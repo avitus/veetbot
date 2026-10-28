@@ -75,7 +75,8 @@ from agent_core.evals.memory_benchmark_live import (
 from agent_core.evals.memory_benchmark_live import (
     _evaluate_probe_live as evaluate_probe_live,
 )
-from agent_core.evals.memory_formation import _evaluation_settings, _write_evidence
+from agent_core.evals.memory_distillation import _evaluation_settings
+from agent_core.evals.memory_formation import _write_evidence
 from agent_core.memory.formation import FORMATION_POLICY_VERSION
 from agent_core.memory.provider_extraction import PROVIDER_FORMATION_POLICY_VERSION
 from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION

@@ -36,8 +36,25 @@ async def test_due_owner_is_claimed_once() -> None:
     assert await store.claim_due(principal(), NOW, "worker-b") is None
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda case: case.__name__)
-async def test_shared_contract(scenario: Callable[[Factory], Awaitable[None]]) -> None:
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        *SCENARIOS,
+        *MERGE_SCENARIOS,
+        *ATTRIBUTION_SCENARIOS,
+        *OPERATION_SCENARIOS,
+        *SUMMARY_SCENARIOS,
+        *INPUT_SCENARIOS,
+        *ADMISSION_SCENARIOS,
+        *EXECUTION_SCENARIOS,
+        *APPLY_SCENARIOS,
+        *AUDIT_SCENARIOS,
+    ],
+    ids=lambda case: case.__name__,
+)
+async def test_shared_and_merge_source_contract(
+    scenario: Callable[[Factory], Awaitable[None]],
+) -> None:
     _, uow_factory = await memory_uow_factory()
 
     @asynccontextmanager
@@ -202,32 +219,6 @@ async def test_aborted_email_cleanup_preserves_other_owners_memory_history() -> 
     async with factory() as uow:
         assert await uow.memories.get(original.id, other) == revised
         assert await uow.memories.get_at(original.id, other, known_at=NOW) == revised
-
-
-@pytest.mark.parametrize(
-    "scenario",
-    [
-        *MERGE_SCENARIOS,
-        *ATTRIBUTION_SCENARIOS,
-        *OPERATION_SCENARIOS,
-        *SUMMARY_SCENARIOS,
-        *INPUT_SCENARIOS,
-        *ADMISSION_SCENARIOS,
-        *EXECUTION_SCENARIOS,
-        *APPLY_SCENARIOS,
-        *AUDIT_SCENARIOS,
-    ],
-    ids=lambda case: case.__name__,
-)
-async def test_merge_source_contract(scenario: Callable[[Factory], Awaitable[None]]) -> None:
-    _, uow_factory = await memory_uow_factory()
-
-    @asynccontextmanager
-    async def factory() -> AsyncIterator[Stores]:
-        async with uow_factory() as uow:
-            yield Stores(uow.memories, uow.reconsolidation, uow.events, uow.people)
-
-    await scenario(factory)
 
 
 async def test_in_memory_summary_erasure_removes_stored_text_synchronously() -> None:

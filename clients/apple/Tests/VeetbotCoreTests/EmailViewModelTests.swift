@@ -1252,24 +1252,11 @@ import SwiftUI
         #expect(toasts.current?.text == "Marked not handled.")
     }
 
-    /// A rejected Handled raises no toast; the inline error stays.
-    @Test func testFailedHandledRaisesNoToast() async throws {
+    /// A rejected inbox checkbox leaves the row unchanged and exposes a recoverable
+    /// inline error; it raises no toast.
+    @Test func testFailedHandledActionKeepsThreadAndReportsError() async throws {
         let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
         let model = try makeModel(toasts: toasts) { request in
-            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
-            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
-            if request.url!.path.hasSuffix("dismiss") { return (409, Self.error("invalid_state", "New mail arrived. Refresh this thread.")) }
-            return (200, self.threadJSON(draft: self.draftJSON()))
-        }
-        await model.reload()
-        await model.setThreadHandled(try #require(model.items.first), handled: true)
-        #expect(toasts.current == nil)
-        #expect(model.errorMessage != nil)
-    }
-
-    /// A rejected inbox checkbox leaves the row unchanged and exposes a recoverable error.
-    @Test func testFailedHandledActionKeepsThreadAndReportsError() async throws {
-        let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
             if request.url!.path.hasSuffix("dismiss") { return (409, Self.error("invalid_state", "New mail arrived. Refresh this thread.")) }
@@ -1282,6 +1269,7 @@ import SwiftUI
         #expect(model.items.first?.isHandled == false)
         #expect(model.selectedThreadID == nil)
         #expect(model.errorMessage != nil)
+        #expect(toasts.current == nil)
         #expect(!model.isPerformingAction)
     }
 
@@ -1444,33 +1432,19 @@ import SwiftUI
     }
 
     /// The digest is the verification, not a bypass: a frozen body that differs is
-    /// still refused even though the truncated prefix matches.
-    @Test func testReviewRefusesATruncatedApprovalBodyWhoseDigestDiffers() async throws {
+    /// still refused even though the truncated prefix matches; a truncated body with no
+    /// digest at all cannot be verified either, so it must not be presented.
+    @Test(arguments: [true, false])
+    func testReviewRefusesATruncatedApprovalBodyWithoutAMatchingDigest(carriesADigest: Bool) async throws {
         let body = String(repeating: "b", count: 600)
         let tampered = body.dropLast() + "X"
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             if request.url!.path.contains("/approvals/") {
+                guard carriesADigest else { return (200, self.approvalJSON(body: Self.truncatedView(body))) }
                 return (200, self.approvalJSON(
                     body: Self.truncatedView(body),
                     digests: "{\"body\":\"\(Self.sha256Hex(String(tampered)))\"}"))
-            }
-            return (200, self.threadJSON(draft: self.draftJSON(body: body, status: "awaiting_approval")))
-        }
-        defer { model.resetConnection() }
-        await model.openThread(threadID)
-        await model.loadReview()
-        #expect(model.review == nil)
-        #expect(model.draftError != nil)
-    }
-
-    /// A truncated body with no digest cannot be verified, so it must not be presented.
-    @Test func testReviewRefusesATruncatedApprovalBodyWithNoDigest() async throws {
-        let body = String(repeating: "b", count: 600)
-        let model = try makeModel { request in
-            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
-            if request.url!.path.contains("/approvals/") {
-                return (200, self.approvalJSON(body: Self.truncatedView(body)))
             }
             return (200, self.threadJSON(draft: self.draftJSON(body: body, status: "awaiting_approval")))
         }

@@ -112,7 +112,6 @@ class RejectionKind(StrEnum):
 
 
 ReviewReason = Literal["conflict", "correction", "source_learned", "sensitive_automatic"]
-DOUBT_REASONS: frozenset[str] = frozenset({"conflict", "correction"})
 ATTENTION_REASONS: frozenset[str] = frozenset({"source_learned", "sensitive_automatic"})
 
 
@@ -357,10 +356,12 @@ class MemoryExtractionResult(list[MemoryCandidate]):
         *,
         provider_failure: ProviderExtractionFailure | None = None,
         people_interactions: Iterable[InteractionEvidence] = (),
+        context_event_ids: Iterable[int] = (),
     ) -> None:
         super().__init__(candidates)
         self.provider_failure = provider_failure
         self.people_interactions = list(people_interactions)
+        self.context_event_ids = tuple(context_event_ids)
 
 
 def minimum_supported_case_count(positive_case_count: int) -> int:

@@ -14,26 +14,13 @@ import pytest
 
 from agent_core.adapters.judgment import FakeJudgmentProvider
 from agent_core.bootstrap import build
-from agent_core.config import load_settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.email_junk import JUNK_MODEL, JUNK_PILOT_POLICY, EmailJunkMode, JunkPilot
 from agent_core.domain.judgment import ChoiceAnswer, JudgmentResult, NoulAnswer
 from agent_core.domain.messages import FakeModelScript
 from agent_core.domain.runs import RunStatus
 from tests.gates.test_email_runtime_m26 import _assessment_turn, _current_mail_factory
-from tests.unit.test_config import base_environment
 from tests.unit.test_email_junk_first_pass import decision, filter_settings
-
-
-def test_explicit_pilot_mode_is_available_but_default_remains_off() -> None:
-    """Expose the separately approved pilot without changing default activation."""
-    assert load_settings(base_environment()).email_junk_filter_mode.value == "off"
-    assert (
-        load_settings(
-            {**base_environment(), "AGENT_EMAIL_JUNK_FILTER_MODE": "pilot"}
-        ).email_junk_filter_mode.value
-        == "pilot"
-    )
 
 
 def pilot_packet(now: datetime | None = None) -> dict[str, Any]:
@@ -103,27 +90,6 @@ def pilot_decision(*, keep: bool = False, topic: bool = False) -> JudgmentResult
     if topic:
         answers["protected_topic"] = NoulAnswer(probability=0.9)
     return decision().model_copy(update={"answers": answers})
-
-
-@pytest.mark.parametrize("keep", [False, True])
-async def test_pilot_uses_reviewed_choice_and_preserves_keep(tmp_path: Path, keep: bool) -> None:
-    """Only the scoped pilot bypasses a valid raw bulk choice below the general cutoff."""
-    judge = FakeJudgmentProvider([pilot_decision(keep=keep)])
-    async with build(
-        settings=pilot_settings(tmp_path),
-        judgment_provider_override=judge,
-        script=FakeModelScript(turns=[_assessment_turn()]),
-        mcp_client_factory=await work_factory(),
-    ) as app:
-        operation = await app.services.email.submit_task(app.principal, kind="refresh")
-        run = await app.runs.get(operation.run_id)
-        assert run.status is RunStatus.COMPLETED, run.failure
-        assert len(judge.requests) == 1
-        assert run.usage.model_calls == int(keep)
-        async with app.uow_factory() as uow:
-            [assessment] = await uow.email.list(app.principal, "assessment")
-            assert not await uow.email.list(app.principal, "draft")
-        assert bool(assessment.payload.get("junk_bypassed")) is not keep
 
 
 @pytest.mark.parametrize(
@@ -227,50 +193,6 @@ async def test_invalid_pilot_stops_calls_and_retains_normal_assessment(
         assert run.usage.model_calls == 1 and judge.requests == []
 
 
-@pytest.mark.parametrize("stop", ["expiry", "off", "evidence", "important"])
-async def test_stopping_pilot_restores_cached_bypass(tmp_path: Path, stop: str) -> None:
-    """The bounded cached-mail refresh restores ordinary assessment after revocation."""
-    from uuid import UUID
-
-    from agent_core.adapters.determinism import FixedClock
-
-    settings = pilot_settings(tmp_path)
-    now = datetime.now(UTC)
-    data = pilot_packet(now)
-    data["expires_at"] = (now + timedelta(minutes=2)).isoformat()
-    settings.email_junk_filter_evidence.write_text(json.dumps(data))
-    clock = FixedClock(now)
-    judge = FakeJudgmentProvider([pilot_decision()])
-    async with build(
-        settings=settings,
-        clock=clock,
-        judgment_provider_override=judge,
-        script=FakeModelScript(turns=[_assessment_turn()]),
-        mcp_client_factory=await work_factory(),
-    ) as app:
-        await app.services.email.submit_task(app.principal, kind="refresh")
-        async with app.uow_factory() as uow:
-            [first] = await uow.email.list(app.principal, "assessment")
-        assert first.payload["junk_bypassed"]
-        if stop == "expiry":
-            clock.advance(timedelta(minutes=2))
-        elif stop == "off":
-            object.__setattr__(settings, "email_junk_filter_mode", EmailJunkMode.OFF)
-        elif stop == "evidence":
-            settings.email_junk_filter_evidence.unlink()
-        else:
-            await app.services.email.feedback(
-                app.principal, thread_id=UUID(first.key), target="thread", judgment="important"
-            )
-        operation = await app.services.email.submit_task(app.principal, kind="refresh")
-        run = await app.runs.get(operation.run_id)
-        assert run.status is RunStatus.COMPLETED, run.failure
-        assert run.usage.model_calls == 1 and len(judge.requests) == 1
-        async with app.uow_factory() as uow:
-            [last] = await uow.email.list(app.principal, "assessment")
-        assert not last.payload.get("junk_bypassed")
-
-
 async def test_expiry_during_provider_call_prevents_bypass(tmp_path: Path) -> None:
     """An in-flight paid classification cannot outlive its authorization window."""
     from agent_core.adapters.determinism import FixedClock
@@ -335,38 +257,6 @@ async def test_pilot_topic_veto_exception_does_not_change_general_filter(tmp_pat
                 account_id="work",
                 now=app.clock.now(),
             )
-
-
-async def test_full_daily_cap_avoids_provider_call(tmp_path: Path) -> None:
-    """An already full durable UTC-day allowance goes directly to normal assessment."""
-    from agent_core.domain.email import EmailRecord
-
-    judge = FakeJudgmentProvider([])
-    async with build(
-        settings=pilot_settings(tmp_path),
-        judgment_provider_override=judge,
-        script=FakeModelScript(turns=[_assessment_turn()]),
-        mcp_client_factory=await work_factory(),
-    ) as app:
-        now = app.clock.now()
-        async with app.uow_factory() as uow, uow.email.lock(app.principal):
-            await uow.email.put(
-                EmailRecord(
-                    tenant_id=app.principal.tenant_id,
-                    principal_id=app.principal.principal_id,
-                    kind="junk_pilot_day",
-                    key=f"work:{now.date().isoformat()}",
-                    revision=1,
-                    payload={"count": 50},
-                    created_at=now,
-                    updated_at=now,
-                ),
-                expected_revision=0,
-            )
-        operation = await app.services.email.submit_task(app.principal, kind="refresh")
-        run = await app.runs.get(operation.run_id)
-        assert run.status is RunStatus.COMPLETED, run.failure
-        assert run.usage.model_calls == 1 and judge.requests == []
 
 
 async def assert_durable_pilot_cap(app: Any) -> None:

@@ -32,6 +32,32 @@ public final class CockpitViewModel: ObservableObject {
     /// Widgets held out of the board after hanging or navigating the realm.
     @Published public private(set) var quarantined: Set<String> = []
     @Published public var selectedSlug: String?
+    /// Confirms a removal from this screen and offers its Undo.
+    public var toasts: ToastCenter = .shared
+
+    /// Remove from this screen (MagicPath merrily-city-4157): the widget leaves
+    /// this device class's board only and stays live elsewhere; Undo saves the
+    /// board as it was.
+    public func removeFromScreen(_ slug: String, deviceClass: CockpitDeviceClass) async {
+        guard let snapshot else { return }
+        let before = CockpitBoard.placements(snapshot, deviceClass: deviceClass)
+            .map { CockpitPlacement(slug: $0.widget.slug, size: $0.size) }
+        guard before.contains(where: { $0.slug == slug }) else { return }
+        let title = snapshot.widgets.first { $0.slug == slug }?.title ?? slug
+        guard let removed = await saveLayout(deviceClass, placements: before.filter { $0.slug != slug })
+        else { return }
+        closeDetail()
+        // Undo compares against the revision the removal itself produced, so an
+        // arrangement saved in the meantime is refused by the server rather than
+        // overwritten, and Undo succeeds only when a layout save did.
+        toasts.show("Removed \(title) from this screen", restored: "\(title) is back on this screen") { [weak self] in
+            guard let self else { return false }
+            return await self.saveLayout(deviceClass, placements: before, expectedRevision: removed.revision) != nil
+        }
+    }
+
+    /// The arrange sheet, opened from the toolbar on the Mac and the options menu on touch.
+    @Published public var isArranging = false
     @Published public private(set) var detail: CockpitWidgetDetail?
     @Published public private(set) var actionMessage: String?
     @Published public private(set) var errorMessage: String?
@@ -190,13 +216,28 @@ public final class CockpitViewModel: ObservableObject {
         }
     }
 
-    /// Arrange this device class's board, compare-and-set on the layout's revision.
-    public func saveLayout(_ deviceClass: CockpitDeviceClass, placements: [CockpitPlacement]) async {
-        let expected = snapshot?.layouts[deviceClass]?.revision
+    /// Arrange this device class's board, compare-and-set on the layout's revision
+    /// (the snapshot's unless the caller anchors the save to an earlier one).
+    /// Returns the saved layout, or nil when nothing was saved: a refused
+    /// compare-and-set, a failed request, or no connection to send it on.
+    @discardableResult
+    public func saveLayout(
+        _ deviceClass: CockpitDeviceClass, placements: [CockpitPlacement], expectedRevision: Int? = nil
+    ) async -> CockpitLayout? {
+        let expected = expectedRevision ?? snapshot?.layouts[deviceClass]?.revision
+        var saved: CockpitLayout?
         await perform { client in
-            _ = try await client.putCockpitLayout(deviceClass, placements: placements, expectedRevision: expected)
+            let layout = try await client.putCockpitLayout(deviceClass, placements: placements, expectedRevision: expected)
+            saved = layout
+            // The next save compares against this revision until the stream refetches the board.
+            if let current = self.snapshot {
+                var layouts = current.layouts
+                layouts[deviceClass] = layout
+                self.snapshot = current.replacingLayouts(layouts)
+            }
             return nil
         }
+        return saved
     }
 
     public func revert(_ slug: String, to revision: UUID) async {

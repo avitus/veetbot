@@ -148,6 +148,7 @@ from agent_core.domain.runs import (
     RunCheckpoint,
     RunFailure,
     RunKind,
+    RunLimits,
     RunStatus,
     RunUsage,
 )
@@ -815,6 +816,19 @@ class PostgresRunRepository:
         )
         if not _rowcount(await self._session.execute(statement)):
             await self._raise_guard_failure(run.id, run.status, lease, "counter update")
+
+    async def set_waiting_limits(self, run_id: UUID, limits: RunLimits) -> Run:
+        row = await self._session.get(RunRow, run_id, with_for_update=True)
+        if row is None:
+            raise NotFoundError("run not found")
+        if row.status != RunStatus.WAITING_FOR_USER.value:
+            raise ConflictError("only a run waiting for its owner takes new limits")
+        if limits.deadline_at != row.deadline_at:
+            raise ConflictError("new limits cannot move the run's deadline")
+        row.limits = limits.model_dump(mode="json")
+        row.updated_at = self._clock.now()
+        await self._session.flush()
+        return run_to_domain(row)
 
     async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
         statement = (
@@ -3391,6 +3405,8 @@ class PostgresMaintenanceRepository:
     async def checkpoint_runs(self, limit: int) -> list[tuple[UUID, bool]]:
         if not await self._acquire("maintenance.checkpoint_prune"):
             return []
+        terminal = RunRow.status.in_([status.value for status in TERMINAL_RUN_STATUSES])
+        latest_full = func.max(CheckpointRow.version).filter(CheckpointRow.full)
         rows = (
             await self._session.execute(
                 select(
@@ -3400,16 +3416,19 @@ class PostgresMaintenanceRepository:
                 )
                 .join(RunRow, RunRow.id == CheckpointRow.run_id)
                 .group_by(CheckpointRow.run_id, RunRow.status)
-                .having(func.count(CheckpointRow.id) > 1)
+                # Select only chains prune accepts. A terminal chain without a
+                # final full snapshot is retained for diagnosis, not retried.
+                .having(
+                    func.count(CheckpointRow.id) > 1,
+                    latest_full.is_not(None),
+                    or_(~terminal, latest_full == func.max(CheckpointRow.version)),
+                )
                 .order_by(func.min(CheckpointRow.created_at), CheckpointRow.run_id)
                 .limit(limit)
             )
         ).all()
         return [
-            (
-                run_id,
-                RunStatus(status) in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED},
-            )
+            (run_id, RunStatus(status) in TERMINAL_RUN_STATUSES)
             for run_id, status, _oldest_checkpoint in rows
         ]
 

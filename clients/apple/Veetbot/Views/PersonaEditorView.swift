@@ -174,6 +174,7 @@ public struct PersonaEditorView: View {
             TextField(
                 "Describe how you want Veetbot to talk to you.",
                 text: $model.voice,
+                prompt: .a2Prompt("Describe how you want Veetbot to talk to you."),
                 axis: .vertical
             )
             .lineLimit(2...6)
@@ -290,7 +291,7 @@ public struct PersonaEditorView: View {
                                 .accessibilityLabel("Affirmed from memory")
                         }
                         VStack(alignment: .leading, spacing: 4) {
-                            TextField("A standing truth", text: $draft.text)
+                            TextField("A standing truth", text: $draft.text, prompt: .a2Prompt("A standing truth"))
                                 .textFieldStyle(.plain)
                                 .a2Field(radius: 10)
                                 .opacity(draft.enabled ? 1 : 0.55)

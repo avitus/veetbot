@@ -78,9 +78,17 @@ function send(message: HostToRealm) {
   frame?.contentWindow?.postMessage(message, '*');
 }
 
+// A column count native code may ask for; anything else keeps the platform's own.
+function columnsOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 6 ? value : undefined;
+}
+
 function render() {
   if (!ready || !snapshot) return;
-  send({ type: 'render', theme: snapshot.theme, platform: snapshot.platform, offsetMs: snapshot.offsetMs, tiles: tilesFor(snapshot, quarantined) });
+  send({
+    type: 'render', theme: snapshot.theme, platform: snapshot.platform, offsetMs: snapshot.offsetMs,
+    columns: columnsOf(snapshot.columns), tiles: tilesFor(snapshot, quarantined),
+  });
 }
 
 function widgetFor(key: string) {

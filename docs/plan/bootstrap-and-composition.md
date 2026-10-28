@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **200 configuration knobs** across the specifications;
+The corpus now declares **224 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -314,7 +314,8 @@ startup warm-up's handshake timeout, retry interval and attempts, and
 ADR-0130 adds the five browser-task run limits; ADR-0137 adds the inline
 tool-output byte ceiling; ADR-0155 adds the title pass's five knobs; ADR-0178
 adds the recall candidate-selection mode (`relevance`, with `recent` for rollback
-and frozen controls). The plan names **three
+and frozen controls); ADR-0261 adds the capture reader's step and run read
+limits. The plan names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
 worker feature flags, and Milestone 13 the default-off delegation flag.
@@ -325,7 +326,7 @@ enabled, so it cannot create, alter, or reactivate work that no materializer
 will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
-`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 24,000-token
+`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 24,500-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
 cap. Not one of them differs between two deployments of the same revision.
 They differ between *revisions*, which is another way of saying they belong in
@@ -339,13 +340,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-200 falls out.
+224 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-200 tuning knobs in YAML.
+224 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -353,7 +354,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 222 knobs live, at the values the
+    module that owns it. This is where all 224 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -417,7 +418,7 @@ src/agent_core/
   policy/default.yaml      the v0.1 policy profile
   models/policies.yaml     model_policies and provider profiles
   models/catalog.yaml      aliases, limits, context windows, prices
-  context/plan.yaml        region caps, reserves, snapshot caps, the 24,000 ceiling
+  context/plan.yaml        region caps, reserves, snapshot caps, the 24,500 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
   memory/profiles.yaml     RRF k, decay and usage knobs
@@ -431,7 +432,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 222. Schema versions, profile names, rule identifiers,
+and asserts the total is 224. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -440,13 +441,13 @@ or invariants rather than knobs and are not counted.
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
 | `context/plan.yaml` | 34 |
-| `tools/limits.yaml` | 25 |
+| `tools/limits.yaml` | 27 |
 | `runtime/limits.yaml` | 65 |
 | `memory/profiles.yaml` | 47 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
 | `cockpit/profiles.yaml` | 10 |
-| **Total** | **222** |
+| **Total** | **224** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle
@@ -541,7 +542,7 @@ model identifier.
 [sandbox-isolation.md](sandbox-isolation.md) as a production adapter in the
 sense the plan uses for the in-memory repositories, a real implementation of
 the port that runs the contract suite unchanged
-(`sandbox-isolation.md:1309`), and it is what lets the whole system be
+(`sandbox-isolation.md:1314`), and it is what lets the whole system be
 exercised without a hypervisor. Startup check 4 below refuses it in
 production beside `docker`.
 
@@ -632,7 +633,7 @@ checks run there, before any adapter exists:
 4.  `deployment_mode == "production"` implies `sandbox` is neither `docker`
     nor `fake`. ADR-0008: "Production startup must refuse to run untrusted
     code under the development fallback." `fake` is behind the same check
-    because it executes nothing (`sandbox-isolation.md:1662`), and a
+    because it executes nothing (`sandbox-isolation.md:1667`), and a
     mechanism that executes nothing isolates less than the fallback this
     rule was written for.
 5.  `config_dir`, if set, exists and contains only files that mirror a shipped
@@ -708,7 +709,7 @@ decisions that can be made from configuration alone, before anything is
 built. Authentication configured or fail. Production refuses the development
 sandbox. Production refuses any policy profile, principal, or tenant name
 beginning with `eval.` or `tenant_eval`. The configured context plan's prefix
-classes sum to at most 24,000 tokens. Nothing has been constructed yet, so
+classes sum to at most 24,500 tokens. Nothing has been constructed yet, so
 nothing has to be torn down, which is the entire reason these checks are
 first rather than convenient.
 
@@ -793,7 +794,7 @@ the probe is built from a `Composition` that has no provider client on it.
 | Production refuses the dev sandbox | ADR-0008 | 1 |
 | Production cannot load an eval identity | eval spec | 1 and 4 |
 | Readiness must not call a provider | plan §16 | 5 |
-| Prefix classes fit the 24,000 ceiling | context spec | 1 and per session |
+| Prefix classes fit the 24,500 ceiling | context spec | 1 and per session |
 | Role-conditional composition | runtime spec | 5 |
 | Migrations upgrade cleanly | plan §25 | not startup |
 | A port with no contract module fails | eval spec | build gate |

@@ -14,13 +14,13 @@ The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
 were written. The present answer is different: Milestones 0 through 14 are
-complete, and Milestone 15 operational hardening is the next sequential,
-fully specified milestone. Milestones 16, 17, 19, 20, 22, 23, and 29 completed
-as separately authorized parallel workstreams; Milestones 18, 21, and 24
-through 31 are authorized parallel workstreams in progress, each with a
-complete design and registered gates. Milestone 32 was authorized on 2026-10-02
-with a proposal; Phase 1 on 2026-10-03 added its detailed contracts and twenty-four
-registered gates. Runtime operations and offline comparisons are implemented; verification remains incomplete.
+complete, and Milestone 15 operational hardening is the next sequential, fully
+specified milestone; its independent reliability repair began under ADR-0205 and
+reached `main` in October 2026. Milestones 16, 17, 19, 20, 22, 23, and 29 completed
+as separately authorized parallel workstreams; Milestones 18, 21, 24 through 28,
+and 30 through 35 are authorized parallel workstreams in progress, each with a
+complete design and registered gates (Milestone 32 since 2026-10-02, 33 since
+2026-10-11, 34 and 35 since 2026-10-22). Milestone 34 is delivered behind its flag.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -64,7 +64,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:2289` states that device tools are *"a reserved
+    `tool-system.md:2295` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -91,7 +91,7 @@ rather than smoothed.
 | 11 | Scheduled runs | Complete | 23 | Nothing |
 | 12 | Notifications and device identity | Complete | 20 | The Apple push key and capability are owner actions outside the corpus |
 | 13 | General-purpose subagents and delegation | Complete | 21 | Nothing; the delegating re-run scored above the failed single-agent trajectory, and tenant activation stays default-off |
-| 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
+| 14 | Inbound surfaces and pairing | Complete | 21 | Nothing; the owner's production Telegram smoke passed on 2026-10-06 |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
 | 16 | Memory evaluation and lifecycle | Complete | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
 | 17 | Memory read API and browser | Complete | 10 | Nothing; the owner decided on 2026-08-23 to expose the three provenance fields, so the projection carries twenty-six fields |
@@ -108,7 +108,11 @@ rather than smoothed.
 | 28 | People and relationship memory | Authorized | 36 | Nothing in the corpus; every gate binding is still pending, and quality evaluation needs the owner |
 | 29 | Chat thread folders | Complete | 17 | Nothing; ADR-0110 adds the typed-judgment port and its matcher |
 | 30 | Advisory approval layer | Authorized | 5 | Nothing in the corpus; threshold calibration and the enforce decision need the owner |
-| 31 | Email unsubscribe assistance | Authorized | 20 | Nothing in the corpus; the real-mailbox smoke is an owner action outside it |
+| 31 | Email unsubscribe assistance | Authorized | 23 | Nothing in the corpus; the real-mailbox smoke is an owner action outside it |
+| 32 | Memory reconsolidation (dreaming) | Implemented; verification incomplete | 24 | Nothing in the corpus; twenty-two runtime and release gates await executable bindings and supervised production evidence |
+| 33 | General memory search and recall | Authorized; implementation in progress | 12 | Nothing in the corpus; optional-channel activation and production delivery need evidence |
+| 34 | Owner records | Implemented behind its flag | 10 | Nothing in the corpus; activation of `AGENT_RECORDS_ENABLED` is an owner action outside it |
+| 35 | Cockpit mode and agent-authored widgets | Authorized; implementation in progress | 23 | Nothing in the corpus; nine gate bindings await executable implementation evidence |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -245,7 +249,7 @@ specification, and recorded as
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
     `engineering-plan.md:1769` says *"Create Alembic migrations for at
-    least these tables"* and `development-toolchain.md:218` supplies
+    least these tables"* and `development-toolchain.md:219` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
     schema migrations, and no design for how the composition root
@@ -380,7 +384,7 @@ only at `engineering-plan.md:585`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:680` named `ApprovalService` as one of
+`bootstrap-and-composition.md:681` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -488,8 +492,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1277-1278` and the resolve at
-`policy-and-approvals.md:1305`, and one reference in
+at `policy-and-approvals.md:1274-1275` and the resolve at
+`policy-and-approvals.md:1330`, and one reference in
 `runtime-loop.md:1310` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -575,7 +579,7 @@ Section 28 of the plan is not empty — `engineering-plan.md:4765-4842`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
-existed. `tool-system.md:1130` constrains MCP server URLs by *"the
+existed. `tool-system.md:1136` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
 `bootstrap-and-composition.md:205` and `:183` assign ownership of
@@ -585,7 +589,7 @@ them.
 
 Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:776`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1638`.
+bridge Section 8.5 requires is specified from `tool-system.md:1644`.
 
 Two further items deserved naming.
 
@@ -594,7 +598,7 @@ Two further items deserved naming.
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1535`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1539`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -623,7 +627,7 @@ The eight types the corpus referenced and never declared are declared:
 `ArtifactWriter`, and `CredentialResolver` from
 `ToolExecutionContext`. That removes the last of the
 referenced-and-undeclared types the API specification named as
-remaining. The egress allowlist `tool-system.md:1130` depends on by
+remaining. The egress allowlist `tool-system.md:1136` depends on by
 name gets a grammar, an owner, and two enforcement points, of which
 the address denylist runs first and no allowlist entry can waive it.
 Workspace lifecycle is settled by a rule rather than a mechanism —
@@ -744,7 +748,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1569-1616` draws the line between
+had to be written. `tool-system.md:1575-1622` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -998,20 +1002,20 @@ review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1824`, and the sibling join
 at `runtime-loop.md:1267` reads it. Restricted context is
-`context-engine.md:542`, where `runs.seed_event_sequence` is nullable
+`context-engine.md:552`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:96`, which
 gets fifteen beliefs against an interactive run's forty. The
-restricted tool set is `tool-system.md:1096`: *"the registry resolves
+restricted tool set is `tool-system.md:1102`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
 `runtime-loop.md:1275`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
-`tool-system.md:1092`. Two are partial: the explicit objective has a
+`tool-system.md:1098`. Two are partial: the explicit objective has a
 carrier but no schema, since `delegate.run` is a control tool at
-`tool-system.md:1029` and no input type for it exists anywhere, and
+`tool-system.md:1035` and no input type for it exists anywhere, and
 the child budget is additive by `engineering-plan.md:679` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
@@ -1588,8 +1592,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1721` does open a *"Device-scoped tools"* section, and
-`tool-system.md:2289` states that device tools are *"a reserved seam,
+`tool-system.md:1727` does open a *"Device-scoped tools"* section, and
+`tool-system.md:2295` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1629,7 +1633,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1735` reserved by name —
+one of them the question `tool-system.md:1741` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1781,7 +1785,7 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1535` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1539` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2663` against
     `model-gateway.md:2011` and `milestone-map.md:1983`. The map
@@ -1844,7 +1848,7 @@ under the conflict it settles.
     settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
-    come first: `tool-system.md:1130` already depends on an egress
+    come first: `tool-system.md:1136` already depends on an egress
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two
@@ -2026,8 +2030,9 @@ refusal of untrusted-turn appends (no policy profile change), two tables with
 forced row-level security, four events, the `recorded_elsewhere` formation
 rule and the body-region catalog item. The build sequence is implemented and
 every gate's check in `evals/gates/records.yaml` is its test; the five tools
-and the catalog stay off until `AGENT_RECORDS_ENABLED` is set, and review,
-hosted CI and production delivery are pending.
+and the catalog stay off until `AGENT_RECORDS_ENABLED` is set. Pull requests
+186, 193 and 202 delivered it to production behind the flag by 2026-10-26;
+setting the flag and accepting the records approval rule remain with the owner.
 
 ## Milestone 35: Cockpit mode and agent-authored widgets
 

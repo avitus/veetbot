@@ -8,9 +8,9 @@ from datetime import datetime
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
-from agent_core.application.people import _safe
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError, ToolValidationError
+from agent_core.domain.hazards import is_safe_text
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     SENSITIVITY_ORDER,
@@ -118,7 +118,7 @@ class PeopleContextService:
                 person = await uow.people.get(
                     principal, person_id, ceiling=ceiling, known_at=query.known_at
                 )
-                if not isinstance(person, Person) or not _safe(person.display_name):
+                if not isinstance(person, Person) or not is_safe_text(person.display_name):
                     raise NotFoundError("person not found")
                 context.append(
                     TracedPersonContext(
@@ -178,7 +178,7 @@ class PeopleContextService:
                     )
                 )
                 for row in history[:5]:
-                    if not isinstance(row, PeopleInteraction) or not _safe(row.summary):
+                    if not isinstance(row, PeopleInteraction) or not is_safe_text(row.summary):
                         continue
                     when = row.occurred_at.isoformat() if row.occurred_at else "date unknown"
                     roles = ", ".join(p.role for p in row.participants if p.person_id == person_id)
@@ -257,7 +257,7 @@ class PeopleContextService:
             or belief.valid_from > at
             or (belief.valid_to is not None and belief.valid_to <= at)
             or (belief.expires_at is not None and belief.expires_at <= at)
-            or not _safe(belief.statement)
+            or not is_safe_text(belief.statement)
         ):
             return None
         endpoints = (
@@ -276,7 +276,7 @@ class PeopleContextService:
                 entity = await uow.people.get(
                     principal, endpoint.id, ceiling=ceiling, known_at=query.known_at
                 )
-                if not isinstance(entity, (Person, OrganizationReference)) or not _safe(
+                if not isinstance(entity, (Person, OrganizationReference)) or not is_safe_text(
                     entity.display_name
                 ):
                     return None
@@ -298,7 +298,7 @@ class PeopleContextService:
         detail += (
             f" {belief.derivation.value}; last evidence {belief.last_evidence_at.isoformat()}."
         )
-        if not _safe(detail):
+        if not is_safe_text(detail):
             return None
         neighbors.update(extra)
         return TracedPersonContext(
@@ -571,7 +571,7 @@ class PeopleContextService:
             next_after = ordered[2] if len(ordered) > 3 else None
             for person_id in ordered[:3]:
                 person = people[person_id]
-                if not _safe(person.display_name):
+                if not is_safe_text(person.display_name):
                     continue
                 edges = owner_edges[person_id]
                 # Exact linked IDs still pass every ordinary memory visibility predicate.
@@ -679,7 +679,11 @@ class PeopleContextService:
                 limit=1,  # The repository returns one additional row for ambiguity.
             )
         )
-        if len(people) == 1 and isinstance(people[0], Person) and _safe(people[0].display_name):
+        if (
+            len(people) == 1
+            and isinstance(people[0], Person)
+            and is_safe_text(people[0].display_name)
+        ):
             return [people[0].id], True, tuple(evidence)
         return [], bool(people), ()
 

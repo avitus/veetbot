@@ -10,20 +10,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from agent_core.config import ConfigurationError
+from agent_core.domain.profiles import FrozenProfileModel
 
 FOLDER_PROFILE_DOCUMENT = "folders/profiles.yaml"
 
 
-class _ProfileModel(BaseModel):
-    """Reject unknown knobs and refuse mutation after validation."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class FolderProposalProfile(_ProfileModel):
+class FolderProposalProfile(FrozenProfileModel):
     """When the proposal pass runs and how large a grouping must be."""
 
     enabled: bool = True
@@ -46,7 +41,7 @@ class FolderProposalProfile(_ProfileModel):
         return self
 
 
-class FolderProfiles(_ProfileModel):
+class FolderProfiles(FrozenProfileModel):
     """The whole `folders/profiles.yaml` document."""
 
     schema_version: Literal[1] = 1

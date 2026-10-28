@@ -95,22 +95,24 @@ def test_valid_destinations_are_accepted(host: str, ports: frozenset[int]) -> No
     validate_destination(EgressDestination(host, ports))
 
 
-def test_deny_mode_refuses_even_a_listed_destination() -> None:
-    policy = EgressPolicy(
-        mode=EgressMode.DENY,
-        destinations=(EgressDestination("pypi.org", frozenset({443})),),
-    )
-
+@pytest.mark.parametrize(
+    "policy",
+    [
+        EgressPolicy(
+            mode=EgressMode.DENY,
+            destinations=(EgressDestination("pypi.org", frozenset({443})),),
+        ),
+        EgressPolicy(),
+    ],
+    ids=["deny_mode_with_listed_destination", "default_policy"],
+)
+def test_deny_mode_and_the_default_policy_refuse_even_a_listed_destination(
+    policy: EgressPolicy,
+) -> None:
     decision = evaluate_egress(policy, "pypi.org", 443, PUBLIC)
 
     assert decision.allowed is False
     assert decision.reason is EgressReason.MODE_DENY
-
-
-def test_the_default_policy_denies_everything() -> None:
-    decision = evaluate_egress(EgressPolicy(), "pypi.org", 443, PUBLIC)
-
-    assert (decision.allowed, decision.reason) == (False, EgressReason.MODE_DENY)
 
 
 @pytest.mark.parametrize(
@@ -159,31 +161,30 @@ def test_a_port_on_one_matching_destination_is_not_borrowed_by_another() -> None
 
 
 @pytest.mark.parametrize(
-    "address",
+    ("address", "public"),
     [
-        "0.0.0.1",
-        "10.1.2.3",
-        "127.0.0.1",
-        "169.254.169.254",
-        "172.16.0.1",
-        "172.31.255.254",
-        "192.168.0.1",
-        "100.64.0.1",
-        "::1",
-        "fc00::1",
-        "fd12:3456::1",
-        "fe80::1",
-        "::ffff:10.0.0.1",
-        "::ffff:169.254.169.254",
+        ("0.0.0.1", False),
+        ("10.1.2.3", False),
+        ("127.0.0.1", False),
+        ("169.254.169.254", False),
+        ("172.16.0.1", False),
+        ("172.31.255.254", False),
+        ("192.168.0.1", False),
+        ("100.64.0.1", False),
+        ("::1", False),
+        ("fc00::1", False),
+        ("fd12:3456::1", False),
+        ("fe80::1", False),
+        ("::ffff:10.0.0.1", False),
+        ("::ffff:169.254.169.254", False),
+        ("93.184.216.34", True),
+        ("172.32.0.1", True),
+        ("100.128.0.1", True),
+        ("2606:4700:4700::1111", True),
+        ("::ffff:8.8.8.8", True),
     ],
 )
-def test_the_fixed_address_denylist_is_not_public(address: str) -> None:
-    assert address_is_public(address) is False
-
-
-@pytest.mark.parametrize(
-    "address",
-    ["93.184.216.34", "172.32.0.1", "100.128.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"],
-)
-def test_public_addresses_just_outside_the_denylist_are_public(address: str) -> None:
-    assert address_is_public(address) is True
+def test_the_fixed_address_denylist_is_not_public_and_addresses_just_outside_it_are(
+    address: str, public: bool
+) -> None:
+    assert address_is_public(address) is public

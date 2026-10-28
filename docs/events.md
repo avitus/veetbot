@@ -40,7 +40,9 @@ exercise these properties against PostgreSQL 16.
 
 Milestone 3 completes the trajectory projection's governed output path. A
 terminal run can be materialized once as a versioned messages-shaped JSON
-artifact after both operator enablement and prospective per-principal consent.
+artifact after both operator enablement (`AGENT_TRAJECTORY_EXPORT_ENABLED=1`,
+default off) and prospective per-principal consent recorded with
+`agent session export-consent`.
 The builder carries the terminal outcome and tool schema hashes, excludes
 reasoning, provider metadata, usage, prices, timestamps, and internal execution
 identifiers structurally, replaces all mandatory secret-pattern and

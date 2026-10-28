@@ -66,25 +66,15 @@ def _judge_output() -> str:
     )
 
 
-def test_build_ref_resolution_bounds_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CIRCLE_SHA1", raising=False)
-    monkeypatch.delenv("GIT_COMMIT_SHA", raising=False)
-    git_executable = "/test/bin/git"
-    monkeypatch.setattr(shutil, "which", lambda _name: git_executable)
-
-    def time_out(command: list[str], *_args: object, **_kwargs: object) -> None:
-        assert command == [git_executable, "rev-parse", "HEAD"]
-        raise subprocess.TimeoutExpired(("git",), 1)
-
-    monkeypatch.setattr(subprocess, "run", time_out)
-
-    with pytest.raises(ValueError, match="could not resolve a build ref"):
-        resolve_build_ref(tmp_path, None)
-
-
-def test_build_ref_resolution_normalizes_git_execution_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "git_error",
+    [subprocess.TimeoutExpired(("git",), 1), OSError("git is unavailable")],
+    ids=["timeout", "os_error"],
+)
+def test_build_ref_resolution_bounds_git_and_normalizes_its_execution_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git_error: Exception
 ) -> None:
+    """A git timeout or execution error becomes the one documented refusal."""
     monkeypatch.delenv("CIRCLE_SHA1", raising=False)
     monkeypatch.delenv("GIT_COMMIT_SHA", raising=False)
     git_executable = "/test/bin/git"
@@ -92,7 +82,7 @@ def test_build_ref_resolution_normalizes_git_execution_errors(
 
     def fail_execution(command: list[str], *_args: object, **_kwargs: object) -> None:
         assert command == [git_executable, "rev-parse", "HEAD"]
-        raise OSError("git is unavailable")
+        raise git_error
 
     monkeypatch.setattr(subprocess, "run", fail_execution)
 
@@ -268,33 +258,25 @@ def test_trajectory_provenance_mismatch_is_rejected(tmp_path: Path) -> None:
         load_scenarios(tmp_path, "research")
 
 
-def test_milestone_thirteen_capability_scenario_is_accepted(tmp_path: Path) -> None:
-    """Admit the authorized Milestone 13 capability ceiling."""
+@pytest.mark.parametrize(("milestone", "accepted"), [(13, True), (14, False)])
+def test_capability_scenario_milestone_ceiling_admits_thirteen_and_rejects_fourteen(
+    tmp_path: Path, milestone: int, accepted: bool
+) -> None:
+    """Admit the authorized Milestone 13 ceiling and keep the schema closed above it."""
 
     _fixture(tmp_path)
     path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
     path.write_text(
-        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 13"),
+        path.read_text(encoding="utf-8").replace("milestone: 3", f"milestone: {milestone}"),
         encoding="utf-8",
     )
 
-    _settings, scenarios = load_scenarios(tmp_path, "research")
-
-    assert scenarios[0].scenario.milestone == 13
-
-
-def test_milestone_fourteen_capability_scenario_is_rejected(tmp_path: Path) -> None:
-    """Keep the capability schema closed above Milestone 13."""
-
-    _fixture(tmp_path)
-    path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 14"),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="less than or equal to 13"):
-        load_scenarios(tmp_path, "research")
+    if accepted:
+        _settings, scenarios = load_scenarios(tmp_path, "research")
+        assert scenarios[0].scenario.milestone == milestone
+    else:
+        with pytest.raises(ValueError, match="less than or equal to 13"):
+            load_scenarios(tmp_path, "research")
 
 
 def test_repository_research_scenario_is_admitted_from_failed_trajectory() -> None:

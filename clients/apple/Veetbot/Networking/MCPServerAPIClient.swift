@@ -26,7 +26,9 @@ extension VeetbotAPIClient {
                 TransportRequest(method: .get, path: "/v1/mcp-servers", retryAttempts: 2)
             )
         } catch {
-            throw mcpCollectionCompatibilityError(from: error) ?? error
+            // The list and add routes have no per-item 404, so a 404 or 405 there
+            // means the routes are not mounted.
+            throw unmountedRouteError(from: error, as: MCPServerClientError.unavailable) ?? error
         }
     }
 
@@ -51,7 +53,8 @@ extension VeetbotAPIClient {
                 created: response.statusCode == 201
             )
         } catch {
-            throw mcpCollectionCompatibilityError(from: error) ?? error
+            // No per-item 404 on the collection; see listMCPServers.
+            throw unmountedRouteError(from: error, as: MCPServerClientError.unavailable) ?? error
         }
     }
 
@@ -118,14 +121,6 @@ func mcpServerPath(_ serverID: String) throws -> String {
         throw MCPServerClientError.invalidServerID
     }
     return "/v1/mcp-servers/\(serverID)"
-}
-
-/// The list and add routes have no per-item 404, so a 404 or 405 there means
-/// the routes are not mounted.
-private func mcpCollectionCompatibilityError(from error: Error) -> MCPServerClientError? {
-    guard case HTTPTransportError.api(let apiError) = error else { return nil }
-    if apiError.statusCode == 404 || apiError.statusCode == 405 { return .unavailable }
-    return nil
 }
 
 /// A per-server 404 may be an unknown server, so it stays an API error and
