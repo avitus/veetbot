@@ -119,6 +119,9 @@ release evidence bound to it are unchanged.
   check that meets an external `<use>` spends one DevTools document read:
   about 22 ms, measured locally on the portal's public sign-in markup with
   120 added sprite icons and its 1.25 MB sprite. Other pages spend nothing.
+  The read grows with the page, about 0.05 ms and 400 bytes per element
+  (20,000 elements in 0.4 s as 8 MB; 200,000 in 11.6 s as 79 MB), so a page
+  past 20,000 elements is not read and its external references stay opaque.
 - A page with any SMIL animation element inspects no sprite, so its icon
   controls still ask. The portal's sign-in page and sprite have none.
 - Approval records say why research mode refused, so a remaining prompt can

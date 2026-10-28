@@ -232,8 +232,9 @@ Each change began with a red test:
   `prefix_tokens` equal a plan without it, it takes no share of the index's
   item cap, an enabled reader is never a definition, and without `tool.call`
   it is skipped. The production-shaped roster gates
-  (`tests/gates/test_deferred_tools_adr0123.py`) still define thirty tools
-  and skip only the two Gmail writes ADR-0253 skips.
+  (`tests/gates/test_deferred_tools_adr0123.py`) still define thirty tools;
+  since ADR-0262 raised the index cap their `skipped_tool_names` is empty,
+  so the two Gmail writes ADR-0253 once skipped are listed again.
 - **The composed gate** (`tests/gates/test_capture_reader_adr0261.py`). A
   chat fetches a 497 KB page through the fake web provider, and its marker
   names the reader. The next turn searches the capture and reads two sections

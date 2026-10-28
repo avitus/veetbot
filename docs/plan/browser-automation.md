@@ -1251,7 +1251,8 @@ opaque (ADR-0129). For a same-origin external reference, such as an icon drawn
 from a site's sprite file, the isolated runtime reads the rendered copies
 through Chromium's DevTools protocol, outside the page's script realm, and reads
 the element again. It does so once per observation or live check, only when an
-element read meets such a reference (ADR-0263). A reference is inspected only
+element read meets such a reference and the page holds at most 20,000
+elements, since the read grows with the page (ADR-0263). A reference is inspected only
 when every `<use>` naming it alone shows a loaded copy that, through nested
 copies, holds no link, frame, object, embed, foreign object, image map or
 animation element, within 2,048 nodes. A `<use>` naming two references vouches

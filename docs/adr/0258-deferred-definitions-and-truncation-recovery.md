@@ -13,8 +13,8 @@
   PR #204 call this decision ADR-0256
 - Amended by: ADR-0262 (2026-10-27), which raises the index's token cap to
   2,500, so the skips recorded under Consequences no longer occur; ADR-0261
-  (2026-10-27), whose readable captures the truncation note now excepts and
-  names
+  (2026-10-27), after which the truncation note excepts readable captures and
+  names them when the capture reader is available
 
 ## Context
 

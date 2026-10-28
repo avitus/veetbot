@@ -29,8 +29,10 @@ from agent_core.adapters.browser import playwright as playwright_adapter
 from agent_core.adapters.browser.page_structure import REGION_SCRIPT
 from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
 from agent_core.adapters.browser.playwright import (
+    USE_INSPECTION_ELEMENT_BOUND,
     PlaywrightBrowserProvider,
     PythonPlaywrightRuntime,
+    _inspected_use_references,
 )
 from agent_core.domain.browser import (
     BrowserAction,
@@ -48,6 +50,62 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.execution import EgressMode, EgressPolicy
 from tests.real_browser_support import RealBrowserRuntime, local_https_site, require_real_browser
+
+
+@pytest.mark.parametrize(
+    "elements", [USE_INSPECTION_ELEMENT_BOUND, USE_INSPECTION_ELEMENT_BOUND + 1]
+)
+async def test_use_inspection_reads_the_document_only_within_the_element_bound(
+    elements: int,
+) -> None:
+    """ADR-0263: the pierced document read grows with the page, so a page past the
+    bound is never read and every external reference on it stays opaque."""
+    session = Mock()
+    session.detach = AsyncMock()
+    session.send = AsyncMock(
+        return_value={
+            "root": {
+                "nodeType": 9,
+                "documentURL": "https://portal.example/",
+                "baseURL": "https://portal.example/",
+                "children": [
+                    {
+                        "nodeType": 1,
+                        "localName": "use",
+                        "attributes": ["href", "/sprite.svg#menu"],
+                        "children": [],
+                        "shadowRoots": [
+                            {
+                                "nodeType": 11,
+                                "shadowRootType": "user-agent",
+                                "children": [
+                                    {
+                                        "nodeType": 1,
+                                        "localName": "symbol",
+                                        "attributes": [],
+                                        "children": [],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+    )
+    page = Mock()
+    page.evaluate = AsyncMock(return_value=elements)
+    page.context.new_cdp_session = AsyncMock(return_value=session)
+
+    references = await _inspected_use_references(page)
+
+    if elements > USE_INSPECTION_ELEMENT_BOUND:
+        assert references == []
+        page.context.new_cdp_session.assert_not_awaited()
+    else:
+        page.context.new_cdp_session.assert_awaited_once_with(page)
+        session.send.assert_awaited_once_with("DOM.getDocument", {"depth": -1, "pierce": True})
+        assert references == ["https://portal.example/sprite.svg#menu"]
 
 
 @pytest.mark.parametrize("stage", ["attach", "identify", "destroy", "confirm"])

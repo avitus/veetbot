@@ -1766,14 +1766,29 @@ def _external_uses(metadata: object) -> bool:
     return isinstance(uses, list) and bool(uses)
 
 
+# ADR-0263: the pierced document read is linear in the page's size, about
+# 0.05 ms and 400 bytes per element measured locally (20,000 elements read in
+# 0.4 s as 8 MB; 200,000 in 11.6 s as 79 MB). A page past this many elements
+# is not read, so every external reference on it stays opaque.
+USE_INSPECTION_ELEMENT_BOUND = 20_000
+
+
 async def _inspected_use_references(page: Page) -> list[str]:
     """Same-origin external ``<use>`` references whose copies are inert (ADR-0263).
 
     Chromium's DevTools protocol shows each copy as the element's user-agent
     shadow root, which page script cannot reach or alter. Any failure inspects
-    nothing, so every external reference stays opaque.
+    nothing, so every external reference stays opaque, and so does every
+    reference on a page past ``USE_INSPECTION_ELEMENT_BOUND`` elements, whose
+    document read would be unbounded.
     """
 
+    try:
+        elements = await page.evaluate("() => document.getElementsByTagName('*').length")
+    except PlaywrightError:
+        return []
+    if not isinstance(elements, int) or elements > USE_INSPECTION_ELEMENT_BOUND:
+        return []
     try:
         session = await page.context.new_cdp_session(page)
         try:

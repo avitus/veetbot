@@ -218,7 +218,14 @@ public final class CockpitViewModel: ObservableObject {
     public func saveLayout(_ deviceClass: CockpitDeviceClass, placements: [CockpitPlacement]) async {
         let expected = snapshot?.layouts[deviceClass]?.revision
         await perform { client in
-            _ = try await client.putCockpitLayout(deviceClass, placements: placements, expectedRevision: expected)
+            let layout = try await client.putCockpitLayout(deviceClass, placements: placements, expectedRevision: expected)
+            // The next save compares against this revision until the stream refetches the board.
+            if var current = self.snapshot {
+                var layouts = current.layouts
+                layouts[deviceClass] = layout
+                current = current.replacingLayouts(layouts)
+                self.snapshot = current
+            }
             return nil
         }
     }

@@ -315,7 +315,7 @@ import Testing
         #expect(client.calls == [
             "detail weather",
             "layout wide [] after 3",
-            "layout wide [\"weather\"] after 3",
+            "layout wide [\"weather\"] after 4",
         ])
         #expect(!client.calls.contains { $0.hasPrefix("delete") }, "Removing from a screen never deletes the widget")
         board.setVisible(false)
