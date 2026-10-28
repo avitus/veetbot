@@ -3687,7 +3687,9 @@ final class ConversationNavigationUITests: XCTestCase {
         let handle = app.descendants(matching: .any)["cockpit.sidebar.resize"]
         XCTAssertTrue(handle.waitForExistence(timeout: 10), app.debugDescription)
         let before = handle.frame.midX
-        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        // Press on the board's side of the hairline: the grab area reaches into
+        // the board, a later sibling, which must not take the drag.
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.8125, dy: 0.5))
         start.press(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 40, dy: 0)))
         XCTAssertTrue(waitForFrame(of: handle, timeout: 5) { abs($0.midX - (before + 40)) <= 4 },
                       "Dragging the hairline must widen Cockpit's left pane\n\(app.debugDescription)")
