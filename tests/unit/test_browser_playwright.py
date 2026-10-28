@@ -148,6 +148,30 @@ async def test_a_grant_constrained_click_reads_its_inspected_copies_again_before
     guard.dispose.assert_awaited()
 
 
+@pytest.mark.parametrize("overflow", [True, None])
+async def test_live_coverage_refuses_a_read_whose_external_references_overflowed(
+    overflow: bool | None,
+) -> None:
+    """ADR-0263: the element read lists at most 64 external references; one past
+    them was neither inspected nor rechecked, so the live check refuses the act
+    rather than trusting the truncated list (a missing flag is the same refusal)."""
+    runtime = PythonPlaywrightRuntime()
+    handle = Mock()
+    handle.evaluate = AsyncMock(side_effect=AssertionError("the overflow refuses before any read"))
+    metadata = {"overlong": False, "externalUsesOverflow": overflow}
+
+    covered = await runtime._live_coverage(
+        Mock(),
+        handle,
+        BrowserAction(kind=BrowserActionKind.CLICK, ref="e1", expected_revision="r1"),
+        Mock(),
+        metadata,
+        now=datetime(2026, 10, 28, tzinfo=UTC),
+    )
+
+    assert covered is False
+
+
 @pytest.mark.parametrize("stage", ["attach", "identify", "destroy", "confirm"])
 @pytest.mark.parametrize("cancelled", [False, True])
 async def test_popup_close_failure_ends_the_browser_session(stage: str, cancelled: bool) -> None:

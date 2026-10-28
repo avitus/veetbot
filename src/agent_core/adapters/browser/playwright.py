@@ -1456,6 +1456,10 @@ class PythonPlaywrightRuntime:
             # A label source past what the live check reads could hold an
             # excluded word in its unread tail.
             return False
+        if metadata.get("externalUsesOverflow") is not False:
+            # ADR-0263: the read lists at most 64 external references, so a
+            # reference past them was neither inspected nor rechecked.
+            return False
         option_texts = await self._live_option_texts(handle, action)
         if option_texts is None:
             return False
@@ -2084,6 +2088,7 @@ _READ_ELEMENT_SCRIPT = """(node, inspected) => {
         forms: forms.slice(0, 64),
         opaque,
         externalUses: [...externalUses].slice(0, 64),
+        externalUsesOverflow: externalUses.size > 64,
         download: flat.some(element => anchor(element) && element.hasAttribute('download')),
         context: dialog ? clean(dialog.getAttribute('aria-label')
             || referenced(dialog, dialog.getAttribute('aria-labelledby'))

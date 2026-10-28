@@ -44,16 +44,15 @@ public final class CockpitViewModel: ObservableObject {
             .map { CockpitPlacement(slug: $0.widget.slug, size: $0.size) }
         guard before.contains(where: { $0.slug == slug }) else { return }
         let title = snapshot.widgets.first { $0.slug == slug }?.title ?? slug
-        await saveLayout(deviceClass, placements: before.filter { $0.slug != slug })
-        guard errorMessage == nil else { return }
-        // Undo compares against the removal's own revision, so an arrangement
-        // saved in the meantime is refused by the server rather than overwritten.
-        let removalRevision = self.snapshot?.layouts[deviceClass]?.revision
+        guard let removed = await saveLayout(deviceClass, placements: before.filter { $0.slug != slug })
+        else { return }
         closeDetail()
+        // Undo compares against the revision the removal itself produced, so an
+        // arrangement saved in the meantime is refused by the server rather than
+        // overwritten, and Undo succeeds only when a layout save did.
         toasts.show("Removed \(title) from this screen", restored: "\(title) is back on this screen") { [weak self] in
             guard let self else { return false }
-            await self.saveLayout(deviceClass, placements: before, expectedRevision: removalRevision)
-            return self.errorMessage == nil
+            return await self.saveLayout(deviceClass, placements: before, expectedRevision: removed.revision) != nil
         }
     }
 
@@ -219,21 +218,26 @@ public final class CockpitViewModel: ObservableObject {
 
     /// Arrange this device class's board, compare-and-set on the layout's revision
     /// (the snapshot's unless the caller anchors the save to an earlier one).
+    /// Returns the saved layout, or nil when nothing was saved: a refused
+    /// compare-and-set, a failed request, or no connection to send it on.
+    @discardableResult
     public func saveLayout(
         _ deviceClass: CockpitDeviceClass, placements: [CockpitPlacement], expectedRevision: Int? = nil
-    ) async {
+    ) async -> CockpitLayout? {
         let expected = expectedRevision ?? snapshot?.layouts[deviceClass]?.revision
+        var saved: CockpitLayout?
         await perform { client in
             let layout = try await client.putCockpitLayout(deviceClass, placements: placements, expectedRevision: expected)
+            saved = layout
             // The next save compares against this revision until the stream refetches the board.
-            if var current = self.snapshot {
+            if let current = self.snapshot {
                 var layouts = current.layouts
                 layouts[deviceClass] = layout
-                current = current.replacingLayouts(layouts)
-                self.snapshot = current
+                self.snapshot = current.replacingLayouts(layouts)
             }
             return nil
         }
+        return saved
     }
 
     public func revert(_ slug: String, to revision: UUID) async {

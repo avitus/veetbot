@@ -353,6 +353,37 @@ import Testing
         board.setVisible(false)
     }
 
+    /// Undo reports success only when a layout save happened: with no connection
+    /// to send it on, nothing is saved and the toast reports the failure.
+    @Test
+    func undoWithoutAConnectionSavesNothingAndReportsFailure() async {
+        let client = FakeClient()
+        let weather = CockpitWidget(
+            slug: "weather", revisionID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            bundleSHA256: String(repeating: "d", count: 64),
+            manifest: ["title": .string("Weather"), "sizes": .array([.string("md")])], changedAt: Self.now
+        )
+        client.queueSnapshot(.success(CockpitSnapshot(
+            cursor: 41, runtime: nil, widgets: [weather],
+            layouts: [.wide: CockpitLayout(revision: 3, placements: [CockpitPlacement(slug: "weather", size: "md")])]
+        )))
+        client.queueStream([])
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        var connected = true
+        let board = CockpitViewModel(
+            makeClient: { connected ? client : nil }, now: { Self.now }, sleep: { _ in await Task.yield() }
+        )
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.removeFromScreen("weather", deviceClass: .wide)
+        connected = false
+        let restored = await board.saveLayout(.wide, placements: [], expectedRevision: 4)
+        #expect(restored == nil, "No connection means nothing was saved")
+        #expect(client.calls == ["layout wide [] after 3"])
+        board.setVisible(false)
+    }
+
     @Test
     func theOwnersChangesGoThroughTheRoutesAndRefreshTheBoard() async {
         let client = FakeClient()

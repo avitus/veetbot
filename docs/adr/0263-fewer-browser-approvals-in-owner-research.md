@@ -128,7 +128,9 @@ release evidence bound to it are unchanged.
   live read relied on inspected copies reads them again immediately before
   the click and is refused, asking instead, when any is no longer inert. That
   second read is not atomic with the click; the window it leaves is the
-  runtime's own dispatch, with no page turn in between.
+  runtime's own dispatch, with no page turn in between. An element read lists
+  at most 64 external references; a live read that met more is refused, since
+  a reference past the list was neither inspected nor rechecked.
 - A page with any SMIL animation element inspects no sprite, so its icon
   controls still ask. The portal's sign-in page and sprite have none.
 - Approval records say why research mode refused, so a remaining prompt can
