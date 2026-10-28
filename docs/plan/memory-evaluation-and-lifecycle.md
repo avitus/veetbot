@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:923), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:925), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:855-857).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:352-354), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:965-968),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:967-970),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:960), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:962), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:882) are
 all written down, and none of them runs.
 
@@ -851,7 +851,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:965-968): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:967-970): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.

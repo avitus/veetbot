@@ -36,6 +36,7 @@ from tests.contract.owner_recall_probe_cases import (
     FakeWebProvider,
     delivery_case,
     home_city_case,
+    post_snapshot_home_case,
     save_case,
 )
 from tests.gates.test_memory_m16 import _START
@@ -139,6 +140,20 @@ async def test_home_city_probe_delivers_the_address_beside_same_subject_noise(
         clock=clock,
     ) as app:
         await home_city_case(app, script)
+
+
+async def test_a_residence_stated_after_the_snapshot_reaches_a_garden_task(
+    tmp_path: Path,
+) -> None:
+    clock = FixedClock(_START)
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=clock,
+    ) as app:
+        await post_snapshot_home_case(app)
 
 
 async def test_write_probe_reports_the_save_outcome_after_web_results(tmp_path: Path) -> None:

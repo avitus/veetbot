@@ -373,11 +373,13 @@ or giving a home (mailing) address. The query records `include_home_location`,
 false for older saved queries. The residence anchor shares the ownership
 anchor's match weight of 0.5, its priority before the candidate cap in both
 stores, its PostgreSQL regular-expression parity and its hard filters.
-Generic advice ("How do I start a garden?") and someone else's place do not
-activate it. Deliberate `memory.search` accepts a keyword query naming the
-user or owner with a residence word, in relevance mode only. Queries using it
-append `+home-location@1`; legacy-mode queries, and so the frozen benchmark,
-never set it.
+Delta recall clears it too: the text-free delta already takes every belief
+past the snapshot watermark, and an anchor there would narrow it to residence
+statements alone. Generic advice ("How do I start a garden?") and someone
+else's place do not activate it. Deliberate `memory.search` accepts a keyword
+query naming the user or owner with a residence word, in relevance mode only.
+Queries using it append `+home-location@1`; legacy-mode queries, and so the
+frozen benchmark, never set it.
 
 ### 2. Hard filter
 

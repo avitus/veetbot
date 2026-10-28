@@ -5,10 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import Composition
 from agent_core.domain.events import NewEvent
-from agent_core.domain.memory import BeliefType, MemoryRecord, MemoryStatus, Sensitivity
-from agent_core.domain.messages import FakeModelScript
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryRecord,
+    MemoryStatus,
+    RecallMoment,
+    RecallTrace,
+    Sensitivity,
+)
+from agent_core.domain.messages import FakeModelScript, TextPart, UserMessage
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.web import WebPage, WebSearchRequest, WebSearchResult
 from agent_core.evals.owner_recall_probe_driver import Finish, _wait, observe_probes
 from agent_core.evals.owner_recall_probes import (
@@ -200,6 +209,64 @@ async def home_city_case(
     # residence (+home-location@1), so the address reaches the first request.
     assert paths["automatic"].evidence[0].stage == "delivered", paths["automatic"]
     return report, address
+
+
+async def post_snapshot_home_case(app: Composition, *, finish: Finish = _wait) -> None:
+    """A residence stated after the session's snapshot still reaches a garden task.
+
+    The first turn freezes the snapshot. The residence and an unrelated fact
+    stated afterwards share no word with the next turn's household-place
+    request, so the residence anchor carries the first and only the delta can
+    carry the second. The delta is text-free and therefore unfiltered: turning
+    the anchor on there would narrow it to residence statements alone.
+    """
+
+    provider = app.executor._model_provider
+    planner = app.executor._context_planner
+    assert isinstance(provider, FakeModelProvider)
+    session_id = await app.sessions.create()
+    await stated(app, session_id, "User prefers dark themes.", "theme")
+    await finish(app, await app.runs.submit("How should you answer?", session_id))
+    plan = await planner.current(session_id)
+    assert plan is not None and plan.snapshot_id is not None
+
+    residence = await stated(app, session_id, "User lives in Exampleville, CA.", "home location")
+    deploys = await stated(app, session_id, "User deploys on Fridays.", "deploys")
+    assert min(residence.store_position, deploys.store_position) > plan.snapshot_watermark
+
+    task = await finish(
+        app,
+        await app.runs.submit(
+            "Maintain a gardening calendar based on what you know about our garden.", session_id
+        ),
+    )
+    request = provider.requests[-1]
+    body = request.conversation[int(request.metadata["region_a_items"]) :]
+    delivered = "\n".join(
+        part.text
+        for item in body
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.MEMORY
+        for part in item.content
+        if isinstance(part, TextPart)
+    )
+    assert residence.statement in delivered
+    assert deploys.statement in delivered
+
+    async with app.uow_factory() as uow:
+        events = await uow.events.list_after(session_id, 0, app.principal)
+        traces: list[RecallTrace] = [
+            await uow.traces.get(UUID(str(event.payload["trace_id"])), app.principal)
+            for event in events
+            if event.event_type == "memory.recalled" and event.run_id == task.id
+        ]
+    in_turn = [trace for trace in traces if trace.moment is RecallMoment.IN_TURN]
+    (base,) = [trace for trace in in_turn if trace.query.text is not None]
+    (delta,) = [trace for trace in in_turn if trace.query.text is None]
+    assert base.query.include_home_location is True
+    assert delta.query.include_home_location is False
+    assert delta.query.min_store_position == plan.snapshot_watermark
+    assert deploys.id in delta.returned
+    assert residence.id in {*base.returned, *delta.returned}
 
 
 def assert_delivery_report(report: ProbeReport, car: MemoryRecord) -> None:
