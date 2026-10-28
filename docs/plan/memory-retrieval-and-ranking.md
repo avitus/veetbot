@@ -361,6 +361,26 @@ metrics and probe rows. Regression coverage includes older possessions,
 candidate floods, model request assembly and PostgreSQL parity. This adds no
 semantic retrieval arm.
 
+A task about the owner's own place needs where that place is: "Maintain a
+gardening calendar for our garden" shares no word with "User lives in
+Exampleville." ([ADR-0259](../adr/0259-owner-places-and-family-ties-reach-recall.md)).
+A `my` or `our` reference to a household place (home, house, garden, yard,
+lawn, property, apartment, neighbourhood, town or city) anchors the owner's
+direct residence statements: `fact` or `user_model_attr`, direct and
+asserted, with a
+subject that is not person-scoped, saying the user lives or resides somewhere
+or giving a home (mailing) address. The query records `include_home_location`,
+false for older saved queries. The residence anchor shares the ownership
+anchor's match weight of 0.5, its priority before the candidate cap in both
+stores, its PostgreSQL regular-expression parity and its hard filters.
+Delta recall clears it too: the text-free delta already takes every belief
+past the snapshot watermark, and an anchor there would narrow it to residence
+statements alone. Generic advice ("How do I start a garden?") and someone
+else's place do not activate it. Deliberate `memory.search` accepts a keyword
+query naming the user or owner with a residence word, in relevance mode only.
+Queries using it append `+home-location@1`; legacy-mode queries, and so the
+frozen benchmark, never set it.
+
 ### 2. Hard filter
 
 Applied in the SQL predicate, before any scoring:
@@ -401,7 +421,14 @@ results rather than delaying the turn.
   review-reason penalties and the attention cap (ADR-0249) changed no
   benchmark metric. They move the live relevance selector to `retrieval@7`;
   the base label stays `retrieval@4` by the owner's decision, because
-  re-recording the baseline would re-pin the frozen M32 control.
+  re-recording the baseline would re-pin the frozen M32 control. Relevance
+  matching also folds a plural or third-person "-s" off a plain query word
+  ("boards" finds "board", "sit" finds "sits"). Both stores expand the query,
+  never the stored text, into the spellings that fold to the same stem and
+  match them as whole lexemes, so PostgreSQL needs no stemming dictionary
+  ([ADR-0259](../adr/0259-owner-places-and-family-ties-reach-recall.md)). This
+  moves the live selector to `retrieval@8`; legacy mode keeps whole-lexeme
+  matching.
 - **Semantic** (optional, off at first). `pgvector` over statement embeddings. This is
   where paraphrased preferences are found ("keep it brief" vs "prefers concise
   writing") — the case lexical genuinely misses. It is built behind the fusion

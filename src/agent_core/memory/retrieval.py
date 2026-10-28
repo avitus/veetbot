@@ -43,10 +43,11 @@ from agent_core.domain.memory import (
     RecallTrace,
     Sensitivity,
     TracedPersonContext,
-    is_owned_resource,
-    lexical_term_lexemes,
+    lexical_term_matched,
     lexical_tokens,
+    owner_anchored,
     recall_query_terms,
+    recall_term_lexemes,
     review_reason,
 )
 from agent_core.domain.memory_candidates import candidate_strength
@@ -79,10 +80,12 @@ from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQue
 # selector moves @5 -> @7 so production traces name the new ranking. The base
 # label stays @4 by the owner's decision: the deterministic M16 benchmark
 # measured no metric change, and re-recording its baseline would re-pin the
-# frozen M32 control and the owner-reviewed review contract.
+# frozen M32 control and the owner-reviewed review contract. ADR-0259 folds
+# a plural or third-person "-s" in relevance matching only: @7 -> @8.
 RETRIEVAL_POLICY_VERSION = "retrieval@4"
-RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@7"
+RELEVANCE_RETRIEVAL_POLICY_VERSION = "retrieval@8"
 OWNED_RESOURCE_POLICY_VERSION = "owned-resources@1"
+HOME_LOCATION_POLICY_VERSION = "home-location@1"
 RECONSOLIDATION_RETRIEVAL_POLICY_VERSION = "retrieval-reconsolidation@2"
 # Episode search reads the session stream in bounded pages: never the whole
 # stream at once, and never more pages than a bounded read is worth.
@@ -211,6 +214,33 @@ def recalls_owned_resources(
     return False
 
 
+# A household place the owner names as their own. "Our" counts here: a home
+# and its garden are usually shared, unlike "my car".
+_HOME_PLACE = re.compile(
+    r"\b(?:my|our)\s+(?:own\s+)?(?:home|house|garden|yard|backyard|front\s+yard|lawn|"
+    r"property|apartment|flat|neighbou?rhood|town|city)\b",
+    re.I,
+)
+_DELIBERATE_HOME = re.compile(
+    r"\b(?:user|owner)\b.*\b(?:home|house|residence|address|lives|location)\b"
+    r"|\b(?:home|house|residence|address|lives|location)\b.*\b(?:user|owner)\b",
+    re.I,
+)
+
+
+def recalls_home_location(text: str, *, deliberate: bool = False) -> bool:
+    """Whether a task concerns the owner's own place, so needs where it is.
+
+    Generic advice ("How do I start a garden?") and someone else's place
+    ("Cheryl's house") do not. Deliberate searches also accept the model's
+    keyword-style query naming the user's home or address.
+    """
+
+    return _HOME_PLACE.search(text) is not None or (
+        deliberate and _DELIBERATE_HOME.search(text) is not None
+    )
+
+
 class DeterministicQueryFormer:
     def __init__(
         self,
@@ -276,6 +306,7 @@ class DeterministicQueryFormer:
                 include_owned_resources=recalls_owned_resources(
                     text, owner_questions=owner_questions
                 ),
+                include_home_location=owner_questions and recalls_home_location(text),
                 candidate_selection=self._candidate_selection,
                 profile=RecallProfile.TASK,
                 budget_tokens=self._budget_tokens,
@@ -416,6 +447,7 @@ class HybridMemoryRetriever:
             # candidate expansion or ranking. Frozen controls retain their policy.
             # Normalize before both vector preparation and lookup so cache keys agree.
             updates["include_owned_resources"] = False
+            updates["include_home_location"] = False
         return query.model_copy(update=updates)
 
     async def bind_semantic_queries(
@@ -615,9 +647,12 @@ class HybridMemoryRetriever:
         if effective_query.include_owned_resources:
             policy_version += f"+{OWNED_RESOURCE_POLICY_VERSION}"
             render_policy += f"+{OWNED_RESOURCE_POLICY_VERSION}"
+        if effective_query.include_home_location:
+            policy_version += f"+{HOME_LOCATION_POLICY_VERSION}"
+            render_policy += f"+{HOME_LOCATION_POLICY_VERSION}"
         if effective_query.relationship_group is not None:
-            policy_version += "+owner-overview@1"
-            render_policy += "+owner-overview@1"
+            policy_version += "+owner-overview@2"
+            render_policy += "+owner-overview@2"
         if effective_query.budget_bytes is not None:
             policy_version += "+inline-budget@1"
             render_policy += "+inline-budget@1"
@@ -772,6 +807,7 @@ class HybridMemoryRetriever:
             bounded=coverage,
             relationship_group=effective_query.relationship_group,
             next_people_after=effective_query.next_people_after,
+            people_overflow=effective_query.people_overflow,
         )
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
@@ -1074,7 +1110,9 @@ class HybridMemoryRetriever:
             people=selected_people,
             rendered=rendered,
             tokens=rendered_tokens,
-            truncated=bool(dropped) or effective_query.next_people_after is not None,
+            truncated=bool(dropped)
+            or effective_query.next_people_after is not None
+            or effective_query.people_overflow,
             trace_id=trace_id,
             watermark=head,
             validate_snapshot_dependencies=True,
@@ -1273,6 +1311,7 @@ class HybridMemoryRetriever:
                     "expand_ids": (),
                     "structured_belief_types": [],
                     "include_owned_resources": False,
+                    "include_home_location": False,
                     "min_score": 0,
                 }
             )
@@ -1600,12 +1639,11 @@ def _arm_match(
 ) -> tuple[float, list[str]]:
     """The candidate's arm match before fusion, 0..1, and the arms that found it."""
 
-    terms = recall_query_terms(query.text)
+    terms = recall_term_lexemes(query.text, fold=query.candidate_selection == "relevance")
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_tokens = lexical_tokens(f"{record.subject} {record.statement}")
     lexical = (
-        sum(1 for lexemes in lexical_term_lexemes(terms) if lexemes and lexemes <= record_tokens)
-        / len(terms)
+        sum(1 for forms in terms if lexical_term_matched(forms, record_tokens)) / len(terms)
         if terms
         else 0
     )
@@ -1617,7 +1655,7 @@ def _arm_match(
             or record.id in query.expand_ids
         )
         else 0.5
-        if query.include_owned_resources and is_owned_resource(record)
+        if owner_anchored(record, query)
         else 0.25
         if record.belief_type in query.structured_belief_types
         else 0
@@ -1888,6 +1926,7 @@ def render_memory(
     bounded: bool = False,
     relationship_group: str | None = None,
     next_people_after: UUID | None = None,
+    people_overflow: bool = False,
     partners: frozenset[UUID] | None = None,
 ) -> str:
     stamp = as_of.isoformat().replace("+00:00", "Z") if hasattr(as_of, "isoformat") else str(as_of)
@@ -1908,9 +1947,17 @@ def render_memory(
             if next_people_after is not None
             else ""
         )
+        overflow = (
+            " More people hold this relationship than one overview reads; ask about a "
+            "person by name."
+            if people_overflow
+            else ""
+        )
         lines.append(
             "  Direct owner relationships: bounded page of at most three people; "
-            "supporting facts may be omitted. Narrow the query for more detail." + continuation
+            "supporting facts may be omitted. Narrow the query for more detail."
+            + continuation
+            + overflow
         )
     for item in items:
         lines.append(f"  {_line(item, partners=partners)}")

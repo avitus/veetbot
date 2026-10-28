@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:898), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:925), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:855-857).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:352-354), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:940-943),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:967-970),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:935), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:962), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:882) are
 all written down, and none of them runs.
 
@@ -851,7 +851,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:940-943): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:967-970): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -890,7 +890,10 @@ incidents replayed through the composed run loop against a database clone,
 reporting per expected belief the furthest stage it reached — Saved, Stored,
 Eligible, Candidate, Ranked, Packed, Delivered, Used — and the primary
 outcomes of expected evidence delivered, facts missed, wrong or outdated
-recall and refused owner saves. Probe files are never the frozen Milestone 16
+recall and refused owner saves. A probe may also list names the delivered
+recall must render as whole words, because an owner overview delivers family
+as People lines rather than one belief per person; the report keeps one flag
+per name, never the name. Probe files are never the frozen Milestone 16
 or 33 controls, their reports are not activation or release evidence, and the
 driver refuses production and any database not named for the purpose.
 
@@ -1040,14 +1043,17 @@ retrieval@1 -> retrieval@2   ranking, when time decay and the near-duplicate
                              penalty land
 retrieval@5 -> retrieval@7   live relevance ranking, for the review-reason
                              penalties and the attention cap (ADR-0249)
+retrieval@7 -> retrieval@8   live relevance matching folds a plural or
+                             third-person "-s" (ADR-0259)
 ```
 
 ADR-0249 kept the base label `retrieval@4` by the owner's decision: the
 deterministic benchmark measured no metric change, and re-recording the
 baseline cascades into the frozen M32 control (its manifest pins the baseline
 digest; its recording pins that manifest and the policy string in every
-trace). Production recall traces carry the live selector, so `retrieval@7`
-separates them from earlier traces.
+trace). Production recall traces carry the live selector, so `retrieval@7`,
+and then `retrieval@8`, separate them from earlier traces. Folding is
+relevance-only, so it too left the benchmark and its baseline unchanged.
 
 Bumping the provider version invalidates the bundled release evidence, whose
 filename and contents are matched against the version. Under the automatic

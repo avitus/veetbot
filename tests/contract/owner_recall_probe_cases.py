@@ -5,10 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import Composition
 from agent_core.domain.events import NewEvent
-from agent_core.domain.memory import BeliefType, MemoryRecord, MemoryStatus, Sensitivity
-from agent_core.domain.messages import FakeModelScript
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryRecord,
+    MemoryStatus,
+    RecallMoment,
+    RecallTrace,
+    Sensitivity,
+)
+from agent_core.domain.messages import FakeModelScript, TextPart, UserMessage
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.web import WebPage, WebSearchRequest, WebSearchResult
 from agent_core.evals.owner_recall_probe_driver import Finish, _wait, observe_probes
 from agent_core.evals.owner_recall_probes import (
@@ -195,13 +204,69 @@ async def home_city_case(
     deliberate = paths["deliberate"]
     assert deliberate.evidence[0].stage == "delivered", deliberate
     assert deliberate.answer_correct is None
-    # The automatic path reproduces production trace d851e572: a task with no
-    # word in common with the address never makes it a candidate, because only
-    # the lexical arm runs and the subject is not in the question. The conflict
-    # repair cannot lift that; the ranking work (plan ADR-B) must, and this pin
-    # is what it changes.
-    assert paths["automatic"].evidence[0].stage == "stored", paths["automatic"]
+    # The automatic path once reproduced production trace d851e572: the task
+    # shares no word with the address. "Our garden" now anchors the owner's
+    # residence (+home-location@1), so the address reaches the first request.
+    assert paths["automatic"].evidence[0].stage == "delivered", paths["automatic"]
     return report, address
+
+
+async def post_snapshot_home_case(app: Composition, *, finish: Finish = _wait) -> None:
+    """A residence stated after the session's snapshot still reaches a garden task.
+
+    The first turn freezes the snapshot. The residence and an unrelated fact
+    stated afterwards share no word with the next turn's household-place
+    request, so the residence anchor carries the first and only the delta can
+    carry the second. The delta is text-free and therefore unfiltered: turning
+    the anchor on there would narrow it to residence statements alone.
+    """
+
+    provider = app.executor._model_provider
+    planner = app.executor._context_planner
+    assert isinstance(provider, FakeModelProvider)
+    session_id = await app.sessions.create()
+    await stated(app, session_id, "User prefers dark themes.", "theme")
+    await finish(app, await app.runs.submit("How should you answer?", session_id))
+    plan = await planner.current(session_id)
+    assert plan is not None and plan.snapshot_id is not None
+
+    residence = await stated(app, session_id, "User lives in Exampleville, CA.", "home location")
+    deploys = await stated(app, session_id, "User deploys on Fridays.", "deploys")
+    assert min(residence.store_position, deploys.store_position) > plan.snapshot_watermark
+
+    task = await finish(
+        app,
+        await app.runs.submit(
+            "Maintain a gardening calendar based on what you know about our garden.", session_id
+        ),
+    )
+    request = provider.requests[-1]
+    body = request.conversation[int(request.metadata["region_a_items"]) :]
+    delivered = "\n".join(
+        part.text
+        for item in body
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.MEMORY
+        for part in item.content
+        if isinstance(part, TextPart)
+    )
+    assert residence.statement in delivered
+    assert deploys.statement in delivered
+
+    async with app.uow_factory() as uow:
+        events = await uow.events.list_after(session_id, 0, app.principal)
+        traces: list[RecallTrace] = [
+            await uow.traces.get(UUID(str(event.payload["trace_id"])), app.principal)
+            for event in events
+            if event.event_type == "memory.recalled" and event.run_id == task.id
+        ]
+    in_turn = [trace for trace in traces if trace.moment is RecallMoment.IN_TURN]
+    (base,) = [trace for trace in in_turn if trace.query.text is not None]
+    (delta,) = [trace for trace in in_turn if trace.query.text is None]
+    assert base.query.include_home_location is True
+    assert delta.query.include_home_location is False
+    assert delta.query.min_store_position == plan.snapshot_watermark
+    assert deploys.id in delta.returned
+    assert residence.id in base.returned
 
 
 def assert_delivery_report(report: ProbeReport, car: MemoryRecord) -> None:
@@ -291,4 +356,40 @@ async def save_case(
     assert refused is not None
     assert refused.status == "save_refused:tool.memory.statement_not_owner_grounded"
     assert report.summary.saves_committed == 3 and report.summary.saves_refused == 1
+    return report
+
+
+async def family_names_case(
+    app: Composition, script: FakeModelScript, *, finish: Finish = _wait
+) -> ProbeReport:
+    """An owner overview delivers family as People lines, not as one belief each.
+
+    The private family probe named three memory ids and reported them
+    `stored` while the overview showed the same people through other edges.
+    It checks the names the delivered recall renders instead.
+    """
+
+    from tests.contract.owner_overview_cases import seed_closeness
+
+    await seed_closeness(app)
+    probe = Probe.model_validate(
+        {
+            "id": "family-names",
+            "incident": "owner-family-overview",
+            "family": "relationships",
+            "question": "Tell me everything you know about me.",
+            "paths": ["automatic"],
+            "delivered_must_contain": ["Erin", "Riv", "Kyrri", "Cousin"],
+        }
+    )
+    report = await observe_probes(app, script, (probe,), finish=finish)
+    (observation,) = report.probes
+    (path,) = observation.paths
+    assert path.run_status == "COMPLETED"
+    # Page one holds the three closest; a cousin waits for the continuation.
+    assert path.delivered_found == (True, True, True, False)
+    assert report.summary.required_evidence == 4
+    assert report.summary.required_delivered == 3
+    assert report.summary.facts_missed == 1
+    assert "Erin" not in report.model_dump_json()
     return report

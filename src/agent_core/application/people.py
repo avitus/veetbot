@@ -66,6 +66,7 @@ from agent_core.domain.people_views import (
     LegacyPeopleLinkResult,
     MergeSuggestionDetail,
     MergeSuggestionPage,
+    OwnerKinshipRepairReport,
     PeopleCorrectionRequest,
     PeopleCorrectionResult,
     PeopleCounts,
@@ -245,6 +246,8 @@ class PublicPeopleService:
         | None = None,
         duplicates: PeopleDeduplicator | None = None,
         email_sources: Callable[[Principal], RetainedEmailReader] | None = None,
+        kinship_linker: Callable[[Principal, bool], Awaitable[OwnerKinshipRepairReport]]
+        | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -255,6 +258,7 @@ class PublicPeopleService:
         self._legacy_linker = legacy_linker
         self._duplicates = duplicates
         self._email_sources = email_sources
+        self._kinship_linker = kinship_linker
         self.imports = PeopleImportService(uow_factory, clock)
 
     async def link_existing(
@@ -264,6 +268,14 @@ class PublicPeopleService:
         if self._legacy_linker is None:
             raise ConflictError("legacy linking is unavailable")
         return await self._legacy_linker(principal, limit, cursor)
+
+    async def link_kinship(
+        self, principal: Principal, *, confirm: bool
+    ) -> OwnerKinshipRepairReport:
+        require_scope(principal, "people.write")
+        if self._kinship_linker is None:
+            raise ConflictError("kinship linking is unavailable")
+        return await self._kinship_linker(principal, confirm)
 
     async def create_import(
         self, principal: Principal, request: PeopleImportRequest, *, key: str, ceiling: Sensitivity

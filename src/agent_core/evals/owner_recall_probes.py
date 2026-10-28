@@ -104,6 +104,9 @@ class Probe(BaseModel):
     expected: tuple[ExpectedEvidence, ...] = ()
     min_required_rendered: NonNegativeInt = 0
     forbidden: tuple[ForbiddenEvidence, ...] = ()
+    # Whole words or names the delivered recall must render. An owner overview
+    # delivers family as People lines rather than one belief each (ADR-0259).
+    delivered_must_contain: tuple[str, ...] = ()
     answer_must_contain: tuple[str, ...] = ()
     answer_must_not_contain: tuple[str, ...] = ()
     latency_ceiling_ms: int | None = Field(default=None, gt=0)
@@ -116,6 +119,8 @@ class Probe(BaseModel):
             raise ValueError(f"unknown probe family {self.family!r}")
         if len(set(self.paths)) != len(self.paths):
             raise ValueError("probe paths repeat")
+        if any(not text.strip() for text in self.delivered_must_contain):
+            raise ValueError("delivered_must_contain holds an empty text")
         return self
 
 
@@ -230,6 +235,8 @@ class PathObservation(BaseModel):
     recall_latency_ms: NonNegativeInt
     within_latency_ceiling: bool | None
     evidence: tuple[EvidenceObservation, ...]
+    # One flag per `delivered_must_contain` entry, in order; never the text.
+    delivered_found: tuple[bool, ...] = ()
     required_delivered: NonNegativeInt
     forbidden_delivered: NonNegativeInt
     answer_correct: bool | None
@@ -297,6 +304,9 @@ def summarize(observations: tuple[ProbeObservation, ...]) -> ProbeSummary:
                     delivered += 1
                 else:
                     missed += 1
+            required += len(path.delivered_found)
+            delivered += sum(path.delivered_found)
+            missed += path.delivered_found.count(False)
             wrong += path.forbidden_delivered
             if path.answer_correct is not None:
                 checked += 1

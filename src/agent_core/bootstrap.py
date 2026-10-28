@@ -595,6 +595,7 @@ from agent_core.memory.formation import (
     HighRecallCandidateExtractor,
 )
 from agent_core.memory.model_choice import OwnerSelectedCandidateExtractor
+from agent_core.memory.people_kinship import link_owner_kinship
 from agent_core.memory.people_legacy import link_existing_beliefs
 from agent_core.memory.people_owner_formation import OwnerPeopleCandidateExtractor
 from agent_core.memory.profiles import MemoryProfiles
@@ -4056,6 +4057,9 @@ async def _compose(
             memory_for=lambda owner: GovernedMemoryService(uow_factory, clock, ids, owner),
             legacy_linker=lambda owner, limit, cursor: link_existing_beliefs(
                 uow_factory, clock, owner, limit=limit, cursor=cursor
+            ),
+            kinship_linker=lambda owner, confirm: link_owner_kinship(
+                uow_factory, clock, owner, confirm=confirm
             ),
             email_sources=_retained_email_reader(uow_factory, clock, ids),
         )

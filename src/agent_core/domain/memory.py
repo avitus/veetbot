@@ -548,6 +548,66 @@ def recall_query_terms(text: str | None) -> list[str]:
     return [term for term in lexical_query_terms(text) if term not in _RECALL_FUNCTION_WORDS]
 
 
+_FOLDABLE_WORD = re.compile(r"[a-z]+")
+
+
+def fold_word(word: str) -> str:
+    """Fold a plural or third-person "-s" off one plain word (ADR-0259).
+
+    Deliberately light: "boards" is "board", "sits" "sit", "companies"
+    "company", "classes" "class". A word ending "ss", "us" or "is" keeps its
+    "s" ("glass", "status", "analysis"), and a word of three letters or fewer
+    is left whole.
+    """
+
+    if len(word) <= 3:
+        return word
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith(("sses", "shes", "ches", "xes", "zes")):
+        return word[:-2]
+    if word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
+def recall_term_forms(text: str | None, *, fold: bool) -> list[tuple[str, ...]]:
+    """Each recall term with the spellings that count as matching it.
+
+    Without folding a term is its only form. Relevance recall folds
+    (ADR-0259): a plain ASCII word also matches every word that folds to the
+    same stem, so "boards" finds "board" and "sit" finds "sits". The query is
+    expanded, never the stored text, so PostgreSQL matches the same forms as
+    whole lexemes of its unfolded `simple` vector. A term with digits,
+    joiners or other letters keeps only itself.
+    """
+
+    forms: list[tuple[str, ...]] = []
+    for term in recall_query_terms(text):
+        if not fold or _FOLDABLE_WORD.fullmatch(term) is None:
+            forms.append((term,))
+            continue
+        stem = fold_word(term)
+        spellings = (term, stem, f"{stem}s", f"{stem}es", f"{stem[:-1]}ies")
+        forms.append(tuple(dict.fromkeys(form for form in spellings if fold_word(form) == stem)))
+    return forms
+
+
+def recall_term_lexemes(text: str | None, *, fold: bool) -> list[tuple[frozenset[str], ...]]:
+    """Each recall term's alternative lexeme sets, one per form."""
+
+    return [
+        tuple(frozenset(lexical_tokens(form)) for form in forms)
+        for forms in recall_term_forms(text, fold=fold)
+    ]
+
+
+def lexical_term_matched(alternatives: Iterable[frozenset[str]], tokens: set[str]) -> bool:
+    """Whether every lexeme of any one form of a term is among these tokens."""
+
+    return any(lexemes and lexemes <= tokens for lexemes in alternatives)
+
+
 class ProviderExtractionEvaluationEvidence(BaseModel):
     """Version-bound evidence required before provider extraction can activate."""
 
@@ -1030,6 +1090,9 @@ class RecallQuery(BaseModel):
     # A bounded structured arm for personal possessions whose stored model
     # name need not share words with a question about "my car" or "my laptop".
     include_owned_resources: bool = False
+    # The owner's residence for a task about "my/our" home, house or garden,
+    # which need not share a word with "User lives in ..." (ADR-0259).
+    include_home_location: bool = False
     # Older persisted queries keep their original selection semantics. New
     # task queries explicitly select relevance (ADR-0178).
     candidate_selection: Literal["recent", "relevance"] = "recent"
@@ -1046,6 +1109,8 @@ class RecallQuery(BaseModel):
     relationship_group: Literal["family", "partner", "friend", "work", "other"] | None = None
     people_after: UUID | None = None
     next_people_after: UUID | None = None
+    # An overview group held more people than one overview reads (ADR-0259).
+    people_overflow: bool = False
     max_items: PositiveInt
     min_score: float = Field(ge=0, le=1)
     # The recall delta bounds a query by the store position a session froze its
@@ -1083,6 +1148,38 @@ def is_owned_resource(record: MemoryRecord) -> bool:
         and record.derivation is MemoryDerivation.DIRECT
         and record.polarity is Polarity.ASSERT
         and re.search(OWNED_RESOURCE_PATTERN, record.statement, re.I) is not None
+    )
+
+
+# Shared with PostgreSQL's case-insensitive regex arm, so word edges are
+# spelled as character classes rather than a dialect's boundary escape.
+HOME_LOCATION_PATTERN = (
+    r"^(the )?user (lives|resides) (in|at|near) "
+    r"|(^|[^a-z])home (mailing |street |postal )?address([^a-z]|$)"
+)
+
+
+def is_home_location(record: MemoryRecord) -> bool:
+    """Recognize a direct statement of where the owner lives.
+
+    A person-scoped subject is someone else's record, so "Cheryl's home
+    address" never answers where the owner's garden is.
+    """
+
+    return (
+        record.belief_type in {BeliefType.FACT, BeliefType.USER_MODEL_ATTR}
+        and record.derivation is MemoryDerivation.DIRECT
+        and record.polarity is Polarity.ASSERT
+        and not record.subject.casefold().startswith("person:")
+        and re.search(HOME_LOCATION_PATTERN, record.statement, re.I) is not None
+    )
+
+
+def owner_anchored(record: MemoryRecord, query: RecallQuery) -> bool:
+    """Whether a query's possession or residence anchor selects this record."""
+
+    return (query.include_owned_resources and is_owned_resource(record)) or (
+        query.include_home_location and is_home_location(record)
     )
 
 

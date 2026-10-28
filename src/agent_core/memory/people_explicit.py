@@ -35,6 +35,7 @@ from agent_core.domain.policies import TrustLevel
 from agent_core.memory.communication_sources import FormationSourceKind, formation_source
 from agent_core.memory.people import identifier_occurs
 from agent_core.memory.people_formation import source_id
+from agent_core.memory.people_kinship import assert_owner_kinship, stated_kinship
 from agent_core.ports.determinism import Clock
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -45,7 +46,8 @@ if TYPE_CHECKING:
 
 async def _owner_identifies(
     store: PeopleStore, principal: Principal, person: Person, text: str, at: datetime
-) -> bool:
+) -> str | None:
+    """The identifier by which the owner's text uniquely names `person`, if any."""
     query = PeopleQuery(
         tenant_id=principal.tenant_id,
         principal_id=principal.principal_id,
@@ -56,7 +58,7 @@ async def _owner_identifies(
         query.model_copy(update={"kinds": ["identifier"], "person_id": person.id})
     )
     if len(aliases) > 100:
-        return False
+        return None
     identifiers = [("name", "owner", "owner", person.display_name)] + [
         (alias.identifier_kind, alias.namespace, alias.context, alias.value)
         for alias in aliases
@@ -92,8 +94,8 @@ async def _owner_identifies(
             ):
                 matches.add(row.person_id)
         if matches == {person.id}:
-            return True
-    return False
+            return value
+    return None
 
 
 async def remember_linked(
@@ -130,16 +132,19 @@ async def remember_linked(
         sensitivity = max(
             (arguments.sensitivity, Sensitivity.SENSITIVE), key=SENSITIVITY_ORDER.__getitem__
         )
+        identified: dict[UUID, str] = {}
         for ref in refs:
             person = await uow.people.get(principal, ref.person_id, ceiling=Sensitivity.SENSITIVE)
             if not isinstance(person, Person):
                 raise NotFoundError("person not found")
             if person.revision != ref.expected_revision or person.state == "merged":
                 raise ConflictError("person revision changed")
-            if not await _owner_identifies(
+            named = await _owner_identifies(
                 uow.people, principal, person, source.text, source.event.created_at
-            ):
+            )
+            if named is None:
                 raise ToolValidationError("owner source does not identify the selected person")
+            identified[person.id] = named
             sensitivity = max((sensitivity, person.sensitivity), key=SENSITIVITY_ORDER.__getitem__)
         subject_people = sorted(str(ref.person_id) for ref in refs if ref.role == "subject")
         stable_subject = f"person:{','.join(subject_people)}:{arguments.subject}"
@@ -206,5 +211,20 @@ async def remember_linked(
                         role=ref.role,
                     ),
                     expected_revision=0,
+                )
+        # ADR-0259: "Erin is my wife" in the owner's own message records the
+        # tie itself, not only a memory linked to Erin's People record.
+        for person_id, named in identified.items():
+            kinship = stated_kinship(belief, source.text, named)
+            if kinship is not None:
+                await assert_owner_kinship(
+                    uow.people,
+                    principal,
+                    belief=belief,
+                    person_id=person_id,
+                    kinship=kinship,
+                    support_ids=[sid],
+                    sensitivity=sensitivity,
+                    now=clock.now(),
                 )
         return belief

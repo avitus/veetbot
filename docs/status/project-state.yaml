@@ -17,6 +17,14 @@
 # unit, PostgreSQL and native tests; delivered in PR 201, merged 2026-10-27 with
 # every review thread resolved (CodeRabbit's conclusion on the final head was
 # NEUTRAL, not a clean pass). No milestone or gate moves.
+# ADR-0259: Owner asked on 2026-10-27 to repair three recall probe misses:
+# "our garden" tasks anchor the owner's residence (+home-location@1); an
+# owner-stated tie on a person-linked save records the People edge, with an
+# `agent people link-kinship` repair for earlier saves; overview pages run
+# closest family first (+owner-overview@2). Relevance matching folds a
+# plural or third-person "-s" (retrieval@8), and probes can check delivered
+# names. Delivered in PR 206, merged 2026-10-28; the production
+# `agent people link-kinship` repair run is pending. No milestone or gate moves.
 # ADR-0251: Owner accepted on 2026-10-25 an app-offered card that connects an
 # unconnected chat to an owned website the owner names; a match never connects
 # by itself, and an offer expires at the next owner message or after 24 hours.

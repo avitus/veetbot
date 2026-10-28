@@ -6,7 +6,7 @@ from sqlalchemy import Select, case, func, literal, or_, select, union_all
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import LateralFromClause
 
-from agent_core.domain.memory import RecallQuery, recall_query_terms
+from agent_core.domain.memory import RecallQuery, recall_term_forms
 
 
 def lexemes(subject: Any, statement: Any) -> LateralFromClause:
@@ -25,6 +25,12 @@ def lexemes(subject: Any, statement: Any) -> LateralFromClause:
         .offset(0)
         .lateral("lexemes")
     )
+
+
+def term_matches(vector: Any, forms: tuple[str, ...]) -> ColumnElement[bool]:
+    """Whether the vector holds any one form of a recall term (ADR-0259)."""
+
+    return or_(*[vector.op("@@")(func.plainto_tsquery("simple", form)) for form in forms])
 
 
 def ranked_candidates(
@@ -49,20 +55,22 @@ def ranked_candidates(
         or query.subjects
         or query.structured_belief_types
         or query.include_owned_resources
+        or query.include_home_location
         or query.include_ids is not None
         or query.expand_ids
     ):
         return base.order_by(
-            *([owned_resource.desc()] if query.include_owned_resources else []),
+            *(
+                [owned_resource.desc()]
+                if query.include_owned_resources or query.include_home_location
+                else []
+            ),
             position.desc(),
             identifier,
         ).limit(limit)
-    terms = recall_query_terms(query.text)
+    terms = recall_term_forms(query.text, fold=query.candidate_selection == "relevance")
     lexical = sum(
-        (
-            case((vector.op("@@")(func.plainto_tsquery("simple", term)), 1), else_=0)
-            for term in terms
-        ),
+        (case((term_matches(vector, forms), 1), else_=0) for forms in terms),
         literal(0),
     )
     exact = or_(
