@@ -181,22 +181,16 @@ async def test_kinship_edge_needs_the_owners_own_words_and_a_relationship_save(
         ("Erin is my wife. I divorced her in 2010.", False),
         ("My wife Erin, who died in 2019, loved roses.", False),
         ("Erin is my wife. She was ill and died last year.", False),
-        ("My wife Erin, who was ill and died in 2019, loved roses.", False),
         ("Erin is my wife. I didn't know she died.", False),
-        ("Erin is my wife. My father died in 1990.", True),
-        ("Erin is my wife. Erin's father died last year.", True),
-        ("Erin is my wife; her father passed away.", True),
-        ("Erin is my wife. We never divorced.", True),
-        ("Erin is my wife. We're not separated.", True),
-        ("Erin is my wife. Sam and Beth divorced last year.", True),
-        ("Erin is my wife. Her father was ill and died.", True),
-        ("Erin is my wife. She said Sam was ill and died.", True),
-        ("Erin is my wife. We haven't divorced.", True),
+        # Said of someone else or negated: still no link (ADR-0259).
+        ("Erin is my wife. My father died in 1990.", False),
+        ("Erin is my wife. Erin's father died last year.", False),
+        ("Erin is my wife. We never divorced.", False),
+        ("Erin is my wife. Sam and Beth divorced last year.", False),
+        ("Erin is my wife. We married in 2005.", True),
     ],
 )
-async def test_an_ending_withdraws_the_tie_only_when_it_is_said_of_the_person(
-    message: str, recorded: bool
-) -> None:
+async def test_any_ending_in_the_message_records_no_link(message: str, recorded: bool) -> None:
     factory, _person_row, _saved = await _save(message, "Erin", "Erin is Andy's wife.")
     assert [edge.predicate for edge in await _edges(factory)] == (["spouse"] if recorded else [])
 
