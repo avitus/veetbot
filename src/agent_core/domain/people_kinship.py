@@ -4,8 +4,9 @@
 The tie is read from the owner's message, never from a model's paraphrase,
 and only from the plain present-tense forms: a negation, "ex-", "late" or a
 past tense states no current tie, and a possessive chain ("my wife's friend")
-ties the owner to someone else. A clause anywhere in the message that says
-the tie ended ("we divorced", "she passed away") withdraws it.
+ties the owner to someone else. An ending said of the person anywhere in the
+message ("we divorced", "my wife died") withdraws the tie; one said of someone
+else ("Erin's father died") or negated ("we never divorced") does not.
 """
 
 from __future__ import annotations
@@ -74,13 +75,23 @@ _ENDED = re.compile(
     rf"\b(?:not|no|never|isn't|aren't|ex|former|late|estranged)[ -]"
     rf"(?:[a-z]+(?:'s)? ){{0,2}}(?P<kin>{_KIN_WORD})\b"
 )
-# A clause that ends a tie ("we divorced last year", "my wife Erin passed
-# away") withdraws it when it names the person or speaks of them by pronoun.
+# An ending is said of the person when their name, a pronoun or the tie itself
+# ("my wife") stands right before it, past linking words ("Erin and I have
+# separated", "my wife, who died"), or right after it ("I divorced her").
 _ENDING = re.compile(
     r"\b(?:divorc[a-z]*|separated|split up|broke up|passed away|passed on|died|dead|deceased"
     r"|widowed)\b"
 )
-_PRONOUN = re.compile(r"\b(?:we|us|he|she|they|him|her|them)\b")
+_WORD = re.compile(r"[a-z0-9']+")
+_NEGATION = frozenset({"not", "never", "no"})
+_LINKING = frozenset(
+    """am is are was were be been being has have had got get getting just recently
+    sadly finally both later then eventually officially legally suddenly who that
+    which""".split()  # noqa: SIM905 - a word list reads as prose
+)
+_PRONOUNS = frozenset(
+    "we we're we've us he he's she she's they they're they've him her them".split()  # noqa: SIM905
+)
 
 
 def _normal(text: str) -> str:
@@ -100,6 +111,37 @@ def _names(listed: str) -> list[str]:
     return [part.strip() for part in re.split(r",\s*(?:and\s+)?|\s+and\s+", listed) if part.strip()]
 
 
+def _is_tie(word: str, kinship: OwnerKinship) -> bool:
+    return (word in _KIN or word in _PLURAL) and _kinship(word) == kinship
+
+
+def _ends(clause: str, name: list[str], kinship: OwnerKinship) -> bool:
+    """Whether the clause says the tie to `name` ended."""
+
+    for match in _ENDING.finditer(clause):
+        before = _WORD.findall(clause[: match.start()])
+        if any(word in _NEGATION or word.endswith("n't") for word in before[-3:]):
+            continue
+        while before and before[-1] in _LINKING:
+            before.pop()
+        if before[-2:] in (["and", "i"], ["and", "me"]):
+            del before[-2:]
+        after = _WORD.findall(clause[match.end() :])
+        if after[:1] in (["from"], ["with"]):
+            del after[:1]
+        last = before[-1] if before else ""
+        first = after[0] if after else ""
+        if (
+            last in _PRONOUNS
+            or first in _PRONOUNS
+            or (bool(name) and name in (before[-len(name) :], after[: len(name)]))
+            or (_is_tie(last, kinship) and "my" in before[-4:-1])
+            or (first == "my" and any(_is_tie(word, kinship) for word in after[1:4]))
+        ):
+            return True
+    return False
+
+
 def owner_kinship(text: str, name: str) -> OwnerKinship | None:
     """The one tie the owner's text states to `name`, or None.
 
@@ -109,11 +151,9 @@ def owner_kinship(text: str, name: str) -> OwnerKinship | None:
     """
 
     wanted = _normal(name)
-    named = re.compile(rf"(?:^|\W){re.escape(wanted)}(?:\W|$)")
+    clauses = _clauses(text)
     found: set[OwnerKinship] = set()
-    for clause in _clauses(text):
-        if _ENDING.search(clause) and (named.search(clause) or _PRONOUN.search(clause)):
-            return None
+    for clause in clauses:
         # "<name> is my wife", "Kyrri and Riv are my daughters".
         if (match := _NAME_FIRST.match(clause)) is not None and wanted in _names(
             match.group("names")
@@ -124,7 +164,11 @@ def owner_kinship(text: str, name: str) -> OwnerKinship | None:
             rest = match.group("name")
             if rest == wanted or rest.startswith(f"{wanted} ") or rest.startswith(f"{wanted},"):
                 found.add(_kinship(match.group("kin")))
-    return found.pop() if len(found) == 1 else None
+    if len(found) != 1:
+        return None
+    (kinship,) = found
+    name_words = _WORD.findall(wanted)
+    return None if any(_ends(clause, name_words, kinship) for clause in clauses) else kinship
 
 
 def statement_states_kinship(statement: str, kinship: OwnerKinship) -> bool:

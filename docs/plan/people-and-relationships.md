@@ -343,8 +343,10 @@ saved statement names the same tie without denying or ending it
 ([ADR-0259](../adr/0259-owner-places-and-family-ties-reach-recall.md)). The tie
 is read for the name that identified the selected person, never from the
 model's paraphrase; a negation, "ex-", "late", a past tense, a possessive
-chain or a clause saying the tie ended ("we divorced last year") records
-nothing, and a current edge of the same kind is not duplicated.
+chain or an ending said of the person ("we divorced last year", "my wife
+died") records nothing, while an ending said of someone else ("Erin's father
+died") or negated ("we never divorced") does not withdraw the tie. A current
+edge of the same kind is not duplicated.
 `agent people link-kinship` applies the same rule to earlier saves.
 
 Inverse labels such as parent/child can be rendered deterministically from

@@ -126,13 +126,6 @@ OWNER_END = PeopleEndpoint(kind="owner")
         ("My brother Sam is visiting.", "Sam", "Sam is Andy's brother.", "sibling", True),
         ("My partner is Jules.", "Jules", "Jules is Andy's partner.", "partner", True),
         ("Erin is my wife.", "Erin", "Erin is Andy's wife, not his sister.", "spouse", True),
-        (
-            "Erin is my wife. My father died in 1990.",
-            "Erin",
-            "Erin is Andy's wife.",
-            "spouse",
-            True,
-        ),
     ],
 )
 async def test_owner_stated_kinship_on_a_linked_save_creates_the_owner_relationship(
@@ -167,14 +160,6 @@ async def test_owner_stated_kinship_on_a_linked_save_creates_the_owner_relations
             "relationship",
             (),
         ),
-        (
-            "Erin is my wife; we divorced last year.",
-            "Erin",
-            "Erin is Andy's wife.",
-            "relationship",
-            (),
-        ),
-        ("My wife Erin passed away last year.", "Erin", "Erin is Andy's wife.", "relationship", ()),
     ],
 )
 async def test_kinship_edge_needs_the_owners_own_words_and_a_relationship_save(
@@ -184,6 +169,30 @@ async def test_kinship_edge_needs_the_owners_own_words_and_a_relationship_save(
         message, name, statement, belief_type=belief_type, others=others
     )
     assert await _edges(factory) == []
+
+
+@pytest.mark.parametrize(
+    ("message", "recorded"),
+    [
+        ("Erin is my wife; we divorced last year.", False),
+        ("My wife Erin passed away last year.", False),
+        ("Erin is my wife. My wife died last year.", False),
+        ("Erin is my wife. Erin and I separated.", False),
+        ("Erin is my wife. I divorced her in 2010.", False),
+        ("My wife Erin, who died in 2019, loved roses.", False),
+        ("Erin is my wife. My father died in 1990.", True),
+        ("Erin is my wife. Erin's father died last year.", True),
+        ("Erin is my wife; her father passed away.", True),
+        ("Erin is my wife. We never divorced.", True),
+        ("Erin is my wife. We're not separated.", True),
+        ("Erin is my wife. Sam and Beth divorced last year.", True),
+    ],
+)
+async def test_an_ending_withdraws_the_tie_only_when_it_is_said_of_the_person(
+    message: str, recorded: bool
+) -> None:
+    factory, _person_row, _saved = await _save(message, "Erin", "Erin is Andy's wife.")
+    assert [edge.predicate for edge in await _edges(factory)] == (["spouse"] if recorded else [])
 
 
 async def test_kinship_edge_is_not_duplicated_when_the_tie_is_saved_again() -> None:
