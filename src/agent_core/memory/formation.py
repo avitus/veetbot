@@ -4259,7 +4259,10 @@ class GovernedMemoryService:
         sensitive statement) has its review flag cleared. A dry run reports the
         same counts and writes nothing. Never a status edit in SQL.
         """
-        async with self._uow_factory() as uow:
+        # The repair writes full records. Serialize its reads with owner review
+        # as well as its writes, so a concurrent correction cannot be replaced
+        # by the pre-review snapshot. PostgreSQL holds this guard to commit.
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
             records = await self._live_conflicted(uow)
             by_id = {record.id: record for record in records}
             pairs = {
