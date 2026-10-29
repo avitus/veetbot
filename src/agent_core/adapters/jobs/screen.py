@@ -21,6 +21,7 @@ class SandboxJobScreen:
     async def check(
         self, principal: Principal, files: Mapping[str, str], *, screen: BuildScreen
     ) -> tuple[BuildDiagnostic, ...]:
+        """Screen public package files in the builder sandbox and always release that sandbox."""
         build_id = self._ids.new_id()
         request = {
             "files": dict(files),

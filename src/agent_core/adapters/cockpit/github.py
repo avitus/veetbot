@@ -154,6 +154,7 @@ class GitHubAppTokens:
         api_url: str = GITHUB_API_URL,
         read_only: bool = False,
     ) -> None:
+        """Bind the GitHub client to its configured credentials and repository access."""
         key = serialization.load_pem_private_key(private_key_pem, password=None)
         if not isinstance(key, rsa.RSAPrivateKey):
             raise ValueError("a GitHub App key is an RSA private key")
@@ -184,6 +185,7 @@ class GitHubAppTokens:
         self._token = None
 
     async def token(self) -> str:
+        """Reuse a valid installation token or request one with the configured permissions."""
         if self._token is not None and self._clock.now() < self._expires_at - _TOKEN_MARGIN:
             return self._token
         url = f"{self._api_url}/app/installations/{self._installation_id}/access_tokens"
@@ -230,6 +232,7 @@ class GitHubWidgetRepository:
         package_kind: str = "widget",
         api_url: str = GITHUB_API_URL,
     ) -> None:
+        """Bind the GitHub client to its configured credentials and repository access."""
         if not _REPOSITORY.fullmatch(repository):
             raise ValueError("the widget repository is owner/name")
         if not _BRANCH.fullmatch(branch):
@@ -303,6 +306,7 @@ class GitHubWidgetRepository:
         }
 
     async def ensure_branch(self) -> str:
+        """Find the package branch or initialize its isolated history."""
         head = await self.head()
         if head is not None:
             return head
@@ -380,6 +384,7 @@ class GitHubWidgetRepository:
     async def write_widget(
         self, slug: str, files: Mapping[str, str], *, parent_sha: str, message: str
     ) -> str:
+        """Write allowed package files and advance the branch without overwriting newer work."""
         if (
             not is_widget_slug(slug)
             or not files
@@ -402,6 +407,7 @@ class GitHubWidgetRepository:
         return await self._commit_change(parent_sha, entries, message)
 
     async def remove_widget(self, slug: str, *, parent_sha: str, message: str) -> str:
+        """Commit removal of one package against the caller's expected branch head."""
         if not is_widget_slug(slug):
             raise WidgetPathRefusedError(f"a removal must name one {self._directory}/<slug>/")
         await self._expect(parent_sha)
@@ -416,6 +422,7 @@ class GitHubWidgetRepository:
         return await self._commit_change(parent_sha, entries, message)
 
     async def read_widget(self, slug: str, *, at: str) -> dict[str, str] | None:
+        """Retrieve allowed files for one package at the selected commit."""
         if not is_widget_slug(slug) or not _COMMIT_SHA.fullmatch(at):
             return None
         prefix = f"{self._directory}/{slug}/"
@@ -430,6 +437,7 @@ class GitHubWidgetRepository:
         return files or None
 
     async def _described(self, sha: str, parent_sha: str | None, message: str) -> WidgetCommit:
+        """Describe changed package slugs and flag changes outside the package namespace."""
         response = await self._request("GET", f"/commits/{sha}")
         files = response.json().get("files", [])
         paths: list[str] = []

@@ -29,6 +29,7 @@ def _restore_run_accounting(run: Run, snapshot: Run) -> None:
 
 
 def _check_before_operation(run: Run, scope: BudgetScope, clock: Clock) -> None:
+    """Enforce operation budgets while admitting jobs with zero model spend."""
     if run.deadline_at is not None and clock.now() >= run.deadline_at:
         raise BudgetExceededError("deadline_exceeded", "the run deadline elapsed")
     if (

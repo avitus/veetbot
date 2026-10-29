@@ -585,6 +585,7 @@ async def _validate_definition(
     definition: ScheduleDefinition,
     limits: ScheduleDefinitionLimits,
 ) -> None:
+    """Validate schedule authority, pinned resources, cadence, and deployment limits."""
     if isinstance(definition.task, JobTask):
         require_scope(principal, "jobs.run")
         task = definition.task

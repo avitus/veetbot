@@ -31,6 +31,7 @@ class SandboxJobRunner:
     def __init__(
         self, manager: SandboxManager, *, timeout_seconds: int = 60, maximum_calls: int = 64
     ) -> None:
+        """Bind job execution to a sandbox manager and a finite timeout."""
         if timeout_seconds <= 0 or maximum_calls <= 0:
             raise ValueError("Job time and broker call limits must be positive.")
         self._manager = manager
@@ -47,6 +48,7 @@ class SandboxJobRunner:
         lease_epoch: int,
         dispatch: JobDispatch,
     ) -> JobResult:
+        """Execute bounded source and inputs in a fresh sandbox, then release its resources."""
         encoded_inputs = _json_bytes(dict(inputs))
         if len(encoded_inputs) > JOB_INPUT_BYTES:
             raise JobExecutionError("Job inputs exceed 64 KiB.")
@@ -57,6 +59,7 @@ class SandboxJobRunner:
         async def declared_dispatch(
             call: str, arguments: dict[str, Any], call_id: str
         ) -> dict[str, Any]:
+            """Forward only operations declared by this job package to its broker."""
             if call not in program.calls:
                 return {
                     "status": "denied",

@@ -29,11 +29,13 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 
 
 def job_commit_message(slug: str, revision_id: UUID, *, archive: bool = False) -> str:
+    """Create a fixed publication message with the revision trailer used for reconciliation."""
     operation = "Archive" if archive else "Save"
     return f"Jobs: {operation} {slug}\n\nVeetbot-Revision: {revision_id}\n"
 
 
 def _strings(value: object) -> list[str]:
+    """Collect nested private input strings for the publication privacy screen."""
     if isinstance(value, str):
         return [value]
     if isinstance(value, dict):
@@ -74,6 +76,7 @@ class JobPublication:
         request_key: str,
         archive: bool = False,
     ) -> JobRevision:
+        """Screen source and atomically save a pending revision and publication request."""
         key = f"job.request:{principal.tenant_id}:{principal.principal_id}:{request_key}"
         async with self.uow_factory() as uow:
             replay = await uow.process_events.get_by_derivation(key)
@@ -194,6 +197,7 @@ class JobPublication:
         return completed
 
     async def _commit(self, principal: Principal, entry: CommitOutboxEntry) -> None:
+        """Publish or reconcile one queued revision while preserving intervening human edits."""
         repository = self.repository
         assert repository is not None
         async with self.uow_factory() as uow:

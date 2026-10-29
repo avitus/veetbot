@@ -19,6 +19,7 @@ query PullRequests($owner: String!, $name: String!, $after: String) {
 
 
 def main(inputs, job):
+    """Collect all requested pull requests, sort them, and publish the configured feed."""
     pulls = []
     for repository in inputs["repositories"]:
         owner, name = repository.split("/", 1)

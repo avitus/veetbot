@@ -50,5 +50,6 @@ class JobPolicyEngine:
     async def evaluate(
         self, action: ProposedAction, principal: Principal, run: Run
     ) -> PolicyDecision:
+        """Use the jobs profile for job.manage and preserve other policy identities."""
         engine = self.publication if action.name == "job.manage" else self.base
         return await engine.evaluate(action, principal, run)

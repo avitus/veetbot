@@ -211,3 +211,35 @@ async def test_archive_restore_and_lost_commit_response_keep_immutable_revisions
     assert not saved.archived and saved.live_revision_id == restored.id
     assert saved.revisions[str(first.id)].source == first.source
     assert saved.revisions[str(first.id)].commit_sha == head
+
+
+def test_public_manifest_bytes_are_identical_across_process_hash_seeds() -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+
+    program = """
+from agent_core.domain.jobs import JobManifest
+manifest = JobManifest(
+    title='Collector',
+    calls=frozenset({'http.request', 'feed.publish', 'log', 'model.complete'}),
+    feeds=frozenset({'agent.first', 'agent.second', 'agent.third'}),
+)
+assert isinstance(manifest.calls, frozenset) and isinstance(manifest.feeds, frozenset)
+print(manifest.model_dump_json(indent=2))
+"""
+    outputs = [
+        subprocess.run(
+            [sys.executable, "-c", program],
+            env={**os.environ, "PYTHONHASHSEED": str(seed)},
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+        for seed in (0, 1, 2)
+    ]
+    assert len(set(outputs)) == 1
+    manifest = json.loads(outputs[0])
+    assert manifest["calls"] == sorted(manifest["calls"])
+    assert manifest["feeds"] == sorted(manifest["feeds"])

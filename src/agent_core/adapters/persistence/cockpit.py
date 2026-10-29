@@ -966,12 +966,14 @@ def _failure_from_row(row: CockpitImportFailureRow) -> ImportFailure:
 
 class PostgresWidgetCommitOutbox:
     def __init__(self, session: AsyncSession, *, package_kind: str = "widget") -> None:
+        """Bind publication persistence to a database session and fixed package namespace."""
         self._session = session
         if package_kind not in {"widget", "job"}:
             raise ValueError("Unknown publication namespace.")
         self._kind = package_kind
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry:
+        """Persist a publication request in this adapter's package namespace."""
         try:
             async with self._session.begin_nested():
                 await self._session.execute(
@@ -996,6 +998,7 @@ class PostgresWidgetCommitOutbox:
         return entry
 
     async def due(self, tenant_id: str, *, now: datetime, limit: int) -> list[CommitOutboxEntry]:
+        """List due publication requests for the tenant and package namespace."""
         rows = (
             await self._session.execute(
                 select(CockpitCommitOutboxRow)
@@ -1023,6 +1026,7 @@ class PostgresWidgetCommitOutbox:
         next_attempt_at: datetime,
         last_error: str | None,
     ) -> CommitOutboxEntry:
+        """Update retry timing for an owned request in this package namespace."""
         row = (
             await self._session.execute(
                 update(CockpitCommitOutboxRow)
@@ -1049,6 +1053,7 @@ class PostgresWidgetCommitOutbox:
         )
 
     async def record_import_failure(self, failure: ImportFailure) -> ImportFailure:
+        """Store an owned import diagnostic without mixing package namespaces."""
         await self._session.execute(
             insert(CockpitImportFailureRow).values(
                 package_kind=self._kind,
@@ -1067,6 +1072,7 @@ class PostgresWidgetCommitOutbox:
     async def import_failures(
         self, principal: Principal, *, unseen_only: bool = False
     ) -> list[ImportFailure]:
+        """List the owner's import diagnostics for this package namespace."""
         query = select(CockpitImportFailureRow).where(
             *_owned_by(CockpitImportFailureRow, principal),
             CockpitImportFailureRow.package_kind == self._kind,
@@ -1083,6 +1089,7 @@ class PostgresWidgetCommitOutbox:
         return [_failure_from_row(row) for row in rows]
 
     async def mark_seen(self, principal: Principal, failure_ids: Sequence[UUID]) -> int:
+        """Acknowledge an owned import diagnostic in this package namespace."""
         if not failure_ids:
             return 0
         result = await self._session.execute(
@@ -1098,6 +1105,7 @@ class PostgresWidgetCommitOutbox:
         return _rowcount(result)
 
     async def erase_principal(self, principal: Principal) -> int:
+        """Erase the owner's publication records only within this package namespace."""
         removed = 0
         for table in (CockpitCommitOutboxRow, CockpitImportFailureRow):
             removed += _rowcount(

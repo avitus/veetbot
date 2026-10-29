@@ -81,7 +81,8 @@ Keep repositories, account identifiers and other personal values in private
 inputs. Propose a `job.run` access object with those inputs, exact hosts and
 credential bindings, feeds and limits. For example, a GitHub collector uses
 `{"api.github.com":"github-reader"}` as `hosts` and `"0"` as `model_cost`.
-The owner approves new external access. The tool returns a `grant_id`, which
+The owner approves new external access or feed publication. The tool returns a
+`grant_id`, which
 subsequent runs reuse without repeating that approval. An expanded grant needs
 approval; existing grants are never changed in place. Pure computation can
 use empty hosts and a zero model budget. A mixed job needs a positive approved

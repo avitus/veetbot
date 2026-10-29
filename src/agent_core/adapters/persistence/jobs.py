@@ -21,6 +21,7 @@ def _conflict() -> ConflictError:
 
 
 def _next(record: JobRecord, expected_version: int | None) -> None:
+    """Reject stale versions before replacing an owned job record."""
     if record.version != (expected_version or 0) + 1:
         raise _conflict()
 
@@ -31,6 +32,7 @@ class InMemoryJobStore:
         self._lock = asyncio.Lock()
 
     async def get(self, principal: Principal, slug: str) -> JobRecord:
+        """Read an owned job or report that it does not exist."""
         async with self._lock:
             value = self._records.get((principal.tenant_id, principal.principal_id, slug))
             if value is None:
@@ -38,6 +40,7 @@ class InMemoryJobStore:
             return value.model_copy(deep=True)
 
     async def list(self, principal: Principal) -> list[JobRecord]:
+        """Return only jobs belonging to this tenant and principal."""
         async with self._lock:
             return [
                 value.model_copy(deep=True)
@@ -46,6 +49,7 @@ class InMemoryJobStore:
             ]
 
     async def put(self, record: JobRecord, *, expected_version: int | None) -> JobRecord:
+        """Create or replace an owned job using the expected persisted version."""
         _next(record, expected_version)
         key = (record.tenant_id, record.principal_id, record.slug)
         async with self._lock:
@@ -56,6 +60,7 @@ class InMemoryJobStore:
             return record.model_copy(deep=True)
 
     async def erase_principal(self, principal: Principal) -> int:
+        """Remove only the selected owner's saved jobs."""
         async with self._lock:
             keys = [
                 key
@@ -72,6 +77,7 @@ class PostgresJobStore:
         self._session = session
 
     async def get(self, principal: Principal, slug: str) -> JobRecord:
+        """Read an owned job or report that it does not exist."""
         body = (
             await self._session.execute(
                 select(JobRecordRow.body).where(
@@ -86,6 +92,7 @@ class PostgresJobStore:
         return JobRecord.model_validate(body)
 
     async def list(self, principal: Principal) -> list[JobRecord]:
+        """Return only jobs belonging to this tenant and principal."""
         bodies = (
             await self._session.execute(
                 select(JobRecordRow.body)
@@ -99,6 +106,7 @@ class PostgresJobStore:
         return [JobRecord.model_validate(body) for body in bodies]
 
     async def put(self, record: JobRecord, *, expected_version: int | None) -> JobRecord:
+        """Create or replace an owned job using the expected persisted version."""
         _next(record, expected_version)
         if expected_version is None:
             try:
@@ -133,6 +141,7 @@ class PostgresJobStore:
         return record.model_copy(deep=True)
 
     async def erase_principal(self, principal: Principal) -> int:
+        """Remove only the selected owner's saved jobs."""
         deleted = (
             await self._session.execute(
                 delete(JobRecordRow)

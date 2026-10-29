@@ -6,11 +6,11 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_serializer, model_validator
 
 from agent_core.domain.cockpit import FEED_ID_PATTERN, WIDGET_SLUG_PATTERN
 from agent_core.domain.web import is_public_https_url
@@ -27,6 +27,7 @@ class JobProgram:
     calls: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
+        """Bound source size and reject unsupported broker operations."""
         if not self.source.strip() or len(self.source.encode("utf-8")) > JOB_SOURCE_BYTES:
             raise ValueError("Job source must contain between 1 byte and 64 KiB.")
         if not self.calls <= JOB_CALLS:
@@ -57,7 +58,11 @@ class JobAccess:
     model_cost: str = "0"
 
     def __post_init__(self) -> None:
-        cost = Decimal(self.model_cost)
+        """Validate private inputs, destinations, feed authority, and execution limits."""
+        try:
+            cost = Decimal(self.model_cost)
+        except InvalidOperation as exc:
+            raise ValueError("Job model cost must be a decimal amount.") from exc
         if not cost.is_finite() or cost < 0:
             raise ValueError("Job model cost must be a finite non-negative amount.")
         for value, maximum in (
@@ -102,8 +107,14 @@ class JobManifest(BaseModel):
     calls: frozenset[str] = frozenset()
     feeds: frozenset[str] = frozenset()
 
+    @field_serializer("calls", "feeds")
+    def sorted_declarations(self, values: frozenset[str]) -> list[str]:
+        """Keep public manifest bytes stable across worker processes."""
+        return sorted(values)
+
     @model_validator(mode="after")
     def operations_are_supported(self) -> JobManifest:
+        """Reject unknown operations and feed declarations without feed publication."""
         if not self.calls <= JOB_CALLS:
             raise ValueError("Job declares an unsupported broker operation.")
         if self.feeds and "feed.publish" not in self.calls:
@@ -154,6 +165,7 @@ class JobRecord(BaseModel):
 
     @model_validator(mode="after")
     def references_are_local(self) -> JobRecord:
+        """Require revision and grant keys to match locally stored immutable identities."""
         if any(key != str(value.id) for key, value in self.revisions.items()):
             raise ValueError("Revision keys must match their ids.")
         if any(key != str(value.id) for key, value in self.grants.items()):

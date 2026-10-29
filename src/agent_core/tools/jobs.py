@@ -49,6 +49,7 @@ def _spec(
     *,
     publication: bool,
 ) -> ToolSpec:
+    """Construct the common deferred-tool contract for job publication or execution."""
     return ToolSpec(
         name=name,
         version="1.0.0",
@@ -73,6 +74,7 @@ def _spec(
 
 
 def _ok(body: dict[str, Any], *, untrusted: bool = False) -> ToolResult:
+    """Return a structured job result with its explicit trust classification."""
     return ToolResult(
         ok=True,
         content=[TextPart(text=json.dumps(body, allow_nan=False, default=str))],
@@ -95,6 +97,8 @@ def _failure(reason: str, detail: str) -> ToolResult:
 
 
 def _model(context: ToolExecutionContext) -> Callable[..., Awaitable[dict[str, Any]]]:
+    """Use the run-bound completion callback or return a useful unavailable error."""
+
     async def unavailable(**kwargs: Any) -> dict[str, Any]:
         raise JobBrokerError("job.model_unavailable")
 
@@ -144,6 +148,7 @@ class JobManageTool:
         self.toolset = toolset
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Validate an owner's job request and apply it under the publication or grant contract."""
         require_scope(context.principal, "jobs.write")
         publication = self.toolset.publication
         try:
@@ -246,6 +251,7 @@ class JobRunTool:
         self.toolset = toolset
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Validate an owner's job request and apply it under the publication or grant contract."""
         require_scope(context.principal, "jobs.run")
         publication = self.toolset.publication
         try:

@@ -156,7 +156,7 @@ Implement in this order:
 5. **Two ways to run a job.**
    - **Once.** From a chat, `job.run` runs a pinned revision with inputs under
      a grant. It returns the result and the log to the agent as an untrusted
-     tool result. A run that needs no host, credential or model asks no
+     tool result. A run that needs no host, credential, feed or model asks no
      approval. A run that needs any of them asks once, for that grant, and
      later one-time runs under the same grant do not ask again.
    - **On a schedule.** A schedule revision's task is either `agent_run`

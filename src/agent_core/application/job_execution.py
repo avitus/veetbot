@@ -50,6 +50,7 @@ class JobExecution:
         model: Callable[..., Awaitable[dict[str, Any]]],
         trial: bool = False,
     ) -> JobResult:
+        """Execute a locally stored committed revision using its owned immutable grant."""
         if not self.enabled:
             raise JobBrokerError("job.disabled")
         async with self.uow_factory() as uow:
@@ -86,6 +87,7 @@ class JobExecution:
         slug: str | None = None,
         grant_id: UUID | None = None,
     ) -> JobResult:
+        """Preview supplied source offline or under an existing grant without live feed writes."""
         access = JobAccess(inputs, {})
         if grant_id is not None:
             if slug is None:
@@ -121,6 +123,7 @@ class JobExecution:
         model: Callable[..., Awaitable[dict[str, Any]]],
         trial: bool,
     ) -> JobResult:
+        """Validate inputs, construct the granted broker, and run within the approved deadline."""
         if not self.enabled:
             raise JobBrokerError("job.disabled")
         if self.schema_check.schema_violations(
@@ -153,6 +156,7 @@ class JobExecution:
             await event("job.log", {"message": message, "call_id": call_id})
 
         async def feed(*, preview: bool, call_id: str, **arguments: Any) -> dict[str, Any]:
+            """Validate feed data and return either a live receipt or a non-mutating preview."""
             del call_id
             try:
                 published, snapshot = await self.feeds.publish(

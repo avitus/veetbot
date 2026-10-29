@@ -20,11 +20,13 @@ from agent_core.ports.credentials import CredentialResolver
 
 
 async def resolve_job_host(host: str) -> tuple[str, ...]:
+    """Resolve a hostname once and return distinct addresses for public-address checks."""
     rows = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     return tuple(dict.fromkeys(str(row[4][0]) for row in rows))
 
 
 def _redact(value: Any, secret: str | None) -> Any:
+    """Remove an echoed credential from JSON strings, keys, and nested containers."""
     if not secret:
         return value
     if isinstance(value, str):
@@ -60,6 +62,7 @@ class JobHTTP:
         maximum_response_bytes: int,
         call_id: str,
     ) -> dict[str, Any]:
+        """Read bounded JSON from a checked public address with the original TLS hostname."""
         del call_id
         if not is_public_https_url(url):
             raise JobBrokerError("job.host_refused")

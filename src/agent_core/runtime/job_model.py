@@ -8,6 +8,7 @@ from contextlib import aclosing
 from decimal import Decimal
 from typing import Any, cast
 
+from agent_core.domain.errors import BudgetExceededError
 from agent_core.domain.jobs import JobBrokerError
 from agent_core.domain.messages import (
     ModelAttempt,
@@ -50,6 +51,7 @@ class JobModelCompletion:
     async def complete(
         self, *, prompt: str, max_output_tokens: int, maximum_cost: Decimal, call_id: str
     ) -> dict[str, Any]:
+        """Make one tool-free completion within grant and run budgets and persist its usage."""
         # One token per UTF-8 byte plus framing is a conservative upper bound
         # for this plain text request. No tools, images or cache writes join it.
         input_bound = len(prompt.encode()) + 512
@@ -68,7 +70,12 @@ class JobModelCompletion:
             raise JobBrokerError("job.model_budget_exceeded")
         if input_bound + output_bound > self.resolved.limits.context_window_tokens:
             raise JobBrokerError("job.model_context_limit")
-        self.budgets.check(self.run, BudgetScope.ATTEMPT)
+        try:
+            self.budgets.check(self.run, BudgetScope.ATTEMPT)
+        except BudgetExceededError as exc:
+            if exc.reason == "budget_exceeded":
+                raise JobBrokerError("job.model_budget_exceeded") from None
+            raise
         request = ModelRequest(
             model_policy=self.resolved.policy_name,
             conversation=[

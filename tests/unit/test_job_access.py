@@ -11,6 +11,7 @@ from agent_core.domain.jobs import JobAccess
     "values",
     [
         {"model_cost": "-1"},
+        {"model_cost": "abc"},
         {"model_cost": "NaN"},
         {"model_cost": "Infinity"},
         {"timeout_seconds": 0},

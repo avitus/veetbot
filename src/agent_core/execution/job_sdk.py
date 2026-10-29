@@ -21,6 +21,7 @@ class _HTTP:
         self._call = call
 
     def request(self, method: str, url: str, *, json: object = None) -> dict[str, Any]:
+        """Request one HTTP operation and return its JSON response envelope."""
         arguments: dict[str, Any] = {"method": method, "url": url}
         if json is not None:
             arguments["json"] = json
@@ -32,6 +33,7 @@ class _Model:
         self._call = call
 
     def complete(self, prompt: str, *, max_output_tokens: int = 1024) -> str:
+        """Request one explicit model completion and return its text."""
         result = self._call(
             "model.complete", {"prompt": prompt, "max_output_tokens": max_output_tokens}
         )
@@ -53,6 +55,7 @@ class _Feed:
         expected_interval_seconds: int,
         schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Publish declared feed data, optionally supplying its schema."""
         arguments: dict[str, Any] = {
             "feed_id": feed_id,
             "data": data,
@@ -77,11 +80,13 @@ class JobContext:
         self.feed = _Feed(self._call)
 
     def log(self, message: str) -> None:
+        """Send a bounded diagnostic line through the broker."""
         if not isinstance(message, str) or len(message.encode()) > 2000:
             raise JobCallError("A job log line must be text of at most 2,000 bytes.")
         self._call("log", {"message": message})
 
     def _call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Send a declared operation through the bridge and raise useful refusal feedback."""
         path = os.environ.get("AGENT_TOOL_BRIDGE_SOCKET")
         if not path:
             raise JobCallError("Job broker is unavailable for this execution.")

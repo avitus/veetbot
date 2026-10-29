@@ -38,11 +38,13 @@ class JobBroker:
             raise JobExecutionError(self._limit_failure)
 
     def _refused(self, reason: str, *, limit: bool = False) -> dict[str, Any]:
+        """Build a refusal and retain limit failures even if job code catches the error."""
         if limit:
             self._limit_failure = f"job.{reason}"
         return {"status": "denied", "reason_code": f"job.{reason}", "retryable": False}
 
     async def dispatch(self, call: str, arguments: dict[str, Any], call_id: str) -> dict[str, Any]:
+        """Return a bounded operation result or a content-free failure to the sandbox."""
         if self._limit_failure is not None:
             return self._refused(self._limit_failure.removeprefix("job."))
         try:
@@ -61,6 +63,7 @@ class JobBroker:
         return result
 
     async def _dispatch(self, call: str, arguments: dict[str, Any], call_id: str) -> dict[str, Any]:
+        """Validate the requested operation against the grant before invoking its service."""
         if call == "http.request":
             url = arguments.get("url")
             if not isinstance(url, str) or not is_public_https_url(url):

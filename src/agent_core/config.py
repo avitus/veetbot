@@ -700,6 +700,7 @@ def _parse_web_provider_allocations(
 
 
 def _job_hosts(values: Mapping[str, str]) -> frozenset[str] | None:
+    """Parse the optional operator superset as validated exact public hostnames."""
     from agent_core.domain.jobs import JobAccess
 
     raw = values.get("AGENT_JOBS_ALLOWED_HOSTS", "").strip()

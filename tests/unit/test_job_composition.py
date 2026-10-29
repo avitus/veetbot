@@ -532,3 +532,19 @@ async def test_new_external_access_is_approved_once_then_reused() -> None:
         async with composition.uow_factory() as uow:
             saved_again = await uow.jobs.get(composition.principal, "count-items")
         assert saved_again.grants == saved.grants
+
+
+async def test_job_credential_close_failure_does_not_abandon_later_cleanup(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from unittest.mock import AsyncMock
+
+    close_sandbox = AsyncMock()
+    async with build(settings=replace(memory_settings(), jobs_enabled=True)) as composition:
+        assert composition.job_credentials is not None and composition.cockpit_sandbox is not None
+        monkeypatch.setattr(
+            composition.job_credentials, "close", AsyncMock(side_effect=OSError("close failed"))
+        )
+        monkeypatch.setattr(composition.cockpit_sandbox, "close", close_sandbox)
+    close_sandbox.assert_awaited_once()
+    assert "job_credentials_close_failed" in caplog.text

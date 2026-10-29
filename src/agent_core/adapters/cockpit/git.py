@@ -36,6 +36,7 @@ class _Commit:
 
 
 def package_rules(kind: str) -> tuple[str, str, Callable[[str], bool]]:
+    """Return the fixed branch namespace and allowed files for a package kind."""
     if kind == "widget":
         return WIDGET_BRANCH_DIRECTORY, WIDGET_BRANCH_README, is_widget_file
     if kind == "job":
@@ -100,6 +101,7 @@ class FakeWidgetRepository:
             return self._head()
 
     async def ensure_branch(self) -> str:
+        """Create the isolated package branch when it does not yet exist."""
         async with self._lock:
             head = self._head()
             if head is not None:
@@ -115,6 +117,7 @@ class FakeWidgetRepository:
         parent_sha: str,
         message: str,
     ) -> str:
+        """Commit an allowed package only while the expected branch head is current."""
         if (
             not is_widget_slug(slug)
             or not files
@@ -134,6 +137,7 @@ class FakeWidgetRepository:
             return self._commit(tree, message, written)
 
     async def remove_widget(self, slug: str, *, parent_sha: str, message: str) -> str:
+        """Remove one package without changing neighboring packages."""
         if not is_widget_slug(slug):
             raise WidgetPathRefusedError(f"a removal must name one {self._directory}/<slug>/")
         async with self._lock:
@@ -148,6 +152,7 @@ class FakeWidgetRepository:
             return self._commit(tree, message, removed)
 
     async def read_widget(self, slug: str, *, at: str) -> dict[str, str] | None:
+        """Read one validated package from a specific immutable commit."""
         async with self._lock:
             prefix = f"{self._directory}/{slug}/"
             files = {

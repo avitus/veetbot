@@ -1798,7 +1798,7 @@ not automatically plan or summarize with a model. The returned value is bounded
 JSON and remains untrusted. Standard output from the program is diagnostic text,
 separate from the structured result.
 
-The first slice provides the sandbox-side library and entry point plus an
+The implementation provides the sandbox-side library and entry point plus an
 execution adapter. The adapter sends source and inputs on stdin to
 `python -m agent_core.execution.job_runner` through `SandboxManager`, with a
 run and lease supplied by its caller. Source is at most 64 KiB, inputs at most
@@ -1811,7 +1811,9 @@ on the worker.
 The SDK uses synchronous, sequential broker calls. HTTP returns the broker's
 JSON response envelope, model completion returns text, feed publication returns
 a receipt, and logging sends a bounded line. A refused call raises a useful
-job error. The first contract checks use known synthetic programs and a scripted
-broker; production broker composition, grants, persistence, tools and scheduling
-remain subsequent MVP slices. Existing sandbox isolation requirements still
-apply. Nothing is registered in the production agent until those pieces exist.
+job error. Production broker composition, grants, persistence, tools and
+scheduling are implemented behind the default-off `AGENT_JOBS_ENABLED` flag.
+`bootstrap.py` registers the job authoring, execution and schedule tools when
+the flag is enabled. Local contract checks use known synthetic programs and
+scripted services; production acceptance remains pending. Existing sandbox
+isolation requirements still apply.

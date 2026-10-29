@@ -17,6 +17,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add private job storage and isolate job publication from widget publication."""
     op.create_table(
         "agent_jobs",
         sa.Column("tenant_id", sa.Text(), nullable=False),
@@ -47,6 +48,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Restore the old schema only after job data and publication records are removed."""
     op.execute("SET LOCAL row_security = off")
     if op.get_bind().scalar(sa.text("SELECT EXISTS (SELECT 1 FROM agent_jobs)")):
         raise RuntimeError("Remove saved jobs before downgrade; pinned revisions must not be lost.")

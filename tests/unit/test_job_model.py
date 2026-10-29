@@ -90,3 +90,34 @@ async def test_unfunded_completion_is_refused_before_the_model_request(
             prompt="Summarize", max_output_tokens=100, maximum_cost=maximum_cost, call_id="summary"
         )
     assert provider.requests == []
+
+
+@pytest.mark.parametrize("expired", [False, True])
+async def test_run_model_limit_returns_repair_feedback_but_preserves_deadlines(
+    expired: bool,
+) -> None:
+    from agent_core.domain.errors import BudgetExceededError
+    from agent_core.domain.jobs import JobBrokerError
+
+    clock, factory = await memory_uow_factory()
+    current = run()
+    current.limits = current.limits.model_copy(update={"max_model_calls": 0})
+    if expired:
+        current.deadline_at = NOW
+    provider = FakeModelProvider(FakeModelScript(turns=[]), clock)
+    completion = JobModelCompletion(
+        run=current,
+        provider=provider,
+        resolved=ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+        budgets=UnitOfWorkBudgetLedger(factory, clock),
+        clock=clock,
+        ids=SequenceIdFactory(),
+    )
+    expected = BudgetExceededError if expired else JobBrokerError
+    with pytest.raises(expected) as error:
+        await completion.complete(
+            prompt="Summarize", max_output_tokens=100, maximum_cost=Decimal("1"), call_id="summary"
+        )
+    assert isinstance(error.value, (BudgetExceededError, JobBrokerError))
+    assert error.value.reason == ("deadline_exceeded" if expired else "job.model_budget_exceeded")
+    assert provider.requests == []

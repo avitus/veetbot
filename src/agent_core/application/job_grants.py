@@ -19,10 +19,11 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 
 
 def access_needs_approval(access: JobAccess, saved: JobRecord) -> bool:
+    """Require approval for remote access, new feed authority, or expanded existing limits."""
     if access.hosts or Decimal(access.model_cost) > 0:
         return True
     if not saved.grants:
-        return False
+        return bool(access.feeds)
     return not any(
         access.feeds <= grant.access.feeds
         and access.timeout_seconds <= grant.access.timeout_seconds
@@ -47,6 +48,7 @@ class JobGrantAuthorizer:
         action_deadline: datetime,
         turn: AuthorizationTurn | None = None,
     ) -> StandingAuthorization:
+        """Reuse an owned grant or permit computation with no new external authority."""
         denied = StandingAuthorization(allowed=False, reason_code="job.grant.not_covered")
         if (
             action.name != "job.run"

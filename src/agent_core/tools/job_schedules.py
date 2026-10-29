@@ -26,6 +26,7 @@ from agent_core.tools.schedule_lifecycle import CockpitScheduleUpdateTool
 async def pin_job(
     definition: ScheduleDefinition, task: JobTask, principal: Principal, factory: UnitOfWorkFactory
 ) -> ScheduleDefinition:
+    """Bind a published revision and approved grant while deriving bounded schedule authority."""
     async with factory() as uow:
         saved = await uow.jobs.get(principal, task.slug)
     grant = saved.grants.get(str(task.grant_id))
@@ -84,6 +85,7 @@ class JobScheduleCreateTool(CockpitScheduleCreateTool):
     async def approval_view_in_session(
         self, arguments: dict[str, Any], **context: Any
     ) -> ApprovalPresentation:
+        """Show the selected job's private grant alongside the requested schedule change."""
         if "task" not in arguments:
             return await super().approval_view_in_session(arguments, **context)
         assert self._uow_factory is not None
@@ -97,6 +99,7 @@ class JobScheduleCreateTool(CockpitScheduleCreateTool):
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Apply job schedule changes or delegate ordinary schedules to the existing tool."""
         if "task" not in arguments:
             return await super().execute(arguments, context)
         try:
@@ -173,6 +176,7 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
     async def approval_view_in_session(
         self, arguments: dict[str, Any], **context: Any
     ) -> ApprovalPresentation:
+        """Show the selected job's private grant alongside the requested schedule change."""
         if "task" not in arguments:
             summary, view = await self.approval_view(
                 arguments, tenant_id=context["principal"].tenant_id
@@ -190,6 +194,7 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Apply job schedule changes or delegate ordinary schedules to the existing tool."""
         if "task" not in arguments:
             return await super().execute(arguments, context)
         try:

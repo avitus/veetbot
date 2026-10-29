@@ -805,6 +805,7 @@ class ToolPipeline:
         ]
         | None = None,
     ) -> None:
+        """Compose tool validation, policy, execution, recovery, and typed work."""
         self._registry = registry
         self._uow_factory = uow_factory
         self._clock = clock

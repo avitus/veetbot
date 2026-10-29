@@ -439,6 +439,7 @@ class ScheduleRevision(BaseModel):
 
     @model_validator(mode="after")
     def execution_is_finite_and_cadence_is_consistent(self) -> ScheduleRevision:
+        """Validate finite limits and cadence, allowing zero model spend for jobs."""
         limits = self.limits
         job = isinstance(self.task, JobTask)
         if job and (self.call_plan is not None or self.browser_profile_id is not None):
@@ -491,6 +492,7 @@ class ScheduleDefinition(BaseModel):
 
     @model_validator(mode="after")
     def execution_is_finite(self) -> ScheduleDefinition:
+        """Require finite run limits while permitting jobs that make no model or tool calls."""
         limits = self.limits
         job = isinstance(self.task, JobTask)
         if job and (self.call_plan is not None or self.browser_profile_id is not None):

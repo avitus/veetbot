@@ -4,6 +4,7 @@ import json
 
 
 def main(inputs, job):
+    """Fetch review data, request one model judgment, and format the returned summary."""
     response = job.http.request("GET", inputs["url"])
     if response["status"] != 200:
         raise ValueError("The approved source could not be read.")

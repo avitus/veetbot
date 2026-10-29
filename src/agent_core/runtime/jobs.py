@@ -13,6 +13,7 @@ from agent_core.runtime.loop import RunContext
 async def execute_job(
     context: RunContext, execution: Callable[..., Awaitable[JobResult]] | None
 ) -> RunOutcome | None:
+    """Run a saved job without model planning or synthesis and return its outcome."""
     if context.run.kind is not RunKind.JOB:
         return None
     try:

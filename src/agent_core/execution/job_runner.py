@@ -17,6 +17,7 @@ def _encode(value: object) -> bytes:
 
 
 def main() -> None:
+    """Execute the supplied program and emit a bounded structured result with repair feedback."""
     try:
         raw = sys.stdin.buffer.read(256 * 1024 + 1)
         if len(raw) > 256 * 1024:

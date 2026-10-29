@@ -926,6 +926,7 @@ class _CockpitMaintenance:
         self.jobs: JobPublication | None = None
 
     def sweeps(self) -> dict[str, Any]:
+        """Bind maintenance credentials and compose publication, import, and feed sweeps."""
         settings = self._settings
         required = {
             "AGENT_COCKPIT_GITHUB_REPOSITORY": settings.cockpit_github_repository,
@@ -1014,10 +1015,12 @@ class _CockpitMaintenance:
             )
 
         async def flush_packages() -> int:
+            """Flush enabled widget and job queues through their separate repositories."""
             count = await widget_outbox.run_once() if settings.cockpit_enabled else 0
             return count + (await self.jobs.flush(self._principal) if self.jobs is not None else 0)
 
         async def import_packages() -> int:
+            """Import enabled widget and job branches without mixing their package namespaces."""
             count = await widget_importer.run_once() if settings.cockpit_enabled else 0
             return count + (
                 await self.jobs.import_changes(self._principal) if self.jobs is not None else 0
@@ -1519,6 +1522,7 @@ def _memory_uow_repositories(
     traces: InMemoryTraceStore | None = None,
     knowledge: InMemoryKnowledgeStore | None = None,
 ) -> UnitOfWorkRepositories:
+    """Assemble the in-memory repositories shared by the composition's units of work."""
     approvals = approvals or InMemoryApprovalRepository(clock)
     skills = skills or InMemorySkillRepository(
         InMemorySkillPackageStore(),
@@ -3222,6 +3226,7 @@ async def _compose(
         )
 
         def job_runner(timeout: int) -> JobRunner:
+            """Use the supplied test runner or build a sandbox runner with the grant's timeout."""
             if job_runner_override is not None:
                 return job_runner_override
             return SandboxJobRunner(
@@ -4704,6 +4709,7 @@ async def _compose(
         async def job_model_factory(
             current_run: Run, selected_agent: AgentSpec, lease: WorkerLease | None
         ) -> object:
+            """Bind job completions to the current run, pinned provider, and usage ledger."""
             resolved = resolved_model
             provider: ModelProvider = model_provider
             if current_run.provider_pin is not None:
@@ -5006,11 +5012,11 @@ async def _compose(
         from agent_core.runtime.email_junk import EmailJunkFilter
 
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
+            """Dispatch persisted typed work before the general agent loop."""
             if context.run.kind is RunKind.JOB:
                 return await execute_job(
                     context, None if job_execution is None else job_execution.run
                 )
-            """Recognize persisted typed work even when its public feature is disabled."""
             await browser_workflows(context)
             if people_import_runner is None:
                 async with uow_factory() as uow:
@@ -5083,6 +5089,7 @@ async def _compose(
             )(context)
 
         async def is_email_task(run: Run, run_principal: Principal) -> bool:
+            """Identify typed job and email runs that bypass ordinary agent preparation."""
             if run.kind is RunKind.JOB:
                 return True
             return await public_services.email.get_task(run_principal, run.id) is not None
@@ -7091,7 +7098,13 @@ async def build(
             except Exception as exc:
                 logger.warning("sandbox_close_failed", extra={"error_class": type(exc).__name__})
             if composition.job_credentials is not None:
-                await composition.job_credentials.close()
+                try:
+                    await composition.job_credentials.close()
+                except Exception as exc:
+                    logger.warning(
+                        "job_credentials_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
             if composition.cockpit_maintenance is not None:
                 with suppress(Exception):
                     await composition.cockpit_maintenance.close()

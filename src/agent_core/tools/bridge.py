@@ -51,6 +51,7 @@ class ProgrammaticBridgeSession:
         maximum_calls: int = 64,
         approval_hold_seconds: float = 300,
     ) -> None:
+        """Bind a per-run bridge token, declared operations, dispatcher, and finite call budget."""
         if len(script_hash) != 64:
             raise ValueError("script_hash must be a SHA-256 hex digest")
         self._script_hash = script_hash
@@ -70,6 +71,7 @@ class ProgrammaticBridgeSession:
         return self._token
 
     async def handle(self, request: bytes) -> bytes:
+        """Validate a bridge request and retain exhausted limits across later requests."""
         if len(request) > 64 * 1024:
             raise BridgeProtocolError("bridge request exceeds 64 KiB")
         try:

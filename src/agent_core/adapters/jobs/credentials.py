@@ -33,6 +33,7 @@ class GitHubReaderCredentials:
         self._tokens: GitHubAppTokens | None = None
 
     async def resolve(self, reference: CredentialRef) -> SecretValue:
+        """Lazily obtain the configured read-only GitHub token for the approved reference."""
         if reference.name != "github-reader":
             raise JobBrokerError("job.credential_refused")
         if self._app_id is None or self._installation_id is None or self._key_file is None:
@@ -57,5 +58,6 @@ class GitHubReaderCredentials:
             raise JobBrokerError("job.credential_unavailable", retryable=True) from None
 
     async def close(self) -> None:
+        """Close the token client if a credentialed request created it."""
         if self._client is not None:
             await self._client.aclose()

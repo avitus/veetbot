@@ -74,3 +74,16 @@ async def test_widened_access_and_foreign_grants_do_not_receive_standing_authori
             turn=AuthorizationTurn(newest_user_trust=TrustLevel.USER),
         )
         assert not result.allowed
+
+
+@pytest.mark.parametrize(
+    "feeds,expected", [(frozenset(), False), (frozenset({"agent.counts"}), True)]
+)
+def test_first_feed_grant_needs_approval_but_local_computation_does_not(
+    feeds: frozenset[str], expected: bool
+) -> None:
+    from agent_core.application.job_grants import access_needs_approval
+    from agent_core.domain.jobs import JobAccess
+
+    saved = record(principal()).model_copy(update={"grants": {}})
+    assert access_needs_approval(JobAccess({}, {}, feeds=feeds), saved) is expected
