@@ -915,7 +915,7 @@ interpolation.
     dark and night watch, Arrange, and the details panel's toggle. The left
     pane leads with the mode switch, then Needs you, the widgets with each
     one's freshness ("6 s", "Stale · 47 min") and This screen.
-  - The left pane (200 to 340 points, 260 to start) and the details panel
+  - The left pane (300 to 420 points, 320 to start) and the details panel
     (280 to 440, 320 to start) resize from their hairlines and keep their
     widths on this Mac; the board takes the rest, in three columns while the
     panel is open (the snapshot message's optional `columns`).
@@ -933,6 +933,10 @@ interpolation.
 - **iPad**
   - Uses the Mac layout at touch sizes, with a keep-screen-on toggle that
     sets the idle timer only while Cockpit is visible.
+  - The regular-width left pane starts at 320 points, resizes from 300 to
+    420 with a touch or pointer drag or VoiceOver adjustment, and shares its
+    device-local saved width with Chat and Email. The remaining content keeps
+    at least 360 points; narrowing the window never overwrites the saved width.
   - Widget details open as a sheet.
 - **iPhone**
   - Shows a compact single column in `compact` layout order.

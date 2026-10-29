@@ -22,19 +22,30 @@ import Testing
     func testTheSidebarStartsAtTheDesignWidthAndKeepsTheOwnersChoice() {
         let defaults = defaults()
         let store = EmailSidebarWidthStore(defaults: defaults)
-        #expect(store.width == 260, "Before any drag the sidebar is the design's 260 points")
+        #expect(store.width == 320, "Before any drag the sidebar is the design's 320 points")
         store.remember(300)
         #expect(store.width == 300)
         #expect(EmailSidebarWidthStore(defaults: defaults).width == 300, "The next launch reads the same width")
         store.remember(90)
-        #expect(store.width == 200)
+        #expect(store.width == 300)
         store.remember(9_000)
-        #expect(store.width == 340)
+        #expect(store.width == 420)
         store.remember(.nan)
-        #expect(store.width == 340, "An unusable width is never remembered")
+        #expect(store.width == 420, "An unusable width is never remembered")
         store.forget()
-        #expect(store.width == 260, "Resetting returns the sidebar to the design width")
+        #expect(store.width == 320, "Resetting returns the sidebar to the design width")
         #expect(defaults.object(forKey: EmailSidebarWidthStore.key) == nil)
+    }
+
+    @Test
+    func testTabletWidthAdaptsWithoutReplacingTheOwnersPreference() {
+        let saved: CGFloat = 420
+        #expect(ModeSidebarLayout.shown(saved, available: 768) == 396)
+        #expect(ModeSidebarLayout.shown(saved, available: 1_024) == saved)
+        #expect(ModeSidebarLayout.clamped(100) == 300)
+        #expect(ModeSidebarLayout.clamped(1_000) == 420)
+        #expect(ModeSidebarLayout.clamped(.nan) == 320)
+        #expect(ModeSidebarLayout.clamped(.infinity) == 320)
     }
 
     @Test
@@ -45,27 +56,25 @@ import Testing
 
     @Test
     func testASidebarDragStopsWhereTheReaderWouldFallBelowItsMinimum() {
-        // 1,120 points beside a 320-point panel leave room for the widest sidebar.
-        #expect(EmailColumnLayout.sidebarDrag(to: 340, from: 260, available: 1_120, inbox: 300) == 340)
-        // 860 points with a 300-point inbox leave the reader 300: the sidebar cannot grow.
-        #expect(EmailColumnLayout.sidebarDrag(to: 330, from: 260, available: 860, inbox: 300) == 260)
-        // 1,000 points leave room for 280 before the reader reaches 420.
-        #expect(EmailColumnLayout.sidebarDrag(to: 330, from: 260, available: 1_000, inbox: 300) == 280)
-        // Narrowing is always allowed.
-        #expect(EmailColumnLayout.sidebarDrag(to: 220, from: 260, available: 860, inbox: 300) == 220)
-        // A squeezed sidebar drags from the 268 it shows, so widening stops there instead
-        // of jumping to a width the owner never saw; from the stored 340 it would reach 300.
-        #expect(EmailColumnLayout.sidebarDrag(to: 300, from: 268, available: 780, inbox: 260) == 268)
-        #expect(EmailColumnLayout.sidebarDrag(to: 300, from: 340, available: 780, inbox: 260) == 300)
+        // A wide window permits the full sidebar range beside a 300-point inbox.
+        #expect(EmailColumnLayout.sidebarDrag(to: 420, from: 320, available: 1_140, inbox: 300) == 420)
+        // Resizing cannot take more reading space from an already narrow window.
+        #expect(EmailColumnLayout.sidebarDrag(to: 380, from: 320, available: 900, inbox: 300) == 320)
+        #expect(EmailColumnLayout.sidebarDrag(to: 380, from: 320, available: 1_060, inbox: 300) == 340)
+        // Narrowing remains possible down to the floor needed by the mode labels.
+        #expect(EmailColumnLayout.sidebarDrag(to: 300, from: 340, available: 900, inbox: 300) == 300)
+        #expect(EmailColumnLayout.sidebarDrag(to: 200, from: 340, available: 900, inbox: 300) == 300)
+        // A squeezed column starts dragging from the width actually on screen.
+        #expect(EmailColumnLayout.sidebarDrag(to: 380, from: 320, available: 832, inbox: 260) == 320)
         #expect(EmailColumnLayout.readerMinimum == 420)
     }
 
     @Test
     func testANarrowWindowSqueezesTheSidebarWithoutChangingItsWidth() {
         #expect(EmailColumnLayout.sidebarShown(stored: 340, available: 1_440) == 340)
-        // 780 points keep the inbox's 260, the reader's 250 and two hairlines before the sidebar.
-        #expect(EmailColumnLayout.sidebarShown(stored: 340, available: 780) == 268)
-        #expect(EmailColumnLayout.sidebarShown(stored: 260, available: 600) == 200, "Never below the sidebar's floor")
+        // A narrow window preserves the sidebar floor; the owner can fold it away.
+        #expect(EmailColumnLayout.sidebarShown(stored: 340, available: 780) == 300)
+        #expect(EmailColumnLayout.sidebarShown(stored: 260, available: 600) == 300, "Never below the sidebar's floor")
     }
 
     @Test
