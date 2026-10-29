@@ -403,4 +403,5 @@ nav:
       - 'ADR-0266: Spent one-time repairs are retired': adr/0266-spent-one-time-repairs-are-retired.md
       - 'ADR-0267: Deferred tool index headroom': adr/0267-deferred-index-headroom.md
       - 'ADR-0268: Jobs the agent writes': adr/0268-agent-written-jobs.md
+      - 'ADR-0269: Semantic admission startup fallback': adr/0269-semantic-admission-falls-back-at-startup.md
   - Changelog: changelog.md

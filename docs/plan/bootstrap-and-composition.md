@@ -1692,6 +1692,16 @@ reviewed reader. It supplies bounded private, restricted, current-project source
 quotes under [ADR-0189](../adr/0189-governed-memory-source-recovery.md). An absent
 runtime binding or withdrawn evidence leaves ordinary fact recall available.
 
+[ADR-0269](../adr/0269-semantic-admission-falls-back-at-startup.md) isolates
+optional semantic configuration rejection at runtime startup. The strict
+semantic composer still rejects missing, expired, incompatible or malformed
+admission before provider access. Bootstrap records the fixed warning
+`semantic_recall_unavailable_using_sparse` and installs no semantic services,
+query preparation, source recovery or index callback when composition rejects.
+Ordinary sparse recall and maintenance remain available. Unrelated startup
+errors still propagate. Valid admission retains the existing graph; restoration
+requires valid current evidence and recomposition, never inherited approval.
+
 ## ADR-0209 browser research composition
 
 `BROWSER_RESEARCH_ENABLED` defaults to `1` and accepts only `0` or `1`. With a

@@ -3938,19 +3938,23 @@ async def _compose(
                     await provider.close()
     semantic_index_pass = None
     if settings.memory_semantic_index_enabled:
-        semantic_index_pass = await compose_indexing(
-            root=REPOSITORY_ROOT,
-            settings=settings,
-            principal=principal,
-            factory=uow_factory,
-            clock=clock,
-            credentials=credential_resolver,
-            configuration=recall_composition.configuration,
-            formation=recall_composition.formation,
-            reader=recall_composition.reader,
-            provider_factory=OpenAIEmbeddingProvider,
-            local_provider_factory=local_embedding_provider,
-        )
+        try:
+            semantic_index_pass = await compose_indexing(
+                root=REPOSITORY_ROOT,
+                settings=settings,
+                principal=principal,
+                factory=uow_factory,
+                clock=clock,
+                credentials=credential_resolver,
+                configuration=recall_composition.configuration,
+                formation=recall_composition.formation,
+                reader=recall_composition.reader,
+                provider_factory=OpenAIEmbeddingProvider,
+                local_provider_factory=local_embedding_provider,
+            )
+        except ConfigurationError:
+            # Admission remains strict; only the optional runtime arm is unavailable.
+            logger.warning("semantic_recall_unavailable_using_sparse")
 
     async def sweep_semantic_index() -> int:
         assert semantic_index_pass is not None
