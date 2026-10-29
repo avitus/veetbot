@@ -211,6 +211,87 @@ class InterruptedBrowser(FakeBrowserProvider):
         raise BrowserProviderError(self.reason, retryable=False)
 
 
+@pytest.mark.parametrize(
+    "answer", ["Stop browsing.", "Use another source.", "I'm already signed in."]
+)
+async def test_manual_auth_reply_reaches_model_before_browser_work(
+    answer: str,
+    *,
+    settings: Settings | None = None,
+    storage: Literal["memory", "postgres"] = "memory",
+) -> None:
+    from agent_core.adapters.models.fake import FakeModelProvider
+    from agent_core.context.history import validate_tool_pairs
+    from agent_core.domain.events import conversation_items
+    from agent_core.domain.messages import TextPart, ToolResultItem
+    from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
+
+    provider = InterruptedBrowser()
+    provider.reason = "tool.browser.needs_user"
+    async with (
+        build(
+            settings=settings or load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+            storage=storage,
+            script=FakeModelScript(turns=[navigation(), ScriptedTurn(text="Acknowledged.")]),
+            sequential_ids=True,
+            enabled_tools=["browser.navigate", "browser.observe", "conversation.ask_user"],
+            browser_provider_override=provider,
+        ) as composition,
+        _client(composition) as client,
+    ):
+        await seed_browser_authority(composition)
+        session = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await composition.runs.submit("Read the selected account.", session.id)
+        worker = None
+        if storage == "postgres":
+            from agent_core.runtime.worker import DurableWorker
+
+            worker = DurableWorker(
+                uow_factory=composition.uow_factory,
+                executor=composition.executor,
+                clock=composition.clock,
+                worker_id="browser-manual-reply-fixture",
+            )
+            assert await worker.run_once()
+        async with composition.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        assert "browser_auth_wait" in checkpoint.working_state
+        question_call_id = checkpoint.pending_tool_calls[0]["call_id"]
+        response = await client.post(
+            f"/v1/runs/{run_id}/input",
+            json={
+                "question_id": checkpoint.working_state["outstanding_question_id"],
+                "content": [{"type": "text", "text": answer}],
+            },
+        )
+        assert response.status_code == 202
+        if worker is not None:
+            assert await worker.run_once()
+        result = await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+        model = cast(FakeModelProvider, composition.executor._model_provider)
+        answers = [
+            part.text
+            for item in model.requests[-1].conversation
+            if isinstance(item, ToolResultItem) and item.call_id == question_call_id
+            for part in item.content
+            if isinstance(part, TextPart)
+        ]
+        assert len(answers) == 1 and f"\n{answer}\n" in answers[0]
+        async with composition.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        assert "browser_auth_wait" not in checkpoint.working_state
+    assert result.status is RunStatus.COMPLETED
+    assert provider.navigations == ["https://example.org/account"]
+    assert provider.observation_count == 0
+    assert not any(event.payload.get("trigger") == "browser_auth_resume" for event in events)
+    validate_tool_pairs([item for event in events for item in conversation_items(event)])
+
+
 def navigation(call_id: str = "open") -> ScriptedTurn:
     return ScriptedTurn(
         tool_calls=[

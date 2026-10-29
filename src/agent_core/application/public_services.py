@@ -1593,7 +1593,13 @@ class PublicRunService:
             )
         )
         checkpoint.last_event_sequence = max(completed_event.sequence, state_event.sequence)
-        if browser_wait is not None and "browser.observe" in checkpoint.pinned_tool_names:
+        # Manual replies may cancel or redirect the task. Let the model read them
+        # before doing more browser work; only verified sign-in warrants this read.
+        if (
+            verified_browser_authentication is not None
+            and browser_wait is not None
+            and "browser.observe" in checkpoint.pinned_tool_names
+        ):
             wait = BrowserAuthenticationWait.model_validate(browser_wait)
             arguments = (
                 {"url": wait.resume_url}

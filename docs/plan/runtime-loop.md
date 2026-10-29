@@ -1933,6 +1933,9 @@ clears the question and requeues the same run atomically. It fabricates no owner
 message. A fresh lease navigates to the bound allowed URL before observing; a
 new lease's blank page is not a continuation point. Current tool/policy checks
 still govern that navigation and any later action. Old generation grants expire.
+Only verified sign-in queues this automatic navigation. A manual answer clears
+the wait and reaches the model before further browser work, so cancellation or
+changed instructions can be honored; a claim of sign-in is not verification.
 
 A verified-status callback attempts continuation immediately. Maintenance scans
 32 principal-scoped waiting runs in UUID order with a rotating cursor at most

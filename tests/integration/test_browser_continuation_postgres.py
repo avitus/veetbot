@@ -33,6 +33,15 @@ async def test_postgres_verified_continuation_is_durable_and_fenced(change: str)
     )
 
 
+@pytest.mark.parametrize(
+    "answer", ["Stop browsing.", "Use another source.", "I'm already signed in."]
+)
+async def test_postgres_manual_sign_in_reply_reaches_model_first(answer: str) -> None:
+    await test_browser_recovery.test_manual_auth_reply_reaches_model_before_browser_work(
+        answer, settings=database_settings(), storage="postgres"
+    )
+
+
 async def test_postgres_an_offer_answers_its_waiting_source_run() -> None:
     """ADR-0251 owner decision 3 in one PostgreSQL transaction."""
     await test_browser_offers.test_accepting_while_the_source_run_asks_answers_it_in_that_run(
