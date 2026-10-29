@@ -3,12 +3,72 @@
 import asyncio
 from time import monotonic
 
+import pytest
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
 from agent_core.domain.browser_diagnostics import collect_browser_diagnostics
 from tests.unit.test_browser_runtime_real_chromium import browsing, html
+
+
+@pytest.mark.parametrize("input_type", ["checkbox", "radio"])
+async def test_covered_check_is_refused_without_an_effect_and_can_be_observed_again(
+    input_type: str,
+) -> None:
+    """A covered check must leave time for recovery instead of an uncertain timeout."""
+    from agent_core.domain.browser import BrowserAction, BrowserActionKind, BrowserProviderError
+
+    effects: list[bool] = []
+
+    async def home(request: Request) -> Response:
+        del request
+        return html(
+            f'<label><input type="{input_type}" id="choice"> Include archived</label>'
+            '<div id="overlay" style="position:fixed;inset:0;z-index:9">Loading</div>',
+            script="document.querySelector('#choice').onchange = "
+            "() => fetch('/effect', {method:'POST'});",
+        )
+
+    async def effect(request: Request) -> Response:
+        del request
+        effects.append(True)
+        return Response("ok")
+
+    async with browsing([Route("/", home), Route("/effect", effect, methods=["POST"])]) as (
+        site,
+        runtime,
+    ):
+        first = await runtime.navigate(site.url("/"))
+        target = next(element for element in first.elements if element.role == input_type)
+        with pytest.raises(BrowserProviderError) as refused:
+            await runtime.act(
+                BrowserAction(
+                    kind=BrowserActionKind.CHECK, ref=target.ref, expected_revision=first.revision
+                )
+            )
+        assert refused.value.reason_code == "tool.browser.element_not_found"
+        assert not refused.value.retryable
+        assert effects == []
+        assert runtime._page is not None
+        assert not await runtime._page.locator("#choice").is_checked()
+        await runtime._page.locator("#overlay").evaluate("node => node.remove()")
+        fresh = await runtime.observe()
+        target = next(element for element in fresh.elements if element.role == input_type)
+        checked = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.CHECK, ref=target.ref, expected_revision=fresh.revision
+            )
+        )
+        target = next(element for element in checked.elements if element.role == input_type)
+        assert target.checked
+        repeated = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.CHECK, ref=target.ref, expected_revision=checked.revision
+            )
+        )
+        assert next(element for element in repeated.elements if element.role == input_type).checked
+        assert effects == [True]
 
 
 async def test_background_polling_does_not_consume_the_whole_readiness_budget() -> None:
