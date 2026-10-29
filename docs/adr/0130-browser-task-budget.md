@@ -7,6 +7,8 @@
 - Related: ADR-0058, ADR-0078, ADR-0098, ADR-0106, ADR-0115, ADR-0119,
   ADR-0123, ADR-0124, ADR-0127, ADR-0129; Sections 12.5 and 33 of the
   engineering plan
+- Amended by: ADR-0148 (2026-10-02), which adds `browser.upload` to the
+  definitions decision 4 requires wherever the provider registers it
 - Amends: `tool-system.md` "The circuit breakers" (the identical-call row);
   ADR-0123 decisions 3 and 4 (configured order and overflow) for sessions
   bound to a website profile

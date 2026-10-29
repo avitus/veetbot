@@ -66,6 +66,12 @@
 # 2,000 to 2,500 tokens so a website-bound chat skips no Gmail write; the
 # prefix ceiling rises to 24,500. Implemented with gate tests; delivery is
 # pending. No milestone, gate or policy profile moves.
+# ADR-0267: Owner asked on 2026-10-29 to raise the deferred tool index to
+# fifty entries and 3,000 tokens, after the fullest production chat filled
+# all forty entries; the prefix ceiling rises to 25,000, and a gate keeps ten
+# entries and 500 tokens free. The owner accepted ADR-0253 the same day.
+# Implemented with gate tests; delivery is pending. No milestone, gate or
+# policy profile moves.
 schema_version: 1
 
 project:

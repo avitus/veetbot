@@ -1,6 +1,6 @@
 schema_version: 1
 prefix:
-  ceiling_tokens: 24500
+  ceiling_tokens: 25000
 classes:
   platform_policy:
     region: A
@@ -18,8 +18,8 @@ classes:
     max_tokens: 9000
   deferred_tool_index:
     region: A
-    max_items: 40
-    max_tokens: 2500
+    max_items: 50
+    max_tokens: 3000
   owner_tool_index:
     region: A
     max_items: 40
