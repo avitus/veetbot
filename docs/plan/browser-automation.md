@@ -1365,10 +1365,10 @@ document. The whole wait is bounded by 2 seconds. Settling never fails a call:
 a page still changing at the bound is observed as it is, with `bound_expired`
 readiness metadata.
 
-Before a `browser.act` click, Playwright checks actionability with a trial bounded by
+Before a `browser.act` click or check, Playwright checks actionability with a trial bounded by
 5 seconds. A trial timeout sends no click and returns the existing
 `tool.browser.element_not_found` refusal, preserving the lease and action
-sequence so the agent can observe an obstructing overlay. The actual click
+sequence so the agent can observe an obstructing overlay. The actual click or check
 also has a 5-second bound, leaving time within the 30-second tool budget for
 validation, settling, observation, and transport. No forced click or automatic
 publication retry is permitted. A failure after actual dispatch remains
