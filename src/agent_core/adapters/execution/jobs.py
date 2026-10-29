@@ -85,6 +85,8 @@ class SandboxJobRunner:
             )
         finally:
             await self._manager.release_run(run_id, lease_epoch)
+        if bridge.limit_exceeded:
+            raise JobExecutionError("Job exceeded its broker call limit.")
         if (
             result.timed_out
             or result.killed_by is not None

@@ -59,6 +59,7 @@ class ProgrammaticBridgeSession:
         self._maximum_calls = maximum_calls
         self._approval_hold_seconds = approval_hold_seconds
         self._ordinal = 0
+        self.limit_exceeded = False
 
     @property
     def call_count(self) -> int:
@@ -92,6 +93,7 @@ class ProgrammaticBridgeSession:
         ):
             raise BridgeProtocolError("bridge call, arguments, or ordinal is invalid")
         if self._ordinal >= self._maximum_calls:
+            self.limit_exceeded = True
             return b'{"status":"denied","reason_code":"bridge.call_limit","retryable":false}'
         ordinal = self._ordinal
         self._ordinal += 1

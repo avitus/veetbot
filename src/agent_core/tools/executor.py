@@ -490,6 +490,11 @@ def _argument_trust(
     anything external the turn read (`owner_grounded_statement`).
     """
 
+    # ADR-0268: code authored for a clean owner turn is eligible for the
+    # exact job.manage rule. External reads still taint the whole turn above;
+    # granting network/model access remains an independent approval decision.
+    if tool_name in {"job.manage", "job.run"} and _turn_origin_trust(checkpoint) is TrustLevel.USER:
+        return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
     current_user = next(
         (
@@ -793,6 +798,8 @@ class ToolPipeline:
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
         standing_authorizer: StandingAuthorizer | None = None,
         delegations: DelegationStarter | None = None,
+        job_model_factory: Callable[[Run, AgentSpec, WorkerLease | None], Awaitable[object]]
+        | None = None,
         before_effect: Callable[
             [Run, Principal, ToolInvocation, WorkerLease | None], Awaitable[None]
         ]
@@ -838,6 +845,7 @@ class ToolPipeline:
         self._standing_authorizer = standing_authorizer
         self._delegations = delegations
         self._before_effect = before_effect
+        self._job_model_factory = job_model_factory
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
         self._completed_traces: deque[PipelineTrace] = deque(maxlen=1_024)
@@ -1636,6 +1644,11 @@ class ToolPipeline:
                 else self._credentials
             ),
             bridge_dispatch=(bridge_dispatch if tool.spec.target_kind == "sandbox" else None),
+            job_model=(
+                await self._job_model_factory(run, agent, lease)
+                if tool.spec.target_kind == "job" and self._job_model_factory is not None
+                else None
+            ),
             working_state=deepcopy(checkpoint.working_state),
             loaded_skills=tuple(body.model_dump(mode="json") for body in checkpoint.loaded_skills),
             available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),

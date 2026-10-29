@@ -21,8 +21,8 @@
 - Answers: Cockpit open question 2 (`cockpit.md`, Open questions). For jobs
   only, it also answers sandbox open question 3 (who chooses egress
   destinations).
-- Scope: a job package on a public branch, a new schedule task kind, one
-  deferred builtin tool, a broker that a sandboxed job calls, and one
+- Scope: a job package on a public branch, a new schedule task kind,
+  deferred authoring and execution tools, a sandbox broker and one
   owner-approved credential. This is an independently authorized MVP workstream
   recorded in project state; it does not advance a milestone or gate.
 - Detailed design: `docs/plan/scheduling.md`,
@@ -170,8 +170,8 @@ Implement in this order:
      words.
 6. **Code changes are governed like widget changes.**
    - A code commit from the owner's own turn ships without a per-change
-     approval. The approval rule is an exact-name allow for the publication
-     side effect, the rule widgets use.
+     approval. The approval rule is an exact-name allow for `job.manage`
+     under the publication side effect. Other publication tools keep their rules.
    - A commit from a turn influenced by untrusted content asks.
    - A change that widens a grant always asks again. That includes a new host,
      a credential, a feed or a higher limit.
@@ -294,33 +294,48 @@ hardening into the MVP.
 
 ## Implementation checkpoint — 2026-10-29
 
-The first execution slice is implemented on `agent-jobs`. It provides
-`JobProgram`, the `JobRunner` port, `SandboxJobRunner`, the sandbox entry point
-and the four-operation job library. The existing sandbox image installs the
-helper; the runner uses `SandboxManager` and `ProgrammaticBridgeSession`. There
-is no new runtime dependency, policy edit or production tool registration.
+The MVP is implemented on `agent-jobs`, behind the default-off flag. It now
+includes saved revisions and private grants in memory and PostgreSQL, a
+separate job publication namespace, commit-before-activate and human import,
+archive/restore/revert, the four broker operations, explicit model budget
+accounting, agent tools and pinned job schedules. The maintenance role owns
+publication; run workers own the lazy GitHub reader credential. No new runtime
+dependency was introduced.
 
-Evidence: `tests/unit/test_job_program_process.py` executes known synthetic
-programs in local child processes: pure computation needs no broker or model,
-and a mixed workflow requests HTTP, one model completion, feed publication and
-logging in that order. It also checks repair feedback for malformed programs,
-missing access and invalid results. `tests/contract/test_job_runner_contract.py`
-checks execution-service dispatch, declared calls, result handling and cleanup
-after failure or cancellation. Both began with expected failures for missing
-execution, then passed after implementation.
+`job.manage` and `job.run` are deferred tools. The exact-name publication rule
+admits generic code authored for an owner turn, retaining approval escalation
+when the turn consumes untrusted content. This rule uses a separate jobs policy
+identity; unrelated model and memory evidence keeps its original policy binding.
+Existing grants can be reused; new external access and expansions ask for
+approval. Schedule creation version
+1.7.0 and update version 1.2.0 support job pins while earlier versions keep
+working. A job run bypasses model planning and final synthesis; only explicit
+SDK completions use the model gateway and ordinary run ledger.
 
-These checks use a scripted broker and execution adapter; they are not live
-provider, GitHub or gVisor acceptance evidence. Saved package publication,
-private approved access, production broker composition and cost accounting,
-agent tools and the schedule task remain to be implemented. The feature is
-not yet available to the production Veetbot agent.
+The generic packages under `samples/jobs/` demonstrate a code-only GitHub PR
+collector and mixed review summarization. The collector's final mapping must
+match the existing widget's feed schema at activation. [The operator guide](../jobs.md)
+covers credentials, branch rules, private inputs, publication state, trials,
+scheduling, rollout and rollback. Credential installation, delivery and the
+production-day validation remain unperformed and require owner authorization.
+No milestone or gate moves, and the deferred hardening remains deferred.
 
-Local verification passes the twelve new cases, all 1,988 contract tests, lint,
-typecheck and documentation checks. The static partition passes 8,859 cases,
-skips one and fails `test_family_probe_checks_the_names_the_overview_delivers`.
-The same failure reproduces on untouched starting commit `bbbb1282`, without
-the jobs changes; it remains outside this implementation. No existing test was
-weakened or skipped to obtain passing evidence.
+Verification covers process execution and the sandbox contract, publication and
+lost-response reconciliation, privacy rejection, local revision execution,
+HTTP resolution/credential boundaries, explicit model accounting, feed previews,
+grant reuse, approval escalation, typed schedule materialization, grant repins,
+zero-model execution and flag-off refusal. PostgreSQL verification runs the
+same job store contract and checks namespace isolation, upgrade/downgrade and
+data-loss refusal. The red tests first failed on missing execution and services,
+wrong namespace, missing schedule fields, redundant approval, a swallowed
+bridge limit and a repin retaining the old zero-model limit. No existing test
+was weakened to obtain passing evidence.
+
+Final verification results are recorded in project state. These are local
+synthetic checks, not live GitHub, provider, gVisor or production acceptance
+claims. The previously reproduced unrelated static failure,
+`test_family_probe_checks_the_names_the_overview_delivers`, remains outside
+this workstream.
 
 ## Alternatives considered
 

@@ -152,6 +152,11 @@ class Settings:
     thread_folders_api_enabled: bool = False
     delegation_enabled: bool = False
     records_enabled: bool = False
+    jobs_enabled: bool = False
+    jobs_allowed_hosts: frozenset[str] | None = None
+    jobs_github_app_id: int | None = None
+    jobs_github_installation_id: int | None = None
+    jobs_github_key_file: Path | None = None
     cockpit_enabled: bool = False
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
@@ -692,6 +697,22 @@ def _parse_web_provider_allocations(
     if sum(allocation.weight for allocation in allocations) != 100:
         raise ConfigurationError(f"{plural_name} percentages must sum to 100")
     return tuple(allocations)
+
+
+def _job_hosts(values: Mapping[str, str]) -> frozenset[str] | None:
+    from agent_core.domain.jobs import JobAccess
+
+    raw = values.get("AGENT_JOBS_ALLOWED_HOSTS", "").strip()
+    if not raw:
+        return None
+    hosts = frozenset(host.strip() for host in raw.split(","))
+    try:
+        JobAccess({}, dict.fromkeys(hosts))
+    except ValueError as exc:
+        raise ConfigurationError(
+            "AGENT_JOBS_ALLOWED_HOSTS needs exact public DNS hostnames"
+        ) from exc
+    return hosts
 
 
 def _parse_flag(values: Mapping[str, str], name: str, *, default: bool = False) -> bool:
@@ -2148,6 +2169,15 @@ def _load_settings(
         thread_folders_api_enabled=thread_folders_api_enabled,
         delegation_enabled=delegation_enabled,
         records_enabled=records_enabled,
+        jobs_enabled=_parse_flag(values, "AGENT_JOBS_ENABLED"),
+        jobs_allowed_hosts=_job_hosts(values),
+        jobs_github_app_id=_optional_positive_int(values, "AGENT_JOBS_GITHUB_APP_ID"),
+        jobs_github_installation_id=_optional_positive_int(
+            values, "AGENT_JOBS_GITHUB_INSTALLATION_ID"
+        ),
+        jobs_github_key_file=Path(values["AGENT_JOBS_GITHUB_KEY_FILE"])
+        if values.get("AGENT_JOBS_GITHUB_KEY_FILE")
+        else None,
         cockpit_enabled=cockpit_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,

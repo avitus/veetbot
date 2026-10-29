@@ -198,3 +198,53 @@ async def test_cancelling_execution_releases_the_job_sandbox() -> None:
             dispatch=no_broker,
         )
     assert environment.live_environment_ids() == frozenset()
+
+
+async def test_catching_the_bridge_call_limit_cannot_turn_a_failed_job_into_success() -> None:
+    from typing import Any
+
+    import pytest
+
+    from agent_core.domain.jobs import JobExecutionError
+    from agent_core.tools.bridge import ProgrammaticBridgeSession
+
+    class ExceedingEnvironment(FakeExecutionEnvironment):
+        async def execute_with_bridge(
+            self, environment: Any, command: Any, endpoint: Any, handler: Any
+        ) -> ExecutionResult:
+            assert isinstance(handler, ProgrammaticBridgeSession)
+            for ordinal in range(3):
+                await handler.handle(
+                    json.dumps(
+                        {
+                            "token": endpoint.token,
+                            "call": "log",
+                            "arguments": {"message": "Hello"},
+                            "ordinal": ordinal,
+                        }
+                    ).encode()
+                )
+            return ExecutionResult(
+                0, b'{"ok":true,"value":1}', b"", False, False, False, None, (), 1
+            )
+
+    environment = ExceedingEnvironment(
+        FixedClock(datetime(2026, 10, 29, tzinfo=UTC)), SequenceIdFactory()
+    )
+    runner = SandboxJobRunner(
+        SandboxManager(environment, image_digest=fake_image_digest(), limits=LIMITS),
+        maximum_calls=2,
+    )
+
+    async def dispatch(*args: Any) -> dict[str, Any]:
+        return {"status": "succeeded", "result": {}}
+
+    with pytest.raises(JobExecutionError, match="limit"):
+        await runner.run(
+            JobProgram("def main(inputs, job): return 1", frozenset({"log"})),
+            {},
+            tenant_id="owner",
+            run_id=RUN,
+            lease_epoch=1,
+            dispatch=dispatch,
+        )

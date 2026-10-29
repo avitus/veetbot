@@ -1392,3 +1392,46 @@ bound to the PostgreSQL parity test, which runs every store suite's scenarios
 on PostgreSQL. The other gates stay pending until their server and native
 halves land.
 
+
+### Saved job implementation (ADR-0268)
+
+The jobs MVP stores an owner-scoped job record with a compare-and-set version,
+its immutable program revisions, its current revision pointer and its private
+grants. A revision records its public manifest and source, publication state,
+commit and creation time. Keeping the source locally makes pinned execution
+independent of GitHub availability. Archive hides the job from new runs without
+erasing its history; restore or revert publishes the selected source again.
+
+Publication follows the widget outbox protocol on the separate `cockpit/jobs`
+branch. The Git adapter shares its fast-forward and path checks, parameterized
+only for the fixed job namespace and its `job.json` and `main.py` files. Pending
+job commits use a separate outbox namespace. The existing privacy screen runs
+in the builder sandbox over both files and the fixed commit message. Inputs,
+exact host permissions, credential references, feed permissions and limits
+remain in private grants. The grant is immutable and names its job; an expanded
+request creates a new approval rather than editing an existing grant.
+
+The per-execution broker admits each operation against that grant. HTTP reads
+resolve a permitted public hostname once and dial the checked address with the
+original TLS hostname. Explicit model completions offer no tools, reserve a
+conservative token cost before sending, and record usage through the ordinary
+run ledger. Trial feed publication applies the existing feed schema and size
+checks but does not change the live feed or its schema.
+
+`job.manage` and `job.run` are deferred builtins. The exact-name publication
+rule allows generic authoring in a clean owner turn and retains the existing
+trust overlay after external content. Only `job.manage` uses the derived jobs
+policy profile; other actions retain their existing policy identity and evidence
+bindings. Reusing a saved grant does not ask for
+approval again; expanded external access does. Model completions share the
+actual mutable run and its durable usage ledger with the surrounding tool
+pipeline, so the parent cannot overwrite the job's usage.
+
+A schedule task defaults to `agent_run`; its legacy serialized representation
+stays unchanged. A `job` task pins a slug, revision and grant. Materialization
+copies those pins into the occurrence session and uses the typed job runtime,
+which bypasses planning, recall preparation and final model synthesis. The
+existing cadence, admission, failure pause and notification paths remain in
+use. Feed grants select quiet-on-success reports. Disabling jobs fails typed
+runs explicitly without falling through to an agent run. See [the operator
+guide](../jobs.md) for activation and examples.

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -35,19 +35,29 @@ class _Commit:
     outside_widgets: bool
 
 
-def _directory(slug: str) -> str:
-    return f"{WIDGET_BRANCH_DIRECTORY}/{slug}/"
+def package_rules(kind: str) -> tuple[str, str, Callable[[str], bool]]:
+    if kind == "widget":
+        return WIDGET_BRANCH_DIRECTORY, WIDGET_BRANCH_README, is_widget_file
+    if kind == "job":
+        return (
+            "cockpit/jobs",
+            "# Veetbot jobs\n\nGeneric programs; personal values stay in private grants.\n",
+            lambda name: name in {"job.json", "main.py"},
+        )
+    raise ValueError("Unknown publication namespace.")
 
 
 BRANCH_ROOT_MESSAGE = "cockpit: create the widget branch\n"
 
 
-def touched_widgets(paths: list[str]) -> tuple[tuple[str, ...], bool]:
+def touched_widgets(
+    paths: list[str], directory: str = WIDGET_BRANCH_DIRECTORY
+) -> tuple[tuple[str, ...], bool]:
     """The widget slugs a commit's paths touch, and whether any path lies outside them."""
 
     slugs: set[str] = set()
     outside = False
-    prefix = f"{WIDGET_BRANCH_DIRECTORY}/"
+    prefix = f"{directory}/"
     for path in paths:
         if path.startswith(prefix) and "/" in path.removeprefix(prefix):
             slugs.add(path.removeprefix(prefix).split("/", 1)[0])
@@ -57,7 +67,8 @@ def touched_widgets(paths: list[str]) -> tuple[tuple[str, ...], bool]:
 
 
 class FakeWidgetRepository:
-    def __init__(self) -> None:
+    def __init__(self, *, package_kind: str = "widget") -> None:
+        self._directory, self._readme, self._file_allowed = package_rules(package_kind)
         self._commits: dict[str, _Commit] = {}
         self._order: list[str] = []
         self._lock = asyncio.Lock()
@@ -71,7 +82,7 @@ class FakeWidgetRepository:
             [len(self._order), parent, message, sorted(tree.items())], separators=(",", ":")
         )
         sha = hashlib.sha1(document.encode("utf-8"), usedforsecurity=False).hexdigest()
-        slugs, outside = touched_widgets(changed)
+        slugs, outside = touched_widgets(changed, self._directory)
         self._commits[sha] = _Commit(sha, parent, message, dict(tree), slugs, outside)
         self._order.append(sha)
         return sha
@@ -93,8 +104,8 @@ class FakeWidgetRepository:
             head = self._head()
             if head is not None:
                 return head
-            readme = f"{WIDGET_BRANCH_DIRECTORY}/README.md"
-            return self._commit({readme: WIDGET_BRANCH_README}, BRANCH_ROOT_MESSAGE, [])
+            readme = f"{self._directory}/README.md"
+            return self._commit({readme: self._readme}, BRANCH_ROOT_MESSAGE, [])
 
     async def write_widget(
         self,
@@ -104,11 +115,15 @@ class FakeWidgetRepository:
         parent_sha: str,
         message: str,
     ) -> str:
-        if not is_widget_slug(slug) or not files or not all(is_widget_file(name) for name in files):
-            raise WidgetPathRefusedError(f"a write must stay inside {_directory('<slug>')}")
+        if (
+            not is_widget_slug(slug)
+            or not files
+            or not all(self._file_allowed(name) for name in files)
+        ):
+            raise WidgetPathRefusedError(f"a write must stay inside {self._directory}/<slug>/")
         async with self._lock:
             self._expect(parent_sha)
-            prefix = _directory(slug)
+            prefix = f"{self._directory}/{slug}/"
             tree = {
                 path: text
                 for path, text in self._tree(parent_sha).items()
@@ -120,10 +135,10 @@ class FakeWidgetRepository:
 
     async def remove_widget(self, slug: str, *, parent_sha: str, message: str) -> str:
         if not is_widget_slug(slug):
-            raise WidgetPathRefusedError(f"a removal must name one {_directory('<slug>')}")
+            raise WidgetPathRefusedError(f"a removal must name one {self._directory}/<slug>/")
         async with self._lock:
             self._expect(parent_sha)
-            prefix = _directory(slug)
+            prefix = f"{self._directory}/{slug}/"
             tree = self._tree(parent_sha)
             removed = [path for path in tree if path.startswith(prefix)]
             if not removed:
@@ -134,7 +149,7 @@ class FakeWidgetRepository:
 
     async def read_widget(self, slug: str, *, at: str) -> dict[str, str] | None:
         async with self._lock:
-            prefix = _directory(slug)
+            prefix = f"{self._directory}/{slug}/"
             files = {
                 path.removeprefix(prefix): text
                 for path, text in self._tree(at).items()

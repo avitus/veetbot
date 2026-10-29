@@ -1,7 +1,7 @@
 # ADR-0268: On 2026-10-29 the owner accepted the agent-written jobs MVP and
 # instructed implementation: saved Python programs combine code and explicit
 # model calls as appropriate, run once or through the existing scheduler, and
-# publish existing Cockpit feeds. Implementation is in progress; production
+# publish existing Cockpit feeds. The MVP implementation is complete; production
 # access, delivery and acceptance remain pending. No milestone or gate moves.
 # ADR-0240: Owner authorized Milestone 35, Cockpit mode and agent-authored
 # widgets, on 2026-10-22; design and pending gates only. The verified ceiling
@@ -338,15 +338,44 @@ agent_jobs_mvp:
   - Code-only and mixed code/model workflows through four broker operations
   - One-time runs, real trials under approved access, and existing scheduler integration
   - GitHub PR monitoring through the existing Cockpit widget and feed
-  implementation_status: execution_slice_implemented_not_exposed
+  implementation_status: implemented_default_off_pending_delivery
   implementation_evidence:
   - tests/unit/test_job_program_process.py
   - tests/contract/test_job_runner_contract.py
+  - tests/contract/test_job_screen_contract.py
+  - tests/contract/test_job_repository_contract.py
+  - tests/contract/test_job_store_contract.py
+  - tests/integration/test_job_store_postgres.py
+  - tests/unit/test_job_publication.py
+  - tests/unit/test_job_http.py
+  - tests/unit/test_job_broker.py
+  - tests/unit/test_job_model.py
+  - tests/unit/test_job_execution.py
+  - tests/unit/test_job_feed_preview.py
+  - tests/unit/test_job_tools.py
+  - tests/unit/test_job_authorization.py
+  - tests/unit/test_job_schedule.py
+  - tests/unit/test_job_composition.py
+  - tests/unit/test_job_examples.py
+  verification:
+    reading_lane: A
+    diff_minimum_reading_lane: A
+    static: 'circleci testsuite run static: 8933 passed, one skipped, one pre-existing failure across all 540 atoms'
+    known_baseline_failure: 'tests/unit/test_owner_recall_probes.py::test_family_probe_checks_the_names_the_overview_delivers; reproduced on untouched bbbb1282 before jobs implementation'
+    contract: 'circleci testsuite run contract: 2004 passed across all 190 test atoms'
+    postgres: 'circleci testsuite run integration: 17 passed across five selected job, Cockpit and schedule atoms; 115 atoms excluded'
+    final_workflow: 'circleci testsuite run static -t ^tests/unit/test_job_composition.py$: 12 passed, including external approval/resume and reuse; 539 atoms excluded'
+    checks: 'Lint, typecheck, Cockpit lint/typecheck, citation repair and docs-check passed'
+    red_test:
+      command: 'circleci testsuite run contract -t ^tests/contract/test_job_runner_contract.py$'
+      expected_failure: 'Catching the broker call limit incorrectly returned success instead of JobExecutionError'
+      resolution: 'The runner retains the bridge limit failure; the regression and complete contract partition pass'
   remaining_work:
-  - Saved package publication and private grants
-  - Production HTTP, model and feed broker composition with budget accounting
-  - Agent tools, schedule task persistence and worker dispatch
-  - GitHub credential setup, production delivery and both MVP smoke workflows
+  - Authorized review and hosted CI on the final delivery head
+  - GitHub reader credential setup and production delivery of all three images
+  - Adapt the generic collector mapping to the existing live widget feed schema
+  - One-time grant reuse and mixed code/model smoke workflows in production
+  - Observe the live widget for a day against ADR-0268 freshness and zero-model-cost criteria
 
 milestones:
   '35':

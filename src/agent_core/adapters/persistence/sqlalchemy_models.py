@@ -3088,10 +3088,11 @@ class CockpitCommitOutboxRow(Base):
         PrimaryKeyConstraint(
             "tenant_id", "principal_id", "revision_id", name="pk_cockpit_commit_outbox"
         ),
-        Index("ix_cockpit_commit_outbox_due", "tenant_id", "next_attempt_at"),
+        Index("ix_cockpit_commit_outbox_due", "tenant_id", "package_kind", "next_attempt_at"),
         CheckConstraint("operation IN ('write', 'remove')", name="operation"),
         CheckConstraint("attempts >= 0", name="attempts"),
     )
+    package_kind: Mapped[str] = mapped_column(Text, server_default="widget")
     tenant_id: Mapped[str] = mapped_column(Text)
     principal_id: Mapped[str] = mapped_column(Text)
     revision_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
@@ -3113,6 +3114,7 @@ class CockpitImportFailureRow(Base):
         ),
         CheckConstraint("jsonb_typeof(diagnostics) = 'array'", name="diagnostics"),
     )
+    package_kind: Mapped[str] = mapped_column(Text, server_default="widget")
     tenant_id: Mapped[str] = mapped_column(Text)
     principal_id: Mapped[str] = mapped_column(Text)
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
@@ -3121,3 +3123,18 @@ class CockpitImportFailureRow(Base):
     diagnostics: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     seen: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class JobRecordRow(Base):
+    """Local source revisions and private grants for one owner-scoped job."""
+
+    __tablename__ = "agent_jobs"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "slug", name="pk_agent_jobs"),
+        CheckConstraint("version >= 1", name="version"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    body: Mapped[dict[str, Any]] = mapped_column(JSONB)

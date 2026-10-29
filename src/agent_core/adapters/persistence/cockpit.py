@@ -965,14 +965,18 @@ def _failure_from_row(row: CockpitImportFailureRow) -> ImportFailure:
 
 
 class PostgresWidgetCommitOutbox:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, package_kind: str = "widget") -> None:
         self._session = session
+        if package_kind not in {"widget", "job"}:
+            raise ValueError("Unknown publication namespace.")
+        self._kind = package_kind
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry:
         try:
             async with self._session.begin_nested():
                 await self._session.execute(
                     insert(CockpitCommitOutboxRow).values(
+                        package_kind=self._kind,
                         tenant_id=entry.tenant_id,
                         principal_id=entry.principal_id,
                         revision_id=entry.revision_id,
@@ -996,6 +1000,7 @@ class PostgresWidgetCommitOutbox:
             await self._session.execute(
                 select(CockpitCommitOutboxRow)
                 .where(
+                    CockpitCommitOutboxRow.package_kind == self._kind,
                     CockpitCommitOutboxRow.tenant_id == tenant_id,
                     CockpitCommitOutboxRow.next_attempt_at <= now,
                 )
@@ -1023,6 +1028,7 @@ class PostgresWidgetCommitOutbox:
                 update(CockpitCommitOutboxRow)
                 .where(
                     *_owned_by(CockpitCommitOutboxRow, principal),
+                    CockpitCommitOutboxRow.package_kind == self._kind,
                     CockpitCommitOutboxRow.revision_id == revision_id,
                 )
                 .values(attempts=attempts, next_attempt_at=next_attempt_at, last_error=last_error)
@@ -1037,6 +1043,7 @@ class PostgresWidgetCommitOutbox:
         await self._session.execute(
             delete(CockpitCommitOutboxRow).where(
                 *_owned_by(CockpitCommitOutboxRow, principal),
+                CockpitCommitOutboxRow.package_kind == self._kind,
                 CockpitCommitOutboxRow.revision_id == revision_id,
             )
         )
@@ -1044,6 +1051,7 @@ class PostgresWidgetCommitOutbox:
     async def record_import_failure(self, failure: ImportFailure) -> ImportFailure:
         await self._session.execute(
             insert(CockpitImportFailureRow).values(
+                package_kind=self._kind,
                 tenant_id=failure.tenant_id,
                 principal_id=failure.principal_id,
                 id=failure.id,
@@ -1060,7 +1068,8 @@ class PostgresWidgetCommitOutbox:
         self, principal: Principal, *, unseen_only: bool = False
     ) -> list[ImportFailure]:
         query = select(CockpitImportFailureRow).where(
-            *_owned_by(CockpitImportFailureRow, principal)
+            *_owned_by(CockpitImportFailureRow, principal),
+            CockpitImportFailureRow.package_kind == self._kind,
         )
         if unseen_only:
             query = query.where(CockpitImportFailureRow.seen.is_(False))
@@ -1080,6 +1089,7 @@ class PostgresWidgetCommitOutbox:
             update(CockpitImportFailureRow)
             .where(
                 *_owned_by(CockpitImportFailureRow, principal),
+                CockpitImportFailureRow.package_kind == self._kind,
                 CockpitImportFailureRow.id.in_(list(failure_ids)),
                 CockpitImportFailureRow.seen.is_(False),
             )
@@ -1091,7 +1101,11 @@ class PostgresWidgetCommitOutbox:
         removed = 0
         for table in (CockpitCommitOutboxRow, CockpitImportFailureRow):
             removed += _rowcount(
-                await self._session.execute(delete(table).where(*_owned_by(table, principal)))
+                await self._session.execute(
+                    delete(table).where(
+                        *_owned_by(table, principal), table.package_kind == self._kind
+                    )
+                )
             )
         return removed
 

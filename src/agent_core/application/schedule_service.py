@@ -17,6 +17,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError, ScheduleValid
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.recurrence import RecurrenceCalculator
 from agent_core.domain.schedules import (
+    JobTask,
     OccurrenceCursor,
     Schedule,
     ScheduleCursor,
@@ -526,6 +527,7 @@ def _revision(
         revision=schedule.current_revision,
         title=definition.title,
         instruction=definition.instruction,
+        task=definition.task,
         agent_id=definition.agent_id,
         agent_version=definition.agent_version,
         policy_profile=definition.policy_profile,
@@ -561,6 +563,7 @@ def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
     return ScheduleDefinition(
         title=revision.title,
         instruction=revision.instruction,
+        task=revision.task,
         agent_id=revision.agent_id,
         agent_version=revision.agent_version,
         policy_profile=revision.policy_profile,
@@ -582,6 +585,28 @@ async def _validate_definition(
     definition: ScheduleDefinition,
     limits: ScheduleDefinitionLimits,
 ) -> None:
+    if isinstance(definition.task, JobTask):
+        require_scope(principal, "jobs.run")
+        task = definition.task
+        job = await uow.jobs.get(principal, task.slug)
+        revision = job.revisions.get(str(task.revision_id))
+        grant = job.grants.get(str(task.grant_id))
+        if job.archived or revision is None or revision.commit_sha is None or grant is None:
+            raise ScheduleValidationError(
+                "schedule.job_unavailable",
+                "Select a published job revision and its approved grant.",
+            )
+        expected_scopes = {"jobs.run"} | (
+            {"cockpit.read", "cockpit.write"} if grant.access.feeds else set()
+        )
+        if definition.requested_scopes != expected_scopes:
+            raise ScheduleValidationError(
+                "schedule.job_scopes", "Job schedule scopes must match its grant."
+            )
+        if not grant.access.feeds <= revision.manifest.feeds:
+            raise ScheduleValidationError(
+                "schedule.job_feeds", "The job revision must declare the grant's feeds."
+            )
     if definition.browser_profile_id is not None:
         require_scope(principal, "browser.profile.read")
         if "browser.profile.read" not in definition.requested_scopes:
