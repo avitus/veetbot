@@ -308,4 +308,4 @@ implementation without one.
 - [ADR-0261: Read a long tool result in sections (Proposed)](0261-read-a-capture-in-sections.md)
 - [ADR-0262: The deferred tool index holds 2,500 tokens (Accepted)](0262-deferred-index-token-headroom.md)
 - [ADR-0263: Fewer browser approvals in owner research (Proposed)](0263-fewer-browser-approvals-in-owner-research.md)
-- [ADR-0268: Jobs the agent writes, run once or on a schedule (Proposed)](0268-agent-written-jobs.md)
+- [ADR-0268: Jobs the agent writes, run once or on a schedule](0268-agent-written-jobs.md)

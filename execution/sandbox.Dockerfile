@@ -14,6 +14,8 @@ COPY src/agent_core/execution/__init__.py /opt/agent/agent_core/execution/__init
 COPY src/agent_core/execution/egress_core.py /opt/agent/agent_core/execution/egress_core.py
 COPY src/agent_core/execution/proxy.py /opt/agent/agent_core/execution/proxy.py
 COPY src/agent_core/execution/bridge_relay.py /opt/agent/agent_core/execution/bridge_relay.py
+COPY src/agent_core/execution/job_sdk.py /opt/agent/agent_core/execution/job_sdk.py
+COPY src/agent_core/execution/job_runner.py /opt/agent/agent_core/execution/job_runner.py
 COPY src/agent_core/execution/visuals.py /opt/agent/agent_core/execution/visuals.py
 COPY execution/visualization-guide.md /opt/agent/visualization-guide.md
 RUN mkdir -p /workspace && chown 65534:65534 /workspace && chmod 0700 /workspace

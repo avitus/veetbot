@@ -4,6 +4,15 @@ title: Current Milestone
 
 # Current milestone
 
+- **Agent-written jobs MVP — ADR-0268:** On 2026-10-29 the owner authorized
+  implementation of saved Python programs that combine code and explicit model
+  calls as appropriate. The first execution slice is implemented and tested
+  through the existing sandbox bridge, with code-only and mixed workflows.
+  Saved packages, approved
+  broker access, agent tools, scheduler integration and production acceptance
+  follow. This independent extension preserves existing platform protections
+  and leaves broader hardening for later; no milestone or gate moves.
+
 - **Owner-added MCP servers — ADR-0255:** On 2026-10-26 the owner asked to
   connect the MagicPath MCP server and to add MCP servers from the Settings
   window. Owner-added HTTP servers are stored with a per-server access level,

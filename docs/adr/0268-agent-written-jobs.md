@@ -1,13 +1,16 @@
 # ADR-0268: Jobs the agent writes, run once or on a schedule
 
-- Status: Proposed. The owner set the direction on 2026-10-27 and 2026-10-29:
+- Status: Accepted for MVP implementation on 2026-10-29. The owner set the
+  direction on 2026-10-27 and clarified the MVP on 2026-10-29:
   - the platform owns scheduling;
   - the Veetbot agent writes the code a job runs, for one-time and scheduled
     jobs;
   - that code may mix API calls, computation and model calls;
   - for now all of it lives in the public repository.
 
-  The owner has not yet accepted this decision or authorized the work.
+  The owner explicitly instructed: update this ADR and begin implementation.
+  Production validation is still pending; implementation authorization does not
+  authorize a pull request, deployment or credential installation.
 - Date: 2026-10-29
 - Amends:
   - ADR-0240 decision 8, which defers deterministic collectors;
@@ -20,9 +23,9 @@
   destinations).
 - Scope: a job package on a public branch, a new schedule task kind, one
   deferred builtin tool, a broker that a sandboxed job calls, and one
-  owner-approved credential. This becomes a new workstream once the owner
-  authorizes it in project state.
-- Detailed design, once accepted: `docs/plan/scheduling.md`,
+  owner-approved credential. This is an independently authorized MVP workstream
+  recorded in project state; it does not advance a milestone or gate.
+- Detailed design: `docs/plan/scheduling.md`,
   `docs/plan/sandbox-isolation.md`, `docs/plan/cockpit.md`,
   `docs/plan/builtin-tools.md`, `docs/plan/policy-and-approvals.md`
 
@@ -54,6 +57,44 @@ to read them, every time.
 In chat the gap is the same. `sandbox.run_command` runs throwaway commands
 with no network. The agent cannot save a program, give it approved access to a
 service, and run it again later.
+
+## MVP scope and delivery
+
+The agent chooses the appropriate combination of code and model calls for the
+owner's task. The failure being repaired is unnecessary model reasoning over
+fixed steps, not the presence of model calls. Code handles structured reads,
+filtering, counts and formatting; a job calls a model when interpretation,
+summarization or other judgment is useful. Both paths belong in the MVP. A
+model is never invoked automatically merely because a job starts or finishes.
+
+The first complete workflow is: the owner asks Veetbot for a GitHub pull request
+monitor; Veetbot writes and tests its program, runs it once, schedules it every
+five minutes and publishes into the existing widget's feed. A second example
+fetches review text with code, asks a model for a summary and publishes the
+result. These are examples of the general job capability, not special platform
+collectors. The model budget defaults to zero for a code-only grant; an approved
+positive budget enables model calls in a mixed job.
+
+Reuse the existing execution service and bridge transport, scheduler, gateway,
+feed validation, approval and budget mechanisms, and public-code publication
+pipeline. Keep their existing protections. Do not redesign the widget renderer,
+build a general credential UI, add advanced grant administration, transactional
+feed publication, sophisticated replay recovery, shared rate-limit coordination
+or a comprehensive fixture framework as prerequisites for the MVP. Later work
+can strengthen these where real use demonstrates the need.
+
+Implement in this order:
+
+1. Execute Python through the existing sandbox bridge. Prove a code-only job
+   makes no model request and a mixed job makes exactly the model requests its
+   code asks for. Return the result and useful errors to the caller.
+2. Add saved packages and the four broker operations using existing platform
+   services, the GitHub reader credential, and private approved inputs/access.
+   Expose authoring and one-time execution to the production Veetbot agent.
+3. Add the job task to the existing scheduler and connect the existing widget.
+4. Verify both workflows in production. Pause the old model-driven collector
+   only after the job publishes a working feed; retain that schedule for manual
+   fallback. Never deliberately run both collectors against that feed.
 
 ## Decision
 
@@ -96,8 +137,9 @@ service, and run it again later.
    - Its only channel out is a per-run socket to a job broker. The broker runs
      outside the execution service, so the execution service still holds
      nothing worth stealing.
-   - The job uses a small preinstalled library, `veetbot_job`. Package
-     installation stays denied.
+   - The job exports `main(inputs, job)`. The preinstalled job library supplies
+     the `job` context with the four operations below. Package installation
+     stays denied.
 
    The library has four calls, and each is a broker request:
 
@@ -154,9 +196,11 @@ service, and run it again later.
    decision.
 9. **The agent writes, tests and fixes jobs.** A deferred builtin,
    `job.manage`, creates, updates, archives and restores packages. A trial
-   action runs a revision once with no grant. That gives it no host, no
-   credential and no model, and its feed publishes go to a preview. The agent
-   sees the result and the log, and a trial asks no approval. `job.run`,
+   runs the same program and returns its result and useful errors for repair.
+   With no grant it has no host, credential or model; with approved access it
+   can exercise real HTTP and model calls. Trial feed publishes go to a preview.
+   A trial never grants access itself. The agent can fix its code and retry
+   without a separate testing framework. `job.run`,
    `schedule.create` and `schedule.update` gain the job task. Earlier tool
    versions stay registered unchanged for pinned runs.
 10. **Outcomes.**
@@ -175,8 +219,9 @@ service, and run it again later.
 
 - Fixed work costs no model tokens. Rewritten as a job, the GitHub widget makes
   one GraphQL query per repository and no model call. It can refresh every
-  five minutes for USD 0 in model cost and 24 queries an hour per repository,
-  well inside the 5,000 an hour an authenticated App gets.
+  five minutes for USD 0 in model cost and twelve scheduled executions an hour.
+  Pagination and refresh on entry may add queries. GitHub GraphQL limits are
+  measured in points per installation; actual usage is checked in the smoke.
 - Judgment stays available where it pays. A job can fetch a thread and call
   `model.complete` once to summarize it, at a cost its grant caps. Briefings
   and research stay agent runs.
@@ -213,7 +258,8 @@ service, and run it again later.
 - `model.complete` charges the run's budget, stops at the grant's per-run cap,
   and offers no tools.
 - `feed.publish` refuses a feed the grant does not allow.
-- A trial reaches no host, no credential and no model.
+- A trial without a grant reaches no host, credential or model; an approved
+  trial uses only its approved access and publishes only to its preview.
 - Widening a grant asks for approval, and so does a commit from a turn
   influenced by untrusted content. A code-only commit from the owner's own
   turn does not.
@@ -226,14 +272,55 @@ service, and run it again later.
 
 ## Validation
 
-The owner accepts this decision when both of these have happened:
+This decision is accepted for implementation. MVP production acceptance remains
+pending until all of these have happened:
 
 - The GitHub widget runs as a scheduled job in production for a day, with:
   - every snapshot at most 1.5 times its interval old;
   - no model cost recorded for that schedule;
   - no unexpected broker refusal.
-- One one-time job written by the agent in a chat runs under an approved
+- One one-time job written by the Veetbot agent in a chat runs under an approved
   grant, and runs again without asking.
+- A mixed job fetches structured data with code, explicitly calls a model for
+  useful judgment, then processes and returns or publishes its answer. Its
+  recorded model calls match those requested by the code; there is no automatic
+  model planning or synthesis around execution.
+- The owner sees the actual widget update, and the agent receives useful errors
+  from an unsuccessful trial so it can repair and rerun the job.
+
+The production-day check evaluates the feature's usefulness. It is not a
+prerequisite for starting implementation, and it does not pull deferred
+hardening into the MVP.
+
+## Implementation checkpoint — 2026-10-29
+
+The first execution slice is implemented on `agent-jobs`. It provides
+`JobProgram`, the `JobRunner` port, `SandboxJobRunner`, the sandbox entry point
+and the four-operation job library. The existing sandbox image installs the
+helper; the runner uses `SandboxManager` and `ProgrammaticBridgeSession`. There
+is no new runtime dependency, policy edit or production tool registration.
+
+Evidence: `tests/unit/test_job_program_process.py` executes known synthetic
+programs in local child processes: pure computation needs no broker or model,
+and a mixed workflow requests HTTP, one model completion, feed publication and
+logging in that order. It also checks repair feedback for malformed programs,
+missing access and invalid results. `tests/contract/test_job_runner_contract.py`
+checks execution-service dispatch, declared calls, result handling and cleanup
+after failure or cancellation. Both began with expected failures for missing
+execution, then passed after implementation.
+
+These checks use a scripted broker and execution adapter; they are not live
+provider, GitHub or gVisor acceptance evidence. Saved package publication,
+private approved access, production broker composition and cost accounting,
+agent tools and the schedule task remain to be implemented. The feature is
+not yet available to the production Veetbot agent.
+
+Local verification passes the twelve new cases, all 1,988 contract tests, lint,
+typecheck and documentation checks. The static partition passes 8,859 cases,
+skips one and fails `test_family_probe_checks_the_names_the_overview_delivers`.
+The same failure reproduces on untouched starting commit `bbbb1282`, without
+the jobs changes; it remains outside this implementation. No existing test was
+weakened or skipped to obtain passing evidence.
 
 ## Alternatives considered
 

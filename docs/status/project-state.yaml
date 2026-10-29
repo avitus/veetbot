@@ -1,3 +1,8 @@
+# ADR-0268: On 2026-10-29 the owner accepted the agent-written jobs MVP and
+# instructed implementation: saved Python programs combine code and explicit
+# model calls as appropriate, run once or through the existing scheduler, and
+# publish existing Cockpit feeds. Implementation is in progress; production
+# access, delivery and acceptance remain pending. No milestone or gate moves.
 # ADR-0240: Owner authorized Milestone 35, Cockpit mode and agent-authored
 # widgets, on 2026-10-22; design and pending gates only. The verified ceiling
 # does not move.
@@ -323,6 +328,25 @@ project:
     - 34
     - 35
 
+
+agent_jobs_mvp:
+  adr: docs/adr/0268-agent-written-jobs.md
+  authorized_on: '2026-10-29'
+  status: in_progress
+  authorized_scope:
+  - Agent-authored public Python packages with private inputs and approved access
+  - Code-only and mixed code/model workflows through four broker operations
+  - One-time runs, real trials under approved access, and existing scheduler integration
+  - GitHub PR monitoring through the existing Cockpit widget and feed
+  implementation_status: execution_slice_implemented_not_exposed
+  implementation_evidence:
+  - tests/unit/test_job_program_process.py
+  - tests/contract/test_job_runner_contract.py
+  remaining_work:
+  - Saved package publication and private grants
+  - Production HTTP, model and feed broker composition with budget accounting
+  - Agent tools, schedule task persistence and worker dispatch
+  - GitHub credential setup, production delivery and both MVP smoke workflows
 
 milestones:
   '35':
@@ -3182,5 +3206,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
   documents_required_before_coding_reaches_them: []
 
-last_updated: '2026-10-28T07:00:00Z'
+last_updated: '2026-10-29T21:00:09Z'
 last_reviewed_commit: 3295faf8
