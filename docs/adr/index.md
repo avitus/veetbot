@@ -297,7 +297,7 @@ implementation without one.
 - [ADR-0250: Learned-memory shape v2 and the reshape of v1 rows](0250-learned-memory-shape-v2.md)
 - [ADR-0251: An unconnected chat offers to connect a website the owner names (Accepted)](0251-chat-offers-to-connect-a-named-website.md)
 - [ADR-0252: Exact-commit signing for the isolated dreaming release](0252-dreaming-release-signing.md)
-- [ADR-0253: A configured tool past the token cap is deferred, not fatal (Proposed)](0253-configured-tools-past-the-token-cap.md)
+- [ADR-0253: A configured tool past the token cap is deferred, not fatal (Accepted)](0253-configured-tools-past-the-token-cap.md)
 - [ADR-0254: Cockpit feeds refresh every minute to every day, and on entry (Accepted)](0254-cockpit-feed-intervals-and-refresh-on-entry.md)
 - [ADR-0255: Owner-added MCP servers with in-app sign-in (Accepted)](0255-owner-added-mcp-servers.md)
 - [ADR-0256: New mail keeps a reserved share of the Email budget (Accepted)](0256-new-mail-keeps-a-reserved-email-budget-share.md)
@@ -308,3 +308,4 @@ implementation without one.
 - [ADR-0261: Read a long tool result in sections (Proposed)](0261-read-a-capture-in-sections.md)
 - [ADR-0262: The deferred tool index holds 2,500 tokens (Accepted)](0262-deferred-index-token-headroom.md)
 - [ADR-0263: Fewer browser approvals in owner research (Proposed)](0263-fewer-browser-approvals-in-owner-research.md)
+- [ADR-0267: The deferred tool index holds fifty entries and 3,000 tokens (Accepted)](0267-deferred-index-headroom.md)

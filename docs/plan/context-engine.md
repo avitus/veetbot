@@ -363,7 +363,7 @@ ceiling.
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
-| A | Deferred tool index | 40 entries / 2,500 tokens | No | Only at an epoch boundary |
+| A | Deferred tool index | 50 entries / 3,000 tokens | No | Only at an epoch boundary |
 | A | Owner tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
@@ -420,9 +420,12 @@ arguments return that tool's whole definition, its description and its input
 schema ([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)).
 A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
-forty entries and 2,500 tokens, and the prefix ceiling rose by exactly that cap:
-2,000 under ADR-0123 and 500 more under
-[ADR-0262](../adr/0262-deferred-index-token-headroom.md).
+fifty entries and 3,000 tokens, and the prefix ceiling rose by exactly that cap:
+2,000 under ADR-0123, 500 more under
+[ADR-0262](../adr/0262-deferred-index-token-headroom.md) and 500 more under
+[ADR-0267](../adr/0267-deferred-index-headroom.md), which also raised the
+item cap from forty. The fullest production chat must leave ten entries and
+500 tokens of it free, so the next tool fails a gate rather than a chat.
 An entry lists required parameters in the order of the schema's `required`
 array and optional ones by name, never in the order of the schema's
 properties: the builder re-renders the prefix from the specifications on the
@@ -460,7 +463,8 @@ that names it, so it adds no bytes to the prefix. It never takes a
 definition; a plan without `tool.call` records it as skipped.
 
 In a session bound to a website profile, `browser.navigate`,
-`browser.observe` and `browser.act` are required definitions (ADR-0130): they
+`browser.observe` and `browser.act` are required definitions (ADR-0130), and
+so is `browser.upload` wherever the provider registers it (ADR-0148): they
 rank ahead of every other candidate, neither the agent's deferral list nor
 overflow moves them to the index, and a plan that cannot define them fails at
 plan time. What they displace moves to the index in the order above.
@@ -505,8 +509,9 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 24,500 tokens — 24,000 before
-ADR-0262 added 500 to the deferred tool index, 22,000 before ADR-0255 added
+The prefix classes sum to a hard ceiling of 25,000 tokens — 24,500 before
+ADR-0267 added 500 more to the deferred tool index, 24,000 before
+ADR-0262 added 500 to it, 22,000 before ADR-0255 added
 the 2,000 of the owner-added servers' index, 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
 exactly its own cap, the same move the skill classes made, 17,000 before
