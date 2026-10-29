@@ -306,29 +306,3 @@ async def _act(
     if constraint is None:
         return await provider.act(action)
     return await provider.act(action, constraint=constraint)
-
-
-class LegacyBrowserActTool(BrowserActTool):
-    """Keep the original action input contract for already pinned chats."""
-
-    spec = BrowserActTool.spec.model_copy(
-        update={
-            "version": "1.0.0",
-            "description": (
-                "Perform one action, subject to approval, on an element of the latest page "
-                "revision. The result is the page after the action settles, with a new revision "
-                "and element refs; act on it directly without observing first. A click refused "
-                "with element_not_found may be covered by an overlay: observe again and inspect "
-                "the current controls before choosing an approved recovery action. Never repeat "
-                "a write whose outcome is uncertain."
-            ),
-            "input_schema": {
-                **INPUT_SCHEMA,
-                "properties": {
-                    key: value
-                    for key, value in INPUT_SCHEMA["properties"].items()
-                    if key != "postcondition"
-                },
-            },
-        }
-    )

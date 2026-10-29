@@ -7,8 +7,13 @@ from uuid import uuid4
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.people import InMemoryPeopleStore
 from agent_core.domain.memory import Sensitivity
-from agent_core.domain.people import Person, PersonIdentifier
-from agent_core.memory.people import resolve_identity
+from agent_core.domain.people import (
+    PeopleEndpoint,
+    Person,
+    PersonIdentifier,
+    RelationshipAssertion,
+)
+from agent_core.memory.people import IdentityResolution, resolve_identity
 from tests.contract.support import NOW, principal
 
 
@@ -321,3 +326,134 @@ async def test_owner_stated_address_matches_mail() -> None:
         ceiling=Sensitivity.RESTRICTED,
     )
     assert (result.status, result.person_ids) == ("matched", [brother.id])
+
+
+async def _tied_person(store: InMemoryPeopleStore, name: str, *, alias_context: str) -> Person:
+    """A person the owner is tied to, known by `name` only through `alias_context`."""
+    person = Person(id=uuid4(), display_name=name.split()[0], **_fields())
+    await store.put(person, expected_revision=0)
+    await store.put(
+        PersonIdentifier(
+            id=uuid4(),
+            person_id=person.id,
+            identifier_kind="name",
+            namespace="owner",
+            value=name,
+            context=alias_context,
+            verification="contextual",
+            valid_from=NOW,
+            **_fields(),
+        ),
+        expected_revision=0,
+    )
+    await store.put(
+        RelationshipAssertion(
+            id=uuid4(),
+            subject=PeopleEndpoint(kind="person", id=person.id),
+            object=PeopleEndpoint(kind="owner"),
+            predicate="parent",
+            belief_id=uuid4(),
+            **_fields(),
+        ),
+        expected_revision=0,
+    )
+    return person
+
+
+async def _resolve_owner_name(
+    store: InMemoryPeopleStore, name: str, *, context: str = "owner"
+) -> IdentityResolution:
+    return await resolve_identity(
+        store,
+        principal(),
+        kind="name",
+        namespace="owner",
+        value=name,
+        context=context,
+        at=NOW,
+        ceiling=Sensitivity.RESTRICTED,
+    )
+
+
+async def test_owner_stated_name_selects_the_one_person_already_tied_to_the_owner() -> None:
+    """ADR-0264: "Cheryl Vitus is my mom" reaches the Cheryl whose name mail already taught.
+
+    Production 2026-10-28: the owner's mother held "Cheryl Vitus" only as
+    email-context aliases, so the owner's own statement formed a second person.
+    """
+    store = InMemoryPeopleStore(FixedClock(NOW))
+    mother = await _tied_person(store, "Cheryl Vitus", alias_context="email:0123abcd")
+    result = await _resolve_owner_name(store, "Cheryl Vitus")
+    assert (result.status, result.person_ids) == ("matched", [mother.id])
+    # The owner's words select; a source's label does not.
+    result = await _resolve_owner_name(store, "Cheryl Vitus", context="email:9876fedc")
+    assert result.status == "unresolved"
+    # A name fragment is not the alias.
+    result = await _resolve_owner_name(store, "Vitus")
+    assert result.status == "unresolved"
+
+
+async def test_owner_stated_name_without_an_owner_tie_stays_a_suggestion() -> None:
+    """Without a relationship to the owner, a name alone still identifies nobody (P01)."""
+    store = InMemoryPeopleStore(FixedClock(NOW))
+    person = Person(id=uuid4(), display_name="Cheryl", **_fields())
+    await store.put(person, expected_revision=0)
+    await store.put(
+        PersonIdentifier(
+            id=uuid4(),
+            person_id=person.id,
+            identifier_kind="name",
+            namespace="owner",
+            value="Cheryl Vitus",
+            context="email:0123abcd",
+            verification="contextual",
+            valid_from=NOW,
+            **_fields(),
+        ),
+        expected_revision=0,
+    )
+    result = await _resolve_owner_name(store, "Cheryl Vitus")
+    assert result.status == "unresolved"
+
+
+async def test_owner_stated_name_shared_by_two_tied_people_stays_ambiguous() -> None:
+    store = InMemoryPeopleStore(FixedClock(NOW))
+    first = await _tied_person(store, "Alex Example", alias_context="email:0123abcd")
+    second = await _tied_person(store, "Alex Example", alias_context="email:9876fedc")
+    result = await _resolve_owner_name(store, "Alex Example")
+    assert result.status == "ambiguous"
+    assert set(result.person_ids) == {first.id, second.id}
+
+
+async def test_owner_stated_name_ignores_an_ended_or_unresolved_owner_tie() -> None:
+    store = InMemoryPeopleStore(FixedClock(NOW))
+    person = Person(id=uuid4(), display_name="Pat", **_fields())
+    await store.put(person, expected_revision=0)
+    await store.put(
+        PersonIdentifier(
+            id=uuid4(),
+            person_id=person.id,
+            identifier_kind="name",
+            namespace="owner",
+            value="Pat Example",
+            context="email:0123abcd",
+            verification="contextual",
+            valid_from=NOW,
+            **_fields(),
+        ),
+        expected_revision=0,
+    )
+    await store.put(
+        RelationshipAssertion(
+            id=uuid4(),
+            subject=PeopleEndpoint(kind="owner"),
+            object=PeopleEndpoint(kind="person", id=person.id),
+            predicate="spouse",
+            belief_id=uuid4(),
+            valid_to=NOW - timedelta(days=1),
+            **_fields(),
+        ),
+        expected_revision=0,
+    )
+    result = await _resolve_owner_name(store, "Pat Example")
+    assert result.status == "unresolved"

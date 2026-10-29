@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from html import escape
 from typing import Any
 
@@ -195,22 +195,11 @@ def prefix_bytes(
     prefix: Sequence[ConversationItem],
     tools: Sequence[ToolSpec],
     deferred_tools: Sequence[ToolSpec] = (),
-    *,
-    recorded_scopes: Mapping[str, Sequence[str]] | None = None,
 ) -> bytes:
-    """The bytes a plan's prefix hash covers.
-
-    `recorded_scopes` reproduces a plan hashed before scope sets serialized
-    sorted: each listed tool's scopes take the order its plan event recorded
-    (ADR-0134).
-    """
+    """The bytes a plan's prefix hash covers."""
 
     def dump(spec: ToolSpec) -> dict[str, Any]:
-        dumped = spec.model_dump(mode="json")
-        order = None if recorded_scopes is None else recorded_scopes.get(spec.name)
-        if order is not None and sorted(order) == dumped["required_scopes"]:
-            dumped["required_scopes"] = list(order)
-        return dumped
+        return spec.model_dump(mode="json")
 
     document: dict[str, Any] = {
         "conversation": [item.model_dump(mode="json") for item in prefix],

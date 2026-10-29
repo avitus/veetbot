@@ -1893,3 +1893,96 @@ async def test_unresolved_commitment_still_requires_admitted_state_evidence(inva
     assert result.run.decision_counts.get("rejected_people_evidence", 0) == 1
     async with factory() as uow:
         assert await uow.people.query(_people_query(["person", "commitment"])) == []
+
+
+async def test_restated_owner_kinship_reaches_the_known_person_not_a_duplicate() -> None:
+    """ADR-0264: "Cheryl Vitus is my mom" attaches to the Cheryl the owner already has.
+
+    Production 2026-10-28: her record held "Cheryl Vitus" only as email-context
+    name aliases, so the owner's correction formed a second "Cheryl Vitus" person
+    and reinforced nothing.
+    """
+    from uuid import uuid4
+
+    from agent_core.domain.people import PeopleEndpoint, PersonIdentifier
+    from tests.contract.support import NOW
+
+    clock, factory = await memory_uow_factory()
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    mother = Person(id=uuid4(), display_name="Cheryl", state="provisional", **common)
+    async with factory() as uow:
+        await uow.people.put(mother, expected_revision=0)
+        await uow.people.put(
+            PersonIdentifier(
+                id=uuid4(),
+                person_id=mother.id,
+                identifier_kind="name",
+                namespace="owner",
+                value="Cheryl Vitus",
+                context="email:0123abcd",
+                verification="contextual",
+                valid_from=NOW,
+                **common,
+            ),
+            expected_revision=0,
+        )
+        await uow.people.put(
+            RelationshipAssertion(
+                id=uuid4(),
+                subject=PeopleEndpoint(kind="person", id=mother.id),
+                object=PeopleEndpoint(kind="owner"),
+                predicate="parent",
+                belief_id=uuid4(),
+                **common,
+            ),
+            expected_revision=0,
+        )
+    text = "Cheryl Vitus is my mom"
+    sequence = await user_event(factory, text)
+    candidate = _owner_kin_candidate(
+        text,
+        sequence=sequence,
+        span="Cheryl Vitus",
+        display_name="Cheryl Vitus",
+        identifier_kind="name",
+        identifier_value="Cheryl Vitus",
+        context="",
+        predicate="parent",
+        qualifier="mother",
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        ids(),
+        principal(),
+        extractor=Extractor(candidate),
+        policy_version="formation@11",
+        people_enabled=True,
+    )
+    result = await service.run(trigger="idle", scope="user", session_id=SESSION_ID)
+    assert [belief.statement for belief in result.beliefs] == [text]
+    query = PeopleQuery(
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        sensitivity_ceiling=Sensitivity.SENSITIVE,
+    )
+    async with factory() as uow:
+        people = [r for r in await uow.people.query(query) if isinstance(r, Person)]
+        assert [person.id for person in people] == [mother.id], "no second Cheryl"
+        relationships = [
+            r
+            for r in await uow.people.query(query.model_copy(update={"kinds": ["relationship"]}))
+            if isinstance(r, RelationshipAssertion)
+        ]
+        assert {relation.subject.id for relation in relationships} == {mother.id}
+        assert any(relation.belief_id == result.beliefs[0].id for relation in relationships)
+        links = await uow.people.query(query.model_copy(update={"kinds": ["memory_link"]}))
+        assert [link.person_id for link in links if isinstance(link, PersonMemoryLink)] == [
+            mother.id
+        ]
+    assert result.beliefs[0].subject.startswith(f"person:{mother.id}:")

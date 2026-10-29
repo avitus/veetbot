@@ -1155,8 +1155,7 @@ Later subject documents add nouns on the same terms, each owned where its
 subject is designed: `agent persona` in
 [persona-surface.md](persona-surface.md), `agent surface` in
 [inbound-surfaces.md](inbound-surfaces.md), `agent people` in
-[people-and-relationships.md](people-and-relationships.md), `agent email
-exclude-bulk` in [email-experience.md](email-experience.md) (ADR-0116), and the
+[people-and-relationships.md](people-and-relationships.md), and the
 role entry points `agent execution-service` (ADR-0067) and `agent call-worker`
 and `agent call-ingress` ([bland-calling.md](bland-calling.md)). `agent session
 export-consent` is ADR-0039's, and `agent eval` carries the subcommands

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections import Counter
+from dataclasses import asdict
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,35 @@ def pytest_configure(config: pytest.Config) -> None:
     if destination:
         real_browser_support.OBSERVED_BROWSER_BUILDS.clear()
         browser_tasks.OUTCOMES.clear()
-        config.pluginmanager.register(BrowserReporter(Path(destination)), "browser-baseline")
+        # An xdist worker only ships what it observed; the controller reports.
+        if hasattr(config, "workerinput"):
+            config.pluginmanager.register(WorkerEvidence(), "browser-evidence")
+        else:
+            config.pluginmanager.register(BrowserReporter(Path(destination)), "browser-baseline")
+
+
+EVIDENCE_KEY = "browser_evidence"
+
+
+class WorkerEvidence:
+    """Hand one xdist worker's builds, task outcomes and filtering to the controller."""
+
+    def __init__(self) -> None:
+        self.deselected_browser_cases = 0
+
+    def pytest_deselected(self, items: list[pytest.Item]) -> None:
+        self.deselected_browser_cases += sum(
+            item.get_closest_marker("browser") is not None for item in items
+        )
+
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        session.config.workeroutput[EVIDENCE_KEY] = {  # type: ignore[attr-defined]
+            "browser_builds": sorted(real_browser_support.OBSERVED_BROWSER_BUILDS),
+            "task_outcomes": {
+                scenario: asdict(outcome) for scenario, outcome in browser_tasks.OUTCOMES.items()
+            },
+            "deselected_browser_cases": self.deselected_browser_cases,
+        }
 
 
 class BrowserReporter:
@@ -40,17 +69,39 @@ class BrowserReporter:
         )
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
+        self._register([item.nodeid for item in session.items])
+
+    def _register(self, nodeids: list[str]) -> None:
         ordinals: Counter[str] = Counter()
-        for item in session.items:
+        for nodeid in nodeids:
             # Parameter IDs can contain values from fixtures. Retain the test
             # function and an ordinal, never arbitrary parameter representations.
-            identity = item.nodeid.partition("[")[0]
+            identity = nodeid.partition("[")[0]
             ordinals[identity] += 1
-            self.cases[item.nodeid] = {
+            self.cases[nodeid] = {
                 "id": f"{identity}#{ordinals[identity]}",
                 "outcome": "not_run",
                 "duration_seconds": 0.0,
             }
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_xdist_node_collection_finished(self, node: Any, ids: list[str]) -> None:
+        # Every worker collects the same cases; the first list defines them.
+        if not self.cases:
+            self._register(ids)
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_testnodedown(self, node: Any, error: object) -> None:
+        evidence = getattr(node, "workeroutput", {}).get(EVIDENCE_KEY)
+        if evidence is None:
+            return
+        real_browser_support.OBSERVED_BROWSER_BUILDS.update(evidence["browser_builds"])
+        for scenario, outcome in evidence["task_outcomes"].items():
+            browser_tasks.OUTCOMES[scenario] = browser_tasks.TaskOutcome(**outcome)
+        # Each worker filters the same collection, so counts are not summed.
+        self.deselected_browser_cases = max(
+            self.deselected_browser_cases, evidence["deselected_browser_cases"]
+        )
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         case = self.cases.get(report.nodeid)

@@ -398,5 +398,8 @@ nav:
       - 'ADR-0261: Read a long tool result in sections': adr/0261-read-a-capture-in-sections.md
       - 'ADR-0262: The deferred tool index holds 2,500 tokens': adr/0262-deferred-index-token-headroom.md
       - 'ADR-0263: Fewer browser approvals in owner research': adr/0263-fewer-browser-approvals-in-owner-research.md
+      - 'ADR-0264: An owner-stated name reaches the person the owner is already tied to': adr/0264-owner-stated-names-reach-the-tied-person.md
+      - 'ADR-0265: The first family page reaches every tier of the family': adr/0265-the-first-family-page-reaches-every-tier.md
+      - 'ADR-0266: Spent one-time repairs are retired': adr/0266-spent-one-time-repairs-are-retired.md
       - 'ADR-0267: Deferred tool index headroom': adr/0267-deferred-index-headroom.md
   - Changelog: changelog.md

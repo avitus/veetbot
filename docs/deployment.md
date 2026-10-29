@@ -1948,11 +1948,3 @@ positions, no SQL). Run the dry run first and keep its output with the
 authorization; the owner's affirmed home address and its seven partners are
 the first production case.
 
-### Learned-memory reshape (ADR-0250)
-
-`agent memory reshape --policy owner-source-learning@1` counts the live rows
-learned under the old shape; `--confirm` supersedes each with its `@2` belief
-through formation (claim as statement, host beside it, same sources,
-confidence and expiry) and leaves the old row readable as superseded. Run the
-dry run first; the production run needs the owner's authorization, and the
-fallback is the rows' own thirty-day expiry.

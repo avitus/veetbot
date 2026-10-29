@@ -963,16 +963,6 @@ class ConsolidationResult(BaseModel):
     conflicted: int = Field(default=0, ge=0)
 
 
-class SourceReshape(BaseModel):
-    """What a learned-memory reshape examined and, unless a dry run, superseded (ADR-0250)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    examined: int = Field(ge=0)
-    reshaped: int = Field(ge=0)
-    dry_run: bool
-
-
 class ConflictReconciliation(BaseModel):
     """What a `reconcile-conflicts` pass examined and, unless a dry run, changed (ADR-0248)."""
 

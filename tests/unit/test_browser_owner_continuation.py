@@ -456,49 +456,21 @@ def test_existing_schedule_tool_pins_keep_the_original_closed_contract() -> None
     import hashlib
     import json
 
-    from agent_core.tools.schedule_create import (
-        LegacyScheduleCreateTool,
-        PreviousScheduleCreateTool,
-        ScheduleCreateTool,
-        SingleCallScheduleCreateTool,
-    )
+    from agent_core.tools.schedule_create import ScheduleCreateTool, SingleCallScheduleCreateTool
 
     def digest(tool: type[ScheduleCreateTool]) -> str:
         encoded = json.dumps(tool.spec.model_dump(mode="json"), sort_keys=True).encode()
         return hashlib.sha256(encoded).hexdigest()
 
     # Restored runs compare whole pinned specs, so retained versions never change.
-    assert {
-        tool.spec.version: digest(tool)
-        for tool in (
-            SingleCallScheduleCreateTool,
-            PreviousScheduleCreateTool,
-            LegacyScheduleCreateTool,
-        )
-    } == {
-        "1.3.0": "2d4485087f586e13e57c014833b4888c09462d3630a9405f9636c80fac5d414a",
-        "1.2.0": "090d405f5dbde3e0e76e2194cc1fb02b8cd72408656e5f28b0ab4562d62cc44c",
-        "1.1.1": "d8e4b31f3a55d358c886a46ec865e95b335fc3da7f3a56bc1bfd59c24cc518f6",
-    }
-
-    old = LegacyScheduleCreateTool.spec
-    assert old.version == "1.1.1"
-    assert "use_website" not in old.input_schema["properties"]
-    assert "use_website" not in old.description
-    assert old.description == (
-        "Create one future one-time or recurring schedule. For recurrence, supply a "
-        "complete IANA-zone cadence; ask about ambiguous dates or times."
+    assert SingleCallScheduleCreateTool.spec.version == "1.3.0"
+    assert (
+        digest(SingleCallScheduleCreateTool)
+        == "2d4485087f586e13e57c014833b4888c09462d3630a9405f9636c80fac5d414a"
     )
-    previous = PreviousScheduleCreateTool.spec
-    assert previous.version == "1.2.0"
-    assert "use_website" in previous.input_schema["properties"]
-    assert "place_call" not in previous.input_schema["properties"]
-    assert "place_call" not in previous.description
-    assert "place_call" not in old.input_schema["properties"]
     # ADR-0213 added call schedules as 1.3.0; ADR-0221 added call plans as 1.4.0.
     assert "place_call" in SingleCallScheduleCreateTool.spec.input_schema["properties"]
     assert "call_plan" not in SingleCallScheduleCreateTool.spec.input_schema["properties"]
-    assert "call_plan" not in previous.input_schema["properties"]
     assert ScheduleCreateTool.spec.version == "1.4.0"
     assert "call_plan" in ScheduleCreateTool.spec.input_schema["properties"]
 

@@ -651,8 +651,8 @@ class HybridMemoryRetriever:
             policy_version += f"+{HOME_LOCATION_POLICY_VERSION}"
             render_policy += f"+{HOME_LOCATION_POLICY_VERSION}"
         if effective_query.relationship_group is not None:
-            policy_version += "+owner-overview@2"
-            render_policy += "+owner-overview@2"
+            policy_version += "+owner-overview@3"
+            render_policy += "+owner-overview@3"
         if effective_query.budget_bytes is not None:
             policy_version += "+inline-budget@1"
             render_policy += "+inline-budget@1"
@@ -1954,8 +1954,8 @@ def render_memory(
             else ""
         )
         lines.append(
-            "  Direct owner relationships: bounded page of at most three people; "
-            "supporting facts may be omitted. Narrow the query for more detail."
+            "  Direct owner relationships: a bounded page of the closest people, not "
+            "everyone; supporting facts may be omitted. Narrow the query for more detail."
             + continuation
             + overflow
         )

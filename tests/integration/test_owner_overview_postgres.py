@@ -58,6 +58,19 @@ async def test_production_overview_first_page_is_the_closest_family_postgres(
         await closeness_overview_run(app)
 
 
+async def test_production_overview_first_page_reaches_every_family_tier_postgres(
+    tmp_path: Path,
+) -> None:
+    from tests.contract.owner_overview_cases import tiered_overview_run
+
+    async with build(
+        settings=replace(_settings(tmp_path), people_enabled=True),
+        storage="postgres",
+        script=script(True),
+    ) as app:
+        await tiered_overview_run(app)
+
+
 async def test_production_overview_says_when_a_group_exceeds_what_it_reads_postgres(
     tmp_path: Path,
 ) -> None:

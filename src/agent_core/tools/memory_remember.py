@@ -136,12 +136,6 @@ def _statement_trust(context: ToolExecutionContext) -> TrustLevel:
     return statement_trust
 
 
-class LegacyMemoryRememberTool(MemoryRememberTool):
-    """Compatibility registration for sessions pinned before the 1.0.1 patch."""
-
-    spec = MemoryRememberTool.spec.model_copy(update={"version": "1.0.0"}, deep=True)
-
-
 class PeopleMemoryRememberTool(MemoryRememberTool):
     """Optional validated People references; old pinned tool versions stay frozen."""
 

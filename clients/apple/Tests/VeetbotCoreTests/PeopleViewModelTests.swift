@@ -175,6 +175,30 @@ import Testing
         #expect(model.receipt?.state == "completed")
     }
 
+    /// Confirming or rejecting a fact from its row menu changes nothing on the row, so a toast says it took.
+    @Test(arguments: [("affirm", "Fact confirmed."), ("reject", "Fact rejected.")])
+    func confirmingOrRejectingAFactIsConfirmed(operation: String, toast: String) async throws {
+        let id = UUID(), sessionID = UUID(), factID = UUID()
+        let fact = """
+        {"id":"\(factID)","subject":"Maya","statement":"Maya is my colleague","belief_type":"relationship","claim_kind":"relationship","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"general","portability":"contextual","authority":"user","sensitivity":"sensitive","confidence":1,"corroboration_count":1,"flagged_for_review":false,"conflicts_with":[],"source_session_id":"\(sessionID)","source_event_ids":[1],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@11","origin_scopes":[],"valid_from":"2026-08-01T00:00:00Z","last_evidence_at":"2026-08-01T00:00:00Z","last_reinforced_at":"2026-08-01T00:00:00Z","created_at":"2026-08-01T00:00:00Z","updated_at":"2026-08-01T00:00:00Z"}
+        """
+        let client = try makePeopleClient { request in
+            if request.url?.path.hasSuffix("/corrections") == true {
+                return (200, #"{"person_revision":2,"belief":null,"removed":false,"erasure":null}"#)
+            }
+            return (200, """
+            {"person":\(personJSON(id)),"aliases":[],"relationships":[],"history":[],"commitments":[],"facts":[\(fact)],"fact_revisions":{"\(factID.uuidString.lowercased())":7},"truncated":false,"coverage":"Recorded evidence only"}
+            """)
+        }
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = PeopleDetailViewModel(personID: id, makeAPIClient: { client }, toasts: toasts)
+        await model.reload()
+        let recorded = try #require(model.profile?.facts.first)
+        await model.correct(recorded, operation: operation, statement: nil, sessionID: sessionID)
+        #expect(model.errorMessage == nil)
+        #expect(toasts.current?.text == toast)
+    }
+
     @Test func structuredRelationshipCorrectionKeepsEndpointsAndRevision() async throws {
         let id = UUID(), sessionID = UUID(), factID = UUID(), edgeID = UUID()
         let fact = """
@@ -577,6 +601,72 @@ import Testing
         #expect(body["expected_revision"] as? Int == 1)
         #expect(body["session_id"] as? String == sessionID.uuidString)
     }
+    /// A Merge click shows at once: the pair reads as in progress until the
+    /// server answers, a second click sends nothing, and a toast confirms it.
+    @Test func answeringADuplicateShowsProgressAndIgnoresASecondClick() async throws {
+        let sourceID = UUID(), targetID = UUID(), suggestionID = UUID(), sessionID = UUID()
+        let lock = NSLock()
+        var answers = 0
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let client = try makePeopleClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/people/merge-suggestions"):
+                let open = lock.withLock { answers == 0 }
+                return (200, "{\"items\":[\(open ? suggestionJSON(suggestionID, source: sourceID, target: targetID) : "")],\"next_cursor\":null}")
+            case ("POST", "/v1/sessions"):
+                return (200, "{\"id\":\"\(sessionID)\",\"status\":\"ACTIVE\",\"agent_id\":\"test\",\"agent_version\":\"1\",\"metadata\":{},\"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\"}")
+            case ("POST", "/v1/people/merge-suggestions/\(suggestionID.uuidString)"):
+                lock.withLock { answers += 1 }
+                _ = gate.wait(timeout: .now() + 5)
+                return (200, suggestionJSON(suggestionID, source: sourceID, target: targetID, state: "merged"))
+            default:
+                return (200, #"{"items":[],"next_cursor":null}"#)
+            }
+        }
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = PeopleViewModel(makeAPIClient: { client }, toasts: toasts)
+        await model.selectCollection(.duplicates)
+        let suggestion = try #require(model.suggestions.first)
+        let merge = Task { await model.resolveSuggestion(suggestion, decision: "merge") }
+        try await waitForPeopleTestCondition { lock.withLock { answers } == 1 }
+        #expect(model.resolvingSuggestionID == suggestionID)
+        await model.resolveSuggestion(suggestion, decision: "merge")
+        gate.signal()
+        await merge.value
+        #expect(lock.withLock { answers } == 1)
+        #expect(model.resolvingSuggestionID == nil)
+        #expect(toasts.current?.text == "Merged.")
+    }
+    /// The profile's Merge shows progress in its callout and confirms with a toast.
+    @Test func profileMergeShowsProgressAndConfirms() async throws {
+        let id = UUID(), suggestionID = UUID(), otherID = UUID(), sessionID = UUID()
+        let lock = NSLock()
+        var answered = false
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let client = try makePeopleClient { request in
+            if request.httpMethod == "POST", request.url?.path.hasPrefix("/v1/people/merge-suggestions/") == true {
+                lock.withLock { answered = true }
+                _ = gate.wait(timeout: .now() + 5)
+                return (200, suggestionJSON(suggestionID, source: otherID, target: id, state: "merged"))
+            }
+            let open = lock.withLock { !answered }
+            return (200, "{\"person\":\(personJSON(id)),\"aliases\":[],\"relationships\":[],\"history\":[],\"commitments\":[],\"facts\":[],\"fact_revisions\":{},\"merge_suggestions\":[\(open ? suggestionJSON(suggestionID, source: otherID, target: id) : "")],\"truncated\":false,\"coverage\":\"Recorded evidence only\"}")
+        }
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = PeopleDetailViewModel(personID: id, makeAPIClient: { client }, toasts: toasts)
+        await model.reload()
+        let suggestion = try #require(model.profile?.mergeSuggestions.first)
+        let merge = Task { await model.resolveSuggestion(suggestion, decision: "merge", sessionID: sessionID) }
+        try await waitForPeopleTestCondition { lock.withLock { answered } }
+        #expect(model.resolvingSuggestionID == suggestionID)
+        gate.signal()
+        await merge.value
+        #expect(model.resolvingSuggestionID == nil)
+        #expect(model.profile?.mergeSuggestions.isEmpty == true)
+        #expect(toasts.current?.text == "Merged.")
+    }
     /// A merge made without asking can be undone from the surviving person.
     @Test func automaticMergeOffersUndoAndSuggestionsAreAnsweredFromTheProfile() async throws {
         let id = UUID(), mergedID = UUID(), operationID = UUID(), suggestionID = UUID(), otherID = UUID()
@@ -832,4 +922,12 @@ private final class PeopleTestURLProtocol: URLProtocol {
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
     override func stopLoading() {}
+}
+
+@MainActor private func waitForPeopleTestCondition(_ condition: () -> Bool) async throws {
+    for _ in 0..<800 {
+        if condition() { return }
+        try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    #expect(condition(), "Expected the People request within four seconds")
 }

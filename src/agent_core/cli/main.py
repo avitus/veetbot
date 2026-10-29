@@ -50,7 +50,6 @@ from agent_core.cli.people import configure as configure_people
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest
-from agent_core.domain.email import EmailBulkExclusionReport
 from agent_core.domain.errors import (
     AgentCoreError,
     ConflictError,
@@ -1181,33 +1180,6 @@ def reconsolidations_undo(
     )
 
 
-async def _email_exclude_bulk(confirm: bool) -> EmailBulkExclusionReport:
-    async with build(storage="postgres") as composition:
-        return await composition.services.email.exclude_bulk_sources(
-            composition.principal, confirm=confirm
-        )
-
-
-@email_app.command("exclude-bulk")
-def email_exclude_bulk(
-    confirm: Annotated[
-        bool,
-        typer.Option(
-            "--confirm",
-            help="Exclude every census-indexed thread; without it the pass only previews.",
-        ),
-    ] = False,
-) -> None:
-    """Exclude retained bulk-sender threads and erase what they formed (ADR-0116)."""
-
-    try:
-        result = asyncio.run(_email_exclude_bulk(confirm))
-    except ConfigurationError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from exc
-    typer.echo(result.model_dump_json())
-
-
 @memory_app.command("get")
 def memory_get(belief_id: UUID) -> None:
     """Inspect one governed memory, including formation and source identifiers."""
@@ -1319,40 +1291,6 @@ def memory_review(
 async def _memory_delete(belief_id: UUID) -> None:
     async with build(storage="postgres") as composition:
         await composition.memory.delete(belief_id)
-
-
-async def _memory_reshape(policy: str, confirm: bool) -> Any:
-    async with build(storage="postgres") as composition:
-        return await composition.source_learning.reshape(policy=policy, confirm=confirm)
-
-
-@memory_app.command("reshape")
-def memory_reshape(
-    policy: Annotated[
-        str,
-        typer.Option("--policy", help="The learned-memory policy version to supersede."),
-    ] = "owner-source-learning@1",
-    confirm: Annotated[
-        bool,
-        typer.Option(
-            "--confirm",
-            help="Write the reshape; without it the pass only counts the rows it would supersede.",
-        ),
-    ] = False,
-) -> None:
-    """Supersede learned memories of one policy version with the @2 shape (ADR-0250).
-
-    Each row becomes a new belief citing the same source events, with the
-    claim as its statement and the website beside it; the old row is
-    superseded and its receipts follow. Governed supersession, never a rewrite.
-    """
-
-    try:
-        result = asyncio.run(_memory_reshape(policy, confirm))
-    except ConfigurationError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from exc
-    typer.echo(result.model_dump_json())
 
 
 async def _memory_reconcile_conflicts(confirm: bool) -> Any:

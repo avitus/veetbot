@@ -422,7 +422,7 @@ current chat's trusted website binding and request `browser.profile.read`.
 Its approval presentation identifies the profile and origins; missing binding
 fails as `schedule.browser_profile_required`, and normal creation validates
 ownership, READY state and current authority. The model cannot supply a profile
-UUID or arbitrary scopes. Version 1.1.1 remains for already pinned runs.
+UUID or arbitrary scopes. Versions 1.1.1 and 1.2.0 are retired (ADR-0266).
 Browser actions retain their existing approval rules,
 including ADR-0168's bounded-scroll permission in the default policy. Scheduled
 feed reads can scroll without an interactive grant. ADR-0209 also permits
