@@ -1,0 +1,26 @@
+{
+  "title": "GitHub open pull request counts",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "repositories"
+    ],
+    "properties": {
+      "repositories": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+        },
+        "maxItems": 20,
+        "minItems": 1,
+        "uniqueItems": true
+      }
+    },
+    "additionalProperties": false
+  },
+  "calls": [
+    "http.request"
+  ],
+  "feeds": []
+}
