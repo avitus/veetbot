@@ -1344,3 +1344,31 @@ async def test_owner_index_admission_measures_what_the_cap_check_measures() -> N
         *(spec.name for spec in owner_specs),
     }
     assert plan.skipped_tool_names == ()
+
+
+async def test_registry_change_requires_builder_bump_to_replace_stored_tool_pins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0266 requires a deployment builder bump; registry changes alone do not rotate."""
+    clock, factory, _service, _retriever = await formation_stack()
+    registry = StaticToolRegistry()
+    configured = agent().model_copy(update={"enabled_tools": ["web.fetch"]})
+    planner = EventContextPlanner(
+        factory,
+        registry,
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        yaml.safe_load(
+            (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text()
+        ),
+        policy_version="contract-policy@1",
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    before = await planner.plan(session(), configured, principal(), model)
+    registry.register(WebFetchTool(FakeWebProvider()))
+    assert await planner.plan(session(), configured, principal(), model) == before
+    monkeypatch.setattr(planner_module, "BUILDER_VERSION", "context-builder@contract-bump")
+    after = await planner.plan(session(), configured, principal(), model)
+    assert after.epoch == before.epoch + 1
+    assert after.tool_names == ("web.fetch",)

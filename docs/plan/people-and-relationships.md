@@ -590,10 +590,12 @@ before projection; neither names nor indirect graph paths infer relationships.
 Directed endpoints and evidence confidence are retained, including provisional
 status. Coverage and continuation are rendered inside the shared recall budget;
 the cursor advances only past contiguous people whose eligible context was
-actually delivered, reserving its metadata before selecting evidence. If the
-first remaining person cannot fit, the response explicitly marks their context
-incomplete and advances past them to reach later people, directing a narrower
-`people.context` lookup for omitted detail. This exception and its cursor are
+actually delivered, reserving its metadata before selecting evidence. The first
+remaining person gets the full shared budget before ordinary beliefs compete. If
+that person still cannot fit, the response explicitly marks their context
+incomplete and advances past them to reach later people. It discloses that omitted
+relationship context is not paginated by `people.context`, rather than promising
+that a narrower query will recover it. This exception and its cursor are
 also budgeted before selection; a page never claims exhaustive knowledge. Other permitted ordinary recall remains
 available alongside the direct relationships.
 

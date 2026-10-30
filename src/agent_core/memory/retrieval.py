@@ -855,13 +855,25 @@ class HybridMemoryRetriever:
             and not _INJECTION.search(item.text)
         ]
         eligible_people.sort(key=lambda item: {"person": 0, "interaction": 1}.get(item.kind, 2))
+        # An overview must give its first remaining person the whole shared
+        # budget before beliefs compete, otherwise a small reservation can be
+        # mistaken for an intrinsically oversized person and skip their evidence.
+        first_person = page_people[0] if page_people else None
+        if first_person is not None:
+            eligible_people.sort(key=lambda item: first_person not in item.person_ids)
         selected_people: list[TracedPersonContext] = []
         people_rendered = ""
         for context_item in eligible_people:
             proposed = people_rendered + "\n" + _person_line(context_item)
             if (
-                len(selected_people) < min(8, max(1, effective_query.max_items // 2))
-                and measure_tokens(proposed) <= effective_query.budget_tokens * 0.4
+                len(selected_people) < effective_query.max_items
+                and (
+                    first_person in context_item.person_ids
+                    or (
+                        len(selected_people) < min(8, max(1, effective_query.max_items // 2))
+                        and measure_tokens(proposed) <= effective_query.budget_tokens * 0.4
+                    )
+                )
                 and measure_tokens(
                     render([], as_of=now, policy_version=render_policy, known_at=render_known_at)
                     + proposed
@@ -1992,8 +2004,9 @@ def render_memory(
         )
         incomplete = (
             f" Incomplete context for person {incomplete_person}: remaining evidence did not "
-            "fit. This cursor moves past that person to reach later people; use "
-            "people.context with that person ID and a narrower text query for detail."
+            "fit. This cursor moves past that person to reach later people. "
+            "The omitted relationship context is not paginated by people.context; "
+            "do not claim this person's context is complete."
             if incomplete_person is not None
             else ""
         )

@@ -824,6 +824,8 @@ async def test_oversized_first_person_explicitly_advances_to_later_people(contin
     assert trace.query.next_people_after == first
     assert f"Incomplete context for person {first}" in result.rendered
     assert f'people_after="{first}"' in result.rendered
+    assert "not paginated by people.context" in result.rendered
+    assert "narrower text query" not in result.rendered
     assert result.truncated and result.tokens <= query.budget_tokens
     # The next People-service page excludes the passed person, as its existing
     # owner-overview contract requires; retrieval must expose the later identity.
@@ -834,3 +836,44 @@ async def test_oversized_first_person_explicitly_advances_to_later_people(contin
     )
     assert str(contexts[-1].record_id) in following.rendered
     assert "Incomplete context" not in following.rendered
+
+
+async def test_overview_first_person_uses_full_budget_before_competing_beliefs() -> None:
+    """A fitting person is not skipped because ordinary beliefs took their slots."""
+    from uuid import UUID
+
+    from agent_core.domain.memory import TracedPersonContext
+
+    clock, factory = await memory_uow_factory()
+    retriever = HybridMemoryRetriever(factory, clock, ids(), principal())
+    first, second = UUID(int=95000), UUID(int=95001)
+    contexts = [
+        TracedPersonContext(
+            record_id=UUID(int=96000 + n),
+            revision=1,
+            person_ids=[person],
+            kind="relationship",
+            text="A supported family relationship.",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+        for n, person in enumerate([first] * 9 + [second])
+    ]
+    async with factory() as uow:
+        for n in range(20):
+            await uow.memories.upsert_belief(
+                memory(belief_id=97000 + n, statement=f"Family fact {n}.").model_copy(
+                    update={"subject": f"Subject {n}", "store_position": n + 1}
+                )
+            )
+    query = recall_query(text="family").model_copy(
+        update={
+            "relationship_group": "family",
+            "max_items": 20,
+            "budget_tokens": 4000,
+        }
+    )
+    result = await retriever.recall(query, session_id=SESSION_ID, people_items=contexts)
+    assert result.items, "Competing ordinary beliefs must actually be eligible"
+    assert all(str(item.record_id) in result.rendered for item in contexts[:9])
+    assert "Incomplete context" not in result.rendered
+    assert result.tokens <= query.budget_tokens

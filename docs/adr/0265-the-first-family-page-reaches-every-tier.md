@@ -36,10 +36,12 @@ affirmed beliefs about the brother and did not deliver them either.
    continuation and says when a group holds more than one overview reads,
    and existing belief visibility predicates still admit the evidence. The
    continuation normally advances only through people whose eligible relationship
-   contexts were fully delivered. If the first remaining person exceeds the page
+   contexts were fully delivered. The first remaining person gets the full shared
+   budget before ordinary beliefs compete. If that person exceeds the page
    budget, the response explicitly identifies that person's context as incomplete
-   and advances past them, so later people remain reachable. It directs a narrower
-   `people.context` lookup for omitted detail rather than claiming full delivery.
+   and advances past them, so later people remain reachable. Omitted relationship
+   context is not paginated by `people.context`; the response states that limitation
+   rather than suggesting a narrower query will recover it.
    Continuation and incomplete-person metadata are budgeted before selection.
 3. **The live label moves.** Overview pages render `+owner-overview@3`; the
    base retrieval label and the frozen evaluation controls do not move.

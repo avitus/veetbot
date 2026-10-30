@@ -154,12 +154,23 @@ service, and run it again later.
    A missing or expired resolution refuses the request. This preserves sandbox
    rule 6: a destination is never model-settable.
 8. **Credentials stay with the platform.** A credential is named in the grant
-   and bound to one host. The broker adds it to a request, and the job's code
-   never sees it. Every credential-bearing request requires HTTPS, even if an
+   and bound to one trusted host. The broker adds it to a request. Every
+   credential-bearing request requires HTTPS, even if an
    operator otherwise permits HTTP. Redirects must preserve HTTPS and the exact
    credential-bound host and pass the same destination checks; a downgrade or
-   different host is refused before forwarding any credential. The first
-   credential is a read-only GitHub App:
+   different host is refused before forwarding any credential.
+
+   Before returning any response to a job, the broker buffers it within a fixed
+   size limit, decompresses it within that limit, and checks response headers
+   and body for the bound secret, including JSON/URL escaping and base64 forms.
+   A match, unsupported encoding, or size limit refuses the response with a
+   fixed diagnostic; rejected bytes never enter job logs, results, events or
+   feeds. The broker must not log raw credential-bearing requests or responses.
+   This protects against direct and supported-encoding echoes, not arbitrary
+   transformations by a malicious endpoint: credential hosts remain trusted
+   security principals, and adding another host requires its own assessment.
+
+   The first credential is a read-only GitHub App:
    - permissions `metadata`, `pull_requests`, `checks`, `statuses` and
      `contents`, all read-only;
    - installed only on repositories the owner picks;
@@ -174,8 +185,9 @@ service, and run it again later.
    action runs a revision once with no grant. That gives it no host, no
    credential and no model, and its feed publishes go to a preview. The agent
    sees the result and the log, and a trial asks no approval. `job.run`,
-   `schedule.create` and `schedule.update` gain the job task. Earlier tool
-   versions stay registered unchanged for pinned runs.
+   `schedule.create` and `schedule.update` gain the job task. Contract retirement
+   follows ADR-0266: no historical registrations, a builder bump for re-planning,
+   and refusal of missing pins on parked runs.
 10. **Outcomes.**
     - A run succeeds when the job returns. It fails when it raises an error,
       exceeds a limit or times out.
@@ -230,7 +242,9 @@ service, and run it again later.
   a fresh execution approval; publication approval never substitutes for it.
 - A credential appears only in the broker's outbound request. It never
   appears in the sandbox environment, the job's result, the log, an event, a
-  feed or the repository. The test uses a canary credential.
+  feed or the repository. Canary tests cover direct, JSON/URL-escaped and base64
+  credential echoes in response headers and bodies, compressed echoes, unsupported
+  encodings and oversized responses; refused bytes must reach none of these sinks.
 - Before any public commit, the privacy screen rejects a job package that
   contains a personal value. Required adversarial fixtures cover a repository
   slug supplied before a grant exists and copied into code, a grant input copied

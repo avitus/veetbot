@@ -53,8 +53,10 @@ session (2,676 plans), the parked runs, the host environment, and Doppler:
    with `builder_version_changed`. `prefix_bytes` has no recorded-order mode.
 2. A tool version bump no longer keeps the previous contract registered. The
    fourteen retained classes are deleted with the v1 People tool schemas. A
-   chat whose plan pins a version the registry lacks re-plans at its next
-   message; a run parked on an approval whose plan pins one fails with
+   deployment retiring a contract must also bump the context builder: the next
+   message then re-plans through `builder_version_changed`. A registry-only
+   change does not invalidate a stored plan; dispatch still refuses a missing
+   pin. A run parked on an approval whose plan pins a retired version fails with
    `tool_pin_mismatch`, as any re-plan under a parked run does today. The
    Cockpit's `schedule.create` 1.5.0 and `schedule.list` 1.0.2 stay: they
    are the versions a deployment without the Cockpit flag offers, not

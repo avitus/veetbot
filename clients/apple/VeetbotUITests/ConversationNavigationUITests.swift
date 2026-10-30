@@ -34,6 +34,8 @@ final class ConversationNavigationUITests: XCTestCase {
     #if os(iOS)
     func testTabletEmailUtilitiesAreAtTheTopRight() throws {
         guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad layout") }
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
         XCUIDevice.shared.orientation = .landscapeLeft
         app.launch()
         let email = app.buttons["mode.email"].firstMatch
@@ -56,6 +58,8 @@ final class ConversationNavigationUITests: XCTestCase {
 
     func testTabletSidebarsKeepModesOnOneLineAndResizeAcrossModesAndLaunches() throws {
         guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad layout") }
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
         XCUIDevice.shared.orientation = .landscapeLeft
         app.launch()
         let handle = app.descendants(matching: .any)["chat.sidebar.resize"].firstMatch
@@ -96,6 +100,8 @@ final class ConversationNavigationUITests: XCTestCase {
     }
     func testTabletPortraitEmailReadsAndReturnsWithoutSqueezingColumns() throws {
         guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad layout") }
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
         XCUIDevice.shared.orientation = .portrait
         app.launch()
         XCTAssertTrue(app.buttons["mode.email"].firstMatch.waitForExistence(timeout: 10))
@@ -1062,8 +1068,9 @@ final class ConversationNavigationUITests: XCTestCase {
                       "Compact navigation covers the inbox while a conversation is open")
         // This case exercises simultaneous inbox/reader interaction. Portrait
         // iPad correctly uses a one-column detail, so give both columns room.
-        UIDevice.current.orientation = .landscapeLeft
-        defer { UIDevice.current.orientation = .portrait }
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
+        XCUIDevice.shared.orientation = .landscapeLeft
         #endif
         app.launchArguments.append("--ui-testing-email-archive-next")
         app.launch()
