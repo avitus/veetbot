@@ -1372,3 +1372,32 @@ async def test_registry_change_requires_builder_bump_to_replace_stored_tool_pins
     after = await planner.plan(session(), configured, principal(), model)
     assert after.epoch == before.epoch + 1
     assert after.tool_names == ("web.fetch",)
+
+
+async def test_deployed_version_fourteen_plan_rotates_after_tool_retirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing production plans must acquire the replacement release's tool roster."""
+    clock, factory, _service, _retriever = await formation_stack()
+    registry = StaticToolRegistry()
+    configured = agent().model_copy(update={"enabled_tools": ["web.fetch"]})
+    planner = EventContextPlanner(
+        factory,
+        registry,
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        yaml.safe_load(
+            (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text()
+        ),
+        policy_version="contract-policy@1",
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    with monkeypatch.context() as deployed:
+        deployed.setattr(planner_module, "BUILDER_VERSION", "context-builder@14")
+        before = await planner.plan(session(), configured, principal(), model)
+    registry.register(WebFetchTool(FakeWebProvider()))
+    after = await planner.plan(session(), configured, principal(), model)
+    assert after.epoch == before.epoch + 1
+    assert after.tool_names == ("web.fetch",)
+    assert await planner.plan(session(), configured, principal(), model) == after

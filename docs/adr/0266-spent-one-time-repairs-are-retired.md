@@ -53,7 +53,8 @@ session (2,676 plans), the parked runs, the host environment, and Doppler:
    with `builder_version_changed`. `prefix_bytes` has no recorded-order mode.
 2. A tool version bump no longer keeps the previous contract registered. The
    fourteen retained classes are deleted with the v1 People tool schemas. A
-   deployment retiring a contract must also bump the context builder: the next
+   deployment retiring a contract must also bump the context builder (this
+   retirement moves `context-builder@14` to `context-builder@15`): the next
    message then re-plans through `builder_version_changed`. A registry-only
    change does not invalidate a stored plan; dispatch still refuses a missing
    pin. A run parked on an approval whose plan pins a retired version fails with
