@@ -50,8 +50,9 @@ session (2,676 plans), the parked runs, the host environment, and Doppler:
 1. The planner no longer re-keys a plan hashed with unsorted scopes and no
    longer treats `context-builder@11` as equivalent to the current builder.
    At the next unpinned run, a plan from any earlier builder rotates through
-   the ordinary logged epoch with `builder_version_changed`. `prefix_bytes` has no recorded-order mode.
-2. A tool version bump no longer keeps the previous contract registered. The
+   the ordinary logged epoch with `builder_version_changed`. `prefix_bytes`
+   has no recorded-order mode.
+2. The obsolete tool contracts audited above no longer stay registered. The
    fourteen retained classes are deleted with the v1 People tool schemas. A
    deployment retiring a contract must also bump the context builder (this
    retirement moves `context-builder@14` to `context-builder@15`): the next
@@ -61,13 +62,13 @@ session (2,676 plans), the parked runs, the host environment, and Doppler:
    and the existing model, policy, persona and rendered-prefix checks pass. New
    registry entries are not added to that run; an initialized empty roster also
    remains empty. Missing or changed contracts still fail closed on resume.
-   A registry-only
-   change does not invalidate a stored plan; dispatch still refuses a missing
+   A registry-only change does not invalidate a stored plan; dispatch still refuses a missing
    pin. A run parked on an approval whose plan pins a retired version fails with
-   `tool_pin_mismatch`, as any re-plan under a parked run does today. The
-   Cockpit's `schedule.create` 1.5.0 and `schedule.list` 1.0.2 stay: they
-   are the versions a deployment without the Cockpit flag offers, not
-   retained history.
+   `tool_pin_mismatch`, as any roster-changing re-plan under a parked run does.
+   The specified exceptions remain registered for pinned runs: `schedule.create`
+   1.5.0 in Cockpit deployments and `schedule.list` 1.0.2 wherever scheduling is
+   enabled. Current versions are `schedule.create` 1.6.0 with Cockpit, 1.4.0
+   without it, and `schedule.list` 1.1.0 wherever scheduling is enabled.
 3. `agent memory reshape` and `SourceLearningService.reshape` are removed.
    Receipts are still read under both policy versions. A backup restored from
    before 2026-10-26 would bring back superseded `@1` rows as live rows; they
