@@ -95,9 +95,9 @@ remembers its frame. The main and settings windows persist their sizes and
 positions independently; system text sizing remains the default.
 On Mac, sheets open at readable widths: 1000 points for Persona, 600 for email
 draft history and send review, 560 for call results and 540 for email learning.
-On iOS, the sidebar toolbar exposes Memory, Schedules, Persona, and Settings in
-an explicit accessible More menu so every destination remains usable at narrow
-split-view widths.
+On compact iOS layouts, the sidebar exposes Memory, Schedules, Persona, and
+Settings in an accessible More menu. Regular-width iPad puts global utilities
+in the active mode’s top-right More menu, also including People.
 Below New conversation, a collapsible Recent chats section lists the five most
 recently active chats, including those inside closed folders; a schedule with
 two or more sessions collapses into one row in the Scheduled section
@@ -248,13 +248,18 @@ com.apple.springboard.finishedstartup` holds SpringBoard's process id, and says
 so; `xcrun simctl erase <udid>` repairs such a simulator. Simulators the target
 booted are shut down when it ends, as xcodebuild did when it booted them; one
 that was already open stays open.
-The iOS navigation helper opens More with one window-anchored touch at its
+The iOS navigation helper selects the rendered compact sidebar or regular-width
+Chat toolbar menu, then opens More with one window-anchored touch at its
 observed centre after its frame settles, rejecting empty, infinite, or
 out-of-window geometry. On the hosted iPhone 17 / iOS 27.0 runner, XCTest can
 report the visible button as unhittable or throw while evaluating hittability.
 The requested menu item must appear after the touch; geometry alone never
 counts as successful activation. The Persona journey still requires the
-unsaved voice text to survive switching sections.
+unsaved voice text to survive switching sections. The briefing rendering check
+requires the closing line’s complete bounds inside the window, below the top
+bar and above the composer. Static Markdown text can lack an XCTest hit point
+on iPad while visibly drawn; that check measures visibility rather than tap
+capability and still scrolls when the line is outside the visible transcript.
 The cases tap an overflow-menu item at its centre rather than as an element,
 after requiring it to exist and be hittable. On the iOS 27.0 iPad simulator
 XCUITest's element tap on the menu's first item is swallowed and the menu stays

@@ -757,8 +757,21 @@ final class ConversationNavigationUITests: XCTestCase {
                     "\(day) visit \(visit)\n\(app.debugDescription)"
                 )
                 #else
-                for _ in 0..<6 where !closing.isHittable { transcript.swipeUp() }
-                XCTAssertTrue(closing.isHittable, "\(day) visit \(visit)\n\(app.debugDescription)")
+                // Static rendered Markdown can have no XCTest hit point on
+                // iPad even while fully drawn. Check the visible transcript
+                // bounds, including the floating composer exclusion, rather
+                // than treating this noninteractive text as a tap target.
+                let composer = app.descendants(matching: .any)["chat.composer"]
+                func closingIsVisible() -> Bool {
+                    let frame = closing.frame
+                    let window = app.windows.firstMatch.frame
+                    return !frame.isEmpty && !frame.isInfinite && !frame.isNull
+                        && window.contains(frame)
+                        && frame.minY >= transcriptTop() - 1
+                        && frame.maxY <= composer.frame.minY
+                }
+                for _ in 0..<6 where !closingIsVisible() { transcript.swipeUp() }
+                XCTAssertTrue(closingIsVisible(), "\(day) visit \(visit)\n\(app.debugDescription)")
                 #endif
             }
         }
@@ -4018,14 +4031,24 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     #if os(iOS)
-    /// Opens a compact sidebar destination after its native menu becomes interactive.
+    /// Opens global utilities through the visible compact or regular-width menu.
     private func openSidebarDestination(identifier: String) {
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10))
-        let moreButton = window.buttons["sidebar.more"]
-        XCTAssertTrue(moreButton.waitForExistence(timeout: 10))
+        // Regular-width Chat moved these utilities to its top-right toolbar.
+        // Select the actual rendered control, not the device idiom: an iPad
+        // can also expose the compact drawer in a narrow window.
+        let toolbarMore = window.buttons["chat.more"]
+        let compactMore = window.buttons["sidebar.more"]
+        let menuAppeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            toolbarMore.exists || compactMore.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [menuAppeared], timeout: 10), .completed)
+        let regularWidth = toolbarMore.exists
+        let moreButton = regularWidth ? toolbarMore : compactMore
+        XCTAssertTrue(moreButton.exists)
         // On iOS 27 the compact drawer's visible More button can have valid
         // geometry while XCTest's hittability query throws or stays false.
         // Touch its observed centre through the window, then require the
@@ -4040,7 +4063,11 @@ final class ConversationNavigationUITests: XCTestCase {
             dx: moreFrame.midX - mainFrame.minX, dy: moreFrame.midY - mainFrame.minY
         )).tap()
 
-        let destination = window.buttons[identifier]
+        let utilityLabels = [
+            "sidebar.memory": "Memory", "sidebar.schedules": "Schedules",
+            "sidebar.persona": "Persona", "sidebar.settings": "Settings"
+        ]
+        let destination = window.buttons[regularWidth ? (utilityLabels[identifier] ?? identifier) : identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
         // Menu elements appear before their presentation becomes interactive.
         waitForSettledFrame(of: destination, stableFor: 3)
