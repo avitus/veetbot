@@ -20,7 +20,11 @@ composition only. It logs the fixed event `semantic_recall_unavailable_using_spa
 without exception prose, paths, credentials or memory contents, then completes
 the ordinary application graph. No semantic services, query preparation, source
 recovery or maintenance indexing callback are installed in that graph. Sparse
-recall and ordinary maintenance remain available. Unrelated application
+recall and ordinary maintenance remain available. The runtime retriever uses
+the sparse profile, retaining owned-resource and home-location anchors even
+when the configured profile requests semantics. The configured profile remains
+unchanged in the evidence identity; valid semantic composition retains its
+existing anchor normalization. Unrelated application
 configuration errors and unexpected programming errors still propagate.
 
 The lower-level semantic composer and admission validators remain strict.

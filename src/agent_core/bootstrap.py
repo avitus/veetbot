@@ -4127,7 +4127,11 @@ async def _compose(
         clock,
         ids,
         principal,
-        profile=memory_profiles.retrieval,
+        # Keep the configured profile in the admission identity, but use the
+        # ordinary sparse policy (including owner anchors) without semantic services.
+        profile=memory_profiles.retrieval
+        if semantic_index_pass is not None
+        else memory_profiles.retrieval.model_copy(update={"semantic_enabled": False}),
         trace_retention=memory_profiles.traces,
         reconsolidation_enabled=True if settings.memory_dreaming_review_enabled else recon_admitted,
         reconsolidation_owner_approved_only=settings.memory_dreaming_review_enabled,

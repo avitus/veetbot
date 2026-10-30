@@ -105,6 +105,70 @@ async def test_updated_app_starts_sparse_without_loading_rejected_semantics(
     assert not credentials and not provider.calls
 
 
+@pytest.mark.parametrize("index_enabled", [True, False])
+@pytest.mark.parametrize(
+    ("question", "statement", "subject"),
+    [
+        ("What should I plant in my garden?", "User lives in Exampleville, CA.", "home location"),
+        ("What accessories suit my car?", "User owns a 2026 Aster S8.", "car"),
+    ],
+)
+async def test_sparse_startup_preserves_owner_anchors_with_semantic_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    index_enabled: bool,
+    question: str,
+    statement: str,
+    subject: str,
+) -> None:
+    """A configured semantic profile must not remove the sparse fallback's anchors."""
+    import json
+
+    import agent_core.bootstrap as bootstrap
+    from agent_core.domain.memory import BeliefType
+    from agent_core.memory.retrieval import DeterministicQueryFormer
+    from tests.contract.memory_fixtures import memory
+    from tests.contract.support import SESSION_ID, principal, session
+
+    kwargs, _, credentials, _, _ = await configured_index(tmp_path, rejected="manifest")
+    settings = replace(kwargs["settings"], memory_semantic_index_enabled=index_enabled)
+    (settings.config_dir / "memory" / "profiles.yaml").write_text(
+        json.dumps({"schema_version": 1, "retrieval": {"semantic_enabled": True}})
+    )
+
+    def forbidden(*args: Any, **options: Any) -> Any:
+        pytest.fail("Sparse fallback must not construct an embedding provider")
+
+    monkeypatch.setattr(bootstrap, "OpenAIEmbeddingProvider", forbidden)
+    monkeypatch.setattr(bootstrap, "local_embedding_provider", forbidden)
+    async with build(
+        settings=settings,
+        storage="memory",
+        principal=principal(),
+        clock=kwargs["clock"],
+        credential_resolver=kwargs["credentials"],
+    ) as app:
+        assert app.semantic_services is None
+        assert app.memory_profiles.retrieval.semantic_enabled  # Preserve configured identity.
+        target = memory(statement=statement).model_copy(
+            update={"subject": subject, "belief_type": BeliefType.USER_MODEL_ATTR}
+        )
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+            await uow.memories.upsert_belief(target)
+        query = DeterministicQueryFormer(principal(), current_scope="project-a").from_text(
+            question
+        )[0]
+        recalled = await app.memory_retriever.recall(query, session_id=SESSION_ID)
+        assert target.id in [item.belief_id for item in recalled.items]
+        async with app.uow_factory() as uow:
+            trace = await uow.traces.get(recalled.trace_id, principal())
+        assert trace.query.include_owned_resources == query.include_owned_resources
+        assert trace.query.include_home_location == query.include_home_location
+        assert "+semantic@" not in trace.retrieval_policy_version
+    assert not credentials
+
+
 async def test_optional_semantic_fallback_does_not_swallow_programming_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
