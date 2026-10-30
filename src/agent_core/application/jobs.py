@@ -6,6 +6,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from agent_core.application.cockpit import screen_names, screen_settings_values
+from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import (
     BuildDiagnostic,
@@ -56,6 +57,7 @@ class JobPublication:
         screen: JobScreen,
         repository: WidgetRepository | None = None,
         owner_names: tuple[str, ...] = (),
+        integration_secrets: IntegrationSecrets | None = None,
     ) -> None:
         self.uow_factory = uow_factory
         self.clock = clock
@@ -64,6 +66,7 @@ class JobPublication:
         self.screen = screen
         self.repository = repository
         self.owner_names = owner_names
+        self.integration_secrets = integration_secrets
 
     async def write(
         self,

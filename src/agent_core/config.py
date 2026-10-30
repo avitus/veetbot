@@ -152,6 +152,8 @@ class Settings:
     thread_folders_api_enabled: bool = False
     delegation_enabled: bool = False
     records_enabled: bool = False
+    integration_secrets_enabled: bool = False
+    integration_secrets_key: SecretStr | None = None
     jobs_enabled: bool = False
     jobs_allowed_hosts: frozenset[str] | None = None
     jobs_github_app_id: int | None = None
@@ -780,6 +782,37 @@ def _read_private_surface_secret_file(raw_path: str, name: str) -> str:
 
 MCP_OAUTH_CALLBACK_PATH = "/v1/mcp-oauth/callback"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _integration_secrets_key(values: Mapping[str, str], enabled_role: bool) -> SecretStr | None:
+    if not enabled_role:
+        if values.get("INTEGRATION_SECRETS_KEY_FILE", "").strip():
+            raise ConfigurationError("This role must not receive INTEGRATION_SECRETS_KEY_FILE")
+        return None
+    if not _parse_flag(values, "AGENT_INTEGRATION_SECRETS_ENABLED"):
+        return None
+    path = Path(values.get("INTEGRATION_SECRETS_KEY_FILE", ""))
+    try:
+        if not path.is_absolute():
+            raise ValueError
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) not in {0o400, 0o600}
+                or metadata.st_size != 32
+            ):
+                raise ValueError
+            key = stream.read(33)
+            if len(key) != 32:
+                raise ValueError
+    except (OSError, ValueError):
+        raise ConfigurationError(
+            "Integration keys require a private owner-held 32-byte key file"
+        ) from None
+    return SecretStr(base64.urlsafe_b64encode(key).decode("ascii"))
 
 
 def _mcp_servers_settings(
@@ -2162,6 +2195,9 @@ def _load_settings(
         thread_folders_api_enabled=thread_folders_api_enabled,
         delegation_enabled=delegation_enabled,
         records_enabled=records_enabled,
+        integration_secrets_enabled=_parse_flag(values, "AGENT_INTEGRATION_SECRETS_ENABLED")
+        and require_execution_environment,
+        integration_secrets_key=_integration_secrets_key(values, require_execution_environment),
         jobs_enabled=_parse_flag(values, "AGENT_JOBS_ENABLED"),
         jobs_allowed_hosts=_job_hosts(values),
         jobs_github_app_id=_optional_positive_int(values, "AGENT_JOBS_GITHUB_APP_ID"),

@@ -29,6 +29,7 @@ from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.email import EmailStore
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.folders import FolderStore
+from agent_core.ports.integration_secrets import IntegrationSecretStore
 from agent_core.ports.jobs import JobStore
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
@@ -125,6 +126,7 @@ class UnitOfWorkRepositories:
     calls: CallStore
     people: PeopleStore
     records: RecordStore
+    integration_secrets: IntegrationSecretStore
     jobs: JobStore
     job_outbox: WidgetCommitOutbox
     cockpit_widgets: WidgetStore
@@ -203,6 +205,7 @@ class MemoryUnitOfWork:
         self.calls = repositories.calls
         self.people = repositories.people
         self.records = repositories.records
+        self.integration_secrets = repositories.integration_secrets
         self.jobs = repositories.jobs
         self.job_outbox = repositories.job_outbox
         self.cockpit_widgets = repositories.cockpit_widgets
@@ -347,6 +350,7 @@ class PostgresUnitOfWork:
         self.calls = repositories.calls
         self.people = repositories.people
         self.records = repositories.records
+        self.integration_secrets = repositories.integration_secrets
         self.jobs = repositories.jobs
         self.job_outbox = repositories.job_outbox
         self.cockpit_widgets = repositories.cockpit_widgets

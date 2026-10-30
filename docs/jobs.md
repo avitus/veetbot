@@ -14,7 +14,7 @@ there; local tests do not establish production freshness or provider access.
 
 1. Apply the normal database migration and deploy the application, sandbox and
    Cockpit builder images from the same revision. The schema revision is
-   `d8a268b10301`. Rollback to an older schema refuses to discard saved jobs or
+   `e8a270b10301`. Rollback to an older schema refuses to discard saved jobs or
    pending job publication.
 2. Give the existing Cockpit publishing App access to the `cockpit/jobs` branch
    under its repository rules. The maintenance role uses its existing
@@ -152,3 +152,11 @@ and run workers. Job schedules fail explicitly and pause at their failure
 limit; they never fall back to model-driven execution. Existing agent-run
 schedules keep their previous behavior. Keep the additive database schema and
 saved source unless deliberately exporting and removing the jobs.
+
+## Owner-entered integration keys
+
+[Integration keys](integration-keys.md) adds the ADR-0270 Settings store. Approved
+job grants may bind a `stored:<uuid>` reference to its exact saved host for GET
+requests. The broker resolves live values on each request; neither jobs nor
+models receive them. The feature is off by default and does not bypass the
+existing jobs activation requirements.

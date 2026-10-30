@@ -1,6 +1,6 @@
 # ADR-0270: An in-app store for integration keys
 
-- **Status:** Proposed; design and branch publication authorized, implementation not authorized
+- **Status:** Accepted; MVP implementation authorized on 2026-10-30, production activation pending
 - **Date:** 2026-10-30
 - **Related:** ADR-0024, ADR-0067, ADR-0255, ADR-0268
 
@@ -12,9 +12,10 @@ MVP is a Settings screen, one encrypted PostgreSQL table, and a scoped adapter
 for the existing credential broker. Agent-written jobs are the first consumer:
 an approved job can read an API using a saved key without receiving its bytes.
 
-This is a proposal, not an implemented capability or permission to activate
-jobs. No milestone, acceptance gate, policy version or production flag moves.
-Acceptance would extend ADR-0268 decision 8, which explicitly deferred a
+The owner accepted this decision and authorized the MVP implementation on
+2026-10-30. This does not authorize production activation of jobs. No milestone,
+acceptance gate, policy version or production flag moves. This extends
+ADR-0268 decision 8, which previously deferred a
 Settings-managed credential store. The engineering plan's server-side broker,
 no-credentials-in-sandboxes and no-secrets-in-events requirements remain intact.
 
@@ -72,7 +73,7 @@ keys; GET alone does not prove an endpoint is harmless or a key is read-only.
 
 ## One table and one host key
 
-Proposed `integration_secrets` fields:
+`integration_secrets` fields:
 
 | Field | Purpose |
 | --- | --- |
@@ -185,7 +186,7 @@ destination is a trusted recipient; the owner must trust it with the key.
 
 ADR-0268's outstanding activation requirements still apply: private authoring
 input screening, execution authority bound to approved code, operator destination
-restrictions and credential-echo handling. This proposal does not certify or
+restrictions and credential-echo handling. This decision does not certify or
 bypass them. Do not enable the job consumer until those requirements have
 evidence; the Settings store can be implemented and tested independently.
 
@@ -218,7 +219,7 @@ not PostgreSQL WAL or old backups; their established retention still applies.
 
 ## Delivery and acceptance
 
-If accepted, implement in three small steps, with regression/contract tests
+Implement in three small steps, with regression/contract tests
 first and documentation alongside each behavior change:
 
 1. Add the table, repository contracts, sealing reuse, key provisioning and
@@ -246,10 +247,11 @@ Acceptance evidence must cover:
 - A synthetic backup restores with the escrowed master key and fails without
   it. Operators can follow the documented loss/compromise procedure.
 
-No acceptance evidence is claimed by this design-only change. Implementation
-must update the API, bootstrap, persistence and security documentation; extend
-ADR-0268's credential contract; document both configuration variables in the
-environment examples; and obtain the normal review/CI/deployment evidence.
+Implementation evidence is tracked in project state. Production review, CI,
+escrow and delivery evidence remain outstanding. The implementation updates
+the API, bootstrap, persistence and security documentation, extends ADR-0268's
+credential contract, and documents both configuration variables in the
+environment examples. Normal review/CI/deployment evidence remains required.
 
 ## Deferred deliberately
 

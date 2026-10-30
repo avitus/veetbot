@@ -295,3 +295,22 @@ Nginx changes are backed up and must pass `nginx -t` before reload. Application
 promotion does not automatically roll back after a migration: reverting code
 across a potentially incompatible schema is an operator decision, not a safe
 automated response to a failed health check.
+
+## Owner-entered integration keys (ADR-0270)
+
+Integration keys are encrypted with a separate host-held 32-byte master key.
+Database copies alone cannot decrypt them; compromise of a trusted application
+process or host root remains outside this boundary. The master key is delivered
+only to opted-in API/run roles through systemd credentials. Values travel only
+through authenticated Settings ingestion and the trusted job HTTP broker, never
+through model tools, sandbox environment, public source or audit payloads.
+Metadata-only reads are owner scoped and protected by tenant RLS. Authentication
+binds ciphertext to owner, ID, exact origin, scheme and revision. Stored GET
+requests require an existing job grant, live ownership/destination checks,
+public-address pinned dialing and no redirects. Common direct and encoded
+credential echoes are refused before job code sees a response. The destination
+is a trusted recipient; this is not a guarantee against arbitrary transformations.
+
+[Integration key operations](integration-keys.md) describes provisioning,
+separate escrow, synthetic restore, deletion and compromise recovery. The
+feature is default off; broader jobs activation requirements remain unchanged.

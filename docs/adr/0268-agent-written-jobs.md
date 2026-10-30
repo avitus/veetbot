@@ -400,3 +400,13 @@ across the builder bump under the planner's existing identity checks.
 - **TypeScript instead of Python.** Widgets are TypeScript. But the sandbox
   image, the chart tool (ADR-0243) and the agent's existing sandbox code are
   Python, and a job renders nothing.
+
+## ADR-0270 extension: owner-entered keys
+
+ADR-0270 is accepted and extends decision 8 with a default-off Settings store.
+Approved grants may bind an owner-owned `stored:<uuid>` to its immutable HTTPS
+origin for authenticated GET only. Values resolve live per request through the
+trusted broker; replacement preserves the binding and deletion revokes future
+resolution. Existing GitHub App GraphQL behavior is unchanged. The extension
+does not activate jobs or satisfy the outstanding production prerequisites.
+See [Integration keys](../integration-keys.md).

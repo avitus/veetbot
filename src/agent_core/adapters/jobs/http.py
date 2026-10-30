@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json as json_module
 import re
 import socket
 from collections.abc import Awaitable, Callable
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from agent_core.domain.credentials import CredentialRef
+from agent_core.domain.credentials import CredentialRef, SecretValue
 from agent_core.domain.jobs import JobBrokerError
 from agent_core.domain.web import is_public_https_url
 from agent_core.execution.egress_core import address_is_public
@@ -38,6 +39,19 @@ def _redact(value: Any, secret: str | None) -> Any:
     return value
 
 
+def _echoes(value: Any, forms: set[str]) -> bool:
+    if isinstance(value, str):
+        # Percent escapes are case-insensitive; JSON escapes have already been decoded.
+        decoded = unquote(value)
+        return any(form in value or form in decoded for form in forms)
+    if isinstance(value, dict):
+        return any(_echoes(key, forms) or _echoes(item, forms) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_echoes(item, forms) for item in value)
+    # A numeric-only key may be echoed as a JSON number rather than a string.
+    return any(form in json_module.dumps(value) for form in forms)
+
+
 class JobHTTP:
     def __init__(
         self,
@@ -46,8 +60,10 @@ class JobHTTP:
         resolver: Callable[[str], Awaitable[tuple[str, ...]]] = resolve_job_host,
         transport: httpx.AsyncBaseTransport | None = None,
         operator_hosts: frozenset[str] | None = None,
+        stored_credentials: Callable[[str, str], Awaitable[tuple[str, SecretValue]]] | None = None,
     ) -> None:
         self._credentials = credentials
+        self._stored_credentials = stored_credentials
         self._resolver = resolver
         self._transport = transport
         self._operator_hosts = operator_hosts
@@ -73,7 +89,11 @@ class JobHTTP:
             raise JobBrokerError("job.host_refused")
         if method not in {"GET", "POST"}:
             raise JobBrokerError("job.invalid_arguments")
-        if credential is not None:
+        stored = credential is not None and credential.startswith("stored:")
+        if stored:
+            if self._stored_credentials is None or method != "GET" or json is not None:
+                raise JobBrokerError("job.credential_refused")
+        elif credential is not None:
             if credential != "github-reader" or host != "api.github.com":
                 raise JobBrokerError("job.credential_refused")
             # The App token is read-only too. Refuse writes before issuing even
@@ -96,11 +116,20 @@ class JobHTTP:
                 addresses = await self._resolver(host)
                 if not addresses or any(not address_is_public(address) for address in addresses):
                     raise JobBrokerError("job.address_refused")
-                secret = (
-                    None
-                    if credential is None
-                    else (await self._credentials.resolve(CredentialRef(credential))).reveal()
-                )
+                scheme = "bearer"
+                secret: str | None
+                if stored:
+                    assert self._stored_credentials is not None and credential is not None
+                    scheme, resolved = await self._stored_credentials(credential, host)
+                    if scheme not in {"bearer", "x-api-key"}:
+                        raise JobBrokerError("job.credential_refused")
+                    secret = resolved.reveal()
+                else:
+                    secret = (
+                        None
+                        if credential is None
+                        else (await self._credentials.resolve(CredentialRef(credential))).reveal()
+                    )
                 headers = {
                     "Host": host,
                     "Accept": "application/json",
@@ -109,7 +138,10 @@ class JobHTTP:
                     "Content-Type": "application/json",
                 }
                 if secret is not None:
-                    headers["Authorization"] = f"Bearer {secret}"
+                    if scheme == "bearer":
+                        headers["Authorization"] = f"Bearer {secret}"
+                    else:
+                        headers["X-API-Key"] = secret
                 # The dial uses a literal checked IP. TLS authenticates the original
                 # host via httpcore's SNI override, also used for certificate checks.
                 request = httpx.Request(
@@ -136,6 +168,18 @@ class JobHTTP:
                         json_module.dumps(document, allow_nan=False)
                     except (ValueError, UnicodeError, RecursionError):
                         raise JobBrokerError("job.response_json_invalid") from None
+                    if stored and secret is not None:
+                        encoded_forms = {
+                            base64.b64encode(secret.encode()).decode(),
+                            base64.urlsafe_b64encode(secret.encode()).decode(),
+                        }
+                        forms = (
+                            {secret}
+                            | encoded_forms
+                            | {value.rstrip("=") for value in encoded_forms}
+                        )
+                        if _echoes(document, forms):
+                            raise JobBrokerError("job.credential_echo_refused")
                     return {"status": response.status_code, "json": _redact(document, secret)}
                 finally:
                     await response.aclose()
