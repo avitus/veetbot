@@ -1466,3 +1466,18 @@ components are reported rather than called complete. Identical resumes reuse
 that approval and component idempotency keys. A later conflicting edit is never
 overwritten. Collection starts at the next interval boundary, without an extra
 hidden run. Individual mutation tools retain their existing rules.
+
+### Refresh repair (ADR-0271)
+
+Widget upkeep is operational work. Every feed-keeping occurrence carries the
+reserved `cockpit_refresh` marker and stays out of Chat, including failed runs
+and refreshes triggered by entry. The schedule inbox retains its audit history;
+Apple clients also remove older cached refresh conversations.
+
+To replace a legacy model-driven collector, `schedule.update` may explicitly
+switch a feed-keeping agent task to a published job revision and an existing
+approved grant. It derives the job scopes and limits and preserves earlier
+occurrence pins. Writing `job.run` into the old instruction does not update its
+agent version or permissions. Use authenticated broker reads for structured
+GitHub acquisition; a public scraping provider's rejection is not evidence that
+a repository has no pull requests.

@@ -82,6 +82,7 @@ from agent_core.domain.runs import (
 from agent_core.domain.sessions import (
     PEOPLE_OPERATIONAL_SESSION_PURPOSES,
     REGENERABLE_TITLE_SOURCES,
+    SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
@@ -333,6 +334,7 @@ class InMemorySessionRepository:
                     not exclude_operational
                     or (
                         session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is not True
+                        and session.metadata.get(SESSION_COCKPIT_REFRESH_METADATA_KEY) is not True
                         and session.metadata.get(SESSION_PURPOSE_METADATA_KEY)
                         not in PEOPLE_OPERATIONAL_SESSION_PURPOSES
                         and (

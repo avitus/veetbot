@@ -164,6 +164,7 @@ async def assert_session_index_filters_before_pagination(repository: SessionRepo
         (703, {"email_operational": False}),
         (704, {"email_operational": True}),
         (705, {"email_thread_id": "draft-thread"}),
+        (706, {"cockpit_refresh": True, "schedule_id": str(UUID(int=42))}),
     ):
         await repository.create(
             session().model_copy(update={"id": UUID(int=value), "metadata": metadata})
@@ -177,8 +178,8 @@ async def assert_session_index_filters_before_pagination(repository: SessionRepo
         exclude_operational=True,
     )
     assert [row.id for row in second] == [UUID(int=701)]
-    all_rows = await repository.list(principal(), limit=5)
-    assert len(all_rows) == 5
+    all_rows = await repository.list(principal(), limit=6)
+    assert len(all_rows) == 6
     assert (
         await repository.list(
             principal().model_copy(update={"principal_id": "foreign"}),

@@ -1363,7 +1363,7 @@ import UserNotifications
     }
 
     /// Preserve a newly focused approval when an earlier history refresh finishes.
-    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
+    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#, #"{"cockpit_refresh":true}"#])
     func testReconciliationPreservesNewlyFocusedOperationalApproval(metadata: String) async throws {
         let sessionID = UUID(), runID = UUID(), approvalID = UUID()
         let lock = NSLock()
@@ -1438,7 +1438,7 @@ import UserNotifications
     }
 
     /// Remove cached internal-session rows while preserving their server audit records.
-    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
+    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#, #"{"cockpit_refresh":true}"#])
     func testSynchronizationPrunesCachedOperationalSessions(metadata: String) async throws {
         let conversationID = UUID()
         let auditID = UUID()

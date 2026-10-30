@@ -170,3 +170,29 @@ and run workers. Job schedules fail explicitly and pause at their failure
 limit; they never fall back to model-driven execution. Existing agent-run
 schedules keep their previous behavior. Keep the additive database schema and
 saved source unless deliberately exporting and removing the jobs.
+
+## Repair an existing widget refresh
+
+A legacy agent-run schedule keeps its original agent version and scopes.
+Putting `job.run` in its instruction cannot grant `jobs.run` or change its tool
+roster. After publishing and previewing a collector, use `schedule.update` with
+an explicit job task, expected schedule revision, published job revision and
+owned approved grant. A feed-keeping agent schedule can switch in place; existing
+occurrences keep their pins. The ordinary update approval still applies. Match
+the cadence to the collector's expected interval. A count-only job without
+approved feed publication access cannot replace the feed-keeping task. Verify one completed run
+and the resulting live feed. Keep the prior revision for rollback.
+
+`samples/jobs/github-widget` preserves the original PR widget's
+`observedAt`, `expectedIntervalSec` and `repositories` schema. It reads compact
+GitHub GraphQL JSON through the approved `github-reader` credential, including
+current-head checks and decisive reviews, and publishes to
+`agent.github-pull-requests`. The grant must permit that feed and the manifest
+must declare it. Use private `repositories` and `refresh_seconds` inputs. A
+provider error never publishes a false zero; the previous snapshot remains
+stale. The query follows [GitHub's pull request schema](https://docs.github.com/en/graphql/reference/pulls).
+
+After ADR-0271's server and Apple release, refreshes never add Chat rows. Their
+isolated execution records and failures stay in schedule history. The migration
+also marks earlier refreshes, and native reconciliation prunes their cached
+conversation rows without deleting server history.

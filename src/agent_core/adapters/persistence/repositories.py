@@ -155,6 +155,7 @@ from agent_core.domain.runs import (
 from agent_core.domain.sessions import (
     PEOPLE_OPERATIONAL_SESSION_PURPOSES,
     REGENERABLE_TITLE_SOURCES,
+    SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
@@ -523,6 +524,11 @@ class PostgresSessionRepository:
             SessionRow.principal_id == principal.principal_id,
         ]
         if exclude_operational:
+            predicates.append(
+                SessionRow.metadata_json[SESSION_COCKPIT_REFRESH_METADATA_KEY]
+                .as_boolean()
+                .is_not(True)
+            )
             predicates.append(
                 SessionRow.metadata_json[SESSION_EMAIL_OPERATIONAL_METADATA_KEY]
                 .as_boolean()

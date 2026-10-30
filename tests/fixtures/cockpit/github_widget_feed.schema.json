@@ -1,0 +1,120 @@
+{
+  "type": "object",
+  "required": [
+    "observedAt",
+    "expectedIntervalSec",
+    "repositories"
+  ],
+  "properties": {
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "repositories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "status",
+          "message",
+          "totalOpen",
+          "pullRequests"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "totalOpen": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "pullRequests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "number",
+                "title",
+                "author",
+                "draft",
+                "review",
+                "checks",
+                "merge"
+              ],
+              "properties": {
+                "draft": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "merge": {
+                  "enum": [
+                    "mergeable",
+                    "conflicting",
+                    "unknown"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "author": {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "checks": {
+                  "enum": [
+                    "passing",
+                    "failing",
+                    "pending",
+                    "none",
+                    "unknown"
+                  ]
+                },
+                "number": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review": {
+                  "enum": [
+                    "approved",
+                    "changes_requested",
+                    "review_required",
+                    "pending",
+                    "none",
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 300
+          }
+        },
+        "additionalProperties": false
+      },
+      "maxItems": 10
+    },
+    "expectedIntervalSec": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}
