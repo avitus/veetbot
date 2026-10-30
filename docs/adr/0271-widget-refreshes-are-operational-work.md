@@ -59,6 +59,10 @@ an operational row, the missing historical marker, cached rows returning on the
 Apple client, and the old collector neither publishing nor surfacing read failure.
 The tests cover the repaired transition executing with zero model calls, audit
 retention, repository parity, migration, native reconciliation and the collector.
+The repository contract also preserves non-boolean historical `cockpit_refresh`
+values. A PostgreSQL regression reproduced an invalid boolean cast that broke
+the conversation index; JSONB containment now excludes only the literal `true`
+marker, matching the in-memory repository without coercing strings or numbers.
 
 The red command
 `circleci testsuite run static --run-tests=all -t 'tests/gates/test_cockpit_feed_refresh_adr0254\.py$'`

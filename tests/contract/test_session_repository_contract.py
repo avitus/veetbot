@@ -194,6 +194,40 @@ async def test_session_index_filters_before_pagination() -> None:
     await assert_session_index_filters_before_pagination(InMemorySessionRepository())
 
 
+async def assert_session_index_preserves_non_boolean_refresh_markers(
+    repository: SessionRepository,
+) -> None:
+    """Hide only literal JSON true, preserving arbitrary historical metadata safely."""
+    visible_ids = set()
+    markers: tuple[object, ...] = (
+        True,
+        False,
+        None,
+        "true",
+        "legacy",
+        1,
+        [],
+        [True],
+        {},
+        {"value": True},
+    )
+    for value, marker in enumerate(markers, start=801):
+        session_id = UUID(int=value)
+        await repository.create(
+            session().model_copy(update={"id": session_id, "metadata": {"cockpit_refresh": marker}})
+        )
+        if marker is not True:
+            visible_ids.add(session_id)
+    rows = await repository.list(principal(), limit=20, exclude_operational=True)
+    assert {row.id for row in rows} == visible_ids
+    assert (await repository.get(UUID(int=801), principal())).metadata["cockpit_refresh"] is True
+
+
+async def test_session_index_preserves_non_boolean_refresh_markers() -> None:
+    """Keep the in-memory index aligned with PostgreSQL's literal-boolean semantics."""
+    await assert_session_index_preserves_non_boolean_refresh_markers(InMemorySessionRepository())
+
+
 async def assert_session_index_hides_people_operational_sessions(
     repository: SessionRepository,
 ) -> None:

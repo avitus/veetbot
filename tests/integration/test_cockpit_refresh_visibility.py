@@ -6,6 +6,7 @@ from agent_core.adapters.persistence.database import create_engine
 from agent_core.bootstrap import build
 from tests.contract.test_session_repository_contract import (
     assert_session_index_filters_before_pagination,
+    assert_session_index_preserves_non_boolean_refresh_markers,
 )
 from tests.gates.test_cockpit_feed_refresh_adr0254 import (
     NOW,
@@ -25,6 +26,15 @@ async def test_postgres_filters_refreshes_before_pagination() -> None:
         composition.uow_factory() as uow,
     ):
         await assert_session_index_filters_before_pagination(uow.sessions)
+
+
+async def test_postgres_preserves_non_boolean_refresh_markers() -> None:
+    """Legacy metadata cannot be cast to boolean or break the conversation index."""
+    async with (
+        build(settings=database_settings(), storage="postgres") as composition,
+        composition.uow_factory() as uow,
+    ):
+        await assert_session_index_preserves_non_boolean_refresh_markers(uow.sessions)
 
 
 async def test_upgrade_marks_old_feed_occurrences_without_erasing_history() -> None:

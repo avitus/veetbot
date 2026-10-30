@@ -123,8 +123,13 @@ def test_incomplete_reviews_and_missing_checks_stay_unknown() -> None:
 
 def test_repeated_page_cursor_refuses_a_partial_snapshot() -> None:
     """Reach the cursor guard with a stable total rather than failing the count check."""
+    feeds: list[Any] = []
     with pytest.raises(ValueError, match="invalid pagination cursor"):
-        execute([page([PULL], after="same", total=1), page([], after="same", total=1)])
+        execute(
+            [page([PULL], after="same", total=1), page([], after="same", total=1)],
+            feed_calls=feeds,
+        )
+    assert feeds == []
 
 
 def test_count_mismatch_refuses_a_partial_snapshot() -> None:

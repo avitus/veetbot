@@ -525,9 +525,7 @@ class PostgresSessionRepository:
         ]
         if exclude_operational:
             predicates.append(
-                SessionRow.metadata_json[SESSION_COCKPIT_REFRESH_METADATA_KEY]
-                .as_boolean()
-                .is_not(True)
+                ~SessionRow.metadata_json.contains({SESSION_COCKPIT_REFRESH_METADATA_KEY: True})
             )
             predicates.append(
                 SessionRow.metadata_json[SESSION_EMAIL_OPERATIONAL_METADATA_KEY]

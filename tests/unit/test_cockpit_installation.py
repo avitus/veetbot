@@ -12,7 +12,7 @@ from agent_core.adapters.cockpit.git import FakeWidgetRepository
 from agent_core.application.cockpit import CommitOutboxWorker
 from agent_core.bootstrap import build
 from agent_core.domain.approvals import ApprovalResolutionType
-from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
+from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, TextPart
 from agent_core.domain.policies import SideEffectClass
 from agent_core.domain.runs import RunStatus
 from agent_core.tools.cockpit_installation import CockpitInstallTool
@@ -380,6 +380,15 @@ async def test_installation_retry_rechecks_constraints_before_creating_component
         async with composition.uow_factory() as uow:
             [replay] = await uow.invocations.list_for_run(replay_run, composition.principal)
             assert replay.outcome.status.value == "failed"
+            assert replay.outcome.reason_code == "cockpit.install_invalid"
+            expected_detail = (
+                "The proposed hosts are outside the operator's enabled job hosts."
+                if constraint == "operator_hosts"
+                else "screen.name: Contains a known name."
+            )
+            assert expected_detail in [
+                part.text for part in replay.result_item.content if isinstance(part, TextPart)
+            ]
             assert await uow.jobs.list(composition.principal) == []
             assert (
                 await uow.cockpit_widgets.list_widgets(composition.principal, include_deleted=True)
