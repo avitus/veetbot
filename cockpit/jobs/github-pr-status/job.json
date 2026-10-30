@@ -1,0 +1,35 @@
+{
+  "title": "GitHub pull request status feed",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "repositories",
+      "refresh_seconds"
+    ],
+    "properties": {
+      "repositories": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+        },
+        "maxItems": 10,
+        "minItems": 1,
+        "uniqueItems": true
+      },
+      "refresh_seconds": {
+        "type": "integer",
+        "maximum": 86400,
+        "minimum": 300
+      }
+    },
+    "additionalProperties": false
+  },
+  "calls": [
+    "feed.publish",
+    "http.request"
+  ],
+  "feeds": [
+    "agent.github-pull-requests"
+  ]
+}
