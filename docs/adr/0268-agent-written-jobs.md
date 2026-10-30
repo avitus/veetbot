@@ -200,9 +200,10 @@ Implement in this order:
    With no grant it has no host, credential or model; with approved access it
    can exercise real HTTP and model calls. Trial feed publishes go to a preview.
    A trial never grants access itself. The agent can fix its code and retry
-   without a separate testing framework. `job.run`,
-   `schedule.create` and `schedule.update` gain the job task. Earlier tool
-   versions stay registered unchanged for pinned runs.
+   without a separate testing framework. `job.run` 1.0.0, `schedule.create`
+   1.7.0 and `schedule.update` 1.2.0 provide the jobs contracts. These
+   jobs-introduced contracts remain registered for pinned runs; contracts
+   retired by ADR-0266 are not retained.
 10. **Outcomes.**
     - A run succeeds when the job returns. It fails when it raises an error,
       exceeds a limit or times out.
