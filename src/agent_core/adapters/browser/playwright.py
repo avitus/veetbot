@@ -1318,11 +1318,11 @@ class PythonPlaywrightRuntime:
         *,
         relied_copies: Sequence[str] = (),
     ) -> None:
-        """Check click actionability, then send one action without automatic replay.
+        """Check pointer actionability, then send one action without automatic replay.
 
         ``guards`` are a grant-constrained act's click guard and, for a key or
         text, its focus guard, released once the action is sent. Only a trial
-        click timeout is a definite refusal; dispatch failures remain uncertain.
+        timeout is a definite refusal; dispatch failures remain uncertain.
 
         ``relied_copies`` are the external ``<use>`` references the live read
         treated as inspected (ADR-0263). The click guard cannot see inside a
@@ -1330,11 +1330,14 @@ class PythonPlaywrightRuntime:
         the click; a copy no longer inert refuses the act instead.
         """
         try:
-            if action.kind is BrowserActionKind.CLICK:
+            if action.kind in {BrowserActionKind.CLICK, BrowserActionKind.CHECK}:
+                pointer_action = (
+                    handle.click if action.kind is BrowserActionKind.CLICK else handle.check
+                )
                 try:
                     # Visibility alone includes controls covered by a modal. Trial
-                    # performs actionability checks without dispatching the click.
-                    await handle.click(trial=True, timeout=CLICK_TIMEOUT_MILLISECONDS)
+                    # performs actionability checks without clicking or checking.
+                    await pointer_action(trial=True, timeout=CLICK_TIMEOUT_MILLISECONDS)
                 except PlaywrightTimeoutError as exc:
                     raise BrowserProviderError(
                         "tool.browser.element_not_found", retryable=False
@@ -1342,13 +1345,11 @@ class PythonPlaywrightRuntime:
                 if relied_copies and not await _copies_still_inert(page, handle, relied_copies):
                     await _release_guards(guards)
                     await self._refuse_grant()
-                await handle.click(timeout=CLICK_TIMEOUT_MILLISECONDS)
+                await pointer_action(timeout=CLICK_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.TYPE:
                 await handle.fill(action.value or "", timeout=ACTION_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.SELECT:
                 await handle.select_option(action.value or "", timeout=ACTION_TIMEOUT_MILLISECONDS)
-            elif action.kind is BrowserActionKind.CHECK:
-                await handle.check(timeout=ACTION_TIMEOUT_MILLISECONDS)
             elif action.kind is BrowserActionKind.PRESS:
                 key = action.key.value if action.key is not None else ""
                 if not guards:
