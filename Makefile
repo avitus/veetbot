@@ -85,23 +85,39 @@ test-fast: test-static test-contract
 
 # Hosted browsers are headed. Linux gives each a private Xvfb display; a Mac
 # would open the windows on the owner's desktop, so there both browser targets
-# run on the Linux chunk sidecar instead (ADR-0236). VEETBOT_BROWSER_ON_HOST=1
-# runs them on the Mac deliberately. test-browser-cases runs only the named
-# cases, so it writes no gate report.
+# run on Linux elsewhere (ADR-0236): by default a local linux/amd64 container
+# spread over CONTAINER_BROWSER_TEST_WORKERS, or with
+# VEETBOT_BROWSER_ROUTE=sidecar the chunk sidecar. VEETBOT_BROWSER_ON_HOST=1
+# runs them on the Mac deliberately. Linux runs them in place, serially unless
+# BROWSER_TEST_WORKERS says otherwise; each worker takes whole files.
+# test-browser-cases runs only the named cases, so it writes no gate report.
+VEETBOT_BROWSER_ROUTE ?= docker
+BROWSER_TEST_WORKERS ?= 0
+CONTAINER_BROWSER_TEST_WORKERS ?= 8
+ifeq ($(VEETBOT_BROWSER_ROUTE),docker)
+BROWSER_ROUTE_SCRIPT := scripts/run_in_linux_container.sh
+BROWSER_ROUTE_WORKERS := BROWSER_TEST_WORKERS=$(CONTAINER_BROWSER_TEST_WORKERS)
+else ifeq ($(VEETBOT_BROWSER_ROUTE),sidecar)
+BROWSER_ROUTE_SCRIPT := scripts/run_on_sidecar.sh
+BROWSER_ROUTE_WORKERS :=
+else
+# Deferred, so an unknown route fails only the browser targets.
+BROWSER_ROUTE_SCRIPT = $(error VEETBOT_BROWSER_ROUTE must be docker or sidecar, not '$(VEETBOT_BROWSER_ROUTE)')
+endif
 ifeq ($(HOST_OS)$(VEETBOT_BROWSER_ON_HOST),Darwin)
 test-browser:
-	@scripts/run_on_sidecar.sh make test-browser
+	@$(BROWSER_ROUTE_SCRIPT) make test-browser $(BROWSER_ROUTE_WORKERS)
 
 test-browser-cases:
-	@scripts/run_on_sidecar.sh "make test-browser-cases CASES='$(CASES)'"
+	@$(BROWSER_ROUTE_SCRIPT) "make test-browser-cases CASES='$(CASES)' $(BROWSER_ROUTE_WORKERS)"
 else
 test-browser: browser-install
-	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 -m browser \
+	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n $(BROWSER_TEST_WORKERS) --dist loadfile -m browser \
 		-p tests.browser_report --browser-report test-results/browser/baseline.json
 
 test-browser-cases: browser-install
 	@test -n "$(CASES)" || { echo 'test-browser-cases needs CASES=<pytest paths or node ids>' >&2; exit 2; }
-	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n 0 $(CASES)
+	VEETBOT_REQUIRE_REAL_BROWSER=1 uv run pytest -n $(BROWSER_TEST_WORKERS) --dist loadfile $(CASES)
 endif
 
 test-integration:

@@ -1550,7 +1550,7 @@ two still owe:
     the empty string, an optional `content` of at most 1 MiB is saved as
     text under a bare file name, exactly one of the two is required, and
     the text result states that the file is attached to the reply.
-    Version 1.0.0 stays registered for pinned sessions.
+    Version 1.0.0 is retired (ADR-0266).
 
 ## Registration, and the startup check
 
@@ -1971,7 +1971,7 @@ Image size defaults to `1024x1024`; the supported sizes are `1024x1024`,
 (default) or 10. Each invocation produces exactly one PNG or MP4.
 
 The owner's follow-up adds optional `reference_image_ids` in version `1.1.0`;
-`1.0.0` remains registered for pinned chats. These are ordered artifact UUIDs
+`1.0.0` is retired (ADR-0266). These are ordered artifact UUIDs
 from this conversation, never URLs, paths, or inline bytes. Image generation
 accepts up to eight references (20 MiB each, 64 MiB total) and uses SenseNova's
 `/v2/sensenova-u1.5/edit` endpoint when any are supplied. Video generation accepts
@@ -2030,8 +2030,8 @@ and URL inputs remain outside these two tools.
 ## Governed source learning
 
 `memory.learn@1.1.0` is always registered, enabled and deferred through
-`tool.call`; the compatible 1.0.0 handler remains registered for existing pinned
-sessions. `workspace.write_text` is also deferred to preserve the existing
+`tool.call`; its 1.0.0 contract is retired (ADR-0266). `workspace.write_text`
+is also deferred to preserve the existing
 browser tool-definition budget when the dispatcher is added. Both remain
 enabled and pinned. Source learning is classified as `MEMORY_WRITE`, with
 `side_effect: NONE`, medium risk, idempotent execution, no additional required

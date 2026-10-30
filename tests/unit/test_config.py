@@ -22,7 +22,6 @@ from agent_core.config import (
     DeploymentMode,
     JudgmentProviderKind,
     MemoryFormationPolicyPin,
-    MemoryProviderExtractionMode,
     PushProviderKind,
     SandboxMechanism,
     WebProviderKind,
@@ -842,39 +841,6 @@ def test_provider_memory_extraction_normalizes_non_utf8_evidence_failure(tmp_pat
         )
 
 
-def test_legacy_provider_memory_enablement_remains_fail_closed(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    release_root = tmp_path / "release-evidence"
-    release_root.mkdir()
-    monkeypatch.setattr(
-        config_module,
-        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
-        release_root,
-    )
-    with pytest.raises(ConfigurationError, match="evaluation evidence"):
-        load_settings(
-            {
-                **base_environment(),
-                "AGENT_PEOPLE_ENABLED": "0",
-                "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "1",
-            }
-        )
-
-
-def test_blank_legacy_provider_memory_enablement_is_unset() -> None:
-    settings = load_settings(
-        {
-            **base_environment(),
-            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "off",
-            "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "   ",
-        }
-    )
-
-    assert settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.OFF
-
-
 def test_auto_provider_memory_mode_tolerates_unusable_operator_evidence(
     tmp_path: Path,
 ) -> None:
@@ -890,17 +856,6 @@ def test_auto_provider_memory_mode_tolerates_unusable_operator_evidence(
     )
 
     assert settings.memory_provider_extraction_mode.value == "auto"
-
-
-def test_provider_memory_mode_and_legacy_flag_are_mutually_exclusive() -> None:
-    with pytest.raises(ConfigurationError, match="mutually exclusive"):
-        load_settings(
-            {
-                **base_environment(),
-                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "auto",
-                "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "1",
-            }
-        )
 
 
 def test_required_database_url_fails_before_construction() -> None:
@@ -1714,3 +1669,16 @@ def test_reviewed_dreaming_flag_is_explicit_and_does_not_enable_unattended_mode(
     assert not settings.memory_reconsolidation_enabled
     with pytest.raises(ConfigurationError):
         load_settings({**base_environment(), "AGENT_MEMORY_DREAMING_REVIEW_ENABLED": "maybe"})
+
+
+@pytest.mark.parametrize("legacy", ["0", "1", "invalid"])
+@pytest.mark.parametrize("mode", ["", "off", "auto"])
+def test_retired_formation_flag_requires_explicit_migration(legacy: str, mode: str) -> None:
+    with pytest.raises(ConfigurationError, match="AGENT_MEMORY_PROVIDER_EXTRACTION_MODE"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": legacy,
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": mode,
+            }
+        )

@@ -58,6 +58,19 @@ async def test_production_overview_first_page_is_the_closest_family_postgres(
         await closeness_overview_run(app)
 
 
+async def test_production_overview_first_page_reaches_every_family_tier_postgres(
+    tmp_path: Path,
+) -> None:
+    from tests.contract.owner_overview_cases import tiered_overview_run
+
+    async with build(
+        settings=replace(_settings(tmp_path), people_enabled=True),
+        storage="postgres",
+        script=script(True),
+    ) as app:
+        await tiered_overview_run(app)
+
+
 async def test_production_overview_says_when_a_group_exceeds_what_it_reads_postgres(
     tmp_path: Path,
 ) -> None:
@@ -69,3 +82,34 @@ async def test_production_overview_says_when_a_group_exceeds_what_it_reads_postg
         script=script(True),
     ) as app:
         await overflow_overview_run(app)
+
+
+@pytest.mark.parametrize(
+    "restriction", ["missing", "retracted", "expired", "future", "sensitive", "future_edge"]
+)
+async def test_owner_name_resolution_requires_current_support_postgres(restriction: str) -> None:
+    from tests.contract.support import NOW, agent, principal, session
+    from tests.integration.m2_support import database_settings
+    from tests.unit.test_people_resolution import owner_tie_support_contract
+
+    async with build(
+        settings=database_settings(), storage="postgres", principal=principal(), fixed_clock_at=NOW
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await owner_tie_support_contract(app.uow_factory, restriction)
+
+
+async def test_owner_name_resolution_qualifies_display_name_postgres() -> None:
+    from tests.contract.support import NOW, agent, principal, session
+    from tests.integration.m2_support import database_settings
+    from tests.unit.test_people_resolution import owner_tie_display_name_contract
+
+    async with build(
+        settings=database_settings(), storage="postgres", principal=principal(), fixed_clock_at=NOW
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await owner_tie_display_name_contract(app.uow_factory)

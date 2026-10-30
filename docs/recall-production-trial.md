@@ -35,6 +35,16 @@ The first window lasts 24 hours. A timely continue decision allows another
 semantic recall expires and ordinary sparse recall remains available. You can
 stop sooner. Continuing past the first week needs a new decision.
 
+## Application updates
+
+With [ADR-0269](adr/0269-semantic-admission-falls-back-at-startup.md), an app
+update can start normally when its semantic admission is no longer valid:
+it serves ordinary sparse recall and logs
+`semantic_recall_unavailable_using_sparse`. Readiness alone does not establish
+semantic activation. Verify current admission separately; refresh compatibility
+and evidence before restoring semantic retrieval through recomposition. A trial
+still expires on its original clock, and no app update renews it automatically.
+
 ## Operator preparation
 
 Follow [ADR-0223](adr/0223-owner-production-recall-trial.md). Before activation,

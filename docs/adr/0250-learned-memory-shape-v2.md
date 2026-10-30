@@ -3,7 +3,7 @@
 - Status: Accepted (2026-10-26; the shape follows the owner's 2026-10-23
   decision that website-learned memories surface as attributed tentative
   facts, and the owner-authorized production reshape superseded all 55 v1
-  rows on 2026-10-26)
+  rows on 2026-10-26; ADR-0266 then retired the reshape command)
 - Date: 2026-10-25
 - Related: ADR-0233, ADR-0245, ADR-0248, ADR-0249
 - Detailed design: `docs/plan/memory-formation-and-consolidation.md`,

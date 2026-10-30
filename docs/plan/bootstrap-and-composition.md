@@ -326,7 +326,7 @@ enabled, so it cannot create, alter, or reactivate work that no materializer
 will claim. Those facts are not in tension by
 accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
-`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 24,500-token
+`MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 25,000-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
 cap. Not one of them differs between two deployments of the same revision.
 They differ between *revisions*, which is another way of saying they belong in
@@ -418,7 +418,7 @@ src/agent_core/
   policy/default.yaml      the v0.1 policy profile
   models/policies.yaml     model_policies and provider profiles
   models/catalog.yaml      aliases, limits, context windows, prices
-  context/plan.yaml        region caps, reserves, snapshot caps, the 24,500 ceiling
+  context/plan.yaml        region caps, reserves, snapshot caps, the 25,000 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
   memory/profiles.yaml     RRF k, decay and usage knobs
@@ -709,7 +709,7 @@ decisions that can be made from configuration alone, before anything is
 built. Authentication configured or fail. Production refuses the development
 sandbox. Production refuses any policy profile, principal, or tenant name
 beginning with `eval.` or `tenant_eval`. The configured context plan's prefix
-classes sum to at most 24,500 tokens. Nothing has been constructed yet, so
+classes sum to at most 25,000 tokens. Nothing has been constructed yet, so
 nothing has to be torn down, which is the entire reason these checks are
 first rather than convenient.
 
@@ -794,7 +794,7 @@ the probe is built from a `Composition` that has no provider client on it.
 | Production refuses the dev sandbox | ADR-0008 | 1 |
 | Production cannot load an eval identity | eval spec | 1 and 4 |
 | Readiness must not call a provider | plan §16 | 5 |
-| Prefix classes fit the 24,500 ceiling | context spec | 1 and per session |
+| Prefix classes fit the 25,000 ceiling | context spec | 1 and per session |
 | Role-conditional composition | runtime spec | 5 |
 | Migrations upgrade cleanly | plan §25 | not startup |
 | A port with no contract module fails | eval spec | build gate |
@@ -1155,8 +1155,7 @@ Later subject documents add nouns on the same terms, each owned where its
 subject is designed: `agent persona` in
 [persona-surface.md](persona-surface.md), `agent surface` in
 [inbound-surfaces.md](inbound-surfaces.md), `agent people` in
-[people-and-relationships.md](people-and-relationships.md), `agent email
-exclude-bulk` in [email-experience.md](email-experience.md) (ADR-0116), and the
+[people-and-relationships.md](people-and-relationships.md), and the
 role entry points `agent execution-service` (ADR-0067) and `agent call-worker`
 and `agent call-ingress` ([bland-calling.md](bland-calling.md)). `agent session
 export-consent` is ADR-0039's, and `agent eval` carries the subcommands
@@ -1692,6 +1691,16 @@ Enabling it requires local semantic query authority and the same release-bound
 reviewed reader. It supplies bounded private, restricted, current-project source
 quotes under [ADR-0189](../adr/0189-governed-memory-source-recovery.md). An absent
 runtime binding or withdrawn evidence leaves ordinary fact recall available.
+
+[ADR-0269](../adr/0269-semantic-admission-falls-back-at-startup.md) isolates
+optional semantic configuration rejection at runtime startup. The strict
+semantic composer still rejects missing, expired, incompatible or malformed
+admission before provider access. Bootstrap records the fixed warning
+`semantic_recall_unavailable_using_sparse` and installs no semantic services,
+query preparation, source recovery or index callback when composition rejects.
+Ordinary sparse recall and maintenance remain available. Unrelated startup
+errors still propagate. Valid admission retains the existing graph; restoration
+requires valid current evidence and recomposition, never inherited approval.
 
 ## ADR-0209 browser research composition
 

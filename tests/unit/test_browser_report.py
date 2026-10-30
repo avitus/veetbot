@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 
 from tests import browser_tasks, real_browser_support
-from tests.browser_report import BrowserReporter
+from tests.browser_report import BrowserReporter, WorkerEvidence
 
 
 @pytest.fixture(autouse=True)
@@ -128,3 +128,91 @@ def test_missing_synthetic_task_fails_an_otherwise_passing_baseline(
     report = json.loads(reporter.destination.read_text())
     assert not report["verified"] and session.exitstatus == pytest.ExitCode.TESTS_FAILED
     assert report["synthetic_tasks"]["cases"][-1]["outcome"] == "not_run"
+
+
+def _passing_report(nodeid: str) -> pytest.TestReport:
+    return cast(
+        pytest.TestReport,
+        SimpleNamespace(nodeid=nodeid, when="call", duration=0.5, failed=False, skipped=False),
+    )
+
+
+def test_a_parallel_run_merges_each_workers_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Under xdist the controller collects and launches nothing; each worker
+    # ships what it observed, and the controller verifies the union.
+    first, second = "tests/unit/test_a.py::test_one", "tests/unit/test_b.py::test_two"
+    half = len(browser_tasks.SCENARIOS) // 2
+    outputs = []
+    for scenarios, build in (
+        (browser_tasks.SCENARIOS[:half], "123.4.5.6"),
+        (browser_tasks.SCENARIOS[half:], "123.4.5.6"),
+    ):
+        monkeypatch.setattr(real_browser_support, "OBSERVED_BROWSER_BUILDS", {build})
+        monkeypatch.setattr(
+            browser_tasks,
+            "OUTCOMES",
+            {
+                scenario.id: browser_tasks.TaskOutcome(True, 2, scenario.expected_effects, 0.1)
+                for scenario in scenarios
+            },
+        )
+        worker = WorkerEvidence()
+        worker.pytest_deselected(cast(list[pytest.Item], []))
+        config = SimpleNamespace(workeroutput={})
+        worker.pytest_sessionfinish(cast(pytest.Session, SimpleNamespace(config=config)))
+        # execnet ships only plain data between processes.
+        json.dumps(config.workeroutput)
+        outputs.append(config.workeroutput)
+
+    monkeypatch.setattr(real_browser_support, "OBSERVED_BROWSER_BUILDS", set())
+    monkeypatch.setattr(browser_tasks, "OUTCOMES", {})
+    destination = tmp_path / "baseline.json"
+    reporter = BrowserReporter(destination)
+    for _worker in outputs:
+        reporter.pytest_xdist_node_collection_finished(SimpleNamespace(), [first, second])
+    for nodeid in (first, second):
+        reporter.pytest_runtest_logreport(_passing_report(nodeid))
+    for output in outputs:
+        reporter.pytest_testnodedown(SimpleNamespace(workeroutput=output), None)
+    session = cast(pytest.Session, SimpleNamespace(items=[], exitstatus=0))
+    reporter.pytest_sessionfinish(session, 0)
+
+    report = json.loads(destination.read_text())
+    assert report["verified"] is True
+    assert report["counts"] == {"passed": 2, "failed": 0, "skipped": 0, "not_run": 0}
+    assert report["browser_builds"] == ["123.4.5.6"]
+    assert report["synthetic_tasks"]["verified"] is True
+
+
+def test_a_parallel_worker_that_filtered_browser_cases_fails_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(real_browser_support, "OBSERVED_BROWSER_BUILDS", {"123.4.5.6"})
+    monkeypatch.setattr(
+        browser_tasks,
+        "OUTCOMES",
+        {
+            scenario.id: browser_tasks.TaskOutcome(True, 2, scenario.expected_effects, 0.1)
+            for scenario in browser_tasks.SCENARIOS
+        },
+    )
+    worker = WorkerEvidence()
+    browser_case = SimpleNamespace(get_closest_marker=lambda name: object())
+    worker.pytest_deselected(cast(list[pytest.Item], [browser_case]))
+    config = SimpleNamespace(workeroutput={})
+    worker.pytest_sessionfinish(cast(pytest.Session, SimpleNamespace(config=config)))
+
+    nodeid = "tests/unit/test_a.py::test_one"
+    destination = tmp_path / "baseline.json"
+    reporter = BrowserReporter(destination)
+    reporter.pytest_xdist_node_collection_finished(SimpleNamespace(), [nodeid])
+    reporter.pytest_runtest_logreport(_passing_report(nodeid))
+    reporter.pytest_testnodedown(SimpleNamespace(workeroutput=config.workeroutput), None)
+    session = cast(pytest.Session, SimpleNamespace(items=[], exitstatus=0))
+    reporter.pytest_sessionfinish(session, 0)
+
+    report = json.loads(destination.read_text())
+    assert report["verified"] is False
+    assert report["deselected_browser_cases"] == 1

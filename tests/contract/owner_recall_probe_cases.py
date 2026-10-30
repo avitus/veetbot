@@ -369,9 +369,9 @@ async def family_names_case(
     It checks the names the delivered recall renders instead.
     """
 
-    from tests.contract.owner_overview_cases import seed_closeness
+    from tests.contract.owner_overview_cases import TIERED, seed_closeness
 
-    await seed_closeness(app)
+    await seed_closeness(app, TIERED)
     probe = Probe.model_validate(
         {
             "id": "family-names",
@@ -379,17 +379,18 @@ async def family_names_case(
             "family": "relationships",
             "question": "Tell me everything you know about me.",
             "paths": ["automatic"],
-            "delivered_must_contain": ["Erin", "Riv", "Kyrri", "Cousin"],
+            "delivered_must_contain": ["Erin", "Riv", "Kyrri", "Cousin", "Cousin2"],
         }
     )
     report = await observe_probes(app, script, (probe,), finish=finish)
     (observation,) = report.probes
     (path,) = observation.paths
     assert path.run_status == "COMPLETED"
-    # Page one holds the three closest; a cousin waits for the continuation.
-    assert path.delivered_found == (True, True, True, False)
-    assert report.summary.required_evidence == 4
-    assert report.summary.required_delivered == 3
+    # ADR-0265: page one reaches every tier, so the first cousin is delivered;
+    # it stops at eight of nine people, so the second cousin waits for the continuation.
+    assert path.delivered_found == (True, True, True, True, False)
+    assert report.summary.required_evidence == 5
+    assert report.summary.required_delivered == 4
     assert report.summary.facts_missed == 1
     assert "Erin" not in report.model_dump_json()
     return report

@@ -2643,6 +2643,30 @@ import SwiftUI
         #expect(model.learning?.styleExamples == 1)
     }
 
+    /// A learning reset shows while it runs and confirms when done; the sheet barely changes otherwise.
+    @Test func testResettingLearningShowsProgressAndConfirms() async throws {
+        let requests = EmailRequestRecorder()
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("learning/reset") {
+                _ = gate.wait(timeout: .now() + 5)
+                return (200, "{\"paused\":false,\"profile_revision\":3,\"excluded_sources\":0,\"style_examples\":0,\"history_processed\":25,\"history_complete\":false}")
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, self.pageJSON())
+        }
+        let reset = Task { await model.resetLearning(scope: "preferences") }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.path.hasSuffix("learning/reset") } }
+        #expect(model.isResettingLearning)
+        gate.signal()
+        await reset.value
+        #expect(!model.isResettingLearning)
+        #expect(toasts.current?.text == "Importance preferences reset.")
+    }
+
     @Test func testWritingExampleCannotEndorseAfterAConflictingSave() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in

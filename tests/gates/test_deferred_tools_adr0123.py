@@ -17,12 +17,20 @@ from types import MappingProxyType
 from typing import Any
 
 import pytest
+import yaml
 from pydantic import SecretStr
 
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.bootstrap import Composition, build
 from agent_core.config import load_settings
-from agent_core.context.rendering import build_prefix, prefix_bytes
+from agent_core.context.estimator import ConservativeTokenEstimator
+from agent_core.context.rendering import (
+    UNINDEXED_DEFERRED_TOOLS,
+    build_prefix,
+    deferred_index_items,
+    envelope_items,
+    prefix_bytes,
+)
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.events import EventEnvelope
@@ -89,6 +97,10 @@ WEBSITE_AND_LATER_FLAGS = MappingProxyType(
         "AGENT_COCKPIT_ENABLED": "1",
     }
 )
+# ADR-0267: what the fullest production chat must leave free in its index.
+INDEX_ENTRY_HEADROOM = 10
+INDEX_TOKEN_HEADROOM = 500
+PLAN_CONFIG = Path(__file__).parents[2] / "src/agent_core/context/plan.yaml"
 RECORDS_TOOLS = frozenset(
     f"records.{tool}" for tool in ("list", "query", "append", "create_series", "delete")
 )
@@ -297,6 +309,17 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
         "mcp.gmail_write.trash_thread",
         "mcp.gmail_write.untrash_thread",
     } <= set(plan.deferred_tool_names)
+    # ADR-0267: the fullest production chat keeps room for the next features'
+    # entries, so one more tool fails here instead of skipping one in a chat.
+    index = yaml.safe_load(PLAN_CONFIG.read_text(encoding="utf-8"))["classes"][
+        "deferred_tool_index"
+    ]
+    index_tokens = ConservativeTokenEstimator().estimate(
+        envelope_items(deferred_index_items(plan.deferred_tool_specs)), plan.model_id
+    )
+    indexed_count = sum(name not in UNINDEXED_DEFERRED_TOOLS for name in plan.deferred_tool_names)
+    assert int(index["max_items"]) - indexed_count >= INDEX_ENTRY_HEADROOM
+    assert int(index["max_tokens"]) - index_tokens >= INDEX_TOKEN_HEADROOM
 
 
 async def test_the_production_plan_renders_its_prefix_again_from_jsonb(tmp_path: Path) -> None:

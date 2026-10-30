@@ -18,13 +18,169 @@ from tests.integration.m2_support import memory_settings
 from tests.unit.test_config import base_environment
 
 
-async def test_index_activation_refuses_missing_release_dependencies() -> None:
+async def test_startup_falls_back_without_semantic_release_dependencies(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     settings = load_settings({**base_environment(), "AGENT_MEMORY_SEMANTIC_INDEX_ENABLED": "1"})
-    with pytest.raises(ConfigurationError, match="Semantic index"):
-        async with build(
-            settings=replace(settings, sandbox=memory_settings().sandbox), storage="memory"
-        ):
-            pass
+    async with build(
+        settings=replace(settings, sandbox=memory_settings().sandbox), storage="memory"
+    ) as app:
+        assert await app.readiness_probe()
+        assert app.semantic_services is None
+        assert app.executor._prepare_recall is None
+        worker = app.maintenance_factory()
+        assert isinstance(worker, MaintenanceWorker)
+        assert worker._sweep_memory_semantic_index is None
+        await worker.run_once()
+    assert "semantic_recall_unavailable_using_sparse" in caplog.text
+
+
+@pytest.mark.parametrize("rejected", ["evidence", "manifest", "policy", "release"])
+async def test_updated_app_starts_sparse_without_loading_rejected_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rejected: str,
+) -> None:
+    import agent_core.bootstrap as bootstrap
+    from agent_core.domain.memory import RecallQuery
+    from tests.contract.memory_fixtures import memory
+    from tests.contract.support import SESSION_ID, principal, session
+
+    kwargs, provider, credentials, _, _ = await configured_index(tmp_path, rejected=rejected)
+    if rejected == "release":
+        import agent_core.memory.semantic_deployment as deployment
+
+        actual_bind = deployment.bind_index_manifest
+
+        def bind(
+            root: Path,
+            manifest: Path,
+            evidence: Path,
+            release: str,
+            dependencies: dict[str, str],
+            **context: Any,
+        ) -> Callable[[], bool]:
+            # Hold every captured dependency constant, changing only the deployed revision.
+            release_files(tmp_path, dependencies)
+            return actual_bind(root, manifest, evidence, release, dependencies, **context)
+
+        monkeypatch.setattr(deployment, "bind_index_manifest", bind)
+        kwargs["settings"] = replace(kwargs["settings"], release_id="20261011-120000-bbbbbbb")
+
+    def forbidden(*args: Any, **options: Any) -> Any:
+        pytest.fail("Rejected semantic evidence must not construct a provider")
+
+    monkeypatch.setattr(bootstrap, "OpenAIEmbeddingProvider", forbidden)
+    monkeypatch.setattr(bootstrap, "local_embedding_provider", forbidden)
+    async with build(
+        settings=kwargs["settings"],
+        storage="memory",
+        principal=principal(),
+        clock=kwargs["clock"],
+        credential_resolver=kwargs["credentials"],
+    ) as app:
+        assert await app.readiness_probe()
+        assert app.semantic_services is None
+        assert app.executor._prepare_recall is None
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+            await uow.memories.upsert_belief(memory(statement="User prefers morning walks"))
+        result = await app.memory_retriever.recall(
+            RecallQuery(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                current_scope="global",
+                text="morning walks",
+                budget_tokens=1000,
+                max_items=10,
+                min_score=0.1,
+            ),
+            session_id=SESSION_ID,
+        )
+        assert result.items
+        worker = app.maintenance_factory()
+        assert isinstance(worker, MaintenanceWorker)
+        assert worker._sweep_memory_semantic_index is None
+        await worker.run_once()
+    assert not credentials and not provider.calls
+
+
+@pytest.mark.parametrize("index_enabled", [True, False])
+@pytest.mark.parametrize(
+    ("question", "statement", "subject"),
+    [
+        ("What should I plant in my garden?", "User lives in Exampleville, CA.", "home location"),
+        ("What accessories suit my car?", "User owns a 2026 Aster S8.", "car"),
+    ],
+)
+async def test_sparse_startup_preserves_owner_anchors_with_semantic_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    index_enabled: bool,
+    question: str,
+    statement: str,
+    subject: str,
+) -> None:
+    """A configured semantic profile must not remove the sparse fallback's anchors."""
+    import json
+
+    import agent_core.bootstrap as bootstrap
+    from agent_core.domain.memory import BeliefType
+    from agent_core.memory.retrieval import DeterministicQueryFormer
+    from tests.contract.memory_fixtures import memory
+    from tests.contract.support import SESSION_ID, principal, session
+
+    kwargs, _, credentials, _, _ = await configured_index(tmp_path, rejected="manifest")
+    settings = replace(kwargs["settings"], memory_semantic_index_enabled=index_enabled)
+    (settings.config_dir / "memory" / "profiles.yaml").write_text(
+        json.dumps({"schema_version": 1, "retrieval": {"semantic_enabled": True}})
+    )
+
+    def forbidden(*args: Any, **options: Any) -> Any:
+        pytest.fail("Sparse fallback must not construct an embedding provider")
+
+    monkeypatch.setattr(bootstrap, "OpenAIEmbeddingProvider", forbidden)
+    monkeypatch.setattr(bootstrap, "local_embedding_provider", forbidden)
+    async with build(
+        settings=settings,
+        storage="memory",
+        principal=principal(),
+        clock=kwargs["clock"],
+        credential_resolver=kwargs["credentials"],
+    ) as app:
+        assert app.semantic_services is None
+        assert app.memory_profiles.retrieval.semantic_enabled  # Preserve configured identity.
+        target = memory(statement=statement).model_copy(
+            update={"subject": subject, "belief_type": BeliefType.USER_MODEL_ATTR}
+        )
+        async with app.uow_factory() as uow:
+            await uow.sessions.create(session())
+            await uow.memories.upsert_belief(target)
+        query = DeterministicQueryFormer(principal(), current_scope="project-a").from_text(
+            question
+        )[0]
+        recalled = await app.memory_retriever.recall(query, session_id=SESSION_ID)
+        assert target.id in [item.belief_id for item in recalled.items]
+        async with app.uow_factory() as uow:
+            trace = await uow.traces.get(recalled.trace_id, principal())
+        assert trace.query.include_owned_resources == query.include_owned_resources
+        assert trace.query.include_home_location == query.include_home_location
+        assert "+semantic@" not in trace.retrieval_policy_version
+    assert not credentials
+
+
+async def test_optional_semantic_fallback_does_not_swallow_programming_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent_core.bootstrap as bootstrap
+
+    async def broken(**options: Any) -> None:
+        raise RuntimeError("Unexpected implementation failure")
+
+    monkeypatch.setattr(bootstrap, "compose_indexing", broken)
+    with pytest.raises(RuntimeError, match="Unexpected implementation failure"):
+        async with build(settings=replace(memory_settings(), memory_semantic_index_enabled=True)):
+            pytest.fail("Only semantic configuration rejection may fall back")
 
 
 @pytest.mark.parametrize("stop", [True, False])

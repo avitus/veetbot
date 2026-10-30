@@ -18,7 +18,7 @@ from agent_core.domain.people import Person
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult
 from agent_core.memory.email_people import EmailPeopleFormationService
 from agent_core.runtime.email_state import save_value
-from agent_core.tools.people import LegacyPeopleHistoryTool, PeopleHistoryTool
+from agent_core.tools.people import PeopleHistoryTool
 from tests.contract.people_mail_fixtures import (
     ALEX,
     OWNER,
@@ -181,32 +181,3 @@ def _assert_refused(result: ToolResult) -> None:
     # NotFoundError instead would end the whole run.
     assert not result.ok and not result.content and result.structured is None
     assert result.failure is not None and result.failure.kind is ToolFailureKind.NOT_FOUND
-
-
-async def test_chats_pinned_to_the_first_version_keep_its_published_shape() -> None:
-    _factory, people, alex = await _stack()
-    legacy = LegacyPeopleHistoryTool(people)
-    assert legacy.spec.version == "1.0.0" and PeopleHistoryTool.spec.version == "1.1.0"
-    assert "source_id" not in legacy.spec.input_schema["properties"]
-
-    result = await legacy.execute(
-        {"person_id": str(alex.id)}, _context("people.read", "email.read")
-    )
-
-    assert result.structured is not None and "source" not in result.structured
-    [item] = result.structured["items"]
-    assert "email" not in item
-    assert legacy.spec.output_schema is not None
-    jsonschema.validate(result.structured, legacy.spec.output_schema)
-
-
-def test_the_first_version_keeps_its_exact_pinned_spec() -> None:
-    import hashlib
-    import json
-
-    # A chat pins the whole spec; a restored run fails on any difference.
-    spec = json.dumps(LegacyPeopleHistoryTool.spec.model_dump(mode="json"), sort_keys=True)
-    assert (
-        hashlib.sha256(spec.encode()).hexdigest()
-        == "a150f49efb3d706a088b3dd9745523c2327958e4b82271835c2049dbbeebb951"
-    )

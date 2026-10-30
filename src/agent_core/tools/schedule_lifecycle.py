@@ -453,12 +453,6 @@ class PreviousScheduleListTool(ScheduleListTool):
     lists_intervals = False
 
 
-class LegacyScheduleListTool(PreviousScheduleListTool):
-    """Compatibility registration for sessions pinned before the 1.0.2 repair."""
-
-    spec = _LIST_SPEC.model_copy(update={"version": "1.0.1"}, deep=True)
-
-
 class ScheduleUpdateTool:
     """Patch model-visible schedule fields without exposing execution authority."""
 

@@ -209,8 +209,13 @@ public final class CockpitViewModel: ObservableObject {
 
     /// Replace a live widget's private settings; they never leave the owner's own clients.
     public func saveSettings(_ slug: String, values: [String: JSONValue]) async {
+        let epoch = connectionEpoch
         await perform { client in
             try await client.putCockpitSettings(slug, values: values)
+            guard epoch == self.connectionEpoch else { return nil }
+            // The form already shows the saved values, so only a toast says it took.
+            self.actionMessage = nil
+            self.toasts.show("Settings saved.")
             await self.openDetail(slug)
             return nil
         }

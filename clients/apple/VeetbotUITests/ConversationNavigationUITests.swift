@@ -31,6 +31,102 @@ final class ConversationNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
+    #if os(iOS)
+    func testTabletEmailUtilitiesAreAtTheTopRight() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad layout") }
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.launch()
+        let email = app.buttons["mode.email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 10))
+        email.tap()
+        let more = app.buttons["email.more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "Email must use the top-right menu")
+        XCTAssertGreaterThan(more.frame.midX, app.frame.width * 0.75)
+        XCTAssertLessThan(more.frame.maxY, app.frame.height * 0.25)
+        XCTAssertFalse(app.buttons["email.global.settings"].exists, "No second menu at the bottom")
+        more.tap()
+        for name in ["Memory", "People", "Schedules", "Persona", "Settings"] {
+            XCTAssertTrue(app.buttons[name].waitForExistence(timeout: 3), "Missing \(name)")
+        }
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "iPad Email top-right utilities"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testTabletSidebarsKeepModesOnOneLineAndResizeAcrossModesAndLaunches() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad layout") }
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.launch()
+        let handle = app.descendants(matching: .any)["chat.sidebar.resize"].firstMatch
+        XCTAssertTrue(handle.waitForExistence(timeout: 10))
+        let before = handle.frame.midX
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 60, dy: 0)))
+        let moved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            handle.frame.midX > before + 45
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 5), .completed, "Sidebar started at \(before), ended at \(handle.frame.midX)")
+        let resized = handle.frame.midX
+        for mode in ["email", "cockpit", "chat"] {
+            app.buttons["mode.\(mode)"].firstMatch.tap()
+            let divider = app.descendants(matching: .any)["\(mode).sidebar.resize"].firstMatch
+            XCTAssertTrue(divider.waitForExistence(timeout: 5))
+            XCTAssertEqual(divider.frame.midX, resized, accuracy: 3)
+            let cockpit = app.buttons["mode.cockpit"].firstMatch
+            let chat = app.buttons["mode.chat"].firstMatch
+            let email = app.buttons["mode.email"].firstMatch
+            XCTAssertLessThan(cockpit.frame.maxX, chat.frame.maxX)
+            XCTAssertLessThan(chat.frame.maxX, email.frame.maxX)
+            XCTAssertEqual(cockpit.frame.midY, email.frame.midY, accuracy: 1)
+            // SwiftUI exposes the padded label as the static text frame (36pt).
+            // Check a single control row and enough width for the full word.
+            XCTAssertLessThanOrEqual(cockpit.frame.height, 37)
+            let titleWidth = ("Cockpit" as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 17)]).width
+            XCTAssertGreaterThanOrEqual(cockpit.frame.width, titleWidth + 16)
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "iPad \(mode) resized sidebar"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        app.launchEnvironment["VEETBOT_UI_TEST_KEEP_TABLET_WIDTH"] = "1"
+        app.launch()
+        XCTAssertTrue(handle.waitForExistence(timeout: 10))
+        XCTAssertEqual(handle.frame.midX, resized, accuracy: 3)
+    }
+    func testTabletPortraitEmailReadsAndReturnsWithoutSqueezingColumns() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad layout") }
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        XCTAssertTrue(app.buttons["mode.email"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["mode.email"].firstMatch.tap()
+        let thread = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(thread.waitForExistence(timeout: 10))
+        // A 13-inch portrait iPad still has room for both columns. Widening its
+        // sidebar makes the reading area cross the same threshold as smaller iPads.
+        let handle = app.descendants(matching: .any)["email.sidebar.resize"].firstMatch
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 100, dy: 0)))
+        thread.tap()
+        let back = app.buttons["email.back-to-inbox"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["mode.chat"].firstMatch.isHittable)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Portrait iPad Email reader"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        back.tap()
+        XCTAssertTrue(thread.waitForExistence(timeout: 5))
+        XCTAssertTrue(thread.isHittable)
+    }
+    #endif
+
     func testA2CallResultDisclosesTranscriptAndStagesANewCall() {
         app.launchArguments.append("--ui-testing-call-result")
         app.launch()
@@ -661,8 +757,21 @@ final class ConversationNavigationUITests: XCTestCase {
                     "\(day) visit \(visit)\n\(app.debugDescription)"
                 )
                 #else
-                for _ in 0..<6 where !closing.isHittable { transcript.swipeUp() }
-                XCTAssertTrue(closing.isHittable, "\(day) visit \(visit)\n\(app.debugDescription)")
+                // Static rendered Markdown can have no XCTest hit point on
+                // iPad even while fully drawn. Check the visible transcript
+                // bounds, including the floating composer exclusion, rather
+                // than treating this noninteractive text as a tap target.
+                let composer = app.descendants(matching: .any)["chat.composer"]
+                func closingIsVisible() -> Bool {
+                    let frame = closing.frame
+                    let window = app.windows.firstMatch.frame
+                    return !frame.isEmpty && !frame.isInfinite && !frame.isNull
+                        && window.contains(frame)
+                        && frame.minY >= transcriptTop() - 1
+                        && frame.maxY <= composer.frame.minY
+                }
+                for _ in 0..<6 where !closingIsVisible() { transcript.swipeUp() }
+                XCTAssertTrue(closingIsVisible(), "\(day) visit \(visit)\n\(app.debugDescription)")
                 #endif
             }
         }
@@ -970,6 +1079,11 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(iOS)
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone,
                       "Compact navigation covers the inbox while a conversation is open")
+        // This case exercises simultaneous inbox/reader interaction. Portrait
+        // iPad correctly uses a one-column detail, so give both columns room.
+        let previousOrientation = XCUIDevice.shared.orientation
+        defer { XCUIDevice.shared.orientation = previousOrientation }
+        XCUIDevice.shared.orientation = .landscapeLeft
         #endif
         app.launchArguments.append("--ui-testing-email-archive-next")
         app.launch()
@@ -3917,14 +4031,24 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     #if os(iOS)
-    /// Opens a compact sidebar destination after its native menu becomes interactive.
+    /// Opens global utilities through the visible compact or regular-width menu.
     private func openSidebarDestination(identifier: String) {
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10))
-        let moreButton = window.buttons["sidebar.more"]
-        XCTAssertTrue(moreButton.waitForExistence(timeout: 10))
+        // Regular-width Chat moved these utilities to its top-right toolbar.
+        // Select the actual rendered control, not the device idiom: an iPad
+        // can also expose the compact drawer in a narrow window.
+        let toolbarMore = window.buttons["chat.more"]
+        let compactMore = window.buttons["sidebar.more"]
+        let menuAppeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            toolbarMore.exists || compactMore.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [menuAppeared], timeout: 10), .completed)
+        let regularWidth = toolbarMore.exists
+        let moreButton = regularWidth ? toolbarMore : compactMore
+        XCTAssertTrue(moreButton.exists)
         // On iOS 27 the compact drawer's visible More button can have valid
         // geometry while XCTest's hittability query throws or stays false.
         // Touch its observed centre through the window, then require the
@@ -3939,7 +4063,11 @@ final class ConversationNavigationUITests: XCTestCase {
             dx: moreFrame.midX - mainFrame.minX, dy: moreFrame.midY - mainFrame.minY
         )).tap()
 
-        let destination = window.buttons[identifier]
+        let utilityLabels = [
+            "sidebar.memory": "Memory", "sidebar.schedules": "Schedules",
+            "sidebar.persona": "Persona", "sidebar.settings": "Settings"
+        ]
+        let destination = window.buttons[regularWidth ? (utilityLabels[identifier] ?? identifier) : identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
         // Menu elements appear before their presentation becomes interactive.
         waitForSettledFrame(of: destination, stableFor: 3)

@@ -16,7 +16,6 @@ from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     BeliefType,
     MemoryAuthority,
-    MemoryBrowseQuery,
     MemoryClaimKind,
     MemoryDerivation,
     MemoryLongevity,
@@ -25,7 +24,6 @@ from agent_core.domain.memory import (
     Polarity,
     Portability,
     Sensitivity,
-    SourceReshape,
 )
 from agent_core.domain.people import PeopleQuery, PeopleSource, SourceMemoryLink
 from agent_core.domain.people_sources import source_id
@@ -39,9 +37,10 @@ from agent_core.memory.formation import GovernedMemoryService
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-# ADR-0250: the claim is the statement; the host sits beside it. Rows learned
-# under @1 keep their embedded citation until the governed reshape supersedes
-# them; receipts are read under both versions so a host still counts once.
+# ADR-0250: the claim is the statement; the host sits beside it. The rows
+# learned under @1 were superseded by their @2 shape on 2026-10-26 (ADR-0266
+# retired the reshape); receipts are read under both versions so a host still
+# counts once.
 VERSION = "owner-source-learning@2"
 LEGACY_VERSION = "owner-source-learning@1"
 VERSIONS = (VERSION, LEGACY_VERSION)
@@ -549,155 +548,6 @@ class SourceLearningService:
             record.expires_at is not None and record.expires_at <= self._clock.now()
         )
 
-    async def reshape(self, *, policy: str, confirm: bool) -> SourceReshape:
-        """Supersede every live belief learned under ``policy`` with its @2 shape
-        (ADR-0250): the claim as the statement, the host beside it, contextual
-        portability, the same source events, confidence and expiry. Governed
-        supersession, never a rewrite; a dry run counts and writes nothing.
-        """
-        async with self._factory() as uow:
-            rows = [
-                record
-                for record in await self._live_rows(uow)
-                if record.consolidation_policy_version == policy and not self._expired(record)
-            ]
-        reshaped = 0
-        for record in rows:
-            claim = _claim_text(record.statement)
-            citation = re.search(r" \[Source: (?P<url>[^\]]+)\]$", record.statement)
-            if claim == record.statement or citation is None:
-                continue  # Not a @1 row shape; left for a human.
-            url = citation.group("url")
-            host = _site((urlsplit(url).hostname or "").casefold())
-            if not host:
-                continue
-            reshaped += 1
-            if not confirm:
-                continue
-            principal = self._service.principal
-            async with self._factory() as uow, uow.people.lock(principal):
-                current = await uow.memories.get(record.id, principal)
-                if (
-                    current.status not in LIVE_MEMORY_STATUSES
-                    or current.superseded_by
-                    or self._expired(current)
-                ):
-                    continue
-                subject = (
-                    host
-                    if _normalized(current.subject) == _normalized(claim)
-                    or len(current.subject) > MAX_SUBJECT_CHARS
-                    else current.subject
-                )
-                replacement, _action = await self._service.remember_formation(
-                    session_id=current.source_session_id,
-                    run_id=None,
-                    statement=claim,
-                    subject=subject,
-                    scope=current.scope,
-                    belief_type=current.belief_type,
-                    portability=Portability.CONTEXTUAL,
-                    sensitivity=current.sensitivity,
-                    source_event_ids=list(current.source_event_ids),
-                    origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
-                    explicit=False,
-                    authority=MemoryAuthority.INFERRED,
-                    polarity=Polarity.ASSERT,
-                    confidence=current.confidence,
-                    valid_from=current.valid_from,
-                    expires_at=current.expires_at,
-                    trigger=VERSION,
-                    record_audit=True,
-                    claim_kind=current.claim_kind,
-                    derivation=MemoryDerivation.HYPOTHESIS,
-                    longevity=MemoryLongevity.TENTATIVE,
-                    evidence_at=current.last_evidence_at,
-                    attributed_external=True,
-                    source_learning=True,
-                    audit_model=VERSION,
-                    existing_uow=uow,
-                    attribution_host=host,
-                )
-                now = self._clock.now()
-                superseded = current.model_copy(
-                    update={
-                        "status": MemoryStatus.SUPERSEDED,
-                        "valid_to": now,
-                        "superseded_by": replacement.id,
-                        "store_position": await uow.memories.next_position(),
-                        "updated_at": now,
-                    },
-                    deep=True,
-                )
-                stored = await uow.memories.reinforce(superseded)
-                await uow.events.append(
-                    NewEvent(
-                        session_id=current.source_session_id,
-                        run_id=None,
-                        event_type="memory.superseded",
-                        actor_type="memory",
-                        actor_id=principal.principal_id,
-                        payload={
-                            "belief_id": str(stored.id),
-                            "superseded_by": str(replacement.id),
-                            "policy_version": VERSION,
-                        },
-                    )
-                )
-                # Read each cited source event, never the whole source session.
-                sources = [
-                    event
-                    for sequence in current.source_event_ids
-                    for event in await uow.events.list_after(
-                        current.source_session_id, sequence - 1, principal, limit=1
-                    )
-                    if event.sequence == sequence
-                ]
-                identity = hashlib.sha256(
-                    (
-                        principal.tenant_id
-                        + "\0"
-                        + principal.principal_id
-                        + "\0"
-                        + host.casefold()
-                        + "\0"
-                        + _normalized(claim)
-                    ).encode()
-                ).hexdigest()
-                # Erasure reaches a belief through its links, never through
-                # superseded_by: support other websites' reinforcements linked
-                # to the v1 row follows it, so deleting any of those chats
-                # still fences the replacement.
-                await self._link_sources(
-                    uow,
-                    principal,
-                    replacement,
-                    sources,
-                    identity,
-                    carried=await self._supports(uow, principal, current),
-                )
-        return SourceReshape(examined=len(rows), reshaped=reshaped, dry_run=not confirm)
-
-    async def _live_rows(self, uow: RepositoryUnitOfWork) -> list[MemoryRecord]:
-        principal = self._service.principal
-        found: list[MemoryRecord] = []
-        cursor: tuple[int, UUID] | None = None
-        while True:
-            page = await uow.memories.browse(
-                MemoryBrowseQuery(
-                    tenant_id=principal.tenant_id,
-                    principal_id=principal.principal_id,
-                    ceiling=Sensitivity.RESTRICTED,
-                    limit=200,
-                    cursor=cursor,
-                )
-            )
-            rows = page[:200]
-            found.extend(rows)
-            if len(page) <= 200 or not rows:
-                return found
-            cursor = (rows[-1].store_position, rows[-1].id)
-
     async def _link_sources(
         self,
         uow: RepositoryUnitOfWork,
@@ -705,8 +555,6 @@ class SourceLearningService:
         belief: MemoryRecord,
         events: list[EventEnvelope],
         identity: str,
-        *,
-        carried: list[UUID] | None = None,
     ) -> None:
         now = self._clock.now()
         support: list[UUID] = []
@@ -731,7 +579,7 @@ class SourceLearningService:
                     ),
                     expected_revision=0,
                 )
-        support = list(dict.fromkeys([*support, *(carried or [])]))
+        support = list(dict.fromkeys(support))
         link_id = uuid5(belief.id, identity)
         existing = await uow.people.get(principal, link_id, ceiling=Sensitivity.RESTRICTED)
         if existing is not None:

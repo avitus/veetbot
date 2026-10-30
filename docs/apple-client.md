@@ -488,6 +488,21 @@ collapsed; the owner's toggles are remembered on the device. Scheduled rows
 carry no move menu, and the groups render whether or not the server offers
 folders.
 
+The mode switch reads **Cockpit, Chat, Email** in that order. Each regular-width
+left pane leads with it, above search or accounts. Sidebars start at 320 points
+with a 300-point minimum and a 420-point maximum. The labels remain on one line
+at standard text sizes; accessibility text sizes may wrap without clipping.
+On iPad, a touch or pointer drag of the sidebar divider changes a shared,
+device-local width; VoiceOver can adjust it and a double tap resets it.
+A narrower window constrains the displayed width without replacing that choice;
+below 672 points the iPad uses compact navigation. The Mac window minimum is
+812 points to fit its sidebar, inbox and reader floors.
+The top-right More menu exposes Memory, People, Schedules, Persona and Settings
+in all three iPad modes; Email has no second utility menu at the bottom.
+When Email has less than 660 points beside the sidebar, the selected thread
+replaces the list in that area, with an Inbox back button. Wider windows show
+both list and reader. Compact navigation and in-progress drafts are preserved.
+
 In compact iPhone and iPad layouts, sidebar rows push an activating chat
 destination before selecting a historical session or resetting to a new
 conversation. On regular-width iPad layouts and macOS, where the split-view

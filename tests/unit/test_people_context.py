@@ -738,3 +738,142 @@ async def test_people_context_is_owner_bound_and_scope_gated(
             recall_query(text="Maya").model_copy(update=query_identity),
             session_id=SESSION_ID,
         )
+
+
+@pytest.mark.parametrize("multiple_edges", [False, True])
+@pytest.mark.parametrize("token_limited", [False, True])
+async def test_overview_cursor_never_skips_undelivered_relationship_context(
+    multiple_edges: bool,
+    token_limited: bool,
+) -> None:
+    from uuid import UUID
+
+    from agent_core.domain.memory import TracedPersonContext
+
+    clock, factory = await memory_uow_factory()
+    retriever = HybridMemoryRetriever(factory, clock, ids(), principal())
+    first, second, third = (UUID(int=90000 + n) for n in range(3))
+    contexts = [
+        TracedPersonContext(
+            record_id=UUID(int=91000 + n),
+            revision=1,
+            person_ids=[person],
+            kind="relationship",
+            text="A supported family relationship.",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+        for n, person in enumerate(
+            [first, second, second, third] if multiple_edges else [first, second, third]
+        )
+    ]
+    query = recall_query().model_copy(
+        update={
+            "relationship_group": "family",
+            "next_people_after": third,
+            "max_items": 20 if token_limited else 2,
+            "budget_tokens": 250 if token_limited else 2000,
+        }
+    )
+    result = await retriever.recall(
+        query,
+        session_id=SESSION_ID,
+        people_items=contexts,
+        measure_rendered_tokens=(lambda text: 100 + 100 * text.count("<person-context "))
+        if token_limited
+        else None,
+    )
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    expected = first if multiple_edges or token_limited else second
+    assert trace.query.next_people_after == expected
+    assert f'people_after="{expected}"' in result.rendered
+    assert result.tokens <= query.budget_tokens
+
+
+@pytest.mark.parametrize("continued", [False, True])
+async def test_oversized_first_person_explicitly_advances_to_later_people(continued: bool) -> None:
+    from uuid import UUID
+
+    from agent_core.domain.memory import TracedPersonContext
+
+    clock, factory = await memory_uow_factory()
+    retriever = HybridMemoryRetriever(factory, clock, ids(), principal())
+    first, second = UUID(int=93000), UUID(int=93001)
+    contexts = [
+        TracedPersonContext(
+            record_id=UUID(int=94000 + n),
+            revision=1,
+            person_ids=[person],
+            kind="relationship",
+            text="A supported family relationship.",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+        for n, person in enumerate([first] * 30 + [second])
+    ]
+    query = recall_query().model_copy(
+        update={
+            "relationship_group": "family",
+            "people_after": UUID(int=92999) if continued else None,
+            "max_items": 20,
+            "budget_tokens": 2000,
+        }
+    )
+    result = await retriever.recall(query, session_id=SESSION_ID, people_items=contexts)
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    assert trace.query.next_people_after == first
+    assert f"Incomplete context for person {first}" in result.rendered
+    assert f'people_after="{first}"' in result.rendered
+    assert "not paginated by people.context" in result.rendered
+    assert "narrower text query" not in result.rendered
+    assert result.truncated and result.tokens <= query.budget_tokens
+    # The next People-service page excludes the passed person, as its existing
+    # owner-overview contract requires; retrieval must expose the later identity.
+    following = await retriever.recall(
+        query.model_copy(update={"people_after": first}),
+        session_id=SESSION_ID,
+        people_items=[contexts[-1]],
+    )
+    assert str(contexts[-1].record_id) in following.rendered
+    assert "Incomplete context" not in following.rendered
+
+
+async def test_overview_first_person_uses_full_budget_before_competing_beliefs() -> None:
+    """A fitting person is not skipped because ordinary beliefs took their slots."""
+    from uuid import UUID
+
+    from agent_core.domain.memory import TracedPersonContext
+
+    clock, factory = await memory_uow_factory()
+    retriever = HybridMemoryRetriever(factory, clock, ids(), principal())
+    first, second = UUID(int=95000), UUID(int=95001)
+    contexts = [
+        TracedPersonContext(
+            record_id=UUID(int=96000 + n),
+            revision=1,
+            person_ids=[person],
+            kind="relationship",
+            text="A supported family relationship.",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+        for n, person in enumerate([first] * 9 + [second])
+    ]
+    async with factory() as uow:
+        for n in range(20):
+            await uow.memories.upsert_belief(
+                memory(belief_id=97000 + n, statement=f"Family fact {n}.").model_copy(
+                    update={"subject": f"Subject {n}", "store_position": n + 1}
+                )
+            )
+    query = recall_query(text="family").model_copy(
+        update={
+            "relationship_group": "family",
+            "max_items": 20,
+            "budget_tokens": 4000,
+        }
+    )
+    result = await retriever.recall(query, session_id=SESSION_ID, people_items=contexts)
+    assert result.items, "Competing ordinary beliefs must actually be eligible"
+    assert all(str(item.record_id) in result.rendered for item in contexts[:9])
+    assert "Incomplete context" not in result.rendered
+    assert result.tokens <= query.budget_tokens

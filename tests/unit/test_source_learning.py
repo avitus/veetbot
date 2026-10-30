@@ -239,30 +239,19 @@ async def test_quote_only_learning_still_requires_owner_intent() -> None:
         assert await app.memory.list_memories() == []
 
 
-async def test_released_learning_tool_version_remains_executable() -> None:
-    async with read_archive() as (app, context, _):
-        tool = app.tool_pipeline._registry.get("memory.learn", "1.0.0")
-        result = await tool.execute({"observations": [observation()]}, context)
-        assert result.structured is not None
-        assert result.structured["results"][0]["status"] == "committed"
-        assert len(await app.memory.list_memories()) == 1
-        assert app.tool_pipeline._registry.get("memory.learn").spec.version == "1.1.0"
-
-
-@pytest.mark.parametrize("version", ["1.0.0", "1.1.0"])
 @pytest.mark.parametrize(
     "quote_length,explicit_claim,status",
     [(512, False, "committed"), (513, False, "rejected"), (2048, True, "committed")],
 )
 async def test_learning_quote_limits_preserve_explicit_evidence_compatibility(
-    version: str, quote_length: int, explicit_claim: bool, status: str
+    quote_length: int, explicit_claim: bool, status: str
 ) -> None:
     quote = ("Family album caption. " * 100)[:quote_length]
     proposal = {"call_id": "read-album", "quote": quote}
     if explicit_claim:
         proposal.update(claim="Family album caption.", subject="Family album")
     async with read_archive(text=quote) as (app, context, _):
-        tool = app.tool_pipeline._registry.get("memory.learn", version)
+        tool = app.tool_pipeline._registry.get("memory.learn")
         result = await tool.execute({"observations": [proposal]}, context)
         assert result.structured is not None
         receipt = result.structured["results"][0]

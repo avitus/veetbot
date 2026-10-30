@@ -22,6 +22,9 @@ struct CockpitModeView: View {
     @AppStorage("cockpit.nightWatch") private var nightWatch = false
     @AppStorage("cockpit.keepAwake") private var keepAwake = false
     @Environment(\.colorScheme) private var colorScheme
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     #if os(macOS)
     var sidebarStore = MacColumnWidthStore.cockpitSidebar()
     var panelStore = MacColumnWidthStore.cockpitPanel()
@@ -103,10 +106,16 @@ struct CockpitModeView: View {
             }
         }
         #else
-        VStack(spacing: 0) {
-            statusBar
-            Rectangle().fill(AppTheme.hairline).frame(height: 1).accessibilityHidden(true)
-            board
+        Group {
+            if sizeClass == .regular {
+                TabletSidebarSplit(mode: .cockpit) {
+                    sidebar
+                } detail: {
+                    tabletBoard
+                }
+            } else {
+                tabletBoard
+            }
         }
         .sheet(item: selectionBinding) { selection in
             NavigationStack {
@@ -117,7 +126,6 @@ struct CockpitModeView: View {
         #endif
     }
 
-    #if os(macOS)
     /// The left pane of "Mac — Cockpit · A2": the mode switch, then Needs you,
     /// the board's widgets with each one's freshness, and This screen.
     private var sidebar: some View {
@@ -157,7 +165,7 @@ struct CockpitModeView: View {
                             .padding(.horizontal, VeetSpace.s2)
                     }
                     SidebarSectionLabel(title: "This screen")
-                    Text("Mac layout · Night watch \(nightWatch ? "on" : "off")")
+                    Text("\(CockpitDevice.platform == "mac" ? "Mac" : "iPad") layout · Night watch \(nightWatch ? "on" : "off")")
                         .veetType(.meta)
                         .foregroundColor(AppTheme.inkFaint)
                         .padding(.horizontal, VeetSpace.s2)
@@ -199,11 +207,20 @@ struct CockpitModeView: View {
         .accessibilityIdentifier("cockpit.widget.\(widget.slug)")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
-    #else
+    #if os(iOS)
+    private var tabletBoard: some View {
+        VStack(spacing: 0) {
+            statusBar
+            Rectangle().fill(AppTheme.hairline).frame(height: 1).accessibilityHidden(true)
+            board
+        }
+    }
+
     private var statusBar: some View {
         HStack(spacing: VeetSpace.s3) {
             connectionLine
             Spacer(minLength: 0)
+            if sizeClass == .regular { ClientUtilitiesMenu(identifier: "cockpit.more", mode: .cockpit) }
             if model.availability == .available {
                 Menu {
                     Toggle("Night watch", isOn: $nightWatch)

@@ -2964,7 +2964,22 @@ def test_apple_ui_overflow_destinations_are_tapped_at_a_point() -> None:
     assert "XCTAssertTrue(destination.waitForExistence(timeout: 5))" in helper
     assert "XCTAssertTrue(destination.isHittable)" in helper
     assert "let window = app.windows.firstMatch" in helper
-    assert "let destination = window.buttons[identifier]" in helper
+    assert 'let toolbarMore = window.buttons["chat.more"]' in helper
+    assert 'let compactMore = window.buttons["sidebar.more"]' in helper
+    assert "toolbarMore.exists || compactMore.exists" in helper
+    assert "let regularWidth = toolbarMore.exists" in helper
+    assert "let moreButton = regularWidth ? toolbarMore : compactMore" in helper
+    for identifier, label in {
+        "sidebar.memory": "Memory",
+        "sidebar.schedules": "Schedules",
+        "sidebar.persona": "Persona",
+        "sidebar.settings": "Settings",
+    }.items():
+        assert f'"{identifier}": "{label}"' in helper
+    assert (
+        "let destination = window.buttons[regularWidth ? "
+        "(utilityLabels[identifier] ?? identifier) : identifier]"
+    ) in helper
     assert "let target = destination.frame" in helper
     assert "let windowFrame = window.frame" in helper
     assert "XCTAssertTrue(windowFrame.contains(target))" in helper

@@ -45,8 +45,7 @@ def test_platform_framing_is_row_zero_of_the_prefix_within_the_platform_cap() ->
     assert ConservativeTokenEstimator().estimate([row], "fake:scripted") <= cap
 
 
-def test_builder_version_moved_with_the_framing_text() -> None:
-    """A changed framing row is a changed prefix: every live plan re-plans once."""
+def test_builder_version_includes_framing_and_retired_tool_contracts() -> None:
+    """Framing and retired contracts require every existing live plan to re-plan once."""
 
-    assert planner_module.BUILDER_VERSION == "context-builder@14"
-    assert "context-builder@13" not in planner_module._EQUIVALENT_EARLIER_BUILDERS
+    assert planner_module.BUILDER_VERSION == "context-builder@15"

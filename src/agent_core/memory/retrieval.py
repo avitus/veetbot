@@ -651,8 +651,8 @@ class HybridMemoryRetriever:
             policy_version += f"+{HOME_LOCATION_POLICY_VERSION}"
             render_policy += f"+{HOME_LOCATION_POLICY_VERSION}"
         if effective_query.relationship_group is not None:
-            policy_version += "+owner-overview@2"
-            render_policy += "+owner-overview@2"
+            policy_version += "+owner-overview@3"
+            render_policy += "+owner-overview@3"
         if effective_query.budget_bytes is not None:
             policy_version += "+inline-budget@1"
             render_policy += "+inline-budget@1"
@@ -802,11 +802,24 @@ class HybridMemoryRetriever:
             partners.update(item.conflict_with)
             collapsed.append(item)
         coverage = effective_query.candidate_selection == "relevance"
+        page_people = (
+            tuple(
+                dict.fromkeys(person for item in (people_items or []) for person in item.person_ids)
+            )
+            if effective_query.relationship_group is not None
+            else ()
+        )
+        # Reserve a full continuation header before choosing evidence. Its final
+        # cursor can shrink or disappear, but cannot consume unbudgeted bytes.
+        reserved_cursor = effective_query.next_people_after or (
+            page_people[-1] if page_people else None
+        )
         render = partial(
             render_memory,
             bounded=coverage,
             relationship_group=effective_query.relationship_group,
-            next_people_after=effective_query.next_people_after,
+            next_people_after=reserved_cursor,
+            incomplete_person=reserved_cursor,
             people_overflow=effective_query.people_overflow,
         )
         selected: list[RecalledBelief] = []
@@ -842,13 +855,25 @@ class HybridMemoryRetriever:
             and not _INJECTION.search(item.text)
         ]
         eligible_people.sort(key=lambda item: {"person": 0, "interaction": 1}.get(item.kind, 2))
+        # An overview must give its first remaining person the whole shared
+        # budget before beliefs compete, otherwise a small reservation can be
+        # mistaken for an intrinsically oversized person and skip their evidence.
+        first_person = page_people[0] if page_people else None
+        if first_person is not None:
+            eligible_people.sort(key=lambda item: first_person not in item.person_ids)
         selected_people: list[TracedPersonContext] = []
         people_rendered = ""
         for context_item in eligible_people:
             proposed = people_rendered + "\n" + _person_line(context_item)
             if (
-                len(selected_people) < min(8, max(1, effective_query.max_items // 2))
-                and measure_tokens(proposed) <= effective_query.budget_tokens * 0.4
+                len(selected_people) < effective_query.max_items
+                and (
+                    first_person in context_item.person_ids
+                    or (
+                        len(selected_people) < min(8, max(1, effective_query.max_items // 2))
+                        and measure_tokens(proposed) <= effective_query.budget_tokens * 0.4
+                    )
+                )
                 and measure_tokens(
                     render([], as_of=now, policy_version=render_policy, known_at=render_known_at)
                     + proposed
@@ -1026,6 +1051,35 @@ class HybridMemoryRetriever:
                         item = proposed_item
                         selected_items = proposed_items
                         rendered = proposed
+        if effective_query.relationship_group is not None:
+            delivered = {item.record_id for item in selected_people}
+            next_after = effective_query.next_people_after
+            previous = effective_query.people_after
+            incomplete_person = None
+            for person_id in page_people:
+                required = {
+                    item.record_id for item in eligible_people if person_id in item.person_ids
+                }
+                if not required <= delivered:
+                    next_after = previous
+                    if previous == effective_query.people_after:
+                        # Repeating this cursor cannot fit an oversized person.
+                        # Expose the omission explicitly and allow later people
+                        # to be reached without claiming full delivery here.
+                        incomplete_person = person_id
+                        next_after = person_id
+                    break
+                previous = person_id
+            effective_query = effective_query.model_copy(update={"next_people_after": next_after})
+            rendered = render(
+                selected_items,
+                as_of=now,
+                policy_version=render_policy,
+                known_at=render_known_at,
+                partners=shown_partners,
+                next_people_after=next_after,
+                incomplete_person=incomplete_person,
+            ) + "".join("\n" + _person_line(person) for person in selected_people)
         rendered_tokens = (
             measure_tokens(rendered) if selected_items or selected_people or coverage else 0
         )
@@ -1926,6 +1980,7 @@ def render_memory(
     bounded: bool = False,
     relationship_group: str | None = None,
     next_people_after: UUID | None = None,
+    incomplete_person: UUID | None = None,
     people_overflow: bool = False,
     partners: frozenset[UUID] | None = None,
 ) -> str:
@@ -1947,6 +2002,14 @@ def render_memory(
             if next_people_after is not None
             else ""
         )
+        incomplete = (
+            f" Incomplete context for person {incomplete_person}: remaining evidence did not "
+            "fit. This cursor moves past that person to reach later people. "
+            "The omitted relationship context is not paginated by people.context; "
+            "do not claim this person's context is complete."
+            if incomplete_person is not None
+            else ""
+        )
         overflow = (
             " More people hold this relationship than one overview reads; ask about a "
             "person by name."
@@ -1954,9 +2017,10 @@ def render_memory(
             else ""
         )
         lines.append(
-            "  Direct owner relationships: bounded page of at most three people; "
-            "supporting facts may be omitted. Narrow the query for more detail."
+            "  Direct owner relationships: a bounded page of the closest people, not "
+            "everyone; supporting facts may be omitted. Narrow the query for more detail."
             + continuation
+            + incomplete
             + overflow
         )
     for item in items:

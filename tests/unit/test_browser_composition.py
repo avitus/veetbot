@@ -75,7 +75,6 @@ from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
     BrowserObserveTool,
-    LegacyBrowserObserveTool,
     PagedBrowserObserveTool,
 )
 from agent_core.tools.registry import RegisteredTool
@@ -186,15 +185,10 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         assert registry.get("browser.observe", version="1.7.0").spec.version == "1.7.0"
         paged = cast(RegisteredTool, registry.get("browser.observe", version="1.1.0"))
         assert isinstance(paged.implementation, PagedBrowserObserveTool)
-        legacy = cast(RegisteredTool, registry.get("browser.observe", version="1.0.0"))
-        assert isinstance(legacy.implementation, LegacyBrowserObserveTool)
-        assert legacy.spec.input_schema["properties"] == {}
         assert (
             paged.implementation._inline_output_bytes
             == composition.tool_pipeline._inline_output_bytes
         )
-        assert registry.get("browser.navigate", version="1.0.0").spec.version == "1.0.0"
-        assert registry.get("browser.act", version="1.0.0").spec.version == "1.0.0"
         assert isinstance(act.implementation, BrowserActTool)
         assert isinstance(navigate.implementation._provider, PlaywrightBrowserProvider)
 

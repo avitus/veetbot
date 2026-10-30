@@ -219,6 +219,12 @@ rebuilds once at the next unpinned run. An initialized empty tool set is pinned,
 as are legacy nonempty pins and pending calls: retries and approval resumes
 must not refresh authority or rewrite their advertised tools. A scheduler's
 seed checkpoint with no pins or pending calls can still build its first plan.
+Across a builder upgrade, the executor explicitly marks an initialized roster
+for preservation. The planner retains it only if every pinned defined and deferred
+tool's exact contract remains registered for that principal and its existing
+model, policy, persona and prefix checks still pass. Added registry entries wait
+for the next unpinned run; missing or changed contracts are not grandfathered
+(ADR-0266).
 Scope reduction alone preserves the prefix even across runs; revocation
 continues to be enforced at call time without rewriting its prefix.
 
@@ -236,16 +242,12 @@ tracked metric and its target is 1.0**; a deployment averaging materially more t
 one has a configuration problem, and because the counter exists, it has one
 visibly.
 
-One rotation reason rebuilds nothing. Before
-[ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's hash
-covered each tool's scope set in whatever order its worker's hash seed gave
-it, and its plan event recorded the scopes as they stood when it was written.
-When such a plan's hash matches its prefix rendered with those recorded
-orders, and nothing else about the plan changed, the planner appends the same
-plan as a new epoch with its canonical hashes and reason
-`prefix_hash_canonicalized`. It does not rebuild the plan under a run that
-may be parked on an approval, and the provider receives the same bytes, so
-nothing is re-cached.
+Before [ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's
+hash covered each tool's scope set in whatever order its worker's hash seed
+gave it. Scope sets now serialize sorted, so the hash is canonical; the
+re-key that once absorbed the recorded order was retired by
+[ADR-0266](../adr/0266-spent-one-time-repairs-are-retired.md) once no plan
+could still match it, and such a plan rotates like any other.
 
 ### The history cache window
 
@@ -285,8 +287,7 @@ session: its markers move every step, so a one-hour write there would pay the
 premium on each request, and a shorter entry after a longer one is the order
 the provider requires. The TTL is not prefix identity either. It never rotates
 an epoch, and a plan built before ADR-0132 keeps the default until a rotation
-for another reason rebuilds it; a `prefix_hash_canonicalized` epoch copies the
-plan and keeps its breakpoints.
+for another reason rebuilds it.
 
 ### Session identity and OpenAI history lookback
 
@@ -363,7 +364,7 @@ ceiling.
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
-| A | Deferred tool index | 40 entries / 2,500 tokens | No | Only at an epoch boundary |
+| A | Deferred tool index | 50 entries / 3,000 tokens | No | Only at an epoch boundary |
 | A | Owner tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
@@ -420,9 +421,12 @@ arguments return that tool's whole definition, its description and its input
 schema ([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)).
 A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
-forty entries and 2,500 tokens, and the prefix ceiling rose by exactly that cap:
-2,000 under ADR-0123 and 500 more under
-[ADR-0262](../adr/0262-deferred-index-token-headroom.md).
+fifty entries and 3,000 tokens, and the prefix ceiling rose by exactly that cap:
+2,000 under ADR-0123, 500 more under
+[ADR-0262](../adr/0262-deferred-index-token-headroom.md) and 500 more under
+[ADR-0267](../adr/0267-deferred-index-headroom.md), which also raised the
+item cap from forty. The fullest production chat must leave ten entries and
+500 tokens of it free, so the next tool fails a gate rather than a chat.
 An entry lists required parameters in the order of the schema's `required`
 array and optional ones by name, never in the order of the schema's
 properties: the builder re-renders the prefix from the specifications on the
@@ -460,7 +464,8 @@ that names it, so it adds no bytes to the prefix. It never takes a
 definition; a plan without `tool.call` records it as skipped.
 
 In a session bound to a website profile, `browser.navigate`,
-`browser.observe` and `browser.act` are required definitions (ADR-0130): they
+`browser.observe` and `browser.act` are required definitions (ADR-0130), and
+so is `browser.upload` wherever the provider registers it (ADR-0148): they
 rank ahead of every other candidate, neither the agent's deferral list nor
 overflow moves them to the index, and a plan that cannot define them fails at
 plan time. What they displace moves to the index in the order above.
@@ -470,13 +475,11 @@ a definition slot, and every candidate without a definition becomes an index
 entry: the configured deferrals first, then the overflow in the order above.
 What fits in neither is skipped, and its name is recorded on the plan event as
 `skipped_tool_names`. An agent without `tool.call` defers nothing and records
-its skips the same way, so no tool leaves the roster silently. Builder version
-`context-builder@12` treats a `context-builder@11` plan as current, because it
-renders the same bytes: re-planning it could move the selection under a run
-parked on an approval. From `context-builder@13` the framing's records catalog
-sentence changes those bytes, so such a plan fails its prefix-hash recheck and
-re-plans once
-([Milestone 34 records catalog framing](#milestone-34-records-catalog-framing)). Earlier versions rebuild through the ordinary logged
+its skips the same way, so no tool leaves the roster silently. A plan from
+any earlier builder version re-plans once through the ordinary logged epoch
+rotation (ADR-0266 retired the builder equivalence that spared
+`context-builder@11` plans until `context-builder@13` changed the framing,
+[Milestone 34 records catalog framing](#milestone-34-records-catalog-framing)). Earlier versions rebuild through the ordinary logged
 epoch rotation, so existing sessions recover the configured capabilities
 without replacing their history. A snapshot containing People context is
 retained even when it contains no ordinary beliefs; the epoch rotation also
@@ -505,8 +508,9 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 24,500 tokens — 24,000 before
-ADR-0262 added 500 to the deferred tool index, 22,000 before ADR-0255 added
+The prefix classes sum to a hard ceiling of 25,000 tokens — 24,500 before
+ADR-0267 added 500 more to the deferred tool index, 24,000 before
+ADR-0262 added 500 to it, 22,000 before ADR-0255 added
 the 2,000 of the owner-added servers' index, 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
 exactly its own cap, the same move the skill classes made, 17,000 before

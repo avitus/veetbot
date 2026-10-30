@@ -11,6 +11,7 @@ from agent_core.domain.people import (
     PeopleValue,
     Person,
     PersonIdentifier,
+    RelationshipAssertion,
     normalize_identifier,
 )
 from agent_core.domain.people_sources import identifier_occurs as identifier_occurs
@@ -20,6 +21,65 @@ from agent_core.ports.people import PeopleStore
 class IdentityResolution(PeopleValue):
     status: Literal["matched", "ambiguous", "unresolved"]
     person_ids: list[UUID]
+
+
+# Relationship rows read per page, and pages read, when checking an owner tie.
+_EDGE_PAGE = 100
+_MAX_EDGE_PAGES = 10
+
+
+async def _tied_to_owner(
+    store: PeopleStore, principal: Principal, person_id: UUID, *, at: datetime, ceiling: Sensitivity
+) -> bool:
+    """Whether the owner holds a current, resolved direct relationship with `person_id`."""
+
+    after: UUID | None = None
+    for _page in range(_MAX_EDGE_PAGES):
+        rows = await store.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                kinds=["relationship"],
+                person_id=person_id,
+                sensitivity_ceiling=ceiling,
+                sort="id",
+                as_of=at,
+                after=after,
+                limit=_EDGE_PAGE,
+            )
+        )
+        belief_ids = [
+            row.belief_id
+            for row in rows[:_EDGE_PAGE]
+            if isinstance(row, RelationshipAssertion)
+            and not row.unresolved
+            and any(endpoint.kind == "owner" for endpoint in (row.subject, row.object))
+        ]
+        # A one-row ID window checks this person without confusing the
+        # person_id edge filter with the identity of a Person row.
+        eligible = (
+            await store.query(
+                PeopleQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    owner_relationship_belief_ids=belief_ids,
+                    sensitivity_ceiling=ceiling,
+                    as_of=at,
+                    states=["active", "provisional"],
+                    sort="id",
+                    after=UUID(int=person_id.int - 1) if person_id.int else None,
+                    limit=1,
+                )
+            )
+            if belief_ids
+            else []
+        )
+        if any(isinstance(row, Person) and row.id == person_id for row in eligible):
+            return True
+        if len(rows) <= _EDGE_PAGE:
+            return False
+        after = rows[_EDGE_PAGE - 1].id
+    return False
 
 
 async def resolve_identity(
@@ -94,4 +154,37 @@ async def resolve_identity(
         status = "ambiguous"
     elif len(matches) == 1:
         status = "matched" if matches == qualified else "ambiguous"
+    if (
+        kind == "name"
+        and context == "owner"
+        and len(rows) <= query.limit
+        and (
+            status == "unresolved"
+            or (status == "ambiguous" and len(matches) == 1 and not qualified)
+        )
+    ):
+        # ADR-0264: a name the owner states in Chat selects the one person the
+        # owner already holds a current direct relationship with, even when that
+        # exact name was learned from mail. Without such a tie, or with two tied
+        # people, a name still identifies nobody on its own (P01).
+        named = {
+            row.person_id
+            for row in rows
+            if isinstance(row, PersonIdentifier)
+            and row.person_id
+            and row.identifier_kind == "name"
+            and row.namespace == namespace
+            and normalize_identifier("name", namespace, row.value) == normalized
+            and row.valid_from <= at
+            and (row.valid_to is None or at < row.valid_to)
+        } | matches
+        tied = [
+            person_id
+            for person_id in sorted(named)
+            if await _tied_to_owner(store, principal, person_id, at=at, ceiling=ceiling)
+        ]
+        if len(tied) == 1:
+            status, ordered = "matched", tied
+        elif tied:
+            status, ordered = "ambiguous", tied
     return IdentityResolution(status=status, person_ids=ordered[:20])

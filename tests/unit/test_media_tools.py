@@ -15,8 +15,6 @@ from agent_core.domain.runs import CancelReason
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.tools.media_generation import (
     ImageGenerationTool,
-    LegacyImageGenerationTool,
-    LegacyVideoGenerationTool,
     VideoGenerationTool,
 )
 from agent_core.tools.validation import validate_and_normalize
@@ -61,18 +59,6 @@ def test_reference_count_is_bounded(tool_type: type[ImageGenerationTool], maximu
         validate_and_normalize(
             {"prompt": "x", "reference_image_ids": [str(UUID(int=1))] * (maximum + 1)},
             tool_type.spec.input_schema,
-        )
-
-
-@pytest.mark.parametrize("tool_type", [LegacyImageGenerationTool, LegacyVideoGenerationTool])
-def test_pinned_text_only_versions_keep_their_original_schema(
-    tool_type: type[ImageGenerationTool],
-) -> None:
-    assert tool_type.spec.version == "1.0.0"
-    validate_and_normalize({"prompt": "x"}, tool_type.spec.input_schema)
-    with pytest.raises(ToolValidationError):
-        validate_and_normalize(
-            {"prompt": "x", "reference_image_ids": []}, tool_type.spec.input_schema
         )
 
 

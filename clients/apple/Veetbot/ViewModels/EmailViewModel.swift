@@ -289,6 +289,7 @@ public final class EmailViewModel: ObservableObject {
     /// Cancels obsolete work and removes all mail, local edits and errors from the old connection.
     public func resetConnection() {
         generation = UUID()
+        isResettingLearning = false
         activation = UUID()
         listRequest = UUID()
         selectionRequest = UUID()
@@ -1445,13 +1446,20 @@ public final class EmailViewModel: ObservableObject {
         } catch { if generation == connection { report(error) } }
     }
 
+    /// True while a learning reset is on its way, so the sheet can show it.
+    @Published public private(set) var isResettingLearning = false
+
     public func resetLearning(scope: String) async {
-        guard let api = makeAPIClient() else { return }
+        guard !isResettingLearning, let api = makeAPIClient() else { return }
         let connection = generation
+        isResettingLearning = true
+        defer { if generation == connection { isResettingLearning = false } }
         do {
             let value = try await api.resetEmailLearning(scope: scope, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
             learning = value
+            toasts.show(scope == "preferences" ? "Importance preferences reset."
+                : scope == "style" ? "Writing style reset." : "Email learning reset.")
             await reload(preserveOrder: true)
         } catch { if generation == connection { report(error) } }
     }

@@ -187,7 +187,11 @@ public struct PeopleBrowserView: View {
                                         Button("Keep separate") { Task { await model.resolveSuggestion(suggestion, decision: "separate") } }
                                             .buttonStyle(SecondaryCapsuleButtonStyle())
                                             .accessibilityLabel("\(suggestion.source.displayName) and \(suggestion.target.displayName) are different people")
+                                        if model.resolvingSuggestionID == suggestion.id {
+                                            ProgressView().controlSize(.small).accessibilityLabel("Saving your answer")
+                                        }
                                     }
+                                    .disabled(model.resolvingSuggestionID != nil)
                                 }
                                 .padding(PeopleMetrics.rowPadding)
                                 .frame(maxWidth: .infinity, alignment: .leading)

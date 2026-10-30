@@ -1327,3 +1327,83 @@ async def test_cancellation_cannot_mark_an_effect_cancelled(
         ToolInvocationStatus.SUCCEEDED,
         ToolInvocationStatus.UNCERTAIN,
     }
+
+
+async def test_parked_input_keeps_valid_tool_pins_across_builder_upgrade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newly available tool must not invalidate an unfinished run's exact roster."""
+    import agent_core.context.planner as planner_module
+    from agent_core.context.planner import EventContextPlanner
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="conversation.ask_user",
+                        arguments={"question": "Which region?"},
+                        call_id="ask",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Using EU.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with _composition(tmp_path, script=script) as app, _client(app) as client:
+        planner = app.executor._context_planner
+        assert isinstance(planner, EventContextPlanner)
+        registry = planner._registry
+        live_specs = registry.specs_for_session
+        with monkeypatch.context() as prior:
+            prior.setattr(planner_module, "BUILDER_VERSION", "context-builder@14")
+            prior.setattr(
+                registry,
+                "specs_for_session",
+                lambda *args, **kwargs: [
+                    spec
+                    for spec in live_specs(*args, **kwargs)
+                    if spec.name != "demo.external_write"
+                ],
+            )
+            session_id = await _create_session(client)
+            response = await client.post(
+                f"/v1/sessions/{session_id}/messages",
+                json={
+                    "content": [{"type": "text", "text": "Choose a region."}],
+                },
+            )
+        run_id = UUID(response.json()["run_id"])
+        assert (await app.runs.get(run_id)).status is RunStatus.WAITING_FOR_USER
+        before = await planner.current(session_id)
+        assert before is not None and "demo.external_write" not in before.tool_names
+        events = await app.runs.events(run_id)
+        question = next(
+            e.payload["question_id"] for e in events if e.event_type == "run.waiting_for_user"
+        )
+        answered = await client.post(
+            f"/v1/runs/{run_id}/input",
+            json={
+                "content": [{"type": "text", "text": "EU"}],
+                "question_id": question,
+            },
+        )
+        assert answered.status_code == 202
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+        assert await planner.current(session_id) == before
+        async with app.uow_factory() as uow:
+            stored_session = await uow.sessions.get(session_id, app.principal)
+            configured_agent = await uow.agents.get_version(
+                stored_session.agent_id, stored_session.agent_version
+            )
+        next_plan = await planner.plan(
+            stored_session,
+            configured_agent,
+            app.principal,
+            app.executor._resolved_model,
+            refresh_authorization=True,
+        )
+        assert next_plan.epoch == before.epoch + 1
+        assert "demo.external_write" in next_plan.tool_names

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.config import ConfigurationError, DeploymentMode, Settings, load_config_document
 from agent_core.domain.agents import Principal
 from agent_core.domain.credentials import CredentialRef
+from agent_core.domain.embeddings import EmbeddingError
 from agent_core.domain.general_recall_release import RecallReleaseIdentity
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig, local_execution
 from agent_core.domain.semantic_work import EmbeddingConfig
@@ -308,7 +309,7 @@ async def compose_indexing(
         assert local_provider_factory is not None and profile.model_directory is not None
         try:
             local_provider = local_provider_factory(profile.model_directory, profile.local)
-        except Exception:
+        except EmbeddingError:
             raise ConfigurationError("Semantic index local model is unavailable") from None
         provider = local_provider
         if query_enabled:

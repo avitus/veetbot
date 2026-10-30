@@ -200,9 +200,10 @@ Implement in this order:
    With no grant it has no host, credential or model; with approved access it
    can exercise real HTTP and model calls. Trial feed publishes go to a preview.
    A trial never grants access itself. The agent can fix its code and retry
-   without a separate testing framework. `job.run`,
-   `schedule.create` and `schedule.update` gain the job task. Earlier tool
-   versions stay registered unchanged for pinned runs.
+   without a separate testing framework. `job.run` 1.0.0, `schedule.create`
+   1.7.0 and `schedule.update` 1.2.0 provide the jobs contracts. These
+   jobs-introduced contracts remain registered for pinned runs; contracts
+   retired by ADR-0266 are not retained.
 10. **Outcomes.**
     - A run succeeds when the job returns. It fails when it raises an error,
       exceeds a limit or times out.
@@ -342,6 +343,39 @@ claims. The earlier unrelated static failure,
 `test_family_probe_checks_the_names_the_overview_delivers`, occurred on the
 original development base; the isolated main-based PR passes the full static
 partition, as recorded in project state.
+
+## Integration with the recall release
+
+PR 210 delivered the separately accepted MVP while PR 211 was reviewing the
+older proposal. The accepted MVP and its implementation checkpoint above
+supersede that proposal's unaccepted scope and activation claims. This recall
+release does not enable jobs, install its credential, or perform its production
+acceptance. The jobs flag must remain off for this release's recall admission.
+
+The following security requirements identified in review of the earlier
+proposal remain open for the jobs activation assessment; the existing MVP tests
+do not establish them:
+
+- Screen all owner-supplied private authoring values and grant inputs before
+  public publication, including human edits; a post-publication import screen
+  cannot remove a prior public disclosure.
+- Bind reuse of external execution authority to the approved code revision,
+  and retain the operator destination restriction and applicable sandbox policy
+  authorization. Publication approval alone must not grant execution authority.
+- Refuse credential echoes, including supported encoded forms, before any
+  response enters results, logs, events or feeds. Direct JSON-string redaction
+  is not evidence for arbitrary encoded echoes. Credential hosts remain trusted
+  security principals; HTTP and redirects remain refused.
+
+These are retained requirements, not completed fixes or permission to activate
+jobs. A subsequent jobs activation must resolve them with evidence or obtain
+an explicit owner decision on any proposed change to the security contract.
+The current recall release preserves the accepted MVP behind its disabled flag.
+
+Tool versions introduced by jobs are retained for pinned runs. ADR-0266 retires
+only the audited obsolete contracts it names; it does not retire the new jobs
+schedule contracts. An unfinished run keeps its exact registered contracts
+across the builder bump under the planner's existing identity checks.
 
 ## Alternatives considered
 

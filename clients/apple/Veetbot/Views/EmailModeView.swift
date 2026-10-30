@@ -75,10 +75,10 @@ struct EmailInboxWidthStore {
 
 /// The mailbox sidebar width the owner chose by dragging its edge, kept on
 /// this Mac like the inbox width and never sent to the server. Before any
-/// drag it is the design's 260 points (MagicPath cozy-evening-6871).
+/// drag it is the design's 320 points (MagicPath cozy-evening-6871).
 struct EmailSidebarWidthStore {
     static let key = "veetbot.email.sidebarWidth"
-    static let bounds: ClosedRange<CGFloat> = 200...340
+    static let bounds: ClosedRange<CGFloat> = ModeSidebarLayout.bounds
     static var defaultWidth: CGFloat { A2Metrics.sidebarWidth }
     /// This launch's store: the owner's defaults, or a UI journey's own suite.
     static let app: EmailSidebarWidthStore = {
@@ -293,14 +293,31 @@ public struct EmailModeView: View {
                 #if os(macOS)
                 macColumns
                 #else
-                HStack(spacing: 0) {
-                    if showsMailboxSidebar { mailboxSidebar.frame(width: 232) }
+                TabletSidebarSplit(mode: .email) {
+                    if showsMailboxSidebar { mailboxSidebar }
+                } detail: {
                     VStack(spacing: 0) {
                         emailHeading
-                        HStack(spacing: 0) {
-                            inbox.frame(width: 300)
-                            HairlineDivider().frame(width: 1)
-                            detail.frame(maxWidth: .infinity)
+                        GeometryReader { geometry in
+                            if geometry.size.width >= 660 {
+                                HStack(spacing: 0) {
+                                    inbox.frame(width: 300)
+                                    HairlineDivider().frame(width: 1)
+                                    detail.frame(maxWidth: .infinity)
+                                }
+                            } else if model.selectedThreadID != nil {
+                                VStack(spacing: 0) {
+                                    Button { model.clearSelection() } label: {
+                                        Label("Inbox", systemImage: "chevron.left")
+                                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .accessibilityIdentifier("email.back-to-inbox")
+                                    detail
+                                }
+                            } else {
+                                inbox
+                            }
                         }
                     }
                 }
@@ -588,7 +605,10 @@ public struct EmailModeView: View {
             }
             Spacer()
             #if os(iOS)
-            if directSelection { EmailRefreshButton(model: model) }
+            if directSelection {
+                EmailRefreshButton(model: model)
+                ClientUtilitiesMenu(identifier: "email.more", mode: .email)
+            }
             #endif
             EmailAppearanceButton().buttonStyle(QuietCapsuleButtonStyle())
         }
@@ -690,10 +710,10 @@ public struct EmailModeView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
+                    ModeSegment(selected: .email, choose: openMode)
                     inboxHeader
                     Button(action: newChat) { Label("New chat", systemImage: "plus").frame(maxWidth: .infinity) }
                         .primaryCapsule().accessibilityIdentifier("email.new-chat")
-                    ModeSegment(selected: .email, choose: openMode)
                     if !chatAttention.isEmpty {
                         SidebarSectionLabel(title: "Needs you")
                         ForEach(chatAttention) { row in
@@ -743,14 +763,6 @@ public struct EmailModeView: View {
                     if let pause = model.budgetPauseMessage { budgetPause(pause) }
                 }.padding(12)
             }
-            HStack {
-                globalButton("Chat", "bubble.left", openChat)
-                globalButton("Memory", "brain", openMemory)
-                globalButton("People", "person.2", openPeople)
-                globalButton("Schedules", "calendar.badge.clock", openSchedules)
-                globalButton("Persona", "sparkles", openPersona)
-                globalButton("Settings", "gearshape", openSettings)
-            }.padding(10)
         }.background(AppTheme.paperDeep)
     }
 
@@ -2264,7 +2276,10 @@ struct EmailLearningScreen: View {
                             Button("Reset importance preferences", role: .destructive) { resetScope = "preferences" }
                             Button("Reset writing style", role: .destructive) { resetScope = "style" }
                             Button("Reset all email learning", role: .destructive) { resetScope = "all" }
-                        }.buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red))
+                            if model.isResettingLearning {
+                                ProgressView("Resetting…").controlSize(.small)
+                            }
+                        }.buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red)).disabled(model.isResettingLearning)
                         DisclosureGroup("History by account") {
                             VStack(alignment: .leading, spacing: 16) {
                                 ForEach(model.accounts) { account in
