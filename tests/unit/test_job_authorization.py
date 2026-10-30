@@ -94,6 +94,7 @@ def test_first_feed_grant_needs_approval_but_local_computation_does_not(
 async def test_owner_preparation_does_not_repeat_publication_approval(
     operation: str, trust: TrustLevel
 ) -> None:
+    """Allow owner-directed reads and offline trials after untrusted results."""
     _, factory = await memory_uow_factory()
     action = _action(name="job.manage", origin_trust=trust, argument_trust=trust).model_copy(
         update={"arguments": {"operation": operation}, "side_effect": SideEffectClass.PUBLICATION}
@@ -115,6 +116,7 @@ async def test_owner_preparation_does_not_repeat_publication_approval(
 
 @pytest.mark.parametrize("mutation", ["denied", "untrusted_user", "delegated", "publication"])
 async def test_preparation_authority_does_not_escape_its_boundary(mutation: str) -> None:
+    """Refuse preparation exceptions for denials, untrusted users or non-owner runs."""
     from agent_core.domain.runs import RunKind
 
     _, factory = await memory_uow_factory()
@@ -150,6 +152,7 @@ async def test_preparation_authority_does_not_escape_its_boundary(mutation: str)
 
 @pytest.mark.parametrize("changed", [False, True])
 async def test_live_trial_reuses_only_the_exact_owned_grant_inputs(changed: bool) -> None:
+    """Allow an existing grant after untrusted results only with its original inputs."""
     _, factory = await memory_uow_factory()
     async with factory() as uow:
         await uow.jobs.put(record(principal()), expected_version=None)

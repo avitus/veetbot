@@ -32,6 +32,7 @@ _INSTALL_SCOPES = {"cockpit.write", "jobs.write", "jobs.run", "schedule.write"}
 
 
 def _spec(name: str, description: str, schema: dict[str, Any], *, prepare: bool) -> ToolSpec:
+    """Declare shared scope requirements and the preparation or publication effect."""
     return ToolSpec(
         name=name,
         version="1.0.0",
@@ -72,12 +73,14 @@ class CockpitPrepareTool:
         schedule: JobScheduleCreateTool,
         operator_hosts: frozenset[str] | None = None,
     ) -> None:
+        """Bind existing publication and scheduling services with operator host limits."""
         self.cockpit = cockpit
         self.jobs = jobs
         self.schedule = schedule
         self.operator_hosts = operator_hosts
 
     async def _owner_chat(self, context: ToolExecutionContext) -> None:
+        """Require every installation scope and an eligible interactive owner session."""
         for scope in _INSTALL_SCOPES:
             require_scope(context.principal, scope)
         async with self.cockpit.uow_factory() as uow:
@@ -86,6 +89,7 @@ class CockpitPrepareTool:
             raise ValueError("Prepare and install widgets in the owner's interactive chat.")
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Validate a private proposal and return immutable preparation identifiers."""
         try:
             await self._owner_chat(context)
             plan = WidgetInstallation.model_validate(arguments)
@@ -103,6 +107,7 @@ class CockpitPrepareTool:
             return _failure("cockpit.install_invalid", str(exc))
 
     async def _check(self, plan: WidgetInstallation, context: ToolExecutionContext) -> None:
+        """Reject stale, invalid or privacy-violating packages before any installation effect."""
         owner = context.principal
         head = await self.cockpit.publication.head_revision(owner, plan.slug)
         if (None if head is None else head.id) != plan.expected_revision:
@@ -190,6 +195,7 @@ class CockpitInstallTool(CockpitPrepareTool):
         arguments: dict[str, Any],
         **context: Any,
     ) -> ApprovalPresentation:
+        """Describe only the successful proposal owned by the current conversation."""
         plan = await prepared_installation(
             self.cockpit.uow_factory,
             context["principal"],
@@ -202,6 +208,7 @@ class CockpitInstallTool(CockpitPrepareTool):
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Verify exact approval and record its receipt before resuming installation."""
         try:
             await self._owner_chat(context)
             plan = await prepared_installation(
@@ -251,6 +258,7 @@ class CockpitInstallTool(CockpitPrepareTool):
         key: str,
         approval_id: UUID,
     ) -> ToolResult:
+        """Publish approved components idempotently, then schedule the live collector."""
         owner = context.principal
         task: dict[str, Any] | None = None
         if plan.job is not None:

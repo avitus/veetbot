@@ -84,6 +84,7 @@ def _ok(body: dict[str, Any], *, untrusted: bool = False) -> ToolResult:
 
 
 def _failure(reason: str, detail: str) -> ToolResult:
+    """Return bounded, untrusted repair diagnostics for invalid job arguments."""
     return ToolResult(
         ok=False,
         content=[],

@@ -1171,9 +1171,11 @@ _BROWSER_TOOL_NAMES = frozenset(
 def _session_tool_filter(
     browser_provider: BrowserProvider | None,
 ) -> Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]:
+    """Build the browser and widget tool filter for each session."""
     session_bound = isinstance(browser_provider, SessionBoundHostedBrowserProvider)
 
     def filter_tools(session: Session, tools: Sequence[ToolSpec]) -> list[ToolSpec]:
+        """Hide browser tools without a binding and widget writes outside owner chat."""
         kept = list(tools)
         if session_bound:
             selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)

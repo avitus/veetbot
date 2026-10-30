@@ -25,6 +25,7 @@ from tests.unit.test_job_publication import Screen
 
 
 async def test_widget_workflow_offers_separate_preparation_and_final_installation() -> None:
+    """Keep private preparation distinct from the publication effect."""
     async with build(
         settings=replace(
             memory_settings(),
@@ -42,6 +43,7 @@ async def test_widget_workflow_offers_separate_preparation_and_final_installatio
 
 
 def proposal(*, job: bool = True) -> dict[str, Any]:
+    """Build a widget proposal with an optional privately configured collector."""
     files = package()
     files["widget.json"] = '{"schema":1,"slug":"weather","feeds":[{"id":"agent.counts"}]}'
     body: dict[str, Any] = {"slug": "weather", "files": files}
@@ -66,6 +68,7 @@ def proposal(*, job: bool = True) -> dict[str, Any]:
 
 @asynccontextmanager
 async def prepared(*, job: bool = True, change: Any = None) -> AsyncIterator[Any]:
+    """Run job reads, an offline trial and preparation through the composed runtime."""
     arguments = proposal(job=job)
     if change:
         change(arguments)
@@ -133,6 +136,7 @@ async def prepared(*, job: bool = True, change: Any = None) -> AsyncIterator[Any
 
 
 def add_install(script: FakeModelScript, arguments: dict[str, Any]) -> None:
+    """Append an installation request and its final response to the model script."""
     script.turns.extend(
         [
             ScriptedTurn(
@@ -150,10 +154,12 @@ def add_install(script: FakeModelScript, arguments: dict[str, Any]) -> None:
 
 
 def reference(invocation: Any) -> dict[str, str]:
+    """Select the immutable preparation by its run and invocation identifiers."""
     return {"preparation_run_id": str(invocation.run_id), "preparation_id": str(invocation.id)}
 
 
 async def test_preparation_is_private_and_screens_new_private_inputs() -> None:
+    """Screen proposed private values without publishing, granting or scheduling."""
     async with prepared() as (composition, _, invocation, builder, screen):
         assert invocation.structured_result["ready"] is True
         assert "private-repo" in screen.seen[-1].settings_values
@@ -173,6 +179,7 @@ async def test_one_approval_installs_and_resumes_without_duplicate_components(
     with_job: bool,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Reuse one exact approval across outbox completion and repeated installation."""
     async with prepared(job=with_job) as (composition, script, invocation, _, _):
         arguments = reference(invocation)
         add_install(script, arguments)
@@ -250,6 +257,7 @@ async def test_one_approval_installs_and_resumes_without_duplicate_components(
     ],
 )
 async def test_invalid_preparation_returns_repair_feedback_without_approval(change: Any) -> None:
+    """Return untrusted repair details for invalid proposals without creating jobs."""
     async with prepared(change=change) as (composition, _, invocation, _, _):
         assert invocation.outcome.status.value == "failed"
         assert invocation.result_item.trust.value == "external_untrusted"
@@ -260,6 +268,7 @@ async def test_invalid_preparation_returns_repair_feedback_without_approval(chan
 
 
 async def test_unapproved_and_cross_session_installation_have_no_effect() -> None:
+    """Refuse installation without approval or outside its preparation session."""
     async with prepared() as (composition, _, invocation, _, _):
         install = composition.tool_pipeline._registry.get("cockpit.install")
         context = replace(
@@ -281,6 +290,7 @@ async def test_unapproved_and_cross_session_installation_have_no_effect() -> Non
 
 
 async def test_declining_installation_leaves_every_component_unpublished() -> None:
+    """Preserve the absence of jobs, widgets and schedules after owner refusal."""
     async with prepared() as (composition, script, invocation, _, _):
         add_install(script, reference(invocation))
         run_id = await composition.runs.submit("Install it.", session_id=invocation.session_id)
@@ -296,6 +306,7 @@ async def test_declining_installation_leaves_every_component_unpublished() -> No
 
 
 async def test_approval_cannot_be_reused_for_another_preparation_or_owner() -> None:
+    """Bind approval reuse to the exact preparation and original owner."""
     from agent_core.application.cockpit_installation import (
         installation_approval,
         prepared_installation,

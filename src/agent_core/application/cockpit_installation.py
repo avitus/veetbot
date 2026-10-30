@@ -34,6 +34,7 @@ INSTALL_ARGUMENTS = {
 
 
 def installation_key(principal: Principal, preparation_id: UUID) -> str:
+    """Namespace a preparation receipt and its effects by the owning principal."""
     return f"cockpit.install:{principal.tenant_id}:{principal.principal_id}:{preparation_id}"
 
 
@@ -95,6 +96,7 @@ async def installation_approval(
 
 class WidgetInstallationAuthorizer:
     def __init__(self, factory: UnitOfWorkFactory) -> None:
+        """Use the same persistence boundary as preparation and approval records."""
         self.factory = factory
 
     async def authorize(
