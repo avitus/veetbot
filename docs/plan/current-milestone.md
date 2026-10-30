@@ -10,8 +10,13 @@ title: Current Milestone
   private grants, HTTP/model/feed/log brokers, agent tools and pinned job tasks
   through the existing scheduler. Code-only runs use no model; mixed runs charge
   only explicit completions. Local execution, publication, schedule and
-  PostgreSQL tests provide implementation evidence. Credential setup, authorized
-  delivery and production validation remain pending; see [the operator guide](../jobs.md).
+  PostgreSQL tests provide implementation evidence. PR 210 delivered the code,
+  and the owner authorized activation on 2026-10-30. Job publication and the
+  repository-scoped reader are configured; a fresh interactive chat passed a
+  code-only sandbox trial and published a generic GitHub job. That job read both
+  selected repositories twice with the same grant and no model operations.
+  Mixed-job, widget-feed and day-long acceptance remain pending; see
+  [the operator guide](../jobs.md).
   Existing protections remain, broader hardening is deferred, and no milestone
   or gate moves.
 
