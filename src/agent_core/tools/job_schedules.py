@@ -9,6 +9,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.messages import TextPart
+from agent_core.domain.policies import IdempotencyClass
 from agent_core.domain.schedules import (
     JobTask,
     ScheduleDefinition,
@@ -146,6 +147,7 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
     spec = CockpitScheduleUpdateTool.spec.model_copy(
         update={
             "version": "1.2.0",
+            "idempotency": IdempotencyClass.NON_IDEMPOTENT,
             "description": CockpitScheduleUpdateTool.spec.description
             + (
                 " Supply task to repin a job schedule to a published revision and approved grant. "

@@ -210,6 +210,10 @@ class JobPublication:
         committed = await repository.find_revision(entry.revision_id, limit=200)
         archive = entry.operation is OutboxOperation.REMOVE
         if committed is None:
+            if revision.state != "pending_commit":
+                async with self.uow_factory() as uow:
+                    await uow.job_outbox.complete(principal, entry.revision_id)
+                return
             head = await repository.ensure_branch()
             current_files = await repository.read_widget(entry.slug, at=head)
             expected_files = (
@@ -246,6 +250,19 @@ class JobPublication:
         async with self.uow_factory() as uow:
             current = await uow.jobs.get(principal, entry.slug)
             revisions = dict(current.revisions)
+            latest = revisions[str(revision.id)]
+            if latest.state != "pending_commit":
+                # A later import owns activation. Reconcile only the receipt,
+                # even if the imported edit left identical package bytes.
+                revisions[str(revision.id)] = latest.model_copy(update={"commit_sha": committed})
+                await uow.jobs.put(
+                    current.model_copy(
+                        update={"version": current.version + 1, "revisions": revisions}
+                    ),
+                    expected_version=current.version,
+                )
+                await uow.job_outbox.complete(principal, revision.id)
+                return
             if current.live_revision_id is not None:
                 old = revisions[str(current.live_revision_id)]
                 revisions[str(old.id)] = old.model_copy(update={"state": "superseded"})
@@ -354,7 +371,14 @@ class JobPublication:
                         expected = None
                     else:
                         expected = saved.version
-                    revisions = dict(saved.revisions)
+                    # An imported owner decision supersedes older queued edits,
+                    # including a remotely committed write whose receipt was lost.
+                    revisions = {
+                        key: item.model_copy(update={"state": "superseded"})
+                        if item.state == "pending_commit"
+                        else item
+                        for key, item in saved.revisions.items()
+                    }
                     if saved.live_revision_id is not None:
                         old = revisions[str(saved.live_revision_id)]
                         revisions[str(old.id)] = old.model_copy(

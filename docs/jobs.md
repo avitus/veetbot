@@ -76,6 +76,8 @@ result means the source is saved but cannot run yet. Read the job until the
 revision is `live`; a repository outage leaves it pending for maintenance to
 retry. An imported human edit is screened and stored as a new revision.
 Existing run and schedule pins retain their original source.
+An imported edit or deletion supersedes older queued publications. A delayed
+receipt records the old commit without reactivating it or undoing that deletion.
 
 Keep repositories, account identifiers and other personal values in private
 inputs. Propose a `job.run` access object with those inputs, exact hosts and
@@ -107,6 +109,8 @@ interval cadence and stay quiet on success. Failures use the existing
 notification and consecutive-failure pause behavior. `schedule.update` version
 1.2.0 can repin future occurrences; earlier occurrences retain their pins.
 Previous tool versions and ordinary agent-run schedules remain supported.
+An interrupted update through version 1.2.0 is marked uncertain after its effect
+boundary; read the schedule's current revision before proposing another update.
 
 The schedule report contains the result's summary, job log and broker operation
 names. The event log records operation and call identifiers; it does not record

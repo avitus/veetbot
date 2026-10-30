@@ -243,3 +243,65 @@ print(manifest.model_dump_json(indent=2))
     manifest = json.loads(outputs[0])
     assert manifest["calls"] == sorted(manifest["calls"])
     assert manifest["feeds"] == sorted(manifest["feeds"])
+
+
+@pytest.mark.parametrize("later_change", ["delete", "edit", "same_files"])
+@pytest.mark.parametrize("existing", [False, True])
+async def test_lost_publication_receipt_preserves_newer_imported_decisions(
+    later_change: str,
+    existing: bool,
+) -> None:
+    factory, service, repository, _ = await setup()
+    owner = principal()
+    previous = None
+    if existing:
+        previous = await service.write(
+            principal=owner,
+            slug="count-items",
+            source="def main(inputs, job): return 0",
+            manifest=JobManifest(title="Count items"),
+            expected_revision=None,
+            request_key="first",
+        )
+        await service.flush(owner)
+    pending = await service.write(
+        principal=owner,
+        slug="count-items",
+        source="def main(inputs, job): return 1",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=None if previous is None else previous.id,
+        request_key="pending",
+    )
+    write = repository.write_widget
+
+    async def lose_response(*args: Any, **kwargs: Any) -> str:
+        await write(*args, **kwargs)
+        raise WidgetRepositoryUnavailableError("Lost response")
+
+    repository.write_widget = lose_response  # type: ignore[method-assign]
+    assert await service.flush(owner) == 0
+    committed = await repository.head()
+    assert committed is not None
+    repository.write_widget = write  # type: ignore[method-assign]
+    if later_change == "delete":
+        await repository.remove_widget("count-items", parent_sha=committed, message="Stop job")
+    else:
+        files = pending.files()
+        if later_change == "edit":
+            files = {**files, "main.py": "def main(inputs, job): return 2"}
+        await write("count-items", files, parent_sha=committed, message="Owner update")
+    await service.import_changes(owner)
+    async with factory() as uow:
+        imported = await uow.jobs.get(owner, "count-items")
+    assert imported.archived == (later_change == "delete")
+    head = await repository.head()
+    cast(FixedClock, service.clock).advance(timedelta(minutes=1))
+    assert await service.flush(owner) == 1
+    assert await service.flush(owner) == 0
+    async with factory() as uow:
+        reconciled = await uow.jobs.get(owner, "count-items")
+    assert reconciled.archived == imported.archived
+    assert reconciled.live_revision_id == imported.live_revision_id
+    assert reconciled.revisions[str(pending.id)].commit_sha == committed
+    assert reconciled.revisions[str(pending.id)].state == "superseded"
+    assert await repository.head() == head

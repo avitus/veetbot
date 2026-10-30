@@ -118,3 +118,18 @@ async def test_trial_marks_effect_before_running_approved_program() -> None:
         context,
     )
     assert result.ok
+
+
+def test_interrupted_job_schedule_update_preserves_uncertain_outcome() -> None:
+    from agent_core.domain.policies import IdempotencyClass
+    from agent_core.domain.tools import ToolInvocationStatus
+    from agent_core.tools.executor import ToolRecoveryAction, tool_recovery_action
+    from agent_core.tools.job_schedules import JobScheduleUpdateTool
+    from agent_core.tools.schedule_lifecycle import CockpitScheduleUpdateTool
+    from tests.resilience.test_tool_recovery_m2 import _invocation
+
+    invocation = _invocation(
+        ToolInvocationStatus.RUNNING, JobScheduleUpdateTool.spec.idempotency, effect_sent=True
+    )
+    assert tool_recovery_action(invocation) is ToolRecoveryAction.MARK_UNCERTAIN
+    assert CockpitScheduleUpdateTool.spec.idempotency is IdempotencyClass.CONDITIONALLY_IDEMPOTENT
