@@ -37,5 +37,5 @@ def downgrade() -> None:
     op.execute("SET LOCAL row_security = off")
     op.execute(
         "UPDATE sessions SET metadata = metadata - 'cockpit_refresh' "
-        "WHERE metadata ? 'cockpit_refresh'"
+        "WHERE metadata @> '{\"cockpit_refresh\": true}'::jsonb"
     )

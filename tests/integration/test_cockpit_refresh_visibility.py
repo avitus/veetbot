@@ -1,9 +1,12 @@
 """Feed upkeep stays in the operational inbox, including pre-upgrade occurrences."""
 
+from uuid import UUID
+
 from sqlalchemy import text
 
 from agent_core.adapters.persistence.database import create_engine
 from agent_core.bootstrap import build
+from tests.contract.support import session
 from tests.contract.test_session_repository_contract import (
     assert_session_index_filters_before_pagination,
     assert_session_index_preserves_non_boolean_refresh_markers,
@@ -18,6 +21,55 @@ from tests.gates.test_cockpit_feed_refresh_adr0254 import (
 )
 from tests.integration.m2_support import database_settings
 from tests.integration.test_migrations import _alembic
+
+
+async def test_downgrade_preserves_non_boolean_refresh_metadata() -> None:
+    """Rollback removes its literal marker without deleting unrelated historical values."""
+    markers: tuple[object, ...] = (
+        True,
+        False,
+        None,
+        "true",
+        "legacy",
+        1,
+        [],
+        [True],
+        {},
+        {"value": True},
+    )
+    settings = database_settings()
+    async with (
+        build(settings=settings, storage="postgres") as composition,
+        composition.uow_factory() as uow,
+    ):
+        for index, marker in enumerate(markers, start=951):
+            await uow.sessions.create(
+                session().model_copy(
+                    update={
+                        "id": UUID(int=index),
+                        "metadata": {"cockpit_refresh": marker, "retained": "audit"},
+                    }
+                )
+            )
+    engine = create_engine(settings.database_url)
+    try:
+        _alembic("downgrade", "d8a268b10301")
+        async with engine.connect() as connection:
+            for index, marker in enumerate(markers, start=951):
+                metadata = (
+                    await connection.execute(
+                        text("SELECT metadata FROM sessions WHERE id = :id"),
+                        {"id": UUID(int=index)},
+                    )
+                ).scalar_one()
+                assert metadata["retained"] == "audit"
+                if marker is True:
+                    assert "cockpit_refresh" not in metadata
+                else:
+                    assert metadata["cockpit_refresh"] == marker
+    finally:
+        _alembic("upgrade", "head")
+        await engine.dispose()
 
 
 async def test_postgres_filters_refreshes_before_pagination() -> None:

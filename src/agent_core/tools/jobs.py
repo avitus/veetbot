@@ -19,6 +19,7 @@ from agent_core.application.job_grants import (
 )
 from agent_core.application.jobs import JobPublication
 from agent_core.domain.approvals import ApprovalPresentation, ApprovalStatus
+from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.jobs import JobAccess, JobBrokerError, JobGrant, JobManifest
 from agent_core.domain.messages import TextPart
@@ -387,7 +388,20 @@ class JobRunTool:
     async def approval_view_in_session(
         self, arguments: dict[str, Any], **context: Any
     ) -> ApprovalPresentation:
+        """Resolve legacy grant access for informed re-approval without exposing secrets."""
+        view = dict(arguments)
+        if "grant_id" in arguments:
+            try:
+                async with self.toolset.publication.uow_factory() as uow:
+                    saved = await uow.jobs.get(context["principal"], arguments["slug"])
+                grant = saved.grants[str(arguments["grant_id"])]
+            except (KeyError, NotFoundError):
+                return ApprovalPresentation(
+                    summary="Job access is unknown: the selected grant could not be resolved.",
+                    arguments=approval_argument_view({**view, "access_status": "unknown"}),
+                )
+            view["access"] = _ACCESS.dump_python(grant.access, mode="json")
         return ApprovalPresentation(
             summary="Run this saved job with the listed private inputs and access.",
-            arguments=arguments,
+            arguments=approval_argument_view(view),
         )

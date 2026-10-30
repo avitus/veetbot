@@ -67,6 +67,8 @@ The repository contract also preserves non-boolean historical `cockpit_refresh`
 values. A PostgreSQL regression reproduced an invalid boolean cast that broke
 the conversation index; JSONB containment now excludes only the literal `true`
 marker, matching the in-memory repository without coercing strings or numbers.
+The migration rollback also removes only literal `true` markers; a PostgreSQL
+round-trip regression preserves every other historical value and audit metadata.
 Collector regressions reproduced schema rejection at 301 items and an attempted
 51st request. They now preserve the complete count with bounded details and
 refuse excess requests without publishing a partial snapshot.

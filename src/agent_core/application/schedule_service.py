@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.job_grants import grant_covers_revision
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserProfileStatus
 from agent_core.domain.errors import ConflictError, NotFoundError, ScheduleValidationError
@@ -185,6 +186,7 @@ class ScheduleService:
         expected_revision: int,
         definition: ScheduleDefinition,
     ) -> ScheduleRecord:
+        """Replace future schedule settings while preserving only unchanged legacy job pins."""
         require_scope(principal, "schedule.write")
         async with self._uow_factory() as uow:
             current = await uow.schedules.get(schedule_id, principal)
@@ -193,11 +195,19 @@ class ScheduleService:
                 raise ConflictError(
                     "terminal schedule cannot be updated", reason="schedule.terminal"
                 )
-            await _reject_started_call_plan(
-                uow,
-                await uow.schedules.get_revision(schedule_id, current.current_revision, principal),
+            prior_revision = await uow.schedules.get_revision(
+                schedule_id, current.current_revision, principal
             )
-            await _validate_definition(uow, principal, definition, self._limits)
+            await _reject_started_call_plan(uow, prior_revision)
+            await _validate_definition(
+                uow,
+                principal,
+                definition,
+                self._limits,
+                existing_task=prior_revision.task
+                if isinstance(prior_revision.task, JobTask)
+                else None,
+            )
             now = self._clock.now()
             next_fire_at = (
                 RecurrenceCalculator.next_after(definition.cadence, now)
@@ -297,7 +307,15 @@ class ScheduleService:
                     **({"cadence": patch.cadence} if patch.cadence is not None else {}),
                 }
             )
-            await _validate_definition(uow, principal, definition, self._limits)
+            await _validate_definition(
+                uow,
+                principal,
+                definition,
+                self._limits,
+                existing_task=current_revision.task
+                if isinstance(current_revision.task, JobTask)
+                else None,
+            )
             now = self._clock.now()
             if definition == current_definition:
                 await uow.schedule_idempotency.create(
@@ -584,6 +602,8 @@ async def _validate_definition(
     principal: Principal,
     definition: ScheduleDefinition,
     limits: ScheduleDefinitionLimits,
+    *,
+    existing_task: JobTask | None = None,
 ) -> None:
     """Validate schedule authority, pinned resources, cadence, and deployment limits."""
     if isinstance(definition.task, JobTask):
@@ -607,6 +627,11 @@ async def _validate_definition(
         if not grant.access.feeds <= revision.manifest.feeds:
             raise ScheduleValidationError(
                 "schedule.job_feeds", "The job revision must declare the grant's feeds."
+            )
+        if task != existing_task and not grant_covers_revision(grant, revision):
+            raise ScheduleValidationError(
+                "schedule.job_grant_revision",
+                "The grant must be approved for the selected job revision.",
             )
     if definition.browser_profile_id is not None:
         require_scope(principal, "browser.profile.read")

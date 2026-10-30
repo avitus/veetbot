@@ -58,6 +58,11 @@ private inputs match the bound revision/grant. Publication's default allow
 cannot approve live trial execution. Pure local computation retains its existing
 rules. Already approved schedules retain their exact code/grant pair; this
 change does not silently alter their pins or stop them.
+New schedules and changed code/grant pairs require revision-bound external
+access at the schedule service boundary. Edits retaining an already approved
+pair preserve legacy authority. Re-approval cards resolve stored grants and show
+redacted inputs, hosts and credential bindings, feeds, model budget and limits;
+an unresolved grant is explicitly unknown, not an empty access proposal.
 
 ### Credential responses
 
@@ -78,6 +83,10 @@ screening and delayed publication screening. Composition tests cover jobs with
 admitted indexing and with semantic startup fallback; these use scripted
 providers and do not establish production recall quality. Existing schedule
 and explicit-model usage tests remain required.
+Review regressions also reproduce an unbound grant accepted during schedule
+conversion and missing stored access on re-approval cards. Coverage preserves
+existing schedule pairs while rejecting new legacy or cross-revision pins,
+and verifies owned, missing and foreign grant presentations without secret text.
 
 Before restoration: finish review and final-head hosted CI, verify delivery,
 refresh exact source/configuration/schema/assets/rollback evidence with jobs on,

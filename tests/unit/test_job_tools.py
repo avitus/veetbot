@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -12,6 +13,63 @@ from agent_core.tools.jobs import JobManageTool, JobRunTool, JobToolset
 from tests.contract.support import tool_context
 from tests.unit.test_job_execution import Runner
 from tests.unit.test_job_publication import setup
+
+
+@pytest.mark.parametrize("lookup", ["owned", "missing_job", "missing_grant", "foreign"])
+async def test_reapproval_card_resolves_and_redacts_stored_access(lookup: str) -> None:
+    """Show legacy access before approval and never disguise an unresolved grant."""
+    from unittest.mock import AsyncMock
+
+    from tests.contract.test_job_store_contract import record
+
+    factory, publication, _, _ = await setup()
+    owner = tool_context().principal
+    saved = record(owner)
+    grant = saved.grants[str(UUID(int=2))]
+    grant = grant.model_copy(
+        update={
+            "access": replace(
+                grant.access,
+                inputs={"repository": "example/private", "token": "private-canary"},
+                hosts={"api.github.com": "github-reader"},
+                feeds=frozenset({"agent.counter"}),
+                model_cost="0.25",
+                maximum_requests=7,
+                maximum_response_bytes=1024,
+                timeout_seconds=30,
+            )
+        }
+    )
+    saved = saved.model_copy(update={"grants": {str(grant.id): grant}})
+    async with factory() as uow:
+        await uow.jobs.put(saved, expected_version=None)
+    arguments = {
+        "slug": "missing-job" if lookup == "missing_job" else saved.slug,
+        "revision_id": str(UUID(int=1)),
+        "grant_id": str(UUID(int=999) if lookup == "missing_grant" else grant.id),
+    }
+    principal = (
+        owner.model_copy(update={"principal_id": "foreign"}) if lookup == "foreign" else owner
+    )
+    view = await JobRunTool(
+        JobToolset(publication, AsyncMock(spec=JobExecution))
+    ).approval_view_in_session(
+        arguments,
+        principal=principal,
+    )
+    assert "private-canary" not in view.model_dump_json()
+    if lookup != "owned":
+        assert "unknown" in view.summary.lower()
+        assert view.arguments["access_status"] == "unknown"
+        return
+    access = view.arguments["access"]
+    assert access["hosts"] == {"api.github.com": "github-reader"}
+    assert access["inputs"] == {"repository": "example/private", "token": "[REDACTED]"}
+    assert access["feeds"] == ["agent.counter"]
+    assert access["model_cost"] == "0.25"
+    assert access["maximum_requests"] == 7
+    assert access["maximum_response_bytes"] == 1024
+    assert access["timeout_seconds"] == 30
 
 
 async def test_agent_saves_a_job_and_reuses_its_offline_grant() -> None:

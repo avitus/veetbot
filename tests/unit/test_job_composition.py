@@ -364,6 +364,7 @@ async def test_owner_can_author_generic_job_code_without_a_redundant_approval() 
 
 
 async def test_schedule_repin_can_enable_an_already_approved_model_grant() -> None:
+    """A newly selected model grant must carry approval for the pinned revision."""
     from datetime import timedelta
     from uuid import UUID
 
@@ -383,7 +384,8 @@ async def test_schedule_repin_can_enable_an_already_approved_model_grant() -> No
         saved = record(owner)
         grant = saved.grants[str(UUID(int=2))]
         mixed_grant = JobGrant(
-            id=UUID(int=3),
+            id=revision_grant_id(UUID(int=99), UUID(int=1)),
+            approval_id=UUID(int=99),
             access=replace(grant.access, model_cost="1"),
             created_at=composition.clock.now(),
         )
@@ -425,9 +427,92 @@ async def test_schedule_repin_can_enable_an_already_approved_model_grant() -> No
         assert current.revision.limits.max_cost == 1
 
 
+async def test_legacy_schedule_retains_its_pair_but_cannot_authorize_a_new_schedule() -> None:
+    """Existing approved pins survive edits; a new schedule needs revision-bound access."""
+    from datetime import timedelta
+    from uuid import UUID
+
+    from agent_core.application.schedule_service import _definition_from_revision
+    from agent_core.domain.errors import ScheduleValidationError
+    from agent_core.domain.schedules import ScheduleDefinitionPatch
+    from tests.contract.support import tool_context
+    from tests.contract.test_job_store_contract import record
+
+    async with build(
+        settings=replace(
+            memory_settings(),
+            jobs_enabled=True,
+            schedule_api_enabled=True,
+            schedule_worker_enabled=True,
+        )
+    ) as composition:
+        owner = composition.principal
+        saved = record(owner)
+        async with composition.uow_factory() as uow:
+            await uow.jobs.put(saved, expected_version=None)
+        context = replace(tool_context(), principal=owner, tenant_id=owner.tenant_id)
+        created = await composition.tool_pipeline._registry.get("schedule.create").execute(
+            {
+                "title": "Count items",
+                "instruction": "Count items",
+                "at": (composition.clock.now() + timedelta(hours=1)).isoformat(),
+                "task": {
+                    "kind": "job",
+                    "slug": saved.slug,
+                    "revision_id": str(UUID(int=1)),
+                    "grant_id": str(UUID(int=2)),
+                },
+            },
+            context,
+        )
+        assert created.ok and created.structured is not None
+        schedule_id = UUID(created.structured["schedule_id"])
+        # Model an already persisted pre-ADR-0272 external grant and approved pin.
+        grant = saved.grants[str(UUID(int=2))]
+        legacy = grant.model_copy(
+            update={
+                "access": replace(
+                    grant.access,
+                    hosts={"api.github.com": "github-reader"},
+                )
+            }
+        )
+        async with composition.uow_factory() as uow:
+            await uow.jobs.put(
+                saved.model_copy(
+                    update={
+                        "version": saved.version + 1,
+                        "grants": {str(legacy.id): legacy},
+                    }
+                ),
+                expected_version=saved.version,
+            )
+        current = await composition.schedules.get(owner, schedule_id)
+        definition = _definition_from_revision(current.revision)
+        with pytest.raises(ScheduleValidationError, match="approved for the selected job revision"):
+            await composition.schedules.create(owner, definition, "new-schedule")
+        updated = await composition.schedules.update(
+            owner,
+            schedule_id,
+            1,
+            definition.model_copy(update={"title": "Existing pin"}),
+        )
+        assert updated.revision.task == current.revision.task
+        patched = await composition.schedules.patch(
+            owner,
+            schedule_id,
+            2,
+            ScheduleDefinitionPatch(title="Still the existing pin"),
+            "edit",
+        )
+        assert patched.revision.task == current.revision.task
+
+
 @pytest.mark.parametrize("publishes_feed", [True, False])
+@pytest.mark.parametrize("grant_binding", ["selected", "other", "legacy"])
 async def test_legacy_feed_schedule_can_switch_to_an_approved_job_without_a_tool_roster(
     publishes_feed: bool,
+    grant_binding: str,
 ) -> None:
     """Convert a legacy feed schedule only when its approved job can publish feeds."""
     from datetime import timedelta
@@ -473,6 +558,16 @@ async def test_legacy_feed_schedule_can_switch_to_an_approved_job_without_a_tool
             }
         )
         grant = saved.grants[str(UUID(int=2))]
+        if grant_binding != "legacy":
+            approval_id = UUID(int=99)
+            grant = grant.model_copy(
+                update={
+                    "approval_id": approval_id,
+                    "id": revision_grant_id(
+                        approval_id, revision.id if grant_binding == "selected" else UUID(int=9)
+                    ),
+                }
+            )
         saved = saved.model_copy(
             update={
                 "grants": {
@@ -517,8 +612,11 @@ async def test_legacy_feed_schedule_can_switch_to_an_approved_job_without_a_tool
             },
             context,
         )
-        if not publishes_feed:
+        if not publishes_feed or grant_binding != "selected":
             assert not updated.ok
+            if publishes_feed:
+                assert updated.failure is not None
+                assert "approved for the selected job revision" in updated.failure.detail
             unchanged = await composition.schedules.get(owner, schedule_id)
             assert unchanged.schedule.current_revision == 1
             return
