@@ -174,7 +174,12 @@ class JobPublication:
         if self.repository is None:
             return 0
         async with self.uow_factory() as uow:
-            entries = await uow.job_outbox.due(principal.tenant_id, now=self.clock.now(), limit=100)
+            entries = await uow.job_outbox.due(
+                principal.tenant_id,
+                principal_id=principal.principal_id,
+                now=self.clock.now(),
+                limit=100,
+            )
         completed = 0
         for entry in entries:
             if entry.principal_id != principal.principal_id:

@@ -360,10 +360,10 @@ agent_jobs_mvp:
   verification:
     reading_lane: A
     diff_minimum_reading_lane: A
-    main_base_static: 'circleci testsuite run static: 8968 passed, one skipped across all 542 atoms after the PR review fix batches'
+    main_base_static: 'circleci testsuite run static: 8969 passed, one skipped across all 542 atoms after the PR review fix batches'
     pre_rebase_static: 'circleci testsuite run static: 8933 passed, one skipped, one pre-existing failure across all 540 atoms on the original dev-based branch'
     original_base_failure: 'tests/unit/test_owner_recall_probes.py::test_family_probe_checks_the_names_the_overview_delivers; reproduced on untouched bbbb1282 before jobs implementation'
-    contract: 'circleci testsuite run contract: 2007 passed across all 190 test atoms on the main-based PR branch'
+    contract: 'circleci testsuite run contract: 2008 passed across all 190 test atoms on the main-based PR branch'
     postgres: 'circleci testsuite run integration: 17 passed across five selected job, Cockpit and schedule atoms; 115 atoms excluded'
     final_workflow: 'circleci testsuite run static -t ^tests/unit/test_job_composition.py$: 12 passed, including external approval/resume and reuse; 539 atoms excluded'
     checks: 'Lint, typecheck, Cockpit lint/typecheck, citation repair and docs-check passed'
@@ -371,6 +371,7 @@ agent_jobs_mvp:
     review_summary_regressions: 'Five new regression cases first failed on replay classification, a missing trial watermark, and repeated failed model requests; all 95 job unit cases and 19 job contract cases now pass. Failed billed usage is persisted and stops execution; existing recovery preserves uncertain effects.'
     publication_recovery_regressions: 'Seven cases first failed on schedule replay and lost publication receipts overriding later imported deletions or edits (including identical files); all 102 job unit cases and 19 job contract cases pass after preserving import precedence and uncertain schedule updates.'
     imported_restore_regressions: 'Two cases first failed on imported-deletion restoration or its missing archive parent. Imported deletions now retain a dedicated archived revision at the deletion commit; all 104 job unit cases and 19 job contract cases pass.'
+    outbox_owner_regression: 'The owner publication test first failed with 100 earlier foreign-owner requests. Owner filtering now precedes the batch limit; 105 job unit cases, the full 2008-case contract partition and four PostgreSQL job/Cockpit integration cases pass, including the shared outbox contract.'
     red_test:
       command: 'circleci testsuite run contract -t ^tests/contract/test_job_runner_contract.py$'
       expected_failure: 'Catching the broker call limit incorrectly returned success instead of JobExecutionError'

@@ -358,3 +358,42 @@ async def test_imported_deletion_can_be_restored_without_repository_repair(
     assert archived.live_revision_id is not None
     assert archived.revisions[str(archived.live_revision_id)].commit_sha == deleted
     assert saved.revisions[str(first.id)].source == first.source
+
+
+async def test_another_owners_backlog_cannot_starve_job_publication() -> None:
+    """Owner filtering happens before the maintenance batch limit."""
+    from uuid import uuid4
+
+    from agent_core.domain.cockpit import CommitOutboxEntry, OutboxOperation
+
+    factory, service, _, _ = await setup()
+    owner = principal()
+    earlier = service.clock.now() - timedelta(minutes=1)
+    async with factory() as uow:
+        for _ in range(100):
+            await uow.job_outbox.enqueue(
+                CommitOutboxEntry(
+                    tenant_id=owner.tenant_id,
+                    principal_id="another-owner",
+                    revision_id=uuid4(),
+                    slug="other-job",
+                    operation=OutboxOperation.WRITE,
+                    next_attempt_at=earlier,
+                    created_at=earlier,
+                )
+            )
+    revision = await service.write(
+        principal=owner,
+        slug="count-items",
+        source="def main(inputs, job): return 1",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=None,
+        request_key="save",
+    )
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        saved = await uow.jobs.get(owner, "count-items")
+        remaining = await uow.job_outbox.due(owner.tenant_id, now=service.clock.now(), limit=100)
+    assert saved.live_revision_id == revision.id
+    assert len(remaining) == 100
+    assert all(item.principal_id == "another-owner" for item in remaining)

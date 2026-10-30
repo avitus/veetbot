@@ -304,12 +304,17 @@ class InMemoryWidgetCommitOutbox:
             self._entries[key] = entry
             return entry
 
-    async def due(self, tenant_id: str, *, now: datetime, limit: int) -> list[CommitOutboxEntry]:
+    async def due(
+        self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
+    ) -> list[CommitOutboxEntry]:
+        """Select due requests, applying optional owner scope before the batch limit."""
         async with self._lock:
             due = [
                 entry
                 for entry in self._entries.values()
-                if entry.tenant_id == tenant_id and entry.next_attempt_at <= now
+                if entry.tenant_id == tenant_id
+                and (principal_id is None or entry.principal_id == principal_id)
+                and entry.next_attempt_at <= now
             ]
             due.sort(
                 key=lambda item: (item.next_attempt_at, item.created_at, str(item.revision_id))
@@ -997,22 +1002,24 @@ class PostgresWidgetCommitOutbox:
             ) from error
         return entry
 
-    async def due(self, tenant_id: str, *, now: datetime, limit: int) -> list[CommitOutboxEntry]:
-        """List due publication requests for the tenant and package namespace."""
+    async def due(
+        self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
+    ) -> list[CommitOutboxEntry]:
+        """List due requests, applying namespace and optional owner scope before the limit."""
+        query = select(CockpitCommitOutboxRow).where(
+            CockpitCommitOutboxRow.package_kind == self._kind,
+            CockpitCommitOutboxRow.tenant_id == tenant_id,
+            CockpitCommitOutboxRow.next_attempt_at <= now,
+        )
+        if principal_id is not None:
+            query = query.where(CockpitCommitOutboxRow.principal_id == principal_id)
         rows = (
             await self._session.execute(
-                select(CockpitCommitOutboxRow)
-                .where(
-                    CockpitCommitOutboxRow.package_kind == self._kind,
-                    CockpitCommitOutboxRow.tenant_id == tenant_id,
-                    CockpitCommitOutboxRow.next_attempt_at <= now,
-                )
-                .order_by(
+                query.order_by(
                     CockpitCommitOutboxRow.next_attempt_at,
                     CockpitCommitOutboxRow.created_at,
                     CockpitCommitOutboxRow.revision_id,
-                )
-                .limit(limit)
+                ).limit(limit)
             )
         ).scalars()
         return [_entry_from_row(row) for row in rows]

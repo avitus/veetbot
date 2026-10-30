@@ -106,13 +106,13 @@ class WidgetCommitOutbox(Protocol):
 
     One entry per revision (`ConflictError` reason `commit_queued`). `due`
     returns the tenant's entries whose next attempt is at or before `now`,
-    oldest first.
+    oldest first. An optional principal filter is applied before the limit.
     """
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry: ...
 
     async def due(
-        self, tenant_id: str, *, now: datetime, limit: int
+        self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]: ...
 
     async def reschedule(

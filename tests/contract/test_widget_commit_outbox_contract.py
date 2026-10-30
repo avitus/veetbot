@@ -134,6 +134,22 @@ async def erasure_removes_only_the_owners_outbox(
     assert await _due(outbox, foreign(owner), 10) == [kept.revision_id]
 
 
+@scenario
+async def principal_filter_precedes_limit_without_changing_tenant_wide_reads(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    """A different owner's older entry cannot consume a principal-scoped page."""
+    other = owner.model_copy(update={"principal_id": f"other-{owner.principal_id}"})
+    earlier = await outbox.enqueue(entry(other, due_in_minutes=-60, created_minutes=-60))
+    mine = await outbox.enqueue(entry(owner))
+    assert await outbox.due(owner.tenant_id, principal_id=owner.principal_id, now=NOW, limit=1) == [
+        mine
+    ]
+    assert await outbox.due(owner.tenant_id, now=NOW, limit=1) == [earlier]
+    await outbox.complete(other, earlier.revision_id)
+    await outbox.complete(owner, mine.revision_id)
+
+
 @pytest.mark.parametrize("check", SCENARIOS, ids=lambda check: check.__name__)
 async def test_in_memory_widget_commit_outbox(check: Scenario) -> None:
     await check(InMemoryWidgetCommitOutbox(), principal())
