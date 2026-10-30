@@ -7,6 +7,9 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort  # type: ignore[import-untyped]
+from onnxruntime.capi import (  # type: ignore[import-untyped]
+    onnxruntime_pybind11_state as ort_errors,
+)
 from tokenizers import Tokenizer
 
 from agent_core.adapters.models.local_embedding_assets import read_local_assets
@@ -21,33 +24,52 @@ class LocalEmbeddingProvider:
         self._work: asyncio.Future[EmbeddingResponse] | None = None
         try:
             model, tokenizer = read_local_assets(root, config)
+        except OSError:
+            raise EmbeddingError("local embedding assets could not be read") from None
+        try:
             self._tokenizer = Tokenizer.from_str(tokenizer.decode("utf-8"))
-            self._tokenizer.no_truncation()
-            self._tokenizer.no_padding()
-            pad_id = self._tokenizer.token_to_id("[PAD]")
-            if pad_id is None:
-                raise EmbeddingError("local embedding padding token is unavailable")
-            self._pad_id = pad_id
-            ort.disable_telemetry_events()
-            options = ort.SessionOptions()
-            options.intra_op_num_threads = config.threads
-            options.inter_op_num_threads = 1
-            options.enable_profiling = False
+        except Exception as error:
+            # The tokenizer's Rust deserializer exposes malformed JSON as the
+            # base Exception type. Do not disguise other Python implementation bugs.
+            if type(error) is not Exception and not isinstance(error, UnicodeError):
+                raise
+            raise EmbeddingError("local embedding tokenizer could not be loaded") from None
+        self._tokenizer.no_truncation()
+        self._tokenizer.no_padding()
+        pad_id = self._tokenizer.token_to_id("[PAD]")
+        if pad_id is None:
+            raise EmbeddingError("local embedding padding token is unavailable")
+        self._pad_id = pad_id
+        ort.disable_telemetry_events()
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = config.threads
+        options.inter_op_num_threads = 1
+        options.enable_profiling = False
+        try:
             # Bytes, rather than a path, prevent model-relative external-data reads.
             self._session = ort.InferenceSession(
                 model, sess_options=options, providers=["CPUExecutionProvider"]
             )
-            if {item.name for item in self._session.get_inputs()} != {
-                "input_ids",
-                "attention_mask",
-                "token_type_ids",
-            }:
-                raise EmbeddingError("local embedding input schema mismatch")
-            outputs = self._session.get_outputs()
-            if len(outputs) != 1 or outputs[0].name != "last_hidden_state":
-                raise EmbeddingError("local embedding output schema mismatch")
-        except Exception:
-            raise EmbeddingError("local embedding model could not be verified or loaded") from None
+        except (
+            ort_errors.EPFail,
+            ort_errors.Fail,
+            ort_errors.InvalidArgument,
+            ort_errors.InvalidGraph,
+            ort_errors.InvalidProtobuf,
+            ort_errors.NoSuchFile,
+            ort_errors.NotImplemented,
+            ort_errors.RuntimeException,
+        ):
+            raise EmbeddingError("local embedding model could not be loaded") from None
+        if {item.name for item in self._session.get_inputs()} != {
+            "input_ids",
+            "attention_mask",
+            "token_type_ids",
+        }:
+            raise EmbeddingError("local embedding input schema mismatch")
+        outputs = self._session.get_outputs()
+        if len(outputs) != 1 or outputs[0].name != "last_hidden_state":
+            raise EmbeddingError("local embedding output schema mismatch")
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-embedding")
 
     def _encode(self, request: EmbeddingRequest) -> EmbeddingResponse:

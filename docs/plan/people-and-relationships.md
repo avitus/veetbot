@@ -590,8 +590,11 @@ before projection; neither names nor indirect graph paths infer relationships.
 Directed endpoints and evidence confidence are retained, including provisional
 status. Coverage and continuation are rendered inside the shared recall budget;
 the cursor advances only past contiguous people whose eligible context was
-actually delivered, reserving its metadata before selecting evidence. A page
-never claims exhaustive knowledge. Other permitted ordinary recall remains
+actually delivered, reserving its metadata before selecting evidence. If the
+first remaining person cannot fit, the response explicitly marks their context
+incomplete and advances past them to reach later people, directing a narrower
+`people.context` lookup for omitted detail. This exception and its cursor are
+also budgeted before selection; a page never claims exhaustive knowledge. Other permitted ordinary recall remains
 available alongside the direct relationships.
 
 Disconnected source accounts make live source navigation unavailable; they do
@@ -604,7 +607,8 @@ contract rather than treating every unavailable provider as an erasure request.
 
 People context shares the existing retrieved-context allocation; it is not an
 additional unbounded prompt section. Start with at most three focal people,
-20 combined items, five recent interactions per focal person, and ten one-hop
+except the first owner/family overview page may include up to eight. Both paths
+retain 20 combined items, five recent interactions per focal person, and ten one-hop
 relationship candidates, all subordinate to the existing 2,000-token task
 recall ceiling and deterministic truncation rules. Explicit lookup can page;
 it does not raise the run's budget. Conflict pairs travel together or receive a

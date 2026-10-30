@@ -508,6 +508,11 @@ enum ModeSidebarLayout {
         return min(max(width, bounds.lowerBound), bounds.upperBound)
     }
 
+    static func preference(saved: CGFloat, displayed: CGFloat, proposed: CGFloat, available: CGFloat) -> CGFloat {
+        let adjusted = shown(proposed, available: available)
+        return adjusted == displayed ? saved : adjusted
+    }
+
     static func shown(_ width: CGFloat, available: CGFloat) -> CGFloat {
         min(clamped(width), max(bounds.lowerBound, available - 360 - dividerWidth))
     }
@@ -566,7 +571,11 @@ struct TabletSidebarSplit<Sidebar: View, Detail: View>: View {
                     dragWidth = ModeSidebarLayout.shown((dragStart ?? width) + value.translation.width, available: available)
                 }
                 .onEnded { _ in
-                    if let dragWidth { savedWidth = Double(dragWidth) }
+                    if let dragWidth {
+                        savedWidth = Double(ModeSidebarLayout.preference(
+                            saved: CGFloat(savedWidth), displayed: dragStart ?? width,
+                            proposed: dragWidth, available: available))
+                    }
                     dragStart = nil
                     dragWidth = nil
                 })
@@ -581,7 +590,9 @@ struct TabletSidebarSplit<Sidebar: View, Detail: View>: View {
             .accessibilityHint("Swipe up or down to resize. Double tap to reset.")
             .accessibilityAdjustableAction { direction in
                 let delta: CGFloat = direction == .increment ? 20 : -20
-                savedWidth = Double(ModeSidebarLayout.shown(width + delta, available: available))
+                savedWidth = Double(ModeSidebarLayout.preference(
+                    saved: CGFloat(savedWidth), displayed: width,
+                    proposed: width + delta, available: available))
             }
             .accessibilityAction { savedWidth = Double(ModeSidebarLayout.defaultWidth) }
             .accessibilityIdentifier("\(mode.rawValue).sidebar.resize")

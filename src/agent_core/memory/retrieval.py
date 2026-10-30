@@ -819,6 +819,7 @@ class HybridMemoryRetriever:
             bounded=coverage,
             relationship_group=effective_query.relationship_group,
             next_people_after=reserved_cursor,
+            incomplete_person=reserved_cursor,
             people_overflow=effective_query.people_overflow,
         )
         selected: list[RecalledBelief] = []
@@ -1042,12 +1043,19 @@ class HybridMemoryRetriever:
             delivered = {item.record_id for item in selected_people}
             next_after = effective_query.next_people_after
             previous = effective_query.people_after
+            incomplete_person = None
             for person_id in page_people:
                 required = {
                     item.record_id for item in eligible_people if person_id in item.person_ids
                 }
                 if not required <= delivered:
                     next_after = previous
+                    if previous == effective_query.people_after:
+                        # Repeating this cursor cannot fit an oversized person.
+                        # Expose the omission explicitly and allow later people
+                        # to be reached without claiming full delivery here.
+                        incomplete_person = person_id
+                        next_after = person_id
                     break
                 previous = person_id
             effective_query = effective_query.model_copy(update={"next_people_after": next_after})
@@ -1058,6 +1066,7 @@ class HybridMemoryRetriever:
                 known_at=render_known_at,
                 partners=shown_partners,
                 next_people_after=next_after,
+                incomplete_person=incomplete_person,
             ) + "".join("\n" + _person_line(person) for person in selected_people)
         rendered_tokens = (
             measure_tokens(rendered) if selected_items or selected_people or coverage else 0
@@ -1959,6 +1968,7 @@ def render_memory(
     bounded: bool = False,
     relationship_group: str | None = None,
     next_people_after: UUID | None = None,
+    incomplete_person: UUID | None = None,
     people_overflow: bool = False,
     partners: frozenset[UUID] | None = None,
 ) -> str:
@@ -1980,6 +1990,13 @@ def render_memory(
             if next_people_after is not None
             else ""
         )
+        incomplete = (
+            f" Incomplete context for person {incomplete_person}: remaining evidence did not "
+            "fit. This cursor moves past that person to reach later people; use "
+            "people.context with that person ID and a narrower text query for detail."
+            if incomplete_person is not None
+            else ""
+        )
         overflow = (
             " More people hold this relationship than one overview reads; ask about a "
             "person by name."
@@ -1990,6 +2007,7 @@ def render_memory(
             "  Direct owner relationships: a bounded page of the closest people, not "
             "everyone; supporting facts may be omitted. Narrow the query for more detail."
             + continuation
+            + incomplete
             + overflow
         )
     for item in items:

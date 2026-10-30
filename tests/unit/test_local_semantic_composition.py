@@ -174,3 +174,46 @@ async def test_source_recovery_binds_same_release_and_requires_local_reader(tmp_
     with pytest.raises(ConfigurationError, match="Semantic index"):
         await compose_indexing(**kwargs)
     assert lifecycle == [], "Source recall must not load without runtime reader authority"
+
+
+@pytest.mark.parametrize("expected", [False, True])
+async def test_bootstrap_distinguishes_local_model_unavailability_from_factory_bugs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    expected: bool,
+) -> None:
+    import agent_core.bootstrap as bootstrap
+    from agent_core.domain.embeddings import EmbeddingError
+    from tests.contract.support import principal
+
+    kwargs, credentials, _, _ = await local_options(tmp_path)
+    monkeypatch.setattr(
+        "agent_core.memory.semantic_deployment.bind_index_manifest",
+        lambda *args, **kwargs: lambda: True,
+    )
+
+    def unavailable(*args: Any, **options: Any) -> Any:
+        if expected:
+            raise EmbeddingError("Model unavailable")
+        raise RuntimeError("Unexpected factory implementation failure")
+
+    monkeypatch.setattr(bootstrap, "local_embedding_provider", unavailable)
+
+    async def start() -> None:
+        async with bootstrap.build(
+            settings=kwargs["settings"],
+            storage="memory",
+            principal=principal(),
+            clock=kwargs["clock"],
+            credential_resolver=kwargs["credentials"],
+        ) as app:
+            assert await app.readiness_probe()
+            assert app.semantic_services is None
+            assert app.executor._prepare_recall is None
+
+    if expected:
+        await start()
+    else:
+        with pytest.raises(RuntimeError, match="Unexpected factory implementation failure"):
+            await start()
+    assert not credentials

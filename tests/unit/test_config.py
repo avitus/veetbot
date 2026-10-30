@@ -1669,3 +1669,16 @@ def test_reviewed_dreaming_flag_is_explicit_and_does_not_enable_unattended_mode(
     assert not settings.memory_reconsolidation_enabled
     with pytest.raises(ConfigurationError):
         load_settings({**base_environment(), "AGENT_MEMORY_DREAMING_REVIEW_ENABLED": "maybe"})
+
+
+@pytest.mark.parametrize("legacy", ["0", "1", "invalid"])
+@pytest.mark.parametrize("mode", ["", "off", "auto"])
+def test_retired_formation_flag_requires_explicit_migration(legacy: str, mode: str) -> None:
+    with pytest.raises(ConfigurationError, match="AGENT_MEMORY_PROVIDER_EXTRACTION_MODE"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": legacy,
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": mode,
+            }
+        )

@@ -67,8 +67,10 @@ session (2,676 plans), the parked runs, the host environment, and Doppler:
 4. `agent email exclude-bulk` and `EmailService.exclude_bulk_sources` are
    removed. Governed deletion of each derived belief remains the cleanup path,
    and per-thread source exclusion is unchanged.
-5. The `AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED` shim is removed; only
-   `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE` is read.
+5. The `AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED` compatibility mapping is
+   removed. A non-empty retired value is rejected with migration guidance;
+   it cannot silently turn an old explicit disable into the `auto` default.
+   Only `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE` selects extraction behavior.
 
 ## Consequences
 

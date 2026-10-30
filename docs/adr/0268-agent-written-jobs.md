@@ -122,8 +122,11 @@ service, and run it again later.
    - **Once.** From a chat, `job.run` runs a pinned revision with inputs under
      a grant. It returns the result and the log to the agent as an untrusted
      tool result. A run that needs no host, credential or model asks no
-     approval. A run that needs any of them asks once, for that grant, and
-     later one-time runs under the same grant do not ask again.
+     approval. A run that needs any of them asks once for the exact grant and
+     pinned revision together. Later one-time runs under that same approved
+     pair do not ask again. A different revision requires a new execution
+     approval, even if its publication was allowed without a prompt or its
+     earlier development was influenced by untrusted content.
    - **On a schedule.** A schedule revision's task is either `agent_run`
      (today's instruction and pinned agent, unchanged) or `job` (a pinned
      revision and a grant). Every cadence applies, including `ONCE` at a
@@ -152,7 +155,11 @@ service, and run it again later.
    rule 6: a destination is never model-settable.
 8. **Credentials stay with the platform.** A credential is named in the grant
    and bound to one host. The broker adds it to a request, and the job's code
-   never sees it. The first credential is a read-only GitHub App:
+   never sees it. Every credential-bearing request requires HTTPS, even if an
+   operator otherwise permits HTTP. Redirects must preserve HTTPS and the exact
+   credential-bound host and pass the same destination checks; a downgrade or
+   different host is refused before forwarding any credential. The first
+   credential is a read-only GitHub App:
    - permissions `metadata`, `pull_requests`, `checks`, `statuses` and
      `contents`, all read-only;
    - installed only on repositories the owner picks;
@@ -216,6 +223,11 @@ service, and run it again later.
   - a missing, expired or mismatched `SANDBOX_NETWORK` approval;
   - a private or metadata address;
   - a second resolution.
+- HTTP credential requests and redirect downgrades are refused, including
+  when the operator's general egress configuration permits HTTP. Redirects
+  outside the credential's exact host are refused before credential forwarding.
+- Reusing an approved grant with a different one-time job revision requires
+  a fresh execution approval; publication approval never substitutes for it.
 - A credential appears only in the broker's outbound request. It never
   appears in the sandbox environment, the job's result, the log, an event, a
   feed or the repository. The test uses a canary credential.

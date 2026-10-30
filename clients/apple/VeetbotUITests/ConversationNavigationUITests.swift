@@ -1060,6 +1060,10 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(iOS)
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone,
                       "Compact navigation covers the inbox while a conversation is open")
+        // This case exercises simultaneous inbox/reader interaction. Portrait
+        // iPad correctly uses a one-column detail, so give both columns room.
+        UIDevice.current.orientation = .landscapeLeft
+        defer { UIDevice.current.orientation = .portrait }
         #endif
         app.launchArguments.append("--ui-testing-email-archive-next")
         app.launch()

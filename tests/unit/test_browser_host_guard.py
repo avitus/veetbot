@@ -56,7 +56,15 @@ def test_suite_setup_leaves_other_cases_alone_on_a_mac_host(
 
 def _dry_run(*arguments: str, check: bool = True) -> str:
     environment = dict(os.environ)
-    for variable in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", HOST_OVERRIDE, ROUTE_SETTING):
+    for variable in (
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKELEVEL",
+        HOST_OVERRIDE,
+        ROUTE_SETTING,
+        "BROWSER_TEST_WORKERS",
+        "CONTAINER_BROWSER_TEST_WORKERS",
+    ):
         environment.pop(variable, None)
     return subprocess.run(
         ["make", "--no-print-directory", "-n", *arguments],
@@ -141,10 +149,13 @@ def test_browser_dry_run_is_independent_of_parent_make_settings(
     monkeypatch.setenv("MAKEFLAGS", "-s")
     monkeypatch.setenv("MFLAGS", "-s")
     monkeypatch.setenv("MAKELEVEL", "4")
+    monkeypatch.setenv("BROWSER_TEST_WORKERS", "3")
+    monkeypatch.setenv("CONTAINER_BROWSER_TEST_WORKERS", "5")
 
     commands = _dry_run("test-browser", "HOST_OS=Darwin")
 
     assert "scripts/run_in_linux_container.sh" in commands
+    assert "BROWSER_TEST_WORKERS=8" in commands
     assert "playwright install" not in commands
 
 

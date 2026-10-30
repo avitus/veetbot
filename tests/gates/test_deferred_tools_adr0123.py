@@ -25,6 +25,7 @@ from agent_core.bootstrap import Composition, build
 from agent_core.config import load_settings
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.rendering import (
+    UNINDEXED_DEFERRED_TOOLS,
     build_prefix,
     deferred_index_items,
     envelope_items,
@@ -316,7 +317,8 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
     index_tokens = ConservativeTokenEstimator().estimate(
         envelope_items(deferred_index_items(plan.deferred_tool_specs)), plan.model_id
     )
-    assert int(index["max_items"]) - len(plan.deferred_tool_names) >= INDEX_ENTRY_HEADROOM
+    indexed_count = sum(name not in UNINDEXED_DEFERRED_TOOLS for name in plan.deferred_tool_names)
+    assert int(index["max_items"]) - indexed_count >= INDEX_ENTRY_HEADROOM
     assert int(index["max_tokens"]) - index_tokens >= INDEX_TOKEN_HEADROOM
 
 

@@ -49,6 +49,14 @@ import Testing
     }
 
     @Test
+    func testTabletResizeAtTheWindowCapPreservesTheRememberedWidth() {
+        #expect(ModeSidebarLayout.preference(saved: 420, displayed: 396, proposed: 416, available: 768) == 420)
+        #expect(ModeSidebarLayout.preference(saved: 420, displayed: 396, proposed: 396, available: 768) == 420)
+        #expect(ModeSidebarLayout.preference(saved: 420, displayed: 396, proposed: 376, available: 768) == 376)
+        #expect(ModeSidebarLayout.preference(saved: 320, displayed: 320, proposed: 340, available: 1_024) == 340)
+    }
+
+    @Test
     func testTheInboxRangeAndStartingWidthMatchTheDesign() {
         #expect(EmailInboxWidthStore.bounds == 260...480)
         #expect(EmailInboxWidthStore.idealWidth == 300)

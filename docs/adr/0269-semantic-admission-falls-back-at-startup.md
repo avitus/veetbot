@@ -44,3 +44,10 @@ provider non-construction, ordinary maintenance and actual sparse retrieval.
 Existing strict validator, admitted indexing and local query composition tests
 remain required. These fixtures establish failure isolation, not production
 answer quality or new activation evidence. No M33 acceptance gate moves.
+
+Local model factories report expected asset/tokenizer/native-load unavailability
+as `EmbeddingError`, which the semantic composer converts to `ConfigurationError`.
+The native adapter catches only deserialization and native model-load failures;
+unexpected Python implementation errors propagate through composition and startup.
+Regression coverage exercises both the actual adapter initialization and the
+factory path through application bootstrap, not only a substituted composer.

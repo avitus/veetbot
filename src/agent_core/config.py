@@ -1757,6 +1757,11 @@ def _load_settings(
     skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
     policy_advisory_observe_enabled = _parse_flag(values, "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED")
+    if values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip():
+        raise ConfigurationError(
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED is retired; "
+            "set AGENT_MEMORY_PROVIDER_EXTRACTION_MODE explicitly"
+        )
     raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
     memory_provider_extraction_mode = _parse_enum(
         MemoryProviderExtractionMode,
