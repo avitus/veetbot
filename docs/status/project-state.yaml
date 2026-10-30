@@ -360,7 +360,7 @@ agent_jobs_mvp:
   verification:
     reading_lane: A
     diff_minimum_reading_lane: A
-    main_base_static: 'circleci testsuite run static: 8954 passed, one skipped across all 542 atoms after the first PR review fixes'
+    main_base_static: 'circleci testsuite run static: 8959 passed, one skipped across all 542 atoms after both PR review fix batches'
     pre_rebase_static: 'circleci testsuite run static: 8933 passed, one skipped, one pre-existing failure across all 540 atoms on the original dev-based branch'
     original_base_failure: 'tests/unit/test_owner_recall_probes.py::test_family_probe_checks_the_names_the_overview_delivers; reproduced on untouched bbbb1282 before jobs implementation'
     contract: 'circleci testsuite run contract: 2007 passed across all 190 test atoms on the main-based PR branch'
@@ -368,6 +368,7 @@ agent_jobs_mvp:
     final_workflow: 'circleci testsuite run static -t ^tests/unit/test_job_composition.py$: 12 passed, including external approval/resume and reuse; 539 atoms excluded'
     checks: 'Lint, typecheck, Cockpit lint/typecheck, citation repair and docs-check passed'
     review_regressions: 'Five reproduced defects now pass: first-feed approval, stable manifest bytes across hash seeds, invalid cost feedback, model-limit feedback and cleanup continuation; 44 focused cases passed'
+    review_summary_regressions: 'Five new regression cases first failed on replay classification, a missing trial watermark, and repeated failed model requests; all 95 job unit cases and 19 job contract cases now pass. Failed billed usage is persisted and stops execution; existing recovery preserves uncertain effects.'
     red_test:
       command: 'circleci testsuite run contract -t ^tests/contract/test_job_runner_contract.py$'
       expected_failure: 'Catching the broker call limit incorrectly returned success instead of JobExecutionError'

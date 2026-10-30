@@ -33,7 +33,7 @@ class JobBroker:
         self._limit_failure: str | None = None
 
     def check_result(self) -> None:
-        """A program cannot turn a limit failure into success by catching it."""
+        """A program cannot catch a terminal broker failure and report success."""
         if self._limit_failure is not None:
             raise JobExecutionError(self._limit_failure)
 
@@ -54,6 +54,9 @@ class JobBroker:
                 "job.request_limit",
                 "job.response_limit",
                 "job.model_budget_exceeded",
+                # Partial billed usage is persisted by the adapter. End this
+                # execution so a caught failure cannot reuse the grant allowance.
+                "job.model_failed",
             }:
                 self._limit_failure = exc.reason
             return {"status": "failed", "reason_code": exc.reason, "retryable": exc.retryable}

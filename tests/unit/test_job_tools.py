@@ -73,3 +73,48 @@ async def test_agent_saves_a_job_and_reuses_its_offline_grant() -> None:
     )
     assert second.ok and second.structured is not None
     assert second.structured["grant_id"] == grant_id
+
+
+@pytest.mark.parametrize("tool", [JobManageTool, JobRunTool])
+def test_interrupted_job_effect_is_uncertain_instead_of_replayed(tool: Any) -> None:
+    from agent_core.domain.tools import ToolInvocationStatus
+    from agent_core.tools.executor import ToolRecoveryAction, tool_recovery_action
+    from tests.resilience.test_tool_recovery_m2 import _invocation
+
+    invocation = _invocation(ToolInvocationStatus.RUNNING, tool.spec.idempotency, effect_sent=True)
+    assert tool_recovery_action(invocation) is ToolRecoveryAction.MARK_UNCERTAIN
+
+
+async def test_trial_marks_effect_before_running_approved_program() -> None:
+    from unittest.mock import AsyncMock
+
+    from agent_core.domain.jobs import JobResult
+
+    _, publication, _, _ = await setup()
+    marked = False
+
+    async def mark() -> None:
+        nonlocal marked
+        marked = True
+
+    async def trial(**kwargs: Any) -> JobResult:
+        assert marked, "Recovery must know a trial may have sent external effects."
+        return JobResult({}, "", 0)
+
+    context = tool_context()
+    context = replace(
+        context,
+        principal=context.principal.model_copy(update={"scopes": {"jobs.write"}}),
+        mark_effect_sent=mark,
+    )
+    execution = AsyncMock(spec=JobExecution)
+    execution.trial.side_effect = trial
+    result = await JobManageTool(JobToolset(publication, execution)).execute(
+        {
+            "operation": "trial",
+            "source": "def main(inputs, job): return {}",
+            "manifest": {"title": "Trial"},
+        },
+        context,
+    )
+    assert result.ok

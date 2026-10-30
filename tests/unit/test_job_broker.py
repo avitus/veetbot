@@ -131,3 +131,26 @@ async def test_log_lines_are_bounded_and_failure_does_not_echo_service_secrets()
         "reason_code": "job.service_unavailable",
         "retryable": True,
     }
+
+
+async def test_failed_model_cannot_reuse_its_allowance_or_report_success() -> None:
+    from agent_core.domain.jobs import JobBrokerError, JobExecutionError
+
+    services = Services()
+    broker = services.broker(JobAccess({}, {}, model_cost="0.04"))
+    attempts = 0
+
+    async def failed(**kwargs: Any) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        # The adapter has persisted partial billed usage before reporting failure.
+        raise JobBrokerError("job.model_failed")
+
+    broker.model = failed
+    first = await broker.dispatch("model.complete", {"prompt": "Summarize"}, "first")
+    assert first["reason_code"] == "job.model_failed"
+    second = await broker.dispatch("model.complete", {"prompt": "Try again"}, "second")
+    assert second["reason_code"] == "job.model_failed"
+    assert attempts == 1
+    with pytest.raises(JobExecutionError, match=r"job\.model_failed"):
+        broker.check_result()

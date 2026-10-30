@@ -311,6 +311,11 @@ approval. Schedule creation version
 1.7.0 and update version 1.2.0 support job pins while earlier versions keep
 working. A job run bypasses model planning and final synthesis; only explicit
 SDK completions use the model gateway and ordinary run ledger.
+Failed completions stop the job after recording billed usage, so caught errors
+cannot reuse the grant allowance. Job tools use existing non-idempotent recovery:
+an interruption after the effect watermark yields an uncertain outcome instead
+of replaying effects, including approved trial HTTP calls. No new recovery
+subsystem is introduced.
 
 The generic packages under `samples/jobs/` demonstrate a code-only GitHub PR
 collector and mixed review summarization. The collector's final mapping must
@@ -333,9 +338,10 @@ was weakened to obtain passing evidence.
 
 Final verification results are recorded in project state. These are local
 synthetic checks, not live GitHub, provider, gVisor or production acceptance
-claims. The previously reproduced unrelated static failure,
-`test_family_probe_checks_the_names_the_overview_delivers`, remains outside
-this workstream.
+claims. The earlier unrelated static failure,
+`test_family_probe_checks_the_names_the_overview_delivers`, occurred on the
+original development base; the isolated main-based PR passes the full static
+partition, as recorded in project state.
 
 ## Alternatives considered
 

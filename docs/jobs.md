@@ -87,6 +87,11 @@ subsequent runs reuse without repeating that approval. An expanded grant needs
 approval; existing grants are never changed in place. Pure computation can
 use empty hosts and a zero model budget. A mixed job needs a positive approved
 model budget and charges each explicit completion to the normal run ledger.
+Failed completions retain their billed usage and stop the job; catching the
+error cannot reuse the same allowance. After interruption, a job tool whose
+effects may have been sent is marked uncertain using existing tool recovery.
+The platform does not automatically replay those effects. This also applies to
+approved trials, whose HTTP calls can have effects even though feeds use previews.
 
 A trial without a grant has no HTTP or model access. A trial naming an existing
 grant uses its exact private inputs and access, with feed writes returned as

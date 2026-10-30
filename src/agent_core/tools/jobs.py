@@ -63,7 +63,7 @@ def _spec(
         output_schema={"type": "object"},
         side_effect=SideEffectClass.PUBLICATION if publication else SideEffectClass.EXTERNAL_WRITE,
         risk=RiskLevel.MEDIUM,
-        idempotency=IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+        idempotency=IdempotencyClass.NON_IDEMPOTENT,
         required_scopes={"jobs.write" if publication else "jobs.run"},
         timeout_seconds=660,
         maximum_output_bytes=256 * 1024,
@@ -171,6 +171,7 @@ class JobManageTool:
                     {"jobs": [item.model_dump(mode="json") for item in records]}, untrusted=True
                 )
             if operation == "trial":
+                await context.mark_effect_sent()
                 result = await self.toolset.execution.trial(
                     principal=context.principal,
                     source=arguments["source"],

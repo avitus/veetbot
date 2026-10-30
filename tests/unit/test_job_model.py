@@ -121,3 +121,47 @@ async def test_run_model_limit_returns_repair_feedback_but_preserves_deadlines(
     assert isinstance(error.value, (BudgetExceededError, JobBrokerError))
     assert error.value.reason == ("deadline_exceeded" if expired else "job.model_budget_exceeded")
     assert provider.requests == []
+
+
+async def test_billed_model_failure_is_recorded_and_stops_further_job_requests() -> None:
+    from agent_core.domain.jobs import JobAccess, JobExecutionError
+    from agent_core.domain.messages import ModelPermanentError
+    from tests.unit.test_job_broker import Services
+
+    clock, factory = await memory_uow_factory()
+    current = run()
+    async with factory() as uow:
+        await uow.runs.create(current)
+    provider = FakeModelProvider(
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    fail_with=ModelPermanentError(
+                        provider="fake", model="scripted", message="Failed", attempt_id=current.id
+                    ),
+                    usage=ModelUsage(input_tokens=20, output_tokens=10, cost=Decimal("0.003")),
+                )
+            ]
+        ),
+        clock,
+    )
+    completion = JobModelCompletion(
+        run=current,
+        provider=provider,
+        resolved=ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+        budgets=UnitOfWorkBudgetLedger(factory, clock),
+        clock=clock,
+        ids=SequenceIdFactory(),
+    )
+    broker = Services().broker(JobAccess({}, {}, model_cost="0.01"))
+    broker.model = completion.complete
+    for call_id in ("first", "caught-retry"):
+        result = await broker.dispatch("model.complete", {"prompt": "Summarize"}, call_id)
+        assert result["reason_code"] == "job.model_failed"
+    assert len(provider.requests) == 1
+    assert current.usage.cost == Decimal("0.003")
+    async with factory() as uow:
+        stored = await uow.runs.get(current.id, principal())
+    assert stored.usage.cost == Decimal("0.003")
+    with pytest.raises(JobExecutionError, match=r"job\.model_failed"):
+        broker.check_result()
