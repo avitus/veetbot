@@ -2,10 +2,18 @@
 
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID, uuid5
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
-from agent_core.domain.jobs import JobAccess, JobRecord, parse_job_access
+from agent_core.domain.jobs import (
+    JobAccess,
+    JobGrant,
+    JobManifest,
+    JobRecord,
+    JobRevision,
+    parse_job_access,
+)
 from agent_core.domain.policies import (
     AuthorizationTurn,
     PolicyDecision,
@@ -20,7 +28,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 
 def access_needs_approval(access: JobAccess, saved: JobRecord) -> bool:
     """Require approval for remote access, new feed authority, or expanded existing limits."""
-    if access.hosts or Decimal(access.model_cost) > 0:
+    if access.hosts or access.feeds or Decimal(access.model_cost) > 0:
         return True
     if not saved.grants:
         return bool(access.feeds)
@@ -30,6 +38,22 @@ def access_needs_approval(access: JobAccess, saved: JobRecord) -> bool:
         and access.maximum_requests <= grant.access.maximum_requests
         and access.maximum_response_bytes <= grant.access.maximum_response_bytes
         for grant in saved.grants.values()
+    )
+
+
+def revision_grant_id(approval_id: UUID, revision_id: UUID) -> UUID:
+    """Bind a new grant to approved code without changing stored record schemas."""
+    return uuid5(approval_id, f"job-revision:{revision_id}")
+
+
+def grant_covers_revision(grant: JobGrant, revision: JobRevision) -> bool:
+    """Reuse external access only for its approved immutable code revision."""
+    external = bool(
+        grant.access.hosts or grant.access.feeds or Decimal(grant.access.model_cost) > 0
+    )
+    return not external or (
+        grant.approval_id is not None
+        and grant.id == revision_grant_id(grant.approval_id, revision.id)
     )
 
 
@@ -84,6 +108,24 @@ class JobGrantAuthorizer:
                     )
                 ):
                     return denied
+                revision = next(
+                    (
+                        item
+                        for item in saved.revisions.values()
+                        if grant_covers_revision(grant, item)
+                    ),
+                    None,
+                )
+                external = bool(
+                    grant.access.hosts or grant.access.feeds or Decimal(grant.access.model_cost) > 0
+                )
+                if external and (
+                    revision is None
+                    or revision.source != action.arguments.get("source")
+                    or revision.manifest
+                    != JobManifest.model_validate(action.arguments.get("manifest"))
+                ):
+                    return denied
                 return StandingAuthorization(
                     allowed=True,
                     reason_code="job.grant.authorized",
@@ -99,7 +141,14 @@ class JobGrantAuthorizer:
                 grant = saved.grants.get(str(action.arguments["grant_id"]))
             elif "access" in action.arguments and "grant_id" not in action.arguments:
                 access = parse_job_access(action.arguments["access"])
-                grant = next((g for g in saved.grants.values() if g.access == access), None)
+                grant = next(
+                    (
+                        g
+                        for g in saved.grants.values()
+                        if g.access == access and grant_covers_revision(g, revision)
+                    ),
+                    None,
+                )
                 if (
                     grant is None
                     and not access_needs_approval(access, saved)
@@ -114,7 +163,7 @@ class JobGrantAuthorizer:
                     )
             else:
                 return denied
-            if grant is None:
+            if grant is None or not grant_covers_revision(grant, revision):
                 return denied
             # Reading stored source marks the tool result untrusted. The exact
             # private grant remains the authority; it cannot expand with that data.

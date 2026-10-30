@@ -360,6 +360,13 @@ agent_jobs_mvp:
   - GitHub PR monitoring through the existing Cockpit widget and feed
   - One final summarized widget installation approval, authorized 2026-10-30 (ADR-0270)
   implementation_status: deployed_and_activated_pending_production_acceptance
+  recall_coexistence_repair:
+    adr: docs/adr/0272-jobs-and-semantic-recall-coexist.md
+    authorized_on: '2026-10-30'
+    status: implemented_pending_delivery
+    scope: 'Keep jobs enabled; bind external grants to code; screen proposed inputs and queued publication; refuse supported encoded credential echoes; assess exact jobs-enabled semantic admission before restoration.'
+    operational_boundary: 'The owner requires no human pushes to cockpit/jobs. An App-only branch update/creation ruleset is installed; history protections remain separate.'
+    limitation: 'Semantic recall is not restored by these development changes. Final release assessment, root installation and independent readback remain required.'
   approval_workflow_repair:
     adr: docs/adr/0270-one-approval-for-a-widget-installation.md
     authorized_on: '2026-10-30'

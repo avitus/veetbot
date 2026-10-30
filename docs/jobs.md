@@ -92,7 +92,8 @@ Updates name the expected live revision. Restore can select an older revision,
 so it also provides revert. Publication is asynchronous: a `pending_commit`
 result means the source is saved but cannot run yet. Read the job until the
 revision is `live`; a repository outage leaves it pending for maintenance to
-retry. An imported human edit is screened and stored as a new revision.
+retry. Legacy human commits are screened on import and stored as new revisions;
+ADR-0272 requires new edits to use the private screened publishing path.
 Existing run and schedule pins retain their original source.
 An imported edit or deletion supersedes older queued publications. A delayed
 receipt records the old commit without reactivating it or undoing that deletion.
@@ -196,3 +197,24 @@ After ADR-0271's server and Apple release, refreshes never add Chat rows. Their
 isolated execution records and failures stay in schedule history. The migration
 also marks earlier refreshes, and native reconciliation prunes their cached
 conversation rows without deleting server history.
+
+## Jobs alongside semantic recall
+
+ADR-0272 permits an assessed jobs-enabled configuration without granting jobs
+implicit memory retrieval. Semantic admission failure falls back to sparse
+recall and does not stop jobs or approved schedules.
+
+Only the publishing App may create or update `cockpit/jobs`; human edits must
+use Veetbot's private authoring workflow. Keep the separate history protections
+and verify that no human bypass exists. Supply private authoring values in
+`job.manage.inputs`; widget installation supplies its approved job inputs.
+Known private values are screened before queuing and again before public
+publication. A queued package refused by the second screen becomes `rejected`
+and needs corrected source in a new revision.
+
+External grants now bind to the approved code revision. Choosing different
+code, or reusing an older unbound grant interactively, needs one fresh execution
+approval. Existing approved schedules keep their pinned code and grant. Live
+trials cannot use publication permission to bypass execution approval. The HTTP
+broker refuses supported encoded credential echoes with a content-free failure;
+it does not claim to recognize arbitrary encodings.

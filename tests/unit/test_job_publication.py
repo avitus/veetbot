@@ -397,3 +397,100 @@ async def test_another_owners_backlog_cannot_starve_job_publication() -> None:
     assert saved.live_revision_id == revision.id
     assert len(remaining) == 100
     assert all(item.principal_id == "another-owner" for item in remaining)
+
+
+async def test_new_private_authoring_inputs_are_screened_before_first_publication() -> None:
+    """New inputs are private even before a saved grant exists."""
+    _, service, repository, screen = await setup()
+    await service.write(
+        principal=principal(),
+        slug="count-items",
+        source="def main(inputs, job): return 3",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=None,
+        request_key="private-first",
+        private_inputs={"account": "private-canary-account"},
+    )
+    assert "private-canary-account" in screen.seen[0].settings_values
+    assert await repository.head() is None
+
+
+async def test_publication_rechecks_privacy_before_outbox_delivery() -> None:
+    """A value discovered after preparation must still block the public write."""
+    factory, service, repository, screen = await setup()
+    await service.write(
+        principal=principal(),
+        slug="count-items",
+        source="def main(inputs, job): return 3",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=None,
+        request_key="queued",
+    )
+    screen.reject = True
+    assert await service.flush(principal()) == 0
+    assert await repository.head() is None
+    async with factory() as uow:
+        saved = await uow.jobs.get(principal(), "count-items")
+    assert saved.live_revision_id is None
+
+
+async def test_privacy_rejection_is_terminal_until_owner_supplies_corrected_code() -> None:
+    """Maintenance cannot later publish a rejected package merely because inputs changed."""
+    factory, service, repository, screen = await setup()
+    revision = await service.write(
+        principal=principal(),
+        slug="count-items",
+        source="def main(inputs, job): return 3",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=None,
+        request_key="terminal",
+    )
+    screen.reject = True
+    assert await service.flush(principal()) == 0
+    screen.reject = False
+    cast(FixedClock, service.clock).advance(timedelta(minutes=1))
+    assert await service.flush(principal()) == 0
+    assert await repository.head() is None
+    async with factory() as uow:
+        saved = await uow.jobs.get(principal(), "count-items")
+    assert saved.revisions[str(revision.id)].state == "rejected"
+
+
+async def test_new_privacy_match_does_not_block_removal_of_public_code() -> None:
+    """Archiving publishes only a fixed commit message, never the old package."""
+    _, service, repository, _ = await setup()
+    owner = principal()
+    revision = await service.write(
+        principal=owner,
+        slug="count-items",
+        source="def main(inputs, job): return 3",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=None,
+        request_key="publish",
+    )
+    assert await service.flush(owner) == 1
+
+    class RejectOldSource(Screen):
+        async def check(
+            self, principal: Principal, files: Mapping[str, str], *, screen: BuildScreen
+        ) -> tuple[BuildDiagnostic, ...]:
+            return (
+                (BuildDiagnostic(rule="screen.setting", message="Contains a private value."),)
+                if "return 3" in files.get("main.py", "")
+                else ()
+            )
+
+    service.screen = RejectOldSource()
+    await service.write(
+        principal=owner,
+        slug="count-items",
+        source=revision.source,
+        manifest=revision.manifest,
+        expected_revision=revision.id,
+        request_key="archive",
+        archive=True,
+    )
+    assert await service.flush(owner) == 1
+    head = await repository.head()
+    assert head is not None
+    assert await repository.read_widget("count-items", at=head) is None

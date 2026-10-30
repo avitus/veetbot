@@ -403,3 +403,11 @@ across the builder bump under the planner's existing identity checks.
 - **TypeScript instead of Python.** Widgets are TypeScript. But the sandbox
   image, the chart tool (ADR-0243) and the agent's existing sandbox code are
   Python, and a job renders nothing.
+
+## Subsequent coexistence repair
+
+ADR-0272 supersedes this release's blanket jobs-off condition after delivery
+and fresh exact jobs-enabled admission. It preserves the security requirements
+above, adds revision-bound execution and encoded-response checks, and follows
+the owner's direction that no human pushes may reach the public jobs branch.
+The historical PR211 admission and its original configuration remain historical.

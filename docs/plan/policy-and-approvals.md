@@ -1701,3 +1701,15 @@ an existing owned grant without changing its private inputs; its feeds remain
 previews. Untrusted content still cannot authorize new grants or publication.
 These narrow owner-authorized preparation semantics do not change the global
 trust overlay or authorize scheduled/delegated authoring.
+
+
+### Jobs and semantic recall coexistence (ADR-0272)
+
+A jobs-enabled configuration may receive exact semantic admission after the
+coexistence repairs and operational assessment. Jobs remain outside implicit
+semantic retrieval; invalid semantic admission does not disable jobs. Reuse of
+external job authority binds the approval and immutable code revision. Live
+trials require execution authority even when publication would otherwise be
+allowed; an exact owned grant may satisfy that requirement. Existing approved
+schedules retain their original code/grant pins. Public jobs branch writes are
+restricted to the screened publishing App, without a human bypass.

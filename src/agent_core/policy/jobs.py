@@ -1,7 +1,12 @@
 """The jobs publication rule has its own policy identity (ADR-0268)."""
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.policies import LoadedRuleset, PolicyDecision, ProposedAction
+from agent_core.domain.policies import (
+    LoadedRuleset,
+    PolicyDecision,
+    PolicyDecisionType,
+    ProposedAction,
+)
 from agent_core.domain.runs import Run
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.ports.policies import PolicyEngine
@@ -53,4 +58,18 @@ class JobPolicyEngine:
     ) -> PolicyDecision:
         """Use the jobs profile for job.manage and preserve other policy identities."""
         engine = self.publication if action.name in {"job.manage", "cockpit.install"} else self.base
-        return await engine.evaluate(action, principal, run)
+        decision = await engine.evaluate(action, principal, run)
+        if (
+            action.name == "job.manage"
+            and action.arguments.get("operation") == "trial"
+            and "grant_id" in action.arguments
+            and decision.decision is PolicyDecisionType.ALLOW
+        ):
+            return decision.model_copy(
+                update={
+                    "decision": PolicyDecisionType.REQUIRE_APPROVAL,
+                    "reason_code": "job.trial.execution_authority",
+                    "explanation": "Live trials require approval or an exact code-bound grant.",
+                }
+            )
+        return decision

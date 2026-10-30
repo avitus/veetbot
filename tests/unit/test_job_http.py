@@ -183,3 +183,43 @@ async def test_github_reader_token_explicitly_requests_only_read_permissions() -
             )
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "encoding", ["base64", "base64url", "hex", "percent", "mixed-hex", "mixed-percent"]
+)
+async def test_encoded_credential_echo_is_refused_before_returning_to_job(encoding: str) -> None:
+    """A response must not hand a reversible credential encoding to sandbox code."""
+    import base64
+
+    hexadecimal = CANARY.encode().hex()
+    # Deliberately mix letter case within a single credential encoding.
+    mixed = hexadecimal.upper().replace("D", "d", 1)
+    encoded = {
+        "mixed-hex": mixed,
+        "mixed-percent": "".join("%" + mixed[i : i + 2] for i in range(0, len(mixed), 2)),
+        "base64": base64.b64encode(CANARY.encode()).decode(),
+        "base64url": base64.urlsafe_b64encode(CANARY.encode()).decode().rstrip("="),
+        "hex": CANARY.encode().hex(),
+        "percent": "".join(f"%{byte:02X}" for byte in CANARY.encode()),
+    }[encoding]
+
+    async def resolve(host: str) -> tuple[str, ...]:
+        return ("140.82.112.6",)
+
+    broker = JobHTTP(
+        Credentials(),
+        resolver=resolve,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={encoded: [encoded]})
+        ),
+    )
+    with pytest.raises(ValueError, match=r"job\.credential_echo_refused"):
+        await broker.request(
+            method="GET",
+            url="https://api.github.com",
+            json=None,
+            credential="github-reader",
+            maximum_response_bytes=1024,
+            call_id="encoded-echo",
+        )

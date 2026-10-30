@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from agent_core.application.job_grants import revision_grant_id
 from agent_core.bootstrap import build
 from tests.integration.m2_support import memory_settings
 
@@ -16,8 +17,10 @@ async def test_enabled_jobs_register_both_deferred_tools() -> None:
 
 
 @pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("semantic_unavailable", [True, False])
 async def test_job_run_bypasses_the_agent_loop_and_completes_with_zero_model_usage(
     enabled: bool,
+    semantic_unavailable: bool,
 ) -> None:
     from decimal import Decimal
     from uuid import UUID
@@ -30,7 +33,11 @@ async def test_job_run_bypasses_the_agent_loop_and_completes_with_zero_model_usa
 
     runner = Runner()
     async with build(
-        settings=replace(memory_settings(), jobs_enabled=enabled),
+        settings=replace(
+            memory_settings(),
+            jobs_enabled=enabled,
+            memory_semantic_index_enabled=semantic_unavailable,
+        ),
         script=FakeModelScript(turns=[]),
         job_runner_override=runner,
     ) as composition:
@@ -213,7 +220,7 @@ async def test_explicit_model_call_inside_job_is_charged_without_losing_parent_u
     arguments = {
         "slug": "count-items",
         "revision_id": str(UUID(int=1)),
-        "grant_id": str(UUID(int=2)),
+        "grant_id": str(revision_grant_id(UUID(int=99), UUID(int=1))),
     }
     script = FakeModelScript(
         turns=[
@@ -236,8 +243,12 @@ async def test_explicit_model_call_inside_job_is_charged_without_losing_parent_u
         saved = saved.model_copy(
             update={
                 "grants": {
-                    str(grant.id): grant.model_copy(
-                        update={"access": replace(grant.access, model_cost="1")}
+                    str(revision_grant_id(UUID(int=99), UUID(int=1))): grant.model_copy(
+                        update={
+                            "access": replace(grant.access, model_cost="1"),
+                            "approval_id": UUID(int=99),
+                            "id": revision_grant_id(UUID(int=99), UUID(int=1)),
+                        }
                     )
                 }
             }
@@ -613,7 +624,8 @@ async def test_job_publication_approval_resumes_with_its_own_policy_profile() ->
         assert saved.live_revision_id is not None
 
 
-async def test_new_external_access_is_approved_once_then_reused() -> None:
+@pytest.mark.parametrize("legacy_grant", [False, True])
+async def test_new_external_access_is_approved_once_then_reused(legacy_grant: bool) -> None:
     from uuid import UUID
 
     from agent_core.domain.approvals import ApprovalResolutionType
@@ -627,9 +639,14 @@ async def test_new_external_access_is_approved_once_then_reused() -> None:
         "revision_id": str(UUID(int=1)),
         "access": {"inputs": {"items": [1, 2]}, "hosts": {"api.github.com": "github-reader"}},
     }
+    first_arguments = (
+        {"slug": "count-items", "revision_id": str(UUID(int=1)), "grant_id": str(UUID(int=2))}
+        if legacy_grant
+        else arguments
+    )
     script = FakeModelScript(
         turns=[
-            ScriptedTurn(tool_calls=[ScriptedToolCall(name="job.run", arguments=arguments)]),
+            ScriptedTurn(tool_calls=[ScriptedToolCall(name="job.run", arguments=first_arguments)]),
             ScriptedTurn(text="Counted the items."),
             ScriptedTurn(tool_calls=[ScriptedToolCall(name="job.run", arguments=arguments)]),
             ScriptedTurn(text="Counted them again."),
@@ -642,7 +659,23 @@ async def test_new_external_access_is_approved_once_then_reused() -> None:
         job_runner_override=Runner(),
     ) as composition:
         async with composition.uow_factory() as uow:
-            await uow.jobs.put(record(composition.principal), expected_version=None)
+            original = record(composition.principal)
+            if legacy_grant:
+                grant = original.grants[str(UUID(int=2))]
+                original = original.model_copy(
+                    update={
+                        "grants": {
+                            str(grant.id): grant.model_copy(
+                                update={
+                                    "access": replace(
+                                        grant.access, hosts={"api.github.com": "github-reader"}
+                                    )
+                                }
+                            )
+                        }
+                    }
+                )
+            await uow.jobs.put(original, expected_version=None)
         first = await composition.runs.submit("Run the counter with this new access.")
         assert (await composition.runs.get(first)).status is RunStatus.WAITING_FOR_APPROVAL
         [approval] = await composition.approvals.list_pending(run_id=first)

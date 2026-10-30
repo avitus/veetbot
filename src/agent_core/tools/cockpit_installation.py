@@ -4,7 +4,7 @@ import ast
 import json
 from dataclasses import replace
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.cockpit import screen_names, screen_settings_values
@@ -14,6 +14,7 @@ from agent_core.application.cockpit_installation import (
     installation_key,
     prepared_installation,
 )
+from agent_core.application.job_grants import revision_grant_id
 from agent_core.application.jobs import _strings, job_commit_message
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.cockpit_installation import WidgetInstallation
@@ -284,6 +285,7 @@ class CockpitInstallTool(CockpitPrepareTool):
                 manifest=job.manifest,
                 expected_revision=job.expected_revision,
                 request_key=key + ":job",
+                private_inputs=job.access.inputs,
             )
             await publication.flush(owner)
             async with self.cockpit.uow_factory() as uow:
@@ -295,7 +297,7 @@ class CockpitInstallTool(CockpitPrepareTool):
                     or saved.archived
                 ):
                     return _ok({"state": revision.state, "stage": "job", "complete": False})
-                grant_id = uuid5(NAMESPACE_URL, key + ":grant")
+                grant_id = revision_grant_id(approval_id, revision.id)
                 if str(grant_id) not in saved.grants:
                     grant = JobGrant(
                         id=grant_id,

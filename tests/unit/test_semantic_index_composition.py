@@ -562,16 +562,23 @@ async def test_index_failure_does_not_stop_maintenance_or_log_provider_content(
     await worker.run_forever()
 
 
+@pytest.mark.parametrize("jobs_enabled", [True, False])
 async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jobs_enabled: bool
 ) -> None:
     import agent_core.bootstrap as bootstrap
     import agent_core.memory.semantic_deployment as deployment
     from tests.contract.memory_fixtures import memory
     from tests.contract.semantic_indexing_cases import Provider
     from tests.contract.support import principal
+    from tests.contract.test_job_store_contract import record
+    from tests.unit.test_job_execution import Runner
 
     kwargs, _, _, _, evidence = await configured_index(tmp_path)
+
+    async def forbidden_model(**options: Any) -> dict[str, Any]:
+        pytest.fail("Running saved code must not call a model or retrieve memory implicitly")
+
     real_compose = deployment.compose_indexing
     real_bind = deployment.bind_index_manifest
     providers = []
@@ -595,15 +602,35 @@ async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
         options["provider_factory"] = lambda _: provider
         return await real_compose(**options)
 
+    # Public repository delivery is covered by the job publication contracts;
+    # this in-memory composition must not construct a live GitHub client.
+    monkeypatch.setattr(bootstrap._CockpitMaintenance, "sweeps", lambda self: {})
     monkeypatch.setattr(deployment, "bind_index_manifest", bind)
     monkeypatch.setattr(bootstrap, "compose_indexing", compose)
     async with build(
-        settings=kwargs["settings"],
+        settings=replace(kwargs["settings"], jobs_enabled=jobs_enabled),
         storage="memory",
         principal=principal(),
         clock=kwargs["clock"],
         credential_resolver=kwargs["credentials"],
+        job_runner_override=Runner(),
     ) as app:
+        assert (app.job_execution is not None) is jobs_enabled
+        if jobs_enabled:
+            assert app.tool_pipeline._registry.get("job.run").spec.name == "job.run"
+            async with app.uow_factory() as uow:
+                await uow.jobs.put(record(principal()), expected_version=None)
+            assert app.job_execution is not None
+            result = await app.job_execution.run(
+                principal=principal(),
+                slug="count-items",
+                revision_id=UUID(int=1),
+                grant_id=UUID(int=2),
+                run_id=UUID(int=3),
+                lease_epoch=0,
+                model=forbidden_model,
+            )
+            assert result.value == {"count": 2}
         assert len(providers) == 1 and not providers[0].calls
         assert configurations[0]["query_authority"] == "local-reviewed-reader@1;remote-withheld"
         assert app.recall_composition.configuration == configurations[0]
