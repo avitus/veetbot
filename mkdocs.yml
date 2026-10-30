@@ -123,6 +123,7 @@ nav:
       - Downloadable Client: client.md
       - Apple Client: apple-client.md
   - Security: security.md
+  - Agent-Written Jobs: jobs.md
   - Production Deployment: deployment.md
   - Gmail Integration Runbook: gmail-integration-runbook.md
   - Telegram Surface Runbook: telegram-surface-runbook.md
@@ -398,4 +399,5 @@ nav:
       - 'ADR-0261: Read a long tool result in sections': adr/0261-read-a-capture-in-sections.md
       - 'ADR-0262: The deferred tool index holds 2,500 tokens': adr/0262-deferred-index-token-headroom.md
       - 'ADR-0263: Fewer browser approvals in owner research': adr/0263-fewer-browser-approvals-in-owner-research.md
+      - 'ADR-0268: Jobs the agent writes': adr/0268-agent-written-jobs.md
   - Changelog: changelog.md

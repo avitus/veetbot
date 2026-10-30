@@ -50,6 +50,8 @@ PLATFORM_SCOPES = frozenset(
         # ADR-0240: the Cockpit board and the owner's widget changes.
         "cockpit.read",
         "cockpit.write",
+        "jobs.write",
+        "jobs.run",
         "persona.read",
         "persona.write",
         "settings.read",

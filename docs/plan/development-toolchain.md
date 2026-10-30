@@ -506,7 +506,9 @@ outside that equality, because it reads git range state `make check`
 does not assume. No check appears in more than one lane, and a developer who
 runs `make check` locally has run all four jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
-Job 1 uses a two-vCPU CircleCI executor and runs only `test-static` with two
+Job 1 uses the Python 3.12 image's Node variant so the jobs privacy-screen
+subprocess tests run in the static lane. It uses a two-vCPU CircleCI executor
+and runs only `test-static` with two
 processes and load-scope scheduling, matching the local target's default.
 The selected tests and required checks are unchanged. Its Makefile
 targets are separate CircleCI steps so timing data identifies the remaining

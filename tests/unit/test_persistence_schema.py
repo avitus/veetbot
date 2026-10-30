@@ -662,6 +662,7 @@ COCKPIT_TABLES: dict[str, tuple[set[str], set[str]]] = {
     "cockpit_commit_outbox": (
         {"tenant_id", "principal_id", "revision_id"},
         {
+            "package_kind",
             "slug",
             "operation",
             "attempts",
@@ -673,7 +674,7 @@ COCKPIT_TABLES: dict[str, tuple[set[str], set[str]]] = {
     ),
     "cockpit_import_failures": (
         {"tenant_id", "principal_id", "id"},
-        {"commit_sha", "slug", "diagnostics", "seen", "created_at"},
+        {"package_kind", "commit_sha", "slug", "diagnostics", "seen", "created_at"},
     ),
 }
 

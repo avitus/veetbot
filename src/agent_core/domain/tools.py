@@ -155,6 +155,7 @@ class ToolExecutionContext:
     # runtime construction supplies an object satisfying CancellationToken.
     cancellation: object
     mark_effect_sent: Callable[[], Awaitable[None]]
+    job_model: object | None = None
     loaded_skills: tuple[dict[str, Any], ...] = ()
     available_tools: frozenset[str] = frozenset()
     origin_trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED

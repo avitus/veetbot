@@ -75,11 +75,15 @@ from agent_core.adapters.execution.docker import (
     resolve_local_image_digest,
 )
 from agent_core.adapters.execution.fake import FakeExecutionEnvironment, fake_image_digest
+from agent_core.adapters.execution.jobs import SandboxJobRunner
 from agent_core.adapters.execution.service import ExecutionServiceClient, ExecutionServiceServer
 from agent_core.adapters.identity import (
     ConfiguredSchedulePrincipalDirectory,
     StaticPrincipalResolver,
 )
+from agent_core.adapters.jobs.credentials import GitHubReaderCredentials
+from agent_core.adapters.jobs.http import JobHTTP
+from agent_core.adapters.jobs.screen import SandboxJobScreen
 from agent_core.adapters.judgment import TypeSafeJudgmentProvider
 from agent_core.adapters.knowledge.pdf import PdfTextExtractor
 from agent_core.adapters.live_events import (
@@ -140,6 +144,7 @@ from agent_core.adapters.persistence.device_channel import (
 from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
 from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
+from agent_core.adapters.persistence.jobs import InMemoryJobStore, PostgresJobStore
 from agent_core.adapters.persistence.latency_report import chat_latency_report
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
@@ -333,6 +338,9 @@ from agent_core.application.device_management import (
 )
 from agent_core.application.email import EmailExperienceService
 from agent_core.application.folder_service import PublicFolderService
+from agent_core.application.job_execution import JobExecution
+from agent_core.application.job_grants import JobGrantAuthorizer
+from agent_core.application.jobs import JobPublication
 from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.application.media_inputs import StoredMediaInputResolver
 from agent_core.application.model_settings import PublicModelSettingsService
@@ -530,6 +538,7 @@ from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     CancelReason,
     Run,
+    RunKind,
     RunLimits,
     RunOutcome,
     RunStatus,
@@ -633,6 +642,7 @@ from agent_core.persona.boundaries import persona_boundaries
 from agent_core.persona.preview import PersonaPreviewer
 from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
+from agent_core.policy.jobs import JobPolicyEngine, job_publication_ruleset
 from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
@@ -652,6 +662,7 @@ from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.embeddings import LocalEmbeddingProvider as LocalEmbeddingPort
+from agent_core.ports.jobs import JobRunner, JobScreen
 from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPOAuthGateway, MCPServerRepository
@@ -676,6 +687,8 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.email_tasks import EmailTaskRunner
 from agent_core.runtime.executor import RunExecutor, SurfaceRunStateWriter
+from agent_core.runtime.job_model import JobModelCompletion
+from agent_core.runtime.jobs import execute_job
 from agent_core.runtime.loop import RunContext
 from agent_core.runtime.scheduled_browser import (
     ScheduledBrowserUnavailableError,
@@ -723,6 +736,8 @@ from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolR
 from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
 from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsubscribeTool
 from agent_core.tools.executor import ToolPipeline
+from agent_core.tools.job_schedules import JobScheduleCreateTool, JobScheduleUpdateTool
+from agent_core.tools.jobs import JOB_TOOL_NAMES, JobManageTool, JobRunTool, JobToolset
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
 from agent_core.tools.media_generation import (
@@ -908,8 +923,10 @@ class _CockpitMaintenance:
         self._owner_names = owner_names
         self._profiles = profiles
         self._client: httpx.AsyncClient | None = None
+        self.jobs: JobPublication | None = None
 
     def sweeps(self) -> dict[str, Any]:
+        """Bind maintenance credentials and compose publication, import, and feed sweeps."""
         settings = self._settings
         required = {
             "AGENT_COCKPIT_GITHUB_REPOSITORY": settings.cockpit_github_repository,
@@ -984,12 +1001,35 @@ class _CockpitMaintenance:
             principal=self._principal,
             history_days=feeds.history_days,
         )
+        widget_outbox = CommitOutboxWorker(**common)
+        widget_importer = BranchImporter(
+            **common, builder=self._builder, owner_names=self._owner_names
+        )
+        if self.jobs is not None:
+            self.jobs.repository = GitHubWidgetRepository(
+                self._client,
+                tokens,
+                repository=settings.cockpit_github_repository,
+                branch="cockpit/jobs",
+                package_kind="job",
+            )
+
+        async def flush_packages() -> int:
+            """Flush enabled widget and job queues through their separate repositories."""
+            count = await widget_outbox.run_once() if settings.cockpit_enabled else 0
+            return count + (await self.jobs.flush(self._principal) if self.jobs is not None else 0)
+
+        async def import_packages() -> int:
+            """Import enabled widget and job branches without mixing their package namespaces."""
+            count = await widget_importer.run_once() if settings.cockpit_enabled else 0
+            return count + (
+                await self.jobs.import_changes(self._principal) if self.jobs is not None else 0
+            )
+
         return {
-            "sweep_cockpit_outbox": CommitOutboxWorker(**common).run_once,
+            "sweep_cockpit_outbox": flush_packages,
             "sweep_cockpit_events": retention.run_once,
-            "sweep_cockpit_import": BranchImporter(
-                **common, builder=self._builder, owner_names=self._owner_names
-            ).run_once,
+            "sweep_cockpit_import": import_packages,
             "cockpit_import_interval_seconds": publication.import_interval_seconds,
             "sweep_cockpit_feeds": projector.run_once,
             "sweep_cockpit_feed_history": feed_history.run_once,
@@ -1050,6 +1090,9 @@ class Composition:
     cockpit_builder: WidgetBuilder | None = None
     cockpit_sandbox: SandboxManager | None = None
     cockpit_publication: CockpitPublication | None = None
+    job_publication: JobPublication | None = None
+    job_execution: JobExecution | None = None
+    job_credentials: GitHubReaderCredentials | None = None
     cockpit_maintenance: _CockpitMaintenance | None = None
     # An evaluation's in-memory widget branch and the outbox that commits to it.
     cockpit_local_branch: WidgetRepository | None = None
@@ -1479,6 +1522,7 @@ def _memory_uow_repositories(
     traces: InMemoryTraceStore | None = None,
     knowledge: InMemoryKnowledgeStore | None = None,
 ) -> UnitOfWorkRepositories:
+    """Assemble the in-memory repositories shared by the composition's units of work."""
     approvals = approvals or InMemoryApprovalRepository(clock)
     skills = skills or InMemorySkillRepository(
         InMemorySkillPackageStore(),
@@ -1587,6 +1631,8 @@ def _memory_uow_repositories(
         calls=InMemoryCallStore(),
         people=people,
         records=records,
+        jobs=InMemoryJobStore(),
+        job_outbox=InMemoryWidgetCommitOutbox(),
         cockpit_widgets=InMemoryWidgetStore(),
         cockpit_outbox=InMemoryWidgetCommitOutbox(),
         cockpit_feeds=InMemoryFeedStore(),
@@ -1693,6 +1739,8 @@ def _postgres_repository_factory(
             calls=PostgresCallStore(session),
             people=people,
             records=records,
+            jobs=PostgresJobStore(session),
+            job_outbox=PostgresWidgetCommitOutbox(session, package_kind="job"),
             cockpit_widgets=PostgresWidgetStore(session),
             cockpit_outbox=PostgresWidgetCommitOutbox(session),
             cockpit_feeds=PostgresFeedStore(session),
@@ -2895,6 +2943,8 @@ async def _compose(
     recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
     cockpit_builder_override: WidgetBuilder | None = None,
     cockpit_local_branch: bool = False,
+    job_runner_override: JobRunner | None = None,
+    job_screen_override: JobScreen | None = None,
     mcp_oauth_gateway: MCPOAuthGateway | None = None,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
@@ -3009,6 +3059,8 @@ async def _compose(
     cockpit_sandbox: SandboxManager | None = None
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
+        job_environment: Any = fake_environment
+        job_image_options: dict[str, Any] = {"image_digest": fake_image_digest()}
         sandbox_manager = SandboxManager(
             fake_environment,
             image_digest=fake_image_digest(),
@@ -3017,7 +3069,7 @@ async def _compose(
             parent_environment=os.environ,
             passthrough_names=settings.sandbox_passthrough,
         )
-        if settings.cockpit_enabled:
+        if settings.cockpit_enabled or settings.jobs_enabled:
             cockpit_sandbox = cockpit_build_sandbox(
                 fake_environment, image_digest=fake_image_digest(), limits=sandbox_limits
             )
@@ -3041,6 +3093,8 @@ async def _compose(
             builder_image_resolver = partial(
                 resolve_local_image_digest, settings.cockpit_builder_image
             )
+        job_environment = execution_environment
+        job_image_options = {"resolve_image_digest": image_resolver}
         sandbox_manager = SandboxManager(
             execution_environment,
             resolve_image_digest=image_resolver,
@@ -3049,7 +3103,7 @@ async def _compose(
             parent_environment=os.environ,
             passthrough_names=settings.sandbox_passthrough,
         )
-        if settings.cockpit_enabled:
+        if settings.cockpit_enabled or settings.jobs_enabled:
             cockpit_sandbox = cockpit_build_sandbox(
                 execution_environment,
                 resolve_image_digest=builder_image_resolver,
@@ -3067,7 +3121,7 @@ async def _compose(
     cockpit_toolset: CockpitToolset | None = None
     local_branch: FakeWidgetRepository | None = None
     local_outbox: CommitOutboxWorker | None = None
-    if cockpit_builder is not None:
+    if cockpit_builder is not None and settings.cockpit_enabled:
         cockpit_profiles = CockpitProfiles.from_document(
             load_config_document(settings, "cockpit/profiles.yaml")
         )
@@ -3145,6 +3199,74 @@ async def _compose(
                 people=settings.people_enabled,
             ),
         )
+    job_publication: JobPublication | None = None
+    job_execution: JobExecution | None = None
+    job_credentials: GitHubReaderCredentials | None = None
+    if settings.jobs_enabled:
+        assert cockpit_sandbox is not None
+        job_credentials = GitHubReaderCredentials(
+            token_factory=GitHubAppTokens,
+            app_id=settings.jobs_github_app_id,
+            installation_id=settings.jobs_github_installation_id,
+            key_file=settings.jobs_github_key_file,
+            clock=clock,
+        )
+        job_publication = JobPublication(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            schema_check=Draft202012SchemaCheck(),
+            screen=job_screen_override or SandboxJobScreen(cockpit_sandbox, ids),
+            owner_names=(
+                (settings.call_configuration.public_name,)
+                if settings.call_configuration is not None
+                else ()
+            ),
+            repository=FakeWidgetRepository(package_kind="job") if cockpit_local_branch else None,
+        )
+
+        def job_runner(timeout: int) -> JobRunner:
+            """Use the supplied test runner or build a sandbox runner with the grant's timeout."""
+            if job_runner_override is not None:
+                return job_runner_override
+            return SandboxJobRunner(
+                SandboxManager(
+                    job_environment,
+                    limits=replace(sandbox_limits, wall_clock_seconds=timeout),
+                    **job_image_options,
+                ),
+                timeout_seconds=timeout,
+            )
+
+        job_execution = JobExecution(
+            uow_factory=uow_factory,
+            clock=clock,
+            runner=job_runner,
+            schema_check=Draft202012SchemaCheck(),
+            http=JobHTTP(job_credentials, operator_hosts=settings.jobs_allowed_hosts).request,
+            feeds=CockpitFeeds(
+                uow_factory=uow_factory,
+                clock=clock,
+                schema_check=Draft202012SchemaCheck(),
+                history_max=288,
+            ),
+        )
+    if job_publication is not None:
+        if cockpit_maintenance is None:
+            assert cockpit_builder is not None
+            cockpit_maintenance = _CockpitMaintenance(
+                settings,
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                builder=cockpit_builder,
+                owner_names=(),
+                profiles=CockpitProfiles.from_document(
+                    load_config_document(settings, "cockpit/profiles.yaml")
+                ),
+            )
+        cockpit_maintenance.jobs = job_publication
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
@@ -3156,6 +3278,10 @@ async def _compose(
         wake_worker=schedule_notify,
     )
     registry = StaticToolRegistry()
+    if job_publication is not None and job_execution is not None:
+        job_toolset = JobToolset(job_publication, job_execution)
+        registry.register(JobManageTool(job_toolset))
+        registry.register(JobRunTool(job_toolset))
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
     registry.register(ToolCallTool())
@@ -3275,6 +3401,21 @@ async def _compose(
         registry.register(ScheduleUpdateTool(schedule_service))
         if settings.cockpit_enabled:
             registry.register(CockpitScheduleUpdateTool(schedule_service))
+        if settings.jobs_enabled:
+            registry.register(
+                JobScheduleCreateTool(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
+            registry.register(
+                JobScheduleUpdateTool(
+                    schedule_service, uow_factory, agent, schedule_definition_limits
+                )
+            )
         registry.register(SchedulePauseTool(schedule_service))
         registry.register(ScheduleResumeTool(schedule_service))
         registry.register(ScheduleCancelTool(schedule_service))
@@ -3295,8 +3436,23 @@ async def _compose(
             )
 
     registry.register(UpdateWorkingStateTool(working_state, validate_source_events))
+    job_ruleset = job_publication_ruleset(ruleset) if settings.jobs_enabled else None
     async with uow_factory() as uow:
         await uow.agents.put(agent)
+        if job_ruleset is not None:
+            await uow.policy_profiles.record(
+                PolicyProfileRecord(
+                    policy_version=job_ruleset.policy_version,
+                    profile_name=job_ruleset.profile_name,
+                    profile_sha256=job_ruleset.profile_sha256,
+                    hardline_sha256=job_ruleset.hardline_sha256,
+                    rule_count=len(job_ruleset.rules)
+                    + len(job_ruleset.tool_rules)
+                    + len(job_ruleset.hardline),
+                    loaded_at=clock.now(),
+                    loaded_by="composition-root",
+                )
+            )
         await uow.policy_profiles.record(
             PolicyProfileRecord(
                 policy_version=ruleset.policy_version,
@@ -4433,7 +4589,12 @@ async def _compose(
         # the standing authorizer's engine: an advisory escalation can never be
         # satisfied by a standing grant, and a resumed invocation never re-asks.
         deterministic_engine = DeterministicPolicyEngine(ruleset)
-        policy_engine: PolicyEngine = deterministic_engine
+        tool_deterministic_engine: PolicyEngine = deterministic_engine
+        if job_ruleset is not None:
+            tool_deterministic_engine = JobPolicyEngine(
+                deterministic_engine, DeterministicPolicyEngine(job_ruleset)
+            )
+        policy_engine: PolicyEngine = tool_deterministic_engine
         if ruleset.advisory_enabled or settings.policy_advisory_observe_enabled:
             if judgment_provider is None:
                 # Never fail closed on the advisor's availability.
@@ -4442,7 +4603,7 @@ async def _compose(
                 )
             else:
                 policy_engine = AdvisedPolicyEngine(
-                    deterministic_engine,
+                    tool_deterministic_engine,
                     JudgmentPolicyAdvisor(judgment_provider),
                     # Enforcing is a profile value and hashes into `policy_version`;
                     # observing changes no decision and is an environment flag.
@@ -4452,6 +4613,8 @@ async def _compose(
                 )
         # ADR-0172: specific owner consent, then ADR-0129 standing/task grants.
         standing_authorizers: list[StandingAuthorizer] = []
+        if settings.jobs_enabled:
+            standing_authorizers.append(JobGrantAuthorizer(uow_factory))
         if browser_provider is not None:
             standing_authorizers.append(
                 BrowserFollowConsentAuthorizer(
@@ -4543,13 +4706,32 @@ async def _compose(
                     raise ConflictError("archive task cannot dispatch another external action")
                 await public_services.email.validate_archive(owner, run, lease)
 
+        async def job_model_factory(
+            current_run: Run, selected_agent: AgentSpec, lease: WorkerLease | None
+        ) -> object:
+            """Bind job completions to the current run, pinned provider, and usage ledger."""
+            resolved = resolved_model
+            provider: ModelProvider = model_provider
+            if current_run.provider_pin is not None:
+                resolved = await model_router.resolve_pinned(current_run.provider_pin)
+                resolved = resolved.model_copy(update={"policy_name": selected_agent.model_policy})
+                provider = effective_providers[resolved.provider]
+            return JobModelCompletion(
+                run=current_run,
+                provider=provider,
+                resolved=resolved,
+                budgets=UnitOfWorkBudgetLedger(uow_factory, clock, lease),
+                clock=clock,
+                ids=ids,
+            ).complete
+
         pipeline = ToolPipeline(
             registry,
             uow_factory,
             clock,
             ids,
             policy=policy_engine,
-            recovery_policy=deterministic_engine,
+            recovery_policy=tool_deterministic_engine,
             workspace_factory=sandbox_manager,
             artifact_writers=artifact_writers,
             current_principal=principal,
@@ -4560,6 +4742,7 @@ async def _compose(
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
             standing_authorizer=standing_authorizer,
+            job_model_factory=job_model_factory,
             delegations=delegation_materializer,
             before_effect=guard_email_effect,
         )
@@ -4829,7 +5012,11 @@ async def _compose(
         from agent_core.runtime.email_junk import EmailJunkFilter
 
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
-            """Recognize persisted typed work even when its public feature is disabled."""
+            """Dispatch persisted typed work before the general agent loop."""
+            if context.run.kind is RunKind.JOB:
+                return await execute_job(
+                    context, None if job_execution is None else job_execution.run
+                )
             await browser_workflows(context)
             if people_import_runner is None:
                 async with uow_factory() as uow:
@@ -4902,6 +5089,9 @@ async def _compose(
             )(context)
 
         async def is_email_task(run: Run, run_principal: Principal) -> bool:
+            """Identify typed job and email runs that bypass ordinary agent preparation."""
+            if run.kind is RunKind.JOB:
+                return True
             return await public_services.email.get_task(run_principal, run.id) is not None
 
         async def resolve_email_archive_approval(
@@ -5656,6 +5846,9 @@ async def _compose(
                 cockpit_builder=cockpit_builder,
                 cockpit_sandbox=cockpit_sandbox,
                 cockpit_publication=cockpit_publication,
+                job_publication=job_publication,
+                job_execution=job_execution,
+                job_credentials=job_credentials,
                 cockpit_maintenance=cockpit_maintenance,
                 cockpit_local_branch=local_branch,
                 cockpit_local_outbox=local_outbox,
@@ -6096,6 +6289,8 @@ async def build(
     device_channel_override: DeviceChannel | None = None,
     cockpit_builder_override: WidgetBuilder | None = None,
     cockpit_local_branch: bool = False,
+    job_runner_override: JobRunner | None = None,
+    job_screen_override: JobScreen | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
@@ -6442,6 +6637,7 @@ async def build(
         ),
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(COCKPIT_TOOL_NAMES if effective_settings.cockpit_enabled else ()),
+        *(JOB_TOOL_NAMES if effective_settings.jobs_enabled else ()),
         *(
             [
                 RecordsListTool.spec.name,
@@ -6490,6 +6686,7 @@ async def build(
             RecordsImportTool.spec.name,
             # The Cockpit is a mode of its own; its tools never take a definition slot.
             *COCKPIT_TOOL_NAMES,
+            *JOB_TOOL_NAMES,
             CAPTURE_READER_TOOL_NAME,
         )
         if name in default_enabled_tools
@@ -6838,6 +7035,8 @@ async def build(
             recall_capture=recall_capture,
             cockpit_builder_override=cockpit_builder_override,
             cockpit_local_branch=cockpit_local_branch,
+            job_runner_override=job_runner_override,
+            job_screen_override=job_screen_override,
         )
         composition = replace(
             composition,
@@ -6898,6 +7097,14 @@ async def build(
                 await composition.sandbox.close()
             except Exception as exc:
                 logger.warning("sandbox_close_failed", extra={"error_class": type(exc).__name__})
+            if composition.job_credentials is not None:
+                try:
+                    await composition.job_credentials.close()
+                except Exception as exc:
+                    logger.warning(
+                        "job_credentials_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
             if composition.cockpit_maintenance is not None:
                 with suppress(Exception):
                     await composition.cockpit_maintenance.close()

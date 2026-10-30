@@ -18,12 +18,13 @@ from agent_core.domain.call_plans import (
 from agent_core.domain.errors import ConflictError, NotFoundError, RateLimitedError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.recurrence import RecurrenceCalculator
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunKind, RunStatus
 from agent_core.domain.schedules import (
     COCKPIT_REFRESH_MIN_AGE,
     FEED_KEEPING_SCOPE,
     AuthoritySnapshot,
     IntervalCadence,
+    JobTask,
     OccurrenceDisposition,
     OccurrenceTrigger,
     OnceCadence,
@@ -594,6 +595,11 @@ class ScheduleMaterializer:
                     if revision.browser_profile_id is not None
                     else {}
                 ),
+                **(
+                    {"job_task": revision.task.model_dump(mode="json")}
+                    if isinstance(revision.task, JobTask)
+                    else {}
+                ),
                 SESSION_SCHEDULE_ID_METADATA_KEY: str(schedule.id),
                 "schedule_revision": revision.revision,
                 "schedule_occurrence_id": str(occurrence.id),
@@ -621,6 +627,7 @@ class ScheduleMaterializer:
         deadline = now + timedelta(seconds=revision.run_timeout_seconds)
         run_limits = revision.limits.model_copy(update={"deadline_at": deadline}, deep=True)
         run = Run(
+            kind=RunKind.JOB if isinstance(revision.task, JobTask) else RunKind.INTERACTIVE,
             id=run_id,
             session_id=session.id,
             tenant_id=schedule.tenant_id,

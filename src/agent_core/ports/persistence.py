@@ -25,6 +25,7 @@ from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.email import EmailStore
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.folders import FolderStore
+from agent_core.ports.jobs import JobStore
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
@@ -103,6 +104,8 @@ class RepositoryUnitOfWork(Protocol):
     calls: CallStore
     people: PeopleStore
     records: RecordStore
+    jobs: JobStore
+    job_outbox: WidgetCommitOutbox
     cockpit_widgets: WidgetStore
     cockpit_outbox: WidgetCommitOutbox
     cockpit_feeds: FeedStore

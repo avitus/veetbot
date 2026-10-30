@@ -1787,3 +1787,33 @@ builds a canary under runsc.
 
 Tenants still cannot choose an image. The per-tenant question remains open.
 [cockpit.md](cockpit.md) owns the build contract.
+
+## Agent-written jobs MVP (ADR-0268)
+
+The owner authorized implementation on 2026-10-29. A job is a Python module
+exporting `main(inputs, job)`. Inputs are a JSON object. `job.http.request`,
+`job.model.complete`, `job.feed.publish` and `job.log` use the existing
+programmatic bridge transport. Code decides which calls occur; execution does
+not automatically plan or summarize with a model. The returned value is bounded
+JSON and remains untrusted. Standard output from the program is diagnostic text,
+separate from the structured result.
+
+The implementation provides the sandbox-side library and entry point plus an
+execution adapter. The adapter sends source and inputs on stdin to
+`python -m agent_core.execution.job_runner` through `SandboxManager`, with a
+run and lease supplied by its caller. Source is at most 64 KiB, inputs at most
+64 KiB, and the JSON result at most 64 KiB. Execution uses the existing deadline,
+output bounds, bridge call cap and cleanup. It dispatches only the four named
+operations declared by the package. The caller must supply an authorized broker;
+the adapter itself grants no HTTP, model or feed access. No source is executed
+on the worker.
+
+The SDK uses synchronous, sequential broker calls. HTTP returns the broker's
+JSON response envelope, model completion returns text, feed publication returns
+a receipt, and logging sends a bounded line. A refused call raises a useful
+job error. Production broker composition, grants, persistence, tools and
+scheduling are implemented behind the default-off `AGENT_JOBS_ENABLED` flag.
+`bootstrap.py` registers the job authoring, execution and schedule tools when
+the flag is enabled. Local contract checks use known synthetic programs and
+scripted services; production acceptance remains pending. Existing sandbox
+isolation requirements still apply.
