@@ -66,6 +66,18 @@ uses the existing feed validator. `job.log(message)` records at most 2,000 bytes
 per line. Declare operations in `manifest.calls` and feeds in `manifest.feeds`.
 Programs receive no tool roster, credentials or direct network access.
 
+## Create a widget with one approval
+
+Ask Veetbot to prepare the complete widget and collector. It uses
+`cockpit.prepare` to check the packages and private access, repairs any errors,
+and calls `cockpit.install` only when ready. One card summarizes the public
+code, private inputs, network/credential access, feeds, model budget and refresh
+interval. Approve once to install everything. New access is not exercised during
+preparation: trials use fixtures or an existing approved grant. Collection
+starts at the next interval boundary. Pending publication resumes with the same
+proposal and approval; changed proposals need a new approval. This ADR-0270
+repair requires deployment before it is available in production.
+
 ## Create and run a job
 
 In a new chat, ask Veetbot to create a generic Python job for the task. The

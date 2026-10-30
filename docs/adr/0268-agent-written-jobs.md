@@ -11,6 +11,9 @@
   The owner explicitly instructed: update this ADR and begin implementation.
   Production validation is still pending; implementation authorization does not
   authorize a pull request, deployment or credential installation.
+- Amendment: ADR-0270 implements the owner's 2026-10-30 instruction for one
+  summarized approval at the end of a combined widget installation; its
+  preparation and installation rules supersede per-step approvals in that flow.
 - Date: 2026-10-29
 - Amends:
   - ADR-0240 decision 8, which defers deterministic collectors;

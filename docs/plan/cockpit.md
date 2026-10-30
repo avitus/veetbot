@@ -1441,3 +1441,28 @@ existing cadence, admission, failure pause and notification paths remain in
 use. Feed grants select quiet-on-success reports. Disabling jobs fails typed
 runs explicitly without falling through to an agent run. See [the operator
 guide](../jobs.md) for activation and examples.
+
+### One approval for widget installation (ADR-0270)
+
+The owner authorized a single summarized approval at the end of widget
+creation on 2026-10-30. When Cockpit, jobs and scheduling are enabled, the
+agent prepares the whole package with `cockpit.prepare`, then uses
+`cockpit.install` instead of publishing and approving its components separately.
+Preparation checks widget and job packages, privacy (including proposed private
+inputs), input schemas, feed declarations, operator hosts and expected revisions.
+It creates no public revision, grant or schedule. Job reads and bounded trials
+need no per-step approval in an owner-directed interactive turn. Offline trials
+use fixtures; a live trial must use an existing owned grant, with unchanged
+private inputs and preview-only feeds. New access waits for installation.
+
+A successful preparation's persisted invocation is the immutable private plan.
+Installation names both its run and invocation identifiers and verifies the same
+owner and conversation. The approval headline shows the widget, collector,
+redacted private inputs, hosts, credential references, feeds, per-run limits,
+model budget and refresh interval. One exact approval covers public publication,
+the private grant and schedule. Changed contents need a new preparation and
+approval. The existing outboxes commit before activation; pending or failed
+components are reported rather than called complete. Identical resumes reuse
+that approval and component idempotency keys. A later conflicting edit is never
+overwritten. Collection starts at the next interval boundary, without an extra
+hidden run. Individual mutation tools retain their existing rules.

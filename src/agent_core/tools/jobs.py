@@ -91,6 +91,7 @@ def _failure(reason: str, detail: str) -> ToolResult:
             kind=ToolFailureKind.INVALID_ARGUMENTS,
             reason_code=reason,
             detail=detail[:2000],
+            external_text=detail[:2000],
             retryable=False,
         ),
     )

@@ -1682,3 +1682,22 @@ diagnostic rather than a denial.
 The edit moves the content-addressed policy version. The step that makes it
 updates the pinned shipped version and names any version-bound evidence it
 affects. [cockpit.md](cockpit.md#the-tools) owns the tool contract.
+
+### One widget installation approval (ADR-0270)
+
+The owner explicitly replaced widget creation's per-step approvals with one
+summarized approval for its exact prepared package. `cockpit.install` uses the
+derived jobs policy profile and requires approval. Its service verifies the
+approved normalized arguments hash, tool, owner and conversation before any
+publication or grant. An immutable successful `cockpit.prepare` invocation binds
+all code, access and cadence; the card does not grant arbitrary future changes.
+A durable authorization receipt allows idempotent continuation of that same
+installation, never a different proposal or a policy denial.
+
+The existing job standing-authorizer seam also admits `job.manage` reads and
+trials in interactive turns whose latest user message has USER trust, even
+after memory or external results. A trial either has no external access or uses
+an existing owned grant without changing its private inputs; its feeds remain
+previews. Untrusted content still cannot authorize new grants or publication.
+These narrow owner-authorized preparation semantics do not change the global
+trust overlay or authorize scheduled/delegated authoring.

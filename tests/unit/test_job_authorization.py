@@ -87,3 +87,93 @@ def test_first_feed_grant_needs_approval_but_local_computation_does_not(
 
     saved = record(principal()).model_copy(update={"grants": {}})
     assert access_needs_approval(JobAccess({}, {}, feeds=feeds), saved) is expected
+
+
+@pytest.mark.parametrize("operation", ["read", "trial"])
+@pytest.mark.parametrize("trust", [TrustLevel.MEMORY, TrustLevel.EXTERNAL_UNTRUSTED])
+async def test_owner_preparation_does_not_repeat_publication_approval(
+    operation: str, trust: TrustLevel
+) -> None:
+    _, factory = await memory_uow_factory()
+    action = _action(name="job.manage", origin_trust=trust, argument_trust=trust).model_copy(
+        update={"arguments": {"operation": operation}, "side_effect": SideEffectClass.PUBLICATION}
+    )
+    decision = await DeterministicPolicyEngine(job_publication_ruleset(DEFAULT_RULESET)).evaluate(
+        action, principal(), run()
+    )
+    result = await JobGrantAuthorizer(factory).authorize(
+        action=action,
+        decision=decision,
+        principal=principal(),
+        run=run(),
+        agent_version="1",
+        action_deadline=NOW,
+        turn=AuthorizationTurn(newest_user_trust=TrustLevel.USER),
+    )
+    assert result.allowed, "Reading or preparing code must not ask to publish it."
+
+
+@pytest.mark.parametrize("mutation", ["denied", "untrusted_user", "delegated", "publication"])
+async def test_preparation_authority_does_not_escape_its_boundary(mutation: str) -> None:
+    from agent_core.domain.runs import RunKind
+
+    _, factory = await memory_uow_factory()
+    action = _action(name="job.manage", origin_trust=TrustLevel.EXTERNAL_UNTRUSTED).model_copy(
+        update={
+            "arguments": {"operation": "create" if mutation == "publication" else "trial"},
+            "side_effect": SideEffectClass.PUBLICATION,
+        }
+    )
+    current = run()
+    if mutation == "delegated":
+        current = current.model_copy(update={"kind": RunKind.DELEGATED})
+    decision = await DeterministicPolicyEngine(job_publication_ruleset(DEFAULT_RULESET)).evaluate(
+        action, principal(), current
+    )
+    if mutation == "denied":
+        decision = decision.model_copy(update={"decision": PolicyDecisionType.DENY})
+    result = await JobGrantAuthorizer(factory).authorize(
+        action=action,
+        decision=decision,
+        principal=principal(),
+        run=current,
+        agent_version="1",
+        action_deadline=NOW,
+        turn=AuthorizationTurn(
+            newest_user_trust=(
+                TrustLevel.EXTERNAL_UNTRUSTED if mutation == "untrusted_user" else TrustLevel.USER
+            )
+        ),
+    )
+    assert not result.allowed
+
+
+@pytest.mark.parametrize("changed", [False, True])
+async def test_live_trial_reuses_only_the_exact_owned_grant_inputs(changed: bool) -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await uow.jobs.put(record(principal()), expected_version=None)
+    action = _action(name="job.manage", origin_trust=TrustLevel.EXTERNAL_UNTRUSTED).model_copy(
+        update={
+            "arguments": {
+                "operation": "trial",
+                "slug": "count-items",
+                "grant_id": str(UUID(int=2)),
+                "inputs": {"items": [99] if changed else [1, 2]},
+            },
+            "side_effect": SideEffectClass.PUBLICATION,
+        }
+    )
+    decision = await DeterministicPolicyEngine(job_publication_ruleset(DEFAULT_RULESET)).evaluate(
+        action, principal(), run()
+    )
+    result = await JobGrantAuthorizer(factory).authorize(
+        action=action,
+        decision=decision,
+        principal=principal(),
+        run=run(),
+        agent_version="1",
+        action_deadline=NOW,
+        turn=AuthorizationTurn(newest_user_trust=TrustLevel.USER),
+    )
+    assert result.allowed is not changed

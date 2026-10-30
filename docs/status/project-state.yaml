@@ -358,7 +358,17 @@ agent_jobs_mvp:
   - Code-only and mixed code/model workflows through four broker operations
   - One-time runs, real trials under approved access, and existing scheduler integration
   - GitHub PR monitoring through the existing Cockpit widget and feed
+  - One final summarized widget installation approval, authorized 2026-10-30 (ADR-0270)
   implementation_status: deployed_and_activated_pending_production_acceptance
+  approval_workflow_repair:
+    adr: docs/adr/0270-one-approval-for-a-widget-installation.md
+    authorized_on: '2026-10-30'
+    status: implemented_pending_delivery
+    checks: 'Static: 9022 passed and one skipped across 542 atoms. Focused workflow/jobs: 46 passed across four atoms. Contracts: 2011 passed across 190 atoms. PostgreSQL: five passed across four selected atoms. Lint, typecheck, citation repair and docs-check passed. Production remains unchanged.'
+    evidence:
+    - tests/unit/test_cockpit_installation.py
+    - tests/unit/test_job_authorization.py
+    verification: 'The initial regression reproduced approval for owner-directed reads and trials. The composed workflow now prepares without publication, requests one summarized approval, resumes pending installation without another prompt, and creates one widget, grant and schedule. Denied, altered and foreign proposals have no installation authority; malformed preparation returns untrusted repair feedback.'
   implementation_evidence:
   - tests/unit/test_job_program_process.py
   - tests/contract/test_job_runner_contract.py
@@ -401,6 +411,7 @@ agent_jobs_mvp:
       expected_failure: 'Catching the broker call limit incorrectly returned success instead of JobExecutionError'
       resolution: 'The runner retains the bridge limit failure; the regression and complete contract partition pass'
   remaining_work:
+  - Deliver and verify the single-approval widget installation repair (ADR-0270)
   - Adapt the generic collector mapping to the existing live widget feed schema
   - Mixed code/model smoke workflow in production
   - Observe the live widget for a day against ADR-0268 freshness and zero-model-cost criteria

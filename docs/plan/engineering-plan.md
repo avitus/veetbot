@@ -4447,6 +4447,12 @@ changes and broader hardening are not prerequisites. This admits only job-specif
 approved access, not general standing approval grants under roadmap B8. The
 verified milestone ceiling and existing gate requirements remain unchanged.
 
+On 2026-10-30 the owner amended widget creation under ADR-0270: prepare and
+test the complete widget and optional collector privately, then ask once with a
+summary covering publication, exact private access and the refresh schedule.
+Reads, offline trials and trials under existing approved access do not require
+per-step approvals; new access and publication wait for the final approval.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap

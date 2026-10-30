@@ -315,3 +315,4 @@ implementation without one.
 - [ADR-0268: Jobs the agent writes, run once or on a schedule (Accepted)](0268-agent-written-jobs.md)
 
 - [ADR-0269: Semantic admission falls back to sparse recall at startup](0269-semantic-admission-falls-back-at-startup.md)
+- [ADR-0270: One approval for a widget installation (Accepted)](0270-one-approval-for-a-widget-installation.md)

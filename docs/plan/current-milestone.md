@@ -17,6 +17,10 @@ title: Current Milestone
   selected repositories twice with the same grant and no model operations.
   Mixed-job, widget-feed and day-long acceptance remain pending; see
   [the operator guide](../jobs.md).
+  On 2026-10-30 the owner requested one summarized approval at the end of
+  widget creation (ADR-0270). The combined preparation/installation repair is
+  implemented with composed approval, retry and refusal tests; delivery and
+  production verification remain pending.
   Existing protections remain, broader hardening is deferred, and no milestone
   or gate moves.
 

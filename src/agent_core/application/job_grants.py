@@ -51,7 +51,7 @@ class JobGrantAuthorizer:
         """Reuse an owned grant or permit computation with no new external authority."""
         denied = StandingAuthorization(allowed=False, reason_code="job.grant.not_covered")
         if (
-            action.name != "job.run"
+            action.name not in {"job.run", "job.manage"}
             or decision.decision is not PolicyDecisionType.REQUIRE_APPROVAL
             or run.kind is not RunKind.INTERACTIVE
             or turn is None
@@ -59,6 +59,37 @@ class JobGrantAuthorizer:
         ):
             return denied
         try:
+            if action.name == "job.manage":
+                operation = action.arguments.get("operation")
+                if operation == "read" or (
+                    operation == "trial" and "grant_id" not in action.arguments
+                ):
+                    return StandingAuthorization(
+                        allowed=True,
+                        reason_code="job.preparation.authorized",
+                        authorization_kind="job_preparation",
+                        authorization_ref=str(run.id),
+                    )
+                if operation != "trial":
+                    return denied
+                async with self.uow_factory() as uow:
+                    saved = await uow.jobs.get(principal, action.arguments["slug"])
+                grant = saved.grants.get(str(action.arguments["grant_id"]))
+                if (
+                    saved.archived
+                    or grant is None
+                    or (
+                        action.arguments.get("inputs")
+                        and action.arguments["inputs"] != grant.access.inputs
+                    )
+                ):
+                    return denied
+                return StandingAuthorization(
+                    allowed=True,
+                    reason_code="job.grant.authorized",
+                    authorization_kind="job_grant",
+                    authorization_ref=str(grant.id),
+                )
             async with self.uow_factory() as uow:
                 saved = await uow.jobs.get(principal, action.arguments["slug"])
             revision = saved.revisions.get(str(action.arguments.get("revision_id")))

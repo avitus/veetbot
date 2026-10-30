@@ -15,6 +15,7 @@ def job_publication_ruleset(base: LoadedRuleset) -> LoadedRuleset:
     }
     # An operator's explicit job rule takes precedence over this MVP default.
     tool_rules.setdefault("job.manage", {"decision": "allow"})
+    tool_rules.setdefault("cockpit.install", {"decision": "require_approval"})
     profile = {
         "schema_version": 1,
         "name": base.profile_name + "-jobs",
@@ -51,5 +52,5 @@ class JobPolicyEngine:
         self, action: ProposedAction, principal: Principal, run: Run
     ) -> PolicyDecision:
         """Use the jobs profile for job.manage and preserve other policy identities."""
-        engine = self.publication if action.name == "job.manage" else self.base
+        engine = self.publication if action.name in {"job.manage", "cockpit.install"} else self.base
         return await engine.evaluate(action, principal, run)

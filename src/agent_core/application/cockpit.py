@@ -407,13 +407,27 @@ class CockpitPublication:
             revision_id=UUID(str(event.payload["revision_id"])),
         )
 
-    async def check(self, principal: Principal, slug: str, files: Mapping[str, str]) -> WidgetBuild:
+    async def check(
+        self,
+        principal: Principal,
+        slug: str,
+        files: Mapping[str, str],
+        *,
+        private_values: tuple[str, ...] = (),
+    ) -> WidgetBuild:
         """Build and screen a package exactly as a write would, recording nothing."""
 
         if not is_widget_slug(slug):
             raise ValueError("a widget slug follows the manifest grammar")
+        screen = await self._screen(principal, None)
         return await self._builder.build(
-            principal, slug, files, screen=await self._screen(principal, None)
+            principal,
+            slug,
+            files,
+            screen=BuildScreen(
+                names=screen.names,
+                settings_values=(*screen.settings_values, *private_values),
+            ),
         )
 
     async def head_revision(self, principal: Principal, slug: str) -> WidgetRevision | None:
