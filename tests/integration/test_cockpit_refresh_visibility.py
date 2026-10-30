@@ -21,6 +21,7 @@ from tests.integration.test_migrations import _alembic
 
 
 async def test_postgres_filters_refreshes_before_pagination() -> None:
+    """Apply the shared operational pagination contract to PostgreSQL."""
     async with (
         build(settings=database_settings(), storage="postgres") as composition,
         composition.uow_factory() as uow,
@@ -38,6 +39,7 @@ async def test_postgres_preserves_non_boolean_refresh_markers() -> None:
 
 
 async def test_upgrade_marks_old_feed_occurrences_without_erasing_history() -> None:
+    """Backfill refresh markers while preserving occurrence audit events."""
     from tests.gates.test_cockpit_feed_refresh_adr0254 import _agent
 
     settings = database_settings()

@@ -22,6 +22,7 @@ async def test_job_run_bypasses_the_agent_loop_and_completes_with_zero_model_usa
     enabled: bool,
     semantic_unavailable: bool,
 ) -> None:
+    """Execute saved code without model usage, including semantic fallback."""
     from decimal import Decimal
     from uuid import UUID
 
@@ -194,6 +195,7 @@ async def test_job_schedule_tool_pins_saved_code_and_private_grant() -> None:
 
 
 async def test_explicit_model_call_inside_job_is_charged_without_losing_parent_usage() -> None:
+    """Account for explicit job model calls alongside the parent run usage."""
     from decimal import Decimal
     from typing import Any
     from uuid import UUID
@@ -427,6 +429,7 @@ async def test_schedule_repin_can_enable_an_already_approved_model_grant() -> No
 async def test_legacy_feed_schedule_can_switch_to_an_approved_job_without_a_tool_roster(
     publishes_feed: bool,
 ) -> None:
+    """Convert a legacy feed schedule only when its approved job can publish feeds."""
     from datetime import timedelta
     from typing import cast
     from uuid import UUID
@@ -626,6 +629,7 @@ async def test_job_publication_approval_resumes_with_its_own_policy_profile() ->
 
 @pytest.mark.parametrize("legacy_grant", [False, True])
 async def test_new_external_access_is_approved_once_then_reused(legacy_grant: bool) -> None:
+    """Approve exact revision access once and replace legacy unbound authority."""
     from uuid import UUID
 
     from agent_core.domain.approvals import ApprovalResolutionType

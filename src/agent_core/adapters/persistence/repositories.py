@@ -519,6 +519,7 @@ class PostgresSessionRepository:
         cursor: SessionCursor | None = None,
         exclude_operational: bool = False,
     ) -> list[Session]:
+        """List owned sessions with operational filters applied before the page limit."""
         predicates: list[Any] = [
             SessionRow.tenant_id == principal.tenant_id,
             SessionRow.principal_id == principal.principal_id,

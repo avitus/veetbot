@@ -15,6 +15,7 @@ from tests.unit.test_job_examples import example
 def page(
     nodes: list[dict[str, Any]], *, after: str | None = None, total: int | None = None
 ) -> dict[str, Any]:
+    """Build a GitHub GraphQL page with explicit pagination metadata."""
     return {
         "status": 200,
         "json": {
@@ -49,10 +50,12 @@ PULL: dict[str, Any] = {
 def execute(
     responses: list[dict[str, Any]], feed_calls: list[Any] | None = None
 ) -> tuple[Any, list[Any], list[Any]]:
+    """Run the sample collector against queued replies and capture feed writes."""
     calls: list[Any] = []
     feeds: list[Any] = [] if feed_calls is None else feed_calls
 
     def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        """Record authenticated GraphQL variables and return the next fixture."""
         assert method == "POST" and url == "https://api.github.com/graphql"
         calls.append(kwargs["json"]["variables"])
         return responses.pop(0)
@@ -68,6 +71,7 @@ def execute(
 
 
 def test_widget_job_pages_authenticated_results_and_publishes_verified_zero() -> None:
+    """Publish a complete validated snapshot including verified empty repositories."""
     second = {**deepcopy(PULL), "number": 4, "mergeable": "UNKNOWN"}
     _, calls, feeds = execute(
         [page([PULL], after="page2", total=2), page([second], total=2), page([])]
@@ -106,6 +110,7 @@ def test_widget_job_pages_authenticated_results_and_publishes_verified_zero() ->
     ],
 )
 def test_inaccessible_repository_never_becomes_a_verified_zero(response: dict[str, Any]) -> None:
+    """Reject inaccessible repositories without publishing a misleading snapshot."""
     feeds: list[Any] = []
     with pytest.raises(ValueError):
         execute([page([PULL]), response], feeds)
@@ -113,6 +118,7 @@ def test_inaccessible_repository_never_becomes_a_verified_zero(response: dict[st
 
 
 def test_incomplete_reviews_and_missing_checks_stay_unknown() -> None:
+    """Preserve unknown status when review or check evidence is incomplete."""
     pull = deepcopy(PULL)
     pull["latestOpinionatedReviews"]["pageInfo"]["hasNextPage"] = True
     pull["commits"]["nodes"] = []
@@ -133,7 +139,47 @@ def test_repeated_page_cursor_refuses_a_partial_snapshot() -> None:
 
 
 def test_count_mismatch_refuses_a_partial_snapshot() -> None:
+    """Refuse to publish when page contents disagree with the reported total."""
     feeds: list[Any] = []
     with pytest.raises(ValueError, match="pagination"):
         execute([page([PULL], total=2), page([])], feeds)
+    assert feeds == []
+
+
+def test_large_snapshot_caps_details_but_preserves_verified_count() -> None:
+    """Read every page before limiting details to the existing feed schema."""
+    pulls = [{**deepcopy(PULL), "number": number} for number in range(1, 302)]
+    responses = [
+        page(
+            pulls[offset : offset + 10], after=str(offset + 10) if offset < 300 else None, total=301
+        )
+        for offset in range(0, 301, 10)
+    ]
+    _, calls, feeds = execute([*responses, page([])])
+    assert len(calls) == 32
+    snapshot = feeds[0][0][1]
+    schema = json.loads(
+        (Path(__file__).parents[1] / "fixtures/cockpit/github_widget_feed.schema.json").read_text()
+    )
+    Draft202012Validator(schema).validate(snapshot)
+    repository = snapshot["repositories"][0]
+    assert repository["totalOpen"] == 301
+    assert len(repository["pullRequests"]) == 300
+    assert [pull["number"] for pull in repository["pullRequests"]] == list(range(1, 301))
+
+
+def test_over_budget_repository_set_stops_before_request_51() -> None:
+    """Keep the previous snapshot and direct the owner to reduce oversized inputs."""
+    responses = [
+        page(
+            [{**deepcopy(PULL), "number": offset + index + 1} for index in range(10)],
+            after=str(offset + 10) if offset < 490 else None,
+            total=500,
+        )
+        for offset in range(0, 500, 10)
+    ] + [page([])]
+    feeds: list[Any] = []
+    with pytest.raises(ValueError, match="50-page budget; reduce the selected repositories"):
+        execute(responses, feeds)
+    assert len(responses) == 1
     assert feeds == []

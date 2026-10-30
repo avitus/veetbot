@@ -474,6 +474,7 @@ async def test_new_privacy_match_does_not_block_removal_of_public_code() -> None
         async def check(
             self, principal: Principal, files: Mapping[str, str], *, screen: BuildScreen
         ) -> tuple[BuildDiagnostic, ...]:
+            """Reject old private source while allowing the fixed archive message."""
             return (
                 (BuildDiagnostic(rule="screen.setting", message="Contains a private value."),)
                 if "return 3" in files.get("main.py", "")

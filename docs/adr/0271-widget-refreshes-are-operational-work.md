@@ -50,6 +50,10 @@ Unavailable evidence fails rather than becoming a verified zero; incomplete
 review or check evidence remains unknown. Public source contains no private
 repository inputs or credentials. Existing publication, grant, sandbox and
 feed-schema checks remain in force.
+The sample retains ten-item pages and the existing 50-request/48 KiB ceilings.
+Oversized selections fail without publishing; the owner reduces the selection
+through normal approval before resuming. Only the published detail list is
+capped to the feed's 300 items, after complete acquisition and count validation.
 
 ## Verification and delivery
 
@@ -63,6 +67,9 @@ The repository contract also preserves non-boolean historical `cockpit_refresh`
 values. A PostgreSQL regression reproduced an invalid boolean cast that broke
 the conversation index; JSONB containment now excludes only the literal `true`
 marker, matching the in-memory repository without coercing strings or numbers.
+Collector regressions reproduced schema rejection at 301 items and an attempted
+51st request. They now preserve the complete count with bounded details and
+refuse excess requests without publishing a partial snapshot.
 
 The red command
 `circleci testsuite run static --run-tests=all -t 'tests/gates/test_cockpit_feed_refresh_adr0254\.py$'`

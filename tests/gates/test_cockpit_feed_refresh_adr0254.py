@@ -242,6 +242,7 @@ async def _refresh(client: httpx.AsyncClient) -> dict[str, str]:
 async def test_feed_refreshes_have_audit_history_but_never_create_chats(
     trigger: str, job: bool
 ) -> None:
+    """Keep every refresh trigger auditable without adding a conversation."""
     from agent_core.domain.schedules import JobTask
 
     async with _composition() as (composition, client):

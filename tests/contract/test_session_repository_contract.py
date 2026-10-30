@@ -158,6 +158,7 @@ async def test_generated_title_lifecycle() -> None:
 
 
 async def assert_session_index_filters_before_pagination(repository: SessionRepository) -> None:
+    """Verify that operational sessions do not consume visible page slots."""
     for value, metadata in (
         (701, {}),
         (702, {"email_operational": True}),

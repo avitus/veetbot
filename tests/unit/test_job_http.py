@@ -205,6 +205,7 @@ async def test_encoded_credential_echo_is_refused_before_returning_to_job(encodi
     }[encoding]
 
     async def resolve(host: str) -> tuple[str, ...]:
+        """Resolve the fixture host to a fixed public address."""
         return ("140.82.112.6",)
 
     broker = JobHTTP(

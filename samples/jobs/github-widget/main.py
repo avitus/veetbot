@@ -61,6 +61,7 @@ def main(inputs, job):
     """Acquire complete bounded JSON before publishing; an error keeps the old feed stale."""
     interval = inputs.get("refresh_seconds", 3600)
     repositories = []
+    requests = 0
     for name in inputs["repositories"]:
         owner, repository = name.split("/", 1)
         pulls = {}
@@ -68,6 +69,11 @@ def main(inputs, job):
         seen_cursors = set()
         expected_count = None
         while True:
+            if requests >= 50:
+                raise ValueError(
+                    "The widget exceeds its 50-page budget; reduce the selected repositories."
+                )
+            requests += 1
             reply = job.http.request(
                 "POST",
                 "https://api.github.com/graphql",
@@ -120,7 +126,7 @@ def main(inputs, job):
                 "status": "ok",
                 "message": "Verified via authenticated GitHub API.",
                 "totalOpen": len(pulls),
-                "pullRequests": list(pulls.values()),
+                "pullRequests": list(pulls.values())[:300],
             }
         )
     snapshot = {

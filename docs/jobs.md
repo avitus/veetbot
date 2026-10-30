@@ -84,6 +84,13 @@ starts at the next interval boundary. Pending publication resumes with the same
 proposal and approval; changed proposals need a new approval. This ADR-0270
 repair requires deployment before it is available in production.
 
+A pending publication can resume after the repository becomes available. A
+rejected publication or revision conflict needs inspection of the current job,
+widget and schedule before preparing a corrected proposal for fresh approval.
+Do not keep replaying a terminal conflict. Installation does not roll back
+components already created: reuse their current revisions in the new proposal,
+or explicitly archive unwanted components through their normal management tools.
+
 ## Create and run a job
 
 In a new chat, ask Veetbot to create a generic Python job for the task. The
@@ -192,6 +199,19 @@ current-head checks and decisive reviews, and publishes to
 must declare it. Use private `repositories` and `refresh_seconds` inputs. A
 provider error never publishes a false zero; the previous snapshot remains
 stale. The query follows [GitHub's pull request schema](https://docs.github.com/en/graphql/reference/pulls).
+
+The sample reads ten pull requests per page and permits at most 50 pages across
+all selected repositories, including one page for each empty repository. With
+full pages, the sum of `max(1, ceil(totalOpen / 10))` must not exceed 50. Preview
+the selected set before scheduling it. If it outgrows the budget, pause the
+schedule, reduce its repository inputs through a newly approved grant, preview
+again and resume. The collector refuses request 51 without publishing a partial
+snapshot; it does not automatically change private inputs, grants or schedules.
+Ten-item pages limit nested review payloads; the broker still enforces the
+48 KiB response ceiling and any tighter approved grant limits. Increasing page
+size is not a safe substitute for that response limit. After validating every
+page, the feed retains the full verified `totalOpen` count and publishes only
+the first 300 pull-request details per repository, as its schema requires.
 
 After ADR-0271's server and Apple release, refreshes never add Chat rows. Their
 isolated execution records and failures stay in schedule history. The migration

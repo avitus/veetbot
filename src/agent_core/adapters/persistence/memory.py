@@ -324,6 +324,7 @@ class InMemorySessionRepository:
         cursor: SessionCursor | None = None,
         exclude_operational: bool = False,
     ) -> list[Session]:
+        """List owned sessions, applying operational visibility before pagination."""
         async with self._lock:
             rows = [
                 session.model_copy(deep=True)

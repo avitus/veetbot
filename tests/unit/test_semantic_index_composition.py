@@ -566,6 +566,7 @@ async def test_index_failure_does_not_stop_maintenance_or_log_provider_content(
 async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jobs_enabled: bool
 ) -> None:
+    """Keep admitted semantic maintenance and saved jobs independently usable."""
     import agent_core.bootstrap as bootstrap
     import agent_core.memory.semantic_deployment as deployment
     from tests.contract.memory_fixtures import memory
@@ -577,6 +578,7 @@ async def test_bootstrap_wires_the_admitted_index_to_maintenance_only(
     kwargs, _, _, _, evidence = await configured_index(tmp_path)
 
     async def forbidden_model(**options: Any) -> dict[str, Any]:
+        """Fail if a saved job attempts an implicit model call."""
         pytest.fail("Running saved code must not call a model or retrieve memory implicitly")
 
     real_compose = deployment.compose_indexing
