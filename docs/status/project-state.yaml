@@ -348,6 +348,21 @@ project:
     - 35
 
 
+integration_secrets_proposal:
+  adr: docs/adr/0270-in-app-integration-secrets.md
+  authorized_on: '2026-10-30'
+  status: proposed
+  authorized_scope:
+  - Documentation-only MVP design and publication on a new branch
+  proposed_scope:
+  - Owner-entered integration keys in Settings, sealed in PostgreSQL
+  - Existing credential broker and approved jobs as the first consumer
+  - A separate host-held master key and manual off-host recovery
+  implementation_authorized: false
+  production_activation_authorized: false
+  remaining_work:
+  - Owner acceptance of the proposal before implementation
+
 agent_jobs_mvp:
   adr: docs/adr/0268-agent-written-jobs.md
   authorized_on: '2026-10-29'

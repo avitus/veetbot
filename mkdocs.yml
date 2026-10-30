@@ -405,4 +405,5 @@ nav:
       - 'ADR-0267: Deferred tool index headroom': adr/0267-deferred-index-headroom.md
       - 'ADR-0268: Jobs the agent writes': adr/0268-agent-written-jobs.md
       - 'ADR-0269: Semantic admission startup fallback': adr/0269-semantic-admission-falls-back-at-startup.md
+      - 'ADR-0270: In-app integration keys (Proposed)': adr/0270-in-app-integration-secrets.md
   - Changelog: changelog.md

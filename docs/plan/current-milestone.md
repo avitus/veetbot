@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Integration keys proposal — ADR-0270:** On 2026-10-30 the owner requested
+  a minimal in-app secret-store design without a production Doppler dependency.
+  [The proposal](../adr/0270-in-app-integration-secrets.md) reuses PostgreSQL,
+  AES-GCM sealing and the credential broker, with approved jobs as the first
+  consumer. Only design and branch publication are authorized; implementation
+  and activation await owner acceptance. No milestone or gate moves.
+
 - **Agent-written jobs MVP — ADR-0268:** On 2026-10-29 the owner authorized
   implementation of saved Python programs that combine code and explicit model
   calls as appropriate. The MVP implementation now includes saved packages,
