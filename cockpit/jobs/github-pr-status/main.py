@@ -1,12 +1,8 @@
 from datetime import datetime, timezone
 import re
 
-FEED = 'agent.github-pull-requests'
-SCHEMA = {'type':'object','additionalProperties':False,'required':['observedAt','expectedIntervalSec','repositories'],'properties':{'observedAt':{'type':'string','format':'date-time'},'expectedIntervalSec':{'type':'integer','minimum':1},'repositories':{'type':'array','maxItems':10,'items':{'type':'object','additionalProperties':False,'required':['name','status','message','totalOpen','pullRequests'],'properties':{'name':{'type':'string','maxLength':200},'status':{'enum':['ok','unavailable']},'message':{'type':'string','maxLength':300},'totalOpen':{'type':['integer','null'],'minimum':0},'pullRequests':{'type':'array','maxItems':300,'items':{'type':'object','additionalProperties':False,'required':['number','title','author','draft','review','checks','merge'],'properties':{'number':{'type':'integer','minimum':1},'title':{'type':'string','maxLength':500},'author':{'type':'string','maxLength':100},'draft':{'type':['boolean','null']},'review':{'enum':['approved','changes_requested','review_required','pending','none','unknown']},'checks':{'enum':['passing','failing','pending','none','unknown']},'merge':{'enum':['mergeable','conflicting','unknown']}}}}}}}}
-
 class ReadFailure(Exception):
     pass
-
 
 def main(inputs, job):
     repos = inputs['repositories']
@@ -22,7 +18,7 @@ def main(inputs, job):
 
     def get(url):
         nonlocal requests
-        if requests >= 95:
+        if requests >= 45:
             raise ReadFailure('Request budget reached')
         requests += 1
         try:
@@ -33,7 +29,7 @@ def main(inputs, job):
             raise ReadFailure('GitHub HTTP ' + str(response.get('status')))
         return response.get('json')
 
-    def pages(url, key=None, max_pages=5, per_page=100):
+    def pages(url, key=None, max_pages=5, per_page=10):
         result = []
         for page in range(1, max_pages + 1):
             body = get(url + ('&' if '?' in url else '?') + 'per_page=' + str(per_page) + '&page=' + str(page))
@@ -55,8 +51,7 @@ def main(inputs, job):
         latest = {}
         for entry in sorted(entries, key=lambda x:x.get('id', 0)):
             state = entry.get('state')
-            user = entry.get('user') or {}
-            login = user.get('login')
+            login = (entry.get('user') or {}).get('login')
             if login and state in ('APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'):
                 latest[login] = state
         states = list(latest.values())
@@ -72,13 +67,12 @@ def main(inputs, job):
         if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-fA-F]{40,64}', sha):
             raise ReadFailure('Head commit unavailable')
         runs = pages(base + '/commits/' + sha + '/check-runs?filter=latest', key='check_runs')
-        status = get(base + '/commits/' + sha + '/status?per_page=100')
+        status = get(base + '/commits/' + sha + '/status?per_page=10')
         if not isinstance(status, dict) or not isinstance(status.get('statuses'), list) or not isinstance(status.get('total_count'), int):
             raise ReadFailure('Commit statuses unavailable')
         states = []
         if status['total_count'] > 0:
-            state = status.get('state')
-            states.append({'success':'passing','failure':'failing','error':'failing','pending':'pending'}.get(state, 'unknown'))
+            states.append({'success':'passing','failure':'failing','error':'failing','pending':'pending'}.get(status.get('state'), 'unknown'))
         for run in runs:
             if run.get('status') != 'completed':
                 states.append('pending' if run.get('status') in ('queued','in_progress','waiting','requested','pending') else 'unknown')
@@ -98,9 +92,7 @@ def main(inputs, job):
         base = 'https://api.github.com/repos/' + repo
         row = {'name':repo,'status':'unavailable','message':'','totalOpen':None,'pullRequests':[]}
         try:
-            listed = pages(base + '/pulls?state=open&sort=created&direction=desc', max_pages=10, per_page=30)
-            if len(listed) > 300:
-                raise ReadFailure('PR listing exceeds display limit')
+            listed = pages(base + '/pulls?state=open&sort=created&direction=desc', max_pages=30)
             seen = set()
             for pull in listed:
                 if not isinstance(pull, dict) or not isinstance(pull.get('number'), int) or pull.get('state') != 'open':
@@ -137,9 +129,7 @@ def main(inputs, job):
             if any('unknown' in (p['review'],p['checks'],p['merge']) for p in row['pullRequests']):
                 row['message'] = 'Some status fields are unknown; GitHub may be computing mergeability or a detail endpoint was unavailable.'
         except ReadFailure as exc:
-            row['message'] = str(exc)[:300] + '; not a zero-PR result.'
+            row['message'] = str(exc)[:240] + '; not a zero-PR result.'
             row['pullRequests'] = []
         output.append(row)
-    data = {'observedAt':datetime.now(timezone.utc).isoformat(),'expectedIntervalSec':interval,'repositories':output}
-    job.feed.publish(FEED, data, expected_interval_seconds=interval, schema=SCHEMA)
-    return {'repositories':[{'name':r['name'],'status':r['status'],'open':r['totalOpen']} for r in output],'requests':requests}
+    return {'observedAt':datetime.now(timezone.utc).isoformat(),'expectedIntervalSec':interval,'repositories':output}
