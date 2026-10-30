@@ -275,6 +275,25 @@ class EventContextPlanner:
         self._remember(plan)
         return plan.model_copy(deep=True)
 
+    def _pinned_contracts_available(self, plan: ContextPlan, principal: Principal) -> bool:
+        """An unfinished run may retain only exact contracts still registered for its owner."""
+        for spec in plan.pinned_tool_specs:
+            try:
+                current = self._registry.get(
+                    spec.name,
+                    spec.version,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    source=spec.source,
+                    server_id=spec.server_id,
+                    device_id=spec.device_id,
+                )
+            except NotFoundError:
+                return False
+            if current.spec != spec:
+                return False
+        return True
+
     async def plan(
         self,
         session: Session,
@@ -283,6 +302,7 @@ class EventContextPlanner:
         model: ResolvedModel,
         *,
         refresh_authorization: bool = False,
+        preserve_tool_pins: bool = False,
         prepare_surface: bool = True,
     ) -> ContextPlan:
         async with self._session_lock(session.id):
@@ -325,7 +345,14 @@ class EventContextPlanner:
                 unchanged = (
                     current.model_id == model_id
                     and current.policy_version == self._policy_version
-                    and _builder_is_current(current.builder_version)
+                    and (
+                        _builder_is_current(current.builder_version)
+                        or (
+                            preserve_tool_pins
+                            and not refresh_authorization
+                            and self._pinned_contracts_available(current, principal)
+                        )
+                    )
                     and current.persona_text == persona_text
                     and current.persona_version == persona_version
                     and not authority_changed

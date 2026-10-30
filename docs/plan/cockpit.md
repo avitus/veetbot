@@ -96,8 +96,8 @@ The owner decided these on 2026-10-22:
   untrusted origin or untrusted arguments. The credential-to-egress hardline
   rule covers `publication` arguments.
 - **The deferred tool index.** Definitions are capped at thirty items, and
-  that cap already binds the owner's roster (`context-engine.md:375-379`).
-  The deferred index (`context-engine.md:406-411`) admits a tool as a
+  that cap already binds the owner's roster (`context-engine.md:381-385`).
+  The deferred index (`context-engine.md:412-417`) admits a tool as a
   one-line entry reached through `tool.call`.
 - **Durable live delivery.** The run event stream already works this way: a
   row is written, then NOTIFY sends its sequence inside the same transaction,

@@ -1401,3 +1401,63 @@ async def test_deployed_version_fourteen_plan_rotates_after_tool_retirement(
     assert after.epoch == before.epoch + 1
     assert after.tool_names == ("web.fetch",)
     assert await planner.plan(session(), configured, principal(), model) == after
+
+
+@pytest.mark.parametrize("change", ["added", "missing", "changed", "empty"])
+async def test_builder_upgrade_preserves_only_exact_registered_resume_contracts(
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from agent_core.domain.errors import ConflictError
+    from agent_core.domain.runs import RunCheckpoint, RunStatus
+    from agent_core.runtime.executor import RunExecutor
+    from tests.contract.support import RUN_ID
+
+    clock, factory, _service, _retriever = await formation_stack()
+    before_registry = StaticToolRegistry()
+    if change != "empty":
+        before_registry.register(CurrentTimeTool(clock))
+    configured = agent().model_copy(
+        update={"enabled_tools": ["system.current_time", "math.calculate"]}
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text()
+    )
+
+    def planner(registry: StaticToolRegistry) -> EventContextPlanner:
+        return EventContextPlanner(
+            factory,
+            registry,
+            ConservativeTokenEstimator(),
+            clock,
+            principal(),
+            config,
+            policy_version="contract-policy@1",
+        )
+
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    with monkeypatch.context() as prior:
+        prior.setattr(planner_module, "BUILDER_VERSION", "context-builder@14")
+        before = await planner(before_registry).plan(session(), configured, principal(), model)
+    checkpoint = RunCheckpoint(
+        run_id=RUN_ID, version=1, status=RunStatus.WAITING_FOR_USER, created_at=NOW
+    )
+    RunExecutor._apply_tool_pins(checkpoint, before, restored=False)
+    after_registry = StaticToolRegistry()
+    if change != "missing":
+        spec = (
+            CurrentTimeTool.spec.model_copy(update={"description": "Changed contract"})
+            if change == "changed"
+            else CurrentTimeTool.spec
+        )
+        after_registry.register(_OwnerTool(spec))
+    after_registry.register(CalculatorTool())
+    resumed = await planner(after_registry).plan(
+        session(), configured, principal(), model, preserve_tool_pins=True
+    )
+    if change in {"added", "empty"}:
+        assert resumed == before
+        RunExecutor._apply_tool_pins(checkpoint, resumed, restored=True)
+    else:
+        with pytest.raises(ConflictError, match="persisted tool pins"):
+            RunExecutor._apply_tool_pins(checkpoint, resumed, restored=True)

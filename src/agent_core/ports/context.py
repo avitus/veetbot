@@ -39,6 +39,7 @@ class ContextPlanner(Protocol):
         model: ResolvedModel,
         *,
         refresh_authorization: bool = False,
+        preserve_tool_pins: bool = False,
         prepare_surface: bool = True,
     ) -> ContextPlan: ...
 

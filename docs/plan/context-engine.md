@@ -219,6 +219,12 @@ rebuilds once at the next unpinned run. An initialized empty tool set is pinned,
 as are legacy nonempty pins and pending calls: retries and approval resumes
 must not refresh authority or rewrite their advertised tools. A scheduler's
 seed checkpoint with no pins or pending calls can still build its first plan.
+Across a builder upgrade, the executor explicitly marks an initialized roster
+for preservation. The planner retains it only if every pinned defined and deferred
+tool's exact contract remains registered for that principal and its existing
+model, policy, persona and prefix checks still pass. Added registry entries wait
+for the next unpinned run; missing or changed contracts are not grandfathered
+(ADR-0266).
 Scope reduction alone preserves the prefix even across runs; revocation
 continues to be enforced at call time without rewriting its prefix.
 

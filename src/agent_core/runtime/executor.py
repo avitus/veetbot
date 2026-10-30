@@ -818,6 +818,13 @@ class RunExecutor:
                     raise RuntimeError("the pinned model provider has no registered adapter")
                 model_provider = selected
             typed = self._typed_task is not None and await self._typed_task(run, principal)
+            preserve_tool_pins = bool(
+                checkpoint_state.tool_pins_initialized
+                or checkpoint_state.pinned_tool_names
+                or checkpoint_state.pinned_tool_versions
+                or checkpoint_state.pinned_tool_specs
+                or checkpoint_state.pending_tool_calls
+            )
             context_plan = await self._context_planner.plan(
                 session,
                 agent,
@@ -827,13 +834,8 @@ class RunExecutor:
                 # A scheduled run may already have a seed checkpoint. Only
                 # initialized pins (including empty ones) or pending calls make
                 # this a continuation whose advertised tools must stay frozen.
-                refresh_authorization=not (
-                    checkpoint_state.tool_pins_initialized
-                    or checkpoint_state.pinned_tool_names
-                    or checkpoint_state.pinned_tool_versions
-                    or checkpoint_state.pinned_tool_specs
-                    or checkpoint_state.pending_tool_calls
-                ),
+                refresh_authorization=not preserve_tool_pins,
+                preserve_tool_pins=preserve_tool_pins,
             )
             if not owner_submitted:
                 require_scheduled_browser_tools(session, context_plan)
