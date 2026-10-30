@@ -106,12 +106,19 @@ class CockpitPrepareTool:
         except (ValueError, SyntaxError, AgentCoreError) as exc:
             return _failure("cockpit.install_invalid", str(exc))
 
-    async def _check(self, plan: WidgetInstallation, context: ToolExecutionContext) -> None:
-        """Reject stale, invalid or privacy-violating packages before any installation effect."""
+    async def _check(
+        self,
+        plan: WidgetInstallation,
+        context: ToolExecutionContext,
+        *,
+        resuming: bool = False,
+    ) -> None:
+        """Recheck constraints on every attempt; component services fence resumed revisions."""
         owner = context.principal
-        head = await self.cockpit.publication.head_revision(owner, plan.slug)
-        if (None if head is None else head.id) != plan.expected_revision:
-            raise ValueError("The widget changed. Read its head revision and prepare again.")
+        if not resuming:
+            head = await self.cockpit.publication.head_revision(owner, plan.slug)
+            if (None if head is None else head.id) != plan.expected_revision:
+                raise ValueError("The widget changed. Read its head revision and prepare again.")
         values: tuple[str, ...] = ()
         if plan.job is not None:
             job = plan.job
@@ -146,11 +153,17 @@ class CockpitPrepareTool:
                     saved = await uow.jobs.get(owner, job.slug)
                 except NotFoundError:
                     saved = None
-                if (None if saved is None else saved.live_revision_id) != job.expected_revision:
+                if (
+                    not resuming
+                    and (None if saved is None else saved.live_revision_id) != job.expected_revision
+                ):
                     raise ValueError("The job changed. Read its live revision and prepare again.")
                 if saved is not None and (
                     saved.archived
-                    or any(item.state == "pending_commit" for item in saved.revisions.values())
+                    or (
+                        not resuming
+                        and any(item.state == "pending_commit" for item in saved.revisions.values())
+                    )
                 ):
                     raise ValueError("The job is archived or has pending publication.")
                 names = await screen_names(uow, owner, self.jobs.publication.owner_names)
@@ -231,9 +244,9 @@ class CockpitInstallTool(CockpitPrepareTool):
             key = installation_key(context.principal, UUID(arguments["preparation_id"]))
             async with self.cockpit.uow_factory() as uow:
                 receipt = await uow.process_events.get_by_derivation(key)
+            # A receipt reuses approval, never mutable operator or privacy constraints.
+            await self._check(plan, context, resuming=receipt is not None)
             if receipt is None:
-                # Catch stale revisions or changed operator constraints before any publication.
-                await self._check(plan, context)
                 async with self.cockpit.uow_factory() as uow:
                     await uow.process_events.append(
                         ProcessEvent(

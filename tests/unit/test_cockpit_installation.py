@@ -341,3 +341,48 @@ async def test_approval_cannot_be_reused_for_another_preparation_or_owner() -> N
             await prepared_installation(
                 composition.uow_factory, other, invocation.session_id, arguments
             )
+
+
+@pytest.mark.parametrize("constraint", ["operator_hosts", "privacy"])
+async def test_installation_retry_rechecks_constraints_before_creating_components(
+    constraint: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A saved approval receipt cannot bypass constraints changed after interruption."""
+    async with prepared() as (composition, script, invocation, _, screen):
+        installer = cast(
+            CockpitInstallTool,
+            cast(
+                RegisteredTool, composition.tool_pipeline._registry.get("cockpit.install")
+            ).implementation,
+        )
+        arguments = reference(invocation)
+        add_install(script, arguments)
+        run_id = await composition.runs.submit("Install it.", session_id=invocation.session_id)
+        [approval] = await composition.approvals.list_pending(run_id=run_id)
+
+        async def interrupted(*args: Any) -> Any:
+            """Interrupt after the durable approval receipt but before component effects."""
+            raise ValueError("Installation interrupted before publication.")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(installer, "_install", interrupted)
+            await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        if constraint == "operator_hosts":
+            installer.operator_hosts = frozenset()
+        else:
+            screen.reject = True
+
+        add_install(script, arguments)
+        replay_run = await composition.runs.submit(
+            "Resume the approved installation.", session_id=invocation.session_id
+        )
+        assert await composition.approvals.list_pending(run_id=replay_run) == []
+        async with composition.uow_factory() as uow:
+            [replay] = await uow.invocations.list_for_run(replay_run, composition.principal)
+            assert replay.outcome.status.value == "failed"
+            assert await uow.jobs.list(composition.principal) == []
+            assert (
+                await uow.cockpit_widgets.list_widgets(composition.principal, include_deleted=True)
+                == []
+            )
+        assert (await composition.schedules.list(composition.principal, 10, None)).items == []

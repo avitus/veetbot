@@ -65,3 +65,10 @@ schedule limits and validation diagnostics. Focused job/workflow tests pass,
 as do the contract partition and PostgreSQL approval, publication, job-store
 and process-event checks. Reading lane A; no milestone gate is advanced.
 Production verification remains pending delivery.
+
+The review regression interrupts installation after its approval receipt, then
+removes an operator host or changes privacy screening before retry. Every attempt
+now rechecks constraints before creating components; only initial revision-head
+checks are omitted on resume, where the component publication services retain
+their idempotency and revision fences. Existing repeated-installation tests
+continue to cover successful completion without duplicate effects or approval.
