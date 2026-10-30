@@ -151,7 +151,7 @@ jobs:
 
   static:
     docker:
-      - image: cimg/python:3.12
+      - image: cimg/python:3.12-node
     resource_class: medium
     # Smarter Testing splits the static files by recorded timing (ADR-0230).
     parallelism: 2
