@@ -371,6 +371,20 @@ class JobPublication:
                         expected = None
                     else:
                         expected = saved.version
+                    if revision is None and saved.revisions:
+                        previous = saved.revisions.get(str(saved.live_revision_id)) or max(
+                            saved.revisions.values(), key=lambda item: item.created_at
+                        )
+                        # Retain source for restore, but pin its parent to the
+                        # deletion commit where the remote package is absent.
+                        revision = previous.model_copy(
+                            update={
+                                "id": self.ids.new_id(),
+                                "state": "archived",
+                                "commit_sha": commit.sha,
+                                "created_at": self.clock.now(),
+                            }
+                        )
                     # An imported owner decision supersedes older queued edits,
                     # including a remotely committed write whose receipt was lost.
                     revisions = {
@@ -382,7 +396,7 @@ class JobPublication:
                     if saved.live_revision_id is not None:
                         old = revisions[str(saved.live_revision_id)]
                         revisions[str(old.id)] = old.model_copy(
-                            update={"state": "archived" if revision is None else "superseded"}
+                            update={"state": "archived" if files is None else "superseded"}
                         )
                     if revision is not None:
                         revisions[str(revision.id)] = revision
@@ -395,7 +409,7 @@ class JobPublication:
                                     "live_revision_id": revision.id
                                     if revision
                                     else saved.live_revision_id,
-                                    "archived": revision is None,
+                                    "archived": files is None,
                                     "updated_at": self.clock.now(),
                                 }
                             ),

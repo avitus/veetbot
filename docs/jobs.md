@@ -78,6 +78,8 @@ retry. An imported human edit is screened and stored as a new revision.
 Existing run and schedule pins retain their original source.
 An imported edit or deletion supersedes older queued publications. A delayed
 receipt records the old commit without reactivating it or undoing that deletion.
+Imported deletions retain an archived revision at the deletion commit, so the
+normal restore flow can republish saved source without repository repair.
 
 Keep repositories, account identifiers and other personal values in private
 inputs. Propose a `job.run` access object with those inputs, exact hosts and

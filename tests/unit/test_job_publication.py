@@ -305,3 +305,56 @@ async def test_lost_publication_receipt_preserves_newer_imported_decisions(
     assert reconciled.revisions[str(pending.id)].commit_sha == committed
     assert reconciled.revisions[str(pending.id)].state == "superseded"
     assert await repository.head() == head
+
+
+@pytest.mark.parametrize("lost_response", [False, True])
+async def test_imported_deletion_can_be_restored_without_repository_repair(
+    lost_response: bool,
+) -> None:
+    """Both acknowledged and pending first publications retain a usable archive parent."""
+    factory, service, repository, _ = await setup()
+    owner = principal()
+    first = await service.write(
+        principal=owner,
+        slug="count-items",
+        source="def main(inputs, job): return 1",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=None,
+        request_key="first",
+    )
+    write = repository.write_widget
+
+    async def lose_response(*args: Any, **kwargs: Any) -> str:
+        await write(*args, **kwargs)
+        raise WidgetRepositoryUnavailableError("Lost response")
+
+    if lost_response:
+        repository.write_widget = lose_response  # type: ignore[method-assign]
+    await service.flush(owner)
+    repository.write_widget = write  # type: ignore[method-assign]
+    head = await repository.head()
+    assert head is not None
+    deleted = await repository.remove_widget("count-items", parent_sha=head, message="Stop job")
+    await service.import_changes(owner)
+    cast(FixedClock, service.clock).advance(timedelta(minutes=1))
+    await service.flush(owner)
+    async with factory() as uow:
+        archived = await uow.jobs.get(owner, "count-items")
+    assert archived.archived
+    restored = await service.write(
+        principal=owner,
+        slug="count-items",
+        source=first.source,
+        manifest=first.manifest,
+        expected_revision=archived.live_revision_id,
+        request_key="restore",
+    )
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        saved = await uow.jobs.get(owner, "count-items")
+    assert not saved.archived
+    assert saved.live_revision_id == restored.id
+    assert saved.revisions[str(restored.id)].state == "live"
+    assert archived.live_revision_id is not None
+    assert archived.revisions[str(archived.live_revision_id)].commit_sha == deleted
+    assert saved.revisions[str(first.id)].source == first.source
