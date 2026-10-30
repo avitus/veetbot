@@ -67,8 +67,10 @@ session (2,676 plans), the parked runs, the host environment, and Doppler:
    `tool_pin_mismatch`, as any roster-changing re-plan under a parked run does.
    The specified exceptions remain registered for pinned runs: `schedule.create`
    1.5.0 in Cockpit deployments and `schedule.list` 1.0.2 wherever scheduling is
-   enabled. Current versions are `schedule.create` 1.6.0 with Cockpit, 1.4.0
-   without it, and `schedule.list` 1.1.0 wherever scheduling is enabled.
+   enabled. With jobs disabled, current versions are `schedule.create` 1.6.0
+   with Cockpit, 1.4.0 without it, and `schedule.list` 1.1.0 wherever scheduling
+   is enabled. The separately accepted jobs MVP adds `schedule.create` 1.7.0
+   and retains its preceding contracts for pinned runs (ADR-0268).
 3. `agent memory reshape` and `SourceLearningService.reshape` are removed.
    Receipts are still read under both policy versions. A backup restored from
    before 2026-10-26 would bring back superseded `@1` rows as live rows; they

@@ -1126,6 +1126,7 @@ def test_ci_has_the_required_partitions() -> None:
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = {
+            "static": "cimg/python:3.12-node",
             "deploy-app": "cimg/base:stable",
             "deploy-nginx": "cimg/base:stable",
             "apple-ios": "cimg/base:stable",

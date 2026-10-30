@@ -4425,11 +4425,27 @@ Acceptance requires:
 The verified sequential ceiling does not move. These remain outside this
 milestone:
 
-- deterministic collectors that fetch outside data with no model run;
+- deterministic collectors were outside the original M35 scope; ADR-0268 now
+  admits agent-written jobs as an independent MVP extension;
 - a browser or television rendering;
 - WidgetKit, Lock Screen and Live Activities;
 - the assistant using MagicPath at runtime;
 - webhook-driven import.
+
+### Agent-written jobs MVP (ADR-0268)
+
+On 2026-10-29 the owner authorized [ADR-0268](../adr/0268-agent-written-jobs.md):
+saved Python programs written by the Veetbot agent, executed once or by the
+existing scheduler. A job may combine brokered HTTP, computation, explicit
+model calls and feed publication. Code-only work makes no model call; work
+requiring judgment can call the model gateway from code. The first deliveries
+are a code-only GitHub PR collector and a mixed code/model workflow.
+
+Reuse existing sandbox, approval, budget, scheduling and publication mechanisms.
+The MVP includes approved live trials and useful repair feedback. Widget renderer
+changes and broader hardening are not prerequisites. This admits only job-specific
+approved access, not general standing approval grants under roadmap B8. The
+verified milestone ceiling and existing gate requirements remain unchanged.
 
 ### Roadmap beyond Milestone 15
 

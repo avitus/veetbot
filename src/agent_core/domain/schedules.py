@@ -391,6 +391,19 @@ class Schedule(BaseModel):
         return self
 
 
+class AgentRunTask(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    kind: Literal["agent_run"] = "agent_run"
+
+
+class JobTask(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    kind: Literal["job"] = "job"
+    slug: str = Field(pattern=r"^[a-z][a-z0-9-]{1,47}$")
+    revision_id: UUID
+    grant_id: UUID
+
+
 class ScheduleRevision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -398,6 +411,11 @@ class ScheduleRevision(BaseModel):
     revision: int = Field(ge=1)
     title: str = Field(min_length=1, max_length=1024)
     instruction: str = Field(min_length=1, max_length=65_536)
+    task: AgentRunTask | JobTask = Field(
+        default_factory=AgentRunTask,
+        discriminator="kind",
+        exclude_if=lambda task: isinstance(task, AgentRunTask),
+    )
     agent_id: UUID
     agent_version: str = Field(min_length=1)
     policy_profile: str = Field(min_length=1)
@@ -421,14 +439,19 @@ class ScheduleRevision(BaseModel):
 
     @model_validator(mode="after")
     def execution_is_finite_and_cadence_is_consistent(self) -> ScheduleRevision:
+        """Validate finite limits and cadence, allowing zero model spend for jobs."""
         limits = self.limits
+        job = isinstance(self.task, JobTask)
+        if job and (self.call_plan is not None or self.browser_profile_id is not None):
+            raise ValueError("A job task has no browser binding or call plan.")
         if (
             limits.max_steps <= 0
-            or limits.max_model_calls <= 0
-            or limits.max_tool_calls <= 0
+            or limits.max_model_calls < (0 if job else 1)
+            or limits.max_tool_calls < (0 if job else 1)
             or limits.max_cost is None
             or not limits.max_cost.is_finite()
-            or limits.max_cost <= Decimal("0")
+            or limits.max_cost < Decimal("0")
+            or (not job and limits.max_cost == Decimal("0"))
         ):
             raise ValueError("scheduled run limits must all be finite positive values")
         if limits.deadline_at is not None:
@@ -449,6 +472,11 @@ class ScheduleDefinition(BaseModel):
 
     title: str = Field(min_length=1, max_length=1024)
     instruction: str = Field(min_length=1, max_length=65_536)
+    task: AgentRunTask | JobTask = Field(
+        default_factory=AgentRunTask,
+        discriminator="kind",
+        exclude_if=lambda task: isinstance(task, AgentRunTask),
+    )
     agent_id: UUID
     agent_version: str = Field(min_length=1)
     policy_profile: str = Field(min_length=1)
@@ -464,14 +492,19 @@ class ScheduleDefinition(BaseModel):
 
     @model_validator(mode="after")
     def execution_is_finite(self) -> ScheduleDefinition:
+        """Require finite run limits while permitting jobs that make no model or tool calls."""
         limits = self.limits
+        job = isinstance(self.task, JobTask)
+        if job and (self.call_plan is not None or self.browser_profile_id is not None):
+            raise ValueError("A job task has no browser binding or call plan.")
         if (
             limits.max_steps <= 0
-            or limits.max_model_calls <= 0
-            or limits.max_tool_calls <= 0
+            or limits.max_model_calls < (0 if job else 1)
+            or limits.max_tool_calls < (0 if job else 1)
             or limits.max_cost is None
             or not limits.max_cost.is_finite()
-            or limits.max_cost <= Decimal("0")
+            or limits.max_cost < Decimal("0")
+            or (not job and limits.max_cost == Decimal("0"))
         ):
             raise ValueError("scheduled run limits must all be finite positive values")
         if limits.deadline_at is not None:

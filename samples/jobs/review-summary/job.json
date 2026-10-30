@@ -1,0 +1,11 @@
+{
+  "title": "Review priorities",
+  "input_schema": {
+    "type": "object",
+    "properties": {"url": {"type": "string", "format": "uri"}},
+    "required": ["url"],
+    "additionalProperties": false
+  },
+  "calls": ["http.request", "model.complete"],
+  "feeds": []
+}

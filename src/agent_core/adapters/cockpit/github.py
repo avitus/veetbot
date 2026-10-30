@@ -26,12 +26,9 @@ import httpx
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from agent_core.adapters.cockpit.git import BRANCH_ROOT_MESSAGE, touched_widgets
+from agent_core.adapters.cockpit.git import BRANCH_ROOT_MESSAGE, package_rules, touched_widgets
 from agent_core.domain.cockpit import (
-    WIDGET_BRANCH_DIRECTORY,
-    WIDGET_BRANCH_README,
     commit_trailers,
-    is_widget_file,
     is_widget_slug,
 )
 from agent_core.ports.cockpit import (
@@ -155,10 +152,13 @@ class GitHubAppTokens:
         private_key_pem: bytes,
         clock: Clock,
         api_url: str = GITHUB_API_URL,
+        read_only: bool = False,
     ) -> None:
+        """Bind the GitHub client to its configured credentials and repository access."""
         key = serialization.load_pem_private_key(private_key_pem, password=None)
         if not isinstance(key, rsa.RSAPrivateKey):
             raise ValueError("a GitHub App key is an RSA private key")
+        self._read_only = read_only
         self._client = client
         self._app_id = app_id
         self._installation_id = installation_id
@@ -185,12 +185,22 @@ class GitHubAppTokens:
         self._token = None
 
     async def token(self) -> str:
+        """Reuse a valid installation token or request one with the configured permissions."""
         if self._token is not None and self._clock.now() < self._expires_at - _TOKEN_MARGIN:
             return self._token
         url = f"{self._api_url}/app/installations/{self._installation_id}/access_tokens"
         try:
             response = await self._client.post(
                 url,
+                json=(
+                    {
+                        "permissions": dict.fromkeys(
+                            ("metadata", "pull_requests", "checks", "statuses", "contents"), "read"
+                        )
+                    }
+                    if self._read_only
+                    else None
+                ),
                 headers={
                     "Authorization": f"Bearer {self._app_jwt()}",
                     "Accept": "application/vnd.github+json",
@@ -219,12 +229,17 @@ class GitHubWidgetRepository:
         *,
         repository: str,
         branch: str = DEFAULT_WIDGET_BRANCH,
+        package_kind: str = "widget",
         api_url: str = GITHUB_API_URL,
     ) -> None:
+        """Bind the GitHub client to its configured credentials and repository access."""
         if not _REPOSITORY.fullmatch(repository):
             raise ValueError("the widget repository is owner/name")
         if not _BRANCH.fullmatch(branch):
             raise ValueError("the widget branch must be a branch under cockpit/")
+        if package_kind == "job" and branch != "cockpit/jobs":
+            raise ValueError("Jobs publish only to cockpit/jobs.")
+        self._directory, self._readme, self._file_allowed = package_rules(package_kind)
         self._client = client
         self._tokens = tokens
         self._repo_url = f"{api_url.rstrip('/')}/repos/{repository}"
@@ -291,10 +306,11 @@ class GitHubWidgetRepository:
         }
 
     async def ensure_branch(self) -> str:
+        """Find the package branch or initialize its isolated history."""
         head = await self.head()
         if head is not None:
             return head
-        readme = f"{WIDGET_BRANCH_DIRECTORY}/README.md"
+        readme = f"{self._directory}/README.md"
         tree = await self._request(
             "POST",
             "/git/trees",
@@ -304,7 +320,7 @@ class GitHubWidgetRepository:
                         "path": readme,
                         "mode": "100644",
                         "type": "blob",
-                        "content": WIDGET_BRANCH_README,
+                        "content": self._readme,
                     }
                 ]
             },
@@ -368,12 +384,15 @@ class GitHubWidgetRepository:
     async def write_widget(
         self, slug: str, files: Mapping[str, str], *, parent_sha: str, message: str
     ) -> str:
-        if not is_widget_slug(slug) or not files or not all(is_widget_file(name) for name in files):
-            raise WidgetPathRefusedError(
-                f"a write must stay inside {WIDGET_BRANCH_DIRECTORY}/<slug>/"
-            )
+        """Write allowed package files and advance the branch without overwriting newer work."""
+        if (
+            not is_widget_slug(slug)
+            or not files
+            or not all(self._file_allowed(name) for name in files)
+        ):
+            raise WidgetPathRefusedError(f"a write must stay inside {self._directory}/<slug>/")
         await self._expect(parent_sha)
-        prefix = f"{WIDGET_BRANCH_DIRECTORY}/{slug}/"
+        prefix = f"{self._directory}/{slug}/"
         existing = await self._tree_paths(await self._commit_tree(parent_sha))
         written = {f"{prefix}{name}": text for name, text in files.items()}
         entries: list[dict[str, Any]] = [
@@ -388,12 +407,11 @@ class GitHubWidgetRepository:
         return await self._commit_change(parent_sha, entries, message)
 
     async def remove_widget(self, slug: str, *, parent_sha: str, message: str) -> str:
+        """Commit removal of one package against the caller's expected branch head."""
         if not is_widget_slug(slug):
-            raise WidgetPathRefusedError(
-                f"a removal must name one {WIDGET_BRANCH_DIRECTORY}/<slug>/"
-            )
+            raise WidgetPathRefusedError(f"a removal must name one {self._directory}/<slug>/")
         await self._expect(parent_sha)
-        prefix = f"{WIDGET_BRANCH_DIRECTORY}/{slug}/"
+        prefix = f"{self._directory}/{slug}/"
         existing = await self._tree_paths(await self._commit_tree(parent_sha))
         removed = sorted(path for path in existing if path.startswith(prefix))
         if not removed:
@@ -404,9 +422,10 @@ class GitHubWidgetRepository:
         return await self._commit_change(parent_sha, entries, message)
 
     async def read_widget(self, slug: str, *, at: str) -> dict[str, str] | None:
+        """Retrieve allowed files for one package at the selected commit."""
         if not is_widget_slug(slug) or not _COMMIT_SHA.fullmatch(at):
             return None
-        prefix = f"{WIDGET_BRANCH_DIRECTORY}/{slug}/"
+        prefix = f"{self._directory}/{slug}/"
         paths = await self._tree_paths(await self._commit_tree(at))
         files: dict[str, str] = {}
         for path, blob in sorted(paths.items()):
@@ -418,6 +437,7 @@ class GitHubWidgetRepository:
         return files or None
 
     async def _described(self, sha: str, parent_sha: str | None, message: str) -> WidgetCommit:
+        """Describe changed package slugs and flag changes outside the package namespace."""
         response = await self._request("GET", f"/commits/{sha}")
         files = response.json().get("files", [])
         paths: list[str] = []
@@ -425,7 +445,7 @@ class GitHubWidgetRepository:
             paths.append(str(item["filename"]))
             if item.get("previous_filename"):
                 paths.append(str(item["previous_filename"]))
-        slugs, outside = touched_widgets(paths)
+        slugs, outside = touched_widgets(paths, self._directory)
         return WidgetCommit(
             sha=sha,
             parent_sha=parent_sha,

@@ -312,6 +312,6 @@ implementation without one.
 - [ADR-0265: The first family page reaches every tier of the family (Proposed)](0265-the-first-family-page-reaches-every-tier.md)
 - [ADR-0266: Spent one-time repairs are retired (Accepted)](0266-spent-one-time-repairs-are-retired.md)
 - [ADR-0267: The deferred tool index holds fifty entries and 3,000 tokens (Accepted)](0267-deferred-index-headroom.md)
-- [ADR-0268: Jobs the agent writes, run once or on a schedule (Proposed)](0268-agent-written-jobs.md)
+- [ADR-0268: Jobs the agent writes, run once or on a schedule (Accepted)](0268-agent-written-jobs.md)
 
 - [ADR-0269: Semantic admission falls back to sparse recall at startup](0269-semantic-admission-falls-back-at-startup.md)

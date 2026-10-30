@@ -1,13 +1,16 @@
 # ADR-0268: Jobs the agent writes, run once or on a schedule
 
-- Status: Proposed. The owner set the direction on 2026-10-27 and 2026-10-29:
+- Status: Accepted for MVP implementation on 2026-10-29. The owner set the
+  direction on 2026-10-27 and clarified the MVP on 2026-10-29:
   - the platform owns scheduling;
   - the Veetbot agent writes the code a job runs, for one-time and scheduled
     jobs;
   - that code may mix API calls, computation and model calls;
   - for now all of it lives in the public repository.
 
-  The owner has not yet accepted this decision or authorized the work.
+  The owner explicitly instructed: update this ADR and begin implementation.
+  Production validation is still pending; implementation authorization does not
+  authorize a pull request, deployment or credential installation.
 - Date: 2026-10-29
 - Amends:
   - ADR-0240 decision 8, which defers deterministic collectors;
@@ -18,11 +21,11 @@
 - Answers: Cockpit open question 2 (`cockpit.md`, Open questions). For jobs
   only, it also answers sandbox open question 3 (who chooses egress
   destinations).
-- Scope: a job package on a public branch, a new schedule task kind, one
-  deferred builtin tool, a broker that a sandboxed job calls, and one
-  owner-approved credential. This becomes a new workstream once the owner
-  authorizes it in project state.
-- Detailed design, once accepted: `docs/plan/scheduling.md`,
+- Scope: a job package on a public branch, a new schedule task kind,
+  deferred authoring and execution tools, a sandbox broker and one
+  owner-approved credential. This is an independently authorized MVP workstream
+  recorded in project state; it does not advance a milestone or gate.
+- Detailed design: `docs/plan/scheduling.md`,
   `docs/plan/sandbox-isolation.md`, `docs/plan/cockpit.md`,
   `docs/plan/builtin-tools.md`, `docs/plan/policy-and-approvals.md`
 
@@ -55,6 +58,44 @@ In chat the gap is the same. `sandbox.run_command` runs throwaway commands
 with no network. The agent cannot save a program, give it approved access to a
 service, and run it again later.
 
+## MVP scope and delivery
+
+The agent chooses the appropriate combination of code and model calls for the
+owner's task. The failure being repaired is unnecessary model reasoning over
+fixed steps, not the presence of model calls. Code handles structured reads,
+filtering, counts and formatting; a job calls a model when interpretation,
+summarization or other judgment is useful. Both paths belong in the MVP. A
+model is never invoked automatically merely because a job starts or finishes.
+
+The first complete workflow is: the owner asks Veetbot for a GitHub pull request
+monitor; Veetbot writes and tests its program, runs it once, schedules it every
+five minutes and publishes into the existing widget's feed. A second example
+fetches review text with code, asks a model for a summary and publishes the
+result. These are examples of the general job capability, not special platform
+collectors. The model budget defaults to zero for a code-only grant; an approved
+positive budget enables model calls in a mixed job.
+
+Reuse the existing execution service and bridge transport, scheduler, gateway,
+feed validation, approval and budget mechanisms, and public-code publication
+pipeline. Keep their existing protections. Do not redesign the widget renderer,
+build a general credential UI, add advanced grant administration, transactional
+feed publication, sophisticated replay recovery, shared rate-limit coordination
+or a comprehensive fixture framework as prerequisites for the MVP. Later work
+can strengthen these where real use demonstrates the need.
+
+Implement in this order:
+
+1. Execute Python through the existing sandbox bridge. Prove a code-only job
+   makes no model request and a mixed job makes exactly the model requests its
+   code asks for. Return the result and useful errors to the caller.
+2. Add saved packages and the four broker operations using existing platform
+   services, the GitHub reader credential, and private approved inputs/access.
+   Expose authoring and one-time execution to the production Veetbot agent.
+3. Add the job task to the existing scheduler and connect the existing widget.
+4. Verify both workflows in production. Pause the old model-driven collector
+   only after the job publishes a working feed; retain that schedule for manual
+   fallback. Never deliberately run both collectors against that feed.
+
 ## Decision
 
 1. **A job is a saved program the agent writes.** A job package holds:
@@ -70,21 +111,14 @@ service, and run it again later.
    - The Cockpit GitHub App's repository rules widen to let it write this
      branch too, and nothing else.
    - Jobs reuse the widget pipeline: the commit outbox, commit before activate,
-     revert, archive and restore, and the import of human commits. Human edits
-     first enter a private working copy and pass the same privacy screen before
-     publication; direct human pushes to the public jobs branch are disabled.
-     The importer rechecks published revisions as defense in depth, not as the
-     first screen. The owner and coding agents can edit jobs through this path.
+     revert, archive and restore, and the import of human commits. The owner
+     and Claude Code can therefore edit a job like any code.
    - Each revision is a commit. The platform keeps its own copy of every
      revision a schedule or run is pinned to, so a GitHub outage delays edits
      but never stops a run.
 3. **Public code, private values.** A package must contain no personal data,
    as widgets must not.
-   - The privacy screen that checks widgets checks job packages too. Its
-     comparison set includes server-supplied names, private settings, commit
-     messages, grant input values, and all personal values supplied by the owner
-     in the authoring context, including values supplied before a grant exists.
-     Missing comparison context refuses publication; it is not an empty set.
+   - The privacy screen that checks widgets checks job packages too.
    - Repository names, account ids, addresses and every other personal value
      arrive as inputs.
    - The **grant** is private and is held with the owner's approval. It
@@ -103,8 +137,9 @@ service, and run it again later.
    - Its only channel out is a per-run socket to a job broker. The broker runs
      outside the execution service, so the execution service still holds
      nothing worth stealing.
-   - The job uses a small preinstalled library, `veetbot_job`. Package
-     installation stays denied.
+   - The job exports `main(inputs, job)`. The preinstalled job library supplies
+     the `job` context with the four operations below. Package installation
+     stays denied.
 
    The library has four calls, and each is a broker request:
 
@@ -121,12 +156,9 @@ service, and run it again later.
 5. **Two ways to run a job.**
    - **Once.** From a chat, `job.run` runs a pinned revision with inputs under
      a grant. It returns the result and the log to the agent as an untrusted
-     tool result. A run that needs no host, credential or model asks no
-     approval. A run that needs any of them asks once for the exact grant and
-     pinned revision together. Later one-time runs under that same approved
-     pair do not ask again. A different revision requires a new execution
-     approval, even if its publication was allowed without a prompt or its
-     earlier development was influenced by untrusted content.
+     tool result. A run that needs no host, credential, feed or model asks no
+     approval. A run that needs any of them asks once, for that grant, and
+     later one-time runs under the same grant do not ask again.
    - **On a schedule.** A schedule revision's task is either `agent_run`
      (today's instruction and pinned agent, unchanged) or `job` (a pinned
      revision and a grant). Every cadence applies, including `ONCE` at a
@@ -138,39 +170,21 @@ service, and run it again later.
      words.
 6. **Code changes are governed like widget changes.**
    - A code commit from the owner's own turn ships without a per-change
-     approval. The approval rule is an exact-name allow for the publication
-     side effect, the rule widgets use.
+     approval. The approval rule is an exact-name allow for `job.manage`
+     under the publication side effect. Other publication tools keep their rules.
    - A commit from a turn influenced by untrusted content asks.
    - A change that widens a grant always asks again. That includes a new host,
      a credential, a feed or a higher limit.
    - A schedule stays pinned to its revision until the owner approves moving
      it, as schedules stay pinned to agent versions today.
-7. **Who chooses egress.** The broker enforces both the operator-configured
-   allowlist and an approved `SANDBOX_NETWORK` resolution, as ADR-0029 requires,
-   as well as the grant's exact host list. There is no default all-public-host
-   allowance. Public HTTPS on port 443, hostname and address-denylist checks
-   further restrict admitted destinations. The model can propose a host, but
-   owner approval cannot bypass the operator allowlist or the policy resolution.
-   A missing or expired resolution refuses the request. This preserves sandbox
-   rule 6: a destination is never model-settable.
+7. **Who chooses egress.** The operator sets a superset. Its default is public
+   HTTPS on port 443, with the existing hostname and address-denylist checks.
+   The owner approves each grant's exact host list, and the broker enforces
+   both. The model can propose a host, and only the owner's approval admits
+   it. This keeps sandbox rule 6: a destination is never model-settable.
 8. **Credentials stay with the platform.** A credential is named in the grant
-   and bound to one trusted host. The broker adds it to a request. Every
-   credential-bearing request requires HTTPS, even if an
-   operator otherwise permits HTTP. Redirects must preserve HTTPS and the exact
-   credential-bound host and pass the same destination checks; a downgrade or
-   different host is refused before forwarding any credential.
-
-   Before returning any response to a job, the broker buffers it within a fixed
-   size limit, decompresses it within that limit, and checks response headers
-   and body for the bound secret, including JSON/URL escaping and base64 forms.
-   A match, unsupported encoding, or size limit refuses the response with a
-   fixed diagnostic; rejected bytes never enter job logs, results, events or
-   feeds. The broker must not log raw credential-bearing requests or responses.
-   This protects against direct and supported-encoding echoes, not arbitrary
-   transformations by a malicious endpoint: credential hosts remain trusted
-   security principals, and adding another host requires its own assessment.
-
-   The first credential is a read-only GitHub App:
+   and bound to one host. The broker adds it to a request, and the job's code
+   never sees it. The first credential is a read-only GitHub App:
    - permissions `metadata`, `pull_requests`, `checks`, `statuses` and
      `contents`, all read-only;
    - installed only on repositories the owner picks;
@@ -182,12 +196,13 @@ service, and run it again later.
    decision.
 9. **The agent writes, tests and fixes jobs.** A deferred builtin,
    `job.manage`, creates, updates, archives and restores packages. A trial
-   action runs a revision once with no grant. That gives it no host, no
-   credential and no model, and its feed publishes go to a preview. The agent
-   sees the result and the log, and a trial asks no approval. `job.run`,
-   `schedule.create` and `schedule.update` gain the job task. Contract retirement
-   follows ADR-0266: no historical registrations, a builder bump for re-planning,
-   and refusal of missing pins on parked runs.
+   runs the same program and returns its result and useful errors for repair.
+   With no grant it has no host, credential or model; with approved access it
+   can exercise real HTTP and model calls. Trial feed publishes go to a preview.
+   A trial never grants access itself. The agent can fix its code and retry
+   without a separate testing framework. `job.run`,
+   `schedule.create` and `schedule.update` gain the job task. Earlier tool
+   versions stay registered unchanged for pinned runs.
 10. **Outcomes.**
     - A run succeeds when the job returns. It fails when it raises an error,
       exceeds a limit or times out.
@@ -204,8 +219,9 @@ service, and run it again later.
 
 - Fixed work costs no model tokens. Rewritten as a job, the GitHub widget makes
   one GraphQL query per repository and no model call. It can refresh every
-  five minutes for USD 0 in model cost and 24 queries an hour per repository,
-  well inside the 5,000 an hour an authenticated App gets.
+  five minutes for USD 0 in model cost and twelve scheduled executions an hour.
+  Pagination and refresh on entry may add queries. GitHub GraphQL limits are
+  measured in points per installation; actual usage is checked in the smoke.
 - Judgment stays available where it pays. A job can fetch a thread and call
   `model.complete` once to summarize it, at a cost its grant caps. Briefings
   and research stay agent runs.
@@ -231,30 +247,19 @@ service, and run it again later.
 - A job sandbox has networking off. A direct connection from job code fails at
   the network namespace.
 - The broker refuses:
-  - a host outside the grant or the operator allowlist;
-  - a missing, expired or mismatched `SANDBOX_NETWORK` approval;
+  - a host outside the grant or the operator superset;
   - a private or metadata address;
   - a second resolution.
-- HTTP credential requests and redirect downgrades are refused, including
-  when the operator's general egress configuration permits HTTP. Redirects
-  outside the credential's exact host are refused before credential forwarding.
-- Reusing an approved grant with a different one-time job revision requires
-  a fresh execution approval; publication approval never substitutes for it.
 - A credential appears only in the broker's outbound request. It never
   appears in the sandbox environment, the job's result, the log, an event, a
-  feed or the repository. Canary tests cover direct, JSON/URL-escaped and base64
-  credential echoes in response headers and bodies, compressed echoes, unsupported
-  encodings and oversized responses; refused bytes must reach none of these sinks.
-- Before any public commit, the privacy screen rejects a job package that
-  contains a personal value. Required adversarial fixtures cover a repository
-  slug supplied before a grant exists and copied into code, a grant input copied
-  into code, missing comparison context, and a human edit that would otherwise
-  publish before import. Each rejection leaves no public commit or Git history.
-  These are implementation gates for this proposed ADR, not executed fixtures.
+  feed or the repository. The test uses a canary credential.
+- The privacy screen rejects a job package that contains a personal value,
+  using the widget screen's adversarial fixtures.
 - `model.complete` charges the run's budget, stops at the grant's per-run cap,
   and offers no tools.
 - `feed.publish` refuses a feed the grant does not allow.
-- A trial reaches no host, no credential and no model.
+- A trial without a grant reaches no host, credential or model; an approved
+  trial uses only its approved access and publishes only to its preview.
 - Widening a grant asks for approval, and so does a commit from a turn
   influenced by untrusted content. A code-only commit from the owner's own
   turn does not.
@@ -267,14 +272,109 @@ service, and run it again later.
 
 ## Validation
 
-The owner accepts this decision when both of these have happened:
+This decision is accepted for implementation. MVP production acceptance remains
+pending until all of these have happened:
 
 - The GitHub widget runs as a scheduled job in production for a day, with:
   - every snapshot at most 1.5 times its interval old;
   - no model cost recorded for that schedule;
   - no unexpected broker refusal.
-- One one-time job written by the agent in a chat runs under an approved
+- One one-time job written by the Veetbot agent in a chat runs under an approved
   grant, and runs again without asking.
+- A mixed job fetches structured data with code, explicitly calls a model for
+  useful judgment, then processes and returns or publishes its answer. Its
+  recorded model calls match those requested by the code; there is no automatic
+  model planning or synthesis around execution.
+- The owner sees the actual widget update, and the agent receives useful errors
+  from an unsuccessful trial so it can repair and rerun the job.
+
+The production-day check evaluates the feature's usefulness. It is not a
+prerequisite for starting implementation, and it does not pull deferred
+hardening into the MVP.
+
+## Implementation checkpoint — 2026-10-29
+
+The MVP is implemented on `agent-jobs`, behind the default-off flag. It now
+includes saved revisions and private grants in memory and PostgreSQL, a
+separate job publication namespace, commit-before-activate and human import,
+archive/restore/revert, the four broker operations, explicit model budget
+accounting, agent tools and pinned job schedules. The maintenance role owns
+publication; run workers own the lazy GitHub reader credential. No new runtime
+dependency was introduced.
+
+`job.manage` and `job.run` are deferred tools. The exact-name publication rule
+admits generic code authored for an owner turn, retaining approval escalation
+when the turn consumes untrusted content. This rule uses a separate jobs policy
+identity; unrelated model and memory evidence keeps its original policy binding.
+Existing grants can be reused; new external access and expansions ask for
+approval. Schedule creation version
+1.7.0 and update version 1.2.0 support job pins while earlier versions keep
+working. A job run bypasses model planning and final synthesis; only explicit
+SDK completions use the model gateway and ordinary run ledger.
+Failed completions stop the job after recording billed usage, so caught errors
+cannot reuse the grant allowance. Job tools use existing non-idempotent recovery:
+an interruption after the effect watermark yields an uncertain outcome instead
+of replaying effects, including approved trial HTTP calls. No new recovery
+subsystem is introduced.
+
+The generic packages under `samples/jobs/` demonstrate a code-only GitHub PR
+collector and mixed review summarization. The collector's final mapping must
+match the existing widget's feed schema at activation. [The operator guide](../jobs.md)
+covers credentials, branch rules, private inputs, publication state, trials,
+scheduling, rollout and rollback. Credential installation, delivery and the
+production-day validation remain unperformed and require owner authorization.
+No milestone or gate moves, and the deferred hardening remains deferred.
+
+Verification covers process execution and the sandbox contract, publication and
+lost-response reconciliation, privacy rejection, local revision execution,
+HTTP resolution/credential boundaries, explicit model accounting, feed previews,
+grant reuse, approval escalation, typed schedule materialization, grant repins,
+zero-model execution and flag-off refusal. PostgreSQL verification runs the
+same job store contract and checks namespace isolation, upgrade/downgrade and
+data-loss refusal. The red tests first failed on missing execution and services,
+wrong namespace, missing schedule fields, redundant approval, a swallowed
+bridge limit and a repin retaining the old zero-model limit. No existing test
+was weakened to obtain passing evidence.
+
+Final verification results are recorded in project state. These are local
+synthetic checks, not live GitHub, provider, gVisor or production acceptance
+claims. The earlier unrelated static failure,
+`test_family_probe_checks_the_names_the_overview_delivers`, occurred on the
+original development base; the isolated main-based PR passes the full static
+partition, as recorded in project state.
+
+## Integration with the recall release
+
+PR 210 delivered the separately accepted MVP while PR 211 was reviewing the
+older proposal. The accepted MVP and its implementation checkpoint above
+supersede that proposal's unaccepted scope and activation claims. This recall
+release does not enable jobs, install its credential, or perform its production
+acceptance. The jobs flag must remain off for this release's recall admission.
+
+The following security requirements identified in review of the earlier
+proposal remain open for the jobs activation assessment; the existing MVP tests
+do not establish them:
+
+- Screen all owner-supplied private authoring values and grant inputs before
+  public publication, including human edits; a post-publication import screen
+  cannot remove a prior public disclosure.
+- Bind reuse of external execution authority to the approved code revision,
+  and retain the operator destination restriction and applicable sandbox policy
+  authorization. Publication approval alone must not grant execution authority.
+- Refuse credential echoes, including supported encoded forms, before any
+  response enters results, logs, events or feeds. Direct JSON-string redaction
+  is not evidence for arbitrary encoded echoes. Credential hosts remain trusted
+  security principals; HTTP and redirects remain refused.
+
+These are retained requirements, not completed fixes or permission to activate
+jobs. A subsequent jobs activation must resolve them with evidence or obtain
+an explicit owner decision on any proposed change to the security contract.
+The current recall release preserves the accepted MVP behind its disabled flag.
+
+Tool versions introduced by jobs are retained for pinned runs. ADR-0266 retires
+only the audited obsolete contracts it names; it does not retire the new jobs
+schedule contracts. An unfinished run keeps its exact registered contracts
+across the builder bump under the planner's existing identity checks.
 
 ## Alternatives considered
 

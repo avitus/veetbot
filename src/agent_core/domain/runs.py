@@ -29,6 +29,7 @@ class RunStatus(StrEnum):
 
 class RunKind(StrEnum):
     INTERACTIVE = "interactive"
+    JOB = "job"
     SKILL_REVIEW = "skill_review"
     DELEGATED = "delegated"
 
