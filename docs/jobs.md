@@ -68,6 +68,12 @@ Programs receive no tool roster, credentials or direct network access.
 
 ## Create a widget with one approval
 
+Enable Cockpit and both scheduling roles with `AGENT_COCKPIT_ENABLED=1`,
+`AGENT_SCHEDULE_API_ENABLED=1` and `AGENT_SCHEDULE_WORKER_ENABLED=1`, in addition
+to jobs. The owner's scopes must include `cockpit.write,jobs.write,jobs.run`
+and `schedule.write`. Both installation tools require all four scopes and all
+these features, even for a widget-only proposal without a collector.
+
 Ask Veetbot to prepare the complete widget and collector. It uses
 `cockpit.prepare` to check the packages and private access, repairs any errors,
 and calls `cockpit.install` only when ready. One card summarizes the public
