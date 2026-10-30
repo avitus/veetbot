@@ -41,7 +41,11 @@ own words, named someone they are already tied to.
    and stays a merge suggestion (ADR-0125).
 2. **Only the owner's statements qualify.** A name read from mail or another
    source keeps its context rule unchanged. An ended tie (`valid_to` in the
-   past) or an unresolved edge does not qualify a candidate.
+   past), a tie starting after the statement's time, or an unresolved edge does
+   not qualify a candidate. The supporting belief must pass the governed owner
+   relationship query's lifecycle, validity and sensitivity checks. A lone
+   unqualified display-name candidate can qualify through that evidence; a
+   truncated or colliding name set cannot.
 3. **Nothing else moves.** Formation, the duplicate sweep, merge suggestions,
    the P01 gate and every other resolution step are unchanged. A restated tie
    now lands on the known person, where formation's own reinforcement rules

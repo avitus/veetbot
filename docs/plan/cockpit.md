@@ -1169,6 +1169,8 @@ and a runbook covering:
 14. **The stream resumes and resets.** The stream resumes from
     `Last-Event-ID` without loss or duplication, sends `stream.reset` past
     retention, heartbeats, closes at its lifetime, and never crosses tenants.
+    Settings saves completed after a native client connection reset cannot change
+    the new connection's feedback, toast or open detail.
     Registered as `gate.cockpit.stream_resume_and_reset`, case. **M35.**
 15. **Off means absent.** With `AGENT_COCKPIT_ENABLED=0` no Cockpit route,
     tool, builder manager, outbox, importer or projector exists, and the

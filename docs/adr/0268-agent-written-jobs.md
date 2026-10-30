@@ -70,14 +70,21 @@ service, and run it again later.
    - The Cockpit GitHub App's repository rules widen to let it write this
      branch too, and nothing else.
    - Jobs reuse the widget pipeline: the commit outbox, commit before activate,
-     revert, archive and restore, and the import of human commits. The owner
-     and Claude Code can therefore edit a job like any code.
+     revert, archive and restore, and the import of human commits. Human edits
+     first enter a private working copy and pass the same privacy screen before
+     publication; direct human pushes to the public jobs branch are disabled.
+     The importer rechecks published revisions as defense in depth, not as the
+     first screen. The owner and coding agents can edit jobs through this path.
    - Each revision is a commit. The platform keeps its own copy of every
      revision a schedule or run is pinned to, so a GitHub outage delays edits
      but never stops a run.
 3. **Public code, private values.** A package must contain no personal data,
    as widgets must not.
-   - The privacy screen that checks widgets checks job packages too.
+   - The privacy screen that checks widgets checks job packages too. Its
+     comparison set includes server-supplied names, private settings, commit
+     messages, grant input values, and all personal values supplied by the owner
+     in the authoring context, including values supplied before a grant exists.
+     Missing comparison context refuses publication; it is not an empty set.
    - Repository names, account ids, addresses and every other personal value
      arrive as inputs.
    - The **grant** is private and is held with the owner's approval. It
@@ -135,11 +142,14 @@ service, and run it again later.
      a credential, a feed or a higher limit.
    - A schedule stays pinned to its revision until the owner approves moving
      it, as schedules stay pinned to agent versions today.
-7. **Who chooses egress.** The operator sets a superset. Its default is public
-   HTTPS on port 443, with the existing hostname and address-denylist checks.
-   The owner approves each grant's exact host list, and the broker enforces
-   both. The model can propose a host, and only the owner's approval admits
-   it. This keeps sandbox rule 6: a destination is never model-settable.
+7. **Who chooses egress.** The broker enforces both the operator-configured
+   allowlist and an approved `SANDBOX_NETWORK` resolution, as ADR-0029 requires,
+   as well as the grant's exact host list. There is no default all-public-host
+   allowance. Public HTTPS on port 443, hostname and address-denylist checks
+   further restrict admitted destinations. The model can propose a host, but
+   owner approval cannot bypass the operator allowlist or the policy resolution.
+   A missing or expired resolution refuses the request. This preserves sandbox
+   rule 6: a destination is never model-settable.
 8. **Credentials stay with the platform.** A credential is named in the grant
    and bound to one host. The broker adds it to a request, and the job's code
    never sees it. The first credential is a read-only GitHub App:
@@ -202,14 +212,19 @@ service, and run it again later.
 - A job sandbox has networking off. A direct connection from job code fails at
   the network namespace.
 - The broker refuses:
-  - a host outside the grant or the operator superset;
+  - a host outside the grant or the operator allowlist;
+  - a missing, expired or mismatched `SANDBOX_NETWORK` approval;
   - a private or metadata address;
   - a second resolution.
 - A credential appears only in the broker's outbound request. It never
   appears in the sandbox environment, the job's result, the log, an event, a
   feed or the repository. The test uses a canary credential.
-- The privacy screen rejects a job package that contains a personal value,
-  using the widget screen's adversarial fixtures.
+- Before any public commit, the privacy screen rejects a job package that
+  contains a personal value. Required adversarial fixtures cover a repository
+  slug supplied before a grant exists and copied into code, a grant input copied
+  into code, missing comparison context, and a human edit that would otherwise
+  publish before import. Each rejection leaves no public commit or Git history.
+  These are implementation gates for this proposed ADR, not executed fixtures.
 - `model.complete` charges the run's budget, stops at the grant's per-run cap,
   and offers no tools.
 - `feed.publish` refuses a feed the grant does not allow.

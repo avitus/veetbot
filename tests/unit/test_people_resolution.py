@@ -4,9 +4,11 @@ from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
+import pytest
+
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.people import InMemoryPeopleStore
-from agent_core.domain.memory import Sensitivity
+from agent_core.domain.memory import MemoryStatus, Sensitivity
 from agent_core.domain.people import (
     PeopleEndpoint,
     Person,
@@ -14,7 +16,11 @@ from agent_core.domain.people import (
     RelationshipAssertion,
 )
 from agent_core.memory.people import IdentityResolution, resolve_identity
-from tests.contract.support import NOW, principal
+from agent_core.ports.memory import MemoryStore
+from agent_core.ports.people import PeopleStore
+from agent_core.ports.persistence import UnitOfWorkFactory
+from tests.contract.memory_fixtures import memory
+from tests.contract.support import NOW, memory_uow_factory, principal
 
 
 async def test_shared_identifiers_and_names_never_merge_people() -> None:
@@ -328,7 +334,9 @@ async def test_owner_stated_address_matches_mail() -> None:
     assert (result.status, result.person_ids) == ("matched", [brother.id])
 
 
-async def _tied_person(store: InMemoryPeopleStore, name: str, *, alias_context: str) -> Person:
+async def _tied_person(
+    store: PeopleStore, name: str, *, alias_context: str, support: MemoryStore | None = None
+) -> Person:
     """A person the owner is tied to, known by `name` only through `alias_context`."""
     person = Person(id=uuid4(), display_name=name.split()[0], **_fields())
     await store.put(person, expected_revision=0)
@@ -346,13 +354,16 @@ async def _tied_person(store: InMemoryPeopleStore, name: str, *, alias_context: 
         ),
         expected_revision=0,
     )
+    belief = memory().model_copy(update={"id": uuid4()})
+    if support is not None:
+        await support.upsert_belief(belief)
     await store.put(
         RelationshipAssertion(
             id=uuid4(),
             subject=PeopleEndpoint(kind="person", id=person.id),
             object=PeopleEndpoint(kind="owner"),
             predicate="parent",
-            belief_id=uuid4(),
+            belief_id=belief.id,
             **_fields(),
         ),
         expected_revision=0,
@@ -361,7 +372,7 @@ async def _tied_person(store: InMemoryPeopleStore, name: str, *, alias_context: 
 
 
 async def _resolve_owner_name(
-    store: InMemoryPeopleStore, name: str, *, context: str = "owner"
+    store: PeopleStore, name: str, *, context: str = "owner"
 ) -> IdentityResolution:
     return await resolve_identity(
         store,
@@ -381,8 +392,12 @@ async def test_owner_stated_name_selects_the_one_person_already_tied_to_the_owne
     Production 2026-10-28: the owner's mother held "Cheryl Vitus" only as
     email-context aliases, so the owner's own statement formed a second person.
     """
-    store = InMemoryPeopleStore(FixedClock(NOW))
-    mother = await _tied_person(store, "Cheryl Vitus", alias_context="email:0123abcd")
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        store = uow.people
+        mother = await _tied_person(
+            store, "Cheryl Vitus", alias_context="email:0123abcd", support=uow.memories
+        )
     result = await _resolve_owner_name(store, "Cheryl Vitus")
     assert (result.status, result.person_ids) == ("matched", [mother.id])
     # The owner's words select; a source's label does not.
@@ -417,9 +432,15 @@ async def test_owner_stated_name_without_an_owner_tie_stays_a_suggestion() -> No
 
 
 async def test_owner_stated_name_shared_by_two_tied_people_stays_ambiguous() -> None:
-    store = InMemoryPeopleStore(FixedClock(NOW))
-    first = await _tied_person(store, "Alex Example", alias_context="email:0123abcd")
-    second = await _tied_person(store, "Alex Example", alias_context="email:9876fedc")
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        store = uow.people
+        first = await _tied_person(
+            store, "Alex Example", alias_context="email:0123abcd", support=uow.memories
+        )
+        second = await _tied_person(
+            store, "Alex Example", alias_context="email:9876fedc", support=uow.memories
+        )
     result = await _resolve_owner_name(store, "Alex Example")
     assert result.status == "ambiguous"
     assert set(result.person_ids) == {first.id, second.id}
@@ -457,3 +478,88 @@ async def test_owner_stated_name_ignores_an_ended_or_unresolved_owner_tie() -> N
     )
     result = await _resolve_owner_name(store, "Pat Example")
     assert result.status == "unresolved"
+
+
+@pytest.mark.parametrize(
+    "restriction", ["missing", "retracted", "expired", "future", "sensitive", "future_edge"]
+)
+async def test_owner_tie_requires_current_eligible_support(restriction: str) -> None:
+    _, factory = await memory_uow_factory()
+    await owner_tie_support_contract(factory, restriction)
+
+
+async def owner_tie_support_contract(factory: UnitOfWorkFactory, restriction: str) -> None:
+    from agent_core.domain.people import PeopleQuery
+
+    async with factory() as uow:
+        person = await _tied_person(uow.people, "Pat Example", alias_context="email:test")
+        edges = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                kinds=["relationship"],
+                person_id=person.id,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+            )
+        )
+        edge = next(row for row in edges if isinstance(row, RelationshipAssertion))
+        belief = memory().model_copy(update={"id": edge.belief_id})
+        restrictions: dict[str, dict[str, Any]] = {
+            "retracted": {"status": MemoryStatus.RETIRED},
+            "expired": {"expires_at": NOW - timedelta(seconds=1)},
+            "future": {"valid_from": NOW + timedelta(days=1)},
+            "sensitive": {"sensitivity": Sensitivity.RESTRICTED},
+        }
+        if restriction != "missing":
+            await uow.memories.upsert_belief(
+                belief.model_copy(update=restrictions.get(restriction, {}))
+            )
+        if restriction == "future_edge":
+            await uow.people.put(
+                edge.model_copy(
+                    update={"valid_from": NOW + timedelta(days=1), "revision": edge.revision + 1}
+                ),
+                expected_revision=edge.revision,
+            )
+        result = await resolve_identity(
+            uow.people,
+            principal(),
+            kind="name",
+            namespace="owner",
+            value="Pat Example",
+            context="owner",
+            at=NOW,
+            ceiling=Sensitivity.SENSITIVE,
+        )
+        assert result.status != "matched", "Ineligible relationship evidence cannot select a person"
+
+
+async def test_owner_tie_can_qualify_a_single_display_name_candidate() -> None:
+    _, factory = await memory_uow_factory()
+    await owner_tie_display_name_contract(factory)
+
+
+async def owner_tie_display_name_contract(factory: UnitOfWorkFactory) -> None:
+    from agent_core.domain.people import PeopleQuery
+
+    async with factory() as uow:
+        person = await _tied_person(uow.people, "Pat Example", alias_context="email:test")
+        await uow.people.put(
+            person.model_copy(
+                update={"display_name": "Pat Example", "revision": person.revision + 1}
+            ),
+            expected_revision=person.revision,
+        )
+        edges = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                kinds=["relationship"],
+                person_id=person.id,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+            )
+        )
+        edge = next(row for row in edges if isinstance(row, RelationshipAssertion))
+        await uow.memories.upsert_belief(memory().model_copy(update={"id": edge.belief_id}))
+        result = await _resolve_owner_name(uow.people, "Pat Example")
+        assert (result.status, result.person_ids) == ("matched", [person.id])

@@ -43,17 +43,38 @@ async def _tied_to_owner(
                 person_id=person_id,
                 sensitivity_ceiling=ceiling,
                 sort="id",
+                as_of=at,
                 after=after,
                 limit=_EDGE_PAGE,
             )
         )
-        if any(
-            isinstance(row, RelationshipAssertion)
-            and not row.unresolved
-            and (row.valid_to is None or at < row.valid_to)
-            and any(endpoint.kind == "owner" for endpoint in (row.subject, row.object))
+        belief_ids = [
+            row.belief_id
             for row in rows[:_EDGE_PAGE]
-        ):
+            if isinstance(row, RelationshipAssertion)
+            and not row.unresolved
+            and any(endpoint.kind == "owner" for endpoint in (row.subject, row.object))
+        ]
+        # A one-row ID window checks this person without confusing the
+        # person_id edge filter with the identity of a Person row.
+        eligible = (
+            await store.query(
+                PeopleQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    owner_relationship_belief_ids=belief_ids,
+                    sensitivity_ceiling=ceiling,
+                    as_of=at,
+                    states=["active", "provisional"],
+                    sort="id",
+                    after=UUID(int=person_id.int - 1) if person_id.int else None,
+                    limit=1,
+                )
+            )
+            if belief_ids
+            else []
+        )
+        if any(isinstance(row, Person) and row.id == person_id for row in eligible):
             return True
         if len(rows) <= _EDGE_PAGE:
             return False
@@ -133,7 +154,15 @@ async def resolve_identity(
         status = "ambiguous"
     elif len(matches) == 1:
         status = "matched" if matches == qualified else "ambiguous"
-    if status == "unresolved" and kind == "name" and context == "owner":
+    if (
+        kind == "name"
+        and context == "owner"
+        and len(rows) <= query.limit
+        and (
+            status == "unresolved"
+            or (status == "ambiguous" and len(matches) == 1 and not qualified)
+        )
+    ):
         # ADR-0264: a name the owner states in Chat selects the one person the
         # owner already holds a current direct relationship with, even when that
         # exact name was learned from mail. Without such a tie, or with two tied

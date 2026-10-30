@@ -82,3 +82,34 @@ async def test_production_overview_says_when_a_group_exceeds_what_it_reads_postg
         script=script(True),
     ) as app:
         await overflow_overview_run(app)
+
+
+@pytest.mark.parametrize(
+    "restriction", ["missing", "retracted", "expired", "future", "sensitive", "future_edge"]
+)
+async def test_owner_name_resolution_requires_current_support_postgres(restriction: str) -> None:
+    from tests.contract.support import NOW, agent, principal, session
+    from tests.integration.m2_support import database_settings
+    from tests.unit.test_people_resolution import owner_tie_support_contract
+
+    async with build(
+        settings=database_settings(), storage="postgres", principal=principal(), fixed_clock_at=NOW
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await owner_tie_support_contract(app.uow_factory, restriction)
+
+
+async def test_owner_name_resolution_qualifies_display_name_postgres() -> None:
+    from tests.contract.support import NOW, agent, principal, session
+    from tests.integration.m2_support import database_settings
+    from tests.unit.test_people_resolution import owner_tie_display_name_contract
+
+    async with build(
+        settings=database_settings(), storage="postgres", principal=principal(), fixed_clock_at=NOW
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await owner_tie_display_name_contract(app.uow_factory)

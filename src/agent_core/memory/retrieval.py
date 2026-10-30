@@ -802,11 +802,23 @@ class HybridMemoryRetriever:
             partners.update(item.conflict_with)
             collapsed.append(item)
         coverage = effective_query.candidate_selection == "relevance"
+        page_people = (
+            tuple(
+                dict.fromkeys(person for item in (people_items or []) for person in item.person_ids)
+            )
+            if effective_query.relationship_group is not None
+            else ()
+        )
+        # Reserve a full continuation header before choosing evidence. Its final
+        # cursor can shrink or disappear, but cannot consume unbudgeted bytes.
+        reserved_cursor = effective_query.next_people_after or (
+            page_people[-1] if page_people else None
+        )
         render = partial(
             render_memory,
             bounded=coverage,
             relationship_group=effective_query.relationship_group,
-            next_people_after=effective_query.next_people_after,
+            next_people_after=reserved_cursor,
             people_overflow=effective_query.people_overflow,
         )
         selected: list[RecalledBelief] = []
@@ -1026,6 +1038,27 @@ class HybridMemoryRetriever:
                         item = proposed_item
                         selected_items = proposed_items
                         rendered = proposed
+        if effective_query.relationship_group is not None:
+            delivered = {item.record_id for item in selected_people}
+            next_after = effective_query.next_people_after
+            previous = effective_query.people_after
+            for person_id in page_people:
+                required = {
+                    item.record_id for item in eligible_people if person_id in item.person_ids
+                }
+                if not required <= delivered:
+                    next_after = previous
+                    break
+                previous = person_id
+            effective_query = effective_query.model_copy(update={"next_people_after": next_after})
+            rendered = render(
+                selected_items,
+                as_of=now,
+                policy_version=render_policy,
+                known_at=render_known_at,
+                partners=shown_partners,
+                next_people_after=next_after,
+            ) + "".join("\n" + _person_line(person) for person in selected_people)
         rendered_tokens = (
             measure_tokens(rendered) if selected_items or selected_people or coverage else 0
         )

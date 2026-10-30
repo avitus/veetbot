@@ -290,6 +290,10 @@ number the owner states in Chat identifies that person for mail and texts, and
 a person the owner creates gets an owner-confirmed name alias. Assignment
 deduplication retains distinct ended and live periods. Import admission and
 source selection use the same distinct assignments as identity snapshots.
+Owner-stated name fallback may qualify a single unqualified display-name
+candidate through a direct owner relationship, but only when both the edge and
+its supporting belief are currently visible, live, temporally valid and within
+the sensitivity ceiling. Multiple name candidates remain ambiguous (ADR-0264).
 
 Cross-claim admission uses only owner-asserted sources in the requested scope;
 an untrusted or foreign-scope claim cannot supply another claim's owner tie.
@@ -585,7 +589,9 @@ person by name. Existing belief visibility predicates admit the supporting evide
 before projection; neither names nor indirect graph paths infer relationships.
 Directed endpoints and evidence confidence are retained, including provisional
 status. Coverage and continuation are rendered inside the shared recall budget;
-a page never claims exhaustive knowledge. Other permitted ordinary recall remains
+the cursor advances only past contiguous people whose eligible context was
+actually delivered, reserving its metadata before selecting evidence. A page
+never claims exhaustive knowledge. Other permitted ordinary recall remains
 available alongside the direct relationships.
 
 Disconnected source accounts make live source navigation unavailable; they do

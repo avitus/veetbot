@@ -1905,6 +1905,7 @@ async def test_restated_owner_kinship_reaches_the_known_person_not_a_duplicate()
     from uuid import uuid4
 
     from agent_core.domain.people import PeopleEndpoint, PersonIdentifier
+    from tests.contract.memory_fixtures import memory
     from tests.contract.support import NOW
 
     clock, factory = await memory_uow_factory()
@@ -1931,13 +1932,15 @@ async def test_restated_owner_kinship_reaches_the_known_person_not_a_duplicate()
             ),
             expected_revision=0,
         )
+        support = memory().model_copy(update={"id": uuid4()})
+        await uow.memories.upsert_belief(support)
         await uow.people.put(
             RelationshipAssertion(
                 id=uuid4(),
                 subject=PeopleEndpoint(kind="person", id=mother.id),
                 object=PeopleEndpoint(kind="owner"),
                 predicate="parent",
-                belief_id=uuid4(),
+                belief_id=support.id,
                 **common,
             ),
             expected_revision=0,

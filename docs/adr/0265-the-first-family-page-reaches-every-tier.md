@@ -34,7 +34,10 @@ affirmed beliefs about the brother and did not deliver them either.
    contributes at most one hundred relationship rows, the shared twenty-item,
    two-thousand-token budget still binds, the page still names its
    continuation and says when a group holds more than one overview reads,
-   and existing belief visibility predicates still admit the evidence.
+   and existing belief visibility predicates still admit the evidence. The
+   continuation advances only through people whose eligible relationship contexts
+   were fully delivered; item and token limits cannot silently skip a person.
+   Continuation metadata is budgeted before selection.
 3. **The live label moves.** Overview pages render `+owner-overview@3`; the
    base retrieval label and the frozen evaluation controls do not move.
 
