@@ -122,8 +122,9 @@ def test_incomplete_reviews_and_missing_checks_stay_unknown() -> None:
 
 
 def test_repeated_page_cursor_refuses_a_partial_snapshot() -> None:
-    with pytest.raises(ValueError, match="pagination"):
-        execute([page([PULL], after="same"), page([], after="same")])
+    """Reach the cursor guard with a stable total rather than failing the count check."""
+    with pytest.raises(ValueError, match="invalid pagination cursor"):
+        execute([page([PULL], after="same", total=1), page([], after="same", total=1)])
 
 
 def test_count_mismatch_refuses_a_partial_snapshot() -> None:
