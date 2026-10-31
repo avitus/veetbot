@@ -123,6 +123,10 @@ that window, provision and escrow a fresh master key, and add replacement keys
 under fresh IDs and grants. Preserve tombstones. Old backups remain sensitive.
 There is no automatic master-key rotation or historical-value service.
 
-To disable, set the opt-in env file's flag to `0` and restart every opted-in role;
-remove the drop-ins if desired. Keep the additive schema. Downgrade refuses while
+To disable while the master-key file is present, set the opt-in env file's flag
+to `0` and restart every opted-in role. If the key file is missing or will be
+removed, first remove the integration-key drop-in from each opted-in unit and
+run `systemctl daemon-reload`. Then restart those units and check readiness.
+Systemd processes `LoadCredential` before Veetbot reads its feature flag.
+Keep the additive schema. Downgrade refuses while
 any records or tombstones exist, rather than silently reviving old references.
