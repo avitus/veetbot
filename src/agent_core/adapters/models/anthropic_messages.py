@@ -601,13 +601,20 @@ class AnthropicMessagesProvider:
                     },
                 )
             elif isinstance(item, ToolResultItem):
+                segments = (
+                    user_segments(item_index, item, attachments or {})
+                    if any((item_index, j) in (attachments or {}) for j in range(len(item.content)))
+                    else []
+                )
                 _append_message(
                     messages,
                     "user",
                     {
                         "type": "tool_result",
                         "tool_use_id": item.call_id,
-                        "content": text_content(item.content),
+                        "content": [_user_block(s) for s in segments]
+                        if segments
+                        else text_content(item.content),
                         "is_error": item.is_error,
                     },
                 )

@@ -349,6 +349,13 @@ project:
     - 35
 
 
+public_photo_inspection:
+  adr: docs/adr/0273-public-image-inspection.md
+  authorized_on: '2026-10-31'
+  status: implemented_pending_delivery
+  evidence: tests/unit/test_web_inspect_image.py
+  scope: Public image URLs and selected SmugMug photos reach the model as verified tool results.
+
 agent_jobs_mvp:
   adr: docs/adr/0268-agent-written-jobs.md
   authorized_on: '2026-10-29'

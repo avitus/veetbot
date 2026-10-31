@@ -640,11 +640,18 @@ class ChatCompletionsProvider:
                     }
                 )
             elif isinstance(item, ToolResultItem):
+                segments = (
+                    user_segments(item_index, item, attachments or {})
+                    if any((item_index, j) in (attachments or {}) for j in range(len(item.content)))
+                    else []
+                )
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": item.call_id,
-                        "content": text_content(item.content),
+                        "content": "\n".join(s.text for s in segments)
+                        if segments
+                        else text_content(item.content),
                     }
                 )
             elif isinstance(item, ProviderReasoningItem):

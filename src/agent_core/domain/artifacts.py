@@ -147,6 +147,7 @@ class AttachmentRead:
 
     artifact_id: UUID
     max_bytes: int
+    inspection_call: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
