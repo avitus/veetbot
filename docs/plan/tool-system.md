@@ -2600,7 +2600,8 @@ checked-in table:
 
 Schema failures return the ordinary `tool.arguments_invalid`.
 
-**Roster.** The tool is the one *unindexed deferral*. The default agent
+**Roster.** The tool is an *unindexed deferral*, the first of two;
+`artifact.delete` (ADR-0277) is the other. The default agent
 enables and defers it. The planner pins it with the deferred tools, and
 `tool.call` resolves it like any of them, but the index renders no entry for
 it, and it counts against neither index cap

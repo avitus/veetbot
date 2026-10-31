@@ -462,6 +462,9 @@ resolved by `tool.call`, but the index renders no entry for it, and it counts
 against neither index cap. Its only useful advertisement is the capture marker
 that names it, so it adds no bytes to the prefix. It never takes a
 definition; a plan without `tool.call` records it as skipped.
+[ADR-0277](../adr/0277-chat-deletes-files-it-generated.md) adds a second one,
+`artifact.delete`, which a sentence in the default agent instructions
+advertises instead of an index entry.
 
 In a session bound to a website profile, `browser.navigate`,
 `browser.observe` and `browser.act` are required definitions (ADR-0130), and

@@ -22,6 +22,10 @@ class ArtifactOrigin(StrEnum):
     KNOWLEDGE_SOURCE = "knowledge_source"
 
 
+# ADR-0277: deletes files Chat generated in a chat; an unindexed deferral that
+# the default instructions name.
+ARTIFACT_DELETE_TOOL_NAME = "artifact.delete"
+
 # ADR-0122: every file a run exports rides on its final reply. Tool-output
 # captures and the owner's own uploads are never re-attached.
 REPLY_ATTACHMENT_ORIGINS = frozenset(

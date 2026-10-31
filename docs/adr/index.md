@@ -323,3 +323,4 @@ implementation without one.
 
 - [ADR-0275: An in-app store for integration keys](0275-in-app-integration-secrets.md)
 - [ADR-0276: Inspect one public image in chat (Accepted)](0276-public-image-inspection.md)
+- [ADR-0277: Chat deletes files it generated in a chat (Accepted)](0277-chat-deletes-files-it-generated.md)

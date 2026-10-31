@@ -118,6 +118,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import (
     AssistantMessage,
+    ConversationItem,
     FileReferencePart,
     ImageReferencePart,
     TextPart,
@@ -349,6 +350,12 @@ def _content_view(
     if not blocks:
         raise TypeError("unsupported session message content part: empty content")
     return blocks
+
+
+def _part_artifact(part: object) -> UUID | None:
+    if isinstance(part, (ImageReferencePart, FileReferencePart)):
+        return part.artifact_id
+    return None
 
 
 def _encode_session_cursor(row: Session) -> str:
@@ -583,6 +590,37 @@ class PublicSessionService:
             next_cursor=(_encode_session_cursor(page_rows[-1]) if has_more and page_rows else None),
         )
 
+    async def _deleted_reply_files(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        items: Sequence[tuple[int, ConversationItem]],
+    ) -> set[UUID]:
+        """Reply files that were deleted or expired, so the transcript stops showing them.
+
+        ADR-0277: a reply keeps its file references in the event log, which is
+        append-only; the view drops the ones whose artifact is gone.
+        """
+
+        referenced = {
+            artifact_id
+            for _sequence, item in items
+            if isinstance(item, AssistantMessage)
+            for artifact_id in map(_part_artifact, item.content)
+            if artifact_id is not None
+        }
+        now = self._clock.now()
+        deleted: set[UUID] = set()
+        for artifact_id in sorted(referenced):
+            try:
+                artifact = await uow.artifacts.get(artifact_id, principal)
+            except NotFoundError:
+                deleted.add(artifact_id)
+                continue
+            if artifact.expires_at is not None and artifact.expires_at <= now:
+                deleted.add(artifact_id)
+        return deleted
+
     async def messages(
         self,
         principal: Principal,
@@ -601,22 +639,29 @@ class PublicSessionService:
                 principal,
                 limit=effective_limit + 1,
             )
-            for event in events:
-                for item in conversation_items(event):
-                    role: Literal["user", "assistant"]
-                    if isinstance(item, UserMessage):
-                        role = "user"
-                    elif isinstance(item, AssistantMessage):
-                        role = "assistant"
-                    else:
-                        continue
-                    messages.append(
-                        SessionMessageView(
-                            sequence=event.sequence,
-                            role=role,
-                            content=_content_view(item.content),
-                        )
+            items = [
+                (event.sequence, item) for event in events for item in conversation_items(event)
+            ]
+            deleted = await self._deleted_reply_files(uow, principal, items)
+            for sequence, item in items:
+                role: Literal["user", "assistant"]
+                if isinstance(item, UserMessage):
+                    role = "user"
+                    content = item.content
+                elif isinstance(item, AssistantMessage):
+                    role = "assistant"
+                    content = [part for part in item.content if _part_artifact(part) not in deleted]
+                else:
+                    continue
+                if not content:
+                    continue
+                messages.append(
+                    SessionMessageView(
+                        sequence=sequence,
+                        role=role,
+                        content=_content_view(content),
                     )
+                )
         has_more = len(messages) > effective_limit
         page_messages = messages[:effective_limit]
         return Page[SessionMessageView](
