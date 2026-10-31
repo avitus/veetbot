@@ -132,6 +132,9 @@ mkdir -p "$RELEASES_DIR" "$SHARED_DIR/uv-cache"
 cleanup() {
   local status=$?
   trap - EXIT
+  if (( status != 0 )) && [[ -n "${HANDOFF_ATTEMPT:-}" ]]; then
+    rm -f -- "$HANDOFF_ATTEMPT"
+  fi
   if [[ -n "$HEALTH_HEADERS" ]]; then
     rm -f -- "$HEALTH_HEADERS"
   fi
@@ -504,6 +507,18 @@ if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "1" ]]; then
   fi
 fi
 
+# The verifier and its interpreter are installed separately by the operator.
+# Never execute privileged Python from the candidate release or pass it paths.
+HANDOFF_ATTEMPT="$STAGE/.venv/recall-handoff-attempt"
+rm -f -- "$HANDOFF_ATTEMPT"
+if [[ -x /usr/local/sbin/veetbot-recall-handoff ]]; then
+  { cat /proc/sys/kernel/random/uuid; printf '%s\n' "${VEETBOT_DELIVERY_WORKFLOW_ID:-local}"; } >"$HANDOFF_ATTEMPT"
+  sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --prepare || {
+    rm -f -- "$HANDOFF_ATTEMPT"
+    printf 'Recall handoff refused for %s; proceeding with sparse fallback.\n' "$RELEASE_ID" >&2
+  }
+fi
+
 if [[ -n "$PREVIOUS_RELEASE" ]]; then
   # Only these workers create provider pins. Stop both before checking again:
   # a run may have pinned the old registry since the live preflight above.
@@ -577,6 +592,11 @@ fi
 if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" ]]; then
   setfacl -R -P -m u:veetbot-call-ingress:rX "$STAGE" || fail \
     "could not grant veetbot-call-ingress read access to $STAGE"
+fi
+
+if [[ -f "$HANDOFF_ATTEMPT" ]] && ! sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --commit; then
+  rm -f -- "$HANDOFF_ATTEMPT"
+  printf 'Recall cutover check failed for %s; using sparse retrieval.\n' "$RELEASE_ID" >&2
 fi
 
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"
@@ -671,6 +691,14 @@ for unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
   pid="$(sudo systemctl show --property MainPID --value "$unit")"
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "$unit has no main process"
 done
+
+if [[ -f "$HANDOFF_ATTEMPT" ]] && ! sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --verify; then
+  rm -f -- "$HANDOFF_ATTEMPT"
+  printf 'Semantic trial readback failed; retiring attempt %s.\n' "$RELEASE_ID" >&2
+fi
+if [[ -n "$PREVIOUS_RELEASE" ]]; then
+  rm -f -- "$PREVIOUS_RELEASE/.venv/recall-handoff-attempt"
+fi
 
 kept=0
 while IFS= read -r candidate; do

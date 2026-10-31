@@ -587,6 +587,7 @@ from agent_core.mcp.configuration import (
     validate_mcp_config,
 )
 from agent_core.mcp.runtime import MCPRuntime
+from agent_core.memory.bounded_recall_admission import BoundedAdmission
 from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
 from agent_core.memory.distillation import (
     NemoriAssistedCandidateExtractor,
@@ -4142,6 +4143,12 @@ async def _compose(
                 provider_factory=OpenAIEmbeddingProvider,
                 local_provider_factory=local_embedding_provider,
             )
+            if semantic_index_pass and isinstance(semantic_index_pass.admitted, BoundedAdmission):
+                logger.info(
+                    "semantic_trial_composed binding=%s jobs=%s",
+                    semantic_index_pass.admitted.receipt_sha256,
+                    int(settings.jobs_enabled),
+                )
         except ConfigurationError:
             # Admission remains strict; only the optional runtime arm is unavailable.
             logger.warning("semantic_recall_unavailable_using_sparse")
@@ -4169,6 +4176,11 @@ async def _compose(
         trace_retention=memory_profiles.traces,
         reconsolidation_enabled=True if settings.memory_dreaming_review_enabled else recon_admitted,
         reconsolidation_owner_approved_only=settings.memory_dreaming_review_enabled,
+        semantic_binding_sha256=(
+            semantic_index_pass.admitted.receipt_sha256
+            if semantic_index_pass and isinstance(semantic_index_pass.admitted, BoundedAdmission)
+            else None
+        ),
         runtime_semantic_queries=None
         if semantic_index_pass is None
         else semantic_index_pass.queries,

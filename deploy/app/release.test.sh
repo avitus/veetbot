@@ -7,6 +7,20 @@ TEST_ROOT="$(mktemp -d)"
 # Permission fixtures below close directories, so reopen them before removal.
 trap 'chmod -R u+rwX "$TEST_ROOT" 2>/dev/null || true; rm -rf -- "$TEST_ROOT"' EXIT
 
+# Exercise the fixed privileged verifier path in a disposable release-script copy.
+# Production has no caller-controlled privileged helper path.
+sed "s|/usr/local/sbin/veetbot-recall-handoff|$TEST_ROOT/recall-handoff|g" \
+  "$RELEASE_SCRIPT" >"$TEST_ROOT/release.sh"
+chmod +x "$TEST_ROOT/release.sh"
+RELEASE_SCRIPT="$TEST_ROOT/release.sh"
+cat >"$TEST_ROOT/recall-handoff" <<'SH'
+#!/usr/bin/env bash
+set -eu
+test -s "$VEETBOT_ROOT/releases/$1/.venv/recall-handoff-attempt"
+printf 'recall-handoff %s\n' "$1" >>"$VEETBOT_TEST_LOG"
+test "${VEETBOT_TEST_REFUSE_RECALL:-0}" != 1
+SH
+chmod +x "$TEST_ROOT/recall-handoff"
 BIN_DIR="$TEST_ROOT/bin"
 DEPLOY_ROOT="$TEST_ROOT/opt/veetbot"
 SYSTEMD_DIR="$TEST_ROOT/systemd"
@@ -206,6 +220,7 @@ write_stub rm '
 '
 write_stub sudo '
   printf "sudo %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  if [[ "${1:-}" == -n ]]; then shift; fi
   "$@"
 '
 write_stub systemctl '
@@ -437,6 +452,8 @@ grep -Eq '(^|,)settings.read(,|$)' "$owner_scopes"
 grep -Eq '(^|,)settings.write(,|$)' "$owner_scopes"
 grep -Fxq 'AUTH_SCOPES=notification.read' "$ENV_FILE"
 grep -Fxq 'curl model-settings' "$LOG_FILE"
+grep -Fxq "recall-handoff $release_id" "$LOG_FILE"
+test -s "$DEPLOY_ROOT/releases/$release_id/.venv/recall-handoff-attempt"
 
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
@@ -1053,7 +1070,9 @@ sed 's/^AGENT_CALL_INGRESS_ENABLED=1$/AGENT_CALL_INGRESS_ENABLED=0/' "$TEST_ROOT
   >"$TEST_ROOT/call-worker-only-role.env"
 VEETBOT_TEST_ENV_FILE="$TEST_ROOT/call-worker-only.env" \
   VEETBOT_TEST_CALL_ENV_FILE="$TEST_ROOT/call-worker-only-role.env" \
-  run_release "$worker_only_id" >/dev/null
+  VEETBOT_TEST_REFUSE_RECALL=1 run_release "$worker_only_id" >"$TEST_ROOT/recall-refused.out" 2>&1
+grep -Fq "Recall handoff refused for $worker_only_id" "$TEST_ROOT/recall-refused.out"
+test ! -e "$DEPLOY_ROOT/releases/$worker_only_id/.venv/recall-handoff-attempt"
 assert_log_lacks 'setfacl'
 assert_log_lacks 'systemctl restart veetbot-call-ingress'
 grep -Fxq 'sudo systemctl is-active --quiet veetbot-call' "$LOG_FILE"
