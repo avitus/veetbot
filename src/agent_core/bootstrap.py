@@ -286,6 +286,7 @@ from agent_core.adapters.telegram import (
 from agent_core.adapters.unsubscribe.http import HttpOneClickTransport
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.keenable import KeenableWebProvider
+from agent_core.adapters.web.public_image import PublicImageReader
 from agent_core.adapters.web.routing import WeightedWebProviderRouter
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.adapters.whatsapp import (
@@ -818,6 +819,7 @@ from agent_core.tools.skill_manage import SkillManageTool
 from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME, ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_fetch_json import WebFetchJsonTool
+from agent_core.tools.web_inspect_image import WebInspectImageTool
 from agent_core.tools.web_search import WebSearchTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
@@ -3362,6 +3364,7 @@ async def _compose(
     if web_fetch_provider is not None:
         registry.register(WebFetchTool(web_fetch_provider))
         registry.register(WebFetchJsonTool(web_fetch_provider))
+        registry.register(WebInspectImageTool(PublicImageReader().read))
     if browser_provider is not None:
         registry.register(BrowserNavigateTool(browser_provider))
         registry.register(
@@ -6677,7 +6680,7 @@ async def build(
         *([] if web_search_enabled and web_fetch_enabled else ["knowledge.ingest"]),
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
-        *(["web.fetch", "web.fetch_json"] if web_fetch_enabled else []),
+        *(["web.fetch", "web.fetch_json", "web.inspect_image"] if web_fetch_enabled else []),
         *(
             [SCHEDULE_CREATE_TOOL_NAME, *SCHEDULE_LIFECYCLE_TOOL_NAMES]
             if effective_settings.schedule_api_enabled
@@ -6739,6 +6742,7 @@ async def build(
             # A JSON read is a narrower web.fetch, chosen once the model knows
             # the answer is JSON; it waits in the index (ADR-0258).
             "web.fetch_json",
+            "web.inspect_image",
             SCHEDULE_UPDATE_TOOL_NAME,
             SCHEDULE_PAUSE_TOOL_NAME,
             SCHEDULE_RESUME_TOOL_NAME,

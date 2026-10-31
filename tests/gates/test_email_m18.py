@@ -1266,6 +1266,7 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
         "memory.learn",
         "workspace.write_text",
         "web.fetch_json",
+        "web.inspect_image",
         "schedule.update",
         "schedule.pause",
         "schedule.resume",

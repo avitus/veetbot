@@ -25,7 +25,7 @@ from agent_core.domain.runs import Run
 from agent_core.mcp.configuration import is_mutating_email_server_id
 from agent_core.policy.hardline import hardline_matches
 
-_WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch", "web.fetch_json"})
+_WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch", "web.fetch_json", "web.inspect_image"})
 _BROWSER_PROVIDER_TOOLS = frozenset({"browser.navigate", "browser.observe"})
 # The "May authorize" column of the trust table in policy-and-approvals.md.
 # Content can inform a decision; only platform configuration and the
@@ -66,6 +66,7 @@ def _path_inside_workspace(action: ProposedAction) -> bool:
 
 
 def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) -> bool:
+    """Match a policy condition against the classified action and its target."""
     if condition is None:
         return True
     if condition is PolicyCondition.PATH_INSIDE_WORKSPACE:
@@ -74,7 +75,7 @@ def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) 
         # Fixed provider targets are constructed only for exact builtin tools.
         # The web adapter fixes its API endpoint, while the browser binding
         # independently enforces its trusted origin policy before navigation.
-        # Model-authored URLs therefore cannot authorize worker egress.
+        # The public image broker pins each hop to a validated public address.
         fixed_provider_target = (
             action.target.kind == "web_provider"
             and action.target.network_enabled

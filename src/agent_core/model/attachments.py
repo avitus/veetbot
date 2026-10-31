@@ -21,6 +21,8 @@ from agent_core.domain.messages import (
     FileReferencePart,
     ImageReferencePart,
     ModelCapabilities,
+    ToolCallItem,
+    ToolResultItem,
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
@@ -181,6 +183,19 @@ def attachment_parts(item: ConversationItem) -> list[AttachmentPart]:
     return [part for part in content if isinstance(part, (ImageReferencePart, FileReferencePart))]
 
 
+def _inspection_calls(conversation: Sequence[ConversationItem]) -> set[str]:
+    """Identify direct and deferred inspection calls for pairing with their results."""
+    return {
+        i.call_id
+        for i in conversation
+        if isinstance(i, ToolCallItem)
+        and (
+            i.name == "web.inspect_image"
+            or (i.name == "tool.call" and i.arguments.get("name") == "web.inspect_image")
+        )
+    }
+
+
 def estimate_attachment_tokens(items: Sequence[ConversationItem]) -> int:
     """Upper bound on what attachments add beyond their serialized references.
 
@@ -190,11 +205,14 @@ def estimate_attachment_tokens(items: Sequence[ConversationItem]) -> int:
 
     labels = 0
     content = 0
+    inspections = _inspection_calls(items)
     for item in items:
-        owner = owner_message(item)
+        inspection = isinstance(item, ToolResultItem) and item.call_id in inspections
         for part in attachment_parts(item):
             labels += LABEL_TOKENS
-            if owner and item_limit_reason(part) is None:
+            if (
+                owner_message(item) or (inspection and isinstance(part, ImageReferencePart))
+            ) and item_limit_reason(part) is None:
                 content += content_tokens(part)
     return labels + min(content, REQUEST_INLINE_MAX_TOKENS)
 
@@ -205,6 +223,7 @@ class AttachmentDecision:
 
     part: AttachmentPart
     reason: MarkerReason | None
+    inspection_call: str | None = None
 
 
 def select_attachments(
@@ -212,19 +231,26 @@ def select_attachments(
 ) -> dict[tuple[int, int], AttachmentDecision]:
     """Choose owner attachments to send, newest message first, within the budget.
 
-    Keys are `(item index, content index)`. References outside owner-written
-    user messages are absent and always render as plain references.
+    Keys are `(item index, content index)`. Only owner messages and paired inspection results
+    may contribute inline content.
     """
 
     decisions: dict[tuple[int, int], AttachmentDecision] = {}
+    inspections = _inspection_calls(conversation)
     items = 0
     raw_bytes = 0
     tokens = 0
     for item_index in range(len(conversation) - 1, -1, -1):
         item = conversation[item_index]
-        if not isinstance(item, UserMessage) or item.trust is not TrustLevel.USER:
+        inspection = (
+            isinstance(item, ToolResultItem) and not item.is_error and item.call_id in inspections
+        )
+        if not ((isinstance(item, UserMessage) and item.trust is TrustLevel.USER) or inspection):
             continue
+        assert isinstance(item, (UserMessage, ToolResultItem))
         for part_index, part in enumerate(item.content):
+            if inspection and not isinstance(part, ImageReferencePart):
+                continue
             if not isinstance(part, (ImageReferencePart, FileReferencePart)):
                 continue
             reason = item_limit_reason(part)
@@ -241,7 +267,9 @@ def select_attachments(
                     items += 1
                     raw_bytes += size
                     tokens += cost
-            decisions[(item_index, part_index)] = AttachmentDecision(part=part, reason=reason)
+            decisions[(item_index, part_index)] = AttachmentDecision(
+                part, reason, item.call_id if isinstance(item, ToolResultItem) else None
+            )
     return decisions
 
 
@@ -336,12 +364,15 @@ class RenderedAttachment:
 def planned_reads(
     decisions: Mapping[tuple[int, int], AttachmentDecision], capabilities: ModelCapabilities
 ) -> list[AttachmentRead]:
+    """Plan bounded reads for references the selected model can receive."""
     reads: dict[UUID, AttachmentRead] = {}
     for decision in decisions.values():
         if decision.reason is not None or capability_reason(decision.part, capabilities):
             continue
         reads[decision.part.artifact_id] = AttachmentRead(
-            artifact_id=decision.part.artifact_id, max_bytes=read_limit(decision.part)
+            artifact_id=decision.part.artifact_id,
+            max_bytes=read_limit(decision.part),
+            inspection_call=decision.inspection_call,
         )
     return list(reads.values())
 

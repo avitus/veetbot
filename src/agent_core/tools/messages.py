@@ -69,6 +69,10 @@ TOOL_MESSAGES: dict[str, str] = {
     ),
     "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
     "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",
+    "tool.web.image_unavailable": (
+        "The photo could not be inspected. Use a public JPEG, PNG or WebP URL, or a "
+        "SmugMug link with one photo selected."
+    ),
     "tool.web.json_invalid": ("The page is not a JSON document; read it with web.fetch instead."),
     "tool.web.json_selection_too_large": (
         "The selected fields exceed the tool's output limit; select fewer fields or narrower paths."

@@ -412,4 +412,5 @@ nav:
       - "ADR-0273: Diagnose a widget from owner chat": adr/0273-cockpit-widget-diagnostics.md
       - "ADR-0274: Continue an active recall trial across equivalent releases": adr/0274-continuous-recall-trial-across-equivalent-releases.md
       - 'ADR-0275: In-app integration keys': adr/0275-in-app-integration-secrets.md
+      - "ADR-0276: Inspect one public image in chat": adr/0276-public-image-inspection.md
   - Changelog: changelog.md
