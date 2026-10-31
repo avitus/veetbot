@@ -1666,3 +1666,17 @@ Both adapters apply this exception; all other events retain the monotonic
 timestamp update. The repair migration restores affected active sessions to
 the latest remaining event or creation time, preserves later independent
 writes and closed sessions, and retains every audit event.
+
+## Integration key persistence (ADR-0273)
+
+`integration_secrets` holds owner-bound metadata, AES-GCM ciphertext and
+permanent tombstones. Tenant RLS supplements tenant/principal predicates. The
+application serializes writes with a transaction-scoped owner advisory lock;
+this also enforces the 100-active-key cap. Immutable bindings and revision CAS
+prevent retargeting or stale writes. Retries compare the current decrypted value
+in memory only; no request hash or plaintext receipt is stored. Create, replace
+and delete append metadata-only `settings.integration_secrets.*` process events
+in the same transaction. Deletion clears ciphertext and increments revision.
+The additive `e8a270b10301` migration refuses downgrade while any row remains.
+Ciphertext AAD binds tenant, principal, ID, origin, scheme and revision. The host
+master key is kept outside the database and its backups.

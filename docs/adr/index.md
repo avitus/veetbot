@@ -318,3 +318,5 @@ implementation without one.
 - [ADR-0270: One approval for a widget installation (Accepted)](0270-one-approval-for-a-widget-installation.md)
 - [ADR-0271: Widget refreshes are operational work (Accepted)](0271-widget-refreshes-are-operational-work.md)
 - [ADR-0272: Jobs and semantic recall coexist](0272-jobs-and-semantic-recall-coexist.md)
+
+- [ADR-0273: An in-app store for integration keys](0273-in-app-integration-secrets.md)

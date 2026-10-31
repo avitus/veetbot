@@ -411,3 +411,13 @@ and fresh exact jobs-enabled admission. It preserves the security requirements
 above, adds revision-bound execution and encoded-response checks, and follows
 the owner's direction that no human pushes may reach the public jobs branch.
 The historical PR211 admission and its original configuration remain historical.
+
+## ADR-0273 extension: owner-entered keys
+
+ADR-0273 is accepted and extends decision 8 with a default-off Settings store.
+Approved grants may bind an owner-owned `stored:<uuid>` to its immutable HTTPS
+origin for authenticated GET only. Values resolve live per request through the
+trusted broker; replacement preserves the binding and deletion revokes future
+resolution. Existing GitHub App GraphQL behavior is unchanged. The extension
+does not activate jobs or satisfy the outstanding production prerequisites.
+See [Integration keys](../integration-keys.md).

@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Integration keys MVP — ADR-0273:** On 2026-10-30 the owner accepted
+  [the decision](../adr/0273-in-app-integration-secrets.md) and authorized its
+  implementation on `secret-store`. The default-off MVP reuses PostgreSQL,
+  AES-GCM sealing and approved job grants, with native Settings for key entry.
+  See [the operator guide](../integration-keys.md). Production activation and
+  ADR-0268's jobs prerequisites remain separate; no milestone or gate moves.
+
 - **Agent-written jobs MVP — ADR-0268:** On 2026-10-29 the owner authorized
   implementation of saved Python programs that combine code and explicit model
   calls as appropriate. The MVP implementation now includes saved packages,

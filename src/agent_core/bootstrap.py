@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import logging
 import os
@@ -84,6 +85,7 @@ from agent_core.adapters.identity import (
 from agent_core.adapters.jobs.credentials import GitHubReaderCredentials
 from agent_core.adapters.jobs.http import JobHTTP
 from agent_core.adapters.jobs.screen import SandboxJobScreen
+from agent_core.adapters.jobs.stored_credentials import StoredJobCredentials
 from agent_core.adapters.judgment import TypeSafeJudgmentProvider
 from agent_core.adapters.knowledge.pdf import PdfTextExtractor
 from agent_core.adapters.live_events import (
@@ -144,6 +146,10 @@ from agent_core.adapters.persistence.device_channel import (
 from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
 from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
+from agent_core.adapters.persistence.integration_secrets import (
+    InMemoryIntegrationSecretStore,
+    PostgresIntegrationSecretStore,
+)
 from agent_core.adapters.persistence.jobs import InMemoryJobStore, PostgresJobStore
 from agent_core.adapters.persistence.latency_report import chat_latency_report
 from agent_core.adapters.persistence.memory import (
@@ -262,6 +268,7 @@ from agent_core.adapters.schedule_wakeup import (
     InMemoryScheduleWakeup,
     PostgresScheduleWakeup,
 )
+from agent_core.adapters.sealing import AESGCMSecretSealer as IntegrationSecretSealer
 from agent_core.adapters.skills.memory import InMemorySkillRepository
 from agent_core.adapters.skills.stores import (
     FilesystemSkillPackageStore,
@@ -339,6 +346,7 @@ from agent_core.application.device_management import (
 )
 from agent_core.application.email import EmailExperienceService
 from agent_core.application.folder_service import PublicFolderService
+from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.application.job_execution import JobExecution
 from agent_core.application.job_grants import JobGrantAuthorizer
 from agent_core.application.jobs import JobPublication
@@ -741,7 +749,13 @@ from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
 from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsubscribeTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.job_schedules import JobScheduleCreateTool, JobScheduleUpdateTool
-from agent_core.tools.jobs import JOB_TOOL_NAMES, JobManageTool, JobRunTool, JobToolset
+from agent_core.tools.jobs import (
+    JOB_TOOL_NAMES,
+    JobManageTool,
+    JobRunTool,
+    JobToolset,
+    StoredKeyJobRunTool,
+)
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
 from agent_core.tools.media_generation import (
@@ -885,6 +899,8 @@ class ApplicationServices:
     schedule_runs: ScheduleMaterializer | None = None
     # Milestone 35: present only when AGENT_COCKPIT_ENABLED is set.
     cockpit: CockpitBoard | None = None
+    # ADR-0273: present only when AGENT_INTEGRATION_SECRETS_ENABLED is set.
+    integration_secrets: IntegrationSecrets | None = None
     # ADR-0255: present only when AGENT_MCP_SERVERS_ENABLED is set.
     mcp_servers: MCPServerSettingsService | None = None
 
@@ -1638,6 +1654,7 @@ def _memory_uow_repositories(
         calls=InMemoryCallStore(),
         people=people,
         records=records,
+        integration_secrets=InMemoryIntegrationSecretStore(),
         jobs=InMemoryJobStore(),
         job_outbox=InMemoryWidgetCommitOutbox(),
         cockpit_widgets=InMemoryWidgetStore(),
@@ -1746,6 +1763,7 @@ def _postgres_repository_factory(
             calls=PostgresCallStore(session),
             people=people,
             records=records,
+            integration_secrets=PostgresIntegrationSecretStore(session),
             jobs=PostgresJobStore(session),
             job_outbox=PostgresWidgetCommitOutbox(session, package_kind="job"),
             cockpit_widgets=PostgresWidgetStore(session),
@@ -3206,6 +3224,19 @@ async def _compose(
                 people=settings.people_enabled,
             ),
         )
+    integration_secrets = None
+    if settings.integration_secrets_enabled:
+        if settings.integration_secrets_key is None:
+            raise ConfigurationError("Integration keys require the configured master key")
+        integration_secrets = IntegrationSecrets(
+            uow_factory,
+            IntegrationSecretSealer(
+                base64.urlsafe_b64decode(settings.integration_secrets_key.get_secret_value()),
+                purpose="veetbot.integration-secret",
+            ),
+            clock,
+            ids,
+        )
     job_publication: JobPublication | None = None
     job_execution: JobExecution | None = None
     job_credentials: GitHubReaderCredentials | None = None
@@ -3219,6 +3250,7 @@ async def _compose(
             clock=clock,
         )
         job_publication = JobPublication(
+            integration_secrets=integration_secrets,
             uow_factory=uow_factory,
             clock=clock,
             ids=ids,
@@ -3251,6 +3283,19 @@ async def _compose(
             runner=job_runner,
             schema_check=Draft202012SchemaCheck(),
             http=JobHTTP(job_credentials, operator_hosts=settings.jobs_allowed_hosts).request,
+            http_for_access=(
+                lambda owner, access: (
+                    JobHTTP(
+                        job_credentials,
+                        operator_hosts=settings.jobs_allowed_hosts,
+                        stored_credentials=StoredJobCredentials(
+                            integration_secrets, owner, access
+                        ).resolve,
+                    ).request
+                )
+            )
+            if integration_secrets is not None
+            else None,
             feeds=CockpitFeeds(
                 uow_factory=uow_factory,
                 clock=clock,
@@ -3289,6 +3334,8 @@ async def _compose(
         job_toolset = JobToolset(job_publication, job_execution)
         registry.register(JobManageTool(job_toolset))
         registry.register(JobRunTool(job_toolset))
+        if integration_secrets is not None:
+            registry.register(StoredKeyJobRunTool(job_toolset))
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
     registry.register(ToolCallTool())
@@ -5635,6 +5682,7 @@ async def _compose(
                 if task_grants_enabled
                 else None
             ),
+            integration_secrets=integration_secrets,
             mcp_servers=owner_mcp_servers,
             calls=call_service,
             email=EmailExperienceService(
