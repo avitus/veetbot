@@ -2175,46 +2175,19 @@ class _TaskIO:
                 Step(run_id=c.run.id, step_number=send_state["step"], started_at=c.clock.now()),
             )
             return await self._finish_send(prior)
-        try:
-            profile = await self.call(draft.account_id, "get_profile", {})
-            async with c.uow_factory() as uow:
-                account = await read_value(
-                    uow.email, c.principal, "account", draft.account_id, EmailAccount
-                )
-            if (
-                account is None
-                or account.email_address is None
-                or account.email_address.casefold() != str(profile["email_address"]).casefold()
-            ):
-                raise EmailToolError("The mailbox identity cannot be verified.")
-            observed, pending = await self.read_thread(
-                draft.account_id, thread.provider_thread_id, fresh=True
-            )
-            while (
-                observed is not None and pending and self.full_reads.get(draft.account_id, 0) < 10
-            ):
-                observed, pending = await self.read_thread(
-                    draft.account_id,
-                    thread.provider_thread_id,
-                    fresh=True,
-                    progress_override=observed,
-                )
-            if observed is None or pending or not observed.get("complete"):
-                raise EmailToolError("A complete fresh conversation could not be retrieved.")
-            await self.service.import_thread(
-                c.principal, draft.account_id, observed, c.run.session_id, run=c.run, lease=c.lease
-            )
-        except EmailToolError:
-            await self._draft_status(EmailDraftStatus.READY)
-            return _finished(
-                "Sending was deferred because the mailbox could not be checked. "
-                "The draft is preserved."
-            )
         approved = False
         if draft.approval_id is not None:
             async with c.uow_factory() as uow:
                 approval = await uow.approvals.get(draft.approval_id, c.principal)
             approved = approval.status is ApprovalStatus.APPROVED and approval.run_id == c.run.id
+        if approved:
+            # The owner is waiting on the proposal, so the mailbox is read once:
+            # after Final Send, before the claim (email-experience.md:567-571).
+            # The approval itself froze the exact value the identity check and
+            # fresh read now validate.
+            deferred = await self._verify_mailbox_before_send(draft, thread)
+            if deferred is not None:
+                return deferred
         async with c.uow_factory() as uow, uow.email.lock(c.principal):
             await self._write_fence(uow)
             current = await self.service._draft(uow.email, c.principal, draft.id)
@@ -2234,7 +2207,8 @@ class _TaskIO:
                 c.checkpoint.pending_tool_calls = []
                 c.checkpoint.pending_approval_ids = []
                 return _finished(
-                    "The source or draft changed. Review the latest draft before sending."
+                    "New mail arrived or the reply changed before it was sent, so nothing "
+                    "went out. Read the thread, then send again."
                 )
             draft = current
             if approved:
@@ -2271,6 +2245,47 @@ class _TaskIO:
             await self._draft_status(EmailDraftStatus.FAILED)
             return _finished("The email was not sent; the draft is preserved.")
         return await self._finish_send(invocation)
+
+    async def _verify_mailbox_before_send(
+        self, draft: EmailDraft, thread: EmailThread
+    ) -> RunOutcome | None:
+        """Check the mailbox identity and import a complete fresh thread, or defer the send."""
+        c = self.context
+        try:
+            profile = await self.call(draft.account_id, "get_profile", {})
+            async with c.uow_factory() as uow:
+                account = await read_value(
+                    uow.email, c.principal, "account", draft.account_id, EmailAccount
+                )
+            if (
+                account is None
+                or account.email_address is None
+                or account.email_address.casefold() != str(profile["email_address"]).casefold()
+            ):
+                raise EmailToolError("The mailbox identity cannot be verified.")
+            observed, pending = await self.read_thread(
+                draft.account_id, thread.provider_thread_id, fresh=True
+            )
+            while (
+                observed is not None and pending and self.full_reads.get(draft.account_id, 0) < 10
+            ):
+                observed, pending = await self.read_thread(
+                    draft.account_id,
+                    thread.provider_thread_id,
+                    fresh=True,
+                    progress_override=observed,
+                )
+            if observed is None or pending or not observed.get("complete"):
+                raise EmailToolError("A complete fresh conversation could not be retrieved.")
+            await self.service.import_thread(
+                c.principal, draft.account_id, observed, c.run.session_id, run=c.run, lease=c.lease
+            )
+        except EmailToolError:
+            await self._draft_status(EmailDraftStatus.READY)
+            return _finished(
+                "Gmail could not be checked, so nothing was sent. Your reply is kept; try again."
+            )
+        return None
 
     async def _draft_status(
         self, status: EmailDraftStatus, *, approval_id: UUID | None = None

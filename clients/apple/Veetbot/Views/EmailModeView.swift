@@ -1523,6 +1523,15 @@ private struct EmailThreadScreen: View {
                         .veetType(.ui).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("email.action-error")
                 }
+                if let message = model.sendProgressMessage {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(message).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("email.send-progress")
+                }
                 if let message = model.styleExampleMessage {
                     Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
@@ -1606,7 +1615,7 @@ private struct EmailThreadScreen: View {
                     HairlineDivider()
                     envelopeField("Subject", path: \.subject, field: .subject)
                 }
-            }.disabled(!draft.canEdit || model.isPerformingAction)
+            }.disabled(!draft.canEdit || model.isPreparingSend)
             HairlineDivider()
             // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
             // no longer change (sending, sent, uncertain) renders as text instead of an editor.
@@ -1618,7 +1627,9 @@ private struct EmailThreadScreen: View {
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 180, idealHeight: 220)
                     .focused($focusedField, equals: .body)
-                    .disabled(model.isPerformingAction)
+                    // Only a send in progress freezes the text; feedback or a style
+                    // endorsement running elsewhere must not stop the owner typing.
+                    .disabled(model.isPreparingSend)
                     .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
                     .padding(.horizontal, Self.wellInset - 5).padding(.vertical, 8)
             } else {
@@ -1646,9 +1657,15 @@ private struct EmailThreadScreen: View {
     /// wait behind one quiet menu at the trailing edge.
     private func draftActions(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         HStack(spacing: 10) {
-            Button("Review & Send") { Task { await model.prepareSend() } }
-                .primaryCapsule()
-                .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
+            Button {
+                Task { await model.prepareSend() }
+            } label: {
+                // The button itself says the press landed; a quiet button that waits
+                // on a queued proposal reads as a button that did nothing.
+                if model.isPreparingSend { ProgressView("Preparing…") } else { Text("Review & Send") }
+            }
+            .primaryCapsule()
+            .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
             Spacer(minLength: 0)
             Menu {
                 Button("Save now") { Task { await model.saveDraft() } }
@@ -1679,8 +1696,12 @@ private struct EmailThreadScreen: View {
     /// action that answers it beside the sentence.
     @ViewBuilder private func draftNotices(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         if draft.stale {
-            draftDecision("New mail arrived", message: "Review the updated thread above before sending.") {
-                Button("I've reviewed the updated thread") { Task { await model.confirmCurrentSourceReviewed() } }
+            // Name the mail that stalled the reply: who wrote, when, and their first
+            // line, so the decision is made from the message rather than a revision.
+            let message = model.staleMailMessage()
+                ?? "Read the updated thread above, then confirm your reply still fits."
+            draftDecision("New mail arrived", message: message) {
+                Button("I've read it, keep my reply") { Task { await model.confirmCurrentSourceReviewed() } }
                     .primaryCapsule()
                     .disabled(model.conflict != nil || model.isSaving)
             }

@@ -560,12 +560,18 @@ Autosave uses optimistic concurrency. A second device can continue from the
 latest saved revision; competing edits produce an explicit conflict preserving
 both versions. Unsaved local edits remain visible on a network error. New
 incoming mail marks the draft stale and requires review of the changed source
-before sending.
+before sending. The stale notice names who wrote and quotes the start of the
+newest message, so the owner decides from the message rather than from a
+revision number; refusals the server returns are written for the owner in the
+same plain terms. Review & Send stays available while an autosave is in flight:
+the proposal waits for that save and freezes the settled revision.
 
 The send flow is:
 
 1. Review & Send freezes the exact current revision and presents From account,
-   To/Cc/Bcc where present, subject, and full body.
+   To/Cc/Bcc where present, subject, and full body. It reads nothing from the
+   mailbox first: the owner is waiting, so the proposal joins the interactive
+   class (ADR-0275) and the identity check belongs to step 3.
 2. Final Send explicitly resolves the ordinary approval for that exact action.
 3. Perform a fresh governed Gmail thread read, then recheck account authority,
    policy, draft/source revision, and action content. A failed freshness read
@@ -575,6 +581,12 @@ The send flow is:
    concurrent local edit cannot slip between validation and the send claim.
 4. Dispatch through the existing account-specific send MCP tool. Persist the
    confirmed result and update the thread and draft state across devices.
+
+A send that ends without dispatch is reported beside the draft in the owner's
+terms (new mail arrived; Gmail could not be checked), never as a review that
+silently closed. While a proposal outlasts the client's local wait, the client
+says it is still being prepared and opens the review from a later refresh of
+the same durable action instead of needing another press.
 
 Sending by value preserves the existing approval guarantee; an approval cannot
 point to a remotely mutable Gmail draft id. Cross-device double taps reuse one
@@ -861,7 +873,8 @@ Archive admission requires current `email.read`, `email.write`, `run.write`,
 scopes. The typed task performs no model work and consumes no automatic-email
 dollar reservation. The owner is waiting on the gesture, so the task is queued in
 the interactive class (event-log-and-persistence.md:698) and never waits behind
-refresh, draft or send work, which stays asynchronous. It uses the existing
+refresh or draft work, which stays asynchronous; a send proposal and its
+approved send share that class (ADR-0275). It uses the existing
 tool pipeline and approval floor, validating the immutable, expiring owner
 request against the exact pending action before ordinary one-time resolution. Preserve requested/resolved audit
 ordering, policy revalidation, worker fencing, and uncertain-effect rules.

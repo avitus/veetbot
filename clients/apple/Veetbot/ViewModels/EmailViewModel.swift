@@ -141,6 +141,8 @@ public final class EmailViewModel: ObservableObject {
     public let subscriptions: EmailSubscriptionsViewModel
     private let makeAPIClient: () -> VeetbotAPIClient?
     private let refreshNanoseconds: UInt64
+    /// The wait between reads of a draft or send run the owner is watching.
+    private let pollNanoseconds: UInt64
     private let now: () -> Date
     private let statusBackoff: @Sendable (UInt64) async throws -> Void
     private var active = false
@@ -154,6 +156,10 @@ public final class EmailViewModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var operationTask: Task<Void, Never>?
     private var autosaveTask: Task<Void, Never>?
+    /// The save currently on the wire; a later save or Review & Send waits for it.
+    private var inflightSave: Task<Bool, Never>?
+    /// A send proposal that outlasted the local wait; the next read of its draft opens the review.
+    private var pendingReviewRunID: UUID?
     private var searchTask: Task<Void, Never>?
     private var refreshKey: String?
     private var refreshFailure: String?
@@ -186,6 +192,7 @@ public final class EmailViewModel: ObservableObject {
     public init(
         makeAPIClient: @escaping () -> VeetbotAPIClient?,
         refreshNanoseconds: UInt64 = 60_000_000_000,
+        pollNanoseconds: UInt64 = 1_000_000_000,
         now: @escaping () -> Date = Date.init,
         statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         toasts: ToastCenter? = nil
@@ -193,6 +200,7 @@ public final class EmailViewModel: ObservableObject {
         self.toasts = toasts ?? .shared
         self.makeAPIClient = makeAPIClient
         self.refreshNanoseconds = refreshNanoseconds
+        self.pollNanoseconds = pollNanoseconds
         self.now = now
         self.statusBackoff = statusBackoff
         subscriptions = EmailSubscriptionsViewModel(
@@ -256,9 +264,60 @@ public final class EmailViewModel: ObservableObject {
     public var threadReadMessage: String? { threadReadError }
     /// Says where held edits are while a stale draft waits for the owner's review of the new mail.
     static let staleEditMessage = "Your edits are kept on this device until you confirm you've reviewed the updated thread."
+    /// A send the server ended without dispatch, in the owner's terms rather than a closed sheet.
+    public static let sendEndedByNewMailMessage =
+        "New mail arrived before this reply was sent, so nothing went out. Read it above, then send again."
+    static let sendNotMadeMessage =
+        "Nothing was sent: Gmail couldn't be checked, or the reply changed. Your draft is kept; send again."
+    static let sendFailedMessage = "This reply wasn't sent. Your draft is kept; try again."
+    /// Shown when a proposal outlasts the local wait; a later refresh opens the review itself.
+    public static let stillPreparingSendMessage =
+        "Still preparing to send. The review will open here as soon as it's ready."
+    /// Progress on a send proposal the owner is waiting on; not an error, so it is shown quietly.
+    @Published public private(set) var sendProgressMessage: String?
+    /// True from Review & Send or Send until the proposal or resolution settles; only this locks the editor.
+    @Published public private(set) var isPreparingSend = false
+
+    /// The newest message that arrived after the draft was last written: the reason it is stale.
+    public var newMailSinceDraft: EmailMessageView? {
+        guard let thread, let draft, draft.stale, let messages = thread.messages, !messages.isEmpty else { return nil }
+        let later = messages.filter { $0.sentAt > draft.updatedAt }
+        return (later.isEmpty ? messages : later).max { $0.sentAt < $1.sentAt }
+    }
+
+    /// Names who wrote and quotes the start of their message, so the owner decides from
+    /// the mail itself rather than from a revision number.
+    public func staleMailMessage(locale: Locale = .current) -> String? {
+        guard let message = newMailSinceDraft else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .full
+        let when = formatter.localizedString(for: message.sentAt, relativeTo: now())
+        return "\(Self.displayName(message.sender)) wrote \(when): “\(Self.excerpt(message.body))” "
+            + "Read it above, then confirm your reply still fits."
+    }
+
+    /// "Dana Lee <dana@example.test>" reads as Dana Lee; a bare address stays an address.
+    static func displayName(_ sender: String) -> String {
+        guard let open = sender.firstIndex(of: "<") else {
+            return sender.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let name = sender[..<open].trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'")))
+        return name.isEmpty ? sender.trimmingCharacters(in: .whitespacesAndNewlines) : name
+    }
+
+    /// The first sentence or so of the new text, before any quoted earlier mail.
+    static func excerpt(_ body: String, limit: Int = 140) -> String {
+        let collapsed = body.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && !$0.hasPrefix(">") } ?? ""
+        guard collapsed.count > limit else { return collapsed }
+        return String(collapsed.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
     public var canReview: Bool {
         guard let draft else { return false }
-        return draft.canEdit && !draft.stale && conflict == nil && !isSaving && !isPerformingAction
+        return draft.canEdit && !draft.stale && conflict == nil && !isPerformingAction && !isPreparingSend
     }
 
     /// Starts foreground refreshes for a new visit or invalidates reads when Email is hidden.
@@ -297,6 +356,10 @@ public final class EmailViewModel: ObservableObject {
         refreshTask?.cancel()
         operationTask?.cancel()
         autosaveTask?.cancel()
+        inflightSave = nil
+        pendingReviewRunID = nil
+        sendProgressMessage = nil
+        isPreparingSend = false
         searchTask?.cancel()
         archiveTasks.values.forEach { $0.cancel() }
         archiveTasks = [:]
@@ -748,6 +811,7 @@ public final class EmailViewModel: ObservableObject {
             } else { draft = nil }
             threadReadError = nil
             if let approvalID, draft?.approvalID == approvalID { await loadReview(activation: foreground) }
+            else { await settlePendingReview(activation: foreground) }
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
             report(error, draft: true, readAccess: true)
@@ -764,9 +828,34 @@ public final class EmailViewModel: ObservableObject {
             conflict = nil
         }
         if reviewDraft?.revision != value.revision || value.stale || value.status != "awaiting_approval" {
+            // A review that closes because mail arrived must say so; closing silently
+            // leaves the owner wondering what they did.
+            if reviewDraft != nil, value.stale { draftActionError = Self.sendEndedByNewMailMessage }
             review = nil
             reviewDraft = nil
         }
+    }
+
+    /// Opens the review for a proposal that outlasted its local wait once a later read shows
+    /// where it landed, and clears the wait notice whichever way it settled.
+    private func settlePendingReview(activation foreground: UUID?) async {
+        guard let pending = pendingReviewRunID, let draft else { return }
+        // Admission marks the draft awaiting approval before the task has frozen one.
+        let stillQueued = draft.runID == pending && draft.approvalID == nil && !draft.stale
+            && ["ready", "awaiting_approval"].contains(draft.status)
+        if stillQueued { return }
+        pendingReviewRunID = nil
+        sendProgressMessage = nil
+        if draft.runID == pending, draft.approvalID != nil, review == nil {
+            await loadReview(activation: foreground)
+        }
+    }
+
+    /// A send run that completed without sending: say why beside the draft.
+    private func reportUnsentSend() {
+        guard let draft, !["sent", "sending", "uncertain"].contains(draft.status) else { return }
+        draftActionError = draft.stale ? Self.sendEndedByNewMailMessage
+            : draft.status == "failed" ? Self.sendFailedMessage : Self.sendNotMadeMessage
     }
 
     public func changeEdit(_ keyPath: WritableKeyPath<EmailDraftEdit, String>, to text: String) {
@@ -787,15 +876,30 @@ public final class EmailViewModel: ObservableObject {
     @discardableResult
     /// Saves the expected draft revision and preserves both versions when another device has edited it.
     public func saveDraft(_ id: UUID? = nil) async -> Bool {
-        guard let id = id ?? draft?.id, let edit = edits[id], let api = makeAPIClient() else { return false }
+        guard let id = id ?? draft?.id else { return false }
+        // A save already on the wire settles first, then whatever is still dirty is
+        // saved: Review & Send waits here instead of being greyed out by an autosave.
+        while let inflight = inflightSave {
+            _ = await inflight.value
+            if inflightSave == inflight { inflightSave = nil }
+        }
+        guard let edit = edits[id], let api = makeAPIClient() else { return false }
         guard edit.isDirty else { return true }
-        guard !isSaving, !(conflict?.id == id) else { return false }
+        guard conflict?.id != id else { return false }
         // The server refuses edits to a stale draft until the owner confirms the
         // updated thread, so hold them here instead of sending a save it must refuse.
         if draft?.id == id, draft?.stale == true, edit.reviewedSourceRevision == nil {
             draftActionError = Self.staleEditMessage
             return false
         }
+        let save = Task { [weak self] in await self?.performSave(id, edit: edit, api: api) ?? false }
+        inflightSave = save
+        let saved = await save.value
+        if inflightSave == save { inflightSave = nil }
+        return saved
+    }
+
+    private func performSave(_ id: UUID, edit: EmailDraftEdit, api: VeetbotAPIClient) async -> Bool {
         isSaving = true
         draftActionError = nil
         let connection = generation
@@ -926,6 +1030,11 @@ public final class EmailViewModel: ObservableObject {
     /// Saves edits and proposes the exact draft for approval, retaining accepted work if Email is hidden.
     public func prepareSend() async {
         guard canReview, let api = makeAPIClient() else { return }
+        isPreparingSend = true
+        sendProgressMessage = nil
+        pendingReviewRunID = nil
+        let connection = generation
+        defer { if generation == connection { isPreparingSend = false } }
         // Typing continues while a save is in flight, so a save can succeed and still
         // leave the edit dirty, holding back the very text the owner asked to send.
         // Settle the newest revision before freezing one, bounding the attempts so
@@ -947,7 +1056,6 @@ public final class EmailViewModel: ObservableObject {
             return
         }
         isPerformingAction = true
-        let connection = generation
         defer { if generation == connection { isPerformingAction = false } }
         let key: String
         if let previous = sendKeys[draft.id], previous.0 == draft.revision { key = previous.1 }
@@ -956,12 +1064,14 @@ public final class EmailViewModel: ObservableObject {
             let result = try await api.proposeEmailSend(draft, idempotencyKey: key)
             guard generation == connection else { return }
             if let value = result.draft { mergeDraft(value) }
-            await watchDraftRun(result.runID, threadID: draft.threadID, connection: connection)
+            await watchDraftRun(result.runID, threadID: draft.threadID, connection: connection, send: true)
             await loadReview(activation: nil)
         } catch { if generation == connection { report(error, draft: true) } }
     }
 
-    private func watchDraftRun(_ runID: UUID, threadID: UUID, connection: UUID) async {
+    /// Follows a draft or send run the owner is waiting on. A send that completes without
+    /// sending is reported; one that outlasts the local wait is marked for a later read to open.
+    private func watchDraftRun(_ runID: UUID, threadID: UUID, connection: UUID, send: Bool = false) async {
         guard let api = makeAPIClient() else { return }
         // Stop local waiting after a bounded interval; subsequent active refresh
         // recovers the same durable action instead of submitting another one.
@@ -975,11 +1085,16 @@ public final class EmailViewModel: ObservableObject {
                     draftActionError = run.failure?.userFacingMessage ?? "The email operation failed. Try again."
                 } else if run.status == .cancelled {
                     draftActionError = "The email operation was cancelled."
+                } else if send, run.status == .completed {
+                    reportUnsentSend()
                 }
                 if run.status.isTerminal || run.status == .waitingForApproval || run.status == .waitingForUser { return }
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                try await Task.sleep(nanoseconds: pollNanoseconds)
             } catch { if generation == connection { report(error, draft: true) }; return }
         }
+        guard send, generation == connection, selectedThreadID == threadID else { return }
+        pendingReviewRunID = runID
+        sendProgressMessage = Self.stillPreparingSendMessage
     }
 
     /// Opens approval only after current account authority and the exact displayed draft match.
@@ -1481,13 +1596,20 @@ public final class EmailViewModel: ObservableObject {
             draft.id == frozen.id, draft.revision == frozen.revision, !draft.stale,
             currentEdit?.isDirty == false, let api = makeAPIClient(), !isPerformingAction else { return }
         isPerformingAction = true
+        isPreparingSend = true
         let connection = generation
-        defer { if generation == connection { isPerformingAction = false } }
+        defer {
+            if generation == connection {
+                isPerformingAction = false
+                isPreparingSend = false
+            }
+        }
         do {
             _ = try await api.resolveApproval(review.id, decision: decision)
             guard generation == connection else { return }
             closeReview()
-            await watchDraftRun(review.runID, threadID: draft.threadID, connection: connection)
+            // A denied send is the owner's own doing; only an approved one that did not go out needs a word.
+            await watchDraftRun(review.runID, threadID: draft.threadID, connection: connection, send: decision != .deny)
         } catch {
             guard generation == connection else { return }
             // A lost response or another device may have resolved this action.

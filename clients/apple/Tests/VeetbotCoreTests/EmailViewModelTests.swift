@@ -1409,6 +1409,124 @@ import SwiftUI
         #expect(model.currentEdit?.isDirty == false)
     }
 
+    /// An autosave in flight must not grey out Review & Send: the proposal waits for
+    /// that save and then carries the settled revision, with no second save.
+    @Test func testReviewSendStaysAvailableWhileAnAutosaveIsInFlight() async throws {
+        let requests = EmailRequestRecorder()
+        let saveGate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "PUT" {
+                let saves = requests.snapshot.filter { $0.httpMethod == "PUT" }.count
+                return (200, self.draftJSON(revision: saves + 1, body: "Edited body"), saves == 1 ? saveGate : nil)
+            }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.draftJSON(revision: 2, body: "Edited body", status: "awaiting_approval"))}", nil)
+            }
+            if request.url!.path.contains("/runs/") {
+                return (200, "{\"id\":\"\(self.runID)\",\"status\":\"WAITING_FOR_APPROVAL\"}", nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { saveGate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited body")
+        let saving = Task { await model.saveDraft() }
+        try await waitForEmailTestCondition { saveGate.isWaiting }
+        #expect(model.isSaving)
+        #expect(model.canReview, "a save in flight must not disable Review & Send")
+        let sending = Task { await model.prepareSend() }
+        saveGate.release()
+        _ = await saving.value
+        await sending.value
+
+        #expect(requests.snapshot.filter { $0.url!.path.hasSuffix("send-proposal") }.count == 1)
+        #expect(requests.snapshot.filter { $0.httpMethod == "PUT" }.count == 1)
+        #expect(model.currentEdit?.isDirty == false)
+    }
+
+    /// A send the server ends because new mail arrived must say so beside the draft,
+    /// not just close the review and leave the draft looking untouched.
+    @Test func testSendEndedByNewMailIsReportedBesideTheDraft() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.draftJSON(status: "awaiting_approval"))}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "COMPLETED")) }
+            let proposed = requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") }
+            return (200, proposed
+                ? self.newMailThreadJSON(draft: self.staleDraftJSON())
+                : self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.prepareSend()
+
+        #expect(model.draft?.stale == true)
+        #expect(model.review == nil)
+        #expect(model.draftActionMessage == EmailViewModel.sendEndedByNewMailMessage)
+    }
+
+    /// The new-mail notice names who wrote and quotes them, so the owner can decide
+    /// without hunting through the thread for what changed.
+    @Test func testStaleDraftNoticeNamesTheNewMail() async throws {
+        let now = ISO8601DateFormatter().date(from: "2026-09-11T00:10:00Z")!
+        let model = try makeModel(now: { now }) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let messages = [
+                self.messageJSON(id: "m1", sender: "Alex Chen <alex@example.test>",
+                                 body: "Here is the agenda.", sentAt: "2026-09-10T23:00:00Z"),
+                self.messageJSON(id: "m2", sender: "Dana Lee <dana@example.test>",
+                                 body: "Thursday works better for me, can we move it?", sentAt: "2026-09-11T00:07:00Z"),
+            ].joined(separator: ",")
+            return (200, self.newMailThreadJSON(draft: self.staleDraftJSON())
+                .replacingOccurrences(of: "\"messages\":[]", with: "\"messages\":[\(messages)]"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+
+        #expect(model.newMailSinceDraft?.id == "m2")
+        #expect(model.staleMailMessage(locale: Locale(identifier: "en_US")) ==
+            "Dana Lee wrote 3 minutes ago: “Thursday works better for me, can we move it?” Read it above, then confirm your reply still fits.")
+    }
+
+    /// When the send proposal outlasts the local wait, the owner sees that it is still
+    /// being prepared, and the review opens from a later refresh without another press.
+    @Test func testLongSendPreparationIsVisibleAndReviewOpensWhenReady() async throws {
+        let ready = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/approvals/") {
+                return (200, self.approvalJSON(body: "Thanks, I will review the agenda."))
+            }
+            // Admission marks the draft awaiting approval; the approval itself comes later.
+            let queued = self.draftJSON(status: "awaiting_approval").replacingOccurrences(
+                of: "\"approval_id\":\"\(self.approvalID)\"", with: "\"approval_id\":null")
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(queued)}")
+            }
+            if request.url!.path.contains("/runs/") {
+                return (200, self.runJSON(status: ready.isSet ? "WAITING_FOR_APPROVAL" : "QUEUED"))
+            }
+            return (200, self.threadJSON(draft: ready.isSet ? self.draftJSON(status: "awaiting_approval") : queued))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.prepareSend()
+
+        #expect(model.review == nil)
+        #expect(model.draftActionMessage == nil)
+        #expect(model.sendProgressMessage == EmailViewModel.stillPreparingSendMessage)
+        ready.set()
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.review?.id == approvalID)
+        #expect(model.sendProgressMessage == nil)
+    }
+
     /// A reply over the approval view's 512-character ceiling arrives truncated. The
     /// published digest still proves the frozen body is exactly the displayed draft,
     /// so review opens instead of silently refusing every long email.
@@ -2718,6 +2836,7 @@ import SwiftUI
 
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
+        pollNanoseconds: UInt64 = 1_000_000_000,
         now: @escaping () -> Date = Date.init,
         statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         toasts: ToastCenter? = nil,
@@ -2732,7 +2851,8 @@ import SwiftUI
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
         return EmailViewModel(
-            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff,
+            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, pollNanoseconds: pollNanoseconds,
+            now: now, statusBackoff: statusBackoff,
             toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
         )
     }
@@ -2766,6 +2886,16 @@ import SwiftUI
     private func draftJSON(revision: Int = 1, body: String = "Thanks, I will review the agenda.", status: String = "ready") -> String {
         """
         {"id":"\(draftID)","thread_id":"\(threadID)","account_id":"personal","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)","status":"\(status)","stale":false,"run_id":"\(runID)","approval_id":"\(approvalID)","session_id":"\(threadID)","updated_at":"2026-09-11T00:00:00Z"}
+        """
+    }
+    private func runJSON(status: String) -> String {
+        """
+        {"id":"\(runID)","session_id":"\(threadID)","status":"\(status)","step_count":1,"model_call_count":0,"tool_call_count":0,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
+        """
+    }
+    private func messageJSON(id: String, sender: String, body: String, sentAt: String) -> String {
+        """
+        {"id":"\(id)","sender":"\(sender)","to":["owner@example.test"],"cc":[],"subject":"Board discussion","body":"\(body)","sent_at":"\(sentAt)","complete":true}
         """
     }
     /// The thread after new mail arrived: its revision advanced past the draft's source revision.
@@ -2861,6 +2991,14 @@ private final class EmailArchiveRaceURLProtocol: URLProtocol {
 
     /// Deferred callbacks are released explicitly by each test, including cleanup paths.
     override func stopLoading() {}
+}
+
+/// A switch the test flips while the handler keeps answering on URLSession's queue.
+private final class EmailTestFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.withLock { value = true } }
+    var isSet: Bool { lock.withLock { value } }
 }
 
 private final class EmailRequestRecorder: @unchecked Sendable {

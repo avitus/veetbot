@@ -289,10 +289,10 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
     from agent_core.domain.approvals import ApprovalResolutionType
     from tests.gates.test_email_m18 import _email_settings
 
+    # The owner is waiting on a send, so the proposal reads nothing before the
+    # approval is shown; the one identity check and thread read follow it.
     factory = await _mailbox_factory(
         [
-            ("get_profile", {**_profile(), "email_address": profile_address}),
-            ("get_thread_page", _page()),
             ("get_profile", {**_profile(), "email_address": profile_address}),
             ("get_thread_page", _page()),
         ]
@@ -304,7 +304,14 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
         operation = await app.services.email.submit_task(
             app.principal, kind="send", draft_id=draft.id, expected_revision=draft.revision
         )
-        assert (await app.runs.get(operation.run_id)).status is RunStatus.WAITING_FOR_APPROVAL
+        proposed = await app.runs.get(operation.run_id)
+        assert proposed.status is RunStatus.WAITING_FOR_APPROVAL
+        assert proposed.priority == 0, "a send proposal joins the interactive class"
+        async with app.uow_factory() as uow:
+            before = await uow.invocations.list_for_run(proposed.id, app.principal)
+        assert not any(
+            item.tool_name.endswith(("get_profile", "get_thread_page")) for item in before
+        )
         [approval] = await app.approvals.list_pending(run_id=operation.run_id)
         assert approval.arguments == {
             "to": "reply@example.test",
@@ -319,7 +326,7 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
         await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
         run = await app.runs.get(operation.run_id)
         assert run.status is RunStatus.COMPLETED
-        assert run.tool_call_count == 5
+        assert run.tool_call_count == 3
         current = await app.services.email.draft(app.principal, draft.id)
         assert current.status.value == "sent"
         async with app.uow_factory() as uow:
@@ -327,7 +334,7 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
             state = await uow.checkpoints.latest(run.id)
         assert len([item for item in invocations if item.tool_name.endswith("send_message")]) == 1
         assert (
-            len([item for item in invocations if item.tool_name.endswith("get_thread_page")]) == 2
+            len([item for item in invocations if item.tool_name.endswith("get_thread_page")]) == 1
         )
         assert state is not None and "mcp.gmail_read.get_profile" not in state.pinned_tool_names
 
@@ -336,15 +343,11 @@ async def test_external_reply_after_approval_invalidates_send_without_dispatch()
     from dataclasses import replace
 
     from agent_core.domain.approvals import ApprovalResolutionType
+    from agent_core.domain.errors import ConflictError
     from tests.gates.test_email_m18 import _email_settings
 
     factory = await _mailbox_factory(
-        [
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-            ("get_profile", _profile()),
-            ("get_thread_page", _page(changed=True)),
-        ]
+        [("get_profile", _profile()), ("get_thread_page", _page(changed=True))]
     )
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
@@ -365,6 +368,11 @@ async def test_external_reply_after_approval_invalidates_send_without_dispatch()
             for call in calls
             if call.tool_name.endswith("send_message")
         )
+        # The owner reads the refusal: it names the new mail, not a revision.
+        with pytest.raises(ConflictError, match="New mail arrived"):
+            await app.services.email.submit_task(
+                app.principal, kind="send", draft_id=draft.id, expected_revision=1
+            )
 
 
 async def test_uncertain_send_is_preserved_and_cannot_be_resubmitted() -> None:
@@ -377,13 +385,7 @@ async def test_uncertain_send_is_preserved_and_cannot_be_resubmitted() -> None:
     from tests.gates.test_email_m18 import _email_settings
 
     factory = await _mailbox_factory(
-        [
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-        ],
-        send_uncertain=True,
+        [("get_profile", _profile()), ("get_thread_page", _page())], send_uncertain=True
     )
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
@@ -405,6 +407,7 @@ async def test_uncertain_send_is_preserved_and_cannot_be_resubmitted() -> None:
 async def test_failed_freshness_preserves_draft_and_never_dispatches_send() -> None:
     from dataclasses import replace
 
+    from agent_core.domain.approvals import ApprovalResolutionType
     from tests.gates.test_email_m18 import _email_settings
 
     factory = await _mailbox_factory([("get_profile", {"is_error": True})])
@@ -415,11 +418,20 @@ async def test_failed_freshness_preserves_draft_and_never_dispatches_send() -> N
         operation = await app.services.email.submit_task(
             app.principal, kind="send", draft_id=draft.id, expected_revision=1
         )
+        # The freshness read follows the approval; its failure defers the send.
+        [approval] = await app.approvals.list_pending(run_id=operation.run_id)
+        await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED
         current = await app.services.email.draft(app.principal, draft.id)
         assert current.status.value == "ready" and current.body == draft.body
         async with app.uow_factory() as uow:
             calls = await uow.invocations.list_for_run(operation.run_id, app.principal)
-        assert not any(call.tool_name.endswith("send_message") for call in calls)
+        assert not any(
+            call.effect_sent_at is not None
+            for call in calls
+            if call.tool_name.endswith("send_message")
+        )
 
 
 async def test_refresh_reserves_history_progress_and_bounds_full_reads_per_account() -> None:
@@ -1201,8 +1213,8 @@ async def test_recovery_after_send_dispatch_preserves_uncertainty_before_any_fre
         assert current.status.value == "uncertain"
         async with app.uow_factory() as uow:
             calls = await uow.invocations.list_for_run(operation.run_id, app.principal)
-        assert len([call for call in calls if call.tool_name.endswith("get_profile")]) == 1
-        assert (await app.runs.get(operation.run_id)).tool_call_count == 3
+        assert not any(call.tool_name.endswith("get_profile") for call in calls)
+        assert (await app.runs.get(operation.run_id)).tool_call_count == 1
 
 
 async def test_editing_pending_send_cancels_old_approval_and_allows_new_exact_proposal() -> None:
@@ -1215,16 +1227,7 @@ async def test_editing_pending_send_cancels_old_approval_and_allows_new_exact_pr
     from agent_core.domain.errors import ConflictError
     from tests.gates.test_email_m18 import _email_settings
 
-    factory = await _mailbox_factory(
-        [
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-        ]
-    )
+    factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
     ) as app:
@@ -1645,14 +1648,7 @@ async def test_send_recovery_accounts_confirmed_outcome_without_redispatch() -> 
     class SimulatedCrash(BaseException):
         pass
 
-    factory = await _mailbox_factory(
-        [
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-            ("get_profile", _profile()),
-            ("get_thread_page", _page()),
-        ]
-    )
+    factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
     ) as app:
@@ -1676,7 +1672,7 @@ async def test_send_recovery_accounts_confirmed_outcome_without_redispatch() -> 
         run = await app.runs.get(task.run_id)
         await app.executor._execute_running(run, lease=None)
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
-        assert (await app.runs.get(task.run_id)).tool_call_count == 5
+        assert (await app.runs.get(task.run_id)).tool_call_count == 3
         async with app.uow_factory() as uow:
             invocations = await uow.invocations.list_for_run(run.id, app.principal)
         assert len([call for call in invocations if call.tool_name.endswith("send_message")]) == 1
@@ -1933,6 +1929,7 @@ async def test_invalid_json_mailbox_result_preserves_account_and_draft(
 ) -> None:
     from dataclasses import replace
 
+    from agent_core.domain.approvals import ApprovalResolutionType
     from tests.gates.test_email_m18 import _email_settings
 
     base_factory = await _mailbox_factory([])
@@ -1958,6 +1955,10 @@ async def test_invalid_json_mailbox_result_preserves_account_and_draft(
             draft_id=draft.id if draft is not None else None,
             expected_revision=1 if kind == "send" else None,
         )
+        if kind == "send":
+            # The mailbox is read only after the owner's approval.
+            [approval] = await app.approvals.list_pending(run_id=operation.run_id)
+            await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED, (
             await app.runs.get(operation.run_id)
         ).model_dump()

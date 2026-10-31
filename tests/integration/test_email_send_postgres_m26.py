@@ -3,8 +3,8 @@
 Guards docs/plan/email-experience.md "Editing and sending" (optimistic draft
 revisions and the explicit conflict, the frozen exact action, the ordinary
 approval, the governed freshness reread before one dispatch), the command
-idempotency rule (email-experience.md:827), the asynchronous lane for send work
-(email-experience.md:863-864) and the retention rule that removes sent draft
+idempotency rule (email-experience.md:827), the interactive lane for send work
+(email-experience.md:875-877) and the retention rule that removes sent draft
 bodies after 30 days (email-experience.md:912), end to end over the HTTP
 routes, the approval route, the durable worker, a composition restart and the
 maintenance sweep, with a recording fake Gmail send server.
@@ -136,11 +136,12 @@ async def test_edited_draft_is_sent_once_through_approval_worker_and_restart() -
         run_id = UUID(proposed.json()["run_id"])
         assert writes == []
 
-        # Send work stays in the asynchronous lane (email-experience.md:863-864).
-        interactive = cast(DurableWorker, app.worker_factory("interactive-lane"))
-        assert not await interactive.run_once()
+        # The owner waits on a send, so it joins the interactive lane and never
+        # queues behind a refresh (email-experience.md:875-877).
         asynchronous = cast(DurableWorker, app.async_worker_factory("async-lane"))
-        assert await asynchronous.run_once()
+        assert not await asynchronous.run_once()
+        interactive = cast(DurableWorker, app.worker_factory("interactive-lane"))
+        assert await interactive.run_once()
         assert (await app.runs.get(run_id)).status is RunStatus.WAITING_FOR_APPROVAL
         awaiting = await client.get(f"/v1/email/drafts/{draft.id}")
         assert awaiting.json()["status"] == "awaiting_approval"
@@ -166,8 +167,8 @@ async def test_edited_draft_is_sent_once_through_approval_worker_and_restart() -
     ):
         task = await app.services.email.get_task(app.principal, run_id)
         assert task is not None and task.kind == "send" and task.draft_id == draft.id
-        asynchronous = cast(DurableWorker, app.async_worker_factory("async-lane-after-restart"))
-        assert await asynchronous.run_once()
+        interactive = cast(DurableWorker, app.worker_factory("interactive-lane-after-restart"))
+        assert await interactive.run_once()
         run = await app.runs.get(run_id)
         assert run.status is RunStatus.COMPLETED, run.failure
         assert writes == [

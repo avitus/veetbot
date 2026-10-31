@@ -650,10 +650,14 @@ class EmailExperienceService:
                 EmailDraftStatus.UNCERTAIN,
                 EmailDraftStatus.DISCARDED,
             }:
-                raise ConflictError("this draft cannot be edited in its current send state")
+                raise ConflictError(
+                    "This draft is being sent or was already sent, so it can no longer change."
+                )
             thread = await self._thread(uow.email, principal, current.thread_id)
             if current.stale and edit.source_revision != thread.revision:
-                raise ConflictError("review the changed thread before updating this draft")
+                raise ConflictError(
+                    "New mail arrived on this thread. Read it, then save your reply again."
+                )
             updated = current.model_copy(
                 update={
                     **values,
@@ -756,7 +760,9 @@ class EmailExperienceService:
                 raise ConflictError("send cancellation is unavailable")
             await self.cancel_parked_run(uow, run, principal.principal_id)
         elif editing:
-            raise ConflictError("send review is running; retry the edit when review is ready")
+            raise ConflictError(
+                "This reply is being checked for sending. Try the edit again in a moment."
+            )
 
     async def draft_revisions(self, principal: Principal, draft_id: UUID) -> dict[str, object]:
         require_scope(principal, "email.read")
@@ -1188,7 +1194,9 @@ class EmailExperienceService:
                 ):
                     continue
                 if kind == "send" and old.expected_revision != expected_revision:
-                    raise ConflictError("another draft revision already has a send operation")
+                    raise ConflictError(
+                        "An earlier version of this reply is already on its way to being sent."
+                    )
                 if (
                     kind == "archive"
                     and old.archive_consent is not None
@@ -1214,14 +1222,16 @@ class EmailExperienceService:
                     or draft.stale
                     or draft.source_revision != thread.revision
                 ):
-                    raise ConflictError("review the latest draft and thread before sending")
+                    raise ConflictError(
+                        "New mail arrived or the reply changed. Check the thread, then send again."
+                    )
                 if draft.status in {
                     EmailDraftStatus.SENDING,
                     EmailDraftStatus.SENT,
                     EmailDraftStatus.UNCERTAIN,
                     EmailDraftStatus.DISCARDED,
                 }:
-                    raise ConflictError("this draft cannot be sent in its current state")
+                    raise ConflictError("This reply was already sent or discarded.")
             reservation = (
                 Decimal("0")
                 if kind == "send" or gesture
@@ -1237,7 +1247,9 @@ class EmailExperienceService:
                 await self._check_budget(uow.email, principal, reservation)
             session = await self._session_in(uow, principal, None if gesture else thread, prepared)
             if await uow.runs.active_for_session(session.id, principal) is not None:
-                raise ConflictError("the thread conversation has an active run")
+                raise ConflictError(
+                    "Veetbot is still working on this thread. Try again in a moment."
+                )
             # A batch may send mail and page a sender's Inbox after its one-click request.
             slice_seconds = timedelta(seconds=300 if kind == "subscription" else 120)
             deadline = (
@@ -1261,9 +1273,9 @@ class EmailExperienceService:
                 agent_version=session.agent_version,
                 status=RunStatus.QUEUED,
                 limits=limits,
-                # The owner waits on a gesture; it must not queue behind
-                # minutes-long refreshes in the asynchronous lane.
-                priority=0 if gesture else 10,
+                # The owner waits on a gesture or a send; neither may queue
+                # behind minutes-long refreshes in the asynchronous lane.
+                priority=0 if gesture or kind == "send" else 10,
                 scheduled_for=now,
                 deadline_at=deadline,
                 created_at=now,
