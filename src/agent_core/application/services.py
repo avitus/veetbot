@@ -25,6 +25,7 @@ from agent_core.domain.browser_task_grants import (
 from agent_core.domain.cockpit import DeviceClass
 from agent_core.domain.cockpit_views import (
     CockpitChangeView,
+    CockpitDeviceFailure,
     CockpitLayoutView,
     CockpitLayoutWrite,
     CockpitSettingsView,
@@ -635,6 +636,10 @@ class CockpitService(Protocol):
     async def asset(self, principal: Principal, sha256: str) -> CockpitAsset: ...
 
     async def widget(self, principal: Principal, slug: str) -> CockpitWidgetDetailView: ...
+
+    async def report_failure(
+        self, principal: Principal, slug: str, report: CockpitDeviceFailure
+    ) -> None: ...
 
     async def put_settings(
         self, principal: Principal, slug: str, values: dict[str, str | int | float | bool]

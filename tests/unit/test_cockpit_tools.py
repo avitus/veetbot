@@ -15,20 +15,26 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.cockpit.runtime import Draft202012SchemaCheck, FileCockpitRuntime
+from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.live_events import InMemoryLiveEventBroadcaster
+from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.cockpit_feeds import CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.cockpit.catalogue import load_kit_catalogue
-from agent_core.domain.cockpit import CockpitEventKind
-from agent_core.domain.messages import TextPart
+from agent_core.domain.artifacts import ArtifactOrigin
+from agent_core.domain.cockpit import BuildDiagnostic, CockpitEventKind, ImportFailure
+from agent_core.domain.messages import ImageReferencePart, TextPart
 from agent_core.domain.policies import IdempotencyClass, SideEffectClass, TrustLevel
 from agent_core.domain.tool_output import content_bytes
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
+from agent_core.ports.cockpit import WidgetBuild, WidgetPreview
 from agent_core.tools.cockpit import (
     COCKPIT_TOOL_NAMES,
     REASON_CODES,
@@ -620,3 +626,116 @@ def test_every_refusal_reads_in_platform_words() -> None:
 
     assert all(code in TOOL_MESSAGES for code in REASON_CODES)
     assert all("{" not in TOOL_MESSAGES[code] for code in REASON_CODES)
+
+
+async def test_diagnostics_explain_a_queued_publication_and_rejected_revision(
+    tmp_path: Path,
+) -> None:
+    async with harness(tmp_path) as h:
+        create = {"operation": "create", "slug": "weather", "files": package()}
+        pending = await h.call(WIDGET_WRITE_TOOL, create)
+        assert pending.structured
+        query = {"operation": "diagnostics", "slug": "weather"}
+        read = await h.call("cockpit.read", query)
+        assert read.structured and read.structured["publication"]["attempts"] == 0
+        async with h.stack.uow_factory() as uow:
+            await uow.cockpit_outbox.reschedule(
+                OWNER,
+                UUID(pending.structured["revision_id"]),
+                attempts=2,
+                next_attempt_at=h.stack.clock.now(),
+                last_error="GitHub answered 403 to GET /private-repository",
+            )
+        retry = await h.call("cockpit.read", query)
+        assert (
+            retry.structured
+            and retry.structured["publication"]["last_error_code"] == "github_http_403"
+        )
+        assert "private-repository" not in str(retry.content)
+        await h.stack.outbox.run_once()
+        rejected = await h.call(
+            WIDGET_WRITE_TOOL,
+            {
+                **create,
+                "operation": "update",
+                "expected_revision": pending.structured["revision_id"],
+                "files": {**package(), "widget.tsx": "REJECT"},
+            },
+        )
+        assert rejected.structured
+        read = await h.call(
+            "cockpit.read", {**query, "revision_id": rejected.structured["revision_id"]}
+        )
+        assert read.structured and read.structured["diagnostics"][0]["rule"] == "lint.banned"
+
+
+async def test_preview_returns_visible_text_and_private_image_without_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with harness(tmp_path) as h:
+        preview = WidgetPreview("fixtures/empty.json", "md", "No flights", b"synthetic-preview")
+        builder = AsyncMock(return_value=WidgetBuild(ok=True, diagnostics=(), preview=preview))
+        monkeypatch.setattr(type(h.stack.builder), "build", builder)
+        context = h.context()
+        writer = ArtifactWriterFactory(
+            h.stack.uow_factory,
+            FilesystemArtifactStore(tmp_path),
+            h.stack.clock,
+            SequenceIdFactory(),
+        ).for_run(
+            tenant_id=OWNER.tenant_id,
+            principal_id=OWNER.principal_id,
+            session_id=CHAT,
+            run_id=context.run_id,
+            origin=ArtifactOrigin.SANDBOX_EXPORT,
+        )
+        args = {
+            "operation": "preview",
+            "slug": "weather",
+            "files": package(),
+            "fixture": preview.fixture,
+            "size": preview.size,
+        }
+        result = await h.call("cockpit.check", args, artifacts=writer)
+        assert result.ok and result.structured and result.structured["text"] == preview.text
+        assert result.output_trust == TrustLevel.EXTERNAL_UNTRUSTED
+        assert builder.await_args is not None
+        assert builder.await_args.kwargs["preview"] == {
+            "fixture": preview.fixture,
+            "size": preview.size,
+        }
+        image = result.content[-1]
+        assert isinstance(image, ImageReferencePart) and image.media_type == "image/png"
+        async with h.stack.uow_factory() as uow:
+            [artifact] = await uow.artifacts.list_for_run(context.run_id, OWNER)
+            assert artifact.id == image.artifact_id and artifact.session_id == CHAT
+            assert artifact.trust == TrustLevel.EXTERNAL_UNTRUSTED
+            assert await uow.cockpit_widgets.list_widgets(OWNER) == []
+
+
+async def test_failed_first_import_is_diagnosable_without_a_widget(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        async with h.stack.uow_factory() as uow:
+            await uow.cockpit_outbox.record_import_failure(
+                ImportFailure(
+                    id=UUID(int=901),
+                    tenant_id=OWNER.tenant_id,
+                    principal_id=OWNER.principal_id,
+                    commit_sha="c" * 40,
+                    slug="markets",
+                    created_at=h.stack.clock.now(),
+                    diagnostics=(
+                        BuildDiagnostic(
+                            rule="compile.typecheck",
+                            file="widget.tsx",
+                            message="Missing property.",
+                            line=6,
+                        ),
+                    ),
+                )
+            )
+        result = await h.call("cockpit.read", {"operation": "diagnostics", "slug": "markets"})
+        assert result.structured and result.structured["revision_id"] is None
+        [failure] = result.structured["import_failures"]
+        assert failure["commit_sha"] == "c" * 40 and failure["diagnostics"][0]["line"] == 6

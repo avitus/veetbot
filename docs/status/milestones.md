@@ -361,6 +361,7 @@ Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).
 The staged implementation is in progress; optional channels remain evidence-gated.
 
+- [ ] Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
 - [ ] Complete the staged implementation and comparative activation evidence
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
@@ -410,7 +411,7 @@ Every other gate is pending.
 
 - [ ] Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image
 - [ ] Build step 10 remainder: the discuss intent, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19's preflight rebuild of live widgets
-- [ ] Build step 11: preview rendering
+- [ ] ADR-0273: Verify the fixture preview and a device failure report after releasing the production builder and Apple client.
 - [ ] Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; then the activation release (build steps 2 to 10 reached main in pull requests 186, 187, 188, 193, 195 and 200 by 2026-10-26)
 
 ## Outside a milestone

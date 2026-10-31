@@ -1,6 +1,6 @@
 # Integration keys
 
-The ADR-0273 MVP stores owner-entered keys in PostgreSQL, encrypted with a
+The ADR-0275 MVP stores owner-entered keys in PostgreSQL, encrypted with a
 separate host-held AES-256-GCM key. It adds no production Doppler dependency.
 It is off by default; this implementation does not enable production use.
 

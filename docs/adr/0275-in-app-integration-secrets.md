@@ -1,4 +1,4 @@
-# ADR-0273: An in-app store for integration keys
+# ADR-0275: An in-app store for integration keys
 
 - **Status:** Accepted; MVP implementation authorized on 2026-10-30, production activation pending
 - **Date:** 2026-10-30

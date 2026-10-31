@@ -296,7 +296,7 @@ promotion does not automatically roll back after a migration: reverting code
 across a potentially incompatible schema is an operator decision, not a safe
 automated response to a failed health check.
 
-## Owner-entered integration keys (ADR-0273)
+## Owner-entered integration keys (ADR-0275)
 
 Integration keys are encrypted with a separate host-held 32-byte master key.
 Database copies alone cannot decrypt them; compromise of a trusted application

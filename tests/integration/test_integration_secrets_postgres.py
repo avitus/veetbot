@@ -1,4 +1,4 @@
-"""ADR-0273 persistence, real transactions, RLS and independent worker reads."""
+"""ADR-0275 persistence, real transactions, RLS and independent worker reads."""
 
 from __future__ import annotations
 

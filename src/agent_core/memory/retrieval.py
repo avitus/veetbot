@@ -371,6 +371,7 @@ class HybridMemoryRetriever:
         reconsolidation_owner_approved_only: bool = False,
         semantic_queries: SemanticQueryLookup | None = None,
         runtime_semantic_queries: RuntimeSemanticQueries | None = None,
+        semantic_binding_sha256: str | None = None,
         source_recovery: BoundedSourceRecovery | None = None,
         reranking_admitted: Callable[[], bool] | None = None,
     ) -> None:
@@ -384,6 +385,7 @@ class HybridMemoryRetriever:
         self._reconsolidation_admission = reconsolidation_enabled
         self._owner_approved_only = reconsolidation_owner_approved_only
         self._semantic_queries = semantic_queries
+        self._semantic_binding_sha256 = semantic_binding_sha256
         self._runtime_semantic_queries = runtime_semantic_queries
         self._source_recovery = source_recovery
         self._reranking_admitted = reranking_admitted
@@ -1149,6 +1151,11 @@ class HybridMemoryRetriever:
                 payload={
                     "trace_id": str(trace_id),
                     "rendered_sha256": trace.rendered_sha256,
+                    **(
+                        {"semantic_binding_sha256": self._semantic_binding_sha256}
+                        if semantic_key is not None and self._semantic_binding_sha256
+                        else {}
+                    ),
                     "returned": [str(item.belief_id) for item in selected_items],
                 },
             )

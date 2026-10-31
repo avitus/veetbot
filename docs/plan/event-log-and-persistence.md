@@ -1667,7 +1667,7 @@ timestamp update. The repair migration restores affected active sessions to
 the latest remaining event or creation time, preserves later independent
 writes and closed sessions, and retains every audit event.
 
-## Integration key persistence (ADR-0273)
+## Integration key persistence (ADR-0275)
 
 `integration_secrets` holds owner-bound metadata, AES-GCM ciphertext and
 permanent tombstones. Tenant RLS supplements tenant/principal predicates. The

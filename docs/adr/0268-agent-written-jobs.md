@@ -412,9 +412,9 @@ above, adds revision-bound execution and encoded-response checks, and follows
 the owner's direction that no human pushes may reach the public jobs branch.
 The historical PR211 admission and its original configuration remain historical.
 
-## ADR-0273 extension: owner-entered keys
+## ADR-0275 extension: owner-entered keys
 
-ADR-0273 is accepted and extends decision 8 with a default-off Settings store.
+ADR-0275 is accepted and extends decision 8 with a default-off Settings store.
 Approved grants may bind an owner-owned `stored:<uuid>` to its immutable HTTPS
 origin for authenticated GET only. Values resolve live per request through the
 trusted broker; replacement preserves the binding and deletion revokes future

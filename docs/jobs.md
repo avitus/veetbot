@@ -241,7 +241,7 @@ it does not claim to recognize arbitrary encodings.
 
 ## Owner-entered integration keys
 
-[Integration keys](integration-keys.md) adds the ADR-0273 Settings store. Approved
+[Integration keys](integration-keys.md) adds the ADR-0275 Settings store. Approved
 job grants may bind a `stored:<uuid>` reference to its exact saved host for GET
 requests. The broker resolves live values on each request; neither jobs nor
 models receive them. The feature is off by default and does not bypass the

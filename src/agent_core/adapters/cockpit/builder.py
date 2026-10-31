@@ -10,6 +10,7 @@ bundle hashes to its digest and fits the cap, and a rejection says why.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
@@ -28,7 +29,7 @@ from agent_core.domain.execution import (
     SandboxPurpose,
 )
 from agent_core.execution.manager import SandboxManager, _WorkspaceEnvironment
-from agent_core.ports.cockpit import BuildScreen, WidgetBuild, WidgetBuildFailedError
+from agent_core.ports.cockpit import BuildScreen, WidgetBuild, WidgetBuildFailedError, WidgetPreview
 from agent_core.ports.determinism import IdFactory
 
 BUILDER_ARGV = ("node", "/opt/cockpit/builder/cli.mjs", "build", "--stdin")
@@ -82,7 +83,39 @@ def _diagnostic(raw: object) -> BuildDiagnostic:
         raise WidgetBuildFailedError("a builder diagnostic is malformed") from error
 
 
-def _verdict(slug: str, result: ExecutionResult) -> WidgetBuild:
+def _preview(report: dict[str, Any], selection: Mapping[str, str]) -> WidgetPreview:
+    value = report.get("preview")
+    sizes = report["manifest"].get("sizes")
+    if not isinstance(value, dict) or not isinstance(sizes, list) or not sizes:
+        raise WidgetBuildFailedError("The preview response is missing.")
+    fixture, size, text, encoded = (value.get(k) for k in ("fixture", "size", "text", "png"))
+    if (
+        fixture != selection.get("fixture", "fixtures/typical.json")
+        or size != selection.get("size", sizes[0])
+        or not isinstance(size, str)
+        or size not in {"sm", "md", "lg", "tall", "wide"}
+        or not isinstance(text, str)
+        or len(text) > 1000
+        or not isinstance(encoded, str)
+        or len(encoded) > 699052
+    ):
+        raise WidgetBuildFailedError("The preview does not match the requested fixture and size.")
+    try:
+        png = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise WidgetBuildFailedError("Invalid preview encoding.") from exc
+    if (
+        len(png) > 524288
+        or not png.startswith(bytes.fromhex("89504e470d0a1a0a0000000d49484452000003c00000021c"))
+        or not png.endswith(bytes.fromhex("0000000049454e44ae426082"))
+    ):
+        raise WidgetBuildFailedError("Invalid preview PNG or dimensions.")
+    return WidgetPreview(fixture=fixture, size=size, text=text, png=png)
+
+
+def _verdict(
+    slug: str, result: ExecutionResult, preview: Mapping[str, str] | None = None
+) -> WidgetBuild:
     if result.timed_out or result.killed_by is not None or result.stdout_truncated:
         raise WidgetBuildFailedError("the build did not finish within its limits")
     if result.exit_code not in (0, 1):
@@ -123,6 +156,7 @@ def _verdict(slug: str, result: ExecutionResult) -> WidgetBuild:
         bundle=bundle,
         bundle_sha256=digest,
         manifest=manifest,
+        preview=None if preview is None else _preview(report, preview),
     )
 
 
@@ -139,7 +173,13 @@ class SandboxWidgetBuilder:
         self._timeout_seconds = timeout_seconds
 
     async def build(
-        self, principal: Principal, slug: str, files: Mapping[str, str], *, screen: BuildScreen
+        self,
+        principal: Principal,
+        slug: str,
+        files: Mapping[str, str],
+        *,
+        screen: BuildScreen,
+        preview: Mapping[str, str] | None = None,
     ) -> WidgetBuild:
         # The slug becomes an argument; anything else could read as an option.
         if not is_widget_slug(slug):
@@ -151,6 +191,8 @@ class SandboxWidgetBuilder:
         if screen.commit_message is not None:
             screened["commitMessage"] = screen.commit_message
         request = {"files": dict(files), "screen": screened}
+        if preview is not None:
+            request["preview"] = dict(preview)
         command = ExecutionCommand(
             argv=(*BUILDER_ARGV, slug, "--emit-bundle"),
             working_directory=_WORKSPACE_ROOT,
@@ -163,4 +205,4 @@ class SandboxWidgetBuilder:
             result = await self._manager.execute_for(principal.tenant_id, build_id, 0, command)
         finally:
             await self._manager.release_run(build_id)
-        return _verdict(slug, result)
+        return _verdict(slug, result, preview)

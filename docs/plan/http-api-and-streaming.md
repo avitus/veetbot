@@ -2504,7 +2504,7 @@ Cockpit adds no error code. A write that does not fit its live widget is
 `malformed_request`, and a build that reached no verdict is
 `sandbox_execution_error`.
 
-## Integration keys (ADR-0273)
+## Integration keys (ADR-0275)
 
 When enabled, `GET /v1/integration-secrets` requires `settings.read` and returns
 `{secrets: [...]}` with only caller-owned active metadata: `id`, `reference`,
