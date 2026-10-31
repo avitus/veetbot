@@ -52,8 +52,10 @@ synthetic restore. No migration or startup generates a master key.
    call, ingress or execution services.
 5. Reload systemd and restart the opted-in roles. `LoadCredential` supplies a
    private file at `%d/integration-secrets`; the loader requires an absolute,
-   regular file owned by the process user, mode `0400` or `0600`, exactly 32
-   bytes, and refuses symlinks. Missing or invalid files refuse startup. A wrong
+   regular 32-byte file and refuses symlinks. Owner-held files use mode `0400`
+   or `0600`. Inside the unit's credentials directory, a root-owned `0440`
+   copy is accepted only with the Linux ACL granting read to root and the
+   unit's user alone. Missing or invalid files refuse startup. A wrong
    key refuses decryption/replacement without rewriting the existing ciphertext.
 6. Confirm the owner's token has `settings.read,settings.write`. Test with a
    synthetic key before storing a real provider key. A disabled server exposes
@@ -105,9 +107,13 @@ backup service or the operator's escrow.
 
 Restore production with the feature off. Reconcile deletions and revocations
 since the backup before enabling use; restoring an old grant must never silently
-restore its authority. Stop credential-bearing requests while recovering. On
-master-key loss, delete the unusable records and re-enter provider credentials
-under fresh references. There is no recovery backdoor.
+restore its authority. Stop credential-bearing requests while recovering. If the master
+key is lost, provision and separately escrow a replacement 32-byte key. Enable
+the store for the API alone and restart the API so the Settings routes mount.
+List the old records and delete each through `DELETE /v1/integration-secrets/{id}`
+with its current revision. Deletion clears ciphertext without decrypting it.
+Enter the provider credentials under fresh references and approve new grants
+before restarting the credential-bearing workers.
 
 On suspected master-key compromise: disable the feature on every opted-in role,
 revoke the affected provider keys, then use a controlled Settings-only recovery

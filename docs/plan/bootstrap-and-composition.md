@@ -1749,6 +1749,8 @@ implementation lands. The detailed contract is [cockpit.md](cockpit.md).
 `AGENT_INTEGRATION_SECRETS_ENABLED` defaults off. Opted-in API/run roles require
 `INTEGRATION_SECRETS_KEY_FILE`, an absolute, owner-only raw 32-byte file; startup
 refuses missing, symlinked, nonregular, incorrectly owned or permissive files.
+A root-owned `0440` systemd copy at `$CREDENTIALS_DIRECTORY/integration-secrets`
+qualifies only when its ACL grants read access to root and the unit user alone.
 The key config is redacted and distinct from both MCP sealing and environment
 credential mappings. Compose `IntegrationSecrets` with the UOW factory and the
 shared AES-GCM primitive under the `veetbot.integration-secret.v1` purpose.

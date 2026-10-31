@@ -384,12 +384,14 @@ integration_secrets_mvp:
     - 'circleci testsuite run static -t test_integration_secret_jobs: stored reference initially rejected by JobAccess'
     - 'make test-apple: Integration keys was absent from the Settings sections'
     - 'Additional regressions first reproduced wrong-key overwrite, incorrect 503 mapping, missing no-store on 500, lowercase URL-escape and numeric JSON echoes, and noncanonical origins'
-    production_evidence: 'Not claimed: no provider smoke, live key provisioning, operator escrow/backup rehearsal, hosted final CI, review or deployment'
+    activation_preflight: '2026-10-31: Confirmed the nightly backup takes a database dump and state tar. Verified the master-key exclusion with a synthetic archive. Escrowed the new key in the owner-designated off-host login Keychain and successfully recovered a synthetic row through pg_dump/pg_restore into a separate database with a fresh escrow read. A wrong key failed.'
+    review_regression: 'The loader initially rejected the root-owned 0440 ACL-backed credential from the production systemd version. The corrected loader admitted a synthetic unit-only credential on that host and refused foreign, group-readable, missing-ACL and ordinary-path variants in tests.'
+    production_evidence: 'Hosted final CI, merged delivery and live enablement pending at PR submission.'
   implementation_authorized: true
   production_activation_authorized: true
   remaining_work:
-  - Authorized review and delivery, master-key escrow and production restore evidence
-  - ADR-0268 job activation prerequisites and an authorized provider smoke
+  - Complete review, final hosted verification and merged delivery
+  - Enable trusted roles, verify the live Settings lifecycle and keep provider permissions scoped
 
 agent_jobs_mvp:
   adr: docs/adr/0268-agent-written-jobs.md

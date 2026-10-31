@@ -12,7 +12,7 @@ import Foundation
 extension IntegrationSecretsTests {
     @Test func writesRetryWithStableIdentityAndReadsContainOnlyMetadata() async throws {
         let id = UUID(uuidString: "00000000-0000-0000-0000-000000000270")!
-        let metadata = #"{"id":"00000000-0000-0000-0000-000000000270","reference":"stored:00000000-0000-0000-0000-000000000270","label":"Example","origin":"https://api.example.com","auth_scheme":"bearer","revision":1,"created_at":"2026-10-30T12:00:00Z","updated_at":"2026-10-30T12:00:00Z"}"#
+        let metadata = #"{"id":"00000000-0000-0000-0000-000000000270","reference":"stored:00000000-0000-0000-0000-000000000270","label":"Example","origin":"https://api.example.com","auth_scheme":"bearer","revision":1,"created_at":"2026-10-30T12:00:00.125000+00:00","updated_at":"2026-10-30T12:00:00.500000+00:00"}"#
         let server = DeviceFlowServer { request in
             switch request.httpMethod {
             case "GET": return (200, "{\"secrets\":[\(metadata)]}")
@@ -43,6 +43,7 @@ extension IntegrationSecretsTests {
         #expect(server.entry(of: route)?.authorization == "Bearer test-token")
         let keys = try await api.listIntegrationKeys().secrets
         #expect(keys.count == 1)
+        #expect(keys[0].updatedAt.timeIntervalSince(keys[0].createdAt) == 0.375)
         #expect(!String(describing: keys).contains("synthetic-client-canary"))
         #expect(!Mirror(reflecting: keys[0]).children.contains { $0.label == "value" })
         let draft = IntegrationKeyDraft(key: keys[0])

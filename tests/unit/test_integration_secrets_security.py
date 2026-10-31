@@ -297,3 +297,51 @@ async def test_secret_ingestion_requires_authentication_before_parsing(tmp_path:
             response = await client.put(f"/v1/integration-secrets/{uuid4()}", content=CANARY)
             assert response.status_code == 401
             assert CANARY not in response.text and "no-store" in response.headers["cache-control"]
+
+
+@pytest.mark.parametrize("access", ["unit", "other_user", "group", "missing", "ordinary_path"])
+def test_systemd_master_key_accepts_only_the_unit_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, access: str
+) -> None:
+    import os
+    import struct
+
+    env = environment(tmp_path)
+    directory = tmp_path / "credentials"
+    directory.mkdir()
+    path = directory / "integration-secrets"
+    Path(env["INTEGRATION_SECRETS_KEY_FILE"]).rename(path)
+    path.chmod(0o440)
+    env.update(
+        INTEGRATION_SECRETS_KEY_FILE=str(path),
+        CREDENTIALS_DIRECTORY=str(tmp_path if access == "ordinary_path" else directory),
+    )
+    uid = 997
+    actual_fstat = os.fstat
+
+    def root_stat(fd: int) -> os.stat_result:
+        st = list(actual_fstat(fd))
+        st[4] = 0
+        return os.stat_result(st)
+
+    def acl(fd: int, name: str) -> bytes:
+        assert isinstance(fd, int) and name == "system.posix_acl_access"
+        if access == "missing":
+            raise OSError
+        entries = [
+            (1, 4, 0xFFFFFFFF),
+            (2, 4, uid if access != "other_user" else uid + 1),
+            (4, 4 if access == "group" else 0, 0xFFFFFFFF),
+            (16, 4, 0xFFFFFFFF),
+            (32, 0, 0xFFFFFFFF),
+        ]
+        return struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *e) for e in entries)
+
+    monkeypatch.setattr(os, "fstat", root_stat)
+    monkeypatch.setattr(os, "geteuid", lambda: uid)
+    monkeypatch.setattr(os, "getxattr", acl, raising=False)
+    if access == "unit":
+        assert load_settings(env).integration_secrets_key is not None
+    else:
+        with pytest.raises(ConfigurationError):
+            load_settings(env)

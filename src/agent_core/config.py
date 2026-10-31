@@ -9,6 +9,7 @@ import json
 import os
 import re
 import stat
+import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -784,6 +785,39 @@ MCP_OAUTH_CALLBACK_PATH = "/v1/mcp-oauth/callback"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
+def _private_integration_key(
+    fd: int, metadata: os.stat_result, path: Path, credentials_directory: str
+) -> bool:
+    """Recognize a private owner file or systemd's root-and-unit-reader copy."""
+    mode = stat.S_IMODE(metadata.st_mode)
+    uid = os.geteuid()
+    if metadata.st_uid == uid and mode in {0o400, 0o600}:
+        return True
+    if (
+        metadata.st_uid != 0
+        or mode != 0o440
+        or not credentials_directory
+        or path != Path(credentials_directory) / "integration-secrets"
+    ):
+        return False
+    getxattr = getattr(os, "getxattr", None)
+    if getxattr is None:
+        return False
+    # Linux POSIX ACL xattr v2, in canonical kernel order. Match the complete
+    # ACL on the opened file so an extra reader, group or malformed entry fails.
+    undefined = 0xFFFFFFFF
+    entries = (
+        (0x01, 4, undefined),  # Owner (root) can read.
+        (0x02, 4, uid),  # This unit's user can read.
+        (0x04, 0, undefined),  # Owning group has no access.
+        (0x10, 4, undefined),  # Group-class mask permits read.
+        (0x20, 0, undefined),  # Others have no access.
+    )
+    expected = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    acl: bytes = getxattr(fd, "system.posix_acl_access")
+    return acl == expected
+
+
 def _integration_secrets_key(values: Mapping[str, str], enabled_role: bool) -> SecretStr | None:
     if not enabled_role:
         if values.get("INTEGRATION_SECRETS_KEY_FILE", "").strip():
@@ -800,9 +834,10 @@ def _integration_secrets_key(values: Mapping[str, str], enabled_role: bool) -> S
             metadata = os.fstat(stream.fileno())
             if (
                 not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_uid != os.geteuid()
-                or stat.S_IMODE(metadata.st_mode) not in {0o400, 0o600}
                 or metadata.st_size != 32
+                or not _private_integration_key(
+                    stream.fileno(), metadata, path, values.get("CREDENTIALS_DIRECTORY", "")
+                )
             ):
                 raise ValueError
             key = stream.read(33)
