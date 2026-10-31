@@ -330,6 +330,7 @@ from agent_core.application.cockpit import (
     CommitOutboxWorker,
 )
 from agent_core.application.cockpit_feeds import CockpitFeeds
+from agent_core.application.cockpit_installation import WidgetInstallationAuthorizer
 from agent_core.application.cockpit_platform_feeds import platform_feed_sources
 from agent_core.application.cockpit_projector import (
     CockpitFeedRetention,
@@ -734,6 +735,11 @@ from agent_core.tools.cockpit import (
     offers_widget_writes,
 )
 from agent_core.tools.cockpit import WIDGET_WRITE_TOOL as COCKPIT_WIDGET_WRITE_TOOL
+from agent_core.tools.cockpit_installation import (
+    INSTALL_TOOL_NAMES,
+    CockpitInstallTool,
+    CockpitPrepareTool,
+)
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.delegate_run import DelegateRunTool
@@ -893,7 +899,7 @@ class ApplicationServices:
     schedule_runs: ScheduleMaterializer | None = None
     # Milestone 35: present only when AGENT_COCKPIT_ENABLED is set.
     cockpit: CockpitBoard | None = None
-    # ADR-0270: present only when AGENT_INTEGRATION_SECRETS_ENABLED is set.
+    # ADR-0273: present only when AGENT_INTEGRATION_SECRETS_ENABLED is set.
     integration_secrets: IntegrationSecrets | None = None
     # ADR-0255: present only when AGENT_MCP_SERVERS_ENABLED is set.
     mcp_servers: MCPServerSettingsService | None = None
@@ -1166,7 +1172,12 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "was remembered or that pending formation succeeded. Save with memory.remember only what "
     "the owner stated, in their words, when they asked to remember it; a plan, schedule or "
     "calendar you derived from web or document content belongs in the reply or an artifact, "
-    "never in memory. Never mention a save, or a failed save, the owner did not ask for."
+    "never in memory. Never mention a save, or a failed save, the owner did not ask for. "
+    "For widget creation, when cockpit.prepare is available, prepare and test the entire "
+    "widget and collector before calling cockpit.install for one final summarized approval. "
+    "Do not publish components or request new job access separately while preparing. Use "
+    "offline trials or existing grants, then include all new access and the schedule "
+    "in the proposal."
 )
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}
@@ -1176,9 +1187,11 @@ _BROWSER_TOOL_NAMES = frozenset(
 def _session_tool_filter(
     browser_provider: BrowserProvider | None,
 ) -> Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]:
+    """Build the browser and widget tool filter for each session."""
     session_bound = isinstance(browser_provider, SessionBoundHostedBrowserProvider)
 
     def filter_tools(session: Session, tools: Sequence[ToolSpec]) -> list[ToolSpec]:
+        """Hide browser tools without a binding and widget writes outside owner chat."""
         kept = list(tools)
         if session_bound:
             selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
@@ -1186,7 +1199,11 @@ def _session_tool_filter(
                 kept = [tool for tool in kept if tool.name not in _BROWSER_TOOL_NAMES]
         # Widgets are written only in the owner's interactive chat (docs/plan/cockpit.md).
         if not offers_widget_writes(session.metadata):
-            kept = [tool for tool in kept if tool.name != COCKPIT_WIDGET_WRITE_TOOL]
+            kept = [
+                tool
+                for tool in kept
+                if tool.name not in {COCKPIT_WIDGET_WRITE_TOOL, *INSTALL_TOOL_NAMES}
+            ]
         return kept
 
     return filter_tools
@@ -3425,6 +3442,21 @@ async def _compose(
                     schedule_service, uow_factory, agent, schedule_definition_limits
                 )
             )
+        if settings.jobs_enabled and cockpit_toolset is not None:
+            for installation_tool in (CockpitPrepareTool, CockpitInstallTool):
+                registry.register(
+                    installation_tool(
+                        cockpit_toolset,
+                        job_toolset,
+                        JobScheduleCreateTool(
+                            schedule_service,
+                            agent,
+                            schedule_definition_limits,
+                            uow_factory=uow_factory,
+                        ),
+                        settings.jobs_allowed_hosts,
+                    )
+                )
         registry.register(SchedulePauseTool(schedule_service))
         registry.register(ScheduleResumeTool(schedule_service))
         registry.register(ScheduleCancelTool(schedule_service))
@@ -4624,6 +4656,7 @@ async def _compose(
         standing_authorizers: list[StandingAuthorizer] = []
         if settings.jobs_enabled:
             standing_authorizers.append(JobGrantAuthorizer(uow_factory))
+            standing_authorizers.append(WidgetInstallationAuthorizer(uow_factory))
         if browser_provider is not None:
             standing_authorizers.append(
                 BrowserFollowConsentAuthorizer(
@@ -6649,6 +6682,14 @@ async def build(
         *(COCKPIT_TOOL_NAMES if effective_settings.cockpit_enabled else ()),
         *(JOB_TOOL_NAMES if effective_settings.jobs_enabled else ()),
         *(
+            INSTALL_TOOL_NAMES
+            if effective_settings.jobs_enabled
+            and effective_settings.cockpit_enabled
+            and effective_settings.schedule_api_enabled
+            and effective_settings.schedule_worker_enabled
+            else ()
+        ),
+        *(
             [
                 RecordsListTool.spec.name,
                 RecordsQueryTool.spec.name,
@@ -6697,6 +6738,7 @@ async def build(
             # The Cockpit is a mode of its own; its tools never take a definition slot.
             *COCKPIT_TOOL_NAMES,
             *JOB_TOOL_NAMES,
+            *INSTALL_TOOL_NAMES,
             CAPTURE_READER_TOOL_NAME,
         )
         if name in default_enabled_tools

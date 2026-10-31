@@ -1744,7 +1744,7 @@ Unset, none of these exists. The flag, the image setting, the App identifiers
 and the `cockpit/profiles.yaml` knobs join the executable inventory when the
 implementation lands. The detailed contract is [cockpit.md](cockpit.md).
 
-## Integration key composition (ADR-0270)
+## Integration key composition (ADR-0273)
 
 `AGENT_INTEGRATION_SECRETS_ENABLED` defaults off. Opted-in API/run roles require
 `INTEGRATION_SECRETS_KEY_FILE`, an absolute, owner-only raw 32-byte file; startup

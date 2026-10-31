@@ -52,6 +52,23 @@ def _echoes(value: Any, forms: set[str]) -> bool:
     return any(form in json_module.dumps(value) for form in forms)
 
 
+def _refuse_encoded_echo(value: Any, secret: str | None) -> None:
+    """Refuse supported reversible encodings before any response leaves the broker."""
+    if not secret:
+        return
+    raw = secret.encode()
+    patterns = (
+        base64.b64encode(raw).decode().rstrip("="),
+        base64.urlsafe_b64encode(raw).decode().rstrip("="),
+    )
+    document = json_module.dumps(value, ensure_ascii=False)
+    hexadecimal = (raw.hex(), "".join(f"%{byte:02x}" for byte in raw))
+    if any(pattern and pattern in document for pattern in patterns) or any(
+        pattern in document.casefold() for pattern in hexadecimal
+    ):
+        raise JobBrokerError("job.credential_echo_refused")
+
+
 class JobHTTP:
     def __init__(
         self,
@@ -168,6 +185,7 @@ class JobHTTP:
                         json_module.dumps(document, allow_nan=False)
                     except (ValueError, UnicodeError, RecursionError):
                         raise JobBrokerError("job.response_json_invalid") from None
+                    _refuse_encoded_echo(document, secret)
                     if stored and secret is not None:
                         encoded_forms = {
                             base64.b64encode(secret.encode()).decode(),

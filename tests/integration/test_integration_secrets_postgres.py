@@ -1,4 +1,4 @@
-"""ADR-0270 persistence, real transactions, RLS and independent worker reads."""
+"""ADR-0273 persistence, real transactions, RLS and independent worker reads."""
 
 from __future__ import annotations
 
@@ -132,7 +132,7 @@ async def test_restart_rotation_restore_and_revocation_across_worker_processes()
         await service.delete(app.principal, key_id, 2)
         assert await asyncio.to_thread(worker_read, key_id) == "unavailable"
         with pytest.raises(RuntimeError, match="tombstones"):
-            _alembic("downgrade", "d8a268b10301")
+            _alembic("downgrade", "e3b271c10402")
         # A logical ciphertext backup restored to an empty disposable table.
         async with app.uow_factory() as uow:
             assert isinstance(uow, PostgresUnitOfWork)

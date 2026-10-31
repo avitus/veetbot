@@ -66,6 +66,31 @@ uses the existing feed validator. `job.log(message)` records at most 2,000 bytes
 per line. Declare operations in `manifest.calls` and feeds in `manifest.feeds`.
 Programs receive no tool roster, credentials or direct network access.
 
+## Create a widget with one approval
+
+Enable Cockpit and both scheduling roles with `AGENT_COCKPIT_ENABLED=1`,
+`AGENT_SCHEDULE_API_ENABLED=1` and `AGENT_SCHEDULE_WORKER_ENABLED=1`, in addition
+to jobs. The owner's scopes must include `cockpit.write,jobs.write,jobs.run`
+and `schedule.write`. Both installation tools require all four scopes and all
+these features, even for a widget-only proposal without a collector.
+
+Ask Veetbot to prepare the complete widget and collector. It uses
+`cockpit.prepare` to check the packages and private access, repairs any errors,
+and calls `cockpit.install` only when ready. One card summarizes the public
+code, private inputs, network/credential access, feeds, model budget and refresh
+interval. Approve once to install everything. New access is not exercised during
+preparation: trials use fixtures or an existing approved grant. Collection
+starts at the next interval boundary. Pending publication resumes with the same
+proposal and approval; changed proposals need a new approval. This ADR-0270
+repair requires deployment before it is available in production.
+
+A pending publication can resume after the repository becomes available. A
+rejected publication or revision conflict needs inspection of the current job,
+widget and schedule before preparing a corrected proposal for fresh approval.
+Do not keep replaying a terminal conflict. Installation does not roll back
+components already created: reuse their current revisions in the new proposal,
+or explicitly archive unwanted components through their normal management tools.
+
 ## Create and run a job
 
 In a new chat, ask Veetbot to create a generic Python job for the task. The
@@ -74,7 +99,8 @@ Updates name the expected live revision. Restore can select an older revision,
 so it also provides revert. Publication is asynchronous: a `pending_commit`
 result means the source is saved but cannot run yet. Read the job until the
 revision is `live`; a repository outage leaves it pending for maintenance to
-retry. An imported human edit is screened and stored as a new revision.
+retry. Legacy human commits are screened on import and stored as new revisions;
+ADR-0272 requires new edits to use the private screened publishing path.
 Existing run and schedule pins retain their original source.
 An imported edit or deletion supersedes older queued publications. A delayed
 receipt records the old commit without reactivating it or undoing that deletion.
@@ -153,9 +179,69 @@ limit; they never fall back to model-driven execution. Existing agent-run
 schedules keep their previous behavior. Keep the additive database schema and
 saved source unless deliberately exporting and removing the jobs.
 
+## Repair an existing widget refresh
+
+A legacy agent-run schedule keeps its original agent version and scopes.
+Putting `job.run` in its instruction cannot grant `jobs.run` or change its tool
+roster. After publishing and previewing a collector, use `schedule.update` with
+an explicit job task, expected schedule revision, published job revision and
+owned approved grant. A feed-keeping agent schedule can switch in place; existing
+occurrences keep their pins. The ordinary update approval still applies. Match
+the cadence to the collector's expected interval. A count-only job without
+approved feed publication access cannot replace the feed-keeping task. Verify one completed run
+and the resulting live feed. Keep the prior revision for rollback.
+
+`samples/jobs/github-widget` preserves the original PR widget's
+`observedAt`, `expectedIntervalSec` and `repositories` schema. It reads compact
+GitHub GraphQL JSON through the approved `github-reader` credential, including
+current-head checks and decisive reviews, and publishes to
+`agent.github-pull-requests`. The grant must permit that feed and the manifest
+must declare it. Use private `repositories` and `refresh_seconds` inputs. A
+provider error never publishes a false zero; the previous snapshot remains
+stale. The query follows [GitHub's pull request schema](https://docs.github.com/en/graphql/reference/pulls).
+
+The sample reads ten pull requests per page and permits at most 50 pages across
+all selected repositories, including one page for each empty repository. With
+full pages, the sum of `max(1, ceil(totalOpen / 10))` must not exceed 50. Preview
+the selected set before scheduling it. If it outgrows the budget, pause the
+schedule, reduce its repository inputs through a newly approved grant, preview
+again and resume. The collector refuses request 51 without publishing a partial
+snapshot; it does not automatically change private inputs, grants or schedules.
+Ten-item pages limit nested review payloads; the broker still enforces the
+48 KiB response ceiling and any tighter approved grant limits. Increasing page
+size is not a safe substitute for that response limit. After validating every
+page, the feed retains the full verified `totalOpen` count and publishes only
+the first 300 pull-request details per repository, as its schema requires.
+
+After ADR-0271's server and Apple release, refreshes never add Chat rows. Their
+isolated execution records and failures stay in schedule history. The migration
+also marks earlier refreshes, and native reconciliation prunes their cached
+conversation rows without deleting server history.
+
+## Jobs alongside semantic recall
+
+ADR-0272 permits an assessed jobs-enabled configuration without granting jobs
+implicit memory retrieval. Semantic admission failure falls back to sparse
+recall and does not stop jobs or approved schedules.
+
+Only the publishing App may create or update `cockpit/jobs`; human edits must
+use Veetbot's private authoring workflow. Keep the separate history protections
+and verify that no human bypass exists. Supply private authoring values in
+`job.manage.inputs`; widget installation supplies its approved job inputs.
+Known private values are screened before queuing and again before public
+publication. A queued package refused by the second screen becomes `rejected`
+and needs corrected source in a new revision.
+
+External grants now bind to the approved code revision. Choosing different
+code, or reusing an older unbound grant interactively, needs one fresh execution
+approval. Existing approved schedules keep their pinned code and grant. Live
+trials cannot use publication permission to bypass execution approval. The HTTP
+broker refuses supported encoded credential echoes with a content-free failure;
+it does not claim to recognize arbitrary encodings.
+
 ## Owner-entered integration keys
 
-[Integration keys](integration-keys.md) adds the ADR-0270 Settings store. Approved
+[Integration keys](integration-keys.md) adds the ADR-0273 Settings store. Approved
 job grants may bind a `stored:<uuid>` reference to its exact saved host for GET
 requests. The broker resolves live values on each request; neither jobs nor
 models receive them. The feature is off by default and does not bypass the

@@ -315,4 +315,8 @@ implementation without one.
 - [ADR-0268: Jobs the agent writes, run once or on a schedule (Accepted)](0268-agent-written-jobs.md)
 
 - [ADR-0269: Semantic admission falls back to sparse recall at startup](0269-semantic-admission-falls-back-at-startup.md)
-- [ADR-0270: An in-app store for integration keys](0270-in-app-integration-secrets.md)
+- [ADR-0270: One approval for a widget installation (Accepted)](0270-one-approval-for-a-widget-installation.md)
+- [ADR-0271: Widget refreshes are operational work (Accepted)](0271-widget-refreshes-are-operational-work.md)
+- [ADR-0272: Jobs and semantic recall coexist](0272-jobs-and-semantic-recall-coexist.md)
+
+- [ADR-0273: An in-app store for integration keys](0273-in-app-integration-secrets.md)

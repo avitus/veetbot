@@ -453,6 +453,15 @@ rejects a caller-supplied value; `ScheduleMaterializer` is the trusted path that
 writes it, so downstream context planning can use its presence as scheduled-run
 provenance.
 
+Feed-keeping revisions (those requesting `cockpit.write`) mark their occurrence
+sessions with reserved metadata `cockpit_refresh: true` (ADR-0271). These are
+operational audit sessions: the conversation index excludes them before
+pagination, and clients remove their cached Chat rows. Timer firings, Run now
+and refresh on entry share this rule, for both agent and job tasks and all
+outcomes. Schedule history, point reads and attention handling remain available.
+Existing occurrences are marked from their own immutable revision at upgrade;
+ordinary scheduled conversations remain visible.
+
 Cross-occurrence continuity comes from the principal's governed long-term
 memory and knowledge stores, not from reusing a conversation session. Provider
 opaque continuation state never crosses occurrences.

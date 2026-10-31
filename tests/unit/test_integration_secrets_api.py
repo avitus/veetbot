@@ -1,4 +1,4 @@
-"""ADR-0270 secret input never becomes a read surface."""
+"""ADR-0273 secret input never becomes a read surface."""
 
 from pathlib import Path
 from uuid import uuid4

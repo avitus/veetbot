@@ -1,6 +1,6 @@
 # Integration keys
 
-The ADR-0270 MVP stores owner-entered keys in PostgreSQL, encrypted with a
+The ADR-0273 MVP stores owner-entered keys in PostgreSQL, encrypted with a
 separate host-held AES-256-GCM key. It adds no production Doppler dependency.
 It is off by default; this implementation does not enable production use.
 
@@ -88,13 +88,13 @@ or constitute a live provider smoke test.
 
 ## Backup, restore and loss
 
-The current [deployment limitations](deployment.md#accepted-limitations) include
-no required database backup or restore service; Milestone 15 owns that work.
-This MVP adds no backup scheduler. Record any manually operated backup mechanism
-and retention before claiming recovery. Until regular backups exist,
-only persistence in the running database is assured. A logical PostgreSQL dump
-includes `integration_secrets` ciphertext and tombstones; it must exclude the
-separately held host key. Protect backup access and retain tombstones with data.
+The production host runs a nightly `veetbot-backup.timer`. It takes a PostgreSQL
+dump and archives host state, including `/etc/veetbot`, in the same encrypted
+off-host backup. Before provisioning the master key, exclude
+`etc/veetbot/secrets/integration-secrets.key` from the state tar and verify
+the exclusion against a synthetic file. Preserve it whenever the host backup
+script is replaced. The database dump retains ciphertext and tombstones.
+Keep the master key in the owner's separate off-host escrow.
 
 On a separate test instance, restore a database backup with the feature off,
 provision the escrowed key, and verify that a synthetic stored row decrypts.

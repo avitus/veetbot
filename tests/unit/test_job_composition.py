@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from agent_core.application.job_grants import revision_grant_id
 from agent_core.bootstrap import build
 from tests.integration.m2_support import memory_settings
 
@@ -16,9 +17,12 @@ async def test_enabled_jobs_register_both_deferred_tools() -> None:
 
 
 @pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("semantic_unavailable", [True, False])
 async def test_job_run_bypasses_the_agent_loop_and_completes_with_zero_model_usage(
     enabled: bool,
+    semantic_unavailable: bool,
 ) -> None:
+    """Execute saved code without model usage, including semantic fallback."""
     from decimal import Decimal
     from uuid import UUID
 
@@ -30,7 +34,11 @@ async def test_job_run_bypasses_the_agent_loop_and_completes_with_zero_model_usa
 
     runner = Runner()
     async with build(
-        settings=replace(memory_settings(), jobs_enabled=enabled),
+        settings=replace(
+            memory_settings(),
+            jobs_enabled=enabled,
+            memory_semantic_index_enabled=semantic_unavailable,
+        ),
         script=FakeModelScript(turns=[]),
         job_runner_override=runner,
     ) as composition:
@@ -187,6 +195,7 @@ async def test_job_schedule_tool_pins_saved_code_and_private_grant() -> None:
 
 
 async def test_explicit_model_call_inside_job_is_charged_without_losing_parent_usage() -> None:
+    """Account for explicit job model calls alongside the parent run usage."""
     from decimal import Decimal
     from typing import Any
     from uuid import UUID
@@ -213,7 +222,7 @@ async def test_explicit_model_call_inside_job_is_charged_without_losing_parent_u
     arguments = {
         "slug": "count-items",
         "revision_id": str(UUID(int=1)),
-        "grant_id": str(UUID(int=2)),
+        "grant_id": str(revision_grant_id(UUID(int=99), UUID(int=1))),
     }
     script = FakeModelScript(
         turns=[
@@ -236,8 +245,12 @@ async def test_explicit_model_call_inside_job_is_charged_without_losing_parent_u
         saved = saved.model_copy(
             update={
                 "grants": {
-                    str(grant.id): grant.model_copy(
-                        update={"access": replace(grant.access, model_cost="1")}
+                    str(revision_grant_id(UUID(int=99), UUID(int=1))): grant.model_copy(
+                        update={
+                            "access": replace(grant.access, model_cost="1"),
+                            "approval_id": UUID(int=99),
+                            "id": revision_grant_id(UUID(int=99), UUID(int=1)),
+                        }
                     )
                 }
             }
@@ -351,6 +364,7 @@ async def test_owner_can_author_generic_job_code_without_a_redundant_approval() 
 
 
 async def test_schedule_repin_can_enable_an_already_approved_model_grant() -> None:
+    """A newly selected model grant must carry approval for the pinned revision."""
     from datetime import timedelta
     from uuid import UUID
 
@@ -370,7 +384,8 @@ async def test_schedule_repin_can_enable_an_already_approved_model_grant() -> No
         saved = record(owner)
         grant = saved.grants[str(UUID(int=2))]
         mixed_grant = JobGrant(
-            id=UUID(int=3),
+            id=revision_grant_id(UUID(int=99), UUID(int=1)),
+            approval_id=UUID(int=99),
             access=replace(grant.access, model_cost="1"),
             created_at=composition.clock.now(),
         )
@@ -410,6 +425,229 @@ async def test_schedule_repin_can_enable_an_already_approved_model_grant() -> No
         current = await composition.schedules.get(owner, UUID(schedule_id))
         assert current.revision.limits.max_model_calls > 0
         assert current.revision.limits.max_cost == 1
+
+
+async def test_legacy_schedule_retains_its_pair_but_cannot_authorize_a_new_schedule() -> None:
+    """Existing approved pins survive edits; a new schedule needs revision-bound access."""
+    from datetime import timedelta
+    from uuid import UUID
+
+    from agent_core.application.schedule_service import _definition_from_revision
+    from agent_core.domain.errors import ScheduleValidationError
+    from agent_core.domain.schedules import ScheduleDefinitionPatch
+    from tests.contract.support import tool_context
+    from tests.contract.test_job_store_contract import record
+
+    async with build(
+        settings=replace(
+            memory_settings(),
+            jobs_enabled=True,
+            schedule_api_enabled=True,
+            schedule_worker_enabled=True,
+        )
+    ) as composition:
+        owner = composition.principal
+        saved = record(owner)
+        async with composition.uow_factory() as uow:
+            await uow.jobs.put(saved, expected_version=None)
+        context = replace(tool_context(), principal=owner, tenant_id=owner.tenant_id)
+        created = await composition.tool_pipeline._registry.get("schedule.create").execute(
+            {
+                "title": "Count items",
+                "instruction": "Count items",
+                "at": (composition.clock.now() + timedelta(hours=1)).isoformat(),
+                "task": {
+                    "kind": "job",
+                    "slug": saved.slug,
+                    "revision_id": str(UUID(int=1)),
+                    "grant_id": str(UUID(int=2)),
+                },
+            },
+            context,
+        )
+        assert created.ok and created.structured is not None
+        schedule_id = UUID(created.structured["schedule_id"])
+        # Model an already persisted pre-ADR-0272 external grant and approved pin.
+        grant = saved.grants[str(UUID(int=2))]
+        legacy = grant.model_copy(
+            update={
+                "access": replace(
+                    grant.access,
+                    hosts={"api.github.com": "github-reader"},
+                )
+            }
+        )
+        async with composition.uow_factory() as uow:
+            await uow.jobs.put(
+                saved.model_copy(
+                    update={
+                        "version": saved.version + 1,
+                        "grants": {str(legacy.id): legacy},
+                    }
+                ),
+                expected_version=saved.version,
+            )
+        current = await composition.schedules.get(owner, schedule_id)
+        definition = _definition_from_revision(current.revision)
+        with pytest.raises(ScheduleValidationError, match="approved for the selected job revision"):
+            await composition.schedules.create(owner, definition, "new-schedule")
+        updated = await composition.schedules.update(
+            owner,
+            schedule_id,
+            1,
+            definition.model_copy(update={"title": "Existing pin"}),
+        )
+        assert updated.revision.task == current.revision.task
+        patched = await composition.schedules.patch(
+            owner,
+            schedule_id,
+            2,
+            ScheduleDefinitionPatch(title="Still the existing pin"),
+            "edit",
+        )
+        assert patched.revision.task == current.revision.task
+
+
+@pytest.mark.parametrize("publishes_feed", [True, False])
+@pytest.mark.parametrize("grant_binding", ["selected", "other", "legacy"])
+async def test_legacy_feed_schedule_can_switch_to_an_approved_job_without_a_tool_roster(
+    publishes_feed: bool,
+    grant_binding: str,
+) -> None:
+    """Convert a legacy feed schedule only when its approved job can publish feeds."""
+    from datetime import timedelta
+    from typing import cast
+    from uuid import UUID
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.domain.messages import FakeModelScript
+    from agent_core.domain.runs import RunKind, RunStatus
+    from agent_core.domain.schedules import JobTask
+    from tests.contract.support import NOW, tool_context
+    from tests.contract.test_job_store_contract import record
+    from tests.unit.test_job_execution import Runner
+
+    runner = Runner()
+
+    async with build(
+        settings=replace(
+            memory_settings(),
+            jobs_enabled=True,
+            cockpit_enabled=True,
+            schedule_api_enabled=True,
+            schedule_worker_enabled=True,
+        ),
+        fixed_clock_at=NOW,
+        script=FakeModelScript(turns=[]),
+        job_runner_override=runner,
+    ) as composition:
+        owner = composition.principal
+        saved = record(owner)
+        revision = saved.revisions[str(UUID(int=1))]
+        saved = saved.model_copy(
+            update={
+                "revisions": {
+                    str(revision.id): revision.model_copy(
+                        update={
+                            "manifest": revision.manifest.model_copy(
+                                update={"feeds": frozenset({"agent.counter"})}
+                            )
+                        }
+                    )
+                }
+            }
+        )
+        grant = saved.grants[str(UUID(int=2))]
+        if grant_binding != "legacy":
+            approval_id = UUID(int=99)
+            grant = grant.model_copy(
+                update={
+                    "approval_id": approval_id,
+                    "id": revision_grant_id(
+                        approval_id, revision.id if grant_binding == "selected" else UUID(int=9)
+                    ),
+                }
+            )
+        saved = saved.model_copy(
+            update={
+                "grants": {
+                    str(grant.id): grant.model_copy(
+                        update={
+                            "access": replace(
+                                grant.access,
+                                feeds=frozenset({"agent.counter"})
+                                if publishes_feed
+                                else frozenset(),
+                            )
+                        }
+                    )
+                }
+            }
+        )
+        async with composition.uow_factory() as uow:
+            await uow.jobs.put(saved, expected_version=None)
+        registry = composition.tool_pipeline._registry
+        context = replace(tool_context(), principal=owner, tenant_id=owner.tenant_id)
+        created = await registry.get("schedule.create").execute(
+            {
+                "title": "Refresh counter",
+                "instruction": "Call job.run to refresh the counter.",
+                "at": (composition.clock.now() + timedelta(hours=1)).isoformat(),
+                "publish_cockpit_feed": True,
+            },
+            context,
+        )
+        assert created.ok and created.structured is not None
+        schedule_id = UUID(created.structured["schedule_id"])
+        updated = await registry.get("schedule.update").execute(
+            {
+                "schedule_id": str(schedule_id),
+                "expected_revision": 1,
+                "task": {
+                    "kind": "job",
+                    "slug": saved.slug,
+                    "revision_id": str(UUID(int=1)),
+                    "grant_id": str(grant.id),
+                },
+            },
+            context,
+        )
+        if not publishes_feed or grant_binding != "selected":
+            assert not updated.ok
+            if publishes_feed:
+                assert updated.failure is not None
+                assert "approved for the selected job revision" in updated.failure.detail
+            unchanged = await composition.schedules.get(owner, schedule_id)
+            assert unchanged.schedule.current_revision == 1
+            return
+        assert updated.ok, updated.failure
+        current = await composition.schedules.get(owner, schedule_id)
+        assert isinstance(current.revision.task, JobTask)
+        assert current.revision.requested_scopes == {"jobs.run", "cockpit.read", "cockpit.write"}
+        assert current.revision.limits.max_model_calls == 0
+        assert current.revision.limits.max_cost == 0
+        async with composition.uow_factory() as uow:
+            prior = await uow.schedules.get_revision(schedule_id, 1, owner)
+        assert not isinstance(prior.task, JobTask)
+        assert "jobs.run" not in prior.requested_scopes
+
+        cast(FixedClock, composition.clock).advance(timedelta(hours=1))
+        from agent_core.scheduling.worker import ScheduleWorker
+
+        worker = composition.schedule_worker_factory()
+        assert isinstance(worker, ScheduleWorker)
+        assert await worker.run_once() == 1
+        async with composition.uow_factory() as uow:
+            [occurrence] = await uow.schedule_occurrences.list(schedule_id, owner, limit=10)
+            assert occurrence.run_id is not None
+            queued = await uow.runs.get(occurrence.run_id, owner)
+        assert queued.kind is RunKind.JOB
+        await composition.executor.execute(queued.id)
+        async with composition.uow_factory() as uow:
+            finished = await uow.runs.get(queued.id, owner)
+        assert finished.status is RunStatus.COMPLETED, finished.failure
+        assert finished.usage.model_calls == 0 and finished.usage.cost == 0
+        assert runner.inputs == {"items": [1, 2]}
 
 
 async def test_job_privacy_screen_includes_the_configured_owner_name() -> None:
@@ -487,7 +725,9 @@ async def test_job_publication_approval_resumes_with_its_own_policy_profile() ->
         assert saved.live_revision_id is not None
 
 
-async def test_new_external_access_is_approved_once_then_reused() -> None:
+@pytest.mark.parametrize("legacy_grant", [False, True])
+async def test_new_external_access_is_approved_once_then_reused(legacy_grant: bool) -> None:
+    """Approve exact revision access once and replace legacy unbound authority."""
     from uuid import UUID
 
     from agent_core.domain.approvals import ApprovalResolutionType
@@ -501,9 +741,14 @@ async def test_new_external_access_is_approved_once_then_reused() -> None:
         "revision_id": str(UUID(int=1)),
         "access": {"inputs": {"items": [1, 2]}, "hosts": {"api.github.com": "github-reader"}},
     }
+    first_arguments = (
+        {"slug": "count-items", "revision_id": str(UUID(int=1)), "grant_id": str(UUID(int=2))}
+        if legacy_grant
+        else arguments
+    )
     script = FakeModelScript(
         turns=[
-            ScriptedTurn(tool_calls=[ScriptedToolCall(name="job.run", arguments=arguments)]),
+            ScriptedTurn(tool_calls=[ScriptedToolCall(name="job.run", arguments=first_arguments)]),
             ScriptedTurn(text="Counted the items."),
             ScriptedTurn(tool_calls=[ScriptedToolCall(name="job.run", arguments=arguments)]),
             ScriptedTurn(text="Counted them again."),
@@ -516,7 +761,23 @@ async def test_new_external_access_is_approved_once_then_reused() -> None:
         job_runner_override=Runner(),
     ) as composition:
         async with composition.uow_factory() as uow:
-            await uow.jobs.put(record(composition.principal), expected_version=None)
+            original = record(composition.principal)
+            if legacy_grant:
+                grant = original.grants[str(UUID(int=2))]
+                original = original.model_copy(
+                    update={
+                        "grants": {
+                            str(grant.id): grant.model_copy(
+                                update={
+                                    "access": replace(
+                                        grant.access, hosts={"api.github.com": "github-reader"}
+                                    )
+                                }
+                            )
+                        }
+                    }
+                )
+            await uow.jobs.put(original, expected_version=None)
         first = await composition.runs.submit("Run the counter with this new access.")
         assert (await composition.runs.get(first)).status is RunStatus.WAITING_FOR_APPROVAL
         [approval] = await composition.approvals.list_pending(run_id=first)

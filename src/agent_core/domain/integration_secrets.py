@@ -1,4 +1,4 @@
-"""Owner-bound metadata and sealed integration keys (ADR-0270)."""
+"""Owner-bound metadata and sealed integration keys (ADR-0273)."""
 
 from __future__ import annotations
 

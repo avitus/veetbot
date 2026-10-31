@@ -1,7 +1,7 @@
 """Owner-bound encrypted integration keys and revocation tombstones.
 
 Revision ID: e8a270b10301
-Revises: d8a268b10301
+Revises: e3b271c10402
 """
 
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "e8a270b10301"
-down_revision: str | Sequence[str] | None = "d8a268b10301"
+down_revision: str | Sequence[str] | None = "e3b271c10402"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

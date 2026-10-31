@@ -4,8 +4,8 @@ title: Current Milestone
 
 # Current milestone
 
-- **Integration keys MVP — ADR-0270:** On 2026-10-30 the owner accepted
-  [the decision](../adr/0270-in-app-integration-secrets.md) and authorized its
+- **Integration keys MVP — ADR-0273:** On 2026-10-30 the owner accepted
+  [the decision](../adr/0273-in-app-integration-secrets.md) and authorized its
   implementation on `secret-store`. The default-off MVP reuses PostgreSQL,
   AES-GCM sealing and approved job grants, with native Settings for key entry.
   See [the operator guide](../integration-keys.md). Production activation and
@@ -17,8 +17,17 @@ title: Current Milestone
   private grants, HTTP/model/feed/log brokers, agent tools and pinned job tasks
   through the existing scheduler. Code-only runs use no model; mixed runs charge
   only explicit completions. Local execution, publication, schedule and
-  PostgreSQL tests provide implementation evidence. Credential setup, authorized
-  delivery and production validation remain pending; see [the operator guide](../jobs.md).
+  PostgreSQL tests provide implementation evidence. PR 210 delivered the code,
+  and the owner authorized activation on 2026-10-30. Job publication and the
+  repository-scoped reader are configured; a fresh interactive chat passed a
+  code-only sandbox trial and published a generic GitHub job. That job read both
+  selected repositories twice with the same grant and no model operations.
+  Mixed-job, widget-feed and day-long acceptance remain pending; see
+  [the operator guide](../jobs.md).
+  On 2026-10-30 the owner requested one summarized approval at the end of
+  widget creation (ADR-0270). The combined preparation/installation repair is
+  implemented with composed approval, retry and refusal tests; delivery and
+  production verification remain pending.
   Existing protections remain, broader hardening is deferred, and no milestone
   or gate moves.
 

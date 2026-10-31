@@ -42,6 +42,7 @@ from agent_core.domain.schedules import (
 )
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
+    SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_SCHEDULE_ID_METADATA_KEY,
     Session,
     SessionStatus,
@@ -605,6 +606,11 @@ class ScheduleMaterializer:
                 "schedule_occurrence_id": str(occurrence.id),
                 "nominal_fire_at": nominal.isoformat(),
                 **(metadata or {}),
+                **(
+                    {SESSION_COCKPIT_REFRESH_METADATA_KEY: True}
+                    if FEED_KEEPING_SCOPE in revision.requested_scopes
+                    else {}
+                ),
             },
             created_at=now,
             updated_at=now,

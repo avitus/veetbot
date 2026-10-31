@@ -218,10 +218,11 @@ public struct SessionView: Codable, Identifiable, Sendable {
         metadata["schedule_id"]?.stringValue.flatMap(UUID.init(uuidString:))
     }
 
-    /// Internal Email and People work must never become a Chat conversation.
+    /// Internal Email, People and widget upkeep must never become a Chat conversation.
     /// Identify internal audit sessions that should not appear as ordinary conversations.
     var isOperational: Bool {
         if metadata["email_operational"]?.boolValue == true { return true }
+        if metadata["cockpit_refresh"]?.boolValue == true { return true }
         guard let purpose = metadata["purpose"]?.stringValue else { return false }
         return purpose == "people-management" || purpose == "people-import"
     }

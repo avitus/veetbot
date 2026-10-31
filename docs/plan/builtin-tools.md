@@ -2064,3 +2064,15 @@ They are:
 Session-environment filtering withholds `cockpit.widget.write` from
 scheduled, delegated, operational and email-task sessions. Delegated children
 cannot write widgets.
+
+### Combined widget installation (ADR-0270)
+
+With Cockpit, jobs and both scheduling roles enabled, two additional deferred
+tools implement one final approval: `cockpit.prepare` (`none`, read-only) checks
+an immutable private proposal; `cockpit.install` (`publication`, conditionally
+idempotent) publishes its exact components after approval. Both require
+`cockpit.write`, `jobs.write`, `jobs.run` and `schedule.write`, are interactive
+owner-chat-only, run serially, and have a 660-second timeout and 64-KiB output
+limit. The install tool may be repeated with the same preparation IDs to resume
+pending publication. Preparation and job errors carry bounded untrusted repair
+feedback. See [the installation design](cockpit.md#one-approval-for-widget-installation-adr-0270).

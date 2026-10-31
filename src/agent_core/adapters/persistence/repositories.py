@@ -155,6 +155,7 @@ from agent_core.domain.runs import (
 from agent_core.domain.sessions import (
     PEOPLE_OPERATIONAL_SESSION_PURPOSES,
     REGENERABLE_TITLE_SOURCES,
+    SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
@@ -518,11 +519,15 @@ class PostgresSessionRepository:
         cursor: SessionCursor | None = None,
         exclude_operational: bool = False,
     ) -> list[Session]:
+        """List owned sessions with operational filters applied before the page limit."""
         predicates: list[Any] = [
             SessionRow.tenant_id == principal.tenant_id,
             SessionRow.principal_id == principal.principal_id,
         ]
         if exclude_operational:
+            predicates.append(
+                ~SessionRow.metadata_json.contains({SESSION_COCKPIT_REFRESH_METADATA_KEY: True})
+            )
             predicates.append(
                 SessionRow.metadata_json[SESSION_EMAIL_OPERATIONAL_METADATA_KEY]
                 .as_boolean()

@@ -19,6 +19,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import httpx
+import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
@@ -234,6 +235,51 @@ async def _refresh(client: httpx.AsyncClient) -> dict[str, str]:
     assert answer.status_code == 202, answer.text
     assert answer.headers["Cache-Control"] == "private, no-store"
     return {item["schedule_id"]: item["outcome"] for item in answer.json()["schedules"]}
+
+
+@pytest.mark.parametrize("trigger", ["scheduled", "entry", "manual"])
+@pytest.mark.parametrize("job", [False, True])
+async def test_feed_refreshes_have_audit_history_but_never_create_chats(
+    trigger: str, job: bool
+) -> None:
+    """Keep every refresh trigger auditable without adding a conversation."""
+    from agent_core.domain.schedules import JobTask
+
+    async with _composition() as (composition, client):
+        feed, revision = _rows(_id(901))
+        if job:
+            revision = revision.model_copy(
+                update={
+                    "task": JobTask(slug="feed-job", revision_id=_id(910), grant_id=_id(911)),
+                    "requested_scopes": FEED | {"jobs.run"},
+                }
+            )
+        ordinary = _rows(
+            _id(902), cadence=DailyCadence(local_time=time(17), timezone="UTC"), scopes=frozenset()
+        )
+        await _create(composition, (feed, revision), ordinary)
+        materializer = _materializer(composition)
+        if trigger == "entry":
+            await _refresh(client)
+        elif trigger == "manual":
+            await materializer.materialize_manual(
+                OWNER, feed.id, expected_revision=1, request_key="refresh"
+            )
+        else:
+            assert feed.next_fire_at is not None
+            _advance(composition, feed.next_fire_at - composition.clock.now())
+            await materializer.materialize(feed.id)
+        refresh = await _latest(composition, feed.id)
+        normal, _ = await materializer.materialize_manual(
+            OWNER, ordinary[0].id, expected_revision=1, request_key="briefing"
+        )
+        # Audit and failure inspection remain available, independently of Chat.
+        async with composition.uow_factory() as uow:
+            assert refresh.session_id is not None
+            assert (await uow.sessions.get(refresh.session_id, OWNER)).id == refresh.session_id
+        response = await client.get("/v1/sessions")
+        assert response.status_code == 200, response.text
+        assert {item["id"] for item in response.json()["items"]} == {str(normal.session_id)}
 
 
 async def test_cockpit_create_offers_an_interval_to_a_feed_and_keeps_1_5_0_pinned() -> None:

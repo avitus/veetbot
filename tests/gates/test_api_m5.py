@@ -266,7 +266,7 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         "validation_error",  # M32 operation routes; ADR-0169's additive vocabulary.
         "mcp_server_unavailable",  # ADR-0255 owner-added MCP servers.
         "mcp_sign_in_unsupported",
-        "integration_key_unavailable",  # ADR-0270 wrong-key/tamper refusal.
+        "integration_key_unavailable",  # ADR-0273 wrong-key/tamper refusal.
         "unsupported_media_type",
         "payload_too_large",
         "rate_limited",
