@@ -723,6 +723,8 @@ from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.cockpit import (
     COCKPIT_TOOL_NAMES,
     CockpitToolset,
+    PreviousCockpitCheckTool,
+    PreviousCockpitReadTool,
     cockpit_tools,
     offers_widget_writes,
 )
@@ -4309,6 +4311,8 @@ async def _compose(
         registry.register(RecordsDeleteTool(records_service, records_zone))
         registry.register(RecordsImportTool(records_service, records_zone))
     if cockpit_toolset is not None:
+        registry.register(PreviousCockpitReadTool(cockpit_toolset))
+        registry.register(PreviousCockpitCheckTool(cockpit_toolset))
         for cockpit_tool in cockpit_tools(cockpit_toolset):
             registry.register(cockpit_tool)
     registry.register(MemoryRecallEpisodesTool(episode_search))

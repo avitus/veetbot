@@ -22,6 +22,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import DeviceClass
 from agent_core.domain.cockpit_views import (
     CockpitChangeView,
+    CockpitDeviceFailure,
     CockpitLayoutView,
     CockpitLayoutWrite,
     CockpitRefreshView,
@@ -149,6 +150,20 @@ def cockpit_router(
     ) -> CockpitWidgetDetailView:
         """Revisions with commit links, import failures and the settings schema."""
         return await service.widget(authenticated, slug)
+
+    @router.post(
+        "/v1/cockpit/widgets/{slug}/diagnostics",
+        status_code=204,
+        openapi_extra={"required_scope": "cockpit.write"},
+    )
+    async def report_failure(
+        slug: str,
+        request: CockpitDeviceFailure,
+        authenticated: Annotated[Principal, secured("cockpit.write")],
+    ) -> Response:
+        """Record a bounded device failure against an owned live revision."""
+        await service.report_failure(authenticated, slug, request)
+        return Response(status_code=204, headers={"Cache-Control": PRIVATE_NO_STORE})
 
     @router.put(
         "/v1/cockpit/widgets/{slug}/settings",

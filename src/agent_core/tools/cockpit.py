@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import difflib
 import json
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.cockpit import CockpitPublication
+from agent_core.application.cockpit_diagnostics import diagnostics
 from agent_core.application.cockpit_feeds import CockpitFeedRefusedError, CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.domain.agents import Principal
@@ -45,7 +46,7 @@ from agent_core.domain.errors import (
     NotFoundError,
     RateLimitedError,
 )
-from agent_core.domain.messages import TextPart
+from agent_core.domain.messages import ImageReferencePart, TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.sessions import (
     SESSION_DEVICE_TRIAGE_METADATA_KEY,
@@ -61,6 +62,7 @@ from agent_core.domain.tools import (
     ToolResult,
     ToolSpec,
 )
+from agent_core.ports.artifacts import ArtifactWriter
 from agent_core.ports.cockpit import WidgetBuild, WidgetBuildFailedError
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -268,7 +270,7 @@ class _CockpitTool:
         raise NotImplementedError
 
 
-class CockpitReadTool(_CockpitTool):
+class PreviousCockpitReadTool(_CockpitTool):
     spec = _spec(
         "cockpit.read",
         "Read the Cockpit. describe_kit lists the authoring rules and the kit's primitives; "
@@ -556,7 +558,33 @@ class CockpitReadTool(_CockpitTool):
         return _ok(f"Feed {feed_id}.", body, trust=TrustLevel.EXTERNAL_UNTRUSTED)
 
 
-class CockpitCheckTool(_CockpitTool):
+class CockpitReadTool(PreviousCockpitReadTool):
+    """Add revision diagnostics while preserving reads pinned to 1.0.0."""
+
+    spec = PreviousCockpitReadTool.spec.model_copy(
+        deep=True,
+        update={
+            "version": "1.1.0",
+            "description": PreviousCockpitReadTool.spec.description
+            + " Use diagnostics with slug and optional revision_id for build, import, "
+            "publication and device failures.",
+        },
+    )
+    spec.input_schema["properties"]["operation"]["enum"].append("diagnostics")
+    spec.input_schema["properties"].update({"revision_id": {"type": "string", "format": "uuid"}})
+
+    async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        if arguments["operation"] == "diagnostics":
+            if "slug" not in arguments:
+                return _invalid("Diagnostics requires a widget slug.")
+            revision = UUID(arguments["revision_id"]) if "revision_id" in arguments else None
+            async with self._toolset.uow_factory() as uow:
+                details = await diagnostics(uow, context.principal, arguments["slug"], revision)
+            return _ok("Widget diagnostics.", details, trust=TrustLevel.EXTERNAL_UNTRUSTED)
+        return await super()._run(arguments, context)
+
+
+class PreviousCockpitCheckTool(_CockpitTool):
     spec = _spec(
         "cockpit.check",
         "Check a widget package without publishing it: validate runs the same build and "
@@ -596,6 +624,87 @@ class CockpitCheckTool(_CockpitTool):
             else f"The package was rejected with {len(build.diagnostics)} diagnostics."
         )
         return _ok(sentence, body)
+
+
+class CockpitCheckTool(PreviousCockpitCheckTool):
+    """Render a checked fixture through WebKit and return its private artifact."""
+
+    spec = PreviousCockpitCheckTool.spec.model_copy(
+        deep=True,
+        update={
+            "version": "1.1.0",
+            "description": "Validate a widget or preview its fixture in WebKit as text and a PNG."
+            + _PUBLIC,
+        },
+    )
+    spec.input_schema["properties"].update(
+        {
+            "fixture": {"type": "string", "pattern": r"^fixtures/[a-z0-9][a-z0-9-]{0,31}\.json$"},
+            "size": {"type": "string", "enum": ["sm", "md", "tall", "lg", "wide"]},
+        }
+    )
+
+    async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        if arguments["operation"] != "preview":
+            return await super()._run(arguments, context)
+        selection = {k: str(arguments[k]) for k in ("fixture", "size") if k in arguments}
+        build = await self._toolset.publication.check(
+            context.principal,
+            str(arguments["slug"]),
+            dict(arguments["files"]),
+            preview=selection,
+        )
+        if build.ok:
+            rendered = build.preview
+            if rendered is None or not callable(getattr(type(context.artifacts), "create", None)):
+                return _failure(
+                    ToolFailureKind.UPSTREAM_ERROR,
+                    "cockpit.preview_unavailable",
+                    "The preview renderer or artifact store is unavailable.",
+                )
+
+            async def stream() -> AsyncIterator[bytes]:
+                yield rendered.png
+
+            name = f"{arguments['slug']}-{rendered.fixture.split('/')[-1][:-5]}-{rendered.size}.png"
+            trust = TrustLevel.EXTERNAL_UNTRUSTED
+            ref = await cast(ArtifactWriter, context.artifacts).create(
+                stream(), name, "image/png", trust
+            )
+            result = _ok(
+                "Rendered the synthetic fixture in WebKit.",
+                {
+                    "ok": True,
+                    "fixture": rendered.fixture,
+                    "size": rendered.size,
+                    "text": rendered.text,
+                    "artifact_id": str(ref.artifact_id),
+                },
+                trust=trust,
+            )
+            result.content.append(
+                ImageReferencePart(
+                    artifact_id=ref.artifact_id, media_type="image/png", filename=name
+                )
+            )
+            result.artifacts.append(
+                {
+                    "artifact_id": str(ref.artifact_id),
+                    "media_type": "image/png",
+                    "sha256": ref.sha256,
+                    "size_bytes": ref.size_bytes,
+                }
+            )
+            return result
+        return _ok(
+            "The widget could not be previewed.",
+            {
+                "ok": False,
+                "kit_api": build.kit_api,
+                "diagnostics": _diagnostics(build),
+            },
+            trust=TrustLevel.EXTERNAL_UNTRUSTED,
+        )
 
 
 class CockpitWidgetWriteTool(_CockpitTool):

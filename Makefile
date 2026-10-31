@@ -403,7 +403,7 @@ cockpit-install:
 
 # The realm boundary tests drive a real browser engine; Chromium is required.
 test-cockpit: cockpit-install
-	npm --prefix cockpit exec -- playwright install chromium
+	npm --prefix cockpit exec -- playwright install chromium webkit
 	npm --prefix cockpit test
 	npm --prefix cockpit run lint
 

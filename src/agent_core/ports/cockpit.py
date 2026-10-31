@@ -111,6 +111,10 @@ class WidgetCommitOutbox(Protocol):
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry: ...
 
+    async def first_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        """The oldest outstanding operation for this owned widget, including backoff."""
+        ...
+
     async def due(
         self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]: ...
@@ -130,7 +134,12 @@ class WidgetCommitOutbox(Protocol):
     async def record_import_failure(self, failure: ImportFailure) -> ImportFailure: ...
 
     async def import_failures(
-        self, principal: Principal, *, unseen_only: bool = False
+        self,
+        principal: Principal,
+        *,
+        unseen_only: bool = False,
+        slug: str | None = None,
+        limit: int | None = None,
     ) -> list[ImportFailure]:
         """Newest first."""
         ...
@@ -291,6 +300,14 @@ class BuildScreen:
 
 
 @dataclass(frozen=True, slots=True)
+class WidgetPreview:
+    fixture: str
+    size: str
+    text: str
+    png: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class WidgetBuild:
     """The builder's verdict. A rejection carries diagnostics and nothing else."""
 
@@ -300,6 +317,7 @@ class WidgetBuild:
     bundle: str | None = None
     bundle_sha256: str | None = None
     manifest: Mapping[str, Any] | None = None
+    preview: WidgetPreview | None = None
 
 
 class WidgetBuildFailedError(Exception):
@@ -322,6 +340,7 @@ class WidgetBuilder(Protocol):
         files: Mapping[str, str],
         *,
         screen: BuildScreen,
+        preview: Mapping[str, str] | None = None,
     ) -> WidgetBuild: ...
 
 

@@ -56,7 +56,13 @@ class ScriptedBuilder:
     screens: list[BuildScreen] = field(default_factory=list)
 
     async def build(
-        self, principal: Principal, slug: str, files: Mapping[str, str], *, screen: BuildScreen
+        self,
+        principal: Principal,
+        slug: str,
+        files: Mapping[str, str],
+        *,
+        screen: BuildScreen,
+        preview: Mapping[str, str] | None = None,
     ) -> WidgetBuild:
         del principal
         self.screens.append(screen)

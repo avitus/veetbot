@@ -23,6 +23,7 @@ import httpx
 import pytest
 
 from agent_core.api import create_app
+from agent_core.application.cockpit_diagnostics import diagnostics
 from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import (
@@ -73,6 +74,7 @@ ROUTES = {
     ("POST", "/v1/cockpit/widgets/{slug}/revert"): "cockpit.write",
     ("POST", "/v1/cockpit/widgets/{slug}/delete"): "cockpit.write",
     ("POST", "/v1/cockpit/widgets/{slug}/restore"): "cockpit.write",
+    ("POST", "/v1/cockpit/widgets/{slug}/diagnostics"): "cockpit.write",
     ("POST", "/v1/cockpit/refresh"): "cockpit.write",
 }
 
@@ -219,7 +221,7 @@ async def test_off_means_every_cockpit_route_is_absent() -> None:
         assert not [name for name in registry._latest if name.startswith("cockpit.")]
 
 
-async def test_on_mounts_exactly_the_ten_routes_under_their_scopes() -> None:
+async def test_on_mounts_exactly_the_cockpit_routes_under_their_scopes() -> None:
     async with cockpit_api() as (_composition, client):
         mounted = {
             (method, route.path): (route.openapi_extra or {}).get("required_scope")
@@ -582,3 +584,26 @@ async def test_a_malformed_resume_point_is_refused_before_the_stream_opens() -> 
         for header in ("soon", "-1"):
             response = await client.get("/v1/cockpit/stream", headers={"Last-Event-ID": header})
             assert response.status_code == 400, header
+
+
+async def test_device_failure_is_scoped_content_free_and_retryable() -> None:
+    async with cockpit_api() as (composition, client):
+        live = await _live_widget(composition)
+        url = "/v1/cockpit/widgets/weather/diagnostics"
+        body = {"revision_id": str(live.id), "code": "render_failed"}
+        assert (await client.post(url, json=body)).status_code == 204
+        assert (await client.post(url, json=body)).status_code == 204
+        assert (await client.post(url, json={**body, "code": "arbitrary"})).status_code == 400
+        assert (await client.post(url, json={**body, "text": "private"})).status_code == 400
+        foreign = await _live_widget(composition, OTHER)
+        assert (
+            await client.post(url, json={**body, "revision_id": str(foreign.id)})
+        ).status_code == 404
+        async with composition.uow_factory() as uow:
+            events = await uow.process_events.list("cockpit.device_failure")
+            assert len(events) == 1
+            assert events[0].payload["code"] == "render_failed"
+            assert await uow.cockpit_events.latest_sequence(OWNER) is None
+            read = await diagnostics(uow, OWNER, "weather", live.id)
+            assert [item["code"] for item in read["device_failures"]] == ["render_failed"]
+            assert not (await diagnostics(uow, OTHER, "weather", foreign.id))["device_failures"]

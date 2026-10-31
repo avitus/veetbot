@@ -414,6 +414,7 @@ class CockpitPublication:
         files: Mapping[str, str],
         *,
         private_values: tuple[str, ...] = (),
+        preview: Mapping[str, str] | None = None,
     ) -> WidgetBuild:
         """Build and screen a package exactly as a write would, recording nothing."""
 
@@ -428,6 +429,7 @@ class CockpitPublication:
                 names=screen.names,
                 settings_values=(*screen.settings_values, *private_values),
             ),
+            preview=preview,
         )
 
     async def head_revision(self, principal: Principal, slug: str) -> WidgetRevision | None:

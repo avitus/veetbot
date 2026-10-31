@@ -74,12 +74,12 @@ function load(tile: RealmTile, rerender: () => void) {
   script.onload = () => {
     loading.delete(tile.key);
     if (components.has(tile.key)) post({ type: 'loaded', key: tile.key });
-    else post({ type: 'tile_error', key: tile.key });
+    else post({ type: 'tile_error', key: tile.key, phase: 'bundle' });
     rerender();
   };
   script.onerror = () => {
     loading.delete(tile.key);
-    post({ type: 'tile_error', key: tile.key });
+    post({ type: 'tile_error', key: tile.key, phase: 'bundle' });
   };
   document.body.append(script);
 }
@@ -89,16 +89,16 @@ let latest: Extract<HostToRealm, { type: 'render' }> | null = null;
 
 function draw() {
   if (!latest) return;
-  const { theme, platform, offsetMs, columns, tiles } = latest;
+  const { theme, platform, offsetMs, frozenAt, columns, tiles } = latest;
   for (const tile of tiles) load(tile, draw);
   root.render(
     <kit.CockpitRoot theme={theme} platform={platform} className="ck-board">
-      <kit.CockpitClock offsetMs={offsetMs}>
+      <kit.CockpitClock offsetMs={offsetMs} frozenAt={frozenAt}>
         <div className="ck-grid" style={columns ? ({ '--ck-cols': columns } as CSSProperties) : undefined}>
           {tiles.map((tile) => {
             const Widget = components.get(tile.key);
             return (
-              <div className="ck-slot" data-size={tile.size} key={tile.key}>
+              <div className="ck-slot" data-size={tile.size} data-loaded={Widget ? "true" : undefined} key={tile.key}>
                 <TileBoundary tile={tile}>
                   <kit.TileHost
                     size={tile.size}

@@ -137,7 +137,7 @@ jobs:
           name: Build, test, and lint the Cockpit kit, builder and realm
           command: |
             make cockpit-install
-            npm --prefix cockpit exec -- playwright install-deps chromium
+            npm --prefix cockpit exec -- playwright install-deps chromium webkit
             make test-cockpit
       - save_cache:
           key: 'cockpit-npm-v1-{{ arch }}-{{ checksum "cockpit/package-lock.json" }}'
