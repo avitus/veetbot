@@ -11,6 +11,9 @@
   The owner explicitly instructed: update this ADR and begin implementation.
   Production validation is still pending; implementation authorization does not
   authorize a pull request, deployment or credential installation.
+- Amendment: ADR-0270 implements the owner's 2026-10-30 instruction for one
+  summarized approval at the end of a combined widget installation; its
+  preparation and installation rules supersede per-step approvals in that flow.
 - Date: 2026-10-29
 - Amends:
   - ADR-0240 decision 8, which defers deterministic collectors;
@@ -400,3 +403,11 @@ across the builder bump under the planner's existing identity checks.
 - **TypeScript instead of Python.** Widgets are TypeScript. But the sandbox
   image, the chart tool (ADR-0243) and the agent's existing sandbox code are
   Python, and a job renders nothing.
+
+## Subsequent coexistence repair
+
+ADR-0272 supersedes this release's blanket jobs-off condition after delivery
+and fresh exact jobs-enabled admission. It preserves the security requirements
+above, adds revision-bound execution and encoded-response checks, and follows
+the owner's direction that no human pushes may reach the public jobs branch.
+The historical PR211 admission and its original configuration remain historical.

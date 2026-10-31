@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json as json_module
 import re
 import socket
@@ -36,6 +37,23 @@ def _redact(value: Any, secret: str | None) -> Any:
     if isinstance(value, list):
         return [_redact(item, secret) for item in value]
     return value
+
+
+def _refuse_encoded_echo(value: Any, secret: str | None) -> None:
+    """Refuse supported reversible encodings before any response leaves the broker."""
+    if not secret:
+        return
+    raw = secret.encode()
+    patterns = (
+        base64.b64encode(raw).decode().rstrip("="),
+        base64.urlsafe_b64encode(raw).decode().rstrip("="),
+    )
+    document = json_module.dumps(value, ensure_ascii=False)
+    hexadecimal = (raw.hex(), "".join(f"%{byte:02x}" for byte in raw))
+    if any(pattern and pattern in document for pattern in patterns) or any(
+        pattern in document.casefold() for pattern in hexadecimal
+    ):
+        raise JobBrokerError("job.credential_echo_refused")
 
 
 class JobHTTP:
@@ -136,6 +154,7 @@ class JobHTTP:
                         json_module.dumps(document, allow_nan=False)
                     except (ValueError, UnicodeError, RecursionError):
                         raise JobBrokerError("job.response_json_invalid") from None
+                    _refuse_encoded_echo(document, secret)
                     return {"status": response.status_code, "json": _redact(document, secret)}
                 finally:
                     await response.aclose()

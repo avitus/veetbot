@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 from uuid import UUID
 
 from agent_core.application.cockpit import screen_names, screen_settings_values
@@ -45,6 +46,10 @@ def _strings(value: object) -> list[str]:
     return []
 
 
+class PublicationPrivacyError(Exception):
+    """A queued public write no longer passes the owner privacy screen."""
+
+
 class JobPublication:
     def __init__(
         self,
@@ -75,6 +80,7 @@ class JobPublication:
         expected_revision: UUID | None,
         request_key: str,
         archive: bool = False,
+        private_inputs: dict[str, Any] | None = None,
     ) -> JobRevision:
         """Screen source and atomically save a pending revision and publication request."""
         key = f"job.request:{principal.tenant_id}:{principal.principal_id}:{request_key}"
@@ -107,6 +113,7 @@ class JobPublication:
             for job in await uow.jobs.list(principal):
                 for grant in job.grants.values():
                     values.extend(_strings(grant.access.inputs))
+        values.extend(_strings(private_inputs or {}))
         if self.schema_check.schema_violations(manifest.input_schema):
             raise ValueError("Job input schema must be a self-contained JSON Schema.")
         revision_id = self.ids.new_id()
@@ -119,7 +126,7 @@ class JobPublication:
         )
         diagnostics = await self.screen.check(
             principal,
-            revision.files(),
+            {"main.py": "", "job.json": ""} if archive else revision.files(),
             screen=BuildScreen(
                 names=names,
                 settings_values=tuple(values),
@@ -186,6 +193,26 @@ class JobPublication:
                 continue
             try:
                 await self._commit(principal, entry)
+            except PublicationPrivacyError:
+                async with self.uow_factory() as uow:
+                    current = await uow.jobs.get(principal, entry.slug)
+                    revision = current.revisions[str(entry.revision_id)]
+                    if revision.state == "pending_commit":
+                        await uow.jobs.put(
+                            current.model_copy(
+                                update={
+                                    "version": current.version + 1,
+                                    "revisions": {
+                                        **current.revisions,
+                                        str(revision.id): revision.model_copy(
+                                            update={"state": "rejected"}
+                                        ),
+                                    },
+                                }
+                            ),
+                            expected_version=current.version,
+                        )
+                    await uow.job_outbox.complete(principal, entry.revision_id)
             except (WidgetRepositoryUnavailableError, BranchMovedError, ConflictError):
                 async with self.uow_factory() as uow:
                     await uow.job_outbox.reschedule(
@@ -219,6 +246,25 @@ class JobPublication:
                 async with self.uow_factory() as uow:
                     await uow.job_outbox.complete(principal, entry.revision_id)
                 return
+            async with self.uow_factory() as uow:
+                names = await screen_names(uow, principal, self.owner_names)
+                values = list(await screen_settings_values(uow, principal))
+                for job in await uow.jobs.list(principal):
+                    for grant in job.grants.values():
+                        values.extend(_strings(grant.access.inputs))
+            diagnostics = await self.screen.check(
+                principal,
+                {"main.py": "", "job.json": ""} if archive else revision.files(),
+                screen=BuildScreen(
+                    names=names,
+                    settings_values=tuple(values),
+                    commit_message=job_commit_message(
+                        entry.slug, entry.revision_id, archive=archive
+                    ),
+                ),
+            )
+            if diagnostics:
+                raise PublicationPrivacyError()
             head = await repository.ensure_branch()
             current_files = await repository.read_widget(entry.slug, at=head)
             expected_files = (

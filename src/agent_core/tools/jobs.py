@@ -12,9 +12,14 @@ from pydantic import TypeAdapter
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.job_execution import JobExecution
-from agent_core.application.job_grants import access_needs_approval
+from agent_core.application.job_grants import (
+    access_needs_approval,
+    grant_covers_revision,
+    revision_grant_id,
+)
 from agent_core.application.jobs import JobPublication
 from agent_core.domain.approvals import ApprovalPresentation, ApprovalStatus
+from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.jobs import JobAccess, JobBrokerError, JobGrant, JobManifest
 from agent_core.domain.messages import TextPart
@@ -84,6 +89,7 @@ def _ok(body: dict[str, Any], *, untrusted: bool = False) -> ToolResult:
 
 
 def _failure(reason: str, detail: str) -> ToolResult:
+    """Return bounded, untrusted repair diagnostics for invalid job arguments."""
     return ToolResult(
         ok=False,
         content=[],
@@ -91,6 +97,7 @@ def _failure(reason: str, detail: str) -> ToolResult:
             kind=ToolFailureKind.INVALID_ARGUMENTS,
             reason_code=reason,
             detail=detail[:2000],
+            external_text=detail[:2000],
             retryable=False,
         ),
     )
@@ -138,7 +145,13 @@ class JobManageTool:
             "expected_revision": _UUID,
             "revision_id": _UUID,
             "grant_id": _UUID,
-            "inputs": {"type": "object"},
+            "inputs": {
+                "type": "object",
+                "description": (
+                    "Private trial inputs, or private authoring values to screen before "
+                    "create/update publication. Keep these values out of public source."
+                ),
+            },
         },
         ["operation"],
         publication=True,
@@ -222,6 +235,7 @@ class JobManageTool:
                 expected_revision=expected,
                 request_key=context.idempotency_key,
                 archive=operation == "archive",
+                private_inputs=arguments.get("inputs", {}),
             )
             if publication.repository is not None:
                 await publication.flush(context.principal)
@@ -261,12 +275,55 @@ class JobRunTool:
             slug = arguments["slug"]
             async with publication.uow_factory() as uow:
                 saved = await uow.jobs.get(context.principal, slug)
+                revision = saved.revisions.get(str(arguments["revision_id"]))
+                if revision is None or revision.commit_sha is None:
+                    raise ValueError("Select a published job revision.")
                 if "grant_id" in arguments:
                     grant_id = UUID(arguments["grant_id"])
+                    grant = saved.grants.get(str(grant_id))
+                    if grant is None:
+                        raise ValueError("The job grant does not exist.")
+                    if not grant_covers_revision(grant, revision):
+                        approval = await uow.approvals.get_by_action(context.invocation_id)
+                        _, _, digest = validate_and_normalize(arguments, self.spec.input_schema)
+                        if (
+                            approval is None
+                            or approval.status is not ApprovalStatus.APPROVED
+                            or approval.principal_id != context.principal.principal_id
+                            or approval.tenant_id != context.tenant_id
+                            or approval.tool_name != self.spec.name
+                            or approval.normalized_arguments_hash != digest
+                        ):
+                            return _failure(
+                                "job.approval_required",
+                                "Approve this code revision's private access before running it.",
+                            )
+                        grant_id = revision_grant_id(approval.id, revision.id)
+                        changed = grant.model_copy(
+                            update={
+                                "id": grant_id,
+                                "approval_id": approval.id,
+                                "created_at": publication.clock.now(),
+                            }
+                        )
+                        await uow.jobs.put(
+                            saved.model_copy(
+                                update={
+                                    "version": saved.version + 1,
+                                    "grants": {**saved.grants, str(grant_id): changed},
+                                }
+                            ),
+                            expected_version=saved.version,
+                        )
                 else:
                     access = _ACCESS.validate_python(arguments["access"])
                     same = next(
-                        (grant for grant in saved.grants.values() if grant.access == access), None
+                        (
+                            grant
+                            for grant in saved.grants.values()
+                            if grant.access == access and grant_covers_revision(grant, revision)
+                        ),
+                        None,
                     )
                     if same is not None:
                         grant_id = same.id
@@ -286,7 +343,11 @@ class JobRunTool:
                                     "job.approval_required",
                                     "Approve this job's private access before running it.",
                                 )
-                        grant_id = publication.ids.new_id()
+                        grant_id = (
+                            publication.ids.new_id()
+                            if approval is None
+                            else revision_grant_id(approval.id, revision.id)
+                        )
                         grant = JobGrant(
                             id=grant_id,
                             access=access,
@@ -327,7 +388,20 @@ class JobRunTool:
     async def approval_view_in_session(
         self, arguments: dict[str, Any], **context: Any
     ) -> ApprovalPresentation:
+        """Resolve legacy grant access for informed re-approval without exposing secrets."""
+        view = dict(arguments)
+        if "grant_id" in arguments:
+            try:
+                async with self.toolset.publication.uow_factory() as uow:
+                    saved = await uow.jobs.get(context["principal"], arguments["slug"])
+                grant = saved.grants[str(arguments["grant_id"])]
+            except (KeyError, NotFoundError):
+                return ApprovalPresentation(
+                    summary="Job access is unknown: the selected grant could not be resolved.",
+                    arguments=approval_argument_view({**view, "access_status": "unknown"}),
+                )
+            view["access"] = _ACCESS.dump_python(grant.access, mode="json")
         return ApprovalPresentation(
             summary="Run this saved job with the listed private inputs and access.",
-            arguments=arguments,
+            arguments=approval_argument_view(view),
         )

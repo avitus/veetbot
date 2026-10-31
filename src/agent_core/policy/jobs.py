@@ -1,7 +1,12 @@
 """The jobs publication rule has its own policy identity (ADR-0268)."""
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.policies import LoadedRuleset, PolicyDecision, ProposedAction
+from agent_core.domain.policies import (
+    LoadedRuleset,
+    PolicyDecision,
+    PolicyDecisionType,
+    ProposedAction,
+)
 from agent_core.domain.runs import Run
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.ports.policies import PolicyEngine
@@ -15,6 +20,7 @@ def job_publication_ruleset(base: LoadedRuleset) -> LoadedRuleset:
     }
     # An operator's explicit job rule takes precedence over this MVP default.
     tool_rules.setdefault("job.manage", {"decision": "allow"})
+    tool_rules.setdefault("cockpit.install", {"decision": "require_approval"})
     profile = {
         "schema_version": 1,
         "name": base.profile_name + "-jobs",
@@ -51,5 +57,19 @@ class JobPolicyEngine:
         self, action: ProposedAction, principal: Principal, run: Run
     ) -> PolicyDecision:
         """Use the jobs profile for job.manage and preserve other policy identities."""
-        engine = self.publication if action.name == "job.manage" else self.base
-        return await engine.evaluate(action, principal, run)
+        engine = self.publication if action.name in {"job.manage", "cockpit.install"} else self.base
+        decision = await engine.evaluate(action, principal, run)
+        if (
+            action.name == "job.manage"
+            and action.arguments.get("operation") == "trial"
+            and "grant_id" in action.arguments
+            and decision.decision is PolicyDecisionType.ALLOW
+        ):
+            return decision.model_copy(
+                update={
+                    "decision": PolicyDecisionType.REQUIRE_APPROVAL,
+                    "reason_code": "job.trial.execution_authority",
+                    "explanation": "Live trials require approval or an exact code-bound grant.",
+                }
+            )
+        return decision

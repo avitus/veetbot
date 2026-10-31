@@ -11,6 +11,7 @@ from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass
 from agent_core.domain.schedules import (
+    FEED_KEEPING_SCOPE,
     JobTask,
     ScheduleDefinition,
     ScheduleDefinitionLimits,
@@ -150,7 +151,8 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
             "idempotency": IdempotencyClass.NON_IDEMPOTENT,
             "description": CockpitScheduleUpdateTool.spec.description
             + (
-                " Supply task to repin a job schedule to a published revision and approved grant. "
+                " Supply task to switch a feed refresh to a saved job or repin a job schedule "
+                "to a published revision and approved grant. "
                 "Existing occurrences keep their pins."
             ),
             "input_schema": {
@@ -201,9 +203,12 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
             return await super().execute(arguments, context)
         try:
             current = await self._service.get(context.principal, UUID(arguments["schedule_id"]))
-            if not isinstance(current.revision.task, JobTask):
+            if (
+                not isinstance(current.revision.task, JobTask)
+                and FEED_KEEPING_SCOPE not in current.revision.requested_scopes
+            ):
                 raise ValueError(
-                    "Create a new job schedule instead of replacing an agent-run schedule."
+                    "Only a feed-keeping agent schedule can be switched to a saved job."
                 )
             definition = _definition_from_revision(current.revision).model_copy(
                 update={
@@ -220,6 +225,11 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
                 context.principal,
                 self.factory,
             )
+            if (
+                not isinstance(current.revision.task, JobTask)
+                and FEED_KEEPING_SCOPE not in definition.requested_scopes
+            ):
+                raise ValueError("The replacement job needs approved feed publication access.")
             await context.mark_effect_sent()
             result = await self._service.update(
                 context.principal, current.schedule.id, arguments["expected_revision"], definition

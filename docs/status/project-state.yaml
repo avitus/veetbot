@@ -1,8 +1,9 @@
 # ADR-0268: On 2026-10-29 the owner accepted the agent-written jobs MVP and
 # instructed implementation: saved Python programs combine code and explicit
 # model calls as appropriate, run once or through the existing scheduler, and
-# publish existing Cockpit feeds. The MVP implementation is complete; production
-# access, delivery and acceptance remain pending. No milestone or gate moves.
+# publish existing Cockpit feeds. PR 210 delivered the implementation; the owner
+# authorized production activation on 2026-10-30. Jobs and the repository-scoped
+# reader are enabled; full production acceptance remains pending. No gate moves.
 # ADR-0240: Owner authorized Milestone 35, Cockpit mode and agent-authored
 # widgets, on 2026-10-22; design and pending gates only. The verified ceiling
 # does not move.
@@ -357,7 +358,24 @@ agent_jobs_mvp:
   - Code-only and mixed code/model workflows through four broker operations
   - One-time runs, real trials under approved access, and existing scheduler integration
   - GitHub PR monitoring through the existing Cockpit widget and feed
-  implementation_status: implemented_default_off_pending_delivery
+  - One final summarized widget installation approval, authorized 2026-10-30 (ADR-0270)
+  implementation_status: deployed_and_activated_pending_production_acceptance
+  recall_coexistence_repair:
+    adr: docs/adr/0272-jobs-and-semantic-recall-coexist.md
+    authorized_on: '2026-10-30'
+    status: implemented_pending_delivery
+    scope: 'Keep jobs enabled; bind external grants to code; screen proposed inputs and queued publication; refuse supported encoded credential echoes; assess exact jobs-enabled semantic admission before restoration.'
+    operational_boundary: 'The owner requires no human pushes to cockpit/jobs. An App-only branch update/creation ruleset is installed; history protections remain separate.'
+    limitation: 'Semantic recall is not restored by these development changes. Final release assessment, root installation and independent readback remain required.'
+  approval_workflow_repair:
+    adr: docs/adr/0270-one-approval-for-a-widget-installation.md
+    authorized_on: '2026-10-30'
+    status: implemented_pending_delivery
+    checks: 'Static: 9022 passed and one skipped across 542 atoms. Focused workflow/jobs: 46 passed across four atoms. Contracts: 2011 passed across 190 atoms. PostgreSQL: five passed across four selected atoms. Lint, typecheck, citation repair and docs-check passed. Production remains unchanged.'
+    evidence:
+    - tests/unit/test_cockpit_installation.py
+    - tests/unit/test_job_authorization.py
+    verification: 'The initial regression reproduced approval for owner-directed reads and trials. The composed workflow now prepares without publication, requests one summarized approval, resumes pending installation without another prompt, and creates one widget, grant and schedule. Denied, altered and foreign proposals have no installation authority; malformed preparation returns untrusted repair feedback.'
   implementation_evidence:
   - tests/unit/test_job_program_process.py
   - tests/contract/test_job_runner_contract.py
@@ -379,6 +397,10 @@ agent_jobs_mvp:
   verification:
     reading_lane: A
     diff_minimum_reading_lane: A
+    production_delivery: 'PR 210 merged as 35c708a15b818711332200d4ade53660049227f5. CircleCI workflow c4c262be-deb1-4051-ae79-84935563f3f1 passed application, documentation, website and TestFlight delivery; public release identities matched 20261030-024932-35c708a.'
+    production_activation: 'On 2026-10-30, using release 20261030-062542-d70fac7, the owner selected two repositories and approved the read-only reader App installation. Publication rules admit cockpit/jobs while retaining branch history protections. Application and scheduler jobs flags are enabled; only run workers receive the reader key through LoadCredential. All five restarted application/scheduler services are active.'
+    production_trial: 'A fresh interactive chat discovered job.manage and job.run. The sandbox sum trial returned 10 with zero broker calls. The agent-authored github-pr-count package published on cockpit/jobs; private repository inputs are absent from its public source.'
+    production_grant_reuse: 'Interactive run a695b1f2-0b1a-4c35-a342-e78b09a70784 completed two successful executions of revision 695ce313-5375-4832-965d-bd7fdafd76a4 with the same grant. Each used two HTTP broker calls and no model operation. The authoring chat used normal model calls. An unsupported proposed response limit was refused; the agent corrected it before execution.'
     main_base_static: 'circleci testsuite run static: 8969 passed, one skipped across all 542 atoms after the PR review fix batches'
     pre_rebase_static: 'circleci testsuite run static: 8933 passed, one skipped, one pre-existing failure across all 540 atoms on the original dev-based branch'
     original_base_failure: 'tests/unit/test_owner_recall_probes.py::test_family_probe_checks_the_names_the_overview_delivers; reproduced on untouched bbbb1282 before jobs implementation'
@@ -396,10 +418,9 @@ agent_jobs_mvp:
       expected_failure: 'Catching the broker call limit incorrectly returned success instead of JobExecutionError'
       resolution: 'The runner retains the bridge limit failure; the regression and complete contract partition pass'
   remaining_work:
-  - Authorized review and hosted CI on the final delivery head
-  - GitHub reader credential setup and production delivery of all three images
+  - Deliver and verify the single-approval widget installation repair (ADR-0270)
   - Adapt the generic collector mapping to the existing live widget feed schema
-  - One-time grant reuse and mixed code/model smoke workflows in production
+  - Mixed code/model smoke workflow in production
   - Observe the live widget for a day against ADR-0268 freshness and zero-model-cost criteria
 
 milestones:
