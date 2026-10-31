@@ -130,3 +130,14 @@ async def test_the_build_sandbox_has_no_network_a_read_only_image_and_no_secrets
     assert report["image"] in {"EROFS", "EACCES"}
     assert report["network"] != "reachable"
     assert set(report["env"]) <= {"HOME", "PWD", "PATH", "TMPDIR", "LANG", "SHLVL", "_"}
+
+
+async def test_preview_in_the_offline_builder_image(builder_sandbox: SandboxManager) -> None:
+    builder = SandboxWidgetBuilder(builder_sandbox, RandomIdFactory())
+    build = await builder.build(
+        OWNER, "weather", _package(WEATHER), screen=BuildScreen(), preview={}
+    )
+    assert build.ok and build.preview is not None
+    assert build.preview.fixture == "fixtures/typical.json"
+    assert "64°" in build.preview.text and "Stale" not in build.preview.text
+    assert build.preview.png.startswith(b"\x89PNG\r\n\x1a\n")

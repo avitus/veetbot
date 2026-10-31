@@ -1481,3 +1481,19 @@ occurrence pins. Writing `job.run` into the old instruction does not update its
 agent version or permissions. Use authenticated broker reads for structured
 GitHub acquisition; a public scraping provider's rejection is not evidence that
 a repository has no pull requests.
+
+## Widget diagnostics
+
+[ADR-0273](../adr/0273-cockpit-widget-diagnostics.md) specifies private fixture
+previews, publication diagnostics and reports from the owner's device. Use
+`cockpit.check` with `preview` to inspect what a synthetic fixture displays.
+Use `cockpit.read` with `diagnostics` and the widget slug to investigate a
+rejected, delayed or failing revision. Compare its revision with the live one
+and use `read_feed` to check the actual input and its age.
+
+Preview defaults to `fixtures/typical.json` and the first declared size.
+Pass `fixture` and `size` to select another combination. The Mac board
+uses the fixture clock. Chat receives the rendered text and an image
+reference, and the owner can open the private PNG attached to the reply.
+Only `cockpit.read` and `cockpit.check` advance to version 1.1.0. Runs pinned
+to 1.0.0 retain their original definitions.

@@ -86,7 +86,7 @@ function columnsOf(value: unknown): number | undefined {
 function render() {
   if (!ready || !snapshot) return;
   send({
-    type: 'render', theme: snapshot.theme, platform: snapshot.platform, offsetMs: snapshot.offsetMs,
+    type: 'render', theme: snapshot.theme, platform: snapshot.platform, offsetMs: snapshot.offsetMs, frozenAt: snapshot.frozenAt,
     columns: columnsOf(snapshot.columns), tiles: tilesFor(snapshot, quarantined),
   });
 }
@@ -140,7 +140,8 @@ function fromRealm(event: MessageEvent<RealmToHost>) {
     case 'loaded':
     case 'tile_error': {
       const widget = typeof message.key === 'string' ? widgetFor(message.key) : undefined;
-      if (widget) toNative({ type: message.type, slug: widget.slug, revision: widget.revision });
+      if (widget) toNative({ type: message.type, slug: widget.slug, revision: widget.revision,
+        ...(message.type === 'tile_error' && message.phase === 'bundle' ? { phase: 'bundle' as const } : {}) });
       break;
     }
     case 'select': {

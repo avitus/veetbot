@@ -25,7 +25,14 @@ public protocol CockpitBoardClient: Sendable {
     func deleteCockpitWidget(_ slug: String) async throws -> CockpitChange
     func restoreCockpitWidget(_ slug: String) async throws -> CockpitChange
     /// Ask the server to refresh every assistant feed now (ADR-0254).
+    func reportCockpitFailure(_ slug: String, revision: UUID, code: CockpitFailureCode) async throws
     func refreshCockpit() async throws
+}
+
+public enum CockpitFailureCode: String, Sendable {
+    case renderFailed = "render_failed"
+    case bundleFailed = "bundle_failed"
+    case quarantined
 }
 
 extension VeetbotAPIClient: CockpitBoardClient {
@@ -81,6 +88,14 @@ extension VeetbotAPIClient: CockpitBoardClient {
 
     public func restoreCockpitWidget(_ slug: String) async throws -> CockpitChange {
         try await cockpitChange(slug, action: "restore", body: Data("{}".utf8))
+    }
+
+    public func reportCockpitFailure(_ slug: String, revision: UUID, code: CockpitFailureCode) async throws {
+        let body = try JSONEncoder().encode(["revision_id": revision.uuidString.lowercased(), "code": code.rawValue])
+        _ = try await transport.sendData(TransportRequest(
+            method: .post, path: "/v1/cockpit/widgets/\(try Self.cockpitSlug(slug))/diagnostics", body: body,
+            headers: ["Content-Type": "application/json"]
+        ))
     }
 
     public func refreshCockpit() async throws {

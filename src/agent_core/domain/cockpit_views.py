@@ -8,6 +8,7 @@ state and reach only the owner's own clients.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -30,6 +31,17 @@ type SettingValue = str | int | float | bool
 
 class _View(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class DeviceFailureCode(StrEnum):
+    RENDER_FAILED = "render_failed"
+    BUNDLE_FAILED = "bundle_failed"
+    QUARANTINED = "quarantined"
+
+
+class CockpitDeviceFailure(_View):
+    revision_id: UUID
+    code: DeviceFailureCode
 
 
 class CockpitRuntimeView(_View):

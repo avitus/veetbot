@@ -13,7 +13,9 @@ RUN apt-get update \
 
 WORKDIR /opt/cockpit
 COPY cockpit/package.json cockpit/package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+RUN npm ci --omit=dev --no-audit --no-fund && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps webkit \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm cache clean --force
 COPY cockpit/tsconfig.json ./
 COPY cockpit/builder ./builder
 COPY cockpit/kit ./kit

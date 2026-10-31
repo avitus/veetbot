@@ -318,3 +318,5 @@ implementation without one.
 - [ADR-0270: One approval for a widget installation (Accepted)](0270-one-approval-for-a-widget-installation.md)
 - [ADR-0271: Widget refreshes are operational work (Accepted)](0271-widget-refreshes-are-operational-work.md)
 - [ADR-0272: Jobs and semantic recall coexist](0272-jobs-and-semantic-recall-coexist.md)
+- [ADR-0273: Diagnose a widget from owner chat](0273-cockpit-widget-diagnostics.md)
+- [ADR-0274: Continue an active recall trial across equivalent releases](0274-continuous-recall-trial-across-equivalent-releases.md)

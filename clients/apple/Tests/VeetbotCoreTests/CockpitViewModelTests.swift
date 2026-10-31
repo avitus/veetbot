@@ -26,6 +26,10 @@ import Testing
         var openStreams: Int { lock.withLock { _openStreams } }
         var refreshes: Int { lock.withLock { _refreshes } }
 
+        func reportCockpitFailure(_ slug: String, revision: UUID, code: CockpitFailureCode) async throws {
+            record("failure " + slug + " " + code.rawValue)
+        }
+
         func refreshCockpit() async throws {
             lock.withLock { _refreshes += 1 }
             if failRefresh { throw URLError(.networkConnectionLost) }
@@ -283,7 +287,14 @@ import Testing
         let board = model(client)
         board.setVisible(true)
         await eventually { board.snapshot != nil }
-        board.hostReported(.quarantined(slug: "weather", revision: "anything"))
+        let revision = board.snapshot!.widgets[0].revisionID.uuidString
+        board.hostReported(.tileError(slug: "weather", revision: "stale"))
+        board.hostReported(.bundleError(slug: "weather", revision: revision))
+        board.hostReported(.bundleError(slug: "weather", revision: revision))
+        board.hostReported(.quarantined(slug: "weather", revision: revision))
+        await eventually { client.calls.contains("failure weather quarantined") }
+        #expect(client.calls.filter { $0 == "failure weather bundle_failed" }.count == 1)
+        #expect(!client.calls.contains("failure weather render_failed"))
         #expect(board.quarantined == ["weather"])
         board.retry("weather")
         #expect(board.quarantined.isEmpty)

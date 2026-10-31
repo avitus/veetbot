@@ -175,6 +175,7 @@ public enum CockpitNavigationPolicy {
 public enum CockpitHostMessage: Equatable, Sendable {
     case ready
     case loaded(slug: String, revision: String)
+    case bundleError(slug: String, revision: String)
     case tileError(slug: String, revision: String)
     case select(slug: String)
     case quarantined(slug: String, revision: String)
@@ -199,7 +200,7 @@ public enum CockpitHostMessage: Equatable, Sendable {
             self = .loaded(slug: slug, revision: revision)
         case "tile_error":
             guard let slug = identifier("slug"), let revision = identifier("revision") else { return nil }
-            self = .tileError(slug: slug, revision: revision)
+            self = message["phase"] as? String == "bundle" ? .bundleError(slug: slug, revision: revision) : .tileError(slug: slug, revision: revision)
         case "select":
             guard let slug = identifier("slug") else { return nil }
             self = .select(slug: slug)

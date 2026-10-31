@@ -154,3 +154,27 @@ test('the CLI builds a package and screen read from stdin, judging the raw file 
   const slugless = spawnSync(process.execPath, [cli, 'build', '--stdin'], { encoding: 'utf8', input: '{}' });
   assert.equal(slugless.status, 2);
 });
+
+test('preview renders the synthetic weather fixture as visible text and a PNG', () => {
+  const files = Object.fromEntries(readPackage(path.join(examples, 'weather')).files);
+  const input = JSON.stringify({ files, preview: { fixture: 'fixtures/typical.json', size: 'sm' } });
+  const run = spawnSync(process.execPath, [cli, 'build', '--stdin', 'weather'], { encoding: 'utf8', input });
+  assert.equal(run.status, 0, run.stderr);
+  const { preview } = JSON.parse(run.stdout);
+  assert.match(preview.text, /Example City/);
+  assert.doesNotMatch(preview.text, /Stale|days ago|\d+ d ago/);
+  assert.match(preview.text, /64°/);
+  assert.equal(Buffer.from(preview.png, 'base64').subarray(1, 4).toString(), 'PNG');
+});
+
+test('preview reports a browser-only render failure without echoing the exception', () => {
+  const files = Object.fromEntries(readPackage(path.join(examples, 'weather')).files);
+  files['widget.tsx'] = files['widget.tsx'].replace('const small =', "if (typeof window !== 'undefined') throw new Error('private-render-value');\n  const small =");
+  const input = JSON.stringify({ files, preview: {} });
+  const run = spawnSync(process.execPath, [cli, 'build', '--stdin', 'weather'], { encoding: 'utf8', input });
+  assert.equal(run.status, 1, run.stderr);
+  const report = JSON.parse(run.stdout);
+  assert.equal(report.diagnostics[0].rule, 'preview.render');
+  assert.equal(report.preview, undefined);
+  assert.doesNotMatch(run.stdout, /private-render-value/);
+});

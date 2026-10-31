@@ -85,6 +85,22 @@ async function openBoard(engine, widgets, feeds = {}, extra = {}) {
 }
 
 for (const [name, engine] of ENGINES) {
+  test(`${name}: a bundle that fails to register reports once across redraws`, async () => {
+    const broken = await placement('broken', 'void 0;');
+    const board = await openBoard(engine, [broken]);
+    try {
+      await board.settled(1);
+      const healthy = await reference('approvals-waiting');
+      await board.page.evaluate((widgets) => window.cockpitHost.apply({
+        type: 'snapshot', theme: 'light', platform: 'mac', offsetMs: 0, widgets, feeds: {},
+      }), [broken, healthy]);
+      await board.page.waitForFunction(() => window.cockpitNativeLog.some((m) => m.type === 'loaded' && m.slug === 'approvals-waiting'));
+      assert.equal((await board.log()).filter((m) => m.type === 'tile_error' && m.slug === 'broken').length, 1);
+    } finally {
+      await board.browser.close();
+    }
+  });
+
   test(`${name}: no member of the adversarial corpus reaches the network`, { timeout: 60000 }, async () => {
     const corpus = readdirSync(path.join(root, 'examples/adversarial')).filter((member) => !NAVIGATION_ONLY.has(member));
     const widgets = [await reference('approvals-waiting')];

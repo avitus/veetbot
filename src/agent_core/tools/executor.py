@@ -312,6 +312,8 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
     # artifact.export is intentionally an in-process capability over a sandbox
     # workspace; its persisted object is nevertheless a sandbox export. Text the
     # model passed as `content` never touched the workspace (ADR-0122).
+    if tool.spec.name == "cockpit.check" and arguments.get("operation") == "preview":
+        return ArtifactOrigin.SANDBOX_EXPORT
     if tool.spec.name == "artifact.export":
         if arguments.get("content") is not None:
             return ArtifactOrigin.MODEL_OUTPUT

@@ -18,6 +18,7 @@ from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.cockpit import CockpitPublication
+from agent_core.application.cockpit_diagnostics import record_failure
 from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import (
     CockpitEventKind,
@@ -33,6 +34,7 @@ from agent_core.domain.cockpit import (
 )
 from agent_core.domain.cockpit_views import (
     CockpitChangeView,
+    CockpitDeviceFailure,
     CockpitFeedEntryView,
     CockpitFeedView,
     CockpitImportFailureView,
@@ -195,6 +197,13 @@ class CockpitBoard:
             schema_version=snapshot.schema_version,
         )
 
+    async def report_failure(
+        self, principal: Principal, slug: str, report: CockpitDeviceFailure
+    ) -> None:
+        require_scope(principal, "cockpit.write")
+        async with self._uow_factory() as uow:
+            await record_failure(uow, principal, slug, report, self._clock.now())
+
     async def asset(self, principal: Principal, sha256: str) -> CockpitAsset:
         require_scope(principal, "cockpit.read")
         if not is_bundle_digest(sha256):
@@ -221,11 +230,7 @@ class CockpitBoard:
                 else await uow.cockpit_widgets.get_revision(principal, widget.live_revision_id)
             )
             settings = await uow.cockpit_widgets.get_settings(principal, slug)
-            failures = [
-                failure
-                for failure in await uow.cockpit_outbox.import_failures(principal)
-                if failure.slug == slug
-            ]
+            failures = await uow.cockpit_outbox.import_failures(principal, slug=slug)
         schema = None if live is None else _manifest(live).get("settings")
         return CockpitWidgetDetailView(
             slug=widget.slug,
