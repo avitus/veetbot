@@ -458,7 +458,13 @@ grep -Fxq 'AUTH_SCOPES=notification.read' "$ENV_FILE"
 grep -Fxq 'curl model-settings' "$LOG_FILE"
 grep -Fxq "recall-handoff $release_id" "$LOG_FILE"
 test -s "$DEPLOY_ROOT/releases/$release_id/.venv/recall-handoff-attempt"
-! cmp -s "$DEPLOY_ROOT/.expired-attempt" "$DEPLOY_ROOT/releases/$release_id/.venv/recall-handoff-attempt"
+test -s "$DEPLOY_ROOT/.expired-attempt"
+comparison=0
+cmp -s "$DEPLOY_ROOT/.expired-attempt" "$DEPLOY_ROOT/releases/$release_id/.venv/recall-handoff-attempt" || comparison=$?
+if (( comparison != 1 )); then
+  printf 'Expected a different retry nonce; cmp returned %s.\n' "$comparison" >&2
+  exit 1
+fi
 
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
