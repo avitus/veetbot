@@ -636,7 +636,7 @@ jobs:
             [[ "$release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
             [[ "$CIRCLE_WORKFLOW_ID" =~ ^[0-9a-f-]{36}$ ]]
             ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "bash -s -- '$release_id' '$CIRCLE_WORKFLOW_ID'" <<'RETIRE'
+              "bash -s -- '$release_id' '$CIRCLE_WORKFLOW_ID'" \<<'RETIRE'
             set -eu
             exec 9>/opt/veetbot/shared/deploy.lock
             flock -w 120 9
@@ -781,7 +781,7 @@ jobs:
             [[ "$release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
             [[ "$CIRCLE_WORKFLOW_ID" =~ ^[0-9a-f-]{36}$ ]]
             ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "bash -s -- '$release_id' '$CIRCLE_WORKFLOW_ID'" <<'RETIRE'
+              "bash -s -- '$release_id' '$CIRCLE_WORKFLOW_ID'" \<<'RETIRE'
             set -eu
             exec 9>/opt/veetbot/shared/deploy.lock
             flock -w 120 9
