@@ -64,23 +64,26 @@ class TileBoundary extends Component<{ tile: RealmTile; children?: ReactNode }, 
 }
 
 const loading = new Set<string>();
+const failedBundles = new Set<string>();
 
 function load(tile: RealmTile, rerender: () => void) {
-  if (components.has(tile.key) || loading.has(tile.key)) return;
+  if (components.has(tile.key) || loading.has(tile.key) || failedBundles.has(tile.key)) return;
   loading.add(tile.key);
   const script = document.createElement('script');
   script.src = tile.bundle;
   script.dataset.key = tile.key;
-  script.onload = () => {
+  const fail = () => {
     loading.delete(tile.key);
-    if (components.has(tile.key)) post({ type: 'loaded', key: tile.key });
-    else post({ type: 'tile_error', key: tile.key, phase: 'bundle' });
-    rerender();
-  };
-  script.onerror = () => {
-    loading.delete(tile.key);
+    failedBundles.add(tile.key);
     post({ type: 'tile_error', key: tile.key, phase: 'bundle' });
   };
+  script.onload = () => {
+    if (!components.has(tile.key)) return fail();
+    loading.delete(tile.key);
+    post({ type: 'loaded', key: tile.key });
+    rerender();
+  };
+  script.onerror = fail;
   document.body.append(script);
 }
 

@@ -280,6 +280,10 @@ def verify_roles(target: Path, manifest: Path, clock: Clock) -> None:
         )
 
 
+class ExpiredPreflightError(HandoffError):
+    """Allow deployment to collect fresh evidence once after a long worker drain."""
+
+
 def main(target_id: str, mode: str = "--prepare", *, clock: Clock) -> None:
     """Only the release ID is caller-supplied. Trust material lives outside the release."""
     import re
@@ -321,10 +325,11 @@ def main(target_id: str, mode: str = "--prepare", *, clock: Clock) -> None:
     path = manifest.with_name(key)
     protected(path)
     prepared = Prepared.model_validate_json(_read_bounded(path))
-    if mode != "--commit" or not timedelta(0) <= clock.now() - prepared.captured_at <= timedelta(
-        minutes=10
-    ):
-        raise HandoffError("Stale or missing handoff preflight")
+    age = clock.now() - prepared.captured_at
+    if mode != "--commit" or age < timedelta(0):
+        raise HandoffError("Invalid handoff preflight")
+    if age > timedelta(minutes=10):
+        raise ExpiredPreflightError("Handoff preflight expired")
     from agent_core.operations.recall_handoff_controller import probe
 
     observed = Environment.model_validate_json(probe("environment", target.name))
@@ -345,4 +350,4 @@ def command(clock: Clock) -> None:
             str(exc) if isinstance(exc, HandoffError) else type(exc).__name__,
             file=sys.stderr,
         )
-        sys.exit(1)
+        sys.exit(os.EX_TEMPFAIL if isinstance(exc, ExpiredPreflightError) else 1)

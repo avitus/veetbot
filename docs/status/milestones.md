@@ -361,6 +361,7 @@ Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).
 The staged implementation is in progress; optional channels remain evidence-gated.
 
+- [ ] Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
 - [ ] Complete the staged implementation and comparative activation evidence
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 

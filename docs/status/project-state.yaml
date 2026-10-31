@@ -2902,6 +2902,8 @@ milestones:
     gates_registered: 12
     implementation_status: authorized_cross_category_recovery_and_combined_release_in_progress
     implementation_evidence:
+      - tests/unit/test_recall_release_handoff.py
+      - tests/unit/test_recall_handoff_observations.py
       - tests/contract/test_runtime_semantic_queries_contract.py
       - tests/contract/test_context_recall_freshness.py
       - tests/unit/test_context_recall_cache.py
@@ -3007,6 +3009,7 @@ milestones:
       - external memory services, arbitrary graph inference, training and RL
       - automatic historical re-extraction and unattended dreaming activation
     open_items:
+      - Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
       - Complete the staged implementation and comparative activation evidence
       - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
   "34":

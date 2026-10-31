@@ -511,12 +511,13 @@ fi
 # Never execute privileged Python from the candidate release or pass it paths.
 HANDOFF_ATTEMPT="$STAGE/.venv/recall-handoff-attempt"
 rm -f -- "$HANDOFF_ATTEMPT"
-if [[ -x /usr/local/sbin/veetbot-recall-handoff ]]; then
-  { cat /proc/sys/kernel/random/uuid; printf '%s\n' "${VEETBOT_DELIVERY_WORKFLOW_ID:-local}"; } >"$HANDOFF_ATTEMPT"
-  sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --prepare || {
-    rm -f -- "$HANDOFF_ATTEMPT"
-    printf 'Recall handoff refused for %s; proceeding with sparse fallback.\n' "$RELEASE_ID" >&2
-  }
+prepare_handoff() {
+  { cat /proc/sys/kernel/random/uuid && printf '%s\n' "${VEETBOT_DELIVERY_WORKFLOW_ID:-local}"; } >"$HANDOFF_ATTEMPT" &&
+    sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --prepare
+}
+if [[ -x /usr/local/sbin/veetbot-recall-handoff ]] && ! prepare_handoff; then
+  rm -f -- "$HANDOFF_ATTEMPT"
+  printf 'Recall handoff refused for %s; proceeding with sparse fallback.\n' "$RELEASE_ID" >&2
 fi
 
 if [[ -n "$PREVIOUS_RELEASE" ]]; then
@@ -594,7 +595,17 @@ if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" ]]; then
     "could not grant veetbot-call-ingress read access to $STAGE"
 fi
 
-if [[ -f "$HANDOFF_ATTEMPT" ]] && ! sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --commit; then
+commit_handoff() {
+  local status=0
+  sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --commit || status=$?
+  if (( status == 75 )); then
+    # Only an expired preflight is retryable. Keep its receipt and use a fresh nonce.
+    prepare_handoff && sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --commit
+  else
+    return "$status"
+  fi
+}
+if [[ -f "$HANDOFF_ATTEMPT" ]] && ! commit_handoff; then
   rm -f -- "$HANDOFF_ATTEMPT"
   printf 'Recall cutover check failed for %s; using sparse retrieval.\n' "$RELEASE_ID" >&2
 fi
