@@ -1034,14 +1034,25 @@ async def suspend_for_browser_question(
         },
     )
     await checkpoint(context, "suspended")
-    return RunOutcome(
-        kind=OutcomeKind.SUSPENDED,
-        suspension={
-            "kind": "user",
-            "question_id": str(error.question_id),
-            "invocation_id": str(error.invocation_id),
-        },
-    )
+    suspension: dict[str, Any] = {
+        "kind": "user",
+        "question_id": str(error.question_id),
+        "invocation_id": str(error.invocation_id),
+    }
+    pending = context.checkpoint.pending_tool_calls[0]
+    if pending["name"] == "conversation.ask_user" and str(pending["call_id"]).startswith(
+        "browser-recovery:"
+    ):
+        # ADR-0277: the app shows a sign-in card from the trusted wait, not a question.
+        sign_in: dict[str, str] = {}
+        raw_wait = context.checkpoint.working_state.get("browser_auth_wait")
+        if raw_wait is not None:
+            wait = BrowserAuthenticationWait.model_validate(raw_wait)
+            sign_in["browser_profile_id"] = str(wait.profile_id)
+            if wait.resume_url is not None:
+                sign_in["origin"] = browser_origin(wait.resume_url)
+        suspension["sign_in"] = sign_in
+    return RunOutcome(kind=OutcomeKind.SUSPENDED, suspension=suspension)
 
 
 async def _invoke_model(

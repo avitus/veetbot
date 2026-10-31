@@ -454,3 +454,61 @@ async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_
         result = await composition.runs.wait_terminal(run_id)
     assert result.status is RunStatus.CANCELLED
     assert len(provider.actions) == 1
+
+
+@pytest.mark.parametrize("bound", [True, False])
+async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: bool) -> None:
+    """ADR-0277: the app shows a sign-in card, not a question, from trusted wait fields."""
+    from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
+
+    provider = InterruptedBrowser()
+    provider.reason = "tool.browser.needs_user"
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[navigation(), ScriptedTurn(text="Done.")]),
+        sequential_ids=True,
+        enabled_tools=["browser.navigate", "browser.observe", "conversation.ask_user"],
+        browser_provider_override=provider,
+    ) as composition:
+        session_id = None
+        if bound:
+            await seed_browser_authority(composition)
+            created = await composition.services.sessions.create(
+                composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+            )
+            session_id = created.id
+        run_id = await composition.runs.submit("Read my account.", session_id)
+        events = await composition.runs.events(run_id)
+    waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
+    assert len(waiting) == 1
+    expected = (
+        {"browser_profile_id": str(PROFILE_ID), "origin": "https://example.org"} if bound else {}
+    )
+    assert waiting[0].payload["suspension"]["sign_in"] == expected
+
+
+async def test_model_authored_question_carries_no_sign_in_marker() -> None:
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    tool_calls=[
+                        ScriptedToolCall(
+                            name="conversation.ask_user",
+                            arguments={"question": "Which account?"},
+                            call_id="ask",
+                        )
+                    ],
+                    stop_reason=StopReason.TOOL_USE,
+                )
+            ]
+        ),
+        sequential_ids=True,
+        enabled_tools=["conversation.ask_user"],
+    ) as composition:
+        run_id = await composition.runs.submit("Read my account.")
+        events = await composition.runs.events(run_id)
+    waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
+    assert len(waiting) == 1
+    assert "sign_in" not in waiting[0].payload["suspension"]

@@ -127,7 +127,6 @@ public struct ChatView: View {
     @State private var textSelection: MessageTextSelection?
     @State private var isDropTargeted = false
     @State private var showingFileImporter = false
-    @State private var showingWebsiteAccess = false
     @State private var transcriptProbe = TranscriptProbe()
     /// What the draft needs; the field hugs one line and grows to a cap.
     @State private var composerContentHeight: CGFloat = 0
@@ -172,7 +171,7 @@ public struct ChatView: View {
 
     private var notificationCovered: Bool {
         var covered = artifactSelection != nil || textSelection != nil || model.isPeopleLookupPresented
-            || showingWebsiteAccess || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
+            || model.isWebsiteAccessPresented || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
             || chatListOverlayPresented
         #if os(iOS)
         covered = covered || showingPhotoPicker || model.pendingSmsInvocation != nil
@@ -350,7 +349,6 @@ public struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { toolbarTitle }
             ToolbarItemGroup(placement: .primaryAction) {
-                websiteAccessButton
                 ChatToolbarActions(model: model)
             }
         }
@@ -360,7 +358,7 @@ public struct ChatView: View {
                 delete: { Task { await model.deleteCallResult() } },
                 followUp: { model.prepareCallFollowUp($0) })
         }
-        .sheet(isPresented: $showingWebsiteAccess) {
+        .sheet(isPresented: $model.isWebsiteAccessPresented) {
             ConnectionSettingsView(model: model, embedded: false, forChat: true).websiteAccessSheetFrame()
         }
         .sheet(item: $artifactSelection) { selection in
@@ -409,9 +407,6 @@ public struct ChatView: View {
                 }
             }
             Spacer(minLength: VeetSpace.s2)
-            #if os(macOS)
-            websiteAccessButton
-            #endif
         }
         .padding(.top, VeetSpace.s5)
         .padding(.bottom, VeetSpace.s4)
@@ -443,16 +438,6 @@ public struct ChatView: View {
             .accessibilityIdentifier("chat.toolbar-title")
     }
     #endif
-
-    private var websiteAccessButton: some View {
-        Button { showingWebsiteAccess = true } label: {
-            Image(systemName: "globe")
-        }
-        .buttonStyle(QuietIconButtonStyle())
-        .help("Website Access")
-        .accessibilityLabel("Website Access")
-        .accessibilityIdentifier("chat.websiteAccess")
-    }
 
     private var statusLabel: String? {
         ConversationStatus.label(runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval)
@@ -506,7 +491,13 @@ public struct ChatView: View {
                 #endif
             }
             if let prompt = state.clarifyingQuestion {
-                WaitingLine(text: "Waiting for your answer. See below.")
+                Group {
+                    if prompt.signIn == nil {
+                        WaitingLine(text: "Waiting for your answer. See below.")
+                    } else {
+                        WaitingLine(text: "Waiting for you to sign in. See below.")
+                    }
+                }
                     .padding(.top, VeetSpace.s3)
                     .id(NotificationFocus.question(prompt.questionID).scrollID)
             }
@@ -941,8 +932,22 @@ private struct AttentionDock: View {
                     #endif
                 }
                 if pending.isEmpty, let prompt = state.clarifyingQuestion {
-                    ClarifyingQuestionCard(prompt: prompt) { answer in
-                        await model.answerQuestion(prompt, answer: answer)
+                    Group {
+                        if prompt.signIn != nil {
+                            SignInRequiredCard(
+                                prompt: prompt,
+                                signIn: { await model.signInToContinue(prompt) },
+                                openWebsiteAccess: { model.isWebsiteAccessPresented = true },
+                                confirmSignedIn: {
+                                    await model.answerQuestion(prompt, answer: "I've signed in.")
+                                },
+                                stop: { await model.cancelActiveRun() }
+                            )
+                        } else {
+                            ClarifyingQuestionCard(prompt: prompt) { answer in
+                                await model.answerQuestion(prompt, answer: answer)
+                            }
+                        }
                     }
                     .shadow(color: AppTheme.ink.opacity(0.12), radius: 20, x: 0, y: 10)
                 }
@@ -1270,6 +1275,12 @@ struct ChatToolbarActions: View {
     }
 
     var body: some View {
+        // In the toolbar, not the scrolling header, so a long chat never hides it (ADR-0277).
+        Button { model.isWebsiteAccessPresented = true } label: {
+            Label("Website Access", systemImage: "globe")
+        }
+        .help("Website Access")
+        .accessibilityIdentifier("chat.websiteAccess")
         Button { model.isPeopleLookupPresented = true } label: {
             Label("People", systemImage: "person.2")
         }

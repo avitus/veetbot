@@ -323,3 +323,4 @@ implementation without one.
 
 - [ADR-0275: An in-app store for integration keys](0275-in-app-integration-secrets.md)
 - [ADR-0276: Inspect one public image in chat (Accepted)](0276-public-image-inspection.md)
+- [ADR-0277: A sign-in pause shows a sign-in card, not a question (Accepted)](0277-sign-in-pause-shows-a-sign-in-card.md)

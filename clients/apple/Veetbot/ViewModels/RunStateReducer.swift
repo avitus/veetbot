@@ -169,8 +169,19 @@ public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
     public let questionID: UUID
     public let runID: UUID
     public let question: String
+    /// Set when the question is the runtime's sign-in pause (ADR-0277).
+    public var signIn: BrowserSignInPause? = nil
 
     public var id: UUID { questionID }
+}
+
+/// The website a sign-in pause waits on, from the server's trusted wait. Both
+/// fields are absent when the run waits for a reply instead.
+public struct BrowserSignInPause: Equatable, Sendable {
+    public let profileID: UUID?
+    public let origin: String?
+
+    public var host: String? { origin.flatMap { URL(string: $0)?.host } }
 }
 
 @MainActor
@@ -736,10 +747,17 @@ public final class RunStateReducer: ObservableObject {
             frame.data["question"]?.stringValue
             ?? workingState?.openQuestions.last
             ?? "The agent needs more information."
+        let signIn = (nested?["sign_in"]?.objectValue).map { fields in
+            BrowserSignInPause(
+                profileID: fields["browser_profile_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
+                origin: fields["origin"]?.stringValue
+            )
+        }
         clarifyingQuestion = ClarifyingQuestionPrompt(
             questionID: questionID,
             runID: runID,
-            question: question
+            question: question,
+            signIn: signIn
         )
     }
 

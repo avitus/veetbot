@@ -27,6 +27,28 @@ import Testing
         #expect(source.contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))
     }
 
+    /// ADR-0277: a sign-in pause is a card with a sign-in button, not a
+    /// question, and Website Access stays in the toolbar on every platform.
+    @Test
+    func testSignInPauseShowsASignInCardAndWebsiteAccessStaysInTheToolbar() throws {
+        let chat = try source(at: "Veetbot/Views/ChatView.swift")
+        let activity = try source(at: "Veetbot/Views/ActivityViews.swift")
+
+        #expect(chat.contains("if prompt.signIn != nil {"))
+        #expect(chat.contains("SignInRequiredCard("))
+        #expect(chat.contains("WaitingLine(text: \"Waiting for you to sign in. See below.\")"))
+        #expect(activity.contains("struct SignInRequiredCard"))
+        #expect(activity.contains(".accessibilityIdentifier(\"sign-in-card.sign-in\")"))
+        let card = try #require(activity.range(of: "struct SignInRequiredCard"))
+        let cardEnd = try #require(activity.range(of: "struct WorkingStatePanel"))
+        #expect(!activity[card.lowerBound..<cardEnd.lowerBound].contains("TextField"))
+
+        let toolbar = try #require(chat.range(of: "struct ChatToolbarActions"))
+        #expect(chat[toolbar.lowerBound...].contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))
+        #expect(!chat.contains("websiteAccessButton"))
+        #expect(!chat.contains("showingWebsiteAccess"))
+    }
+
     @Test
     func testComposerIsATranslucentCapsuleAndMessagesFollowTheReference() throws {
         let source = try source(at: "Veetbot/Views/ChatView.swift")

@@ -275,6 +275,45 @@ import Testing
         #expect(reducer.timeline.count == count)
     }
 
+    /// ADR-0277: the runtime's sign-in pause is a sign-in card, not a question.
+    @Test
+    func signInPauseCarriesTheWaitingWebsite() throws {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        let profileID = UUID()
+        reducer.begin(runID: runID, status: .running)
+        reducer.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object([
+                "kind": .string("user"),
+                "sign_in": .object([
+                    "browser_profile_id": .string(profileID.uuidString),
+                    "origin": .string("https://www.example.org"),
+                ]),
+            ]),
+        ]))
+        let signIn = try #require(reducer.clarifyingQuestion?.signIn)
+        #expect(signIn.profileID == profileID)
+        #expect(signIn.host == "www.example.org")
+
+        reducer.reduce(SSEFrame(id: 2, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object(["kind": .string("user"), "sign_in": .object([:])]),
+        ]))
+        let unbound = try #require(reducer.clarifyingQuestion?.signIn)
+        #expect(unbound.profileID == nil && unbound.host == nil)
+
+        reducer.reduce(SSEFrame(id: 3, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object(["kind": .string("user")]),
+        ]))
+        #expect(reducer.clarifyingQuestion != nil)
+        #expect(reducer.clarifyingQuestion?.signIn == nil)
+    }
+
     @Test
     func testApprovalBindsToMostRecentMatchingUnresolvedTool() {
         let reducer = RunStateReducer()

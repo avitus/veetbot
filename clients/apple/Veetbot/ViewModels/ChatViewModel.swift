@@ -187,6 +187,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvalsInFlight: [UUID: ApprovalDecision] = [:]
     /// Presented from the conversation's toolbar, which on the Mac belongs to the window.
     @Published public var isPeopleLookupPresented = false
+    /// The open chat's Website Access sheet, from its toolbar button or a sign-in card.
+    @Published public var isWebsiteAccessPresented = false
 
     /// Whether an approval still waits on the owner; one whose decision is on its way does not.
     public var awaitingOwnerApproval: Bool {
@@ -1668,6 +1670,24 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             present(error)
             return false
+        }
+    }
+
+    /// ADR-0277: the sign-in card's main button opens the device sign-in for
+    /// the website the run waits on; without one, Website Access.
+    public func signInToContinue(_ prompt: ClarifyingQuestionPrompt) async {
+        guard let profileID = prompt.signIn?.profileID else {
+            isWebsiteAccessPresented = true
+            return
+        }
+        if !browserProfiles.contains(where: { $0.id == profileID }), let api {
+            try? await reloadBrowserProfiles(using: api)
+        }
+        guard let profile = browserProfiles.first(where: { $0.id == profileID }),
+            beginDeviceSignIn(profile: profile) != nil
+        else {
+            isWebsiteAccessPresented = true
+            return
         }
     }
 

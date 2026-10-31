@@ -982,6 +982,51 @@ import Testing
     /// A short poll limit keeps the give-up case fast; a case that must
     /// succeed by polling passes a generous one, so a loaded machine cannot
     /// time it out.
+    /// ADR-0277: the sign-in card opens the device sign-in for the waiting
+    /// website, loading the saved logins first when the app has none yet.
+    @Test
+    func theSignInCardOpensSignInForTheWaitingWebsite() async throws {
+        let profileID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "needs_user")]))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let prompt = ClarifyingQuestionPrompt(
+            questionID: UUID(), runID: UUID(), question: "Please sign in.",
+            signIn: BrowserSignInPause(profileID: profileID, origin: "https://example.org")
+        )
+
+        await model.signInToContinue(prompt)
+
+        let request = try #require(model.deviceSignInRequest)
+        #expect(request.profileID == profileID)
+        #expect(request.startURL.absoluteString == "https://example.org/")
+        #expect(!model.isWebsiteAccessPresented)
+    }
+
+    /// Without a waiting website the card opens Website Access instead.
+    @Test
+    func aSignInCardWithoutAWebsiteOpensWebsiteAccess() async throws {
+        let server = DeviceFlowServer { request in
+            Self.route(request) == "GET veetbot.test /v1/browser-profiles" ? (200, Self.page([])) : nil
+        }
+        let model = try await configuredModel(server)
+        let prompt = ClarifyingQuestionPrompt(
+            questionID: UUID(), runID: UUID(), question: "Please sign in.",
+            signIn: BrowserSignInPause(profileID: nil, origin: nil)
+        )
+
+        await model.signInToContinue(prompt)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(model.isWebsiteAccessPresented)
+    }
+
     private func configuredModel(
         _ server: DeviceFlowServer,
         timing: DeviceSignInTiming = DeviceSignInTiming(pollInterval: 0.01, pollLimit: 0.2)
