@@ -350,11 +350,55 @@ project:
 
 
 public_photo_inspection:
-  adr: docs/adr/0273-public-image-inspection.md
+  adr: docs/adr/0276-public-image-inspection.md
   authorized_on: '2026-10-31'
   status: implemented_pending_delivery
   evidence: tests/unit/test_web_inspect_image.py
   scope: Public image URLs and selected SmugMug photos reach the model as verified tool results.
+
+integration_secrets_mvp:
+  adr: docs/adr/0275-in-app-integration-secrets.md
+  authorized_on: '2026-10-30'
+  status: in_progress
+  authorized_scope:
+  - Owner-entered integration keys in Settings, sealed in PostgreSQL
+  - Existing credential broker and approved jobs as the first consumer
+  - A separate host-held master key and manual off-host recovery
+  - PR to main, CodeRabbit review, final hosted verification, merge and production activation authorized on 2026-10-31
+  implementation_status: implemented_default_off_pending_review_and_delivery
+  implementation_evidence:
+  - tests/unit/test_integration_secrets_api.py
+  - tests/unit/test_integration_secrets_security.py
+  - tests/unit/test_integration_secret_jobs.py
+  - tests/contract/test_integration_secret_store_contract.py
+  - tests/integration/test_integration_secrets_postgres.py
+  - clients/apple/Tests/VeetbotCoreTests/IntegrationSecretsTests.swift
+  verification:
+    reading_lane: A
+    diff_minimum_reading_lane: A
+    static: 'Full frozen-code partition: 9037 passed, one skipped; the sole failure was the workflow test asserting two workers under the four-worker invocation, all 12 tests in that module passed when rerun with defaults'
+    focused: '200 API, secret-store, jobs and architecture checks passed after the failure-path fixes'
+    initial_run: 'The initial full run overlapped source edits, invalidating cached release-evidence fingerprints; a synthetic userinfo URL also triggered the scanner. Source was frozen and the fixture constructed at runtime before the rerun; none of those failures remained'
+    checks: 'Lint, mypy, citation repair, docs-check and git diff --check passed'
+    contract: 'circleci testsuite run contract: 2012 passed; includes the unchanged MCP sealing contract'
+    postgres: 'circleci testsuite run integration: 24 passed across secret store, jobs, migration and MCP persistence atoms on an isolated disposable PostgreSQL 16 cluster'
+    native: 'make test-apple: 1040 core tests and four contrast tests passed'
+    security_evidence: 'Owner/RLS isolation, ciphertext AAD/tamper/wrong-key refusal, transaction rollback, concurrent CAS/cap/retries, tombstones, fresh worker processes after replacement/deletion, and synthetic ciphertext snapshot restore with a separately supplied key'
+    boundary_evidence: 'Metadata-only authenticated API, content-free validation/errors/logging, no-store failures, dedicated transient native input, stable retry identity, grant-bound composed HTTP reads and encoded-echo refusal'
+    red_tests:
+    - 'circleci testsuite run static -t test_integration_secrets_api: expected PUT 200 initially returned 404'
+    - 'circleci testsuite run contract -t test_integration_secret_store_contract: expected the composed repository; it was absent'
+    - 'circleci testsuite run static -t test_integration_secret_jobs: stored reference initially rejected by JobAccess'
+    - 'make test-apple: Integration keys was absent from the Settings sections'
+    - 'Additional regressions first reproduced wrong-key overwrite, incorrect 503 mapping, missing no-store on 500, lowercase URL-escape and numeric JSON echoes, and noncanonical origins'
+    activation_preflight: '2026-10-31: Confirmed the nightly backup takes a database dump and state tar. Verified the master-key exclusion with a synthetic archive. Escrowed the new key in the owner-designated off-host login Keychain and successfully recovered a synthetic row through pg_dump/pg_restore into a separate database with a fresh escrow read. A wrong key failed.'
+    review_regression: 'The loader initially rejected the root-owned 0440 ACL-backed credential from the production systemd version. The corrected loader admitted a synthetic unit-only credential on that host and refused foreign, group-readable, missing-ACL and ordinary-path variants in tests.'
+    production_evidence: 'Hosted final CI, merged delivery and live enablement pending at PR submission.'
+  implementation_authorized: true
+  production_activation_authorized: true
+  remaining_work:
+  - Complete review, final hosted verification and merged delivery
+  - Enable trusted roles, verify the live Settings lifecycle and keep provider permissions scoped
 
 agent_jobs_mvp:
   adr: docs/adr/0268-agent-written-jobs.md
@@ -478,7 +522,7 @@ milestones:
     open_items:
     - 'Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image'
     - 'Build step 10 remainder: the discuss intent, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19''s preflight rebuild of live widgets'
-    - 'Build step 11: preview rendering'
+    - 'ADR-0273: Verify the fixture preview and a device failure report after releasing the production builder and Apple client.'
     - "Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; then the activation release (build steps 2 to 10 reached main in pull requests 186, 187, 188, 193, 195 and 200 by 2026-10-26)"
     deferred_scope:
     - Deterministic collectors that fetch outside data without a model run, and their egress allowlist
@@ -2909,6 +2953,8 @@ milestones:
     gates_registered: 12
     implementation_status: authorized_cross_category_recovery_and_combined_release_in_progress
     implementation_evidence:
+      - tests/unit/test_recall_release_handoff.py
+      - tests/unit/test_recall_handoff_observations.py
       - tests/contract/test_runtime_semantic_queries_contract.py
       - tests/contract/test_context_recall_freshness.py
       - tests/unit/test_context_recall_cache.py
@@ -3014,6 +3060,7 @@ milestones:
       - external memory services, arbitrary graph inference, training and RL
       - automatic historical re-extraction and unattended dreaming activation
     open_items:
+      - Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
       - Complete the staged implementation and comparative activation evidence
       - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
   "34":

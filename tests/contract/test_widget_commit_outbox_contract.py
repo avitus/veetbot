@@ -93,6 +93,9 @@ async def a_retry_is_rescheduled_and_completion_removes_it(
         last_error="github unavailable",
     )
     assert (retried.attempts, retried.last_error) == (1, "github unavailable")
+    assert await outbox.first_for_widget(owner, "weather") == retried
+    assert await outbox.first_for_widget(foreign(owner), "weather") is None
+    assert await outbox.first_for_widget(owner, "markets") is None
     assert await _due(outbox, owner, 1) == []
     assert await _due(outbox, owner, 2) == [queued.revision_id]
     with pytest.raises(NotFoundError):

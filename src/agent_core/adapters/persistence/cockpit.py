@@ -304,6 +304,19 @@ class InMemoryWidgetCommitOutbox:
             self._entries[key] = entry
             return entry
 
+    async def first_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        owned = _owner(principal)
+        async with self._lock:
+            return min(
+                (
+                    entry
+                    for key, entry in self._entries.items()
+                    if key[:2] == owned and entry.slug == slug
+                ),
+                key=lambda e: (e.created_at, str(e.revision_id)),
+                default=None,
+            )
+
     async def due(
         self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]:
@@ -357,16 +370,21 @@ class InMemoryWidgetCommitOutbox:
             return failure
 
     async def import_failures(
-        self, principal: Principal, *, unseen_only: bool = False
+        self,
+        principal: Principal,
+        *,
+        unseen_only: bool = False,
+        slug: str | None = None,
+        limit: int | None = None,
     ) -> list[ImportFailure]:
         async with self._lock:
             failures = [
                 item
                 for item in self._failures.get(_owner(principal), {}).values()
-                if not (unseen_only and item.seen)
+                if not (unseen_only and item.seen) and (slug is None or item.slug == slug)
             ]
             failures.sort(key=lambda item: (item.created_at, str(item.id)), reverse=True)
-            return failures
+            return failures[:limit]
 
     async def mark_seen(self, principal: Principal, failure_ids: Sequence[UUID]) -> int:
         async with self._lock:
@@ -1002,6 +1020,20 @@ class PostgresWidgetCommitOutbox:
             ) from error
         return entry
 
+    async def first_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        row = await self._session.scalar(
+            select(CockpitCommitOutboxRow)
+            .where(
+                CockpitCommitOutboxRow.package_kind == self._kind,
+                CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                CockpitCommitOutboxRow.principal_id == principal.principal_id,
+                CockpitCommitOutboxRow.slug == slug,
+            )
+            .order_by(CockpitCommitOutboxRow.created_at, CockpitCommitOutboxRow.revision_id)
+            .limit(1)
+        )
+        return _entry_from_row(row) if row else None
+
     async def due(
         self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]:
@@ -1077,13 +1109,22 @@ class PostgresWidgetCommitOutbox:
         return failure
 
     async def import_failures(
-        self, principal: Principal, *, unseen_only: bool = False
+        self,
+        principal: Principal,
+        *,
+        unseen_only: bool = False,
+        slug: str | None = None,
+        limit: int | None = None,
     ) -> list[ImportFailure]:
         """List the owner's import diagnostics for this package namespace."""
         query = select(CockpitImportFailureRow).where(
             *_owned_by(CockpitImportFailureRow, principal),
             CockpitImportFailureRow.package_kind == self._kind,
         )
+        if slug is not None:
+            query = query.where(CockpitImportFailureRow.slug == slug)
+        if limit is not None:
+            query = query.limit(limit)
         if unseen_only:
             query = query.where(CockpitImportFailureRow.seen.is_(False))
         rows = (

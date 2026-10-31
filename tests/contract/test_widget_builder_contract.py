@@ -283,3 +283,19 @@ async def test_a_cancelled_build_releases_its_sandbox() -> None:
         await task
 
     assert environment.live_environment_ids() == frozenset()
+
+
+@pytest.mark.parametrize(
+    "preview",
+    [
+        None,
+        {"fixture": "fixtures/typical.json", "size": "md", "text": "OK", "png": "not-png"},
+        {"fixture": "fixtures/empty.json", "size": "md", "text": "OK", "png": ""},
+    ],
+)
+async def test_a_preview_requires_the_selected_fixture_and_bounded_png(preview: object) -> None:
+    builder, environment = _builder()
+    environment.queue_result(_result(_built(preview=preview)))
+    with pytest.raises(WidgetBuildFailedError):
+        await builder.build(OWNER, "weather", FILES, screen=SCREEN, preview={})
+    assert not environment.live_environment_ids()

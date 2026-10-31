@@ -294,4 +294,4 @@ verified gate ceiling until Milestone 10 as a whole completes.
 
 ## Public photo inspection
 
-With web fetch enabled, `web.inspect_image` accepts a public image URL or a selected SmugMug photo permalink. It returns an external-untrusted image for a vision-capable model. A gallery without a selected photo requires a more specific link. See [ADR-0273](../adr/0273-public-image-inspection.md).
+With web fetch enabled, `web.inspect_image` accepts a public image URL or a selected SmugMug photo permalink. It returns an external-untrusted image for a vision-capable model. A gallery without a selected photo requires a more specific link. See [ADR-0276](../adr/0276-public-image-inspection.md).

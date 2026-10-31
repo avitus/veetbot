@@ -75,6 +75,7 @@ public final class CockpitViewModel: ObservableObject {
     private var visible = false
     private var streamTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private var reportedFailures: [UUID: [CockpitFailureCode: Date]] = [:]
     private var quarantinedRevisions: [String: UUID] = [:]
     /// Bumped by every new connection, so an answer to the old one never lands on the new board.
     private var connectionEpoch = 0
@@ -113,6 +114,7 @@ public final class CockpitViewModel: ObservableObject {
         connection = .idle
         quarantined = []
         quarantinedRevisions = [:]
+        reportedFailures = [:]
         selectedSlug = nil
         detail = nil
         actionMessage = nil
@@ -136,8 +138,13 @@ public final class CockpitViewModel: ObservableObject {
 
     public func hostReported(_ message: CockpitHostMessage) {
         switch message {
-        case .quarantined(let slug, _):
+        case .quarantined(let slug, let revision):
+            guard ownsDisplayedRevision(slug, revision) else { return }
             quarantine(slug)
+        case .tileError(let slug, let revision):
+            if ownsDisplayedRevision(slug, revision) { recordFailure(slug, .renderFailed) }
+        case .bundleError(let slug, let revision):
+            if ownsDisplayedRevision(slug, revision) { recordFailure(slug, .bundleFailed) }
         case .select(let slug):
             selectedSlug = slug
         case .open(let slug, let kind, let id):
@@ -151,7 +158,7 @@ public final class CockpitViewModel: ObservableObject {
             case .schedule: onOpen(.schedule(uuid))
             case .session: onOpen(.session(uuid))
             }
-        case .ready, .loaded, .tileError:
+        case .ready, .loaded:
             break
         }
     }
@@ -171,6 +178,8 @@ public final class CockpitViewModel: ObservableObject {
     /// Take a freshly loaded board; a quarantined widget returns once its revision changes.
     public func apply(_ snapshot: CockpitSnapshot) {
         let revisions = Dictionary(snapshot.widgets.map { ($0.slug, $0.revisionID) }, uniquingKeysWith: { a, _ in a })
+        let liveRevisions = Set(revisions.values)
+        reportedFailures = reportedFailures.filter { liveRevisions.contains($0.key) }
         for (slug, revision) in quarantinedRevisions where revisions[slug] != revision {
             quarantinedRevisions[slug] = nil
             quarantined.remove(slug)
@@ -303,10 +312,33 @@ public final class CockpitViewModel: ObservableObject {
         }
     }
 
+    private func ownsDisplayedRevision(_ slug: String, _ revision: String) -> Bool {
+        guard let id = UUID(uuidString: revision) else { return false }
+        return snapshot?.widgets.contains { $0.slug == slug && $0.revisionID == id } == true
+    }
+
+    private func recordFailure(_ slug: String, _ code: CockpitFailureCode) {
+        guard let revision = snapshot?.widgets.first(where: { $0.slug == slug })?.revisionID,
+              let client = makeClient(), reportedFailures[revision]?[code] ?? .distantPast <= now()
+        else { return }
+        reportedFailures[revision, default: [:]][code] = .distantFuture
+        let epoch = connectionEpoch
+        Task {
+            do {
+                try await client.reportCockpitFailure(slug, revision: revision, code: code)
+            } catch {
+                if epoch == connectionEpoch, reportedFailures[revision] != nil {
+                    reportedFailures[revision]?[code] = now().addingTimeInterval(30)
+                }
+            }
+        }
+    }
+
     private func quarantine(_ slug: String) {
         guard let widget = snapshot?.widgets.first(where: { $0.slug == slug }) else { return }
         quarantinedRevisions[slug] = widget.revisionID
         quarantined.insert(slug)
+        recordFailure(slug, .quarantined)
     }
 
     private func run(reloading: Bool = false) async {

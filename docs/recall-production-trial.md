@@ -122,3 +122,72 @@ ACLs, expiry/withdrawal and a compatible application/docs/website rollback.
 Keep the historical withdrawn manifest and evidence intact; use a new admission
 location with independently verified readback. Until both these checks and the
 separate owner decision are complete, semantic recall stays withdrawn.
+
+## Carry a live trial through an equivalent release
+
+ADR-0274 implements the proposed recall handoff. The first release containing
+the verifier changes the input census and requires ordinary exact admission.
+For later updates, the deployment hook runs immediately before promotion.
+The independently installed controller checks final review, hosted CI, merge
+identity, recovery and both environments. The issuer compares both deployed
+trees with the existing admission. A target process checks its own source,
+effective composition (including its actual principal and scopes), local model
+and original trial evidence. The trial clock and check-in history stay in the
+original files. Inspect the private `memory.recalled` event's binding digest
+alongside its run and trace IDs to attribute actual semantic use.
+
+Provision the controller once per host. Install a reviewed copy of the project in a root-owned isolated Python installation
+at `/opt/veetbot-recall-verifier`. Install `deploy/recall/veetbot-recall-handoff`
+at `/usr/local/sbin/veetbot-recall-handoff` and install three copies of
+`deploy/recall/probe` named `release-clearance`, `environment` and `recovery`
+under `/usr/local/libexec/veetbot-recall/`. Restrict write access to the
+administrator throughout those paths. Grant the deploy account noninteractive
+sudo only for the installed verifier with its validated release ID and phase arguments (prepare, commit and verify).
+Never point the verifier interpreter at a release or editable checkout.
+
+The root-controlled directory `/etc/veetbot/recall/handoff-controller` holds:
+
+- `pg_service.conf` with a read-only `veetbot_recall_verify` libpq service
+  against the actual application database. The reference probes use host
+  PostgreSQL clients, systemd and the Docker CLI. A missing or inaccessible
+  input refuses the handoff.
+- `host-profile.json` conforming to `HostProfile` in
+  `src/agent_core/operations/recall_handoff_observe.py`. Enroll every effective settings file,
+  environment file, credential source, override directory, encoder asset and
+  all seven role units. Include the retained application, interpreter and its
+  resolved dependencies, public docs/site artifacts and three image tags.
+  Record the recovery fingerprint and live schema digest along with the
+  independent successful rollback guard receipt. Retain those artifacts and
+  non-prunable image tags outside ordinary deployment pruning. Only enroll a complete
+  inventory verified for this host. The reference collector accepts filesystem
+  links only when their resolved bytes are also covered.
+- `enrollment.json` conforming to `Enrollment` in
+  `src/agent_core/operations/recall_handoff_controller.py`. At exact admission or genuine
+  renewal, pin the live manifest and evidence digests, verified rollback commit
+  and the result of the environment probe on the admitted release. Recheck the
+  actual configuration before replacing enrollment after a renewal.
+- `github-gates.json` with the enrolled release reviewers' GitHub numeric
+  `approver_ids`, the `coderabbit_app_id`, the `circleci_creator_id` and the
+  complete `required_contexts` for this repository. An enrolled independent
+  release reviewer approves the final head after disposing all forms of the
+  CodeRabbit review. The verifier reads that ordinary PR approval, the merge
+  and reviewed trees, review threads, CodeRabbit result and each hosted CI
+  status directly from GitHub. It requires the approved head and successful
+  checks before merge. Configure a protected read-only `github-read-token`
+  for private repository reads and the GitHub GraphQL review-thread query.
+- For a release coordinated outside GitHub approvals, the independent release
+  operator can instead publish its normal `review-clearance.json` and
+  `hosted-ci-evidence.json` together in `reviewed-heads/<full PR head SHA>/`.
+  Restrict writers to the existing release gate and publish the directory
+  atomically. The verifier still resolves the actual merge, head and both trees
+  through GitHub. An incomplete supplied record refuses the handoff.
+
+The verifier issues a read-only receipt per deployment attempt in the active
+trial root. Keep it with the original evidence. A refused or missing receipt
+leaves the new process on ordinary sparse retrieval with jobs available.
+Deployment removes an attempt marker on failure and retires the previous
+release's marker after role verification. Before manual rollback, withdraw
+the active trial overrides using the current trial helper. After delivery,
+verify public identities, four strict semantic compositions and the five
+expected jobs roles. If delivery verification fails after server cutover,
+withdraw the current handoff and verify sparse retrieval and jobs.

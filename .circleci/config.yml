@@ -137,7 +137,7 @@ jobs:
           name: Build, test, and lint the Cockpit kit, builder and realm
           command: |
             make cockpit-install
-            npm --prefix cockpit exec -- playwright install-deps chromium
+            npm --prefix cockpit exec -- playwright install-deps chromium webkit
             make test-cockpit
       - save_cache:
           key: 'cockpit-npm-v1-{{ arch }}-{{ checksum "cockpit/package-lock.json" }}'
@@ -565,6 +565,7 @@ jobs:
       - run:
           name: Stage and release application
           command: |
+            [[ "$CIRCLE_WORKFLOW_ID" =~ ^[0-9a-f-]{36}$ ]]
             stage="/opt/veetbot/releases/$VEETBOT_RELEASE_ID"
             set +e
             ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
@@ -591,7 +592,7 @@ jobs:
                    cd / && rm -rf -- '$stage'; exit 1; \
                  fi; \
                  rm -f veetbot-server.tar.gz veetbot-server.tar.gz.sha256; \
-                 bash deploy/app/release.sh '$VEETBOT_RELEASE_ID'"
+                 VEETBOT_DELIVERY_WORKFLOW_ID='$CIRCLE_WORKFLOW_ID' bash deploy/app/release.sh '$VEETBOT_RELEASE_ID'"
             fi
       - run:
           name: Verify public release identity
@@ -624,6 +625,24 @@ jobs:
             done
             echo "production did not report release $VEETBOT_RELEASE_ID" >&2
             exit 1
+
+      - run:
+          name: Retire this semantic handoff if delivery verification failed
+          when: on_fail
+          command: |
+            file=/tmp/veetbot-release/release-id
+            [[ -f "$file" ]] || exit 0
+            release_id="$(cat "$file")"
+            [[ "$release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
+            [[ "$CIRCLE_WORKFLOW_ID" =~ ^[0-9a-f-]{36}$ ]]
+            ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "bash -s -- '$release_id' '$CIRCLE_WORKFLOW_ID'" \<<'RETIRE'
+            set -eu
+            exec 9>/opt/veetbot/shared/deploy.lock
+            flock -w 120 9
+            marker="/opt/veetbot/releases/$1/.venv/recall-handoff-attempt"
+            if [[ -f "$marker" ]] && grep -Fxq -- "$2" "$marker"; then rm -f -- "$marker"; fi
+            RETIRE
 
   deploy-nginx:
     docker:
@@ -751,6 +770,24 @@ jobs:
               echo "website did not report release $expected_release_id" >&2
               exit 1
             fi
+
+      - run:
+          name: Retire this semantic handoff if delivery verification failed
+          when: on_fail
+          command: |
+            file=/tmp/veetbot-release/release-id
+            [[ -f "$file" ]] || exit 0
+            release_id="$(cat "$file")"
+            [[ "$release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
+            [[ "$CIRCLE_WORKFLOW_ID" =~ ^[0-9a-f-]{36}$ ]]
+            ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "bash -s -- '$release_id' '$CIRCLE_WORKFLOW_ID'" \<<'RETIRE'
+            set -eu
+            exec 9>/opt/veetbot/shared/deploy.lock
+            flock -w 120 9
+            marker="/opt/veetbot/releases/$1/.venv/recall-handoff-attempt"
+            if [[ -f "$marker" ]] && grep -Fxq -- "$2" "$marker"; then rm -f -- "$marker"; fi
+            RETIRE
 
 workflows:
   verify:

@@ -114,8 +114,10 @@
 		100000000000000000005104 /* CockpitWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005104 /* CockpitWebView.swift */; };
 		10000000000000000000F551 /* MCPServerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F551 /* MCPServerModels.swift */; };
 		10000000000000000000F552 /* MCPServerAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F552 /* MCPServerAPIClient.swift */; };
+		10000000000000000000F570 /* IntegrationSecretsAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F570 /* IntegrationSecretsAPIClient.swift */; };
 		10000000000000000000F553 /* MCPServerSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F553 /* MCPServerSettingsViewModel.swift */; };
 		10000000000000000000F554 /* MCPServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F554 /* MCPServerSettingsView.swift */; };
+		10000000000000000000F571 /* IntegrationKeysSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F571 /* IntegrationKeysSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -240,8 +242,10 @@
 		200000000000000000005104 /* CockpitWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitWebView.swift; sourceTree = "<group>"; };
 		20000000000000000000F551 /* MCPServerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerModels.swift; sourceTree = "<group>"; };
 		20000000000000000000F552 /* MCPServerAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerAPIClient.swift; sourceTree = "<group>"; };
+		20000000000000000000F570 /* IntegrationSecretsAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationSecretsAPIClient.swift; sourceTree = "<group>"; };
 		20000000000000000000F553 /* MCPServerSettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerSettingsViewModel.swift; sourceTree = "<group>"; };
 		20000000000000000000F554 /* MCPServerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerSettingsView.swift; sourceTree = "<group>"; };
+		20000000000000000000F571 /* IntegrationKeysSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationKeysSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -317,6 +321,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000F552 /* MCPServerAPIClient.swift */,
+				20000000000000000000F570 /* IntegrationSecretsAPIClient.swift */,
 				20000000000000000000B002 /* MemorySynthesisAPIClient.swift */,
 				20000000000000000000A003 /* DeviceSignInHandoffClient.swift */,
 				20000000000000000000A002 /* WebsiteSessionScope.swift */,
@@ -389,6 +394,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000F554 /* MCPServerSettingsView.swift */,
+				20000000000000000000F571 /* IntegrationKeysSettingsView.swift */,
 				20000000000000000000B004 /* MemorySynthesisView.swift */,
 				20000000000000000000A00A /* BrowserActionApprovalCard.swift */,
 				20000000000000000000A007 /* WebsiteAccessActions.swift */,
@@ -561,8 +567,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				10000000000000000000F554 /* MCPServerSettingsView.swift in Sources */,
+				10000000000000000000F571 /* IntegrationKeysSettingsView.swift in Sources */,
 				10000000000000000000F553 /* MCPServerSettingsViewModel.swift in Sources */,
 				10000000000000000000F552 /* MCPServerAPIClient.swift in Sources */,
+				10000000000000000000F570 /* IntegrationSecretsAPIClient.swift in Sources */,
 				10000000000000000000F551 /* MCPServerModels.swift in Sources */,
 				10000000000000000000B004 /* MemorySynthesisView.swift in Sources */,
 				10000000000000000000E001 /* InspectorModel.swift in Sources */,

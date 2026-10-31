@@ -18,6 +18,7 @@ from agent_core.application.job_grants import (
     revision_grant_id,
 )
 from agent_core.application.jobs import JobPublication
+from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalPresentation, ApprovalStatus
 from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.errors import ConflictError, NotFoundError
@@ -248,6 +249,7 @@ class JobManageTool:
 
 
 class JobRunTool:
+    supports_stored_keys = False
     spec = _spec(
         "job.run",
         (
@@ -273,6 +275,13 @@ class JobRunTool:
             if ("grant_id" in arguments) == ("access" in arguments):
                 raise ValueError("Supply either a grant_id or proposed access.")
             slug = arguments["slug"]
+            if "access" in arguments:
+                await _key_metadata(
+                    publication,
+                    context.principal,
+                    _ACCESS.validate_python(arguments["access"]),
+                    allow_stored=self.supports_stored_keys,
+                )
             async with publication.uow_factory() as uow:
                 saved = await uow.jobs.get(context.principal, slug)
                 revision = saved.revisions.get(str(arguments["revision_id"]))
@@ -401,7 +410,45 @@ class JobRunTool:
                     arguments=approval_argument_view({**view, "access_status": "unknown"}),
                 )
             view["access"] = _ACCESS.dump_python(grant.access, mode="json")
+        if "access" in view:
+            keys = await _key_metadata(
+                self.toolset.publication,
+                context["principal"],
+                _ACCESS.validate_python(view["access"]),
+                allow_stored=self.supports_stored_keys,
+            )
+            if keys:
+                view["integration_keys"] = keys
         return ApprovalPresentation(
             summary="Run this saved job with the listed private inputs and access.",
             arguments=approval_argument_view(view),
         )
+
+
+class StoredKeyJobRunTool(JobRunTool):
+    """New sessions can propose stored bindings; pinned v1.0 specifications stay stable."""
+
+    supports_stored_keys = True
+    spec = JobRunTool.spec.model_copy(
+        update={
+            "version": "1.1.0",
+            "description": JobRunTool.spec.description
+            + " For API keys ask the owner to save one in Settings > Integration keys"
+            + " and provide its stored: reference. Never ask for a raw key."
+            + " Stored keys permit GET only.",
+        }
+    )
+
+
+async def _key_metadata(
+    publication: JobPublication, principal: Principal, access: JobAccess, *, allow_stored: bool
+) -> list[dict[str, object]]:
+    keys = []
+    for host, reference in access.hosts.items():
+        if reference is None or not reference.startswith("stored:"):
+            continue
+        if not allow_stored or publication.integration_secrets is None:
+            raise JobBrokerError("job.credential_unconfigured")
+        row = await publication.integration_secrets.binding(principal, reference, host)
+        keys.append(row.metadata())
+    return keys

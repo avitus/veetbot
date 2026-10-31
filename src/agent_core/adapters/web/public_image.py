@@ -1,4 +1,4 @@
-"""Credential-free, DNS-pinned public image reads for ADR-0273."""
+"""Credential-free, DNS-pinned public image reads for ADR-0276."""
 
 from __future__ import annotations
 

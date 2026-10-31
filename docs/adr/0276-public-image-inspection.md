@@ -1,4 +1,4 @@
-# ADR-0273: Inspect one public image in chat
+# ADR-0276: Inspect one public image in chat
 
 - Status: Accepted by the repository owner on 2026-10-31
 - Date: 2026-10-31

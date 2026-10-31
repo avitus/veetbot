@@ -104,7 +104,7 @@ An `AttachmentResolver` port, built in the composition root and passed to each
 provider adapter, reads an attachment's bytes after checking that it is an
 upload of the principal in the conversation's session and has not expired.
 Except for a verified image from a successful inspection in the current run
-([ADR-0273](../adr/0273-public-image-inspection.md)), only references in a
+([ADR-0276](../adr/0276-public-image-inspection.md)), only references in a
 `UserMessage` with `USER` trust are resolved; one in a
 tool result, an assistant message, or a system message renders as a one-line
 text marker, and so does any reference when no resolver is configured. A
