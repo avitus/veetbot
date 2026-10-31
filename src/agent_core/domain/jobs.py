@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_serializer, model_validator
 
 from agent_core.domain.cockpit import FEED_ID_PATTERN, WIDGET_SLUG_PATTERN
+from agent_core.domain.integration_secrets import secret_id
 from agent_core.domain.web import is_public_https_url
 
 JOB_CALLS = frozenset({"http.request", "model.complete", "feed.publish", "log"})
@@ -77,7 +78,12 @@ class JobAccess:
                 raise ValueError("A job host must be an exact public DNS hostname.")
             if any(character in host for character in "/:@?#"):
                 raise ValueError("A job host must not contain a URL path or port.")
-            if credential is not None and (host, credential) != ("api.github.com", "github-reader"):
+            if credential is not None and credential.startswith("stored:"):
+                secret_id(credential)
+            elif credential is not None and (host, credential) != (
+                "api.github.com",
+                "github-reader",
+            ):
                 raise ValueError("The job credential is not bound to that host.")
         if any(
             not feed.startswith("agent.")

@@ -29,12 +29,15 @@ class JobExecution:
         http: Callable[..., Awaitable[dict[str, Any]]],
         feeds: CockpitFeeds,
         enabled: bool = True,
+        http_for_access: Callable[[Principal, JobAccess], Callable[..., Awaitable[dict[str, Any]]]]
+        | None = None,
     ) -> None:
         self.uow_factory = uow_factory
         self.clock = clock
         self.runner = runner
         self.schema_check = schema_check
         self.http = http
+        self.http_for_access = http_for_access
         self.feeds = feeds
         self.enabled = enabled
 
@@ -173,7 +176,8 @@ class JobExecution:
                 result["data"] = snapshot.data
             return result
 
-        broker = JobBroker(access, http=self.http, model=model, feed=feed, log=log, trial=trial)
+        http = self.http_for_access(principal, access) if self.http_for_access else self.http
+        broker = JobBroker(access, http=http, model=model, feed=feed, log=log, trial=trial)
 
         async def dispatch(call: str, arguments: dict[str, Any], call_id: str) -> dict[str, Any]:
             logs.append(f"Broker request: {call}")

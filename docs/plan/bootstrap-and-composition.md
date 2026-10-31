@@ -1743,3 +1743,17 @@ without it, and no other process receives the credential.
 Unset, none of these exists. The flag, the image setting, the App identifiers
 and the `cockpit/profiles.yaml` knobs join the executable inventory when the
 implementation lands. The detailed contract is [cockpit.md](cockpit.md).
+
+## Integration key composition (ADR-0275)
+
+`AGENT_INTEGRATION_SECRETS_ENABLED` defaults off. Opted-in API/run roles require
+`INTEGRATION_SECRETS_KEY_FILE`, an absolute, owner-only raw 32-byte file; startup
+refuses missing, symlinked, nonregular, incorrectly owned or permissive files.
+A root-owned `0440` systemd copy at `$CREDENTIALS_DIRECTORY/integration-secrets`
+qualifies only when its ACL grants read access to root and the unit user alone.
+The key config is redacted and distinct from both MCP sealing and environment
+credential mappings. Compose `IntegrationSecrets` with the UOW factory and the
+shared AES-GCM primitive under the `veetbot.integration-secret.v1` purpose.
+Compose job resolution per authenticated owner and approved host map; never
+install a global stored-reference resolver. Other roles keep the flag off and
+receive no credential. See [provisioning](../integration-keys.md).

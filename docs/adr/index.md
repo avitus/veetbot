@@ -320,3 +320,5 @@ implementation without one.
 - [ADR-0272: Jobs and semantic recall coexist](0272-jobs-and-semantic-recall-coexist.md)
 - [ADR-0273: Diagnose a widget from owner chat](0273-cockpit-widget-diagnostics.md)
 - [ADR-0274: Continue an active recall trial across equivalent releases](0274-continuous-recall-trial-across-equivalent-releases.md)
+
+- [ADR-0275: An in-app store for integration keys](0275-in-app-integration-secrets.md)
