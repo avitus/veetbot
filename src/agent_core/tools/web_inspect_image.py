@@ -35,6 +35,7 @@ class WebInspectImageTool:
         self.read = read
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Store a bounded photo rendition and return its untrusted image reference."""
         if "artifact.read" not in context.principal.scopes:
             return _failure(ToolFailureKind.PERMISSION, "policy.scope.missing", retryable=False)
         try:

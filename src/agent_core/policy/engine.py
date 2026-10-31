@@ -66,6 +66,7 @@ def _path_inside_workspace(action: ProposedAction) -> bool:
 
 
 def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) -> bool:
+    """Match a policy condition against the classified action and its target."""
     if condition is None:
         return True
     if condition is PolicyCondition.PATH_INSIDE_WORKSPACE:

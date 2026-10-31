@@ -34,6 +34,7 @@ async def test_public_image_inspection_is_registered() -> None:
 
 
 async def test_smugmug_selected_photo_reaches_model_without_upload(tmp_path: Path) -> None:
+    """Trace the selected gallery photo through both vision-capable wire formats."""
     page = "https://owner.smugmug.com/Travel/Japan/i-selected/A"
     direct = "https://photos.smugmug.com/Travel/i-selected/XL/selected.jpg"
     source = io.BytesIO()
@@ -41,10 +42,12 @@ async def test_smugmug_selected_photo_reaches_model_without_upload(tmp_path: Pat
     hosts: list[str] = []
 
     async def resolve(host: str) -> tuple[str, ...]:
+        """Return deterministic addresses for the requested fixture host."""
         hosts.append(host)
         return ("8.8.8.8",)
 
     def serve(request: httpx.Request) -> httpx.Response:
+        """Serve the fixture response and verify the expected request path."""
         assert request.url.host == "8.8.8.8"
         if request.headers["host"] == "owner.smugmug.com":
             return httpx.Response(
@@ -126,14 +129,17 @@ async def test_smugmug_selected_photo_reaches_model_without_upload(tmp_path: Pat
     "case", ["ambiguous", "private", "redirect", "invalid", "oversize", "wrong_photo"]
 )
 async def test_refuses_unusable_or_unsafe_image(case: str) -> None:
+    """Refuse unsafe network hops and invalid or ambiguous image responses."""
     connections = 0
 
     async def resolve(host: str) -> tuple[str, ...]:
+        """Return deterministic addresses for the requested fixture host."""
         return (
             ("127.0.0.1",) if case == "private" or host == "private.example.com" else ("8.8.8.8",)
         )
 
     def serve(request: httpx.Request) -> httpx.Response:
+        """Serve the fixture response and verify the expected request path."""
         nonlocal connections
         connections += 1
         if case == "redirect":
@@ -155,6 +161,8 @@ async def test_refuses_unusable_or_unsafe_image(case: str) -> None:
 
 
 async def test_missing_artifact_scope_refuses_before_network() -> None:
+    """Check artifact read authority before making a network request."""
+
     async def unexpected(url: str) -> bytes:
         pytest.fail(f"Unexpected request for {url}")
 

@@ -554,6 +554,7 @@ class AnthropicMessagesProvider:
         resolved: ResolvedModel,
         attachments: RenderedAttachments | None = None,
     ) -> tuple[dict[str, Any], int, int]:
+        """Encode verified images inside the originating Messages tool result."""
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)

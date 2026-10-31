@@ -575,6 +575,7 @@ class OpenAIResponsesProvider:
         resolved: ResolvedModel,
         attachments: RenderedAttachments | None = None,
     ) -> dict[str, Any]:
+        """Encode verified tool images as Responses function-call output."""
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)

@@ -611,6 +611,7 @@ class ChatCompletionsProvider:
         resolved: ResolvedModel,
         attachments: RenderedAttachments | None = None,
     ) -> tuple[dict[str, Any], httpx.Timeout]:
+        """Serialize the conversation for the text-only Chat Completions adapter."""
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)

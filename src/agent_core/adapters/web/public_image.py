@@ -23,6 +23,7 @@ class _PhotoMetadata(HTMLParser):
         self.images: set[str] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Collect distinct Open Graph image URLs from the photo page."""
         values = dict(attrs)
         if (
             tag == "meta"
@@ -33,6 +34,7 @@ class _PhotoMetadata(HTMLParser):
 
 
 def _rendition(body: bytes) -> bytes:
+    """Decode within the pixel budget and return an oriented, bounded JPEG."""
     with Image.open(io.BytesIO(body), formats=("JPEG", "PNG", "WEBP")) as image:
         if image.width * image.height > 32_000_000:
             raise ValueError("Image exceeds the pixel limit.")
@@ -53,6 +55,7 @@ class PublicImageReader:
         self.transport = transport
 
     async def read(self, url: str) -> bytes:
+        """Fetch a public photo, validating and pinning each network hop."""
         async with (
             asyncio.timeout(25),
             httpx.AsyncClient(

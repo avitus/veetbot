@@ -184,6 +184,7 @@ def attachment_parts(item: ConversationItem) -> list[AttachmentPart]:
 
 
 def _inspection_calls(conversation: Sequence[ConversationItem]) -> set[str]:
+    """Identify direct and deferred inspection calls for pairing with their results."""
     return {
         i.call_id
         for i in conversation
@@ -363,6 +364,7 @@ class RenderedAttachment:
 def planned_reads(
     decisions: Mapping[tuple[int, int], AttachmentDecision], capabilities: ModelCapabilities
 ) -> list[AttachmentRead]:
+    """Plan bounded reads for references the selected model can receive."""
     reads: dict[UUID, AttachmentRead] = {}
     for decision in decisions.values():
         if decision.reason is not None or capability_reason(decision.part, capabilities):

@@ -294,6 +294,7 @@ async def _render_group(
     resolved: ResolvedModel,
     attempt: ModelAttempt,
 ) -> RenderedAttachments:
+    """Resolve one group of references with the same inspection authority."""
     reads = planned_reads(decisions, resolved.capabilities)
     contents: dict[UUID, AttachmentContent] = {}
     if reads and resolver is not None:
@@ -318,6 +319,7 @@ def has_attachment_parts(item: UserMessage) -> bool:
 def user_segments(
     item_index: int, item: UserMessage | ToolResultItem, rendered: RenderedAttachments
 ) -> list[UserSegment]:
+    """Preserve content order when expanding admitted references into text or media."""
     segments: list[UserSegment] = []
     for part_index, part in enumerate(item.content):
         if isinstance(part, TextPart):

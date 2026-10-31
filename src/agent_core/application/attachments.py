@@ -157,6 +157,7 @@ class StoredAttachmentResolver:
     async def resolve(
         self, reads: Sequence[AttachmentRead], *, run_id: UUID
     ) -> dict[UUID, AttachmentContent]:
+        """Read attachments released to this run under their individual byte limits."""
         if not reads:
             return {}
         released = await self._released(
