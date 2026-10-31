@@ -111,7 +111,8 @@ restore its authority. Stop credential-bearing requests while recovering. If the
 key is lost, provision and separately escrow a replacement 32-byte key. Enable
 the store for the API alone and restart the API so the Settings routes mount.
 List the old records and delete each through `DELETE /v1/integration-secrets/{id}`
-with its current revision. Deletion clears ciphertext without decrypting it.
+with the header `If-Match: <current_revision>`. Use the revision returned by
+the list request. Deletion clears ciphertext without decrypting it.
 Enter the provider credentials under fresh references and approve new grants
 before restarting the credential-bearing workers.
 
