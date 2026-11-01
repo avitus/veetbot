@@ -2803,7 +2803,11 @@ class EmailExperienceService:
                     EmailDraftStatus.SENT,
                     EmailDraftStatus.UNCERTAIN,
                 }:
-                    await self._cancel_obsolete_send(uow, principal, draft)
+                    # A claimed send belongs to its worker: it may already have
+                    # crossed the provider boundary before a requeue, so its own
+                    # recovery and freshness checks settle it (ADR-0279).
+                    if draft.send_claim_id is None:
+                        await self._cancel_obsolete_send(uow, principal, draft)
                     update: dict[str, Any] = {"stale": True}
                     if draft.status is EmailDraftStatus.SENDING and draft.send_claim_id is None:
                         # The parked one-press send was just cancelled; no worker

@@ -2656,3 +2656,58 @@ async def test_undo_names_the_send_it_takes_back() -> None:
         )
         assert taken.status.value == "ready"
         assert (await app.runs.get(second.run_id)).status is RunStatus.CANCELLED
+
+
+async def test_new_mail_leaves_a_claimed_send_to_its_worker() -> None:
+    """A consented send a worker has claimed (and possibly dispatched before a requeue) is
+    not cancelled by an import of new mail: the worker's own recovery and freshness
+    checks settle it, and the draft keeps its claim instead of being stuck or duplicated."""
+    from dataclasses import replace
+
+    from agent_core.domain.email import EmailDraft
+    from agent_core.runtime.email_state import read_value, save_value
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+
+        async def parked(run_id: UUID) -> None:
+            """The worker has not claimed the task yet."""
+            return None
+
+        app.services.email.dispatch = parked
+        pressed = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="press-claimed-then-requeued",
+        )
+        task = await app.services.email.get_task(app.principal, pressed.run_id)
+        assert task is not None
+        # The worker claimed the frozen revision, then lost its lease: the run is
+        # queued again while the draft still carries the claim.
+        async with app.uow_factory() as uow, uow.email.lock(app.principal):
+            claimed = await read_value(uow.email, app.principal, "draft", str(draft.id), EmailDraft)
+            assert claimed is not None
+            await save_value(
+                uow.email,
+                app.principal,
+                "draft",
+                str(draft.id),
+                claimed.model_copy(update={"send_claim_id": task.id, "send_undo_until": None}),
+                app.clock.now(),
+            )
+        session = await app.sessions.create()
+        moved = await app.services.email.import_thread(
+            app.principal, "default", _page(changed=True), session
+        )
+        assert moved.revision == thread.revision + 1
+        assert (await app.runs.get(pressed.run_id)).status is RunStatus.QUEUED
+        current = await app.services.email.draft(app.principal, draft.id)
+        assert current.stale
+        assert current.status.value == "sending"
+        assert current.send_claim_id == task.id and current.run_id == pressed.run_id
