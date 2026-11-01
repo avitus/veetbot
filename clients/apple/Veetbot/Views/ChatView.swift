@@ -442,6 +442,7 @@ public struct ChatView: View {
     }
     #endif
 
+    /// What the run needs from the owner, beneath the title.
     private var statusLabel: String? {
         ConversationStatus.label(
             runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval,

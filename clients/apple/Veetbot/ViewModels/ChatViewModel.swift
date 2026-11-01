@@ -2473,6 +2473,7 @@ public final class ChatViewModel: ObservableObject {
         deviceSignInSurface == surface ? deviceSignInRequest : nil
     }
 
+    /// Opens a sign-in window on the surface that started it.
     private func openDeviceSignIn(_ request: DeviceSignInRequest, from surface: DeviceSignInSurface = .websiteAccess) {
         deviceSignInCreatedProfile = nil
         deviceSignInSurface = surface

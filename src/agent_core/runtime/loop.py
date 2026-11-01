@@ -1021,6 +1021,7 @@ async def prepare_browser_connection_question(context: RunContext) -> None:
 async def suspend_for_browser_question(
     context: RunContext, error: UserInputRequiredError
 ) -> RunOutcome:
+    """Suspend on a runtime browser question; a sign-in pause carries ``sign_in`` (ADR-0277)."""
     question = str(context.checkpoint.pending_tool_calls[0]["arguments"]["question"])
     state = _record_open_question(context.checkpoint, question, context.add_open_question)
     context.checkpoint.working_state["outstanding_question_id"] = str(error.question_id)

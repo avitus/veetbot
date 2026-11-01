@@ -477,6 +477,7 @@ private struct DeviceSignInPresentation: ViewModifier {
     @ObservedObject var model: ChatViewModel
     let surface: DeviceSignInSurface
 
+    /// This surface's sign-in only; closing its window abandons the sign-in.
     private var request: Binding<DeviceSignInRequest?> {
         Binding(
             get: { model.deviceSignInRequest(for: surface) },

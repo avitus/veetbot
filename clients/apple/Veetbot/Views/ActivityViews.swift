@@ -561,6 +561,7 @@ struct SignInRequiredCard: View {
 
     private var waitsForWebsite: Bool { prompt.signIn?.profileID != nil }
 
+    /// Names the website that signed the owner out, when the pause knows it.
     static func title(for prompt: ClarifyingQuestionPrompt) -> String {
         guard let host = prompt.signIn?.host else { return "A website needs you to sign in" }
         return "\(host) signed you out"
@@ -609,6 +610,7 @@ struct SignInRequiredCard: View {
         .accessibilityIdentifier("sign-in-card")
     }
 
+    /// Runs one button's action at a time; the buttons stay disabled meanwhile.
     private func run(_ action: @escaping () async -> Void) {
         guard !isWorking else { return }
         isWorking = true

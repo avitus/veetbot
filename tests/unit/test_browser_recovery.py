@@ -488,6 +488,7 @@ async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: b
 
 
 async def test_model_authored_question_carries_no_sign_in_marker() -> None:
+    """Only the runtime's own sign-in pause is marked; the model cannot claim one."""
     async with build(
         settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
         script=FakeModelScript(

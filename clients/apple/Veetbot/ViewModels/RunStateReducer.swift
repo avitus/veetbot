@@ -735,6 +735,8 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
+    /// The question the run waits on, and the website a sign-in pause waits
+    /// for when the event's suspension carries `sign_in` (ADR-0277).
     private func reduceQuestion(_ frame: SSEFrame, runID: UUID?) {
         let nested = frame.data["suspension"]?.objectValue
         guard
@@ -858,6 +860,7 @@ private struct ToolOutcomePayload: Decodable {
 /// the owner. A run parked as waiting for approval with no approval left to
 /// decide is resuming, or waiting on a delegated child, and asks for nothing.
 public enum ConversationStatus {
+    /// What the run needs from the owner, or nil when it needs nothing.
     public static func label(runStatus: RunStatus?, awaitingApproval: Bool, awaitingSignIn: Bool = false) -> String? {
         switch runStatus {
         case .waitingForApproval where awaitingApproval: return "Needs your approval"
