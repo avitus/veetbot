@@ -324,4 +324,6 @@ implementation without one.
 - [ADR-0275: An in-app store for integration keys](0275-in-app-integration-secrets.md)
 - [ADR-0276: Inspect one public image in chat (Accepted)](0276-public-image-inspection.md)
 - [ADR-0277: Chat deletes files it generated in a chat (Accepted)](0277-chat-deletes-files-it-generated.md)
+- [ADR-0278: Send proposals are interactive work and read the mailbox once (Proposed)](0278-send-proposals-are-interactive-work.md)
+- [ADR-0279: One-press Send with Undo (Accepted)](0279-one-press-send-with-undo.md)
 - [ADR-0280: A sign-in pause shows a sign-in card, not a question (Accepted)](0280-sign-in-pause-shows-a-sign-in-card.md)

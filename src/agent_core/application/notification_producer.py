@@ -62,6 +62,7 @@ class NotificationProducer:
         approval_expires_at: datetime | None = None,
         approval_tool_name: str | None = None,
     ) -> bool:
+        """Build the content-free notification one run status change calls for, if any."""
         now = self._clock.now()
         notification_id = self._ids.new_id()
         if status is RunStatus.WAITING_FOR_APPROVAL:
@@ -113,8 +114,18 @@ class NotificationProducer:
                     if kind is NotificationKind.APPROVAL_REQUESTED
                     else now + timedelta(hours=24)
                 ),
+                # Attention requests wait ninety seconds for an answer on another
+                # device (ADR-0143). An approval that would expire within that wait
+                # plus the dispatcher's thirty-second fallback poll keeps the
+                # thirty-second grace, so a scan still finds it before it expires.
                 next_attempt_at=(
                     now + timedelta(seconds=30)
+                    if (
+                        kind is NotificationKind.APPROVAL_REQUESTED
+                        and approval_expires_at is not None
+                        and approval_expires_at <= now + timedelta(seconds=120)
+                    )
+                    else now + timedelta(seconds=90)
                     if kind
                     in {NotificationKind.APPROVAL_REQUESTED, NotificationKind.QUESTION_ASKED}
                     else now
@@ -142,6 +153,7 @@ class NotificationProducer:
         revision: ScheduleRevision,
         run: Run,
     ) -> bool:
+        """Build the notification for a schedule run whose outcome was accounted."""
         if (
             occurrence.disposition is not OccurrenceDisposition.MATERIALIZED
             or occurrence.session_id is None
@@ -184,7 +196,7 @@ class NotificationProducer:
                 ),
                 priority=5,
                 expires_at=now + timedelta(hours=24),
-                next_attempt_at=now + timedelta(seconds=30),
+                next_attempt_at=now + timedelta(seconds=90),
                 created_at=now,
             ),
             failure_context={
@@ -207,6 +219,7 @@ class NotificationProducer:
         occurrence: ScheduleOccurrence,
         revision: ScheduleRevision,
     ) -> bool:
+        """Build the notification for a skipped or finished schedule occurrence."""
         if occurrence.disposition is OccurrenceDisposition.MATERIALIZED:
             return False
         if occurrence.disposition not in {
@@ -240,7 +253,7 @@ class NotificationProducer:
                 ),
                 priority=5,
                 expires_at=now + timedelta(hours=24),
-                next_attempt_at=now + timedelta(seconds=30),
+                next_attempt_at=now + timedelta(seconds=90),
                 created_at=now,
             ),
             failure_context={

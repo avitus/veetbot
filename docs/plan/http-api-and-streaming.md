@@ -2228,11 +2228,13 @@ build failure.
 ## Milestone 26 email routes
 
 The approved [email-experience.md](email-experience.md) defines the account,
-thread, refresh, feedback, learning, draft and send-proposal route families.
+thread, refresh, feedback, learning, draft, send-proposal and one-press send
+(`/send`, `/send-undo`; ADR-0279) route families.
 Application scopes `email.read` and `email.write` intersect current mailbox MCP
 authority; send-proposal returns ordinary run/approval references and existing
-approval routes authorize dispatch. There is no direct-send route or arbitrary
-write extension to the memory API. Every command requires validation,
+approval routes authorize dispatch; `/send` admits a governed task whose
+`REQUIRE_APPROVAL` the owner's own press resolves once (ADR-0279). There is no
+direct-send route or arbitrary write extension to the memory API. Every command requires validation,
 authorization, failure, conflict and retry coverage under the existing error
 vocabulary; ordinary run SSE remains the progress transport.
 

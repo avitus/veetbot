@@ -263,6 +263,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
     private static var emailRevision = 1
     private static var emailStatus = "ready"
+    /// Run reads since a one-press send was parked; the third reports it sent.
+    private static var emailSendReads = 0
     private static var learningPaused = false
     private static var callContentErased = false
     private static var emailHandled = false
@@ -447,6 +449,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         defer { emailLock.unlock() }
         emailBody = "Thanks, Alex. I'll review the agenda."
         emailRevision = 1
+        emailSendReads = 0
         emailStatus = "ready"
         learningPaused = false
         callContentErased = false
@@ -813,6 +816,20 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             Self.emailLock.unlock()
             statusCode = 200
             body = Self.emailDraftJSON
+        case ("POST", "/v1/email/drafts/\(Self.emailDraftID)/send"):
+            // One press parks the send (ADR-0279); the third run read after it reports Sent.
+            Self.emailLock.lock()
+            Self.emailStatus = "sending"
+            Self.emailSendReads = 0
+            Self.emailLock.unlock()
+            statusCode = 200
+            body = "{\"draft\":\(Self.emailDraftJSON),\"run_id\":\"\(Self.emailRunID)\",\"operation_id\":\"\(Self.emailRunID)\",\"status\":\"QUEUED\",\"approval_id\":null}"
+        case ("POST", "/v1/email/drafts/\(Self.emailDraftID)/send-undo"):
+            Self.emailLock.lock()
+            Self.emailStatus = "ready"
+            Self.emailLock.unlock()
+            statusCode = 200
+            body = Self.emailDraftJSON
         case ("POST", "/v1/email/drafts/\(Self.emailDraftID)/send-proposal"):
             Self.emailLock.lock()
             Self.emailStatus = "awaiting_approval"
@@ -821,7 +838,14 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = "{\"draft\":\(Self.emailDraftJSON),\"run_id\":\"\(Self.emailRunID)\",\"status\":\"WAITING_FOR_APPROVAL\",\"approval_id\":\"\(Self.emailApprovalID)\"}"
         case ("GET", "/v1/runs/\(Self.emailRunID)"):
             statusCode = 200
-            let status = Self.emailLock.withLock { Self.emailStatus == "sent" ? "COMPLETED" : "WAITING_FOR_APPROVAL" }
+            let status: String = Self.emailLock.withLock {
+                if Self.emailStatus == "sending" {
+                    Self.emailSendReads += 1
+                    if Self.emailSendReads >= 3 { Self.emailStatus = "sent" }
+                    return Self.emailStatus == "sent" ? "COMPLETED" : "QUEUED"
+                }
+                return Self.emailStatus == "sent" ? "COMPLETED" : "WAITING_FOR_APPROVAL"
+            }
             body = """
                 {"id":"\(Self.emailRunID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","parent_run_id":null,"status":"\(status)","step_count":1,"model_call_count":0,"tool_call_count":1,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
                 """
@@ -1516,8 +1540,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailDraftJSON: String {
         let (body, revision, status) = emailLock.withLock { (emailBody, emailRevision, emailStatus) }
         let escapedBody = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
+        // A parked send carries its undo window so the composer shows Undo (ADR-0279).
+        let undoUntil = status == "sending"
+            ? "\"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(10)))\"" : "null"
         return """
-            {"id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
+            {"id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"send_undo_until":\(undoUntil),"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
             """
     }
     /// Projects confirmed mailbox state separately from a deliberately observable pending archive operation.

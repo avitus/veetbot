@@ -560,21 +560,52 @@ Autosave uses optimistic concurrency. A second device can continue from the
 latest saved revision; competing edits produce an explicit conflict preserving
 both versions. Unsaved local edits remain visible on a network error. New
 incoming mail marks the draft stale and requires review of the changed source
-before sending.
+before sending. The stale notice names who wrote and quotes the start of the
+newest message, so the owner decides from the message rather than from a
+revision number; refusals the server returns are written for the owner in the
+same plain terms. Send stays available while an autosave is in flight: the press
+waits for that save and freezes the settled revision.
 
 The send flow is:
 
-1. Review & Send freezes the exact current revision and presents From account,
-   To/Cc/Bcc where present, subject, and full body.
-2. Final Send explicitly resolves the ordinary approval for that exact action.
+1. Send is one press on the exact current revision (⌘↩ on the Mac). The press
+   is the owner's consent to that exact message — mailbox, recipients, subject,
+   body and thread — recorded with the durable send task as an authenticated
+   gesture, as the Archive gesture is (ADR-0095, ADR-0279). The client sends
+   the draft revision and the thread revision it displayed; the server derives
+   everything else from that immutable revision. A thread that moved on, a
+   stale draft, or a draft in another send state refuses the press in plain
+   words. It reads nothing from the mailbox first: the owner is waiting, so
+   the task joins the interactive class (ADR-0278).
+2. The task is parked for the undo window (`AGENT_EMAIL_SEND_UNDO_SECONDS`,
+   ten seconds by default). Undo within the window cancels the parked task
+   and returns the draft to editing with its text intact; once a worker has
+   claimed the task, Undo is refused and the send proceeds. The draft carries
+   `send_undo_until` so every device shows the same window. Undo must name
+   the run it takes back, so a late Undo cannot cancel a later press; the
+   in-memory composition's inline dispatcher parks the run in the background
+   for the same window, so the request returns at once.
 3. Perform a fresh governed Gmail thread read, then recheck account authority,
-   policy, draft/source revision, and action content. A failed freshness read
-   defers sending and preserves the draft. An observed new message, external
-   reply, edit, or recipient/account change invalidates the previous approval.
-   Atomically claim the frozen local action/draft revision for dispatch so a
-   concurrent local edit cannot slip between validation and the send claim.
+   policy, the consent, draft/source revision, and action content. A failed
+   freshness read defers sending and preserves the draft. An observed new
+   message, external reply, edit, or recipient/account change invalidates the
+   consent. Atomically claim the frozen local action/draft revision for
+   dispatch so a concurrent local edit cannot slip between validation and the
+   send claim. The send tool's `REQUIRE_APPROVAL` raises as usual; the consent
+   consumer resolves that approval once, only when its tool, arguments and
+   argument hash match the consented revision and the gesture event, and it
+   never notifies for a consent already given. The pre-effect dispatch guard
+   revalidates the consent again.
 4. Dispatch through the existing account-specific send MCP tool. Persist the
    confirmed result and update the thread and draft state across devices.
+
+The earlier two-step path — `send-proposal`, then Final Send on the pending
+approval — remains for older clients and for a draft already awaiting
+approval; the Email client's primary action no longer uses it.
+
+A send that ends without dispatch is reported beside the draft in the owner's
+terms (new mail arrived; Gmail could not be checked), never as a sheet that
+silently closed.
 
 Sending by value preserves the existing approval guarantee; an approval cannot
 point to a remotely mutable Gmail draft id. Cross-device double taps reuse one
@@ -807,7 +838,8 @@ normal contract naming review:
 | `/v1/email/feedback` | Create, inspect, correct, undo scoped owner feedback and attention judgments. |
 | `/v1/email/learning` | Inspect profile/coverage, pause/resume learning, reset derived preferences or exclude a source. |
 | `/v1/email/threads/{id}/drafts` and draft detail | Start/refine a governed generation run; read/save revisions; discard internal proposals. |
-| `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references. |
+| `/v1/email/drafts/{id}/send` and `/send-undo` | Admit one consented send of an exact draft revision at the displayed thread revision (ADR-0279); cancel it while it is still parked in the undo window. |
+| `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references (older clients). |
 | `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
 | `/v1/email/threads/{id}/spam` and `/spam-flag` | Milestone 31 (ADR-0165), behind its flag: admit an owner's Report spam or Not spam with Archive's gesture; clear or restore a suspected-spam flag without a mailbox change. |
 | `/v1/email/threads/{id}/discussion`, `/dismiss`, and `/exclude` | Open the thread in Chat once (`email.discussion.opened`, which also needs `session.write`); set or clear handled state at the revision the client saw; exclude the thread as a learning source. |
@@ -861,7 +893,8 @@ Archive admission requires current `email.read`, `email.write`, `run.write`,
 scopes. The typed task performs no model work and consumes no automatic-email
 dollar reservation. The owner is waiting on the gesture, so the task is queued in
 the interactive class (event-log-and-persistence.md:698) and never waits behind
-refresh, draft or send work, which stays asynchronous. It uses the existing
+refresh or draft work, which stays asynchronous; a send proposal and its
+approved send share that class (ADR-0278). It uses the existing
 tool pipeline and approval floor, validating the immutable, expiring owner
 request against the exact pending action before ordinary one-time resolution. Preserve requested/resolved audit
 ordering, policy revalidation, worker fencing, and uncertain-effect rules.

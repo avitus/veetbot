@@ -74,7 +74,7 @@ import Testing
         #expect(source.contains(".accessibilityIdentifier(\"email.feedback\")"))
         #expect(source.contains(".accessibilityIdentifier(\"email.jump-to-reply\")"))
         #expect(source.contains(".accessibilityIdentifier(\"email.discuss\")"))
-        #expect(source.contains(".accessibilityIdentifier(\"email.review-send\")"))
+        #expect(source.contains(".accessibilityIdentifier(\"email.send\")"))
         #expect(source.contains(".accessibilityIdentifier(\"email.draft-body\")"))
         #expect(source.contains("PrimaryCapsuleButtonStyle"))
         #expect(!source.contains(".emailCard("))

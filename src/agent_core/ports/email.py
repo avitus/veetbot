@@ -12,7 +12,14 @@ from uuid import UUID
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.correspondence import CorrespondenceSummaryWork, EmailCorrespondenceSummary
-from agent_core.domain.email import EmailDraft, EmailFeedback, EmailRecord, EmailTask, EmailThread
+from agent_core.domain.email import (
+    EmailDraft,
+    EmailFeedback,
+    EmailOperation,
+    EmailRecord,
+    EmailTask,
+    EmailThread,
+)
 from agent_core.domain.email_junk import JunkAuthorization
 from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSource
 from agent_core.domain.memory import MemoryRecord
@@ -175,6 +182,40 @@ class EmailRuntimeServices(Protocol):
     ) -> EmailTask: ...
 
     async def approve_archive(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+        approval_id: UUID,
+    ) -> None: ...
+
+    async def send(
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        source_revision: int,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
+    async def undo_send(
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        run_id: UUID,
+    ) -> EmailDraft: ...
+
+    async def validate_send(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+    ) -> EmailTask: ...
+
+    async def approve_send(
         self,
         principal: Principal,
         run: Run,
