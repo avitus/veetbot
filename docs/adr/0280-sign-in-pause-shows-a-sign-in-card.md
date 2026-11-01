@@ -1,4 +1,4 @@
-# ADR-0277: A sign-in pause shows a sign-in card, not a question
+# ADR-0280: A sign-in pause shows a sign-in card, not a question
 
 - Status: Accepted by the owner on 2026-10-31
 - Date: 2026-10-31

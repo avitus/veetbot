@@ -359,7 +359,7 @@ public struct ChatView: View {
                 followUp: { model.prepareCallFollowUp($0) })
         }
         // The sign-in card and the website offer start sign-ins here; Website
-        // Access presents its own (ADR-0277).
+        // Access presents its own (ADR-0280).
         .deviceSignInPresentation(model: model, surface: .chat)
         .sheet(isPresented: $model.isWebsiteAccessPresented) {
             ConnectionSettingsView(model: model, embedded: false, forChat: true).websiteAccessSheetFrame()
@@ -1282,7 +1282,7 @@ struct ChatToolbarActions: View {
     }
 
     var body: some View {
-        // In the toolbar, not the scrolling header, so a long chat never hides it (ADR-0277).
+        // In the toolbar, not the scrolling header, so a long chat never hides it (ADR-0280).
         Button { model.isWebsiteAccessPresented = true } label: {
             Label("Website Access", systemImage: "globe")
         }

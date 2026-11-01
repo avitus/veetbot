@@ -275,7 +275,7 @@ import Testing
         #expect(reducer.timeline.count == count)
     }
 
-    /// ADR-0277: the runtime's sign-in pause is a sign-in card, not a question.
+    /// ADR-0280: the runtime's sign-in pause is a sign-in card, not a question.
     @Test
     func signInPauseCarriesTheWaitingWebsite() throws {
         let reducer = RunStateReducer()
@@ -1273,7 +1273,7 @@ import Testing
         )
         #expect(ConversationStatus.label(runStatus: .waitingForApproval, awaitingApproval: false) == nil)
         #expect(ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false) == "Needs your answer")
-        // ADR-0277: a sign-in pause asks for a sign-in, not an answer.
+        // ADR-0280: a sign-in pause asks for a sign-in, not an answer.
         #expect(
             ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false, awaitingSignIn: true)
                 == "Needs you to sign in"

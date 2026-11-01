@@ -1675,7 +1675,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// ADR-0277: the sign-in card's main button opens the device sign-in for
+    /// ADR-0280: the sign-in card's main button opens the device sign-in for
     /// the website the run waits on; without one, Website Access.
     public func signInToContinue(_ prompt: ClarifyingQuestionPrompt) async {
         guard let profileID = prompt.signIn?.profileID else {

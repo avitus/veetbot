@@ -349,6 +349,13 @@ project:
     - 35
 
 
+generated_file_deletion:
+  adr: docs/adr/0277-chat-deletes-files-it-generated.md
+  authorized_on: '2026-10-31'
+  status: implemented_pending_delivery
+  evidence: tests/unit/test_artifact_delete.py
+  scope: Chat deletes files it generated in the current chat at the owner's request.
+
 public_photo_inspection:
   adr: docs/adr/0276-public-image-inspection.md
   authorized_on: '2026-10-31'

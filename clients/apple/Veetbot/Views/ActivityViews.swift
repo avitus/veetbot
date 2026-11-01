@@ -548,7 +548,7 @@ struct ClarifyingQuestionCard: View {
     }
 }
 
-/// ADR-0277: the runtime paused because a website signed the owner out. With
+/// ADR-0280: the runtime paused because a website signed the owner out. With
 /// a waiting website the run resumes once sign-in is verified, so there is
 /// nothing to type; otherwise the owner signs in and says so.
 struct SignInRequiredCard: View {

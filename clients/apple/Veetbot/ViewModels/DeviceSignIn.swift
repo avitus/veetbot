@@ -30,7 +30,7 @@ public struct DeviceSignInRequest: Identifiable, Equatable, Sendable {
 }
 
 /// Where a device sign-in started, so only that surface presents its window:
-/// the Website Access sheet, or the chat's own sign-in card (ADR-0277).
+/// the Website Access sheet, or the chat's own sign-in card (ADR-0280).
 public enum DeviceSignInSurface: Equatable, Sendable {
     case websiteAccess
     case chat

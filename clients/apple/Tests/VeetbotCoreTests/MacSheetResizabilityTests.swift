@@ -21,7 +21,7 @@ import Testing
         #expect(sheet.contentMinSize.height >= 680)
     }
 
-    /// ADR-0277: the chat presents the sign-in window its sign-in card starts.
+    /// ADR-0280: the chat presents the sign-in window its sign-in card starts.
     @Test func chatPresentsTheSignInWindowItsCardStarts() async throws {
         let model = try await configuredChatModel()
         let profile = try JSONDecoder.server.decode(BrowserProfileView.self, from: Data(Self.profileJSON.utf8))

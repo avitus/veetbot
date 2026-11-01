@@ -169,7 +169,7 @@ public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
     public let questionID: UUID
     public let runID: UUID
     public let question: String
-    /// Set when the question is the runtime's sign-in pause (ADR-0277).
+    /// Set when the question is the runtime's sign-in pause (ADR-0280).
     public var signIn: BrowserSignInPause? = nil
 
     public var id: UUID { questionID }
@@ -736,7 +736,7 @@ public final class RunStateReducer: ObservableObject {
     }
 
     /// The question the run waits on, and the website a sign-in pause waits
-    /// for when the event's suspension carries `sign_in` (ADR-0277).
+    /// for when the event's suspension carries `sign_in` (ADR-0280).
     private func reduceQuestion(_ frame: SSEFrame, runID: UUID?) {
         let nested = frame.data["suspension"]?.objectValue
         guard

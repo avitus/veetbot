@@ -982,7 +982,7 @@ import Testing
     /// A short poll limit keeps the give-up case fast; a case that must
     /// succeed by polling passes a generous one, so a loaded machine cannot
     /// time it out.
-    /// ADR-0277: the sign-in card opens the device sign-in for the waiting
+    /// ADR-0280: the sign-in card opens the device sign-in for the waiting
     /// website, at the origin the run waits on, and only the chat presents it;
     /// it loads the saved logins first when the app has none yet.
     @Test(arguments: [

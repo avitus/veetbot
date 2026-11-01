@@ -458,7 +458,7 @@ async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_
 
 @pytest.mark.parametrize("bound", [True, False])
 async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: bool) -> None:
-    """ADR-0277: the app shows a sign-in card, not a question, from trusted wait fields."""
+    """ADR-0280: the app shows a sign-in card, not a question, from trusted wait fields."""
     from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 
     provider = InterruptedBrowser()

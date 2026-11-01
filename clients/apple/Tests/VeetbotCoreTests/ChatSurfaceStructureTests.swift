@@ -27,7 +27,7 @@ import Testing
         #expect(source.contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))
     }
 
-    /// ADR-0277: a sign-in pause is a card with a sign-in button, not a
+    /// ADR-0280: a sign-in pause is a card with a sign-in button, not a
     /// question, and Website Access stays in the toolbar on every platform.
     @Test
     func testSignInPauseShowsASignInCardAndWebsiteAccessStaysInTheToolbar() throws {

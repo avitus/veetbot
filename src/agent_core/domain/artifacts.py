@@ -22,6 +22,10 @@ class ArtifactOrigin(StrEnum):
     KNOWLEDGE_SOURCE = "knowledge_source"
 
 
+# ADR-0277: deletes files Chat generated in a chat; an unindexed deferral that
+# the default instructions name.
+ARTIFACT_DELETE_TOOL_NAME = "artifact.delete"
+
 # ADR-0122: every file a run exports rides on its final reply. Tool-output
 # captures and the owner's own uploads are never re-attached.
 REPLY_ATTACHMENT_ORIGINS = frozenset(
@@ -29,14 +33,19 @@ REPLY_ATTACHMENT_ORIGINS = frozenset(
 )
 
 
-def reply_attachments(artifacts: list[ArtifactRef]) -> list[ArtifactRef]:
-    """Choose a run's exported files in creation order, once per name and content."""
+def reply_attachments(artifacts: list[ArtifactRef], *, now: datetime) -> list[ArtifactRef]:
+    """Choose a run's exported files in creation order, once per name and content.
+
+    A file already expired, such as one `artifact.delete` removed earlier in the
+    run (ADR-0277), is left off: attaching it would clear the expiry.
+    """
 
     chosen: list[ArtifactRef] = []
     seen: set[tuple[str, str]] = set()
     for artifact in sorted(artifacts, key=lambda item: (item.created_at, item.id)):
         key = (artifact.name, artifact.sha256)
-        if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen:
+        expired = artifact.expires_at is not None and artifact.expires_at <= now
+        if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen or expired:
             continue
         seen.add(key)
         chosen.append(artifact)

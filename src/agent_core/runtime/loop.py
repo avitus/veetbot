@@ -163,7 +163,8 @@ async def _complete_reply(context: RunContext, message: AssistantMessage) -> Ass
     reply = message
     async with context.uow_factory() as uow:
         exported = reply_attachments(
-            await uow.artifacts.list_for_run(context.run.id, context.principal)
+            await uow.artifacts.list_for_run(context.run.id, context.principal),
+            now=context.clock.now(),
         )
         if exported:
             retained = await uow.artifacts.retain_for_reply(
@@ -1021,7 +1022,7 @@ async def prepare_browser_connection_question(context: RunContext) -> None:
 async def suspend_for_browser_question(
     context: RunContext, error: UserInputRequiredError
 ) -> RunOutcome:
-    """Suspend on a runtime browser question; a sign-in pause carries ``sign_in`` (ADR-0277)."""
+    """Suspend on a runtime browser question; a sign-in pause carries ``sign_in`` (ADR-0280)."""
     question = str(context.checkpoint.pending_tool_calls[0]["arguments"]["question"])
     state = _record_open_question(context.checkpoint, question, context.add_open_question)
     context.checkpoint.working_state["outstanding_question_id"] = str(error.question_id)
@@ -1044,7 +1045,7 @@ async def suspend_for_browser_question(
     if pending["name"] == "conversation.ask_user" and str(pending["call_id"]).startswith(
         "browser-recovery:"
     ):
-        # ADR-0277: the app shows a sign-in card from the trusted wait, not a question.
+        # ADR-0280: the app shows a sign-in card from the trusted wait, not a question.
         sign_in: dict[str, str] = {}
         raw_wait = context.checkpoint.working_state.get("browser_auth_wait")
         if raw_wait is not None:
