@@ -34,7 +34,8 @@ owner had to scroll to the top of the thread to reach it.
 2. The app shows a sign-in card in the attention dock in place of the question
    card. With a waiting website it names the website and offers **Sign in to
    <host>**, which opens the device sign-in for that saved login, and **Stop
-   task**. It has no answer field: verified sign-in resumes the run. Without a
+   task**. It has no answer field and the chat composer cannot send an answer
+   while it shows: verified sign-in resumes the run. Without a
    waiting website it offers **Open Website Access** and **I've signed in**,
    which answers the question with fixed text, and **Stop task**. The
    transcript's waiting line says "Waiting for you to sign in." and the chat

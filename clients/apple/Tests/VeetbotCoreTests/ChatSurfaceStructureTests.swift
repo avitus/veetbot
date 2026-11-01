@@ -43,6 +43,8 @@ import Testing
         let card = try #require(activity.range(of: "struct SignInRequiredCard"))
         let cardEnd = try #require(activity.range(of: "struct WorkingStatePanel"))
         #expect(!activity[card.lowerBound..<cardEnd.lowerBound].contains("TextField"))
+        let canSend = try #require(chat.range(of: "var canSendDraft: Bool"))
+        #expect(chat[canSend.lowerBound...].prefix(600).contains("awaitsVerifiedSignIn"))
 
         let toolbar = try #require(chat.range(of: "struct ChatToolbarActions"))
         #expect(chat[toolbar.lowerBound...].contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))

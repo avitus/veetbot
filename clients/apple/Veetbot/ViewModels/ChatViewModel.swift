@@ -1653,6 +1653,7 @@ public final class ChatViewModel: ObservableObject {
         answer rawAnswer: String
     ) async -> Bool {
         guard let api, runState.runStatus == .waitingForUser else { return false }
+        guard !prompt.awaitsVerifiedSignIn else { return false }
         let answer = rawAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !answer.isEmpty else { return false }
         isSending = true

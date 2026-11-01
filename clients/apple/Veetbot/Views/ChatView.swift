@@ -763,11 +763,14 @@ public struct ChatView: View {
     var canSendDraft: Bool {
         let hasText = !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let answering = state.runStatus == .waitingForUser
+        // ADR-0280: a verified sign-in resumes this run, so no reply can answer it.
+        let awaitsSignIn = answering && state.clarifyingQuestion?.awaitsVerifiedSignIn == true
         // Attachments alone make a message, but an answer to a question is text.
         return (hasText || (!model.attachments.isEmpty && !answering))
             && (answering || model.attachmentsReady)
             && !model.isSending
             && (!state.isRunActive || answering)
+            && !awaitsSignIn
             && model.isConfigured
     }
 

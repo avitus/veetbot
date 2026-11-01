@@ -1086,6 +1086,55 @@ import Testing
         #expect(model.isWebsiteAccessPresented)
     }
 
+    /// ADR-0280: verified sign-in resumes a run that waits on a website, so no
+    /// typed reply reaches the run; the composer's text is not consumed.
+    @Test
+    func aReplyCannotAnswerAPauseThatWaitsOnAWebsite() async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let prompt = try #require(Self.waitForSignIn(model, profileID: UUID(), origin: "https://example.org"))
+
+        let sent = await model.send("I signed in")
+        let answered = await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(!sent)
+        #expect(!answered)
+        #expect(!server.routes.contains { $0.hasSuffix("/input") })
+        #expect(model.runState.clarifyingQuestion?.questionID == prompt.questionID)
+    }
+
+    /// Without a waiting website nothing else can resume the run, so the card's
+    /// fixed reply and the composer both still answer it.
+    @Test(arguments: ["composer", "card"])
+    func aReplyStillAnswersAPauseWithoutAWebsite(path: String) async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let runID = UUID()
+        model.runState.begin(runID: runID, status: .running)
+        model.runState.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object(["kind": .string("user"), "sign_in": .object([:])]),
+        ]))
+        let prompt = try #require(model.runState.clarifyingQuestion)
+
+        let delivered = path == "composer"
+            ? await model.send("I signed in")
+            : await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(delivered)
+        #expect(server.routes.contains { $0.hasSuffix("/input") })
+    }
+
+    /// A stub that accepts any run's input, so only the client can hold a reply back.
+    private static func inputAcceptingServer() -> DeviceFlowServer {
+        DeviceFlowServer { request in
+            guard let path = request.url?.path, path.hasSuffix("/input") else { return nil }
+            let runID = path.split(separator: "/").dropLast().last.map(String.init) ?? ""
+            return (202, "{\"run_id\":\"\(runID)\",\"status\":\"QUEUED\"}")
+        }
+    }
+
     private func configuredModel(
         _ server: DeviceFlowServer,
         timing: DeviceSignInTiming = DeviceSignInTiming(pollInterval: 0.01, pollLimit: 0.2)

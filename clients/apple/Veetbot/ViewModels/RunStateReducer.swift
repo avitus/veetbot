@@ -173,6 +173,8 @@ public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
     public var signIn: BrowserSignInPause? = nil
 
     public var id: UUID { questionID }
+    /// The run resumes on a verified sign-in to a saved website, not on a reply.
+    public var awaitsVerifiedSignIn: Bool { signIn?.profileID != nil }
 }
 
 /// The website a sign-in pause waits on, from the server's trusted wait. Both
