@@ -1707,7 +1707,15 @@ public final class EmailViewModel: ObservableObject {
                     } else if run.status == .completed {
                         self.reportUnsentSend()
                     }
-                    if run.status.isTerminal { return }
+                    if run.status.isTerminal {
+                        // A send that did not go out must not keep its key: "try again"
+                        // has to be a new admission, not a replay of the dead one.
+                        if let draft = self.draft, draft.threadID == threadID,
+                           !["sent", "sending", "uncertain"].contains(draft.status) {
+                            self.sendKeys.removeValue(forKey: draft.id)
+                        }
+                        return
+                    }
                     try await Task.sleep(nanoseconds: self.pollNanoseconds)
                 } catch {
                     if self.generation == connection, !(error is CancellationError) { self.report(error, draft: true) }
