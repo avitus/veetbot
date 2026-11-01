@@ -2221,6 +2221,23 @@ class _TaskIO:
             else:
                 changed = False
                 draft = current
+                # The claim is taken in the same transaction as the freshness check,
+                # so no import can reset the draft between validating and claiming.
+                if approved:
+                    if draft.send_claim_id not in {None, self.task.id}:
+                        raise ConflictError(
+                            "the draft is already claimed by another send operation"
+                        )
+                    draft = draft.model_copy(
+                        update={
+                            "status": EmailDraftStatus.SENDING,
+                            "send_claim_id": self.task.id,
+                            "send_undo_until": None,
+                        }
+                    )
+                    await save_value(
+                        uow.email, c.principal, "draft", str(draft.id), draft, c.clock.now()
+                    )
         if changed:
             reason = (
                 "New mail arrived or the reply changed before it was sent, so nothing "
@@ -2230,22 +2247,6 @@ class _TaskIO:
             if consent is not None:
                 return await self._abandon_consented_send(reason)
             return _finished(reason)
-        async with c.uow_factory() as uow, uow.email.lock(c.principal):
-            await self._write_fence(uow)
-            draft = await self.service._draft(uow.email, c.principal, draft.id)
-            if approved:
-                if draft.send_claim_id not in {None, self.task.id}:
-                    raise ConflictError("the draft is already claimed by another send operation")
-                draft = draft.model_copy(
-                    update={
-                        "status": EmailDraftStatus.SENDING,
-                        "send_claim_id": self.task.id,
-                        "send_undo_until": None,
-                    }
-                )
-                await save_value(
-                    uow.email, c.principal, "draft", str(draft.id), draft, c.clock.now()
-                )
         arguments = send_message_arguments(draft, thread.provider_thread_id)
         try:
             await self.call(draft.account_id, "send_message", arguments, operation="send")
