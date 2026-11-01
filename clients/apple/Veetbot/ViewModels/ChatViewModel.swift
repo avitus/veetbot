@@ -153,6 +153,8 @@ public final class ChatViewModel: ObservableObject {
     /// launch URL, capability or session value: those live only in the locals
     /// of `completeDeviceSignIn`.
     @Published public private(set) var deviceSignInRequest: DeviceSignInRequest?
+    /// Which surface started the open sign-in, and so presents its window.
+    @Published public private(set) var deviceSignInSurface: DeviceSignInSurface = .websiteAccess
     /// The open conversation's active task permission, if any (ADR-0129).
     @Published public private(set) var activeTaskGrant: BrowserTaskGrantView?
     /// Only a conversation bound to a website profile can hold one.
@@ -187,6 +189,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvalsInFlight: [UUID: ApprovalDecision] = [:]
     /// Presented from the conversation's toolbar, which on the Mac belongs to the window.
     @Published public var isPeopleLookupPresented = false
+    /// The open chat's Website Access sheet, from its toolbar button or a sign-in card.
+    @Published public var isWebsiteAccessPresented = false
 
     /// Whether an approval still waits on the owner; one whose decision is on its way does not.
     public var awaitingOwnerApproval: Bool {
@@ -1649,6 +1653,7 @@ public final class ChatViewModel: ObservableObject {
         answer rawAnswer: String
     ) async -> Bool {
         guard let api, runState.runStatus == .waitingForUser else { return false }
+        guard prompt.acceptsReply() else { return false }
         let answer = rawAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !answer.isEmpty else { return false }
         isSending = true
@@ -1668,6 +1673,30 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             present(error)
             return false
+        }
+    }
+
+    /// ADR-0280: the sign-in card's main button opens the device sign-in for
+    /// the website the run waits on; without one, Website Access.
+    public func signInToContinue(_ prompt: ClarifyingQuestionPrompt) async {
+        guard let profileID = prompt.signIn?.profileID else {
+            isWebsiteAccessPresented = true
+            return
+        }
+        let sessionID = selectedSessionID
+        if !browserProfiles.contains(where: { $0.id == profileID }), let api {
+            try? await reloadBrowserProfiles(using: api)
+        }
+        // The owner may have moved on, or the run resumed or ended, while the
+        // saved logins loaded: open nothing unless this card still waits.
+        guard selectedSessionID == sessionID, runState.activeRunID == prompt.runID,
+            runState.clarifyingQuestion?.questionID == prompt.questionID
+        else { return }
+        guard let profile = browserProfiles.first(where: { $0.id == profileID }),
+            beginDeviceSignIn(profile: profile, startOrigin: prompt.signIn?.origin, from: .chat) != nil
+        else {
+            isWebsiteAccessPresented = true
+            return
         }
     }
 
@@ -2182,9 +2211,13 @@ public final class ChatViewModel: ObservableObject {
     /// Opens the sign-in window to sign in again to an existing, unrevoked
     /// profile, at the root of its first origin.
     @discardableResult
-    public func beginDeviceSignIn(profile: BrowserProfileView) -> DeviceSignInRequest? {
+    public func beginDeviceSignIn(
+        profile: BrowserProfileView, startOrigin: String? = nil, from surface: DeviceSignInSurface = .websiteAccess
+    ) -> DeviceSignInRequest? {
+        // A start origin the profile does not allow falls back to its first.
         guard api != nil, profile.status != .revoked,
-            let origin = profile.allowedOrigins.first,
+            let origin = startOrigin.flatMap({ profile.allowedOrigins.contains($0) ? $0 : nil })
+                ?? profile.allowedOrigins.first,
             let startURL = URL(string: origin + "/")
         else { return nil }
         websiteConnectionSessionID = selectedSessionID
@@ -2194,7 +2227,7 @@ public final class ChatViewModel: ObservableObject {
             profileID: profile.id,
             adoptableOrigin: nil
         )
-        openDeviceSignIn(request)
+        openDeviceSignIn(request, from: surface)
         return request
     }
 
@@ -2439,8 +2472,15 @@ public final class ChatViewModel: ObservableObject {
         await refreshBrowserAuthentication()
     }
 
-    private func openDeviceSignIn(_ request: DeviceSignInRequest) {
+    /// The sign-in a surface presents: only one it started.
+    public func deviceSignInRequest(for surface: DeviceSignInSurface) -> DeviceSignInRequest? {
+        deviceSignInSurface == surface ? deviceSignInRequest : nil
+    }
+
+    /// Opens a sign-in window on the surface that started it.
+    private func openDeviceSignIn(_ request: DeviceSignInRequest, from surface: DeviceSignInSurface = .websiteAccess) {
         deviceSignInCreatedProfile = nil
+        deviceSignInSurface = surface
         deviceSignInRequest = request
         errorMessage = nil
     }
@@ -2578,7 +2618,7 @@ public final class ChatViewModel: ObservableObject {
             try? await reloadBrowserProfiles(using: api)
         }
         guard let profile = browserProfiles.first(where: { $0.id == website.profileID }),
-            beginDeviceSignIn(profile: profile) != nil
+            beginDeviceSignIn(profile: profile, from: .chat) != nil
         else {
             pendingWebsiteOffer = nil
             return

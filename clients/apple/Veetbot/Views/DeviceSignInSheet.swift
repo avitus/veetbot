@@ -468,19 +468,21 @@ extension View {
     /// sheet that opens at 1000 by 760 points and shrinks no smaller than 820
     /// by 680, so a website that needs more room can have it. Dismissing it
     /// abandons the sign-in.
-    func deviceSignInPresentation(model: ChatViewModel) -> some View {
-        modifier(DeviceSignInPresentation(model: model))
+    func deviceSignInPresentation(model: ChatViewModel, surface: DeviceSignInSurface = .websiteAccess) -> some View {
+        modifier(DeviceSignInPresentation(model: model, surface: surface))
     }
 }
 
 private struct DeviceSignInPresentation: ViewModifier {
     @ObservedObject var model: ChatViewModel
+    let surface: DeviceSignInSurface
 
+    /// This surface's sign-in only; closing its window abandons the sign-in.
     private var request: Binding<DeviceSignInRequest?> {
         Binding(
-            get: { model.deviceSignInRequest },
+            get: { model.deviceSignInRequest(for: surface) },
             set: { value in
-                if value == nil, model.deviceSignInRequest != nil {
+                if value == nil, model.deviceSignInRequest(for: surface) != nil {
                     Task { await model.abandonDeviceSignIn() }
                 }
             }

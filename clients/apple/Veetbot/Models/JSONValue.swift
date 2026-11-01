@@ -120,7 +120,7 @@ extension JSONDecoder {
     }
 }
 
-private enum ServerDates {
+enum ServerDates {
     private static func formatter(fractionalSeconds: Bool) -> ISO8601DateFormatter {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions =

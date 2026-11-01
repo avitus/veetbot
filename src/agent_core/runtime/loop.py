@@ -1022,6 +1022,7 @@ async def prepare_browser_connection_question(context: RunContext) -> None:
 async def suspend_for_browser_question(
     context: RunContext, error: UserInputRequiredError
 ) -> RunOutcome:
+    """Suspend on a runtime browser question; a sign-in pause carries ``sign_in`` (ADR-0280)."""
     question = str(context.checkpoint.pending_tool_calls[0]["arguments"]["question"])
     state = _record_open_question(context.checkpoint, question, context.add_open_question)
     context.checkpoint.working_state["outstanding_question_id"] = str(error.question_id)
@@ -1035,14 +1036,28 @@ async def suspend_for_browser_question(
         },
     )
     await checkpoint(context, "suspended")
-    return RunOutcome(
-        kind=OutcomeKind.SUSPENDED,
-        suspension={
-            "kind": "user",
-            "question_id": str(error.question_id),
-            "invocation_id": str(error.invocation_id),
-        },
-    )
+    suspension: dict[str, Any] = {
+        "kind": "user",
+        "question_id": str(error.question_id),
+        "invocation_id": str(error.invocation_id),
+    }
+    pending = context.checkpoint.pending_tool_calls[0]
+    if pending["name"] == "conversation.ask_user" and str(pending["call_id"]).startswith(
+        "browser-recovery:"
+    ):
+        # ADR-0280: the app shows a sign-in card from the trusted wait, not a question.
+        sign_in: dict[str, str] = {}
+        raw_wait = context.checkpoint.working_state.get("browser_auth_wait")
+        if raw_wait is not None:
+            wait = BrowserAuthenticationWait.model_validate(raw_wait)
+            sign_in["browser_profile_id"] = str(wait.profile_id)
+            if wait.resume_url is not None:
+                sign_in["origin"] = browser_origin(wait.resume_url)
+            sign_in["expires_at"] = wait.model_dump(mode="json")["expires_at"]
+        if context.run.deadline_at is not None:
+            sign_in["run_deadline_at"] = context.run.deadline_at.isoformat()
+        suspension["sign_in"] = sign_in
+    return RunOutcome(kind=OutcomeKind.SUSPENDED, suspension=suspension)
 
 
 async def _invoke_model(

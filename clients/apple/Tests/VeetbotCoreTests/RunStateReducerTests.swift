@@ -275,6 +275,60 @@ import Testing
         #expect(reducer.timeline.count == count)
     }
 
+    /// ADR-0280: the runtime's sign-in pause is a sign-in card, not a question.
+    @Test
+    func signInPauseCarriesTheWaitingWebsite() throws {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        let profileID = UUID()
+        reducer.begin(runID: runID, status: .running)
+        reducer.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object([
+                "kind": .string("user"),
+                "sign_in": .object([
+                    "browser_profile_id": .string(profileID.uuidString),
+                    "origin": .string("https://www.example.org"),
+                    "expires_at": .string("2099-09-25T12:15:00Z"),
+                    "run_deadline_at": .string("2099-09-25T12:20:00Z"),
+                ]),
+            ]),
+        ]))
+        let prompt = try #require(reducer.clarifyingQuestion)
+        let signIn = try #require(prompt.signIn)
+        #expect(signIn.profileID == profileID)
+        #expect(signIn.host == "www.example.org")
+        let expiry = Date(timeIntervalSince1970: 4_094_021_700)
+        #expect(signIn.expiresAt == expiry)
+        #expect(prompt.awaitsVerifiedSignIn(at: expiry.addingTimeInterval(-1)))
+        #expect(!prompt.awaitsVerifiedSignIn(at: expiry))
+        // A verified sign-in resumes the run, then a reply does, then nothing can.
+        let deadline = expiry.addingTimeInterval(300)
+        #expect(signIn.runDeadlineAt == deadline)
+        #expect(!prompt.acceptsReply(at: expiry.addingTimeInterval(-1)))
+        #expect(prompt.acceptsReply(at: expiry))
+        #expect(!prompt.runDeadlinePassed(at: deadline.addingTimeInterval(-1)))
+        #expect(prompt.runDeadlinePassed(at: deadline))
+        #expect(!prompt.acceptsReply(at: deadline))
+
+        reducer.reduce(SSEFrame(id: 2, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object(["kind": .string("user"), "sign_in": .object([:])]),
+        ]))
+        let unbound = try #require(reducer.clarifyingQuestion?.signIn)
+        #expect(unbound.profileID == nil && unbound.host == nil)
+
+        reducer.reduce(SSEFrame(id: 3, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object(["kind": .string("user")]),
+        ]))
+        #expect(reducer.clarifyingQuestion != nil)
+        #expect(reducer.clarifyingQuestion?.signIn == nil)
+    }
+
     @Test
     func testApprovalBindsToMostRecentMatchingUnresolvedTool() {
         let reducer = RunStateReducer()
@@ -1234,6 +1288,11 @@ import Testing
         )
         #expect(ConversationStatus.label(runStatus: .waitingForApproval, awaitingApproval: false) == nil)
         #expect(ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false) == "Needs your answer")
+        // ADR-0280: a sign-in pause asks for a sign-in, not an answer.
+        #expect(
+            ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false, awaitingSignIn: true)
+                == "Needs you to sign in"
+        )
         // A pending card left behind by a run that moved on asks for nothing.
         for status: RunStatus? in [nil, .queued, .running, .completed, .failed, .cancelled] {
             #expect(ConversationStatus.label(runStatus: status, awaitingApproval: true) == nil)

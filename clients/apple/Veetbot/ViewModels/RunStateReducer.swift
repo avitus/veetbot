@@ -169,8 +169,38 @@ public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
     public let questionID: UUID
     public let runID: UUID
     public let question: String
+    /// Set when the question is the runtime's sign-in pause (ADR-0280).
+    public var signIn: BrowserSignInPause? = nil
 
     public var id: UUID { questionID }
+    /// The run resumes on a verified sign-in to a saved website, not on a reply.
+    public func awaitsVerifiedSignIn(at now: Date = Date()) -> Bool {
+        guard let signIn, signIn.profileID != nil else { return false }
+        return signIn.expiresAt.map { now < $0 } ?? true
+    }
+
+    /// Past the run's own deadline neither a sign-in nor a reply can continue it.
+    public func runDeadlinePassed(at now: Date = Date()) -> Bool {
+        signIn?.runDeadlineAt.map { now >= $0 } ?? false
+    }
+
+    /// Whether a typed reply can continue the run now.
+    public func acceptsReply(at now: Date = Date()) -> Bool {
+        !awaitsVerifiedSignIn(at: now) && !runDeadlinePassed(at: now)
+    }
+}
+
+/// The website a sign-in pause waits on, from the server's trusted wait. Both
+/// fields are absent when the run waits for a reply instead.
+public struct BrowserSignInPause: Equatable, Sendable {
+    public let profileID: UUID?
+    public let origin: String?
+    /// When the server stops resuming the run by itself.
+    public var expiresAt: Date? = nil
+    /// When the run itself ends, if it has a deadline.
+    public var runDeadlineAt: Date? = nil
+
+    public var host: String? { origin.flatMap { URL(string: $0)?.host } }
 }
 
 @MainActor
@@ -724,6 +754,8 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
+    /// The question the run waits on, and the website a sign-in pause waits
+    /// for when the event's suspension carries `sign_in` (ADR-0280).
     private func reduceQuestion(_ frame: SSEFrame, runID: UUID?) {
         let nested = frame.data["suspension"]?.objectValue
         guard
@@ -736,10 +768,19 @@ public final class RunStateReducer: ObservableObject {
             frame.data["question"]?.stringValue
             ?? workingState?.openQuestions.last
             ?? "The agent needs more information."
+        let signIn = (nested?["sign_in"]?.objectValue).map { fields in
+            BrowserSignInPause(
+                profileID: fields["browser_profile_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
+                origin: fields["origin"]?.stringValue,
+                expiresAt: fields["expires_at"]?.stringValue.flatMap(ServerDates.date(from:)),
+                runDeadlineAt: fields["run_deadline_at"]?.stringValue.flatMap(ServerDates.date(from:))
+            )
+        }
         clarifyingQuestion = ClarifyingQuestionPrompt(
             questionID: questionID,
             runID: runID,
-            question: question
+            question: question,
+            signIn: signIn
         )
     }
 
@@ -840,10 +881,11 @@ private struct ToolOutcomePayload: Decodable {
 /// the owner. A run parked as waiting for approval with no approval left to
 /// decide is resuming, or waiting on a delegated child, and asks for nothing.
 public enum ConversationStatus {
-    public static func label(runStatus: RunStatus?, awaitingApproval: Bool) -> String? {
+    /// What the run needs from the owner, or nil when it needs nothing.
+    public static func label(runStatus: RunStatus?, awaitingApproval: Bool, awaitingSignIn: Bool = false) -> String? {
         switch runStatus {
         case .waitingForApproval where awaitingApproval: return "Needs your approval"
-        case .waitingForUser: return "Needs your answer"
+        case .waitingForUser: return awaitingSignIn ? "Needs you to sign in" : "Needs your answer"
         default: return nil
         }
     }
