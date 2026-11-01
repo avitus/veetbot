@@ -373,7 +373,7 @@ citations:
   - cite: "docs/plan/readiness.md#docs/plan/bootstrap-and-composition.md:681"
     excerpt: "approvals: ApprovalService"
     digest: "ed8ca54dad32fe74"
-  - cite: "docs/plan/readiness.md#docs/plan/builtin-tools.md:1543"
+  - cite: "docs/plan/readiness.md#docs/plan/builtin-tools.md:1544"
     excerpt: "1. **`sandbox.run_command`, at Milestone 6.** Everything abo"
     digest: "b3c66a3851c126fb"
   - cite: "docs/plan/readiness.md#docs/plan/context-engine.md:559"

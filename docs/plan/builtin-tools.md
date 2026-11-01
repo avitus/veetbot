@@ -221,11 +221,11 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is every builtin the composition root registers, and
-that is a function of the deployment. Twenty identities are always
+that is a function of the deployment. Twenty-one identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `artifact.read_capture`, `artifact.delete`, `context.update_working_state`, the four `memory.*` tools,
-`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-four register only
+`skill.load`, `tool.call`, `run.inspect`, and the two `knowledge.*` tools. The other thirty-eight register only
 with their flag or provider: `skill.manage` with skill authoring, the three
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
@@ -233,8 +233,9 @@ and worker, the three `people.*` tools with People, `email.context` and
 `email.feedback` with Email mode, and `email.subscriptions` and
 `email.unsubscribe` with email unsubscribe, the six `records.*` tools with
 `AGENT_RECORDS_ENABLED=1`, the five `cockpit.*` tools with
-`AGENT_COCKPIT_ENABLED=1`, and `image.generate` and `video.generate` with the
-TensorScale credential. Historical versions of
+`AGENT_COCKPIT_ENABLED=1`, `code.read`, `code.draft` and `code.test` with
+`AGENT_CODE_TOOLS_ENABLED=1`, `code.propose` with `AGENT_CODE_PROPOSALS_ENABLED=1`, and
+`image.generate` and `video.generate` with the TensorScale credential. Historical versions of
 `memory.remember`, `skill.load`, `artifact.export`, `schedule.list`, `image.generate`,
 `video.generate`, `delegate.run`, and `people.history` (ADR-0126) register
 beside their current versions, and step 6 validates every registered version.
