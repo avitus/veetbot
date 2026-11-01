@@ -469,7 +469,7 @@ async def _assert_resolved_or_expired_approval_is_superseded_without_send() -> N
                     None,
                 )
 
-        clock.advance(timedelta(seconds=30))
+        clock.advance(timedelta(seconds=90))
         assert await _dispatcher(factory, clock, ids, transport).run_once() == 1
         async with factory() as uow:
             [notification] = await uow.notification_outbox.list(principal(), limit=10)
@@ -508,7 +508,7 @@ async def _assert_answered_question_or_run_no_longer_waiting_is_superseded() -> 
                 question_id=question_id,
             )
 
-        clock.advance(timedelta(seconds=30))
+        clock.advance(timedelta(seconds=90))
         assert await _dispatcher(factory, clock, ids, transport).run_once() == 1
         async with factory() as uow:
             [notification] = await uow.notification_outbox.list(principal(), limit=10)
@@ -648,7 +648,7 @@ async def test_resolution_during_fanout_keeps_first_delivery_and_suppresses_rema
             return PushOutcome(outcome=DeliveryOutcome.DELIVERED)
 
     transport = ResolvingTransport()
-    clock.advance(timedelta(seconds=30))
+    clock.advance(timedelta(seconds=90))
     await _dispatcher(factory, clock, ids, transport).run_once()
     assert transport.calls == 1
     async with factory() as uow:

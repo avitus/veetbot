@@ -94,3 +94,14 @@ idempotence, a newer unread result, exclusion of noncompleted and foreign runs,
 and bounded requests. Native tests cover batching, read-state replacement,
 connection races, offline retention, older-server fallback and acknowledgement
 through the loaded-transcript path.
+
+## Amendment: longer attention grace (2026-10-31)
+
+The owner requested ninety seconds instead of thirty seconds before initial
+push eligibility for approvals, questions and scheduled outcomes. Newly
+enqueued notifications use the longer window; existing outbox deadlines,
+expiry, retries and immediate notification kinds remain unchanged.
+
+Producer regressions cover all four delayed kinds and immediate run failures.
+The attention regression checks no dispatch at thirty or eighty-nine seconds,
+dispatch at ninety seconds, and suppression of an already viewed result.

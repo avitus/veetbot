@@ -224,6 +224,11 @@ async def test_exact_transition_catalog_builds_content_free_deduplicated_rows() 
             NotificationKind.SCHEDULE_RUN_FINISHED,
             NotificationKind.SCHEDULE_OCCURRENCE_SKIPPED,
         }
+        assert all(
+            row.next_attempt_at
+            == (NOW if row.kind is NotificationKind.RUN_FAILED else NOW + timedelta(seconds=90))
+            for row in rows
+        )
         assert len(rows) == 8
         assert all(row.status is NotificationStatus.PENDING for row in rows)
         assert all("Sensitive" not in row.payload.model_dump_json() for row in rows)
@@ -307,7 +312,7 @@ async def test_required_trigger_identifiers_fail_closed() -> None:
 
 
 @pytest.mark.parametrize("status", [RunStatus.WAITING_FOR_APPROVAL, RunStatus.WAITING_FOR_USER])
-async def test_attention_requests_allow_thirty_seconds_to_answer_on_another_device(
+async def test_attention_requests_allow_ninety_seconds_to_answer_on_another_device(
     status: RunStatus,
 ) -> None:
     clock, factory = await memory_uow_factory()
@@ -323,5 +328,5 @@ async def test_attention_requests_allow_thirty_seconds_to_answer_on_another_devi
             approval_expires_at=NOW + timedelta(minutes=5),
         )
         [notification] = await uow.notification_outbox.list(principal(), limit=10)
-    assert notification.next_attempt_at == NOW + timedelta(seconds=30)
+    assert notification.next_attempt_at == NOW + timedelta(seconds=90)
     assert notification.created_at == NOW

@@ -114,7 +114,7 @@ class NotificationProducer:
                     else now + timedelta(hours=24)
                 ),
                 next_attempt_at=(
-                    now + timedelta(seconds=30)
+                    now + timedelta(seconds=90)
                     if kind
                     in {NotificationKind.APPROVAL_REQUESTED, NotificationKind.QUESTION_ASKED}
                     else now
@@ -184,7 +184,7 @@ class NotificationProducer:
                 ),
                 priority=5,
                 expires_at=now + timedelta(hours=24),
-                next_attempt_at=now + timedelta(seconds=30),
+                next_attempt_at=now + timedelta(seconds=90),
                 created_at=now,
             ),
             failure_context={
@@ -240,7 +240,7 @@ class NotificationProducer:
                 ),
                 priority=5,
                 expires_at=now + timedelta(hours=24),
-                next_attempt_at=now + timedelta(seconds=30),
+                next_attempt_at=now + timedelta(seconds=90),
                 created_at=now,
             ),
             failure_context={
