@@ -2143,7 +2143,13 @@ pass. Tests that need PostgreSQL, Docker or a browser cannot pass here, so a pas
 is partial evidence and hosted CI remains the full verification.
 
 **`code.propose`.** It asks the owner through the ordinary `publication` approval,
-which no `tool_rules` entry skips, and shows a bounded diff. Its arguments carry
+which no `tool_rules` entry skips, and shows the whole diff and summary. The
+approval view keeps 50 items a list and cuts longer strings, so the card pages the
+diff and splits a long line across entries, continuing it with `> `. A change past
+400 entries cannot be shown whole, so its card says so and the tool refuses with
+`code.diff_too_large`. Text shaped like a credential is masked on the card with
+its count stated, leaving the rest of its line visible, and the secret screen
+still checks it. Its arguments carry
 the digest `code.draft` reports, over the draft's files and base, so an approval
 covers exactly the content on its card. A draft that has moved since refuses
 with `code.draft_changed` and publishes nothing, and a card for a moved draft
@@ -2153,7 +2159,7 @@ lines, the title and the summary pass the Cockpit privacy screen with a
 high-confidence secret rule, because `token: str` is ordinary code here. A hit
 publishes nothing and never repeats the value. The tool then records an outbox
 entry; the maintenance role's worker, the only holder of the key, creates a new
-`veetbot/<slug>-<id>` branch from the release's revision, commits and opens a pull
+`veetbot/<slug>-<id>-<digest>` branch from the release's revision, commits and opens a pull
 request to `dev`. A retry finds its own branch by commit trailer and its open pull
 request. The adapter refuses any other ref or a protected path before calling
 GitHub, and it has no merge, review or force operation. A push starts no CI, and

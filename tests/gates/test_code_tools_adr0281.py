@@ -144,10 +144,55 @@ async def test_a_proposal_waits_for_the_owner_and_shows_the_diff(tmp_path: Path)
     view = approvals[0]
     assert "public repository" in view.action_summary and "cannot merge" in view.action_summary
     assert "Raise the limit" not in view.action_summary
-    assert "+limit = 2" in view.arguments["diff"]
+    assert "+limit = 2" in [entry for page in view.arguments["diff"].values() for entry in page]
     # Asking published nothing: the draft stays private until the owner decides.
     assert draft.state is CodeDraftState.OPEN
     assert draft.proposal is None
+
+
+async def test_a_long_line_reaches_the_owner_whole_through_the_pipeline(tmp_path: Path) -> None:
+    """Whatever the approval path stores is what the owner reads, so nothing may clip it."""
+    source = tmp_path / "source"
+    source.mkdir()
+    long_line = "limit = '" + "x" * 3000 + "tail'"
+    _factory, context = await _production(
+        tmp_path,
+        _turns(
+            _tool_call("code.draft", {"operation": "open", "slug": "fix-limit"}),
+            _tool_call(
+                "code.draft",
+                {
+                    "operation": "edit",
+                    "slug": "fix-limit",
+                    "path": "src/app.py",
+                    "old": "limit = 1",
+                    "new": long_line,
+                },
+            ),
+            _tool_call(
+                "code.propose",
+                {
+                    "slug": "fix-limit",
+                    "title": "Raise the limit",
+                    "summary": "Why it matters.",
+                    "digest": content_digest(
+                        "20261101-120000-abc1234", "abc1234", {"src/app.py": f"{long_line}\n"}
+                    ),
+                },
+            ),
+        ),
+        extra_environment=_environment(source),
+    )
+    async with context as app:
+        session_id = await app.sessions.create()
+        run_id = await app.runs.submit("Fix the limit and open a PR.", session_id)
+        await asyncio.wait_for(_until_waiting(app, run_id), timeout=30)
+        approvals = await app.approvals.list_pending()
+
+    entries = [entry for page in approvals[0].arguments["diff"].values() for entry in page]
+    pieces = [entry for entry in entries if "xxxx" in entry]
+    assert not any("TRUNCATED" in entry for entry in entries)
+    assert pieces[0] + "".join(piece.removeprefix("> ") for piece in pieces[1:]) == f"+{long_line}"
 
 
 async def _until_waiting(app: Any, run_id: Any) -> None:

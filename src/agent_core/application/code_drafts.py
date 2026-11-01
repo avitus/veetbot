@@ -11,6 +11,7 @@ from agent_core.domain.code import (
     CodeDraft,
     CodeDraftState,
     CodeProposal,
+    draft_digest,
     path_is_protected,
 )
 from agent_core.domain.errors import NotFoundError
@@ -196,15 +197,14 @@ class CodeDrafts:
                 expected_version=draft.version,
             )
 
-    async def diff(self, draft: CodeDraft) -> list[str]:
-        """A unified diff of the draft against the release, with long lines clipped."""
+    async def complete_diff(self, draft: CodeDraft) -> list[str]:
+        """A unified diff of the draft against the release, every line whole."""
         lines: list[str] = []
         for path in sorted(draft.files):
             base = await self._base(path)
             after = draft.files[path]
             lines.extend(
-                line[:_DIFF_LINE_CHARACTERS]
-                for line in difflib.unified_diff(
+                difflib.unified_diff(
                     (base or "").splitlines(),
                     (after or "").splitlines(),
                     fromfile=f"a/{path}" if base is not None else "/dev/null",
@@ -213,6 +213,15 @@ class CodeDrafts:
                 )
             )
         return lines
+
+    async def diff(self, draft: CodeDraft) -> list[str]:
+        """The diff for reading in chat, marking any long line it clips."""
+        return [
+            line
+            if len(line) <= _DIFF_LINE_CHARACTERS
+            else f"{line[:_DIFF_LINE_CHARACTERS]} ... [line clipped]"
+            for line in await self.complete_diff(draft)
+        ]
 
     async def added_lines(self, draft: CodeDraft) -> dict[str, str]:
         """What a proposal adds to the public repository, file by file."""
@@ -237,7 +246,8 @@ class CodeDrafts:
     async def mark_proposing(
         self, draft: CodeDraft, *, title: str, body: str, now: datetime
     ) -> CodeDraft:
-        branch = f"{BRANCH_PREFIX}{draft.slug}-{draft.id.hex[:8]}"
+        # A retry keeps its branch's head, so different content must never share the name.
+        branch = f"{BRANCH_PREFIX}{draft.slug}-{draft.id.hex[:8]}-{draft_digest(draft)}"
         async with self._uow_factory() as uow:
             return await uow.code_drafts.put(
                 draft.model_copy(

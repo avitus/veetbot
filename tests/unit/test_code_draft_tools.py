@@ -9,6 +9,7 @@ import pytest
 from agent_core.adapters.code.source_tree import FilesystemSourceTree
 from agent_core.adapters.determinism import RandomIdFactory
 from agent_core.application.code_drafts import CodeDrafts
+from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.code import (
     CodeCheck,
     CodeCheckKind,
@@ -106,6 +107,12 @@ async def _edit(harness: Harness, **arguments: Any) -> Any:
     return await harness.draft.execute(
         {"operation": "edit", "slug": "fix-limit", "path": "src/app.py", **arguments}, _context()
     )
+
+
+def _card_lines(view: Any) -> list[str]:
+    """The diff entries the owner reads, after the approval path's own view of them."""
+    diff = approval_argument_view(view.arguments)["diff"]
+    return [entry for page in sorted(diff) for entry in diff[page]]
 
 
 async def _proposal(harness: Harness, **overrides: Any) -> dict[str, Any]:
@@ -323,7 +330,7 @@ async def test_an_edit_after_the_owner_was_asked_publishes_nothing(harness: Harn
     view = await harness.propose.approval_view_in_session(
         arguments, run=None, principal=principal(), turn=None, not_covered=None
     )
-    assert "+other = 3" in view.arguments["diff"]
+    assert "+other = 3" in _card_lines(view)
 
     await _edit(harness, old="other = 3", new="other = 4")
     result = await harness.propose.execute(arguments, _context())
@@ -352,6 +359,7 @@ async def test_the_card_never_shows_a_diff_other_than_the_one_being_approved(
 
     assert view.arguments["diff_status"] == "changed"
     assert "diff" not in view.arguments
+    assert "publishes nothing" in view.summary
     assert "file_changes" not in view.arguments
 
 
@@ -394,6 +402,139 @@ async def test_a_draft_discarded_and_reopened_after_the_ask_publishes_nothing(
     assert not result.ok
     assert result.failure is not None
     assert result.failure.reason_code == "code.draft_changed"
+
+
+async def test_changed_content_after_a_refusal_gets_its_own_branch(harness: Harness) -> None:
+    """A retried branch keeps its head, so reusing the name would publish the old content."""
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    assert (await harness.propose.execute(await _proposal(harness), _context())).ok
+    async with harness.factory() as uow:
+        draft = await uow.code_drafts.get(principal(), "fix-limit")
+        assert draft.proposal is not None
+        first = draft.proposal.branch
+        # The worker hands a refused proposal back to the chat this way.
+        await uow.code_drafts.put(
+            draft.model_copy(update={"state": CodeDraftState.OPEN, "version": draft.version + 1}),
+            expected_version=draft.version,
+        )
+
+    await _edit(harness, old="other = 3", new="other = 4")
+    assert (await harness.propose.execute(await _proposal(harness), _context())).ok
+
+    async with harness.factory() as uow:
+        moved = await uow.code_drafts.get(principal(), "fix-limit")
+    assert moved.proposal is not None
+    assert moved.proposal.branch != first
+    assert moved.proposal.branch.startswith("veetbot/fix-limit-")
+
+
+async def test_the_card_shows_a_long_line_whole_and_show_says_when_it_clipped(
+    harness: Harness,
+) -> None:
+    """Everything published must be visible on the card the owner approves."""
+    await _open(harness)
+    long_line = "other = '" + "x" * 900 + "tail'"
+    await _edit(harness, old="other = 2", new=long_line)
+
+    view = await harness.propose.approval_view_in_session(
+        await _proposal(harness), run=None, principal=principal(), turn=None, not_covered=None
+    )
+    shown = await harness.draft.execute({"operation": "show", "slug": "fix-limit"}, _context())
+
+    assert long_line not in _text(shown)
+    assert "line clipped" in _text(shown)
+    pieces = [entry for entry in _card_lines(view) if "xxxx" in entry]
+    assert len(pieces) > 1
+    rebuilt = pieces[0] + "".join(piece.removeprefix("> ") for piece in pieces[1:])
+    assert rebuilt == f"+{long_line}"
+
+
+async def test_every_line_of_a_long_diff_survives_the_approval_view(harness: Harness) -> None:
+    """The view keeps 50 items a list, and the card must not lose the 51st line."""
+    await _open(harness)
+    await harness.draft.execute(
+        {
+            "operation": "edit",
+            "slug": "fix-limit",
+            "path": "src/large.py",
+            "content": "".join(f"value_{number} = 1\n" for number in range(200)),
+        },
+        _context(),
+    )
+
+    view = await harness.propose.approval_view_in_session(
+        await _proposal(harness), run=None, principal=principal(), turn=None, not_covered=None
+    )
+
+    lines = _card_lines(view)
+    assert all(f"+value_{number} = 1" in lines for number in range(200))
+    assert not any("TRUNCATED" in line for line in lines)
+
+
+async def test_a_credential_shape_hides_only_itself_and_the_card_says_so(harness: Harness) -> None:
+    """One shape must not hide the code around it from the owner."""
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="run_this()  # token: abc and_this()")
+
+    view = await harness.propose.approval_view_in_session(
+        await _proposal(harness), run=None, principal=principal(), turn=None, not_covered=None
+    )
+
+    entry = next(line for line in _card_lines(view) if "run_this" in line)
+    assert entry.startswith("+run_this()  # ")
+    assert entry.endswith(" and_this()")
+    assert "abc" not in entry
+    assert view.arguments["hidden_credential_shapes"] == 1
+    assert "1 piece(s)" in view.summary
+
+
+async def test_a_long_summary_reaches_the_owner_whole(harness: Harness) -> None:
+    """The pull request's body is published too, so the card cannot cut it at 512."""
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    summary = "word " * 400 + "ending"
+
+    view = await harness.propose.approval_view_in_session(
+        await _proposal(harness, summary=summary),
+        run=None,
+        principal=principal(),
+        turn=None,
+        not_covered=None,
+    )
+
+    pieces = approval_argument_view(view.arguments)["summary"]
+    assert not any("TRUNCATED" in piece for piece in pieces)
+    assert pieces[0] + "".join(piece.removeprefix("> ") for piece in pieces[1:]) == summary
+
+
+async def test_a_change_too_large_for_the_card_cannot_be_approved_into_publication(
+    harness: Harness,
+) -> None:
+    await _open(harness)
+    await harness.draft.execute(
+        {
+            "operation": "edit",
+            "slug": "fix-limit",
+            "path": "src/large.py",
+            "content": "".join(f"value_{number} = 1\n" for number in range(500)),
+        },
+        _context(),
+    )
+    arguments = await _proposal(harness)
+
+    view = await harness.propose.approval_view_in_session(
+        arguments, run=None, principal=principal(), turn=None, not_covered=None
+    )
+    result = await harness.propose.execute(arguments, _context())
+
+    assert view.arguments["diff_status"] == "too_large"
+    assert "diff" not in view.arguments
+    assert "publishes nothing" in view.summary
+    assert "Publish this change" not in view.summary
+    assert result.failure is not None
+    assert result.failure.reason_code == "code.diff_too_large"
+    assert harness.screen.message is None
 
 
 async def test_a_replay_for_different_content_is_not_the_recorded_proposal(
@@ -441,7 +582,7 @@ async def test_the_approval_card_shows_the_diff_in_server_words(harness: Harness
     assert "cannot merge" in view.summary
     assert "Ignore rules" not in view.summary
     assert view.arguments["file_changes"] == ["src/app.py"]
-    assert "+other = 3" in view.arguments["diff"]
+    assert "+other = 3" in _card_lines(view)
     assert NOW is not None
 
 
