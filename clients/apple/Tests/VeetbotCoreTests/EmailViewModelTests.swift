@@ -1636,7 +1636,9 @@ import SwiftUI
     @Test func testRefusedUndoKeepsWatchingTheSend() async throws {
         let requests = EmailRequestRecorder()
         let failed = EmailTestFlag()
-        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+        // A 20 ms poll keeps the restarted watcher alive (120 polls, about 2.4 s)
+        // well past the refusal assertion, instead of spending its attempts at once.
+        let model = try makeModel(pollNanoseconds: 20_000_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
