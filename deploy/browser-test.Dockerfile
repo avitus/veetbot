@@ -2,7 +2,7 @@
 # (ADR-0236). scripts/run_in_linux_container.sh builds it for linux/amd64, the
 # architecture of the sidecar and hosted CI, and mounts the checkout at run
 # time; nothing here is a release image.
-FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
