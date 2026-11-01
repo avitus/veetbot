@@ -1696,6 +1696,52 @@ import SwiftUI
         #expect(keys.count == 2 && keys[0] != keys[1])
     }
 
+    /// A watcher left over from an earlier send must not clear the key of, or report
+    /// its failure against, a newer send the owner started after a refresh showed the
+    /// earlier one had failed.
+    @Test func testAnEarlierSendsWatcherLeavesANewerSendAlone() async throws {
+        let requests = EmailRequestRecorder()
+        let secondRunID = UUID(uuidString: "00000000-0000-0000-0000-000000000903")!
+        let firstFailed = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 100_000_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }.count
+            if request.url!.path.hasSuffix("/send") {
+                let run = sends == 1 ? self.runID : secondRunID
+                return (200, "{\"run_id\":\"\(run)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON(runID: run))}")
+            }
+            if request.url!.path.contains("/runs/\(self.runID)") {
+                return (200, self.runJSON(status: firstFailed.isSet ? "FAILED" : "QUEUED"))
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED", id: secondRunID)) }
+            // After the first send, the thread shows it failed; after the second, the new parked send.
+            if sends >= 2 { return (200, self.threadJSON(draft: self.parkedDraftJSON(runID: secondRunID))) }
+            if sends == 1 {
+                return (200, self.threadJSON(draft: self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        // The first send's watcher keeps polling (run queued) while the thread already shows it failed.
+        let firstSend = Task { await model.sendNow() }
+        try await waitForEmailTestCondition { model.draft?.status == "failed" }
+        let secondSend = Task { await model.sendNow() }
+        try await waitForEmailTestCondition { model.draft?.runID == secondRunID }
+        #expect(model.canUndoSend)
+        // Now the first run reports its failure to the leftover watcher.
+        firstFailed.set()
+        await firstSend.value
+        secondSend.cancel()
+
+        #expect(model.draft?.runID == secondRunID)
+        #expect(model.draftActionMessage == nil, "the earlier send's failure is not the newer send's")
+        #expect(model.canUndoSend)
+    }
+
     /// A refused Undo (the send was already claimed) keeps watching that send so its
     /// outcome is still reported, instead of leaving a silent "sending" draft.
     @Test func testRefusedUndoKeepsWatchingTheSend() async throws {
@@ -3143,15 +3189,16 @@ import SwiftUI
         """
     }
     /// The draft the server returns while a one-press send is parked in its undo window.
-    private func parkedDraftJSON() -> String {
+    private func parkedDraftJSON(runID: UUID? = nil) -> String {
         draftJSON(revision: 2, body: "Edited before sending", status: "sending")
             .replacingOccurrences(of: "\"approval_id\":\"\(approvalID)\"", with: "\"approval_id\":null")
+            .replacingOccurrences(of: "\"run_id\":\"\(self.runID)\"", with: "\"run_id\":\"\(runID ?? self.runID)\"")
             .replacingOccurrences(of: "\"updated_at\":\"2026-09-11T00:00:00Z\"",
                                   with: "\"updated_at\":\"2026-09-11T00:00:00Z\",\"send_undo_until\":\"2026-09-11T00:00:10Z\"")
     }
-    private func runJSON(status: String) -> String {
+    private func runJSON(status: String, id: UUID? = nil) -> String {
         """
-        {"id":"\(runID)","session_id":"\(threadID)","status":"\(status)","step_count":1,"model_call_count":0,"tool_call_count":0,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
+        {"id":"\(id ?? runID)","session_id":"\(threadID)","status":"\(status)","step_count":1,"model_call_count":0,"tool_call_count":0,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
         """
     }
     private func messageJSON(id: String, sender: String, body: String, sentAt: String) -> String {

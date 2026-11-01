@@ -2260,15 +2260,16 @@ class _TaskIO:
             try:
                 await self.service.approve_send(c.principal, c.run, c.lease, exc.approval_id)
                 await self.service.validate_send(c.principal, c.run, c.lease)
-                await self.call(draft.account_id, "send_message", arguments, operation="send")
             except (ConflictError, AuthorizationError) as refused:
                 async with c.uow_factory() as uow:
                     await uow.approvals.cancel_for_run(c.run.id)
                 c.checkpoint.pending_tool_calls = []
                 c.checkpoint.pending_approval_ids = []
                 return await self._abandon_consented_send(str(refused))
-            except EmailToolError:
-                pass
+            # Dispatch sits outside that handler: once the message may have left,
+            # a conflict in accounting must never make the draft editable again.
+            with suppress(EmailToolError):
+                await self.call(draft.account_id, "send_message", arguments, operation="send")
         except EmailToolError:
             pass
         state = c.checkpoint.working_state.get("email_calls", {}).get("send")

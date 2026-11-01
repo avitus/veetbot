@@ -2464,3 +2464,39 @@ async def test_a_refused_consent_releases_its_claim_so_the_next_press_can_send()
         run = await app.runs.get(second.run_id)
         assert run.status is RunStatus.COMPLETED, run.failure
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
+
+
+async def test_undo_is_refused_once_the_window_has_passed_even_if_unclaimed() -> None:
+    """After send_undo_until the send belongs to the worker even while it is still queued."""
+    from dataclasses import replace
+    from datetime import UTC, datetime, timedelta
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.domain.errors import ConflictError
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    clock = FixedClock(datetime(2026, 10, 31, 12, tzinfo=UTC))
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        clock=clock,
+    ) as app:
+        thread, draft = await _seed_draft(app)
+
+        async def parked(run_id: UUID) -> None:
+            """The worker has not claimed the task yet."""
+            return None
+
+        app.services.email.dispatch = parked
+        await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="press-late-undo",
+        )
+        clock.advance(timedelta(seconds=11))
+        with pytest.raises(ConflictError, match="already"):
+            await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
+        assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sending"

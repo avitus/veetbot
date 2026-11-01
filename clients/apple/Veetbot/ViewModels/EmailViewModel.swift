@@ -1700,6 +1700,9 @@ public final class EmailViewModel: ObservableObject {
                     await self.openThread(threadID, refreshOnly: true)
                     guard self.generation == connection, self.selectedThreadID == threadID, !Task.isCancelled
                     else { return }
+                    // Once the draft belongs to a newer send, this watcher is history: it
+                    // must neither report this run's outcome against it nor touch its key.
+                    guard self.draft?.runID == runID else { return }
                     if run.status == .failed {
                         self.draftActionError = run.failure?.userFacingMessage ?? Self.sendFailedMessage
                     } else if run.status == .cancelled, !self.undoneRunIDs.contains(runID) {

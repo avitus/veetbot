@@ -1667,6 +1667,7 @@ class EmailExperienceService:
                 or task is None
                 or task.send_consent is None
                 or draft.send_undo_until is None
+                or self.clock.now() >= draft.send_undo_until
                 or run.status is not RunStatus.QUEUED
                 or self.cancel_parked_run is None
             ):
