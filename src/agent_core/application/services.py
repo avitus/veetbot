@@ -1019,7 +1019,12 @@ class EmailService(Protocol):
     ) -> EmailOperation: ...
 
     async def undo_send(
-        self, principal: Principal, draft_id: UUID, *, expected_revision: int
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        run_id: UUID | None = None,
     ) -> EmailDraft: ...
 
     async def archive(

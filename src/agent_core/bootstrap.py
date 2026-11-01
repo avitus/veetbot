@@ -5253,17 +5253,18 @@ async def _compose(
                 return 0.0
             return max(0.0, (queued.scheduled_for - clock.now()).total_seconds())
 
+        local_import_tasks: set[asyncio.Task[None]] = set()
         dispatcher = (
             InlineRunDispatcher(
                 executor.execute,
                 unit_of_work_open=uow_factory.is_open,
                 delay_before=queued_delay,
                 sleep=lambda seconds: clock.sleep(seconds),
+                tasks=local_import_tasks,
             )
             if storage == "memory"
             else PostgresRunDispatcher()
         )
-        local_import_tasks: set[asyncio.Task[None]] = set()
         if people_service is not None:
             if storage == "memory":
 

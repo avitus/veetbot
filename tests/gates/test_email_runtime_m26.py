@@ -2105,6 +2105,14 @@ async def test_draft_in_a_planned_thread_session_starts_no_server() -> None:
     assert started == {}
 
 
+async def _drain(app: Composition) -> None:
+    """Let the in-memory dispatcher finish every send it parked for its window."""
+    dispatcher = getattr(app.services.email.dispatch, "__self__", None)
+    drain = getattr(dispatcher, "drain", None)
+    if drain is not None:
+        await drain()
+
+
 def _fixed_clock() -> FixedClock:
     """A controllable clock: the inline dispatcher waits out a parked send's window on it
     without wall-clock time passing."""
@@ -2136,6 +2144,7 @@ async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_r
             source_revision=thread.revision,
             idempotency_key="send-once",
         )
+        await _drain(app)
         run = await app.runs.get(operation.run_id)
         assert run.status is RunStatus.COMPLETED, run.failure
         assert run.priority == 0
@@ -2242,6 +2251,7 @@ async def test_undo_is_refused_once_the_send_was_claimed() -> None:
             source_revision=thread.revision,
             idempotency_key="send-claimed",
         )
+        await _drain(app)
         with pytest.raises(ConflictError, match="already"):
             await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
@@ -2298,6 +2308,7 @@ async def test_consented_send_ends_without_dispatch_when_mail_arrives_before_the
             source_revision=thread.revision,
             idempotency_key="send-raced",
         )
+        await _drain(app)
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
         current = await app.services.email.draft(app.principal, draft.id)
         assert current.stale and current.status.value == "ready"
@@ -2466,6 +2477,7 @@ async def test_a_refused_consent_releases_its_claim_so_the_next_press_can_send()
             source_revision=thread.revision,
             idempotency_key="press-refused",
         )
+        await _drain(app)
         assert (await app.runs.get(first.run_id)).status is RunStatus.COMPLETED
         after = await app.services.email.draft(app.principal, draft.id)
         assert after.status.value == "ready" and after.send_claim_id is None
@@ -2478,6 +2490,7 @@ async def test_a_refused_consent_releases_its_claim_so_the_next_press_can_send()
             source_revision=thread.revision,
             idempotency_key="press-again",
         )
+        await _drain(app)
         run = await app.runs.get(second.run_id)
         assert run.status is RunStatus.COMPLETED, run.failure
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
@@ -2521,7 +2534,8 @@ async def test_undo_is_refused_once_the_window_has_passed_even_if_unclaimed() ->
 
 async def test_in_memory_dispatch_waits_out_the_undo_window_and_honours_undo() -> None:
     """The in-process dispatcher parks a consented send for its window like a worker's claim
-    would, and a send taken back during the window never runs (ADR-0279)."""
+    would: the request returns with the run queued, the window passes before dispatch, and a
+    send taken back during the window never runs (ADR-0279)."""
     import asyncio
     from dataclasses import replace
     from datetime import timedelta
@@ -2544,6 +2558,8 @@ async def test_in_memory_dispatch_waits_out_the_undo_window_and_honours_undo() -
             source_revision=thread.revision,
             idempotency_key="press-waits",
         )
+        assert sent.status == RunStatus.QUEUED.value, "the request returns while the run is parked"
+        await _drain(app)
         assert clock.now() >= before + timedelta(seconds=10), "the window passed before dispatch"
         assert (await app.runs.get(sent.run_id)).status is RunStatus.COMPLETED
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
@@ -2565,26 +2581,78 @@ async def test_in_memory_dispatch_waits_out_the_undo_window_and_honours_undo() -
             await genuine_sleep(seconds)
 
         clock.sleep = held  # type: ignore[method-assign]
-        pressed = asyncio.create_task(
-            app.services.email.send(
-                app.principal,
-                draft.id,
-                expected_revision=1,
-                source_revision=thread.revision,
-                idempotency_key="press-undone",
-            )
+        pressed = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="press-undone",
         )
-        for _ in range(200):
-            await asyncio.sleep(0)
-            parked = await app.services.email.draft(app.principal, draft.id)
-            if parked.status.value == "sending" and parked.run_id is not None:
-                break
-        restored = await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
+        parked = await app.services.email.draft(app.principal, draft.id)
+        assert parked.status.value == "sending" and parked.run_id == pressed.run_id
+        restored = await app.services.email.undo_send(
+            app.principal, draft.id, expected_revision=1, run_id=pressed.run_id
+        )
         assert restored.status.value == "ready"
         window.set()
-        outcome = await pressed
-        assert (await app.runs.get(outcome.run_id)).status is RunStatus.CANCELLED
+        await _drain(app)
+        assert (await app.runs.get(pressed.run_id)).status is RunStatus.CANCELLED
         async with app.uow_factory() as uow:
-            calls = await uow.invocations.list_for_run(outcome.run_id, app.principal)
+            calls = await uow.invocations.list_for_run(pressed.run_id, app.principal)
         assert calls == []
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "ready"
+
+
+async def test_undo_names_the_send_it_takes_back() -> None:
+    """A late Undo meant for an earlier press cannot cancel a later press of the same draft."""
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from agent_core.domain.errors import ConflictError
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+
+        async def parked(run_id: UUID) -> None:
+            """The worker has not claimed the task yet."""
+            return None
+
+        app.services.email.dispatch = parked
+        first = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="press-a",
+        )
+        restored = await app.services.email.undo_send(
+            app.principal, draft.id, expected_revision=1, run_id=first.run_id
+        )
+        assert restored.status.value == "ready"
+        second = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="press-b",
+        )
+        assert second.run_id != first.run_id
+        with pytest.raises(ConflictError, match="no longer the one"):
+            await app.services.email.undo_send(
+                app.principal, draft.id, expected_revision=1, run_id=first.run_id
+            )
+        with pytest.raises(ConflictError, match="no longer the one"):
+            await app.services.email.undo_send(
+                app.principal, draft.id, expected_revision=1, run_id=uuid4()
+            )
+        assert (await app.runs.get(second.run_id)).status is RunStatus.QUEUED
+        assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sending"
+        taken = await app.services.email.undo_send(
+            app.principal, draft.id, expected_revision=1, run_id=second.run_id
+        )
+        assert taken.status.value == "ready"
+        assert (await app.runs.get(second.run_id)).status is RunStatus.CANCELLED

@@ -264,6 +264,8 @@ async def _consented_send_notification() -> None:
             source_revision=thread.revision,
             idempotency_key="consented-send",
         )
+        dispatcher = getattr(app.services.email.dispatch, "__self__", None)
+        await dispatcher.drain()  # type: ignore[union-attr]
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
         async with app.uow_factory() as uow:

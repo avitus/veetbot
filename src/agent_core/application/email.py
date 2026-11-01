@@ -1645,9 +1645,18 @@ class EmailExperienceService:
         )
 
     async def undo_send(
-        self, principal: Principal, draft_id: UUID, *, expected_revision: int
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        run_id: UUID | None = None,
     ) -> EmailDraft:
-        """Cancel a send still parked in its undo window; a claimed send is on its way."""
+        """Cancel a send still parked in its undo window; a claimed send is on its way.
+
+        `run_id` names the send being taken back, so a delayed or repeated Undo meant
+        for an earlier press cannot cancel a later press of the unchanged draft.
+        """
         require_scope(principal, "email.write")
         async with self.uow_factory() as uow, uow.email.lock(principal):
             draft = await self._draft(uow.email, principal, draft_id)
@@ -1656,6 +1665,8 @@ class EmailExperienceService:
             if draft.run_id is None and draft.status is EmailDraftStatus.READY:
                 # Already back in editing: a repeated Undo changes nothing.
                 return draft
+            if run_id is not None and draft.run_id != run_id:
+                raise ConflictError("That send is no longer the one on this reply.")
             run = None if draft.run_id is None else await uow.runs.get(draft.run_id, principal)
             task = (
                 None

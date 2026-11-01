@@ -1587,6 +1587,7 @@ import SwiftUI
 
         let undo = try #require(requests.snapshot.first { $0.url!.path.hasSuffix("/send-undo") })
         #expect(try Self.archiveRequestBody(undo)["expected_revision"] as? Double == 2)
+        #expect(try Self.archiveRequestBody(undo)["run_id"] as? String == runID.uuidString, "Undo names the send it takes back")
         #expect(model.draft?.status == "ready")
         #expect(model.draft?.canEdit == true)
         #expect(!model.canUndoSend)

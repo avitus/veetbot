@@ -47,6 +47,12 @@ class SendRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=200)
 
 
+class SendUndoRequest(RevisionRequest):
+    """Undo names the send it takes back; an older client may omit it."""
+
+    run_id: UUID | None = None
+
+
 class ArchiveRequest(RevisionRequest):
     archived: bool = Field(strict=True)
     idempotency_key: str = Field(min_length=1, max_length=200)
@@ -319,12 +325,15 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
     )
     async def send_undo(
         draft_id: UUID,
-        body: RevisionRequest,
+        body: SendUndoRequest,
         authenticated: Annotated[Principal, secured("email.write")],
     ) -> dict[str, object]:
         """Cancel a send still parked in its undo window and return the draft to editing."""
         draft = await service.undo_send(
-            authenticated, draft_id, expected_revision=body.expected_revision
+            authenticated,
+            draft_id,
+            expected_revision=body.expected_revision,
+            run_id=body.run_id,
         )
         return draft.model_dump(mode="json")
 
