@@ -1635,6 +1635,7 @@ import SwiftUI
     /// outcome is still reported, instead of leaving a silent "sending" draft.
     @Test func testRefusedUndoKeepsWatchingTheSend() async throws {
         let requests = EmailRequestRecorder()
+        let failed = EmailTestFlag()
         let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
@@ -1645,9 +1646,10 @@ import SwiftUI
             if request.url!.path.hasSuffix("/send-undo") {
                 return (409, Self.error("invalid_state", "This reply is already on its way and can't be undone."))
             }
-            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("/send-undo") }
-            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: undone ? "FAILED" : "QUEUED")) }
-            return (200, self.threadJSON(draft: undone
+            // The run stays queued until the test releases its failure, so the refusal
+            // is asserted before the restarted watcher can report anything.
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: failed.isSet ? "FAILED" : "QUEUED")) }
+            return (200, self.threadJSON(draft: failed.isSet
                 ? self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")
                 : self.parkedDraftJSON()))
         }
@@ -1658,6 +1660,7 @@ import SwiftUI
         await model.undoSend()
         #expect(model.draftActionMessage == "This reply is already on its way and can't be undone.")
         // The restarted watcher reports the send's own outcome once it lands.
+        failed.set()
         try await waitForEmailTestCondition { model.draftActionMessage == EmailViewModel.sendFailedMessage }
         #expect(model.draft?.status == "failed")
     }

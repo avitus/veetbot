@@ -1212,6 +1212,24 @@ class EmailExperienceService:
                     raise ConflictError(
                         "An earlier version of this reply is already on its way to being sent."
                     )
+                # A press and an older client's proposal are different requests:
+                # neither is answered with the other's run (ADR-0279).
+                if kind == "send" and consented and old.send_consent is None:
+                    raise ConflictError(
+                        "This reply already has a send waiting for your approval. "
+                        "Approve or deny that first."
+                    )
+                if kind == "send" and not consented and old.send_consent is not None:
+                    raise ConflictError("This reply is already on its way. Undo it first.")
+                if (
+                    kind == "send"
+                    and consented
+                    and old.send_consent is not None
+                    and old.send_consent.source_revision != source_revision
+                ):
+                    raise ConflictError(
+                        "New mail arrived on this thread. Read it, then send again."
+                    )
                 if (
                     kind == "archive"
                     and old.archive_consent is not None

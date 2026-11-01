@@ -2337,3 +2337,70 @@ async def test_new_mail_during_the_undo_window_returns_the_parked_send_to_editin
             ),
         )
         assert edited.revision == 2 and edited.status.value == "ready" and not edited.stale
+
+
+async def test_a_press_and_a_proposal_for_the_same_revision_never_coalesce() -> None:
+    """A one-press send and an older-client proposal are different requests: neither may be
+    answered with the other's run, and a press at another displayed thread revision is refused."""
+    from dataclasses import replace
+
+    from agent_core.domain.email import EmailDraftEdit
+    from agent_core.domain.errors import ConflictError
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+
+        async def parked(run_id: UUID) -> None:
+            return None
+
+        app.services.email.dispatch = parked
+        proposal = await app.services.email.submit_task(
+            app.principal, kind="send", draft_id=draft.id, expected_revision=1
+        )
+        with pytest.raises(ConflictError, match="waiting for your approval"):
+            await app.services.email.send(
+                app.principal,
+                draft.id,
+                expected_revision=1,
+                source_revision=thread.revision,
+                idempotency_key="press-over-proposal",
+            )
+        # Editing cancels the parked proposal and advances the revision.
+        await app.services.email.edit_draft(
+            app.principal,
+            draft.id,
+            EmailDraftEdit(
+                expected_revision=1,
+                source_revision=draft.source_revision,
+                to=draft.to,
+                cc=draft.cc,
+                bcc=draft.bcc,
+                subject=draft.subject,
+                body="Pressed once.",
+            ),
+        )
+        assert (await app.runs.get(proposal.run_id)).status is RunStatus.CANCELLED
+        pressed = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=2,
+            source_revision=thread.revision,
+            idempotency_key="press-two",
+        )
+        assert (await app.runs.get(pressed.run_id)).status is RunStatus.QUEUED
+        with pytest.raises(ConflictError, match="Undo"):
+            await app.services.email.submit_task(
+                app.principal, kind="send", draft_id=draft.id, expected_revision=2
+            )
+        with pytest.raises(ConflictError, match="New mail"):
+            await app.services.email.send(
+                app.principal,
+                draft.id,
+                expected_revision=2,
+                source_revision=thread.revision + 1,
+                idempotency_key="press-three",
+            )
