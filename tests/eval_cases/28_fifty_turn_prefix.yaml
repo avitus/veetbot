@@ -16,8 +16,9 @@ session:
   # window; the memory citation framing (context-builder@14) made the prefix
   # ~190 estimated tokens longer, so the stressor was 1700 bytes. The
   # artifact.delete instruction sentence (ADR-0277) left 1700 over the window
-  # on the final turn, so it is 1680 bytes now.
-  prompt_padding_bytes: 1680
+  # on the final turn, so it was 1680 bytes. The debugging instruction sentences
+  # (ADR-0281) made the prefix about 100 estimated tokens longer, so it is 1640 now.
+  prompt_padding_bytes: 1640
   revoke_scope: artifact.write
   revoke_scope_turn: 10
   memory_write_turn: 20

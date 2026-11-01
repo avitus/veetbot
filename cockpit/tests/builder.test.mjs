@@ -167,6 +167,22 @@ test('preview renders the synthetic weather fixture as visible text and a PNG', 
   assert.equal(Buffer.from(preview.png, 'base64').subarray(1, 4).toString(), 'PNG');
 });
 
+test('preview renders supplied live feed values and labels them live', () => {
+  const files = Object.fromEntries(readPackage(path.join(examples, 'weather')).files);
+  const typical = JSON.parse(files['fixtures/typical.json']);
+  const [id] = Object.keys(typical.feeds);
+  const live = {
+    ...typical,
+    feeds: { [id]: { ...typical.feeds[id], data: { ...typical.feeds[id].data, temperature: 37 } } },
+  };
+  const input = JSON.stringify({ files, preview: { size: 'sm', live: JSON.stringify(live) } });
+  const run = spawnSync(process.execPath, [cli, 'build', '--stdin', 'weather'], { encoding: 'utf8', input });
+  assert.equal(run.status, 0, run.stderr);
+  const { preview } = JSON.parse(run.stdout);
+  assert.equal(preview.fixture, 'live');
+  assert.match(preview.text, /37°/);
+});
+
 test('preview reports a browser-only render failure without echoing the exception', () => {
   const files = Object.fromEntries(readPackage(path.join(examples, 'weather')).files);
   files['widget.tsx'] = files['widget.tsx'].replace('const small =', "if (typeof window !== 'undefined') throw new Error('private-render-value');\n  const small =");

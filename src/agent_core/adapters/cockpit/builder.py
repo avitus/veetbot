@@ -90,7 +90,8 @@ def _preview(report: dict[str, Any], selection: Mapping[str, str]) -> WidgetPrev
         raise WidgetBuildFailedError("The preview response is missing.")
     fixture, size, text, encoded = (value.get(k) for k in ("fixture", "size", "text", "png"))
     if (
-        fixture != selection.get("fixture", "fixtures/typical.json")
+        fixture
+        != ("live" if "live" in selection else selection.get("fixture", "fixtures/typical.json"))
         or size != selection.get("size", sizes[0])
         or not isinstance(size, str)
         or size not in {"sm", "md", "lg", "tall", "wide"}

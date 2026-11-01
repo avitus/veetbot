@@ -11,6 +11,7 @@ from datetime import datetime
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.code import CODE_WRITE_TOOL_NAMES
 from agent_core.domain.delegations import (
     ChildOutcome,
     Delegation,
@@ -76,7 +77,13 @@ WriteProbe = Callable[[str], None]
 # child-run behavior (ADR-0083). `cockpit.widget.write` commits to a public
 # branch, which only the owner's own chat does (ADR-0240).
 FORBIDDEN_CHILD_TOOLS = frozenset(
-    {"delegate.run", "skill.manage", "device.sms.send", "cockpit.widget.write"}
+    {
+        "delegate.run",
+        "skill.manage",
+        "device.sms.send",
+        "cockpit.widget.write",
+        *CODE_WRITE_TOOL_NAMES,
+    }
 )
 # json.dumps escapes neither < nor >, so a brief naming the envelope tag could
 # read to the child model as closing the untrusted-data boundary.

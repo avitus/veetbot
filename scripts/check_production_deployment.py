@@ -80,12 +80,13 @@ def _model_policy_failures(settings: Settings) -> list[str]:
 
 
 def _image_failures(settings: Settings) -> list[str]:
-    """The run sandbox image and the Cockpit builder image must both be present."""
+    """The run sandbox, Cockpit builder and code sandbox images must all be present."""
 
     failures: list[str] = []
     for label, reference in (
         ("sandbox image", settings.sandbox_image),
         ("Cockpit builder image", settings.cockpit_builder_image),
+        ("code sandbox image", settings.code_sandbox_image),
     ):
         if _run("docker", "image", "inspect", reference).returncode != 0:
             failures.append(f"{label} is unavailable: {reference}")

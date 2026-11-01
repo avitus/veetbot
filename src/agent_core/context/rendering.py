@@ -13,6 +13,7 @@ from agent_core.context.estimator import canonical_json_bytes
 from agent_core.domain.agents import AgentSpec
 from agent_core.domain.artifacts import ARTIFACT_DELETE_TOOL_NAME
 from agent_core.domain.captures import CAPTURE_READER_TOOL_NAME
+from agent_core.domain.code import CODE_TOOL_NAMES, RUN_INSPECT_TOOL_NAME
 from agent_core.domain.context import ContextPlan, WorkingState
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -53,8 +54,11 @@ DEFERRED_INDEX_DISCOVERED_HEADING = "Discovered tools in the deferred tool index
 # ADR-0261: pinned and reached through tool.call like any deferred tool, but the
 # capture marker that prints its call is its advertisement, so the index renders
 # no entry for it and it uses none of the index's caps. ADR-0277 adds
-# artifact.delete, which the default agent instructions advertise instead.
-UNINDEXED_DEFERRED_TOOLS = frozenset({CAPTURE_READER_TOOL_NAME, ARTIFACT_DELETE_TOOL_NAME})
+# artifact.delete, which the default agent instructions advertise instead, and
+# ADR-0281 adds the debugging and code tools the same way.
+UNINDEXED_DEFERRED_TOOLS = frozenset(
+    {CAPTURE_READER_TOOL_NAME, ARTIFACT_DELETE_TOOL_NAME, RUN_INSPECT_TOOL_NAME, *CODE_TOOL_NAMES}
+)
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
 _INDEX_SUMMARY_LIMIT = 200
 

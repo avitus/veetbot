@@ -326,3 +326,4 @@ implementation without one.
 - [ADR-0277: Chat deletes files it generated in a chat (Accepted)](0277-chat-deletes-files-it-generated.md)
 - [ADR-0278: Send proposals are interactive work and read the mailbox once (Proposed)](0278-send-proposals-are-interactive-work.md)
 - [ADR-0279: One-press Send with Undo (Accepted)](0279-one-press-send-with-undo.md)
+- [ADR-0281: Veetbot debugs and proposes changes to its own code (Accepted)](0281-veetbot-debugs-and-changes-its-own-code.md)

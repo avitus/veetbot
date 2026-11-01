@@ -72,6 +72,19 @@ async function openBoard(engine, widgets, feeds = {}, extra = {}) {
   await page.evaluate((snapshot) => window.cockpitHost.apply(snapshot), {
     type: 'snapshot', theme: 'light', platform: 'mac', offsetMs: 0, widgets, feeds, ...extra,
   });
+  // The host reads each message's data: hiding the realm's answers here works in every engine.
+  await page.evaluate(() => {
+    window.cockpitDropPongs = () => {
+      const { get } = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'data');
+      Object.defineProperty(MessageEvent.prototype, 'data', {
+        configurable: true,
+        get() {
+          const data = get.call(this);
+          return data?.type === 'pong' ? null : data;
+        },
+      });
+    };
+  });
   const log = () => page.evaluate(() => window.cockpitNativeLog ?? []);
   const settled = async (count) => {
     await page.waitForFunction(
@@ -187,6 +200,53 @@ for (const [name, engine] of ENGINES) {
       // The remounted realm renders the remaining widget without the quarantined one.
       await board.page.waitForFunction(() => (window.cockpitNativeLog ?? []).filter((message) => message.type === 'loaded' && message.slug === 'approvals-waiting').length >= 2, null, { timeout: 15000 });
       assert.equal(await board.realm().$$eval('.ck-tile', (elements) => elements.length), 1);
+    } finally {
+      await board.browser.close();
+    }
+  });
+
+  test(`${name}: a page that was asleep does not count against a widget`, { timeout: 60000 }, async () => {
+    const board = await openBoard(engine, [await reference('approvals-waiting')]);
+    try {
+      await board.settled(1);
+      // A sleeping Mac stops the host's timer: the next tick finds the clock a minute on.
+      await board.page.evaluate(() => {
+        const real = Date.now.bind(Date);
+        Date.now = () => real() + 60_000;
+      });
+      await board.page.waitForTimeout(2500);
+      assert.deepEqual((await board.log()).filter((message) => message.type === 'quarantined'), []);
+    } finally {
+      await board.browser.close();
+    }
+  });
+
+  test(`${name}: a hidden page does not count against a widget`, { timeout: 60000 }, async () => {
+    const board = await openBoard(engine, [await reference('approvals-waiting')]);
+    try {
+      await board.settled(1);
+      // A hidden page's realm answers late or not at all, while the host's timer can still run.
+      await board.page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        window.cockpitDropPongs();
+      });
+      await board.page.waitForTimeout(6500);
+      assert.deepEqual((await board.log()).filter((message) => message.type === 'quarantined'), []);
+    } finally {
+      await board.browser.close();
+    }
+  });
+
+  test(`${name}: a realm that stops answering a running host is still quarantined`, { timeout: 60000 }, async () => {
+    const board = await openBoard(engine, [await reference('approvals-waiting')]);
+    try {
+      await board.settled(1);
+      await board.page.evaluate(() => {
+        window.cockpitDropPongs();
+      });
+      await board.page.waitForFunction(() => (window.cockpitNativeLog ?? []).some((message) => message.type === 'quarantined'), null, { timeout: 15000 });
+      const quarantined = (await board.log()).filter((message) => message.type === 'quarantined');
+      assert.deepEqual(quarantined.map(({ slug, reason }) => ({ slug, reason })), [{ slug: 'approvals-waiting', reason: 'unresponsive' }]);
     } finally {
       await board.browser.close();
     }

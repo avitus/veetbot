@@ -185,7 +185,21 @@ class JobExecution:
             await event(
                 "job.broker.requested", {"operation": call, "call_id": call_id, "trial": trial}
             )
-            return await broker.dispatch(call, arguments, call_id)
+            started = self.clock.now()
+            result = await broker.dispatch(call, arguments, call_id)
+            # Outcome and time only, so a slow or failed run shows where it stopped.
+            await event(
+                "job.broker.completed",
+                {
+                    "operation": call,
+                    "call_id": call_id,
+                    "trial": trial,
+                    "outcome": result["status"],
+                    "reason_code": result.get("reason_code"),
+                    "duration_ms": int((self.clock.now() - started).total_seconds() * 1000),
+                },
+            )
+            return result
 
         async with asyncio.timeout(access.timeout_seconds):
             result = await self.runner(access.timeout_seconds).run(

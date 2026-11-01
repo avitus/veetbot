@@ -251,7 +251,8 @@ which also runs `client-build` to build the downloadable client zipapp.
 `docs-serve` serves the documentation locally, `sandbox-image` builds the
 development sandbox image, `cockpit-builder-image` builds the development
 Cockpit builder image, which `test-sandbox` also needs
-([cockpit.md](cockpit.md)), and `production-check` validates a host-native
+([cockpit.md](cockpit.md)), `code-sandbox-image` builds the development image
+behind `code.test` (ADR-0281), and `production-check` validates a host-native
 production deployment. `browser-image` builds the browser-profile service
 image, and `test-browser-image` measures what its browser asks for on its own
 (ADR-0152); both need Docker and stay outside `make check`.

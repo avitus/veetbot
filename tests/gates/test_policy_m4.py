@@ -1443,8 +1443,8 @@ async def test_prompt_not_authz() -> None:
 
 def test_scope_grammar() -> None:
     assert (
-        len(PLATFORM_SCOPES) == 50
-    )  # ADR-0268 adds jobs.write and jobs.run to the previous 48 scopes.
+        len(PLATFORM_SCOPES) == 52
+    )  # ADR-0268 added jobs.write and jobs.run; ADR-0281 adds code.read and code.write.
     assert {"jobs.write", "jobs.run"} <= PLATFORM_SCOPES
     assert {
         "schedule.read",

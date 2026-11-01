@@ -1273,6 +1273,7 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
         "schedule.pause",
         "schedule.resume",
         "schedule.cancel",
+        "run.inspect",
     }
     assert {
         "mcp.gmail_read.search_threads",

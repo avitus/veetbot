@@ -1,0 +1,21 @@
+# Local trees hold generated and private files that a release, cut from `git
+# archive`, does not. Nothing here may reach /source (ADR-0281).
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*
+!.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.p8
+**/.venv
+**/node_modules
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/.hypothesis
+**/.next
+**/build
+**/.build
+**/DerivedData

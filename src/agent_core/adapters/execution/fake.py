@@ -178,8 +178,8 @@ class FakeExecutionEnvironment:
         now = self._clock.now()
         for environment_id, specification in tuple(self._live.items()):
             expired = self._expiry[environment_id] <= now
-            # As in the Docker adapter, a build's own deadline is its lease.
-            if specification.purpose is SandboxPurpose.COCKPIT_BUILD:
+            # As in the Docker adapter, a build's or check's own deadline is its lease.
+            if specification.purpose in (SandboxPurpose.COCKPIT_BUILD, SandboxPurpose.CODE_CHECK):
                 if expired:
                     stale.append(environment_id)
                 continue

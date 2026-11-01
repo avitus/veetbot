@@ -14,6 +14,7 @@ PROCESS_ROOT="$TEST_ROOT/proc"
 LOG_FILE="$TEST_ROOT/commands.log"
 DOCKER_STATE="$TEST_ROOT/docker-production-image"
 BUILDER_STATE="$TEST_ROOT/docker-production-builder-image"
+CODE_SANDBOX_STATE="$TEST_ROOT/docker-production-code-sandbox-image"
 FAIL_MARKER="$TEST_ROOT/docs-switch-failed"
 WEBSITE_FAIL_MARKER="$TEST_ROOT/website-switch-failed"
 SERVICES_STOPPED="$TEST_ROOT/services-stopped"
@@ -58,6 +59,7 @@ ln -s "$WEBSITE_ROOT/releases/$PREVIOUS_ID" "$WEBSITE_ROOT/current"
 ln -s "$DEPLOY_ROOT/releases/$TARGET_ID" "$PROCESS_ROOT/4242/cwd"
 printf '%s\n' previous-image-id >"$DOCKER_STATE"
 printf '%s\n' previous-builder-id >"$BUILDER_STATE"
+printf '%s\n' previous-code-sandbox-id >"$CODE_SANDBOX_STATE"
 : >"$LOG_FILE"
 
 write_stub() {
@@ -130,6 +132,23 @@ write_stub docker '
       printf "%s\n" target-builder-id >"$VEETBOT_TEST_BUILDER_STATE"
     elif [[ "$2" == previous-builder-id ]]; then
       printf "%s\n" previous-builder-id >"$VEETBOT_TEST_BUILDER_STATE"
+    else
+      exit 1
+    fi
+  elif [[ "${1:-}" == image && "${2:-}" == inspect && " $* " == *" veetbot-code-sandbox:"* ]]; then
+    # A release from before ADR-0281 has no code sandbox image to roll back to.
+    if [[ "${3:-}" == --format ]]; then
+      [[ "${5:-}" == veetbot-code-sandbox:production && -f "$VEETBOT_TEST_CODE_SANDBOX_STATE" ]]
+      cat "$VEETBOT_TEST_CODE_SANDBOX_STATE"
+    else
+      [[ "${3:-}" == "veetbot-code-sandbox:$VEETBOT_TEST_TARGET_ID" ]]
+      [[ "${VEETBOT_TEST_TARGET_HAS_CODE_SANDBOX:-1}" == 1 ]]
+    fi
+  elif [[ "${1:-}" == tag && "${3:-}" == veetbot-code-sandbox:production ]]; then
+    if [[ "$2" == "veetbot-code-sandbox:$VEETBOT_TEST_TARGET_ID" ]]; then
+      printf "%s\n" target-code-sandbox-id >"$VEETBOT_TEST_CODE_SANDBOX_STATE"
+    elif [[ "$2" == previous-code-sandbox-id ]]; then
+      printf "%s\n" previous-code-sandbox-id >"$VEETBOT_TEST_CODE_SANDBOX_STATE"
     else
       exit 1
     fi
@@ -217,6 +236,7 @@ run_rollback() {
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_DOCKER_STATE="$DOCKER_STATE" \
   VEETBOT_TEST_BUILDER_STATE="$BUILDER_STATE" \
+  VEETBOT_TEST_CODE_SANDBOX_STATE="$CODE_SANDBOX_STATE" \
   VEETBOT_TEST_SERVICES_STOPPED="$SERVICES_STOPPED" \
   VEETBOT_TEST_TARGET_ID="$TARGET_ID" \
   VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$TARGET_ID}" \
@@ -267,6 +287,11 @@ grep -Fq 'docker tag previous-image-id agent-core-sandbox:production' "$LOG_FILE
   exit 1
 }
 grep -Fq 'docker tag previous-builder-id veetbot-cockpit-builder:production' "$LOG_FILE"
+[[ "$(cat "$CODE_SANDBOX_STATE")" == previous-code-sandbox-id ]] || {
+  printf 'production code sandbox image tag was not restored\n' >&2
+  exit 1
+}
+grep -Fq 'docker tag previous-code-sandbox-id veetbot-code-sandbox:production' "$LOG_FILE"
 
 rm -f -- "$WEBSITE_FAIL_MARKER"
 : >"$LOG_FILE"
@@ -326,14 +351,15 @@ fi
 [[ "$(basename "$(readlink -f "$WEBSITE_ROOT/current")")" == "$TARGET_ID" ]]
 [[ "$(cat "$DOCKER_STATE")" == target-image-id ]]
 [[ "$(cat "$BUILDER_STATE")" == target-builder-id ]]
+[[ "$(cat "$CODE_SANDBOX_STATE")" == target-code-sandbox-id ]]
 grep -Fq \
   'systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
 [[ "$(grep -c '^curl ' "$LOG_FILE")" == 121 ]]
 [[ "$(grep -cFx 'sleep 1' "$LOG_FILE")" == 120 ]]
 
-# A target released before Milestone 35, on a host that never had a builder,
-# rolls back without touching any builder tag.
+# A target released before Milestone 35, on a host that never had a builder or
+# a code sandbox, rolls back without touching either tag.
 for pointer in "$DEPLOY_ROOT/current" "$DOCS_ROOT/current" "$WEBSITE_ROOT/current"; do
   root="$(dirname "$pointer")"
   [[ "$pointer" == "$DEPLOY_ROOT/current" ]] && root="$DEPLOY_ROOT"
@@ -341,9 +367,9 @@ for pointer in "$DEPLOY_ROOT/current" "$DOCS_ROOT/current" "$WEBSITE_ROOT/curren
   ln -s "$root/releases/$PREVIOUS_ID" "$pointer"
 done
 printf '%s\n' previous-image-id >"$DOCKER_STATE"
-/bin/rm -f -- "$BUILDER_STATE"
+/bin/rm -f -- "$BUILDER_STATE" "$CODE_SANDBOX_STATE"
 : >"$LOG_FILE"
-if ! VEETBOT_TEST_TARGET_HAS_BUILDER=0 run_rollback >"$TEST_ROOT/pre-cockpit.out" 2>&1; then
+if ! VEETBOT_TEST_TARGET_HAS_BUILDER=0 VEETBOT_TEST_TARGET_HAS_CODE_SANDBOX=0 run_rollback >"$TEST_ROOT/pre-cockpit.out" 2>&1; then
   tail -n 5 "$TEST_ROOT/pre-cockpit.out" >&2
   printf 'rollback to a release without a builder image failed\n' >&2
   exit 1
@@ -351,6 +377,11 @@ fi
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$TARGET_ID" ]]
 [[ "$(cat "$DOCKER_STATE")" == target-image-id ]]
 [[ ! -e "$BUILDER_STATE" ]]
+[[ ! -e "$CODE_SANDBOX_STATE" ]]
+if grep -Fq 'veetbot-code-sandbox:production' <(grep '^docker tag' "$LOG_FILE"); then
+  printf 'rollback to a release without a code sandbox image retagged one\n' >&2
+  exit 1
+fi
 if grep -Fq 'docker tag veetbot-cockpit-builder' "$LOG_FILE" \
   || grep -Fq 'veetbot-cockpit-builder:production' <(grep '^docker tag' "$LOG_FILE"); then
   printf 'rollback to a release without a builder image retagged a builder\n' >&2

@@ -209,6 +209,10 @@ class Settings:
     auth_scopes: frozenset[str] = frozenset()
     sandbox_image: str = "agent-core-sandbox:dev"
     cockpit_builder_image: str = "veetbot-cockpit-builder:dev"
+    code_tools_enabled: bool = False
+    code_source_root: Path | None = None
+    code_sandbox_image: str = "veetbot-code-sandbox:dev"
+    code_proposals_enabled: bool = False
     # The GitHub App that commits widgets; only the maintenance role sets the key file.
     cockpit_github_repository: str | None = None
     cockpit_github_branch: str = "cockpit/widgets"
@@ -2081,6 +2085,23 @@ def _load_settings(
     sandbox_image = values.get("AGENT_SANDBOX_IMAGE", "agent-core-sandbox:dev").strip()
     if not sandbox_image:
         raise ConfigurationError("AGENT_SANDBOX_IMAGE must not be empty")
+    code_tools_enabled = _parse_flag(values, "AGENT_CODE_TOOLS_ENABLED")
+    code_source_root = (
+        Path(values["AGENT_CODE_SOURCE_ROOT"]) if values.get("AGENT_CODE_SOURCE_ROOT") else None
+    )
+    if code_tools_enabled and code_source_root is None:
+        raise ConfigurationError("AGENT_CODE_TOOLS_ENABLED requires AGENT_CODE_SOURCE_ROOT")
+    code_sandbox_image = values.get("AGENT_CODE_SANDBOX_IMAGE", "veetbot-code-sandbox:dev").strip()
+    if not code_sandbox_image:
+        raise ConfigurationError("AGENT_CODE_SANDBOX_IMAGE must not be empty")
+    if _parse_flag(values, "AGENT_CODE_PROPOSALS_ENABLED") and not (
+        code_tools_enabled and cockpit_enabled
+    ):
+        # The Cockpit's maintenance sweep holds the GitHub key that opens the pull request.
+        raise ConfigurationError(
+            "AGENT_CODE_PROPOSALS_ENABLED requires AGENT_CODE_TOOLS_ENABLED and "
+            "AGENT_COCKPIT_ENABLED"
+        )
     cockpit_builder_image = values.get(
         "AGENT_COCKPIT_BUILDER_IMAGE", "veetbot-cockpit-builder:dev"
     ).strip()
@@ -2298,6 +2319,11 @@ def _load_settings(
         auth_scopes=auth_scopes,
         sandbox_image=sandbox_image,
         cockpit_builder_image=cockpit_builder_image,
+        code_tools_enabled=code_tools_enabled,
+        code_source_root=code_source_root,
+        code_sandbox_image=code_sandbox_image,
+        code_proposals_enabled=code_tools_enabled
+        and _parse_flag(values, "AGENT_CODE_PROPOSALS_ENABLED"),
         cockpit_github_repository=cockpit_github_repository,
         cockpit_github_branch=cockpit_github_branch,
         cockpit_github_app_id=cockpit_github_app_id,

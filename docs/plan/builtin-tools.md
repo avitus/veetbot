@@ -181,6 +181,7 @@ cockpit.feed.publish          capability  cockpit
 
 Fifty-three model-callable builtin tools in total: the original roster of
 eight, the forty-three above, and the two media-generation tools in ADR-0140.
+ADR-0281 adds five more, [listed below](#platform-diagnostics-and-code-tools).
 ADR-0261 added `artifact.read_capture`, which
 [tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
 declares and classifies, and ADR-0277 added `artifact.delete`, which
@@ -2079,3 +2080,65 @@ owner-chat-only, run serially, and have a 660-second timeout and 64-KiB output
 limit. The install tool may be repeated with the same preparation IDs to resume
 pending publication. Preparation and job errors carry bounded untrusted repair
 feedback. See [the installation design](cockpit.md#one-approval-for-widget-installation-adr-0270).
+
+## Platform diagnostics and code tools
+
+[ADR-0281](../adr/0281-veetbot-debugs-and-changes-its-own-code.md) adds the
+`run` and `code` domains so the assistant can establish why something of its own
+failed, read the code involved, test a repair and offer it for review. All five
+tools are unindexed deferred entries: the default instructions name them, they
+use no definition slot and no index entry, and they are reached through
+`tool.call`.
+
+| Tool | Registered when | Side effect | Scope | Output trust |
+| --- | --- | --- | --- | --- |
+| `run.inspect` | always | `none` | `run.read`; its schedule history also needs `schedule.read` | internal, untrusted when it carries text a run wrote |
+| `code.read` | `AGENT_CODE_TOOLS_ENABLED` | `none` | `code.read` | internal |
+| `code.draft` | `AGENT_CODE_TOOLS_ENABLED` | `none` | `code.write` | internal |
+| `code.test` | `AGENT_CODE_TOOLS_ENABLED` | `code_execution` in a `sandbox` target | `code.write` | untrusted |
+| `code.propose` | `AGENT_CODE_PROPOSALS_ENABLED` | `publication` | `code.write` | internal |
+
+Every answer fits the 4 KiB inline budget by paging.
+
+**`run.inspect`.** `schedule_history` returns the schedule's state, pause reason,
+failure counter, failure limit and timeout, a count of recent occurrences by
+outcome, and up to eight failures. A failure names its reason, error class and
+duration, plus a machine code and repair hint when the message is one; free text
+a job or provider wrote is withheld, so this operation keeps internal trust.
+`run` returns one run's status and failure with a timeline of its events,
+offset from the run's creation. Tool calls show only their name and reason code.
+Job log lines are shown, which makes that result untrusted.
+
+**`code.read`.** It reads `AGENT_CODE_SOURCE_ROOT`, the running release's
+directory. A release has no `.git` and keeps private files beside its source, so
+the tree serves an allowlist of top-level names and refuses, at every depth,
+dotted names, generated directories, key-shaped suffixes and symbolic links.
+Search runs `grep` with no shell and a ten-second limit.
+
+**`code.draft`.** A draft is one owner-scoped set of whole-file changes against
+one release, stored in PostgreSQL. An edit is one exact replacement, a whole
+file or a deletion. `.circleci/`, `.github/`, `deploy/`, `policy/` and
+`src/agent_core/policy/` are refused. When a newer release runs, the draft is
+stale and refuses further edits, tests and proposals, because its base file
+contents are gone.
+
+**`code.test`.** A fresh sandbox from the release's `AGENT_CODE_SANDBOX_IMAGE`
+copies the baked source, applies the draft and runs one closed command: pytest,
+ruff, mypy or the Cockpit tests, with validated repository paths and a validated
+keyword. Networking is off, the root is read-only, the environment is empty and
+the run has no credentials. A timeout or a malformed report is an error, never a
+pass. Tests that need PostgreSQL, Docker or a browser cannot pass here, so a pass
+is partial evidence and hosted CI remains the full verification.
+
+**`code.propose`.** It asks the owner through the ordinary `publication` approval,
+which no `tool_rules` entry skips, and shows a bounded diff. The tool refuses any
+run that is not interactive or any session that is not the owner's chat. Added
+lines, the title and the summary pass the Cockpit privacy screen with a
+high-confidence secret rule, because `token: str` is ordinary code here. A hit
+publishes nothing and never repeats the value. The tool then records an outbox
+entry; the maintenance role's worker, the only holder of the key, creates a new
+`veetbot/<slug>-<id>` branch from the release's revision, commits and opens a pull
+request to `dev`. A retry finds its own branch by commit trailer and its open pull
+request. The adapter refuses any other ref or a protected path before calling
+GitHub, and it has no merge, review or force operation. A push starts no CI, and
+the ordinary review loop applies.
