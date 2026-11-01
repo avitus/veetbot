@@ -548,6 +548,95 @@ struct ClarifyingQuestionCard: View {
     }
 }
 
+/// ADR-0280: the runtime paused because a website signed the owner out. With
+/// a waiting website the run resumes once sign-in is verified, so there is
+/// nothing to type; otherwise the owner signs in and says so.
+struct SignInRequiredCard: View {
+    let prompt: ClarifyingQuestionPrompt
+    /// A verified sign-in continues the run; false once the wait has expired.
+    let resumesByItself: Bool
+    /// The run's own deadline has passed, so only stopping it is left.
+    let ranOutOfTime: Bool
+    let signIn: () async -> Void
+    let openWebsiteAccess: () -> Void
+    let confirmSignedIn: () async -> Bool
+    let stop: () async -> Void
+    @State private var isWorking = false
+
+    private var waitsForWebsite: Bool { prompt.signIn?.profileID != nil }
+
+    /// Names the website that signed the owner out, when the pause knows it.
+    static func title(for prompt: ClarifyingQuestionPrompt) -> String {
+        guard let host = prompt.signIn?.host else { return "A website needs you to sign in" }
+        return "\(host) signed you out"
+    }
+
+    private var explanation: String {
+        if ranOutOfTime {
+            return "This task ran out of time. Stop it, then start it again."
+        }
+        if resumesByItself {
+            return "Veetbot paused this task. It continues on its own once you are signed in."
+        }
+        return waitsForWebsite
+            ? "Sign in, then let Veetbot know to continue."
+            : "Sign in from Website Access, then let Veetbot know to continue."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            AttentionCardLabel(title: "Sign-in needed")
+            Text(Self.title(for: prompt))
+                .veetType(.ui, weight: .semibold)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("sign-in-card.title")
+            Text(explanation)
+            .veetType(.meta)
+            .foregroundColor(AppTheme.inkSoft)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: VeetSpace.s2) {
+                if ranOutOfTime {
+                    EmptyView()
+                } else if waitsForWebsite {
+                    Button(prompt.signIn?.host.map { "Sign in to \($0)" } ?? "Sign in") {
+                        run { await signIn() }
+                    }
+                    .primaryCapsule()
+                    .accessibilityIdentifier("sign-in-card.sign-in")
+                } else {
+                    Button("Open Website Access", action: openWebsiteAccess)
+                        .primaryCapsule()
+                        .accessibilityIdentifier("sign-in-card.website-access")
+                }
+                if !resumesByItself && !ranOutOfTime {
+                    Button("I've signed in") { run { _ = await confirmSignedIn() } }
+                        .buttonStyle(QuietCapsuleButtonStyle())
+                        .accessibilityIdentifier("sign-in-card.signed-in")
+                }
+                Button("Stop task") { run { await stop() } }
+                    .buttonStyle(QuietCapsuleButtonStyle())
+                    .accessibilityIdentifier("sign-in-card.stop")
+                Spacer(minLength: 0)
+            }
+            .disabled(isWorking)
+            .padding(.top, 4)
+        }
+        .attentionCard()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("sign-in-card")
+    }
+
+    /// Runs one button's action at a time; the buttons stay disabled meanwhile.
+    private func run(_ action: @escaping () async -> Void) {
+        guard !isWorking else { return }
+        isWorking = true
+        Task {
+            defer { isWorking = false }
+            await action()
+        }
+    }
+}
+
 struct WorkingStatePanel: View {
     let state: WorkingStateView
     @State private var expanded = false

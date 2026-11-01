@@ -11,7 +11,7 @@ from agent_core.bootstrap import build
 from agent_core.config import Settings, load_settings
 from agent_core.domain.browser import BrowserObservation, BrowserProviderError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
-from agent_core.domain.runs import RunLimits, RunStatus
+from agent_core.domain.runs import FailureReason, RunLimits, RunStatus
 from agent_core.domain.tools import ToolInvocationStatus
 from tests.gates.test_api_m5 import _client
 from tests.unit.test_browser_tools import FakeBrowserProvider
@@ -454,3 +454,172 @@ async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_
         result = await composition.runs.wait_terminal(run_id)
     assert result.status is RunStatus.CANCELLED
     assert len(provider.actions) == 1
+
+
+@pytest.mark.parametrize("bound", [True, False])
+async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: bool) -> None:
+    """ADR-0280: the app shows a sign-in card, not a question, from trusted wait fields."""
+    from datetime import datetime, timedelta
+
+    from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
+
+    provider = InterruptedBrowser()
+    provider.reason = "tool.browser.needs_user"
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[navigation(), ScriptedTurn(text="Done.")]),
+        sequential_ids=True,
+        enabled_tools=["browser.navigate", "browser.observe", "conversation.ask_user"],
+        browser_provider_override=provider,
+    ) as composition:
+        session_id = None
+        if bound:
+            await seed_browser_authority(composition)
+            created = await composition.services.sessions.create(
+                composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+            )
+            session_id = created.id
+        run_id = await composition.runs.submit("Read my account.", session_id)
+        events = await composition.runs.events(run_id)
+    waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
+    assert len(waiting) == 1
+    sign_in = dict(waiting[0].payload["suspension"]["sign_in"])
+    if bound:
+        expires_at = datetime.fromisoformat(sign_in.pop("expires_at"))
+        assert expires_at - waiting[0].created_at <= timedelta(minutes=15)
+        assert expires_at > waiting[0].created_at + timedelta(minutes=14)
+    expected = (
+        {"browser_profile_id": str(PROFILE_ID), "origin": "https://example.org"} if bound else {}
+    )
+    assert sign_in == expected
+
+
+@pytest.mark.parametrize("bound", [True, False])
+async def test_sign_in_pause_names_a_run_deadline_that_ends_the_wait(bound: bool) -> None:
+    """ADR-0280: past its own deadline a run can only fail, so the card must not offer a reply."""
+    from datetime import UTC, datetime, timedelta
+
+    from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
+
+    provider = InterruptedBrowser()
+    provider.reason = "tool.browser.needs_user"
+    deadline = datetime.now(UTC) + timedelta(minutes=5)
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[navigation(), ScriptedTurn(text="Done.")]),
+        sequential_ids=True,
+        enabled_tools=["browser.navigate", "browser.observe", "conversation.ask_user"],
+        browser_provider_override=provider,
+        limits=RunLimits(deadline_at=deadline),
+    ) as composition:
+        session_id = None
+        if bound:
+            await seed_browser_authority(composition)
+            created = await composition.services.sessions.create(
+                composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+            )
+            session_id = created.id
+        run_id = await composition.runs.submit("Read my account.", session_id)
+        events = await composition.runs.events(run_id)
+    waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
+    assert len(waiting) == 1
+    sign_in = waiting[0].payload["suspension"]["sign_in"]
+    assert datetime.fromisoformat(sign_in["run_deadline_at"]) == deadline
+    if bound:
+        assert datetime.fromisoformat(sign_in["expires_at"]) == deadline
+    else:
+        assert set(sign_in) == {"run_deadline_at"}
+
+
+@pytest.mark.parametrize("bound", [True, False])
+@pytest.mark.parametrize("past_deadline", [True, False])
+async def test_reply_is_refused_once_the_run_deadline_arrives(
+    bound: bool, past_deadline: bool
+) -> None:
+    """ADR-0280: the server holds the deadline the card shows, for any client of the route."""
+    from datetime import timedelta
+
+    from agent_core.adapters.determinism import FixedClock
+    from tests.contract.support import NOW
+    from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
+
+    provider = InterruptedBrowser()
+    provider.reason = "tool.browser.needs_user"
+    deadline = NOW + timedelta(minutes=5)
+    clock = FixedClock(NOW)
+    async with (
+        build(
+            settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+            script=FakeModelScript(turns=[navigation(), ScriptedTurn(text="Done.")]),
+            sequential_ids=True,
+            enabled_tools=["browser.navigate", "browser.observe", "conversation.ask_user"],
+            browser_provider_override=provider,
+            limits=RunLimits(deadline_at=deadline),
+            clock=clock,
+        ) as composition,
+        _client(composition) as client,
+    ):
+        session_id = None
+        if bound:
+            await seed_browser_authority(composition)
+            created = await composition.services.sessions.create(
+                composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+            )
+            session_id = created.id
+        run_id = await composition.runs.submit("Read my account.", session_id)
+        clock.advance(timedelta(minutes=5) if past_deadline else timedelta(minutes=4))
+        reply = await client.post(
+            f"/v1/runs/{run_id}/input",
+            json={"content": [{"type": "text", "text": "Done"}]},
+        )
+        if not past_deadline:
+            assert reply.status_code == 202
+            result = await composition.runs.wait_terminal(run_id)
+            assert result.status is RunStatus.COMPLETED
+            return
+        assert reply.status_code == 409
+        body = reply.json()
+        assert body["error"]["code"] == "invalid_state_transition"
+        assert body["error"]["message"] == "run deadline has passed"
+        view = await client.get(f"/v1/runs/{run_id}")
+        events = await composition.runs.events(run_id)
+        assert view.json()["status"] == "WAITING_FOR_USER"
+        assert not [e for e in events if e.payload.get("question_id") and "content" in e.payload]
+        # A new message is not an answer: it ends the overdue run and frees the chat.
+        message = await client.post(
+            f"/v1/sessions/{view.json()['session_id']}/messages",
+            json={"content": [{"type": "text", "text": "Something else"}]},
+        )
+        assert message.status_code == 202
+        result = await composition.runs.wait_terminal(run_id)
+    assert result.status is RunStatus.FAILED
+    assert result.failure is not None
+    assert result.failure.reason is FailureReason.DEADLINE_EXCEEDED
+
+
+async def test_model_authored_question_carries_no_sign_in_marker() -> None:
+    """Only the runtime's own sign-in pause is marked; the model cannot claim one."""
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    tool_calls=[
+                        ScriptedToolCall(
+                            name="conversation.ask_user",
+                            arguments={"question": "Which account?"},
+                            call_id="ask",
+                        )
+                    ],
+                    stop_reason=StopReason.TOOL_USE,
+                )
+            ]
+        ),
+        sequential_ids=True,
+        enabled_tools=["conversation.ask_user"],
+    ) as composition:
+        run_id = await composition.runs.submit("Read my account.")
+        events = await composition.runs.events(run_id)
+    waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
+    assert len(waiting) == 1
+    assert "sign_in" not in waiting[0].payload["suspension"]

@@ -982,6 +982,207 @@ import Testing
     /// A short poll limit keeps the give-up case fast; a case that must
     /// succeed by polling passes a generous one, so a loaded machine cannot
     /// time it out.
+    /// ADR-0280: the sign-in card opens the device sign-in for the waiting
+    /// website, at the origin the run waits on, and only the chat presents it;
+    /// it loads the saved logins first when the app has none yet.
+    @Test(arguments: [
+        ("https://portal.example.org", "https://portal.example.org/"),
+        ("https://elsewhere.test", "https://example.org/"),
+    ])
+    func theSignInCardOpensSignInForTheWaitingWebsite(origin: String, start: String) async throws {
+        let profileID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([Self.profile(
+                    profileID, origins: ["https://example.org", "https://portal.example.org"], status: "needs_user"
+                )]))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let prompt = try #require(Self.waitForSignIn(model, profileID: profileID, origin: origin))
+
+        await model.signInToContinue(prompt)
+
+        let request = try #require(model.deviceSignInRequest(for: .chat))
+        #expect(request.profileID == profileID)
+        #expect(request.startURL.absoluteString == start)
+        #expect(model.deviceSignInRequest(for: .websiteAccess) == nil)
+        #expect(!model.isWebsiteAccessPresented)
+
+        let fromSettings = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
+        #expect(model.deviceSignInRequest(for: .websiteAccess) == fromSettings)
+        #expect(model.deviceSignInRequest(for: .chat) == nil)
+    }
+
+    /// A card the run no longer waits on opens nothing: the owner may have
+    /// moved on, or the run resumed or ended, while the saved logins loaded.
+    @Test(arguments: ["another run", "resumed", "ended"])
+    func aSignInCardTheRunNoLongerWaitsOnOpensNothing(change: String) async throws {
+        let profileID = UUID()
+        let server = DeviceFlowServer { request in
+            Self.route(request) == "GET veetbot.test /v1/browser-profiles"
+                ? (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "needs_user")]))
+                : nil
+        }
+        let model = try await configuredModel(server)
+        let prompt = try #require(Self.waitForSignIn(model, profileID: profileID, origin: "https://example.org"))
+        switch change {
+        case "another run":
+            model.runState.begin(runID: UUID(), status: .running)
+        case "resumed":
+            model.runState.reduce(SSEFrame(id: 2, event: "run.resumed", data: [
+                "run_id": .string(prompt.runID.uuidString),
+            ]))
+        default:
+            model.runState.reduce(SSEFrame(id: 2, event: "run.cancelled", data: [
+                "run_id": .string(prompt.runID.uuidString),
+            ]))
+        }
+
+        await model.signInToContinue(prompt)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(!model.isWebsiteAccessPresented)
+    }
+
+    /// The open chat's run pauses for sign-in to `profileID`, as the stream reports it.
+    private static func waitForSignIn(
+        _ model: ChatViewModel, profileID: UUID, origin: String, expiresAt: String = future
+    ) -> ClarifyingQuestionPrompt? {
+        let runID = UUID()
+        model.runState.begin(runID: runID, status: .running)
+        model.runState.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object([
+                "kind": .string("user"),
+                "sign_in": .object([
+                    "browser_profile_id": .string(profileID.uuidString),
+                    "origin": .string(origin),
+                    "expires_at": .string(expiresAt),
+                ]),
+            ]),
+        ]))
+        return model.runState.clarifyingQuestion
+    }
+
+    /// Without a waiting website the card opens Website Access instead.
+    @Test
+    func aSignInCardWithoutAWebsiteOpensWebsiteAccess() async throws {
+        let server = DeviceFlowServer { request in
+            Self.route(request) == "GET veetbot.test /v1/browser-profiles" ? (200, Self.page([])) : nil
+        }
+        let model = try await configuredModel(server)
+        let prompt = ClarifyingQuestionPrompt(
+            questionID: UUID(), runID: UUID(), question: "Please sign in.",
+            signIn: BrowserSignInPause(profileID: nil, origin: nil)
+        )
+
+        await model.signInToContinue(prompt)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(model.isWebsiteAccessPresented)
+    }
+
+    /// ADR-0280: verified sign-in resumes a run that waits on a website, so no
+    /// typed reply reaches the run; the composer's text is not consumed.
+    @Test
+    func aReplyCannotAnswerAPauseThatWaitsOnAWebsite() async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let prompt = try #require(Self.waitForSignIn(model, profileID: UUID(), origin: "https://example.org"))
+
+        let sent = await model.send("I signed in")
+        let answered = await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(!sent)
+        #expect(!answered)
+        #expect(!server.routes.contains { $0.hasSuffix("/input") })
+        #expect(model.runState.clarifyingQuestion?.questionID == prompt.questionID)
+    }
+
+    /// Once the wait expires the server no longer resumes the run by itself, so
+    /// a reply is again the way to continue it.
+    @Test(arguments: ["composer", "card"])
+    func aReplyAnswersAPauseWhoseWaitHasExpired(path: String) async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let prompt = try #require(Self.waitForSignIn(
+            model, profileID: UUID(), origin: "https://example.org",
+            expiresAt: "2020-01-01T00:00:00Z"
+        ))
+        #expect(!prompt.awaitsVerifiedSignIn())
+
+        let delivered = path == "composer"
+            ? await model.send("I signed in")
+            : await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(delivered)
+        #expect(server.routes.contains { $0.hasSuffix("/input") })
+    }
+
+    /// Past the run's own deadline a reply could only make it fail, so none is sent.
+    @Test(arguments: [true, false])
+    func aReplyCannotAnswerAPausePastItsRunDeadline(waitsOnAWebsite: Bool) async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let runID = UUID()
+        var signIn: [String: JSONValue] = ["run_deadline_at": .string("2020-01-01T00:00:00Z")]
+        if waitsOnAWebsite {
+            signIn["browser_profile_id"] = .string(UUID().uuidString)
+            signIn["expires_at"] = .string("2020-01-01T00:00:00Z")
+        }
+        model.runState.begin(runID: runID, status: .running)
+        model.runState.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object(["kind": .string("user"), "sign_in": .object(signIn)]),
+        ]))
+        let prompt = try #require(model.runState.clarifyingQuestion)
+
+        let sent = await model.send("I signed in")
+        let answered = await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(!sent)
+        #expect(!answered)
+        #expect(!server.routes.contains { $0.hasSuffix("/input") })
+    }
+
+    /// Without a waiting website nothing else can resume the run, so the card's
+    /// fixed reply and the composer both still answer it.
+    @Test(arguments: ["composer", "card"])
+    func aReplyStillAnswersAPauseWithoutAWebsite(path: String) async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let runID = UUID()
+        model.runState.begin(runID: runID, status: .running)
+        model.runState.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object(["kind": .string("user"), "sign_in": .object([:])]),
+        ]))
+        let prompt = try #require(model.runState.clarifyingQuestion)
+
+        let delivered = path == "composer"
+            ? await model.send("I signed in")
+            : await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(delivered)
+        #expect(server.routes.contains { $0.hasSuffix("/input") })
+    }
+
+    /// A stub that accepts any run's input, so only the client can hold a reply back.
+    private static func inputAcceptingServer() -> DeviceFlowServer {
+        DeviceFlowServer { request in
+            guard let path = request.url?.path, path.hasSuffix("/input") else { return nil }
+            let runID = path.split(separator: "/").dropLast().last.map(String.init) ?? ""
+            return (202, "{\"run_id\":\"\(runID)\",\"status\":\"QUEUED\"}")
+        }
+    }
+
     private func configuredModel(
         _ server: DeviceFlowServer,
         timing: DeviceSignInTiming = DeviceSignInTiming(pollInterval: 0.01, pollLimit: 0.2)

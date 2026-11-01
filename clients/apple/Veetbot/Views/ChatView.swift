@@ -127,7 +127,6 @@ public struct ChatView: View {
     @State private var textSelection: MessageTextSelection?
     @State private var isDropTargeted = false
     @State private var showingFileImporter = false
-    @State private var showingWebsiteAccess = false
     @State private var transcriptProbe = TranscriptProbe()
     /// What the draft needs; the field hugs one line and grows to a cap.
     @State private var composerContentHeight: CGFloat = 0
@@ -172,7 +171,7 @@ public struct ChatView: View {
 
     private var notificationCovered: Bool {
         var covered = artifactSelection != nil || textSelection != nil || model.isPeopleLookupPresented
-            || showingWebsiteAccess || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
+            || model.isWebsiteAccessPresented || showingFileImporter || model.callResult != nil || model.deviceSignInRequest != nil
             || chatListOverlayPresented
         #if os(iOS)
         covered = covered || showingPhotoPicker || model.pendingSmsInvocation != nil
@@ -298,6 +297,21 @@ public struct ChatView: View {
                 "settled session=\(sessionID.uuidString, privacy: .public) rows=\(rows) content=\(content) viewport=\(viewport)"
             )
         }
+        // No event marks a sign-in wait's expiry or the run's deadline; redraw
+        // the card and the composer at each.
+        .task(id: [state.clarifyingQuestion?.signIn?.expiresAt, state.clarifyingQuestion?.signIn?.runDeadlineAt]) {
+            let moments = [
+                state.clarifyingQuestion?.signIn?.expiresAt,
+                state.clarifyingQuestion?.signIn?.runDeadlineAt,
+            ].compactMap { $0 }.sorted()
+            for moment in moments {
+                let remaining = moment.timeIntervalSinceNow
+                guard remaining > 0 else { continue }
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                state.objectWillChange.send()
+            }
+        }
         .task(id: model.selectedSessionID) {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -350,7 +364,6 @@ public struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { toolbarTitle }
             ToolbarItemGroup(placement: .primaryAction) {
-                websiteAccessButton
                 ChatToolbarActions(model: model)
             }
         }
@@ -360,7 +373,10 @@ public struct ChatView: View {
                 delete: { Task { await model.deleteCallResult() } },
                 followUp: { model.prepareCallFollowUp($0) })
         }
-        .sheet(isPresented: $showingWebsiteAccess) {
+        // The sign-in card and the website offer start sign-ins here; Website
+        // Access presents its own (ADR-0280).
+        .deviceSignInPresentation(model: model, surface: .chat)
+        .sheet(isPresented: $model.isWebsiteAccessPresented) {
             ConnectionSettingsView(model: model, embedded: false, forChat: true).websiteAccessSheetFrame()
         }
         .sheet(item: $artifactSelection) { selection in
@@ -409,9 +425,6 @@ public struct ChatView: View {
                 }
             }
             Spacer(minLength: VeetSpace.s2)
-            #if os(macOS)
-            websiteAccessButton
-            #endif
         }
         .padding(.top, VeetSpace.s5)
         .padding(.bottom, VeetSpace.s4)
@@ -444,18 +457,12 @@ public struct ChatView: View {
     }
     #endif
 
-    private var websiteAccessButton: some View {
-        Button { showingWebsiteAccess = true } label: {
-            Image(systemName: "globe")
-        }
-        .buttonStyle(QuietIconButtonStyle())
-        .help("Website Access")
-        .accessibilityLabel("Website Access")
-        .accessibilityIdentifier("chat.websiteAccess")
-    }
-
+    /// What the run needs from the owner, beneath the title.
     private var statusLabel: String? {
-        ConversationStatus.label(runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval)
+        ConversationStatus.label(
+            runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval,
+            awaitingSignIn: state.clarifyingQuestion?.signIn != nil
+        )
     }
 
     // MARK: - Transcript
@@ -506,7 +513,13 @@ public struct ChatView: View {
                 #endif
             }
             if let prompt = state.clarifyingQuestion {
-                WaitingLine(text: "Waiting for your answer. See below.")
+                Group {
+                    if prompt.signIn == nil {
+                        WaitingLine(text: "Waiting for your answer. See below.")
+                    } else {
+                        WaitingLine(text: "Waiting for you to sign in. See below.")
+                    }
+                }
                     .padding(.top, VeetSpace.s3)
                     .id(NotificationFocus.question(prompt.questionID).scrollID)
             }
@@ -765,11 +778,15 @@ public struct ChatView: View {
     var canSendDraft: Bool {
         let hasText = !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let answering = state.runStatus == .waitingForUser
+        // ADR-0280: a verified sign-in resumes this run, or its deadline has
+        // passed, so no reply can answer it.
+        let replyRefused = answering && state.clarifyingQuestion?.acceptsReply() == false
         // Attachments alone make a message, but an answer to a question is text.
         return (hasText || (!model.attachments.isEmpty && !answering))
             && (answering || model.attachmentsReady)
             && !model.isSending
             && (!state.isRunActive || answering)
+            && !replyRefused
             && model.isConfigured
     }
 
@@ -941,8 +958,24 @@ private struct AttentionDock: View {
                     #endif
                 }
                 if pending.isEmpty, let prompt = state.clarifyingQuestion {
-                    ClarifyingQuestionCard(prompt: prompt) { answer in
-                        await model.answerQuestion(prompt, answer: answer)
+                    Group {
+                        if prompt.signIn != nil {
+                            SignInRequiredCard(
+                                prompt: prompt,
+                                resumesByItself: prompt.awaitsVerifiedSignIn(),
+                                ranOutOfTime: prompt.runDeadlinePassed(),
+                                signIn: { await model.signInToContinue(prompt) },
+                                openWebsiteAccess: { model.isWebsiteAccessPresented = true },
+                                confirmSignedIn: {
+                                    await model.answerQuestion(prompt, answer: "I've signed in.")
+                                },
+                                stop: { await model.cancelActiveRun() }
+                            )
+                        } else {
+                            ClarifyingQuestionCard(prompt: prompt) { answer in
+                                await model.answerQuestion(prompt, answer: answer)
+                            }
+                        }
                     }
                     .shadow(color: AppTheme.ink.opacity(0.12), radius: 20, x: 0, y: 10)
                 }
@@ -1270,6 +1303,12 @@ struct ChatToolbarActions: View {
     }
 
     var body: some View {
+        // In the toolbar, not the scrolling header, so a long chat never hides it (ADR-0280).
+        Button { model.isWebsiteAccessPresented = true } label: {
+            Label("Website Access", systemImage: "globe")
+        }
+        .help("Website Access")
+        .accessibilityIdentifier("chat.websiteAccess")
         Button { model.isPeopleLookupPresented = true } label: {
             Label("People", systemImage: "person.2")
         }

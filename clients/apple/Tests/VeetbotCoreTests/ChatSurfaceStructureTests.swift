@@ -27,6 +27,40 @@ import Testing
         #expect(source.contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))
     }
 
+    /// ADR-0280: a sign-in pause is a card with a sign-in button, not a
+    /// question, and Website Access stays in the toolbar on every platform.
+    @Test
+    func testSignInPauseShowsASignInCardAndWebsiteAccessStaysInTheToolbar() throws {
+        let chat = try source(at: "Veetbot/Views/ChatView.swift")
+        let activity = try source(at: "Veetbot/Views/ActivityViews.swift")
+
+        #expect(chat.contains("if prompt.signIn != nil {"))
+        #expect(chat.contains("SignInRequiredCard("))
+        #expect(chat.contains(".deviceSignInPresentation(model: model, surface: .chat)"))
+        #expect(chat.contains("WaitingLine(text: \"Waiting for you to sign in. See below.\")"))
+        #expect(activity.contains("struct SignInRequiredCard"))
+        #expect(activity.contains(".accessibilityIdentifier(\"sign-in-card.sign-in\")"))
+        let card = try #require(activity.range(of: "struct SignInRequiredCard"))
+        let cardEnd = try #require(activity.range(of: "struct WorkingStatePanel"))
+        #expect(!activity[card.lowerBound..<cardEnd.lowerBound].contains("TextField"))
+        let canSend = try #require(chat.range(of: "var canSendDraft: Bool"))
+        #expect(chat[canSend.lowerBound...].prefix(600).contains("acceptsReply()"))
+        // The card and the composer change when the wait or the run's deadline
+        // passes, with no event to redraw them.
+        #expect(chat.contains("state.clarifyingQuestion?.signIn?.expiresAt"))
+        #expect(chat.contains("state.clarifyingQuestion?.signIn?.runDeadlineAt"))
+        #expect(chat.contains("resumesByItself: prompt.awaitsVerifiedSignIn()"))
+        #expect(chat.contains("ranOutOfTime: prompt.runDeadlinePassed()"))
+        let cardSource = activity[card.lowerBound..<cardEnd.lowerBound]
+        #expect(cardSource.contains("if !resumesByItself && !ranOutOfTime {"))
+        #expect(cardSource.contains("This task ran out of time."))
+
+        let toolbar = try #require(chat.range(of: "struct ChatToolbarActions"))
+        #expect(chat[toolbar.lowerBound...].contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))
+        #expect(!chat.contains("websiteAccessButton"))
+        #expect(!chat.contains("showingWebsiteAccess"))
+    }
+
     @Test
     func testComposerIsATranslucentCapsuleAndMessagesFollowTheReference() throws {
         let source = try source(at: "Veetbot/Views/ChatView.swift")
