@@ -152,6 +152,32 @@ extension VeetbotAPIClient {
         )
     }
 
+    /// One press on Send: the exact revision and the thread revision the owner saw (ADR-0279).
+    public func sendEmailDraft(
+        _ draft: EmailDraftView, sourceRevision: Int, idempotencyKey: String
+    ) async throws -> EmailDraftOperation {
+        try await emailCommand(
+            path: "/drafts/\(draft.id.uuidString)/send",
+            values: [
+                "expected_revision": .number(Double(draft.revision)),
+                "source_revision": .number(Double(sourceRevision)),
+                "idempotency_key": .string(idempotencyKey),
+            ],
+            key: idempotencyKey
+        )
+    }
+
+    /// Takes back a send still parked in its undo window; the draft returns to editing.
+    public func undoEmailSend(_ draft: EmailDraftView) async throws -> EmailDraftView {
+        var values: [String: JSONValue] = ["expected_revision": .number(Double(draft.revision))]
+        // Name the send being taken back, so a late Undo cannot cancel a later press.
+        if let runID = draft.runID { values["run_id"] = .string(runID.uuidString) }
+        return try await transport.send(TransportRequest(
+            method: .post, path: "/v1/email/drafts/\(draft.id.uuidString)/send-undo",
+            body: try JSONEncoder.server.encode(values), retryAttempts: 2
+        ))
+    }
+
     public func discardEmailDraft(_ draft: EmailDraftView, idempotencyKey: String) async throws {
         _ = try await transport.sendData(TransportRequest(
             method: .delete, path: "/v1/email/drafts/\(draft.id.uuidString)",

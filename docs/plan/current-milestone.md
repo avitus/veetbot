@@ -31,6 +31,19 @@ title: Current Milestone
   Existing protections remain, broader hardening is deferred, and no milestone
   or gate moves.
 
+- **Email reply flow repairs — ADR-0278:** On 2026-10-31 the owner reported
+  that replying to an email was slow, with inert-looking controls and opaque
+  "email changed" notices, and chose these repairs first: send tasks run in
+  the interactive queue class, the one governed mailbox read follows Final
+  Send, server refusals are written for the owner, and the Apple client keeps
+  Review & Send available while an autosave is in flight, says when a send
+  ended without dispatch, and names the new mail that stalled a draft. A
+  one-press send with Undo remains a separate decision on the exact-send
+  approval (ADR-0278). On 2026-10-31 the owner then authorized that decision
+  as ADR-0279: Send is one press that consents to the exact revision, parked
+  for a ten-second Undo window and resolved through the ordinary approval by
+  the Archive-style consent consumer. No milestone or gate moves.
+
 - **Owner-added MCP servers — ADR-0255:** On 2026-10-26 the owner asked to
   connect the MagicPath MCP server and to add MCP servers from the Settings
   window. Owner-added HTTP servers are stored with a per-server access level,

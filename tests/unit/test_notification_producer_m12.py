@@ -146,6 +146,7 @@ def _occurrence(
 
 
 async def test_exact_transition_catalog_builds_content_free_deduplicated_rows() -> None:
+    """Every catalogued transition builds one content-free, deduplicated row."""
     clock, factory = await memory_uow_factory()
     producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
     approval_id = UUID(int=410)
@@ -224,6 +225,11 @@ async def test_exact_transition_catalog_builds_content_free_deduplicated_rows() 
             NotificationKind.SCHEDULE_RUN_FINISHED,
             NotificationKind.SCHEDULE_OCCURRENCE_SKIPPED,
         }
+        assert all(
+            row.next_attempt_at
+            == (NOW if row.kind is NotificationKind.RUN_FAILED else NOW + timedelta(seconds=90))
+            for row in rows
+        )
         assert len(rows) == 8
         assert all(row.status is NotificationStatus.PENDING for row in rows)
         assert all("Sensitive" not in row.payload.model_dump_json() for row in rows)
@@ -306,10 +312,33 @@ async def test_required_trigger_identifiers_fail_closed() -> None:
             )
 
 
+@pytest.mark.parametrize("lifetime_seconds", [30, 60, 90, 120])
+async def test_a_short_lived_approval_keeps_the_thirty_second_grace(lifetime_seconds: int) -> None:
+    """An approval that expires within the ninety-second grace plus the dispatcher's
+    thirty-second fallback poll keeps the thirty-second grace, so a scan still finds it
+    before it expires."""
+    clock, factory = await memory_uow_factory()
+    producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
+    async with factory() as uow:
+        await producer.for_run_transition(
+            uow,
+            run=run(status=RunStatus.WAITING_FOR_APPROVAL),
+            principal_id=principal().principal_id,
+            status=RunStatus.WAITING_FOR_APPROVAL,
+            approval_id=UUID(int=902),
+            approval_expires_at=NOW + timedelta(seconds=lifetime_seconds),
+        )
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+    assert notification.next_attempt_at == NOW + timedelta(seconds=30)
+    assert notification.expires_at is not None
+    assert notification.next_attempt_at <= notification.expires_at
+
+
 @pytest.mark.parametrize("status", [RunStatus.WAITING_FOR_APPROVAL, RunStatus.WAITING_FOR_USER])
-async def test_attention_requests_allow_thirty_seconds_to_answer_on_another_device(
+async def test_attention_requests_allow_ninety_seconds_to_answer_on_another_device(
     status: RunStatus,
 ) -> None:
+    """Attention requests wait ninety seconds for an answer on another device."""
     clock, factory = await memory_uow_factory()
     producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
     async with factory() as uow:
@@ -323,5 +352,5 @@ async def test_attention_requests_allow_thirty_seconds_to_answer_on_another_devi
             approval_expires_at=NOW + timedelta(minutes=5),
         )
         [notification] = await uow.notification_outbox.list(principal(), limit=10)
-    assert notification.next_attempt_at == NOW + timedelta(seconds=30)
+    assert notification.next_attempt_at == NOW + timedelta(seconds=90)
     assert notification.created_at == NOW

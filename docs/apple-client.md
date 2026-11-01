@@ -929,11 +929,13 @@ the draft waits on (new mail in the thread, an unknown send status, a pending
 approval, an edit from another device) is one amber-ruled card that names the
 decision with its action beside it; a save refused because another device
 edited the draft shows only that card, never the refusal as a second error.
-Review & Send is the filled capsule; Draft
+Send is the filled capsule (⌘↩): one press consents to the exact reply and
+parks it for the undo window, during which the notice reads "Sending" with
+Undo beside it, then Sent (ADR-0279). Draft
 options is a quiet icon menu at the trailing edge, and Refine with Veetbot
 folds its field and button into one row.
 The bottom bar keeps Discuss in Chat and the reply shortcut on the material
-edge. The Email learning, Draft history, Review & Send and unsubscribe sheets
+edge. The Email learning, Draft history, pending-approval review and unsubscribe sheets
 share `EmailSheetHeader` (a display-face title and a quiet way out); the
 Subscriptions census takes the same row and capsule styles.
 A compact mailbox-status disclosure retains
@@ -965,8 +967,9 @@ reply composer. Why this matters and Improve priorities expand on demand, while
 the persistent Your reply action reaches the editor without scrolling through
 the conversation. From and To stay visible; Cc, Bcc and subject expand together
 and initially open when copy recipients are present. Draft options collect save,
-history, writing-example endorsement and discard. Review & Send remains the
-primary composer action and opens a separate, scrollable exact-message review.
+history, writing-example endorsement and discard. Send is the primary composer
+action; the exact-message review sheet remains only for a draft already
+awaiting approval through the older proposal path.
 Native interaction coverage checks the five-row inbox, divider dragging and
 width preservation across mode changes and relaunch, the reply shortcut,
 optional feedback, recipient-field discovery and separation of Chat and Email
@@ -982,9 +985,11 @@ Learning controls expose pause/resume, scoped resets and explicit source
 exclusion. Draft edits autosave
 with optimistic revisions; conflicts preserve local and server versions, and
 draft history can restore earlier text into the editor. Typing continues while a
-save is in flight, so Review & Send settles the newest revision through bounded
+save is in flight, so Send settles the newest revision through bounded
 save attempts before freezing one, and reports a save that will not settle rather
-than freezing text the owner cannot see. A failed owner action is reported beside
+than freezing text the owner cannot see. A press the server refuses because mail
+arrived shows that mail in the stale notice, and Undo within the window returns
+the editor with the text intact. A failed owner action is reported beside
 the control that caused it, and a failed mail read with the conversation it could
 not refresh; an action refused far from its button reads as no action at all. The Writing style menu
 can explicitly endorse the displayed wording as an example after saving any

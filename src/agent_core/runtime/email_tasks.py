@@ -36,6 +36,7 @@ from agent_core.domain.email import (
     archive_result_matches,
     body_cutoff,
     retained_thread,
+    send_message_arguments,
 )
 from agent_core.domain.email_junk import JunkPilotUnavailableError, junk_request
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
@@ -2136,6 +2137,7 @@ class _TaskIO:
         )
 
     async def send(self) -> RunOutcome:
+        """Send one frozen draft revision: recover a prior dispatch, or read, claim, send once."""
         c = self.context
         if self.task.draft_id is None:
             raise ConflictError("send task has no draft")
@@ -2175,6 +2177,114 @@ class _TaskIO:
                 Step(run_id=c.run.id, step_number=send_state["step"], started_at=c.clock.now()),
             )
             return await self._finish_send(prior)
+        consent = self.task.send_consent
+        approved = False
+        if consent is not None:
+            # The press is the approval (ADR-0279): revalidate it, then read the
+            # mailbox once and claim exactly as an approved send does.
+            try:
+                await self.service.validate_send(c.principal, c.run, c.lease)
+            except (ConflictError, AuthorizationError) as exc:
+                return await self._abandon_consented_send(str(exc))
+            approved = True
+        elif draft.approval_id is not None:
+            async with c.uow_factory() as uow:
+                approval = await uow.approvals.get(draft.approval_id, c.principal)
+            approved = approval.status is ApprovalStatus.APPROVED and approval.run_id == c.run.id
+        if approved:
+            # The owner is waiting on the proposal, so the mailbox is read once:
+            # after Final Send, before the claim (email-experience.md:567-571).
+            # The approval itself froze the exact value the identity check and
+            # fresh read now validate.
+            deferred = await self._verify_mailbox_before_send(draft, thread)
+            if deferred is not None:
+                return deferred
+        async with c.uow_factory() as uow, uow.email.lock(c.principal):
+            await self._write_fence(uow)
+            current = await self.service._draft(uow.email, c.principal, draft.id)
+            source = await self.service._thread(uow.email, c.principal, draft.thread_id)
+            if (
+                current.revision != self.task.expected_revision
+                or current.source_revision != source.revision
+                or current.stale
+                or current.status
+                in {
+                    EmailDraftStatus.SENT,
+                    EmailDraftStatus.UNCERTAIN,
+                    EmailDraftStatus.DISCARDED,
+                }
+            ):
+                await uow.approvals.cancel_for_run(c.run.id)
+                c.checkpoint.pending_tool_calls = []
+                c.checkpoint.pending_approval_ids = []
+                changed = True
+            else:
+                changed = False
+                draft = current
+                # The claim is taken in the same transaction as the freshness check,
+                # so no import can reset the draft between validating and claiming.
+                if approved:
+                    if draft.send_claim_id not in {None, self.task.id}:
+                        raise ConflictError(
+                            "the draft is already claimed by another send operation"
+                        )
+                    draft = draft.model_copy(
+                        update={
+                            "status": EmailDraftStatus.SENDING,
+                            "send_claim_id": self.task.id,
+                            "send_undo_until": None,
+                        }
+                    )
+                    await save_value(
+                        uow.email, c.principal, "draft", str(draft.id), draft, c.clock.now()
+                    )
+        if changed:
+            reason = (
+                "New mail arrived or the reply changed before it was sent, so nothing "
+                "went out. Read the thread, then send again."
+            )
+            # The draft lock is released above; a consented draft returns to editing.
+            if consent is not None:
+                return await self._abandon_consented_send(reason)
+            return _finished(reason)
+        arguments = send_message_arguments(draft, thread.provider_thread_id)
+        try:
+            await self.call(draft.account_id, "send_message", arguments, operation="send")
+        except ApprovalRequiredError as exc:
+            if consent is None:
+                await self._draft_status(
+                    EmailDraftStatus.AWAITING_APPROVAL, approval_id=exc.approval_id
+                )
+                raise
+            # The owner already pressed Send: the consumer resolves this exact
+            # approval once, and the press is checked again before dispatch.
+            try:
+                await self.service.approve_send(c.principal, c.run, c.lease, exc.approval_id)
+                await self.service.validate_send(c.principal, c.run, c.lease)
+            except (ConflictError, AuthorizationError) as refused:
+                async with c.uow_factory() as uow:
+                    await uow.approvals.cancel_for_run(c.run.id)
+                c.checkpoint.pending_tool_calls = []
+                c.checkpoint.pending_approval_ids = []
+                return await self._abandon_consented_send(str(refused))
+            # Dispatch sits outside that handler: once the message may have left,
+            # a conflict in accounting must never make the draft editable again.
+            with suppress(EmailToolError):
+                await self.call(draft.account_id, "send_message", arguments, operation="send")
+        except EmailToolError:
+            pass
+        state = c.checkpoint.working_state.get("email_calls", {}).get("send")
+        invocation = None if state is None else await self._invocation(state["call"]["call_id"])
+        if invocation is None:
+            await self._draft_status(EmailDraftStatus.FAILED)
+            return _finished("The email was not sent; the draft is preserved.")
+        return await self._finish_send(invocation)
+
+    async def _verify_mailbox_before_send(
+        self, draft: EmailDraft, thread: EmailThread
+    ) -> RunOutcome | None:
+        """Check the mailbox identity and import a complete fresh thread, or defer the send."""
+        c = self.context
         try:
             profile = await self.call(draft.account_id, "get_profile", {})
             async with c.uow_factory() as uow:
@@ -2207,74 +2317,19 @@ class _TaskIO:
         except EmailToolError:
             await self._draft_status(EmailDraftStatus.READY)
             return _finished(
-                "Sending was deferred because the mailbox could not be checked. "
-                "The draft is preserved."
+                "Gmail could not be checked, so nothing was sent. Your reply is kept; try again."
             )
-        approved = False
-        if draft.approval_id is not None:
-            async with c.uow_factory() as uow:
-                approval = await uow.approvals.get(draft.approval_id, c.principal)
-            approved = approval.status is ApprovalStatus.APPROVED and approval.run_id == c.run.id
-        async with c.uow_factory() as uow, uow.email.lock(c.principal):
-            await self._write_fence(uow)
-            current = await self.service._draft(uow.email, c.principal, draft.id)
-            source = await self.service._thread(uow.email, c.principal, draft.thread_id)
-            if (
-                current.revision != self.task.expected_revision
-                or current.source_revision != source.revision
-                or current.stale
-                or current.status
-                in {
-                    EmailDraftStatus.SENT,
-                    EmailDraftStatus.UNCERTAIN,
-                    EmailDraftStatus.DISCARDED,
-                }
-            ):
-                await uow.approvals.cancel_for_run(c.run.id)
-                c.checkpoint.pending_tool_calls = []
-                c.checkpoint.pending_approval_ids = []
-                return _finished(
-                    "The source or draft changed. Review the latest draft before sending."
-                )
-            draft = current
-            if approved:
-                if draft.send_claim_id not in {None, self.task.id}:
-                    raise ConflictError("the draft is already claimed by another send operation")
-                draft = draft.model_copy(
-                    update={"status": EmailDraftStatus.SENDING, "send_claim_id": self.task.id}
-                )
-                await save_value(
-                    uow.email, c.principal, "draft", str(draft.id), draft, c.clock.now()
-                )
-        arguments = {
-            "to": ", ".join(draft.to),
-            "cc": ", ".join(draft.cc) or None,
-            "bcc": ", ".join(draft.bcc) or None,
-            "subject": draft.subject,
-            "body": draft.body,
-            "thread_id": thread.provider_thread_id,
-            "in_reply_to": draft.in_reply_to,
-            "references": " ".join(draft.references) or None,
-        }
-        try:
-            await self.call(draft.account_id, "send_message", arguments, operation="send")
-        except ApprovalRequiredError as exc:
-            await self._draft_status(
-                EmailDraftStatus.AWAITING_APPROVAL, approval_id=exc.approval_id
-            )
-            raise
-        except EmailToolError:
-            pass
-        state = c.checkpoint.working_state.get("email_calls", {}).get("send")
-        invocation = None if state is None else await self._invocation(state["call"]["call_id"])
-        if invocation is None:
-            await self._draft_status(EmailDraftStatus.FAILED)
-            return _finished("The email was not sent; the draft is preserved.")
-        return await self._finish_send(invocation)
+        return None
+
+    async def _abandon_consented_send(self, reason: str) -> RunOutcome:
+        """A press whose message or thread changed sends nothing; the draft returns to editing."""
+        await self._draft_status(EmailDraftStatus.READY)
+        return _finished(reason)
 
     async def _draft_status(
         self, status: EmailDraftStatus, *, approval_id: UUID | None = None
     ) -> None:
+        """Record this run's outcome on its own draft revision; another run's draft is untouched."""
         c = self.context
         assert self.task.draft_id is not None
         async with c.uow_factory() as uow, uow.email.lock(c.principal):
@@ -2291,6 +2346,19 @@ class _TaskIO:
                     update={
                         "status": status,
                         "approval_id": approval_id or draft.approval_id,
+                        # Whatever settled the send, the undo window is over, and a
+                        # draft back in editing keeps no claim from the attempt.
+                        "send_undo_until": None,
+                        "send_claim_id": (
+                            draft.send_claim_id
+                            if status
+                            in {
+                                EmailDraftStatus.SENDING,
+                                EmailDraftStatus.SENT,
+                                EmailDraftStatus.UNCERTAIN,
+                            }
+                            else None
+                        ),
                         "updated_at": c.clock.now(),
                     }
                 ),

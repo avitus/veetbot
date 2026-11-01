@@ -4770,6 +4770,14 @@ async def _compose(
                 ):
                     raise ConflictError("archive task cannot dispatch another external action")
                 await public_services.email.validate_archive(owner, run, lease)
+            # A consented send revalidates the press at the dispatch watermark too.
+            if (
+                task is not None
+                and task.kind == "send"
+                and task.send_consent is not None
+                and invocation.tool_name == task.send_consent.tool_name
+            ):
+                await public_services.email.validate_send(owner, run, lease)
 
         async def job_model_factory(
             current_run: Run, selected_agent: AgentSpec, lease: WorkerLease | None
@@ -5172,6 +5180,20 @@ async def _compose(
                 lease=lease,
             )
 
+        async def resolve_email_send_approval(
+            owner: Principal,
+            approval_id: UUID,
+            lease: WorkerLease | None,
+        ) -> None:
+            """The owner's one press on Send consents to this exact message (ADR-0279)."""
+            await archive_approval_service.resolve(
+                owner,
+                approval_id,
+                ApprovalResolutionType.APPROVE_ONCE,
+                "Explicit owner send gesture",
+                lease=lease,
+            )
+
         executor = RunExecutor(
             principal=principal,
             release_id=settings.release_id,
@@ -5220,12 +5242,29 @@ async def _compose(
                 else None
             ),
         )
+
+        async def queued_delay(run_id: UUID) -> float | None:
+            """Seconds until a queued run may start; None once it is no longer queued."""
+            async with uow_factory() as uow:
+                queued = await uow.runs.get(run_id, principal)
+            if queued.status is not RunStatus.QUEUED:
+                return None
+            if queued.scheduled_for is None:
+                return 0.0
+            return max(0.0, (queued.scheduled_for - clock.now()).total_seconds())
+
+        local_import_tasks: set[asyncio.Task[None]] = set()
         dispatcher = (
-            InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
+            InlineRunDispatcher(
+                executor.execute,
+                unit_of_work_open=uow_factory.is_open,
+                delay_before=queued_delay,
+                sleep=lambda seconds: clock.sleep(seconds),
+                tasks=local_import_tasks,
+            )
             if storage == "memory"
             else PostgresRunDispatcher()
         )
-        local_import_tasks: set[asyncio.Task[None]] = set()
         if people_service is not None:
             if storage == "memory":
 
@@ -5727,6 +5766,8 @@ async def _compose(
                 cleanup_artifacts=cleanup_email_artifacts,
                 cancel_parked_run=executor.cancel_parked_run,
                 resolve_archive_approval=resolve_email_archive_approval,
+                resolve_send_approval=resolve_email_send_approval,
+                send_undo_seconds=settings.email_send_undo_seconds,
                 current_archive_principal=lambda: (
                     principal
                     if settings.email_mode_enabled

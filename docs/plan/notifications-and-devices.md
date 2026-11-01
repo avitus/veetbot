@@ -1013,7 +1013,8 @@ notification carries no authority to place calls or to act on caller claims.
 ## Attention and delivered-notification reconciliation
 
 The owner's 2026-09-30 extension, [ADR-0143](../adr/0143-notification-attention-and-reconciliation.md),
-adds a thirty-second initial dispatch grace period for `approval_requested`,
+adds an initial dispatch grace period — thirty seconds then, ninety seconds since
+its 2026-10-31 amendment — for `approval_requested`,
 `question_asked`, `schedule_run_finished` and `schedule_occurrence_skipped`.
 Enqueue remains atomic with its triggering event. Expiry and retry deadlines
 retain their meaning; device wake-ups and operational alerts are not delayed.

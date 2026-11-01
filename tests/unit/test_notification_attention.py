@@ -106,6 +106,7 @@ async def test_sync_validates_scope_body_and_unknown_runs_without_partial_succes
 
 
 async def test_read_receipt_precedes_enqueue_and_cleanup_preserves_pending_requests() -> None:
+    """A read receipt before enqueue suppresses delivery, and cleanup keeps pending requests."""
     from datetime import timedelta
 
     from agent_core.adapters.determinism import SequenceIdFactory
@@ -155,7 +156,7 @@ async def test_read_receipt_precedes_enqueue_and_cleanup_preserves_pending_reque
 
     result = next(row for row in rows if row.kind is NotificationKind.SCHEDULE_RUN_FINISHED)
     pending = next(row for row in rows if row.kind is NotificationKind.APPROVAL_REQUESTED)
-    assert result.next_attempt_at == NOW + timedelta(seconds=30)
+    assert result.next_attempt_at == NOW + timedelta(seconds=90)
     response = await service.sync(
         owner,
         NotificationSyncRequest(delivered_notification_ids=[result.id, pending.id, UUID(int=999)]),
@@ -165,6 +166,10 @@ async def test_read_receipt_precedes_enqueue_and_cleanup_preserves_pending_reque
     dispatcher = _dispatcher(factory, clock, ids, transport)
     assert await dispatcher.run_once() == 0
     clock.advance(timedelta(seconds=30))
+    assert await dispatcher.run_once() == 0
+    clock.advance(timedelta(seconds=59))
+    assert await dispatcher.run_once() == 0
+    clock.advance(timedelta(seconds=1))
     assert await dispatcher.run_once() == 2
     assert len(transport.calls) == 1
     async with factory() as uow:
