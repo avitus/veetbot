@@ -1022,7 +1022,7 @@ async def test_a_schedule_made_in_chat_runs_while_away_and_its_result_reaches_th
 
         await _run_worker_on_wall_clock(composition, "golden-away-proposer")
         assert await notifier.run_once() == 0
-        clock.advance(timedelta(seconds=29))
+        clock.advance(timedelta(seconds=89))
         assert await notifier.run_once() == 0
         clock.advance(timedelta(seconds=1))
         assert await notifier.run_once() == 1
@@ -1061,7 +1061,7 @@ async def test_a_schedule_made_in_chat_runs_while_away_and_its_result_reaches_th
         assert accounted.payload["run_status"] == RunStatus.COMPLETED.value
 
         assert await notifier.run_once() == 0
-        clock.advance(timedelta(seconds=29))
+        clock.advance(timedelta(seconds=89))
         assert await notifier.run_once() == 0
         clock.advance(timedelta(seconds=1))
         assert await notifier.run_once() == 1

@@ -238,7 +238,7 @@ async def test_a_paired_telegram_chat_asks_approves_and_receives_the_reply() -> 
             max_attempts=3,
         )
         assert await prompts.run_once() == 0
-        clock.advance(timedelta(seconds=29))
+        clock.advance(timedelta(seconds=89))
         assert await prompts.run_once() == 0
         clock.advance(timedelta(seconds=1))
         assert await prompts.run_once() == 1
