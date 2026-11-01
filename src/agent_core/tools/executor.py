@@ -1542,6 +1542,10 @@ class ToolPipeline:
                         lease=lease,
                     )
 
+        # A script's earlier bridge results reach no conversation, so they join
+        # the batch's in the trust of each later bridge call (ADR-0277).
+        bridge_results: list[ToolResultItem] = []
+
         async def bridge_dispatch(
             name: str, bridge_arguments: dict[str, Any], bridge_call_id: str
         ) -> dict[str, Any]:
@@ -1568,11 +1572,13 @@ class ToolPipeline:
                         token=token,
                         lease=lease,
                         parallel_group=None,
+                        batch_results=(*batch_results, *bridge_results),
                     )
                     break
                 except ApprovalRequiredError:
                     await asyncio.sleep(approval_poll_seconds)
                     approval_poll_seconds = min(2.0, approval_poll_seconds * 2)
+            bridge_results.append(item)
             if not item.is_error:
                 return {
                     "status": "succeeded",

@@ -581,7 +581,8 @@ cheap, it is deterministic, it requires no matching, and it is exactly the
 signal a rule like *require approval for external writes when the turn saw
 untrusted content* needs. In a serial batch, the results of the calls before
 this one count as present, although the conversation receives them only when
-the batch ends (ADR-0277).
+the batch ends, and so do a sandbox script's earlier bridge results for each
+later bridge call (ADR-0277).
 
 **`argument_trust` defaults to `EXTERNAL_UNTRUSTED` for every argument**,
 because the model produced them and ADR-0002 labels model output

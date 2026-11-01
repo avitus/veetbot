@@ -34,9 +34,9 @@ conversation. The owner wants Chat to be allowed to delete what it generated.
    expired as `already_deleted`.
 5. A turn that has read external content cannot delete. The tool refuses it
    with `artifact.untrusted_turn`, the guard `records.append` uses, because the
-   trust overlay does not escalate `NONE`. A serial batch's earlier results
-   count toward the turn's trust, so a page read and a delete in one step are
-   refused. This also closes the same gap for every other tool.
+   trust overlay does not escalate `NONE`. A serial batch's earlier results,
+   and a sandbox script's earlier bridge results, count toward the turn's
+   trust, so a page read and a delete in one step or one script are refused. This also closes the same gap for every other tool.
 6. The session transcript (`GET /v1/sessions/{id}/messages`) omits an
    assistant item's file or image block whose artifact is expired or gone. The
    event log keeps its references, because it is append-only. A reply left
