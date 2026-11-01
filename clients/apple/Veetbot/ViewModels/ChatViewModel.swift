@@ -1682,9 +1682,12 @@ public final class ChatViewModel: ObservableObject {
             isWebsiteAccessPresented = true
             return
         }
+        let sessionID = selectedSessionID
         if !browserProfiles.contains(where: { $0.id == profileID }), let api {
             try? await reloadBrowserProfiles(using: api)
         }
+        // The owner may have moved on while the saved logins loaded.
+        guard selectedSessionID == sessionID, runState.activeRunID == prompt.runID else { return }
         guard let profile = browserProfiles.first(where: { $0.id == profileID }),
             beginDeviceSignIn(profile: profile, startOrigin: prompt.signIn?.origin, from: .chat) != nil
         else {

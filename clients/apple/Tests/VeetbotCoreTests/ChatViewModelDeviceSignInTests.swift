@@ -1006,6 +1006,7 @@ import Testing
             questionID: UUID(), runID: UUID(), question: "Please sign in.",
             signIn: BrowserSignInPause(profileID: profileID, origin: origin)
         )
+        model.runState.begin(runID: prompt.runID, status: .waitingForUser)
 
         await model.signInToContinue(prompt)
 
@@ -1018,6 +1019,29 @@ import Testing
         let fromSettings = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
         #expect(model.deviceSignInRequest(for: .websiteAccess) == fromSettings)
         #expect(model.deviceSignInRequest(for: .chat) == nil)
+    }
+
+    /// A card from a run that is no longer the open chat's opens nothing: the
+    /// owner may have moved on while the saved logins loaded.
+    @Test
+    func aSignInCardFromAnotherRunOpensNothing() async throws {
+        let profileID = UUID()
+        let server = DeviceFlowServer { request in
+            Self.route(request) == "GET veetbot.test /v1/browser-profiles"
+                ? (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "needs_user")]))
+                : nil
+        }
+        let model = try await configuredModel(server)
+        model.runState.begin(runID: UUID(), status: .running)
+        let prompt = ClarifyingQuestionPrompt(
+            questionID: UUID(), runID: UUID(), question: "Please sign in.",
+            signIn: BrowserSignInPause(profileID: profileID, origin: "https://example.org")
+        )
+
+        await model.signInToContinue(prompt)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(!model.isWebsiteAccessPresented)
     }
 
     /// Without a waiting website the card opens Website Access instead.
