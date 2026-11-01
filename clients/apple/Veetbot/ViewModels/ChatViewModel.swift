@@ -153,6 +153,8 @@ public final class ChatViewModel: ObservableObject {
     /// launch URL, capability or session value: those live only in the locals
     /// of `completeDeviceSignIn`.
     @Published public private(set) var deviceSignInRequest: DeviceSignInRequest?
+    /// Which surface started the open sign-in, and so presents its window.
+    @Published public private(set) var deviceSignInSurface: DeviceSignInSurface = .websiteAccess
     /// The open conversation's active task permission, if any (ADR-0129).
     @Published public private(set) var activeTaskGrant: BrowserTaskGrantView?
     /// Only a conversation bound to a website profile can hold one.
@@ -1684,7 +1686,7 @@ public final class ChatViewModel: ObservableObject {
             try? await reloadBrowserProfiles(using: api)
         }
         guard let profile = browserProfiles.first(where: { $0.id == profileID }),
-            beginDeviceSignIn(profile: profile) != nil
+            beginDeviceSignIn(profile: profile, startOrigin: prompt.signIn?.origin, from: .chat) != nil
         else {
             isWebsiteAccessPresented = true
             return
@@ -2202,9 +2204,13 @@ public final class ChatViewModel: ObservableObject {
     /// Opens the sign-in window to sign in again to an existing, unrevoked
     /// profile, at the root of its first origin.
     @discardableResult
-    public func beginDeviceSignIn(profile: BrowserProfileView) -> DeviceSignInRequest? {
+    public func beginDeviceSignIn(
+        profile: BrowserProfileView, startOrigin: String? = nil, from surface: DeviceSignInSurface = .websiteAccess
+    ) -> DeviceSignInRequest? {
+        // A start origin the profile does not allow falls back to its first.
         guard api != nil, profile.status != .revoked,
-            let origin = profile.allowedOrigins.first,
+            let origin = startOrigin.flatMap({ profile.allowedOrigins.contains($0) ? $0 : nil })
+                ?? profile.allowedOrigins.first,
             let startURL = URL(string: origin + "/")
         else { return nil }
         websiteConnectionSessionID = selectedSessionID
@@ -2214,7 +2220,7 @@ public final class ChatViewModel: ObservableObject {
             profileID: profile.id,
             adoptableOrigin: nil
         )
-        openDeviceSignIn(request)
+        openDeviceSignIn(request, from: surface)
         return request
     }
 
@@ -2459,8 +2465,14 @@ public final class ChatViewModel: ObservableObject {
         await refreshBrowserAuthentication()
     }
 
-    private func openDeviceSignIn(_ request: DeviceSignInRequest) {
+    /// The sign-in a surface presents: only one it started.
+    public func deviceSignInRequest(for surface: DeviceSignInSurface) -> DeviceSignInRequest? {
+        deviceSignInSurface == surface ? deviceSignInRequest : nil
+    }
+
+    private func openDeviceSignIn(_ request: DeviceSignInRequest, from surface: DeviceSignInSurface = .websiteAccess) {
         deviceSignInCreatedProfile = nil
+        deviceSignInSurface = surface
         deviceSignInRequest = request
         errorMessage = nil
     }
@@ -2598,7 +2610,7 @@ public final class ChatViewModel: ObservableObject {
             try? await reloadBrowserProfiles(using: api)
         }
         guard let profile = browserProfiles.first(where: { $0.id == website.profileID }),
-            beginDeviceSignIn(profile: profile) != nil
+            beginDeviceSignIn(profile: profile, from: .chat) != nil
         else {
             pendingWebsiteOffer = nil
             return

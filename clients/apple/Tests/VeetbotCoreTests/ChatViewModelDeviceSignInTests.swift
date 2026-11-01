@@ -983,14 +983,20 @@ import Testing
     /// succeed by polling passes a generous one, so a loaded machine cannot
     /// time it out.
     /// ADR-0277: the sign-in card opens the device sign-in for the waiting
-    /// website, loading the saved logins first when the app has none yet.
-    @Test
-    func theSignInCardOpensSignInForTheWaitingWebsite() async throws {
+    /// website, at the origin the run waits on, and only the chat presents it;
+    /// it loads the saved logins first when the app has none yet.
+    @Test(arguments: [
+        ("https://portal.example.org", "https://portal.example.org/"),
+        ("https://elsewhere.test", "https://example.org/"),
+    ])
+    func theSignInCardOpensSignInForTheWaitingWebsite(origin: String, start: String) async throws {
         let profileID = UUID()
         let server = DeviceFlowServer { request in
             switch Self.route(request) {
             case "GET veetbot.test /v1/browser-profiles":
-                return (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "needs_user")]))
+                return (200, Self.page([Self.profile(
+                    profileID, origins: ["https://example.org", "https://portal.example.org"], status: "needs_user"
+                )]))
             default:
                 return nil
             }
@@ -998,15 +1004,20 @@ import Testing
         let model = try await configuredModel(server)
         let prompt = ClarifyingQuestionPrompt(
             questionID: UUID(), runID: UUID(), question: "Please sign in.",
-            signIn: BrowserSignInPause(profileID: profileID, origin: "https://example.org")
+            signIn: BrowserSignInPause(profileID: profileID, origin: origin)
         )
 
         await model.signInToContinue(prompt)
 
-        let request = try #require(model.deviceSignInRequest)
+        let request = try #require(model.deviceSignInRequest(for: .chat))
         #expect(request.profileID == profileID)
-        #expect(request.startURL.absoluteString == "https://example.org/")
+        #expect(request.startURL.absoluteString == start)
+        #expect(model.deviceSignInRequest(for: .websiteAccess) == nil)
         #expect(!model.isWebsiteAccessPresented)
+
+        let fromSettings = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
+        #expect(model.deviceSignInRequest(for: .websiteAccess) == fromSettings)
+        #expect(model.deviceSignInRequest(for: .chat) == nil)
     }
 
     /// Without a waiting website the card opens Website Access instead.

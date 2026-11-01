@@ -36,6 +36,7 @@ import Testing
 
         #expect(chat.contains("if prompt.signIn != nil {"))
         #expect(chat.contains("SignInRequiredCard("))
+        #expect(chat.contains(".deviceSignInPresentation(model: model, surface: .chat)"))
         #expect(chat.contains("WaitingLine(text: \"Waiting for you to sign in. See below.\")"))
         #expect(activity.contains("struct SignInRequiredCard"))
         #expect(activity.contains(".accessibilityIdentifier(\"sign-in-card.sign-in\")"))

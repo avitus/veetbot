@@ -37,7 +37,12 @@ owner had to scroll to the top of the thread to reach it.
    task**. It has no answer field: verified sign-in resumes the run. Without a
    waiting website it offers **Open Website Access** and **I've signed in**,
    which answers the question with fixed text, and **Stop task**. The
-   transcript's waiting line says "Waiting for you to sign in."
+   transcript's waiting line says "Waiting for you to sign in." and the chat
+   status says "Needs you to sign in". The sign-in window starts at the
+   waiting origin when the saved login allows it, else at its first origin.
+   The chat presents the sign-in window for the sign-ins it starts (this card
+   and the ADR-0251 website offer); Website Access presents its own, so one
+   sign-in never has two presenters.
 3. Website Access sits with the chat's toolbar actions on every platform, so
    on the Mac it stays in the window toolbar instead of scrolling away.
 

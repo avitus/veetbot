@@ -858,10 +858,10 @@ private struct ToolOutcomePayload: Decodable {
 /// the owner. A run parked as waiting for approval with no approval left to
 /// decide is resuming, or waiting on a delegated child, and asks for nothing.
 public enum ConversationStatus {
-    public static func label(runStatus: RunStatus?, awaitingApproval: Bool) -> String? {
+    public static func label(runStatus: RunStatus?, awaitingApproval: Bool, awaitingSignIn: Bool = false) -> String? {
         switch runStatus {
         case .waitingForApproval where awaitingApproval: return "Needs your approval"
-        case .waitingForUser: return "Needs your answer"
+        case .waitingForUser: return awaitingSignIn ? "Needs you to sign in" : "Needs your answer"
         default: return nil
         }
     }

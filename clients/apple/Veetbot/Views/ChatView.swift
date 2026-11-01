@@ -358,6 +358,9 @@ public struct ChatView: View {
                 delete: { Task { await model.deleteCallResult() } },
                 followUp: { model.prepareCallFollowUp($0) })
         }
+        // The sign-in card and the website offer start sign-ins here; Website
+        // Access presents its own (ADR-0277).
+        .deviceSignInPresentation(model: model, surface: .chat)
         .sheet(isPresented: $model.isWebsiteAccessPresented) {
             ConnectionSettingsView(model: model, embedded: false, forChat: true).websiteAccessSheetFrame()
         }
@@ -440,7 +443,10 @@ public struct ChatView: View {
     #endif
 
     private var statusLabel: String? {
-        ConversationStatus.label(runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval)
+        ConversationStatus.label(
+            runStatus: state.runStatus, awaitingApproval: model.awaitingOwnerApproval,
+            awaitingSignIn: state.clarifyingQuestion?.signIn != nil
+        )
     }
 
     // MARK: - Transcript

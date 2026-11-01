@@ -1273,6 +1273,11 @@ import Testing
         )
         #expect(ConversationStatus.label(runStatus: .waitingForApproval, awaitingApproval: false) == nil)
         #expect(ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false) == "Needs your answer")
+        // ADR-0277: a sign-in pause asks for a sign-in, not an answer.
+        #expect(
+            ConversationStatus.label(runStatus: .waitingForUser, awaitingApproval: false, awaitingSignIn: true)
+                == "Needs you to sign in"
+        )
         // A pending card left behind by a run that moved on asks for nothing.
         for status: RunStatus? in [nil, .queued, .running, .completed, .failed, .cancelled] {
             #expect(ConversationStatus.label(runStatus: status, awaitingApproval: true) == nil)
