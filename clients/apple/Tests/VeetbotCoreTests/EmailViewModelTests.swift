@@ -1661,6 +1661,41 @@ import SwiftUI
         #expect(keys.count == 2 && keys[0] != keys[1])
     }
 
+    /// A known failure clears the key even when the thread refresh that would show the
+    /// failed draft does not land; the next press after a later refresh is a new request.
+    @Test func testKnownFailureClearsTheSendKeyWithoutADraftRefresh() async throws {
+        let requests = EmailRequestRecorder()
+        let refreshWorks = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "FAILED")) }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            guard sent else { return (200, self.threadJSON(draft: self.draftJSON())) }
+            // The refresh that would show the failed draft is down until the test allows it.
+            guard refreshWorks.isSet else { return (503, Self.error("unavailable", "Mail is briefly unavailable.")) }
+            return (200, self.threadJSON(draft: self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.draft?.status == "sending", "the refresh never landed, so the draft still looks parked")
+        refreshWorks.set()
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draft?.status == "failed")
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        #expect(sends.count == 2)
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 2 && keys[0] != keys[1])
+    }
+
     /// A refused Undo (the send was already claimed) keeps watching that send so its
     /// outcome is still reported, instead of leaving a silent "sending" draft.
     @Test func testRefusedUndoKeepsWatchingTheSend() async throws {

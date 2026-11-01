@@ -1709,9 +1709,13 @@ public final class EmailViewModel: ObservableObject {
                     }
                     if run.status.isTerminal {
                         // A send that did not go out must not keep its key: "try again"
-                        // has to be a new admission, not a replay of the dead one.
+                        // has to be a new admission, not a replay of the dead one. A known
+                        // failure clears it even if the draft refresh above did not land;
+                        // a completed run keeps it only while the draft is sent or uncertain.
+                        let known = run.status == .failed
+                            || (run.status == .cancelled && !self.undoneRunIDs.contains(runID))
                         if let draft = self.draft, draft.threadID == threadID,
-                           !["sent", "sending", "uncertain"].contains(draft.status) {
+                           known || !["sent", "sending", "uncertain"].contains(draft.status) {
                             self.sendKeys.removeValue(forKey: draft.id)
                         }
                         return
