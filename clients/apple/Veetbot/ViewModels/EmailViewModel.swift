@@ -1634,12 +1634,17 @@ public final class EmailViewModel: ObservableObject {
         }
         isPerformingAction = true
         defer { if generation == connection { isPerformingAction = false } }
+        // The key belongs to this press, not to the revision: it is kept only while
+        // the server has not answered, so a lost response can be retried safely, and
+        // dropped on any answer, so Undo, a failure or another device's Undo leave the
+        // next press a new request rather than a replay of the dead one.
         let key: String
         if let previous = sendKeys[draft.id], previous.0 == draft.revision { key = previous.1 }
         else { key = UUID().uuidString; sendKeys[draft.id] = (draft.revision, key) }
         do {
             let result = try await api.sendEmailDraft(draft, sourceRevision: thread.revision, idempotencyKey: key)
             guard generation == connection else { return }
+            sendKeys.removeValue(forKey: draft.id)
             draftActionError = nil
             if let value = result.draft { mergeDraft(value) }
             isPreparingSend = false
@@ -1647,6 +1652,7 @@ public final class EmailViewModel: ObservableObject {
             await watchSend(result.runID, threadID: draft.threadID, connection: connection)
         } catch {
             guard generation == connection else { return }
+            if case HTTPTransportError.api = error { sendKeys.removeValue(forKey: draft.id) }
             report(error, draft: true)
             // A refused press usually means mail arrived: show it beside the draft.
             if case HTTPTransportError.api(let failure) = error, failure.statusCode == 409 {
@@ -1668,9 +1674,6 @@ public final class EmailViewModel: ObservableObject {
         do {
             let restored = try await api.undoEmailSend(draft)
             guard generation == connection else { return }
-            // The revision survives an undo; the next press must be a new request,
-            // not a replay of the send the owner just took back.
-            sendKeys.removeValue(forKey: draft.id)
             draftActionError = nil
             mergeDraft(restored)
         } catch {
@@ -1710,19 +1713,7 @@ public final class EmailViewModel: ObservableObject {
                     } else if run.status == .completed {
                         self.reportUnsentSend()
                     }
-                    if run.status.isTerminal {
-                        // A send that did not go out must not keep its key: "try again"
-                        // has to be a new admission, not a replay of the dead one. A known
-                        // failure clears it even if the draft refresh above did not land;
-                        // a completed run keeps it only while the draft is sent or uncertain.
-                        let known = run.status == .failed
-                            || (run.status == .cancelled && !self.undoneRunIDs.contains(runID))
-                        if let draft = self.draft, draft.threadID == threadID,
-                           known || !["sent", "sending", "uncertain"].contains(draft.status) {
-                            self.sendKeys.removeValue(forKey: draft.id)
-                        }
-                        return
-                    }
+                    if run.status.isTerminal { return }
                     try await Task.sleep(nanoseconds: self.pollNanoseconds)
                 } catch {
                     if self.generation == connection, !(error is CancellationError) { self.report(error, draft: true) }
