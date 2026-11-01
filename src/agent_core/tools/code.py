@@ -20,8 +20,9 @@ from agent_core.domain.code import (
     CodeCheckKind,
     CodeDraft,
     CodeDraftState,
+    draft_digest,
 )
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import (
@@ -225,6 +226,16 @@ def _refused(exc: CodeDraftRefusedError) -> ToolResult:
     return _failure(exc.reason, str(exc), ToolFailureKind.INVALID_ARGUMENTS)
 
 
+def _draft_changed() -> ToolResult:
+    """The refusal when the draft is no longer the content the owner approved."""
+    return _failure(
+        "code.draft_changed",
+        "The draft changed after the owner was asked, so nothing was published. "
+        "Show it again and propose the current digest.",
+        ToolFailureKind.INVALID_ARGUMENTS,
+    )
+
+
 def _draft_body(draft: CodeDraft) -> dict[str, Any]:
     """The structured summary of a draft that each draft operation returns."""
     return {
@@ -233,6 +244,7 @@ def _draft_body(draft: CodeDraft) -> dict[str, Any]:
         "base_release": draft.base_release,
         "files": sorted(draft.files),
         "version": draft.version,
+        "digest": draft_digest(draft),
         "pull_url": draft.proposal.pull_url if draft.proposal else None,
         "proposal_error": draft.proposal.last_error if draft.proposal else None,
     }
@@ -467,7 +479,8 @@ class CodeProposeTool:
         description=(
             "Ask the owner to open a draft as a pull request to dev from a new branch. It "
             "publishes the change to a public repository, so run code.test first and say what "
-            "you could not verify in summary. You cannot merge or deploy."
+            "you could not verify in summary. digest is the one code.draft last reported; "
+            "the owner approves exactly that content. You cannot merge or deploy."
         ),
         input_schema={
             "type": "object",
@@ -475,8 +488,9 @@ class CodeProposeTool:
                 "slug": _DRAFT_SLUG,
                 "title": {"type": "string", "minLength": 1, "maxLength": 120},
                 "summary": {"type": "string", "minLength": 1, "maxLength": 6000},
+                "digest": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
             },
-            "required": ["slug", "title", "summary"],
+            "required": ["slug", "title", "summary", "digest"],
             "additionalProperties": False,
         },
         output_schema={"type": "object"},
@@ -499,7 +513,7 @@ class CodeProposeTool:
         if refusal is not None:
             return refusal
         toolset = self._toolset
-        slug, title = arguments["slug"], arguments["title"]
+        slug, title, digest = arguments["slug"], arguments["title"], arguments["digest"]
         principal = context.principal
         try:
             async with toolset.uow_factory() as uow:
@@ -513,8 +527,12 @@ class CodeProposeTool:
             existing.state in {CodeDraftState.PROPOSING, CodeDraftState.PROPOSED}
             and existing.proposal is not None
             and existing.proposal.title == title
+            and draft_digest(existing) == digest
         ):
             return await self._await_pull(existing, context)
+        # The owner approved these arguments, so a draft that has moved since is not approved.
+        if draft_digest(existing) != digest:
+            return _draft_changed()
         if toolset.screen is None:
             return _failure(
                 "code.proposals_unavailable",
@@ -529,6 +547,8 @@ class CodeProposeTool:
             return _failure(
                 "code.draft_empty", "This draft changes nothing.", ToolFailureKind.INVALID_ARGUMENTS
             )
+        if draft_digest(draft) != digest:
+            return _draft_changed()
         body = (
             f"{arguments['summary']}\n\n---\nProposed by Veetbot from release "
             f"{draft.base_release} after the owner approved opening it. Hosted CI has not run."
@@ -559,9 +579,13 @@ class CodeProposeTool:
                 f"The change would publish private data or a secret. {detail}"[:2000],
                 ToolFailureKind.INVALID_ARGUMENTS,
             )
-        proposing = await toolset.drafts.mark_proposing(
-            draft, title=title, body=body, now=toolset.clock.now()
-        )
+        try:
+            proposing = await toolset.drafts.mark_proposing(
+                draft, title=title, body=body, now=toolset.clock.now()
+            )
+        except ConflictError:
+            # Edited while the screen ran: what was screened and approved is gone.
+            return _draft_changed()
         return await self._await_pull(proposing, context)
 
     async def _await_pull(self, draft: CodeDraft, context: ToolExecutionContext) -> ToolResult:
@@ -607,12 +631,16 @@ class CodeProposeTool:
         try:
             async with self._toolset.uow_factory() as uow:
                 draft = await uow.code_drafts.get(principal, slug)
-            lines = await self._toolset.drafts.diff(draft)
-            view.update(
-                file_changes=sorted(draft.files),
-                diff=lines[:_DIFF_MAX_LINES],
-                diff_truncated=len(lines) > _DIFF_MAX_LINES,
-            )
+            # The card shows only the content this approval would publish.
+            if draft_digest(draft) != arguments.get("digest"):
+                view["diff_status"] = "changed"
+            else:
+                lines = await self._toolset.drafts.diff(draft)
+                view.update(
+                    file_changes=sorted(draft.files),
+                    diff=lines[:_DIFF_MAX_LINES],
+                    diff_truncated=len(lines) > _DIFF_MAX_LINES,
+                )
         except (NotFoundError, CodeDraftRefusedError):
             view["diff_status"] = "unknown"
         return ApprovalPresentation(

@@ -41,7 +41,8 @@ source, and it could not test a fix or offer one.
    - It never merges, approves, deploys, force-pushes, or writes to `main`,
      `dev` or any existing branch.
    - Every proposal asks the owner, showing the bounded diff. There is no
-     `tool_rules` entry that would skip this.
+     `tool_rules` entry that would skip this. The approval names the content by
+     digest, so an edit after the owner was asked publishes nothing.
    - Only the owner's interactive chat is offered these writes. Scheduled,
      delegated, email and device sessions are not, and the tools refuse a call
      by name there too.

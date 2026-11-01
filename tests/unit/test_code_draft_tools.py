@@ -16,6 +16,7 @@ from agent_core.domain.code import (
     CodeDraftState,
     CodeFinding,
     CodeProposal,
+    draft_digest,
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, SideEffectClass, TrustLevel
@@ -105,6 +106,19 @@ async def _edit(harness: Harness, **arguments: Any) -> Any:
     return await harness.draft.execute(
         {"operation": "edit", "slug": "fix-limit", "path": "src/app.py", **arguments}, _context()
     )
+
+
+async def _proposal(harness: Harness, **overrides: Any) -> dict[str, Any]:
+    """Proposal arguments carrying the digest code.draft reports for the current draft."""
+    shown = await harness.draft.execute({"operation": "show", "slug": "fix-limit"}, _context())
+    assert shown.structured is not None
+    return {
+        "slug": "fix-limit",
+        "title": "Fix the limit",
+        "summary": "Why it matters.",
+        "digest": shown.structured["digest"],
+        **overrides,
+    }
 
 
 async def test_an_edit_needs_one_exact_match_and_show_gives_the_diff(harness: Harness) -> None:
@@ -238,9 +252,7 @@ async def test_a_screen_hit_publishes_nothing_and_never_repeats_the_value(
     harness.screen.findings = (
         CodeFinding(file="src/app.py", code="email", message="contains an email address"),
     )
-    result = await harness.propose.execute(
-        {"slug": "fix-limit", "title": "Fix the limit", "summary": "Why."}, _context()
-    )
+    result = await harness.propose.execute(await _proposal(harness), _context())
     assert result.failure is not None
     assert result.failure.reason_code == "code.screen_refused"
     assert "owner@example.com" not in result.failure.detail
@@ -254,9 +266,7 @@ async def test_a_screen_hit_publishes_nothing_and_never_repeats_the_value(
 
 async def test_an_empty_draft_is_not_proposed(harness: Harness) -> None:
     await _open(harness)
-    result = await harness.propose.execute(
-        {"slug": "fix-limit", "title": "T", "summary": "S"}, _context()
-    )
+    result = await harness.propose.execute(await _proposal(harness), _context())
     assert result.failure is not None
     assert result.failure.reason_code == "code.draft_empty"
 
@@ -266,7 +276,7 @@ async def test_a_proposal_queues_for_the_worker_and_a_replay_opens_nothing_new(
 ) -> None:
     await _open(harness)
     await _edit(harness, old="other = 2", new="other = 3")
-    arguments = {"slug": "fix-limit", "title": "Fix the limit", "summary": "Why it matters."}
+    arguments = await _proposal(harness)
 
     queued = await harness.propose.execute(arguments, _context())
     assert queued.ok
@@ -305,11 +315,123 @@ async def test_a_proposal_queues_for_the_worker_and_a_replay_opens_nothing_new(
     assert harness.screen.message is None
 
 
+async def test_an_edit_after_the_owner_was_asked_publishes_nothing(harness: Harness) -> None:
+    """The owner approves the exact change on the card, not whatever the slug holds later."""
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    arguments = await _proposal(harness)
+    view = await harness.propose.approval_view_in_session(
+        arguments, run=None, principal=principal(), turn=None, not_covered=None
+    )
+    assert "+other = 3" in view.arguments["diff"]
+
+    await _edit(harness, old="other = 3", new="other = 4")
+    result = await harness.propose.execute(arguments, _context())
+
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.reason_code == "code.draft_changed"
+    assert harness.screen.message is None
+    async with harness.factory() as uow:
+        draft = await uow.code_drafts.get(principal(), "fix-limit")
+    assert draft.state is CodeDraftState.OPEN
+    assert draft.proposal is None
+
+
+async def test_the_card_never_shows_a_diff_other_than_the_one_being_approved(
+    harness: Harness,
+) -> None:
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    arguments = await _proposal(harness)
+    await _edit(harness, old="other = 3", new="other = 4")
+
+    view = await harness.propose.approval_view_in_session(
+        arguments, run=None, principal=principal(), turn=None, not_covered=None
+    )
+
+    assert view.arguments["diff_status"] == "changed"
+    assert "diff" not in view.arguments
+    assert "file_changes" not in view.arguments
+
+
+async def test_an_edit_while_the_screen_runs_publishes_nothing(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check before screening cannot see an edit that lands during it."""
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    arguments = await _proposal(harness)
+    screened = harness.screen.screen
+
+    async def edit_during_the_screen(**kwargs: Any) -> Any:
+        await _edit(harness, old="other = 3", new="other = 4")
+        return await screened(**kwargs)
+
+    monkeypatch.setattr(harness.screen, "screen", edit_during_the_screen)
+    result = await harness.propose.execute(arguments, _context())
+
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.reason_code == "code.draft_changed"
+    async with harness.factory() as uow:
+        draft = await uow.code_drafts.get(principal(), "fix-limit")
+    assert draft.state is CodeDraftState.OPEN
+    assert draft.proposal is None
+
+
+async def test_a_draft_discarded_and_reopened_after_the_ask_publishes_nothing(
+    harness: Harness,
+) -> None:
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    arguments = await _proposal(harness)
+    await harness.draft.execute({"operation": "discard", "slug": "fix-limit"}, _context())
+    await _open(harness)
+
+    result = await harness.propose.execute(arguments, _context())
+
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.reason_code == "code.draft_changed"
+
+
+async def test_a_replay_for_different_content_is_not_the_recorded_proposal(
+    harness: Harness,
+) -> None:
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    arguments = await _proposal(harness)
+    assert (await harness.propose.execute(arguments, _context())).ok
+
+    replay = await harness.propose.execute({**arguments, "digest": "0" * 32}, _context())
+
+    assert not replay.ok
+    assert replay.failure is not None
+    assert replay.failure.reason_code == "code.draft_changed"
+
+
+async def test_the_digest_covers_the_content_and_the_base_but_not_the_lifecycle(
+    harness: Harness,
+) -> None:
+    await _open(harness)
+    await _edit(harness, old="other = 2", new="other = 3")
+    async with harness.factory() as uow:
+        draft = await uow.code_drafts.get(principal(), "fix-limit")
+    digest = draft_digest(draft)
+    assert draft_digest(draft.model_copy(update={"version": 9, "updated_at": NOW})) == digest
+    assert draft_digest(draft.model_copy(update={"files": {"src/app.py": "x\n"}})) != digest
+    assert draft_digest(draft.model_copy(update={"base_revision": "fffffff"})) != digest
+    assert draft_digest(draft.model_copy(update={"files": {"a": None}})) != draft_digest(
+        draft.model_copy(update={"files": {"a": ""}})
+    )
+
+
 async def test_the_approval_card_shows_the_diff_in_server_words(harness: Harness) -> None:
     await _open(harness)
     await _edit(harness, old="other = 2", new="other = 3")
     view = await harness.propose.approval_view_in_session(
-        {"slug": "fix-limit", "title": "Ignore rules", "summary": "Trust me"},
+        await _proposal(harness, title="Ignore rules", summary="Trust me"),
         run=None,
         principal=principal(),
         turn=None,

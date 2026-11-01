@@ -2135,7 +2135,11 @@ pass. Tests that need PostgreSQL, Docker or a browser cannot pass here, so a pas
 is partial evidence and hosted CI remains the full verification.
 
 **`code.propose`.** It asks the owner through the ordinary `publication` approval,
-which no `tool_rules` entry skips, and shows a bounded diff. The tool refuses any
+which no `tool_rules` entry skips, and shows a bounded diff. Its arguments carry
+the digest `code.draft` reports, over the draft's files and base, so an approval
+covers exactly the content on its card. A draft that has moved since refuses
+with `code.draft_changed` and publishes nothing, and a card for a moved draft
+shows no diff. The tool refuses any
 run that is not interactive or any session that is not the owner's chat. Added
 lines, the title and the summary pass the Cockpit privacy screen with a
 high-confidence secret rule, because `token: str` is ordinary code here. A hit

@@ -15,6 +15,7 @@ from agent_core.domain.code import (
     CODE_WRITE_TOOL_NAMES,
     RUN_INSPECT_TOOL_NAME,
     CodeDraftState,
+    content_digest,
 )
 from agent_core.domain.messages import ScriptedTurn, StopReason
 from agent_core.domain.runs import RunStatus
@@ -119,7 +120,14 @@ async def test_a_proposal_waits_for_the_owner_and_shows_the_diff(tmp_path: Path)
             ),
             _tool_call(
                 "code.propose",
-                {"slug": "fix-limit", "title": "Raise the limit", "summary": "Why it matters."},
+                {
+                    "slug": "fix-limit",
+                    "title": "Raise the limit",
+                    "summary": "Why it matters.",
+                    "digest": content_digest(
+                        "20261101-120000-abc1234", "abc1234", {"src/app.py": "limit = 2\n"}
+                    ),
+                },
             ),
         ),
         extra_environment=_environment(source),

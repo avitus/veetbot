@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
@@ -89,6 +92,21 @@ class CodeDraft(BaseModel):
         if size > MAXIMUM_DRAFT_BYTES:
             raise ValueError("A draft holds at most 1 MiB of changed files.")
         return self
+
+
+def content_digest(base_release: str, base_revision: str, files: Mapping[str, str | None]) -> str:
+    """Name a change by its content and base, so an approval binds exactly what it showed."""
+    canonical = json.dumps(
+        {"release": base_release, "revision": base_revision, "files": dict(files)},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()[:32]
+
+
+def draft_digest(draft: CodeDraft) -> str:
+    """The digest of a draft's content; its state and version do not change it."""
+    return content_digest(draft.base_release, draft.base_revision, draft.files)
 
 
 class CodeCheckKind(StrEnum):
