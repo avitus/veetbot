@@ -1290,9 +1290,11 @@ is the entire reason the field exists.
 The runtime's own sign-in pause adds `sign_in` to that event's
 `suspension`: `browser_profile_id`, `origin` and `expires_at` when the run waits
 for a verified sign-in, otherwise none of them. A client shows a sign-in card
-for it, with no answer field until `expires_at`, when the run stops resuming by
-itself and a reply continues it. A run with a deadline adds `run_deadline_at` in
-both cases, past which the card offers only stopping the run (ADR-0280).
+for it. With a waiting website the card takes no answer until `expires_at`, when
+the run stops resuming by itself and a reply continues it. Without one there is
+no expiry to wait for: the owner signs in and replies at any time. A run with a
+deadline adds `run_deadline_at` in both cases, past which the card offers only
+stopping the run (ADR-0280).
 
 **A run not in `WAITING_FOR_USER` is `invalid_state` with status 409.**
 Not 404: the run exists, and telling a client its answer arrived too
