@@ -4716,6 +4716,14 @@ async def _compose(
                 ):
                     raise ConflictError("archive task cannot dispatch another external action")
                 await public_services.email.validate_archive(owner, run, lease)
+            # A consented send revalidates the press at the dispatch watermark too.
+            if (
+                task is not None
+                and task.kind == "send"
+                and task.send_consent is not None
+                and invocation.tool_name == task.send_consent.tool_name
+            ):
+                await public_services.email.validate_send(owner, run, lease)
 
         async def job_model_factory(
             current_run: Run, selected_agent: AgentSpec, lease: WorkerLease | None
@@ -5115,6 +5123,20 @@ async def _compose(
                 approval_id,
                 ApprovalResolutionType.APPROVE_ONCE,
                 "Explicit owner archive gesture",
+                lease=lease,
+            )
+
+        async def resolve_email_send_approval(
+            owner: Principal,
+            approval_id: UUID,
+            lease: WorkerLease | None,
+        ) -> None:
+            """The owner's one press on Send consents to this exact message (ADR-0276)."""
+            await archive_approval_service.resolve(
+                owner,
+                approval_id,
+                ApprovalResolutionType.APPROVE_ONCE,
+                "Explicit owner send gesture",
                 lease=lease,
             )
 
@@ -5672,6 +5694,8 @@ async def _compose(
                 cleanup_artifacts=cleanup_email_artifacts,
                 cancel_parked_run=executor.cancel_parked_run,
                 resolve_archive_approval=resolve_email_archive_approval,
+                resolve_send_approval=resolve_email_send_approval,
+                send_undo_seconds=settings.email_send_undo_seconds,
                 current_archive_principal=lambda: (
                     principal
                     if settings.email_mode_enabled

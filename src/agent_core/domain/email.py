@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from email.utils import getaddresses
@@ -158,6 +159,61 @@ class EmailArchiveConsent(EmailValue):
         return hashlib.sha256(value.encode()).hexdigest()
 
 
+class EmailSendConsent(EmailValue):
+    """One press on Send: the owner's consent to one exact draft revision (ADR-0276)."""
+
+    tenant_id: str
+    principal_id: str
+    account_id: str
+    provider_thread_id: str
+    read_server_id: str
+    send_server_id: str
+    draft_id: UUID
+    draft_revision: int
+    source_revision: int
+    # sha256 of the exact send arguments; the task record never holds mail content.
+    arguments_digest: str
+    expires_at: datetime
+    undo_until: datetime
+
+    @property
+    def tool_name(self) -> str:
+        return f"mcp.{self.send_server_id}.send_message"
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+
+
+def send_arguments_digest(arguments: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest()
+
+
+def send_message_arguments(draft: EmailDraft, provider_thread_id: str) -> dict[str, Any]:
+    """The exact `send_message` call one draft revision stands for; admission and dispatch agree."""
+    return {
+        "to": ", ".join(draft.to),
+        "cc": ", ".join(draft.cc) or None,
+        "bcc": ", ".join(draft.bcc) or None,
+        "subject": draft.subject,
+        "body": draft.body,
+        "thread_id": provider_thread_id,
+        "in_reply_to": draft.in_reply_to,
+        "references": " ".join(draft.references) or None,
+    }
+
+
+def send_gesture(task_id: UUID, consent: EmailSendConsent) -> dict[str, object]:
+    """The authenticated press; identities and a digest only, never mail content."""
+    return {
+        "task_id": str(task_id),
+        "draft_id": str(consent.draft_id),
+        "draft_revision": consent.draft_revision,
+        "source_revision": consent.source_revision,
+        "consent_digest": consent.digest,
+    }
+
+
 def archive_result_matches(consent: EmailArchiveConsent, result: dict[str, Any] | None) -> bool:
     """Require the first-party write receipt to name exactly the requested delta."""
     arguments = consent.arguments
@@ -237,6 +293,8 @@ class EmailDraft(EmailValue):
     send_claim_id: UUID | None = None
     provider_thread_id: str | None = None
     send_tool_name: str | None = None
+    # Set while a one-press send is parked and can still be undone (ADR-0276).
+    send_undo_until: datetime | None = None
 
 
 class EmailFeedback(EmailValue):
@@ -271,6 +329,7 @@ class EmailTask(EmailValue):
     instruction: str | None = None
     archive_consent: EmailArchiveConsent | None = None
     subscription_consent: EmailSubscriptionConsent | None = None
+    send_consent: EmailSendConsent | None = None
     created_at: datetime
     reservation: Decimal = Decimal("0")
     settled_cost: Decimal | None = None

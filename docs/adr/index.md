@@ -321,3 +321,4 @@ implementation without one.
 - [ADR-0273: Diagnose a widget from owner chat](0273-cockpit-widget-diagnostics.md)
 - [ADR-0274: Continue an active recall trial across equivalent releases](0274-continuous-recall-trial-across-equivalent-releases.md)
 - [ADR-0275: Send proposals are interactive work and read the mailbox once (Proposed)](0275-send-proposals-are-interactive-work.md)
+- [ADR-0276: One-press Send with Undo (Accepted)](0276-one-press-send-with-undo.md)

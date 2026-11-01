@@ -1,3 +1,10 @@
+# ADR-0276: On 2026-10-31 the owner authorized one-press Send with Undo: the
+# press is the owner's consent to the exact draft revision at the thread
+# revision on screen (the Archive gesture pattern), the task is parked for
+# AGENT_EMAIL_SEND_UNDO_SECONDS, Undo cancels it, and the consent consumer
+# resolves the ordinary REQUIRE_APPROVAL once with no second notification.
+# The review sheet remains only for drafts already awaiting approval.
+# Accepted; no milestone or gate moves.
 # ADR-0275: On 2026-10-31 the owner asked for a quicker, clearer email reply
 # flow and chose its repairs ahead of a one-press send: send tasks join the
 # interactive queue class, the mailbox is read once (after Final Send), owner

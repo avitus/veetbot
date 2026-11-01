@@ -1249,7 +1249,7 @@ final class ConversationNavigationUITests: XCTestCase {
         let editor = app.textViews["email.draft-body"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         XCTAssertTrue(editor.isHittable)
-        XCTAssertTrue(app.buttons["email.review-send"].isHittable)
+        XCTAssertTrue(app.buttons["email.send"].isHittable)
         attachEmailScreenshot("Reply composer")
 
         let envelope = app.buttons["email.draft-envelope"]
@@ -3035,16 +3035,15 @@ final class ConversationNavigationUITests: XCTestCase {
         let keyboardDone = app.buttons["email.keyboard-done"]
         XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
         keyboardDone.tap()
-        let review = app.buttons["email.review-send"]
-        scrollEmailUntilVisible(review)
-        XCTAssertTrue(review.isHittable)
-        review.tap()
-        let send = app.buttons["email.approve-send"]
-        XCTAssertTrue(send.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["To: alex@example.test"].exists)
+        let send = app.buttons["email.send"]
+        scrollEmailUntilVisible(send)
+        XCTAssertTrue(send.isHittable)
         XCTAssertFalse(app.staticTexts["Sent"].exists)
         send.tap()
-        XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 10))
+        // One press parks the send with a way back, then it reads Sent (ADR-0276).
+        XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["email.approve-send"].exists)
+        XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 15))
     }
 
     func testEmailModePreservesAnUnsentChatMessage() {
@@ -3908,21 +3907,20 @@ final class ConversationNavigationUITests: XCTestCase {
         row.click()
         XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5), app.debugDescription)
         checkHandledActionInDetail()
-        let review = app.buttons["email.review-send"]
+        let send = app.buttons["email.send"]
         // Scroll until the button lies inside the reading column: macOS 26 reports a
         // control just below the viewport, but still inside the window, as hittable.
         let reading = app.scrollViews["email.detail"]
-        for _ in 0..<8 where !reading.frame.contains(review.frame) {
+        for _ in 0..<8 where !reading.frame.contains(send.frame) {
             reading.scroll(byDeltaX: 0, deltaY: -350)
         }
-        XCTAssertTrue(reading.frame.contains(review.frame), app.debugDescription)
-        XCTAssertTrue(review.isHittable)
-        review.click()
-        let send = app.buttons["email.approve-send"]
-        XCTAssertTrue(send.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["To: alex@example.test"].exists)
+        XCTAssertTrue(reading.frame.contains(send.frame), app.debugDescription)
+        XCTAssertTrue(send.isHittable)
         send.click()
-        XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 10))
+        // One press parks the send with a way back, then it reads Sent (ADR-0276).
+        XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["email.approve-send"].exists)
+        XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 15))
         // A sent reply is read-only text the owner can still select and copy; a disabled
         // container blocks that. The owner's clipboard is restored afterwards.
         let sentBody = app.staticTexts["email.draft-body"]

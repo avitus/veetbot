@@ -210,6 +210,8 @@ public struct EmailDraftView: Codable, Identifiable, Equatable, Sendable {
     public let approvalID: UUID?
     public let sessionID: UUID?
     public let updatedAt: Date
+    /// While set and in the future, the send is parked and Undo takes it back (ADR-0276).
+    public var sendUndoUntil: Date?
 
     public var canEdit: Bool { ["ready", "awaiting_approval", "failed"].contains(status) }
     public var isProcessing: Bool { ["generating", "sending"].contains(status) }
@@ -225,6 +227,7 @@ public struct EmailDraftView: Codable, Identifiable, Equatable, Sendable {
         case approvalID = "approval_id"
         case sessionID = "session_id"
         case updatedAt = "updated_at"
+        case sendUndoUntil = "send_undo_until"
     }
 }
 

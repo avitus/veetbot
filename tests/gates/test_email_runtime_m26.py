@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from pathlib import Path
 from typing import Any, Literal, Protocol
+from uuid import UUID
 
 import pytest
 
@@ -2093,3 +2094,191 @@ async def test_draft_in_a_planned_thread_session_starts_no_server() -> None:
         draft = (await app.services.email.thread(app.principal, thread.id))["draft"]
         assert isinstance(draft, dict) and draft["body"] == "Next."
     assert started == {}
+
+
+async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_read() -> None:
+    """One press is the owner's consent: the task reads the mailbox, the consumer resolves
+    the exact approval once, and the gesture record carries no mail content (ADR-0276)."""
+    import json
+    from dataclasses import replace
+
+    from agent_core.domain.approvals import ApprovalStatus
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        operation = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=draft.revision,
+            source_revision=thread.revision,
+            idempotency_key="send-once",
+        )
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert run.priority == 0
+        current = await app.services.email.draft(app.principal, draft.id)
+        assert current.status.value == "sent"
+        assert current.send_undo_until is None
+        async with app.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run.id, app.principal)
+            [send] = [item for item in invocations if item.tool_name.endswith("send_message")]
+            approval = await uow.approvals.get_by_action(send.id)
+            task = await app.services.email.get_task(app.principal, run.id)
+            assert task is not None and task.send_consent is not None
+            gesture = await uow.events.get_by_derivation(f"email-send:{task.id}", app.principal)
+            outbox = await uow.notification_outbox.list(app.principal, limit=100)
+        assert send.effect_sent_at is not None
+        assert approval is not None and approval.status is ApprovalStatus.APPROVED
+        assert approval.arguments["body"] == draft.body
+        assert gesture is not None and gesture.actor_type == "principal"
+        assert draft.body not in json.dumps(gesture.payload)
+        assert "reply@example.test" not in json.dumps(gesture.payload)
+        assert not any(item.kind.value == "approval_requested" for item in outbox)
+        replay = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=draft.revision,
+            source_revision=thread.revision,
+            idempotency_key="send-once",
+        )
+        assert replay.run_id == operation.run_id and replay.replayed
+
+
+async def test_undo_within_the_window_returns_the_parked_send_to_editing() -> None:
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from agent_core.domain.email import EmailDraftEdit
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+
+        async def parked(run_id: UUID) -> None:
+            """The worker has not claimed the task yet."""
+            return None
+
+        app.services.email.dispatch = parked
+        before = app.clock.now()
+        operation = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="send-then-undo",
+        )
+        queued = await app.runs.get(operation.run_id)
+        assert queued.status is RunStatus.QUEUED
+        assert queued.scheduled_for is not None
+        assert queued.scheduled_for >= before + timedelta(seconds=10)
+        parked_draft = await app.services.email.draft(app.principal, draft.id)
+        assert parked_draft.status.value == "sending"
+        assert parked_draft.send_undo_until == queued.scheduled_for
+        restored = await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
+        assert restored.status.value == "ready"
+        assert restored.send_undo_until is None and restored.run_id is None
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.CANCELLED
+        edited = await app.services.email.edit_draft(
+            app.principal,
+            draft.id,
+            EmailDraftEdit(
+                expected_revision=1,
+                source_revision=draft.source_revision,
+                to=draft.to,
+                cc=draft.cc,
+                bcc=draft.bcc,
+                subject=draft.subject,
+                body="I changed my mind; here is the revised reply.",
+            ),
+        )
+        assert edited.revision == 2 and edited.status.value == "ready"
+
+
+async def test_undo_is_refused_once_the_send_was_claimed() -> None:
+    from dataclasses import replace
+
+    from agent_core.domain.errors import ConflictError
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="send-claimed",
+        )
+        with pytest.raises(ConflictError, match="already"):
+            await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
+        assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
+
+
+async def test_one_press_send_refuses_a_thread_the_owner_has_not_seen() -> None:
+    from dataclasses import replace
+
+    from agent_core.domain.errors import ConflictError
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        session = await app.sessions.create()
+        moved = await app.services.email.import_thread(
+            app.principal, "default", _page(changed=True), session
+        )
+        assert moved.revision == thread.revision + 1
+        with pytest.raises(ConflictError, match="New mail"):
+            await app.services.email.send(
+                app.principal,
+                draft.id,
+                expected_revision=1,
+                source_revision=thread.revision,
+                idempotency_key="send-unseen",
+            )
+        async with app.uow_factory() as uow:
+            assert await uow.email.list(app.principal, "task") == []
+
+
+async def test_consented_send_ends_without_dispatch_when_mail_arrives_before_the_read() -> None:
+    from dataclasses import replace
+
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory(
+        [("get_profile", _profile()), ("get_thread_page", _page(changed=True))]
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        operation = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="send-raced",
+        )
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        current = await app.services.email.draft(app.principal, draft.id)
+        assert current.stale and current.status.value == "ready"
+        assert current.send_undo_until is None
+        async with app.uow_factory() as uow:
+            calls = await uow.invocations.list_for_run(operation.run_id, app.principal)
+        assert not any(
+            call.effect_sent_at is not None
+            for call in calls
+            if call.tool_name.endswith("send_message")
+        )

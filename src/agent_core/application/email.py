@@ -46,6 +46,7 @@ from agent_core.domain.email import (
     EmailMessage,
     EmailOperation,
     EmailRecord,
+    EmailSendConsent,
     EmailTask,
     EmailThread,
     EmailValue,
@@ -56,6 +57,9 @@ from agent_core.domain.email import (
     draft_expired,
     feedback_matches,
     retained_thread,
+    send_arguments_digest,
+    send_gesture,
+    send_message_arguments,
 )
 from agent_core.domain.email_junk import JunkAuthorization, JunkPilotUnavailableError
 from agent_core.domain.errors import (
@@ -227,6 +231,9 @@ class EmailExperienceService:
         cancel_parked_run: Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]] | None = None,
         resolve_archive_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
         | None = None,
+        resolve_send_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
+        | None = None,
+        send_undo_seconds: int = 10,
         archive_self_approval_enabled: bool = True,
         current_archive_principal: Callable[[], Principal] | None = None,
         unsubscribe_enabled: bool = False,
@@ -249,6 +256,8 @@ class EmailExperienceService:
         self.cleanup_artifacts = cleanup_artifacts
         self.cancel_parked_run = cancel_parked_run
         self.resolve_archive_approval = resolve_archive_approval
+        self.resolve_send_approval = resolve_send_approval
+        self.send_undo_seconds = send_undo_seconds
         self.archive_self_approval_enabled = archive_self_approval_enabled
         self.current_archive_principal = current_archive_principal
         self.account_servers = {
@@ -1055,6 +1064,8 @@ class EmailExperienceService:
         archived: bool | None = None,
         subscription: SubscriptionRequest | None = None,
         spam: bool = False,
+        source_revision: int | None = None,
+        consented: bool = False,
     ) -> EmailOperation:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         # Typed owner gestures: no model, no catalog, no automatic-email dollars.
@@ -1111,9 +1122,13 @@ class EmailExperienceService:
                 require_scope(principal, f"mcp.{self.account_servers[account]['read']}.use")
                 if kind == "send":
                     require_scope(principal, f"mcp.{self.account_servers[account]['send']}.use")
+                if kind == "send" and consented:
+                    self._require_send(principal, account)
                 if kind == "archive":
                     self._require_archive(principal, account)
             intent = [kind, str(thread_id), str(draft_id), expected_revision, instruction]
+            if consented:
+                intent.extend(["consent", source_revision])
             if kind == "archive":
                 intent.append(archived)
                 if spam:
@@ -1217,6 +1232,10 @@ class EmailExperienceService:
                 )
             if draft is not None:
                 assert thread is not None
+                if consented and (source_revision != thread.revision or draft.stale):
+                    raise ConflictError(
+                        "New mail arrived on this thread. Read it, then send again."
+                    )
                 if (
                     draft.revision != expected_revision
                     or draft.stale
@@ -1264,6 +1283,8 @@ class EmailExperienceService:
                     "deadline_at": deadline,
                 },
             )
+            # A consented send is parked for the undo window first (ADR-0276).
+            scheduled_for = now + timedelta(seconds=self.send_undo_seconds) if consented else now
             run = Run(
                 id=self.ids.new_id(),
                 session_id=session.id,
@@ -1276,7 +1297,7 @@ class EmailExperienceService:
                 # The owner waits on a gesture or a send; neither may queue
                 # behind minutes-long refreshes in the asynchronous lane.
                 priority=0 if gesture or kind == "send" else 10,
-                scheduled_for=now,
+                scheduled_for=scheduled_for,
                 deadline_at=deadline,
                 created_at=now,
                 updated_at=now,
@@ -1284,7 +1305,7 @@ class EmailExperienceService:
             if uow.queue is None:
                 await uow.runs.create(run)
             else:
-                await uow.queue.enqueue(run, priority=run.priority, scheduled_for=now)
+                await uow.queue.enqueue(run, priority=run.priority, scheduled_for=scheduled_for)
             task = EmailTask(
                 id=self.ids.new_id(),
                 run_id=run.id,
@@ -1312,6 +1333,26 @@ class EmailExperienceService:
                         spam=spam,
                     )
                     if kind == "archive" and thread is not None and archived is not None
+                    else None
+                ),
+                send_consent=(
+                    EmailSendConsent(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        account_id=draft.account_id,
+                        provider_thread_id=thread.provider_thread_id,
+                        read_server_id=self.account_servers[draft.account_id]["read"],
+                        send_server_id=self.account_servers[draft.account_id]["send"],
+                        draft_id=draft.id,
+                        draft_revision=draft.revision,
+                        source_revision=thread.revision,
+                        arguments_digest=send_arguments_digest(
+                            send_message_arguments(draft, thread.provider_thread_id)
+                        ),
+                        expires_at=now + timedelta(seconds=600),
+                        undo_until=scheduled_for,
+                    )
+                    if consented and draft is not None and thread is not None
                     else None
                 ),
             )
@@ -1354,7 +1395,10 @@ class EmailExperienceService:
                             "session_id": session.id,
                             "status": EmailDraftStatus.GENERATING
                             if kind == "draft"
+                            else EmailDraftStatus.SENDING
+                            if consented
                             else EmailDraftStatus.AWAITING_APPROVAL,
+                            "send_undo_until": scheduled_for if consented else None,
                         }
                     ),
                     now,
@@ -1394,6 +1438,18 @@ class EmailExperienceService:
                         actor_id=principal.principal_id,
                         payload=archive_gesture(task.id, thread_id, task.archive_consent),
                         derivation_key=f"email-archive:{task.id}",
+                    )
+                )
+            if task.send_consent is not None:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=session.id,
+                        run_id=run.id,
+                        event_type="email.send.requested",
+                        actor_type="principal",
+                        actor_id=principal.principal_id,
+                        payload=send_gesture(task.id, task.send_consent),
+                        derivation_key=f"email-send:{task.id}",
                     )
                 )
             if task.subscription_consent is not None:
@@ -1520,6 +1576,209 @@ class EmailExperienceService:
         require_scope(principal, f"mcp.{server}.use")
         if not self.archive_self_approval_enabled:
             raise AuthorizationError("approval requires a distinct resolver")
+
+    def _require_send(self, principal: Principal, account_id: str) -> None:
+        """Preflight current authority before storing a send consent (ADR-0276)."""
+        for scope in (
+            "email.read",
+            "email.write",
+            "run.write",
+            "session.write",
+            "approval.resolve",
+        ):
+            require_scope(principal, scope)
+        self._authorize_account(principal, account_id)
+        server = self.account_servers.get(account_id, {}).get("send")
+        if server is None or self.resolve_send_approval is None:
+            raise ConflictError("One-press send is unavailable for this account")
+        require_scope(principal, f"mcp.{server}.use")
+        if not self.archive_self_approval_enabled:
+            raise AuthorizationError("approval requires a distinct resolver")
+
+    async def send(
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        source_revision: int,
+        idempotency_key: str,
+    ) -> EmailOperation:
+        """Admit one consented send of an exact draft revision at the displayed thread revision."""
+        if (
+            type(expected_revision) is not int
+            or type(source_revision) is not int
+            or not idempotency_key
+            or len(idempotency_key) > 200
+        ):
+            raise ValueError("invalid send request")
+        return await self.submit_task(
+            principal,
+            kind="send",
+            draft_id=draft_id,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            source_revision=source_revision,
+            consented=True,
+        )
+
+    async def undo_send(
+        self, principal: Principal, draft_id: UUID, *, expected_revision: int
+    ) -> EmailDraft:
+        """Cancel a send still parked in its undo window; a claimed send is on its way."""
+        require_scope(principal, "email.write")
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            draft = await self._draft(uow.email, principal, draft_id)
+            if draft.revision != expected_revision:
+                raise ConflictError("The reply changed. Refresh the thread and try again.")
+            if draft.run_id is None and draft.status is EmailDraftStatus.READY:
+                # Already back in editing: a repeated Undo changes nothing.
+                return draft
+            run = None if draft.run_id is None else await uow.runs.get(draft.run_id, principal)
+            task = (
+                None
+                if run is None
+                else await read_value(uow.email, principal, "task", str(run.id), EmailTask)
+            )
+            if (
+                run is None
+                or task is None
+                or task.send_consent is None
+                or draft.send_undo_until is None
+                or run.status is not RunStatus.QUEUED
+                or self.cancel_parked_run is None
+            ):
+                raise ConflictError("This reply is already on its way and can't be undone.")
+            await self.cancel_parked_run(uow, run, principal.principal_id)
+            restored = draft.model_copy(
+                update={
+                    "status": EmailDraftStatus.READY,
+                    "run_id": None,
+                    "approval_id": None,
+                    "send_claim_id": None,
+                    "send_undo_until": None,
+                    "updated_at": self.clock.now(),
+                }
+            )
+            await save_value(
+                uow.email, principal, "draft", str(draft.id), restored, self.clock.now()
+            )
+            return restored
+
+    async def validate_send(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+    ) -> EmailTask:
+        """Revalidate the owner's press immediately before each undispatched attempt."""
+        principal = self._archive_authority(principal)
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            await self._fence(uow, run, lease)
+            task = await read_value(uow.email, principal, "task", str(run.id), EmailTask)
+            if task is None or task.kind != "send" or task.draft_id is None:
+                raise ConflictError("send request is unavailable")
+            consent = task.send_consent
+            if consent is None or (consent.tenant_id, consent.principal_id) != (
+                principal.tenant_id,
+                principal.principal_id,
+            ):
+                raise ConflictError("send request does not belong to this owner")
+            self._require_send(principal, consent.account_id)
+            draft = await self._draft(uow.email, principal, task.draft_id)
+            thread = await self._thread(uow.email, principal, draft.thread_id)
+            servers = self.account_servers.get(consent.account_id, {})
+            if (
+                task.session_id != run.session_id
+                or task.account_ids != [consent.account_id]
+                or task.expected_revision != consent.draft_revision
+                or draft.id != consent.draft_id
+                or draft.revision != consent.draft_revision
+                or draft.stale
+                or draft.source_revision != thread.revision
+                or thread.revision != consent.source_revision
+                or draft.account_id != consent.account_id
+                or thread.provider_thread_id != consent.provider_thread_id
+                or draft.run_id != run.id
+                or consent.expires_at <= self.clock.now()
+                or servers.get("read") != consent.read_server_id
+                or servers.get("send") != consent.send_server_id
+                or send_arguments_digest(send_message_arguments(draft, thread.provider_thread_id))
+                != consent.arguments_digest
+            ):
+                raise ConflictError(
+                    "New mail arrived or the reply changed before it was sent, so nothing "
+                    "went out. Read the thread, then send again."
+                )
+            session = await uow.sessions.get(run.session_id, principal)
+            if session.metadata.get("email_account_servers") != self.account_servers:
+                raise ConflictError("send account configuration changed")
+            event = await uow.events.get_by_derivation(f"email-send:{task.id}", principal)
+            if (
+                event is None
+                or event.run_id != run.id
+                or event.actor_type != "principal"
+                or event.actor_id != principal.principal_id
+                or event.payload != send_gesture(task.id, consent)
+            ):
+                raise ConflictError("send consent has no matching authenticated gesture")
+            for invocation in await uow.invocations.list_for_run(run.id, principal):
+                if not invocation.tool_name.endswith(".send_message"):
+                    continue
+                approval = await uow.approvals.get_by_action(invocation.id)
+                if invocation.tool_name != consent.tool_name or (
+                    approval is not None
+                    and (approval.expires_at is None or approval.expires_at <= self.clock.now())
+                ):
+                    raise ConflictError("the frozen send invocation expired or changed")
+            return task
+
+    async def approve_send(
+        self,
+        principal: Principal,
+        run: Run,
+        lease: WorkerLease | None,
+        approval_id: UUID,
+    ) -> None:
+        """Consume the press through ordinary one-time approval resolution (ADR-0276)."""
+        task = await self.validate_send(principal, run, lease)
+        consent = task.send_consent
+        assert consent is not None and task.draft_id is not None
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            await self._fence(uow, run, lease)
+            draft = await self._draft(uow.email, principal, task.draft_id)
+            arguments = send_message_arguments(draft, consent.provider_thread_id)
+            approval = await uow.approvals.get(approval_id, principal)
+            invocations = await uow.invocations.list_for_run(run.id, principal)
+            expected_call = "email-" + hashlib.sha256(f"{run.id}:send".encode()).hexdigest()[:32]
+            invocation = next((i for i in invocations if i.id == approval.tool_invocation_id), None)
+            if (
+                approval.run_id != run.id
+                or approval.session_id != run.session_id
+                or approval.tool_name != consent.tool_name
+                or approval.status not in {ApprovalStatus.PENDING, ApprovalStatus.APPROVED}
+                or approval.expires_at is None
+                or approval.expires_at <= self.clock.now()
+                or invocation is None
+                or invocation.call_id != expected_call
+                or invocation.tool_name != consent.tool_name
+                or approval.arguments != arguments
+                or approval.normalized_arguments_hash != invocation.normalized_arguments_hash
+            ):
+                raise ConflictError("approval does not match the consented send")
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="approval.requested",
+                    actor_type="runtime",
+                    payload={"approval_id": str(approval.id)},
+                    derivation_key=f"email-send-approval:{approval.id}",
+                ),
+                lease=lease,
+            )
+        assert self.resolve_send_approval is not None
+        await self.resolve_send_approval(self._archive_authority(principal), approval_id, lease)
 
     async def archive(
         self,

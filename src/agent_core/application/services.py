@@ -1007,6 +1007,20 @@ class EmailService(Protocol):
 
     async def operation(self, principal: Principal, operation_id: UUID) -> EmailOperation: ...
 
+    async def send(
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        source_revision: int,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
+    async def undo_send(
+        self, principal: Principal, draft_id: UUID, *, expected_revision: int
+    ) -> EmailDraft: ...
+
     async def archive(
         self,
         principal: Principal,

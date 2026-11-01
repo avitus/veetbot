@@ -189,6 +189,8 @@ class Settings:
     email_junk_filter_mode: EmailJunkMode = EmailJunkMode.OFF
     email_junk_filter_evidence: Path | None = None
     email_unsubscribe_enabled: bool = False
+    # The window in which a one-press send can still be undone (ADR-0276).
+    email_send_undo_seconds: int = 10
     attachment_uploads_enabled: bool = False
     email_semantic_evidence: Path | None = None
     email_account_ids: tuple[str, ...] = ()
@@ -1929,6 +1931,13 @@ def _load_settings(
             "AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1 requires AGENT_EMAIL_ENABLED=1 "
             "and AGENT_EMAIL_MODE_ENABLED=1"
         )
+    undo_text = values.get("AGENT_EMAIL_SEND_UNDO_SECONDS", "").strip()
+    try:
+        email_send_undo_seconds = int(undo_text) if undo_text else 10
+    except ValueError as exc:
+        raise ConfigurationError("AGENT_EMAIL_SEND_UNDO_SECONDS must be an integer") from exc
+    if not 0 <= email_send_undo_seconds <= 60:
+        raise ConfigurationError("AGENT_EMAIL_SEND_UNDO_SECONDS must be between 0 and 60")
     attachment_uploads_enabled = _parse_flag(values, "AGENT_ATTACHMENT_UPLOADS_ENABLED")
     raw_email_semantic_evidence = values.get("AGENT_EMAIL_SEMANTIC_EVIDENCE", "").strip()
     email_semantic_evidence = (
@@ -2202,6 +2211,7 @@ def _load_settings(
         email_junk_filter_mode=email_junk_filter_mode,
         email_junk_filter_evidence=email_junk_filter_evidence,
         email_unsubscribe_enabled=email_unsubscribe_enabled,
+        email_send_undo_seconds=email_send_undo_seconds,
         attachment_uploads_enabled=attachment_uploads_enabled,
         email_semantic_evidence=email_semantic_evidence,
         email_account_ids=email_account_ids,

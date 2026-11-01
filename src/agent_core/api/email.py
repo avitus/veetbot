@@ -38,6 +38,15 @@ class DismissRequest(RevisionRequest):
     dismissed: bool = Field(default=True, strict=True)
 
 
+class SendRequest(BaseModel):
+    """One press on Send: the exact revision and the thread revision the client displayed."""
+
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1, strict=True)
+    source_revision: int = Field(ge=1, strict=True)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
 class ArchiveRequest(RevisionRequest):
     archived: bool = Field(strict=True)
     idempotency_key: str = Field(min_length=1, max_length=200)
@@ -275,6 +284,49 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
             "status": operation.status,
             "approval_id": None if draft.approval_id is None else str(draft.approval_id),
         }
+
+    @router.post(
+        "/v1/email/drafts/{draft_id}/send", openapi_extra={"required_scope": "email.write"}
+    )
+    async def send(
+        draft_id: UUID,
+        body: SendRequest,
+        authenticated: Annotated[Principal, secured("email.write")],
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> dict[str, object]:
+        """One authenticated press consents to exactly this draft revision (ADR-0276)."""
+        if idempotency_key is not None and idempotency_key != body.idempotency_key:
+            raise HTTPException(status_code=400, detail="Idempotency keys must match")
+        await service.draft(authenticated, draft_id)
+        operation = await service.send(
+            authenticated,
+            draft_id,
+            expected_revision=body.expected_revision,
+            source_revision=body.source_revision,
+            idempotency_key=body.idempotency_key,
+        )
+        draft = await service.draft(authenticated, draft_id)
+        return {
+            "draft": draft.model_dump(mode="json"),
+            "run_id": str(operation.run_id),
+            "operation_id": str(operation.operation_id),
+            "status": operation.status,
+            "approval_id": None if draft.approval_id is None else str(draft.approval_id),
+        }
+
+    @router.post(
+        "/v1/email/drafts/{draft_id}/send-undo", openapi_extra={"required_scope": "email.write"}
+    )
+    async def send_undo(
+        draft_id: UUID,
+        body: RevisionRequest,
+        authenticated: Annotated[Principal, secured("email.write")],
+    ) -> dict[str, object]:
+        """Cancel a send still parked in its undo window and return the draft to editing."""
+        draft = await service.undo_send(
+            authenticated, draft_id, expected_revision=body.expected_revision
+        )
+        return draft.model_dump(mode="json")
 
     @router.post(
         "/v1/email/threads/{thread_id}/discussion", openapi_extra={"required_scope": "email.write"}

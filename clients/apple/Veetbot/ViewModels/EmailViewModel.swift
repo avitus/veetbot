@@ -160,6 +160,10 @@ public final class EmailViewModel: ObservableObject {
     private var inflightSave: Task<Bool, Never>?
     /// A send proposal that outlasted the local wait; the next read of its draft opens the review.
     private var pendingReviewRunID: UUID?
+    /// The poll following a one-press send; Undo cancels it.
+    private var sendWatchTask: Task<Void, Never>?
+    /// Sends the owner took back, so their cancellation is not reported as a failure.
+    private var undoneRunIDs: Set<UUID> = []
     private var searchTask: Task<Void, Never>?
     private var refreshKey: String?
     private var refreshFailure: String?
@@ -360,6 +364,8 @@ public final class EmailViewModel: ObservableObject {
         pendingReviewRunID = nil
         sendProgressMessage = nil
         isPreparingSend = false
+        sendWatchTask?.cancel()
+        sendWatchTask = nil
         searchTask?.cancel()
         archiveTasks.values.forEach { $0.cancel() }
         archiveTasks = [:]
@@ -1589,6 +1595,115 @@ public final class EmailViewModel: ObservableObject {
             clearSelection()
             await reload(preserveOrder: true)
         } catch { if generation == connection { report(error, draft: true) } }
+    }
+
+    /// True while a one-press send is parked in its undo window (ADR-0276).
+    public var canUndoSend: Bool {
+        guard let draft, draft.status == "sending", let until = draft.sendUndoUntil else { return false }
+        return until > now() && !isPerformingAction
+    }
+
+    /// Seconds left in the undo window, for the countdown beside Undo.
+    public func undoSecondsRemaining(at date: Date? = nil) -> Int {
+        guard let until = draft?.sendUndoUntil else { return 0 }
+        return max(0, Int((until.timeIntervalSince(date ?? now())).rounded(.up)))
+    }
+
+    /// One press sends the exact revision at the thread revision on screen: no proposal, no
+    /// sheet. The server parks it for the undo window and this watches it through to Sent.
+    public func sendNow() async {
+        guard canReview, let api = makeAPIClient() else { return }
+        isPreparingSend = true
+        sendProgressMessage = nil
+        pendingReviewRunID = nil
+        let connection = generation
+        defer { if generation == connection { isPreparingSend = false } }
+        for _ in 0..<3 {
+            autosaveTask?.cancel()
+            guard currentEdit?.isDirty == true else { break }
+            guard await saveDraft() else { return }
+        }
+        guard let draft, let thread, thread.id == draft.threadID else { return }
+        guard !draft.stale else {
+            draftActionError = staleMailMessage() ?? Self.sendEndedByNewMailMessage
+            return
+        }
+        guard currentEdit?.isDirty == false else {
+            draftActionError = "Your most recent edits are still saving. Press Send again."
+            return
+        }
+        isPerformingAction = true
+        defer { if generation == connection { isPerformingAction = false } }
+        let key: String
+        if let previous = sendKeys[draft.id], previous.0 == draft.revision { key = previous.1 }
+        else { key = UUID().uuidString; sendKeys[draft.id] = (draft.revision, key) }
+        do {
+            let result = try await api.sendEmailDraft(draft, sourceRevision: thread.revision, idempotencyKey: key)
+            guard generation == connection else { return }
+            draftActionError = nil
+            if let value = result.draft { mergeDraft(value) }
+            isPreparingSend = false
+            isPerformingAction = false
+            await watchSend(result.runID, threadID: draft.threadID, connection: connection)
+        } catch {
+            guard generation == connection else { return }
+            report(error, draft: true)
+            // A refused press usually means mail arrived: show it beside the draft.
+            if case HTTPTransportError.api(let failure) = error, failure.statusCode == 409 {
+                await openThread(draft.threadID, refreshOnly: true)
+            }
+        }
+    }
+
+    /// Takes a parked send back; the draft returns to editing with its text intact.
+    public func undoSend() async {
+        guard let draft, canUndoSend, let api = makeAPIClient() else { return }
+        let connection = generation
+        undoneRunIDs.insert(draft.runID ?? UUID())
+        sendWatchTask?.cancel()
+        isPerformingAction = true
+        defer { if generation == connection { isPerformingAction = false } }
+        do {
+            let restored = try await api.undoEmailSend(draft)
+            guard generation == connection else { return }
+            draftActionError = nil
+            mergeDraft(restored)
+        } catch {
+            guard generation == connection else { return }
+            report(error, draft: true)
+            await openThread(draft.threadID, refreshOnly: true)
+        }
+    }
+
+    /// Follows a consented send until it settles; an Undo of the owner's own is silent.
+    private func watchSend(_ runID: UUID, threadID: UUID, connection: UUID) async {
+        guard let api = makeAPIClient() else { return }
+        let task = Task { [weak self] in
+            for _ in 0..<120 {
+                guard let self, self.generation == connection, self.selectedThreadID == threadID,
+                      !Task.isCancelled else { return }
+                do {
+                    let run = try await api.getRun(runID)
+                    await self.openThread(threadID, refreshOnly: true)
+                    guard self.generation == connection, self.selectedThreadID == threadID, !Task.isCancelled
+                    else { return }
+                    if run.status == .failed {
+                        self.draftActionError = run.failure?.userFacingMessage ?? Self.sendFailedMessage
+                    } else if run.status == .cancelled, !self.undoneRunIDs.contains(runID) {
+                        self.draftActionError = "This reply wasn't sent. Your draft is kept; try again."
+                    } else if run.status == .completed {
+                        self.reportUnsentSend()
+                    }
+                    if run.status.isTerminal { return }
+                    try await Task.sleep(nanoseconds: self.pollNanoseconds)
+                } catch {
+                    if self.generation == connection, !(error is CancellationError) { self.report(error, draft: true) }
+                    return
+                }
+            }
+        }
+        sendWatchTask = task
+        await task.value
     }
 
     public func resolveSend(_ decision: ApprovalDecision) async {

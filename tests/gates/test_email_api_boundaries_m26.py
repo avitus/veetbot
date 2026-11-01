@@ -61,6 +61,20 @@ COMMANDS = (
         "email.write",
         {"expected_revision": 1},
     ),
+    Command(
+        "send_now",
+        "POST",
+        "/v1/email/drafts/{d}/send",
+        "email.write",
+        {"expected_revision": 1, "source_revision": 1, "idempotency_key": "send-request"},
+    ),
+    Command(
+        "send_undo",
+        "POST",
+        "/v1/email/drafts/{d}/send-undo",
+        "email.write",
+        {"expected_revision": 1},
+    ),
     Command("discuss", "POST", "/v1/email/threads/{t}/discussion", "email.write"),
     Command(
         "dismiss", "POST", "/v1/email/threads/{t}/dismiss", "email.write", {"expected_revision": 1}
@@ -105,9 +119,11 @@ async def _request(
 ) -> tuple[str, dict[str, object] | None]:
     """Seed the state each command needs and return its concrete request payload."""
     thread, draft = await seed_mail(app)
-    if command.name in {"archive", "restore"}:
+    if command.name in {"archive", "restore", "send_now"}:
         app.principal.scopes.update({"approval.resolve", "mcp.gmail_write.use"})
         app.services.email.account_servers[thread.account_id]["write"] = "gmail_write"
+    if command.name in {"send_now", "send_undo"}:
+        app.principal.scopes.add("approval.resolve")
 
     async def dispatch(run_id: UUID) -> None:
         """Keep boundary tests from executing admitted email work."""
@@ -127,6 +143,13 @@ async def _request(
         )
         assert response.status_code == 200
         identities["f"] = UUID(response.json()["feedback_id"])
+    if command.name == "send_undo":
+        # Undo needs a send parked in its window; dispatch above keeps it parked.
+        response = await client.post(
+            f"/v1/email/drafts/{draft.id}/send",
+            json={"expected_revision": 1, "source_revision": 1, "idempotency_key": "parked"},
+        )
+        assert response.status_code == 200, response.text
     if command.name == "operation":
         response = await client.post("/v1/email/refresh")
         assert response.status_code == 200
@@ -189,7 +212,7 @@ async def _succeed_and_retry_without_duplicate_actions(command: Command) -> None
     async with email_client() as (app, client):
         path, body = await _request(app, client, command)
         headers = {"Idempotency-Key": f"retry-{command.name}"}
-        if command.name in {"archive", "restore"}:
+        if command.name in {"archive", "restore", "send_now"}:
             body = {**(body or {}), "idempotency_key": headers["Idempotency-Key"]}
         first = await client.request(command.method, path, json=body, headers=headers)
         assert first.status_code == 200, first.text
@@ -197,7 +220,7 @@ async def _succeed_and_retry_without_duplicate_actions(command: Command) -> None
         assert second.status_code == 200, second.text
         for response in (first, second):
             assert response.headers["cache-control"] == "private, no-store"
-        if command.name in {"refresh", "generate", "send", "archive", "restore"}:
+        if command.name in {"refresh", "generate", "send", "send_now", "archive", "restore"}:
             assert first.json()["run_id"] == second.json()["run_id"]
         if command.name in {"feedback", "discuss", "edit", "endorse", "undo", "discard"}:
             assert first.json() == second.json()
@@ -273,7 +296,7 @@ async def _reject_reused_idempotency_key(name: str) -> None:
     async with email_client() as (app, client):
         path, body = await _request(app, client, command)
         headers = {"Idempotency-Key": "same-request"}
-        if name in {"archive", "restore"}:
+        if name in {"archive", "restore", "send_now"}:
             body = {**(body or {}), "idempotency_key": headers["Idempotency-Key"]}
         first = await client.request(command.method, path, json=body, headers=headers)
         assert first.status_code == 200
@@ -282,6 +305,7 @@ async def _reject_reused_idempotency_key(name: str) -> None:
             "edit": {"body": "A different response."},
             "generate": {"instruction": "Make this shorter."},
             "send": {"expected_revision": 2},
+            "send_now": {"source_revision": 2},
             "archive": {"archived": False},
             "restore": {"archived": True},
         }
@@ -310,7 +334,7 @@ async def _retry_durable_operation_after_dispatch_failure(name: str) -> None:
             base_url="http://agent.test",
         ) as client:
             headers = {"Idempotency-Key": "lost-dispatch-response"}
-            if name in {"archive", "restore"}:
+            if name in {"archive", "restore", "send_now"}:
                 body = {**(body or {}), "idempotency_key": headers["Idempotency-Key"]}
             first = await client.request(command.method, path, json=body, headers=headers)
             assert first.status_code == 500
@@ -346,14 +370,15 @@ async def test_email_application_http_boundaries(command: Command) -> None:
         "unhandle",
         "archive",
         "restore",
+        "send_now",
         "discard",
         "exclude",
         "endorse",
     }:
         await _preserve_current_mail_on_revision_conflict(command)
-    if command.name in {"feedback", "edit", "generate", "send", "archive", "restore"}:
+    if command.name in {"feedback", "edit", "generate", "send", "send_now", "archive", "restore"}:
         await _reject_reused_idempotency_key(command.name)
-    if command.name in {"refresh", "generate", "send", "archive", "restore"}:
+    if command.name in {"refresh", "generate", "send", "send_now", "archive", "restore"}:
         await _retry_durable_operation_after_dispatch_failure(command.name)
 
 
@@ -454,6 +479,48 @@ async def test_archive_rejects_conflicting_transport_idempotency_keys() -> None:
         response = await client.post(
             path, json=body, headers={"Idempotency-Key": "different-request"}
         )
+        assert response.status_code == 400
+        assert response.headers["cache-control"] == "private, no-store"
+        async with app.uow_factory() as uow:
+            assert await uow.email.list(app.principal, "task") == []
+
+
+@pytest.mark.parametrize("missing_scope", ["approval.resolve", "mcp.gmail_send.use", "email.write"])
+async def test_one_press_send_requires_every_exact_scope_before_admission(
+    missing_scope: str,
+) -> None:
+    """A consented send cannot borrow authority from another account or platform scope."""
+    command = next(item for item in COMMANDS if item.name == "send_now")
+    async with email_client() as (app, client):
+        path, body = await _request(app, client, command)
+        app.principal.scopes.remove(missing_scope)
+        app.principal.scopes.add("mcp.gmail_other_send.use")
+        response = await client.post(path, json=body)
+        assert response.status_code == 403
+        assert response.headers["cache-control"] == "private, no-store"
+        async with app.uow_factory() as uow:
+            assert await uow.email.list(app.principal, "task") == []
+            [draft] = await uow.email.list(app.principal, "draft")
+            assert draft.payload["status"] == "ready"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"source_revision": "1"},
+        {"expected_revision": "1"},
+        {"idempotency_key": ""},
+        {"to": ["other@example.test"]},
+        {"body": "A body the client chose."},
+        {"account_id": "other"},
+    ],
+)
+async def test_one_press_send_rejects_client_selected_content(change: dict[str, object]) -> None:
+    """The press consents to the server's immutable revision; the client names nothing else."""
+    command = next(item for item in COMMANDS if item.name == "send_now")
+    async with email_client() as (app, client):
+        path, body = await _request(app, client, command)
+        response = await client.post(path, json={**(body or {}), **change})
         assert response.status_code == 400
         assert response.headers["cache-control"] == "private, no-store"
         async with app.uow_factory() as uow:

@@ -411,4 +411,5 @@ nav:
       - "ADR-0273: Diagnose a widget from owner chat": adr/0273-cockpit-widget-diagnostics.md
       - "ADR-0274: Continue an active recall trial across equivalent releases": adr/0274-continuous-recall-trial-across-equivalent-releases.md
       - 'ADR-0275: Send proposals are interactive work': adr/0275-send-proposals-are-interactive-work.md
+      - 'ADR-0276: One-press Send with Undo': adr/0276-one-press-send-with-undo.md
   - Changelog: changelog.md

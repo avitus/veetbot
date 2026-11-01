@@ -243,3 +243,69 @@ async def test_edited_draft_is_sent_once_through_approval_worker_and_restart() -
         revisions = await client.get(f"/v1/email/drafts/{draft.id}/revisions")
         assert revisions.status_code == 200 and revisions.json()["items"] == []
     assert len(writes) == 1
+
+
+async def test_one_press_send_waits_out_its_undo_window_then_sends_once() -> None:
+    """A consented send stays parked until its window closes; Undo inside it sends nothing,
+    and a second press after the window sends exactly one message (ADR-0276)."""
+    writes: list[tuple[str, dict[str, Any]]] = []
+    factory = await _recording_factory(writes)
+    clock = FixedClock(NOW)
+    settings = replace(
+        _email_settings(),
+        database_url=database_settings().database_url,
+        email_mode_enabled=True,
+    )
+    async with (
+        build(
+            settings=settings, storage="postgres", mcp_client_factory=factory, clock=clock
+        ) as app,
+        _client(app) as client,
+    ):
+        thread, draft = await _seed_draft(app)
+        interactive = cast(DurableWorker, app.worker_factory("interactive-lane"))
+        pressed = await client.post(
+            f"/v1/email/drafts/{draft.id}/send",
+            json={
+                "expected_revision": draft.revision,
+                "source_revision": thread.revision,
+                "idempotency_key": "press-one",
+            },
+            headers={"Idempotency-Key": "press-one"},
+        )
+        assert pressed.status_code == 200, pressed.text
+        assert pressed.json()["draft"]["status"] == "sending"
+        assert pressed.json()["draft"]["send_undo_until"] is not None
+        # Parked: the worker will not claim it before the window closes.
+        assert not await interactive.run_once()
+        undone = await client.post(
+            f"/v1/email/drafts/{draft.id}/send-undo", json={"expected_revision": draft.revision}
+        )
+        assert undone.status_code == 200, undone.text
+        assert undone.json()["status"] == "ready" and undone.json()["send_undo_until"] is None
+        clock.advance(timedelta(seconds=11))
+        assert not await interactive.run_once()
+        assert writes == []
+
+        again = await client.post(
+            f"/v1/email/drafts/{draft.id}/send",
+            json={
+                "expected_revision": draft.revision,
+                "source_revision": thread.revision,
+                "idempotency_key": "press-two",
+            },
+            headers={"Idempotency-Key": "press-two"},
+        )
+        assert again.status_code == 200, again.text
+        assert not await interactive.run_once()
+        clock.advance(timedelta(seconds=11))
+        assert await interactive.run_once()
+        run = await app.runs.get(UUID(again.json()["run_id"]))
+        assert run.status is RunStatus.COMPLETED, run.failure
+        sent = await client.get(f"/v1/email/drafts/{draft.id}")
+        assert sent.json()["status"] == "sent" and sent.json()["send_undo_until"] is None
+        assert len(writes) == 1 and writes[0][1]["body"] == draft.body
+        late = await client.post(
+            f"/v1/email/drafts/{draft.id}/send-undo", json={"expected_revision": draft.revision}
+        )
+        assert late.status_code == 409, late.text

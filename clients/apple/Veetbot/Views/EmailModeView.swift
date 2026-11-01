@@ -1657,15 +1657,19 @@ private struct EmailThreadScreen: View {
     /// wait behind one quiet menu at the trailing edge.
     private func draftActions(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         HStack(spacing: 10) {
+            // One press is the owner's consent to this exact message (ADR-0276); the
+            // server parks it for the undo window shown in the notice above.
             Button {
-                Task { await model.prepareSend() }
+                Task { await model.sendNow() }
             } label: {
                 // The button itself says the press landed; a quiet button that waits
-                // on a queued proposal reads as a button that did nothing.
-                if model.isPreparingSend { ProgressView("Preparing…") } else { Text("Review & Send") }
+                // on the request reads as a button that did nothing.
+                if model.isPreparingSend { ProgressView("Sending…") } else { Text("Send") }
             }
             .primaryCapsule()
-            .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(!model.canReview).accessibilityIdentifier("email.send")
+            .help("Send this reply (⌘↩). You have a few seconds to undo.")
             Spacer(minLength: 0)
             Menu {
                 Button("Save now") { Task { await model.saveDraft() } }
@@ -1715,10 +1719,25 @@ private struct EmailThreadScreen: View {
         } else if draft.status == "sent" {
             Label("Sent", systemImage: "checkmark.circle.fill").veetType(.ui, weight: .medium)
                 .foregroundColor(AppTheme.tealText)
+        } else if model.canUndoSend {
+            // The window the server parked this send for; Undo takes it back whole.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let seconds = model.undoSecondsRemaining(at: context.date)
+                draftDecision(
+                    "Sending",
+                    message: "To \(draft.to.joined(separator: ", ")). You can still take it back for \(seconds) s."
+                ) {
+                    Button("Undo") { Task { await model.undoSend() } }
+                        .primaryCapsule()
+                        .keyboardShortcut("z", modifiers: .command)
+                        .disabled(model.isPerformingAction)
+                        .accessibilityIdentifier("email.send-undo")
+                }
+            }
         } else if draft.isProcessing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(draft.status == "sending" ? "Sending approved message…" : "Preparing your draft…")
+                Text(draft.status == "sending" ? "Sending…" : "Preparing your draft…")
                     .veetType(.ui).foregroundColor(AppTheme.inkSoft)
             }
             .accessibilityElement(children: .combine)

@@ -722,7 +722,9 @@ above and needs no new Google permission.
    `email.read` and `email.write` grants ship in `deploy/veetbot.env.example`,
    so every release provisions them (ADR-0149); no `AUTH_SCOPES` edit is
    needed. The flag grants no authority; the scopes and the existing account
-   authority do.
+   authority do. One-press Send parks each reply for
+   `AGENT_EMAIL_SEND_UNDO_SECONDS` (default 10, 0–60) before the worker sends
+   it; Undo within that window cancels it (ADR-0276).
 3. Automatic email work spends at most USD 20 per UTC day and USD 200 per
    rolling 30 days. A reviewed `runtime/limits.yaml` overlay under
    `AGENT_CONFIG_DIR` can set other finite `email.daily_cost` and

@@ -229,6 +229,57 @@ async def _approval_notification() -> None:
             assert value not in public
 
 
+async def _consented_send_notification() -> None:
+    """One press consents to the exact draft: no approval alert asks again, and neither the
+    gesture nor the notification outbox carries mail content (ADR-0276)."""
+    factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
+    async with build(
+        settings=replace(
+            _email_settings(),
+            email_mode_enabled=True,
+            notification_api_enabled=True,
+            notification_dispatch_enabled=True,
+        ),
+        mcp_client_factory=factory,
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        draft = await app.services.email.edit_draft(
+            app.principal,
+            draft.id,
+            EmailDraftEdit(
+                expected_revision=draft.revision,
+                to=draft.to,
+                cc=draft.cc,
+                subject=MAIL_CANARY,
+                body=DRAFT_CANARY,
+            ),
+        )
+        operation = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=draft.revision,
+            source_revision=thread.revision,
+            idempotency_key="consented-send",
+        )
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
+        async with app.uow_factory() as uow:
+            notifications = await uow.notification_outbox.list(app.principal, limit=100)
+            processes = await uow.process_events.list()
+            task = await app.services.email.get_task(app.principal, operation.run_id)
+            assert task is not None
+            gesture = await uow.events.get_by_derivation(f"email-send:{task.id}", app.principal)
+        assert gesture is not None
+        assert not any(item.kind is NotificationKind.APPROVAL_REQUESTED for item in notifications)
+        public = (
+            "\n".join(item.model_dump_json() for item in notifications)
+            + str(processes)
+            + str(gesture.payload)
+        )
+        for value in (DRAFT_CANARY, MAIL_CANARY, *draft.to, *draft.cc):
+            assert value not in public
+
+
 async def _foreign_principal() -> None:
     async with email_client() as (app, _):
         thread, draft = await seed_mail(app)
@@ -394,6 +445,7 @@ async def _importance_replay(tmp_path: Path) -> None:
         "tool_error",
         "model_error",
         "approval_notification",
+        "consented_send",
         "foreign_principal",
         "upstream_secret",
         "internal_api_error",
@@ -419,6 +471,7 @@ async def test_email_privacy_boundaries(
             "tool_error": lambda: _hostile_mail(failure="tool"),
             "model_error": lambda: _hostile_mail(failure="model"),
             "approval_notification": _approval_notification,
+            "consented_send": _consented_send_notification,
             "foreign_principal": _foreign_principal,
             "upstream_secret": _upstream_secret,
             "internal_api_error": _internal_api_error,

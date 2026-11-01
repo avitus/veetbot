@@ -1527,6 +1527,122 @@ import SwiftUI
         #expect(model.sendProgressMessage == nil)
     }
 
+    /// One press on Send consents to the exact revision at the thread revision on screen:
+    /// no proposal, no sheet, and an Undo window the draft carries (ADR-0276).
+    @Test func testSendIsOnePressWithAnUndoWindow() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+
+        let send = try #require(requests.snapshot.first { $0.url!.path.hasSuffix("/send") })
+        let body = try Self.archiveRequestBody(send)
+        #expect(body["expected_revision"] as? Double == 2)
+        #expect(body["source_revision"] as? Double == 1)
+        #expect((body["idempotency_key"] as? String)?.isEmpty == false)
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
+        #expect(model.review == nil)
+        #expect(model.draft?.status == "sending")
+        #expect(model.canUndoSend)
+        #expect(model.draftActionMessage == nil)
+    }
+
+    /// Undo inside the window takes the send back and returns the editor with the text intact.
+    @Test func testUndoReturnsTheParkedSendToEditing() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.hasSuffix("/send-undo") {
+                return (200, self.draftJSON(revision: 2, body: "Edited before sending").replacingOccurrences(
+                    of: "\"approval_id\":\"\(self.approvalID)\"", with: "\"approval_id\":null"))
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("/send-undo") }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: undone ? self.draftJSON(revision: 2, body: "Edited before sending") : sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.canUndoSend)
+        await model.undoSend()
+
+        let undo = try #require(requests.snapshot.first { $0.url!.path.hasSuffix("/send-undo") })
+        #expect(try Self.archiveRequestBody(undo)["expected_revision"] as? Double == 2)
+        #expect(model.draft?.status == "ready")
+        #expect(model.draft?.canEdit == true)
+        #expect(!model.canUndoSend)
+        #expect(model.currentEdit?.body == "Edited before sending")
+        #expect(model.draftActionMessage == nil)
+    }
+
+    /// A press the server refuses because mail arrived shows that mail, in the server's words.
+    @Test func testSendRefusedForUnseenMailShowsTheNewMail() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (409, Self.error("invalid_state", "New mail arrived on this thread. Read it, then send again."))
+            }
+            let refused = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, refused ? self.newMailThreadJSON(draft: self.staleDraftJSON()) : self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.sendNow()
+
+        #expect(model.draftActionMessage == "New mail arrived on this thread. Read it, then send again.")
+        #expect(model.draft?.stale == true)
+        #expect(!model.canUndoSend)
+    }
+
+    /// Once the window closes and the run completes, the draft reads Sent.
+    @Test func testSendReportsSentWhenTheRunCompletes() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") {
+                let polls = requests.snapshot.filter { $0.url!.path.contains("/runs/") }.count
+                return (200, self.runJSON(status: polls >= 3 ? "COMPLETED" : "QUEUED"))
+            }
+            let polls = requests.snapshot.filter { $0.url!.path.contains("/runs/") }.count
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: polls >= 3 ? self.draftJSON(revision: 2, status: "sent") : sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.sendNow()
+
+        #expect(model.draft?.status == "sent")
+        #expect(!model.canUndoSend)
+        #expect(model.draftActionMessage == nil)
+    }
+
     /// A reply over the approval view's 512-character ceiling arrives truncated. The
     /// published digest still proves the frozen body is exactly the displayed draft,
     /// so review opens instead of silently refusing every long email.
@@ -2887,6 +3003,13 @@ import SwiftUI
         """
         {"id":"\(draftID)","thread_id":"\(threadID)","account_id":"personal","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)","status":"\(status)","stale":false,"run_id":"\(runID)","approval_id":"\(approvalID)","session_id":"\(threadID)","updated_at":"2026-09-11T00:00:00Z"}
         """
+    }
+    /// The draft the server returns while a one-press send is parked in its undo window.
+    private func parkedDraftJSON() -> String {
+        draftJSON(revision: 2, body: "Edited before sending", status: "sending")
+            .replacingOccurrences(of: "\"approval_id\":\"\(approvalID)\"", with: "\"approval_id\":null")
+            .replacingOccurrences(of: "\"updated_at\":\"2026-09-11T00:00:00Z\"",
+                                  with: "\"updated_at\":\"2026-09-11T00:00:00Z\",\"send_undo_until\":\"2026-09-11T00:00:10Z\"")
     }
     private func runJSON(status: String) -> String {
         """

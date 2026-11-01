@@ -36,6 +36,7 @@ from agent_core.domain.email import (
     archive_result_matches,
     body_cutoff,
     retained_thread,
+    send_message_arguments,
 )
 from agent_core.domain.email_junk import JunkPilotUnavailableError, junk_request
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
@@ -2175,8 +2176,17 @@ class _TaskIO:
                 Step(run_id=c.run.id, step_number=send_state["step"], started_at=c.clock.now()),
             )
             return await self._finish_send(prior)
+        consent = self.task.send_consent
         approved = False
-        if draft.approval_id is not None:
+        if consent is not None:
+            # The press is the approval (ADR-0276): revalidate it, then read the
+            # mailbox once and claim exactly as an approved send does.
+            try:
+                await self.service.validate_send(c.principal, c.run, c.lease)
+            except (ConflictError, AuthorizationError) as exc:
+                return await self._abandon_consented_send(str(exc))
+            approved = True
+        elif draft.approval_id is not None:
             async with c.uow_factory() as uow:
                 approval = await uow.approvals.get(draft.approval_id, c.principal)
             approved = approval.status is ApprovalStatus.APPROVED and approval.run_id == c.run.id
@@ -2206,37 +2216,58 @@ class _TaskIO:
                 await uow.approvals.cancel_for_run(c.run.id)
                 c.checkpoint.pending_tool_calls = []
                 c.checkpoint.pending_approval_ids = []
-                return _finished(
-                    "New mail arrived or the reply changed before it was sent, so nothing "
-                    "went out. Read the thread, then send again."
-                )
-            draft = current
+                changed = True
+            else:
+                changed = False
+                draft = current
+        if changed:
+            reason = (
+                "New mail arrived or the reply changed before it was sent, so nothing "
+                "went out. Read the thread, then send again."
+            )
+            # The draft lock is released above; a consented draft returns to editing.
+            if consent is not None:
+                return await self._abandon_consented_send(reason)
+            return _finished(reason)
+        async with c.uow_factory() as uow, uow.email.lock(c.principal):
+            await self._write_fence(uow)
+            draft = await self.service._draft(uow.email, c.principal, draft.id)
             if approved:
                 if draft.send_claim_id not in {None, self.task.id}:
                     raise ConflictError("the draft is already claimed by another send operation")
                 draft = draft.model_copy(
-                    update={"status": EmailDraftStatus.SENDING, "send_claim_id": self.task.id}
+                    update={
+                        "status": EmailDraftStatus.SENDING,
+                        "send_claim_id": self.task.id,
+                        "send_undo_until": None,
+                    }
                 )
                 await save_value(
                     uow.email, c.principal, "draft", str(draft.id), draft, c.clock.now()
                 )
-        arguments = {
-            "to": ", ".join(draft.to),
-            "cc": ", ".join(draft.cc) or None,
-            "bcc": ", ".join(draft.bcc) or None,
-            "subject": draft.subject,
-            "body": draft.body,
-            "thread_id": thread.provider_thread_id,
-            "in_reply_to": draft.in_reply_to,
-            "references": " ".join(draft.references) or None,
-        }
+        arguments = send_message_arguments(draft, thread.provider_thread_id)
         try:
             await self.call(draft.account_id, "send_message", arguments, operation="send")
         except ApprovalRequiredError as exc:
-            await self._draft_status(
-                EmailDraftStatus.AWAITING_APPROVAL, approval_id=exc.approval_id
-            )
-            raise
+            if consent is None:
+                await self._draft_status(
+                    EmailDraftStatus.AWAITING_APPROVAL, approval_id=exc.approval_id
+                )
+                raise
+            # The owner already pressed Send: the consumer resolves this exact
+            # approval once, and the press is checked again before dispatch.
+            try:
+                await self.service.approve_send(c.principal, c.run, c.lease, exc.approval_id)
+                await self.service.validate_send(c.principal, c.run, c.lease)
+                await self.call(draft.account_id, "send_message", arguments, operation="send")
+            except (ConflictError, AuthorizationError) as refused:
+                async with c.uow_factory() as uow:
+                    await uow.approvals.cancel_for_run(c.run.id)
+                c.checkpoint.pending_tool_calls = []
+                c.checkpoint.pending_approval_ids = []
+                return await self._abandon_consented_send(str(refused))
+            except EmailToolError:
+                pass
         except EmailToolError:
             pass
         state = c.checkpoint.working_state.get("email_calls", {}).get("send")
@@ -2287,6 +2318,11 @@ class _TaskIO:
             )
         return None
 
+    async def _abandon_consented_send(self, reason: str) -> RunOutcome:
+        """A press whose message or thread changed sends nothing; the draft returns to editing."""
+        await self._draft_status(EmailDraftStatus.READY)
+        return _finished(reason)
+
     async def _draft_status(
         self, status: EmailDraftStatus, *, approval_id: UUID | None = None
     ) -> None:
@@ -2306,6 +2342,8 @@ class _TaskIO:
                     update={
                         "status": status,
                         "approval_id": approval_id or draft.approval_id,
+                        # Whatever settled the send, the undo window is over.
+                        "send_undo_until": None,
                         "updated_at": c.clock.now(),
                     }
                 ),
