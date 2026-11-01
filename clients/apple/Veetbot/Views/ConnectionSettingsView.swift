@@ -5,6 +5,7 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case models
     case websiteAccess
     case mcpServers
+    case integrationKeys
     case notifications
     case appearance
     case smsIntegration
@@ -19,13 +20,13 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     // at each group's `case` in the page switch below.
     private static let titles: [ConnectionSettingsSection: String] = [
         .connection: "Connection", .models: "Models", .websiteAccess: "Website access",
-        .mcpServers: "MCP servers", .notifications: "Notifications", .appearance: "Appearance",
+        .integrationKeys: "Integration keys", .mcpServers: "MCP servers", .notifications: "Notifications", .appearance: "Appearance",
         .smsIntegration: "SMS integration", .dataAndPrivacy: "Data & privacy",
     ]
 
     private static let systemImages: [ConnectionSettingsSection: String] = [
         .connection: "key", .models: "wand.and.stars", .websiteAccess: "globe",
-        .mcpServers: "puzzlepiece.extension", .notifications: "bell", .appearance: "paintpalette",
+        .integrationKeys: "key.fill", .mcpServers: "puzzlepiece.extension", .notifications: "bell", .appearance: "paintpalette",
         .smsIntegration: "message", .dataAndPrivacy: "lock.shield",
     ]
 
@@ -678,6 +679,20 @@ public struct ConnectionSettingsView: View {
                     Text("Connect this app to Veetbot before adding MCP servers.")
                         .veetType(.ui)
                         .foregroundColor(AppTheme.inkSoft)
+                }
+            }
+
+        case .integrationKeys:
+            SettingsCard(
+                title: "Integration keys",
+                summary: "Store keys securely for approved integrations.",
+                systemImage: "key.fill",
+                tint: AppTheme.tealText
+            ) {
+                if model.isConfigured {
+                    IntegrationKeysSettingsSection(api: model.currentAPIClient)
+                } else {
+                    Text("Connect this app to Veetbot before managing integration keys.")
                 }
             }
 

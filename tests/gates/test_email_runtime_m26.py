@@ -2098,7 +2098,7 @@ async def test_draft_in_a_planned_thread_session_starts_no_server() -> None:
 
 async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_read() -> None:
     """One press is the owner's consent: the task reads the mailbox, the consumer resolves
-    the exact approval once, and the gesture record carries no mail content (ADR-0276)."""
+    the exact approval once, and the gesture record carries no mail content (ADR-0279)."""
     import json
     from dataclasses import replace
 

@@ -1657,7 +1657,7 @@ private struct EmailThreadScreen: View {
     /// wait behind one quiet menu at the trailing edge.
     private func draftActions(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         HStack(spacing: 10) {
-            // One press is the owner's consent to this exact message (ADR-0276); the
+            // One press is the owner's consent to this exact message (ADR-0279); the
             // server parks it for the undo window shown in the notice above.
             Button {
                 Task { await model.sendNow() }

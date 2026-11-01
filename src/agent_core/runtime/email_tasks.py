@@ -2179,7 +2179,7 @@ class _TaskIO:
         consent = self.task.send_consent
         approved = False
         if consent is not None:
-            # The press is the approval (ADR-0276): revalidate it, then read the
+            # The press is the approval (ADR-0279): revalidate it, then read the
             # mailbox once and claim exactly as an approved send does.
             try:
                 await self.service.validate_send(c.principal, c.run, c.lease)

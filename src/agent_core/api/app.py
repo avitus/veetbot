@@ -27,6 +27,7 @@ from agent_core.api.dreaming import dreaming_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
+from agent_core.api.integration_secrets import integration_secrets_router
 from agent_core.api.mcp_servers import mcp_servers_router
 from agent_core.api.middleware import (
     PayloadTooLargeError,
@@ -617,7 +618,13 @@ def _error_response(
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     if request.url.path.startswith(
-        ("/v1/email/", "/v1/calls", "/v1/dreaming", "/v1/memory-reconsolidations")
+        (
+            "/v1/email/",
+            "/v1/calls",
+            "/v1/dreaming",
+            "/v1/memory-reconsolidations",
+            "/v1/integration-secrets",
+        )
     ):
         # Unhandled errors are rendered outside the ordinary request middleware.
         headers = {**(headers or {}), "Cache-Control": PRIVATE_NO_STORE}
@@ -684,7 +691,7 @@ def create_app(
         # version-bump decision this handler does not make (rule 3).
         """Report invalid field locations without exposing submitted values."""
         locations: list[str] = []
-        for error in exc.errors():
+        for error in [] if request.url.path.startswith("/v1/integration-secrets") else exc.errors():
             location = ".".join(str(part) for part in error["loc"])
             if location and location not in locations:
                 locations.append(location)
@@ -2260,6 +2267,9 @@ def create_app(
     task_grants = getattr(services, "browser_task_grants", None)
     if settings.browser_task_grants_enabled and task_grants is not None:
         app.include_router(browser_task_grants_router(task_grants, secured))
+    integration_secrets = getattr(services, "integration_secrets", None)
+    if settings.integration_secrets_enabled and integration_secrets is not None:
+        app.include_router(integration_secrets_router(integration_secrets, secured))
     owner_mcp_servers = getattr(services, "mcp_servers", None)
     if settings.mcp_servers_enabled and owner_mcp_servers is not None:
         app.include_router(mcp_servers_router(owner_mcp_servers, secured))

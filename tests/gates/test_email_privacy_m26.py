@@ -231,7 +231,7 @@ async def _approval_notification() -> None:
 
 async def _consented_send_notification() -> None:
     """One press consents to the exact draft: no approval alert asks again, and neither the
-    gesture nor the notification outbox carries mail content (ADR-0276)."""
+    gesture nor the notification outbox carries mail content (ADR-0279)."""
     factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
     async with build(
         settings=replace(

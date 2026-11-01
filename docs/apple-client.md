@@ -931,7 +931,7 @@ decision with its action beside it; a save refused because another device
 edited the draft shows only that card, never the refusal as a second error.
 Send is the filled capsule (⌘↩): one press consents to the exact reply and
 parks it for the undo window, during which the notice reads "Sending" with
-Undo beside it, then Sent (ADR-0276). Draft
+Undo beside it, then Sent (ADR-0279). Draft
 options is a quiet icon menu at the trailing edge, and Refine with Veetbot
 folds its field and button into one row.
 The bottom bar keeps Discuss in Chat and the reply shortcut on the material

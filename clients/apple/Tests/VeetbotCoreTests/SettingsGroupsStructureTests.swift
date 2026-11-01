@@ -14,12 +14,12 @@ import Testing
     func testTheGroupsFollowTheDesignOrder() {
         #expect(
             ConnectionSettingsSection.allCases == [
-                .connection, .models, .websiteAccess, .mcpServers, .notifications, .appearance,
+                .connection, .models, .websiteAccess, .mcpServers, .integrationKeys, .notifications, .appearance,
                 .smsIntegration, .dataAndPrivacy,
             ]
         )
         #expect(ConnectionSettingsSection.allCases.map(\.title) == [
-            "Connection", "Models", "Website access", "MCP servers", "Notifications", "Appearance",
+            "Connection", "Models", "Website access", "MCP servers", "Integration keys", "Notifications", "Appearance",
             "SMS integration", "Data & privacy",
         ])
     }

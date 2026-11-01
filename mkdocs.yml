@@ -124,6 +124,7 @@ nav:
       - Apple Client: apple-client.md
   - Security: security.md
   - Agent-Written Jobs: jobs.md
+  - Integration Keys: integration-keys.md
   - Production Deployment: deployment.md
   - Gmail Integration Runbook: gmail-integration-runbook.md
   - Telegram Surface Runbook: telegram-surface-runbook.md
@@ -410,6 +411,8 @@ nav:
       - "ADR-0272: Jobs and semantic recall coexist": adr/0272-jobs-and-semantic-recall-coexist.md
       - "ADR-0273: Diagnose a widget from owner chat": adr/0273-cockpit-widget-diagnostics.md
       - "ADR-0274: Continue an active recall trial across equivalent releases": adr/0274-continuous-recall-trial-across-equivalent-releases.md
-      - 'ADR-0275: Send proposals are interactive work': adr/0275-send-proposals-are-interactive-work.md
-      - 'ADR-0276: One-press Send with Undo': adr/0276-one-press-send-with-undo.md
+      - 'ADR-0275: In-app integration keys': adr/0275-in-app-integration-secrets.md
+      - "ADR-0276: Inspect one public image in chat": adr/0276-public-image-inspection.md
+      - 'ADR-0278: Send proposals are interactive work': adr/0278-send-proposals-are-interactive-work.md
+      - 'ADR-0279: One-press Send with Undo': adr/0279-one-press-send-with-undo.md
   - Changelog: changelog.md

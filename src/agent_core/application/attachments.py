@@ -157,9 +157,16 @@ class StoredAttachmentResolver:
     async def resolve(
         self, reads: Sequence[AttachmentRead], *, run_id: UUID
     ) -> dict[UUID, AttachmentContent]:
+        """Read attachments released to this run under their individual byte limits."""
         if not reads:
             return {}
-        released = await self._released([read.artifact_id for read in reads], run_id)
+        released = await self._released(
+            [read.artifact_id for read in reads],
+            run_id,
+            inspections={
+                r.artifact_id: r.inspection_call for r in reads if r.inspection_call is not None
+            },
+        )
         contents: dict[UUID, AttachmentContent] = {}
         for read in reads:
             chosen = released.get(read.artifact_id)
@@ -185,7 +192,11 @@ class StoredAttachmentResolver:
         }
 
     async def _released(
-        self, artifact_ids: Sequence[UUID], run_id: UUID
+        self,
+        artifact_ids: Sequence[UUID],
+        run_id: UUID,
+        *,
+        inspections: dict[UUID, str] | None = None,
     ) -> dict[UUID, ArtifactRef]:
         """The named artifacts that are live uploads of the caller in the run's session."""
 
@@ -196,15 +207,40 @@ class StoredAttachmentResolver:
                 run = await uow.runs.get(run_id, self._principal)
             except NotFoundError:
                 return {}
+            verified = {
+                (i.call_id, i.structured_result.get("artifact_id"))
+                for i in (
+                    await uow.invocations.list_for_run(run_id, self._principal)
+                    if inspections
+                    else []
+                )
+                if i.tool_name == "web.inspect_image"
+                and i.tool_source == "builtin"
+                and i.status == "SUCCEEDED"
+                and i.structured_result
+            }
             for artifact_id in artifact_ids:
                 try:
                     artifact = await uow.artifacts.get(artifact_id, self._principal)
                 except NotFoundError:
                     continue
+                inspection = (inspections or {}).get(artifact_id)
+                allowed = (
+                    (
+                        (inspection, str(artifact_id)) in verified
+                        and artifact.run_id == run_id
+                        and artifact.origin == "tool_output"
+                        and artifact.media_type == "image/jpeg"
+                    )
+                    if inspection
+                    else (
+                        artifact.origin in {"upload", "knowledge_source"}
+                        and ATTACHMENT_METADATA_KEY in artifact.metadata
+                    )
+                )
                 if (
                     artifact.session_id == run.session_id
-                    and artifact.origin in {"upload", "knowledge_source"}
-                    and ATTACHMENT_METADATA_KEY in artifact.metadata
+                    and allowed
                     and (artifact.expires_at is None or artifact.expires_at > now)
                 ):
                     released[artifact.id] = artifact

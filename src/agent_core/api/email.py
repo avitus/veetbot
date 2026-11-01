@@ -294,7 +294,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         authenticated: Annotated[Principal, secured("email.write")],
         idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
     ) -> dict[str, object]:
-        """One authenticated press consents to exactly this draft revision (ADR-0276)."""
+        """One authenticated press consents to exactly this draft revision (ADR-0279)."""
         if idempotency_key is not None and idempotency_key != body.idempotency_key:
             raise HTTPException(status_code=400, detail="Idempotency keys must match")
         await service.draft(authenticated, draft_id)

@@ -1597,7 +1597,7 @@ public final class EmailViewModel: ObservableObject {
         } catch { if generation == connection { report(error, draft: true) } }
     }
 
-    /// True while a one-press send is parked in its undo window (ADR-0276).
+    /// True while a one-press send is parked in its undo window (ADR-0279).
     public var canUndoSend: Bool {
         guard let draft, draft.status == "sending", let until = draft.sendUndoUntil else { return false }
         return until > now() && !isPerformingAction

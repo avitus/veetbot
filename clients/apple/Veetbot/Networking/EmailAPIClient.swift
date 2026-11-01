@@ -152,7 +152,7 @@ extension VeetbotAPIClient {
         )
     }
 
-    /// One press on Send: the exact revision and the thread revision the owner saw (ADR-0276).
+    /// One press on Send: the exact revision and the thread revision the owner saw (ADR-0279).
     public func sendEmailDraft(
         _ draft: EmailDraftView, sourceRevision: Int, idempotencyKey: String
     ) async throws -> EmailDraftOperation {

@@ -247,7 +247,7 @@ async def test_edited_draft_is_sent_once_through_approval_worker_and_restart() -
 
 async def test_one_press_send_waits_out_its_undo_window_then_sends_once() -> None:
     """A consented send stays parked until its window closes; Undo inside it sends nothing,
-    and a second press after the window sends exactly one message (ADR-0276)."""
+    and a second press after the window sends exactly one message (ADR-0279)."""
     writes: list[tuple[str, dict[str, Any]]] = []
     factory = await _recording_factory(writes)
     clock = FixedClock(NOW)

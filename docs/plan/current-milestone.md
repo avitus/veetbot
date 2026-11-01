@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Integration keys MVP — ADR-0275:** On 2026-10-30 the owner accepted
+  [the decision](../adr/0275-in-app-integration-secrets.md) and authorized its
+  implementation on `secret-store`. The default-off MVP reuses PostgreSQL,
+  AES-GCM sealing and approved job grants, with native Settings for key entry.
+  See [the operator guide](../integration-keys.md). Production activation and
+  ADR-0268's jobs prerequisites remain separate; no milestone or gate moves.
+
 - **Agent-written jobs MVP — ADR-0268:** On 2026-10-29 the owner authorized
   implementation of saved Python programs that combine code and explicit model
   calls as appropriate. The MVP implementation now includes saved packages,
@@ -24,7 +31,7 @@ title: Current Milestone
   Existing protections remain, broader hardening is deferred, and no milestone
   or gate moves.
 
-- **Email reply flow repairs — ADR-0275:** On 2026-10-31 the owner reported
+- **Email reply flow repairs — ADR-0278:** On 2026-10-31 the owner reported
   that replying to an email was slow, with inert-looking controls and opaque
   "email changed" notices, and chose these repairs first: send tasks run in
   the interactive queue class, the one governed mailbox read follows Final
@@ -32,8 +39,8 @@ title: Current Milestone
   Review & Send available while an autosave is in flight, says when a send
   ended without dispatch, and names the new mail that stalled a draft. A
   one-press send with Undo remains a separate decision on the exact-send
-  approval (ADR-0275). On 2026-10-31 the owner then authorized that decision
-  as ADR-0276: Send is one press that consents to the exact revision, parked
+  approval (ADR-0278). On 2026-10-31 the owner then authorized that decision
+  as ADR-0279: Send is one press that consents to the exact revision, parked
   for a ten-second Undo window and resolved through the ordinary approval by
   the Archive-style consent consumer. No milestone or gate moves.
 

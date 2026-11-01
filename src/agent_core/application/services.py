@@ -32,6 +32,7 @@ from agent_core.domain.cockpit_views import (
     CockpitSnapshotView,
     CockpitWidgetDetailView,
 )
+from agent_core.domain.credentials import SecretValue
 from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, ForwardDreamingBoundary
@@ -1079,3 +1080,21 @@ class CallingService(Protocol):
 
 class CallIngressService(Protocol):
     async def receive(self, body: bytes, signature: str, secret: str) -> bool: ...
+
+
+class IntegrationSecretSettings(Protocol):
+    async def list(self, principal: Principal) -> list[dict[str, object]]: ...
+
+    async def put(
+        self,
+        principal: Principal,
+        key_id: UUID,
+        *,
+        label: str,
+        origin: str,
+        auth_scheme: Literal["bearer", "x-api-key"],
+        value: SecretValue,
+        expected_revision: int,
+    ) -> dict[str, object]: ...
+
+    async def delete(self, principal: Principal, key_id: UUID, expected_revision: int) -> None: ...

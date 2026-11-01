@@ -1,7 +1,7 @@
-# ADR-0276: One-press Send with Undo
+# ADR-0279: One-press Send with Undo
 
 - Status: Accepted — the owner authorized this change to the exact-send
-  approval on 2026-10-31, after the ADR-0275 repairs.
+  approval on 2026-10-31, after the ADR-0278 repairs.
 - Amends: `email-experience.md` send flow (steps 1–2); ADR-0095's gesture
   consent is reused for sending.
 - Scope: Milestone 26 behavior. Gate 20 (exact send approval), gate 21
@@ -36,7 +36,7 @@ when the frozen invocation matches the consent.
    stale draft, a draft in another send state, or a revision the client did
    not display refuses the press with a plain sentence.
 2. **Undo is a real window.** The send task is admitted in the interactive
-   class (ADR-0275) with `scheduled_for` set to now plus
+   class (ADR-0278) with `scheduled_for` set to now plus
    `AGENT_EMAIL_SEND_UNDO_SECONDS` (10 by default, 0–60). The draft shows
    `send_undo_until`. `POST /v1/email/drafts/{id}/send-undo` cancels the
    parked task and returns the draft to editing with its text intact; once a

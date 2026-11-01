@@ -3138,3 +3138,25 @@ class JobRecordRow(Base):
     slug: Mapped[str] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer)
     body: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class IntegrationSecretRow(Base):
+    __tablename__ = "integration_secrets"
+    __table_args__ = (
+        CheckConstraint("revision > 0", name="integration_secrets_revision"),
+        CheckConstraint(
+            "(deleted_at IS NULL) = (sealed_value IS NOT NULL)",
+            name="integration_secrets_lifecycle",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text, index=True)
+    principal_id: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)
+    auth_scheme: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
+    sealed_value: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

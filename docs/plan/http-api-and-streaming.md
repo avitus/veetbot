@@ -2219,11 +2219,11 @@ build failure.
 
 The approved [email-experience.md](email-experience.md) defines the account,
 thread, refresh, feedback, learning, draft, send-proposal and one-press send
-(`/send`, `/send-undo`; ADR-0276) route families.
+(`/send`, `/send-undo`; ADR-0279) route families.
 Application scopes `email.read` and `email.write` intersect current mailbox MCP
 authority; send-proposal returns ordinary run/approval references and existing
 approval routes authorize dispatch; `/send` admits a governed task whose
-`REQUIRE_APPROVAL` the owner's own press resolves once (ADR-0276). There is no
+`REQUIRE_APPROVAL` the owner's own press resolves once (ADR-0279). There is no
 direct-send route or arbitrary write extension to the memory API. Every command requires validation,
 authorization, failure, conflict and retry coverage under the existing error
 vocabulary; ordinary run SSE remains the progress transport.
@@ -2505,3 +2505,22 @@ foreign or unknown widget, revision or feed is an indistinguishable 404.
 Cockpit adds no error code. A write that does not fit its live widget is
 `malformed_request`, and a build that reached no verdict is
 `sandbox_execution_error`.
+
+## Integration keys (ADR-0275)
+
+When enabled, `GET /v1/integration-secrets` requires `settings.read` and returns
+`{secrets: [...]}` with only caller-owned active metadata: `id`, `reference`,
+`label`, `origin`, `auth_scheme`, `revision`, `created_at`, `updated_at`.
+`PUT /v1/integration-secrets/{id}` requires `settings.write` and accepts immutable
+`label`, `origin` and `auth_scheme` fields plus secret `value` and integer
+`expected_revision` (0 creates); it returns the saved metadata. Identical
+lost-response retries return that metadata without another mutation.
+`DELETE /v1/integration-secrets/{id}` requires `settings.write`, an integer
+`If-Match` revision and returns 204; owned tombstone retries also return 204.
+Wrong-owner and unknown existing IDs are 404, malformed writes 400, missing
+scopes 403, stale revisions/binding changes/tombstone recreation 409, bodies over
+8 KiB 413, and a key that cannot be opened `503 integration_key_unavailable` with
+empty details. All responses use private, no-store caching, including failures. Parse secret bodies manually under the
+cap; never reflect body fields, values, unknown field names or parser details
+in errors. There is no GET-by-ID, reveal or export route. See
+[the owner and operator guide](../integration-keys.md).

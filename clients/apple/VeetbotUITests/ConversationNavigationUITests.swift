@@ -3040,7 +3040,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(send.isHittable)
         XCTAssertFalse(app.staticTexts["Sent"].exists)
         send.tap()
-        // One press parks the send with a way back, then it reads Sent (ADR-0276).
+        // One press parks the send with a way back, then it reads Sent (ADR-0279).
         XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.buttons["email.approve-send"].exists)
         XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 15))
@@ -3917,7 +3917,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(reading.frame.contains(send.frame), app.debugDescription)
         XCTAssertTrue(send.isHittable)
         send.click()
-        // One press parks the send with a way back, then it reads Sent (ADR-0276).
+        // One press parks the send with a way back, then it reads Sent (ADR-0279).
         XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.buttons["email.approve-send"].exists)
         XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 15))

@@ -16,6 +16,7 @@ import Testing
                 .models,
                 .websiteAccess,
                 .mcpServers,
+                .integrationKeys,
                 .notifications,
                 .appearance,
                 .dataAndPrivacy,

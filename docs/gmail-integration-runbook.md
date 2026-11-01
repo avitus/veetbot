@@ -724,7 +724,7 @@ above and needs no new Google permission.
    needed. The flag grants no authority; the scopes and the existing account
    authority do. One-press Send parks each reply for
    `AGENT_EMAIL_SEND_UNDO_SECONDS` (default 10, 0–60) before the worker sends
-   it; Undo within that window cancels it (ADR-0276).
+   it; Undo within that window cancels it (ADR-0279).
 3. Automatic email work spends at most USD 20 per UTC day and USD 200 per
    rolling 30 days. A reviewed `runtime/limits.yaml` overlay under
    `AGENT_CONFIG_DIR` can set other finite `email.daily_cost` and

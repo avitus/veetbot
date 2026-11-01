@@ -1528,7 +1528,7 @@ import SwiftUI
     }
 
     /// One press on Send consents to the exact revision at the thread revision on screen:
-    /// no proposal, no sheet, and an Undo window the draft carries (ADR-0276).
+    /// no proposal, no sheet, and an Undo window the draft carries (ADR-0279).
     @Test func testSendIsOnePressWithAnUndoWindow() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in

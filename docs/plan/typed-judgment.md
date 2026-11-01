@@ -128,7 +128,7 @@ already follow.
 - **Fixed egress.** The adapter dials exactly one HTTPS endpoint, the vendor's
   documented System One endpoint, held as a module constant, and follows no
   redirect. No setting, request field, or response changes the destination.
-  This is the fixed-endpoint arrangement web-access.md:186-191 describes: the
+  This is the fixed-endpoint arrangement web-access.md:187-189 describes: the
   composition root selects the adapter and the adapter hard-codes its host.
   The egress policy governs sandbox traffic and tenant-supplied URLs
   (sandbox-isolation.md:810-821) and gains no entry.

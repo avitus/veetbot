@@ -160,7 +160,7 @@ class EmailArchiveConsent(EmailValue):
 
 
 class EmailSendConsent(EmailValue):
-    """One press on Send: the owner's consent to one exact draft revision (ADR-0276)."""
+    """One press on Send: the owner's consent to one exact draft revision (ADR-0279)."""
 
     tenant_id: str
     principal_id: str
@@ -293,7 +293,7 @@ class EmailDraft(EmailValue):
     send_claim_id: UUID | None = None
     provider_thread_id: str | None = None
     send_tool_name: str | None = None
-    # Set while a one-press send is parked and can still be undone (ADR-0276).
+    # Set while a one-press send is parked and can still be undone (ADR-0279).
     send_undo_until: datetime | None = None
 
 

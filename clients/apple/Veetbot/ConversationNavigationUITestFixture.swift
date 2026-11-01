@@ -817,7 +817,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             statusCode = 200
             body = Self.emailDraftJSON
         case ("POST", "/v1/email/drafts/\(Self.emailDraftID)/send"):
-            // One press parks the send (ADR-0276); the third run read after it reports Sent.
+            // One press parks the send (ADR-0279); the third run read after it reports Sent.
             Self.emailLock.lock()
             Self.emailStatus = "sending"
             Self.emailSendReads = 0
@@ -1540,7 +1540,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailDraftJSON: String {
         let (body, revision, status) = emailLock.withLock { (emailBody, emailRevision, emailStatus) }
         let escapedBody = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
-        // A parked send carries its undo window so the composer shows Undo (ADR-0276).
+        // A parked send carries its undo window so the composer shows Undo (ADR-0279).
         let undoUntil = status == "sending"
             ? "\"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(10)))\"" : "null"
         return """

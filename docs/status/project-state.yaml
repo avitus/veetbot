@@ -1,11 +1,11 @@
-# ADR-0276: On 2026-10-31 the owner authorized one-press Send with Undo: the
+# ADR-0279: On 2026-10-31 the owner authorized one-press Send with Undo: the
 # press is the owner's consent to the exact draft revision at the thread
 # revision on screen (the Archive gesture pattern), the task is parked for
 # AGENT_EMAIL_SEND_UNDO_SECONDS, Undo cancels it, and the consent consumer
 # resolves the ordinary REQUIRE_APPROVAL once with no second notification.
 # The review sheet remains only for drafts already awaiting approval.
 # Accepted; no milestone or gate moves.
-# ADR-0275: On 2026-10-31 the owner asked for a quicker, clearer email reply
+# ADR-0278: On 2026-10-31 the owner asked for a quicker, clearer email reply
 # flow and chose its repairs ahead of a one-press send: send tasks join the
 # interactive queue class, the mailbox is read once (after Final Send), owner
 # refusals read as plain English, and the Apple client keeps Review & Send
@@ -361,6 +361,57 @@ project:
     - 34
     - 35
 
+
+public_photo_inspection:
+  adr: docs/adr/0276-public-image-inspection.md
+  authorized_on: '2026-10-31'
+  status: implemented_pending_delivery
+  evidence: tests/unit/test_web_inspect_image.py
+  scope: Public image URLs and selected SmugMug photos reach the model as verified tool results.
+
+integration_secrets_mvp:
+  adr: docs/adr/0275-in-app-integration-secrets.md
+  authorized_on: '2026-10-30'
+  status: in_progress
+  authorized_scope:
+  - Owner-entered integration keys in Settings, sealed in PostgreSQL
+  - Existing credential broker and approved jobs as the first consumer
+  - A separate host-held master key and manual off-host recovery
+  - PR to main, CodeRabbit review, final hosted verification, merge and production activation authorized on 2026-10-31
+  implementation_status: implemented_default_off_pending_review_and_delivery
+  implementation_evidence:
+  - tests/unit/test_integration_secrets_api.py
+  - tests/unit/test_integration_secrets_security.py
+  - tests/unit/test_integration_secret_jobs.py
+  - tests/contract/test_integration_secret_store_contract.py
+  - tests/integration/test_integration_secrets_postgres.py
+  - clients/apple/Tests/VeetbotCoreTests/IntegrationSecretsTests.swift
+  verification:
+    reading_lane: A
+    diff_minimum_reading_lane: A
+    static: 'Full frozen-code partition: 9037 passed, one skipped; the sole failure was the workflow test asserting two workers under the four-worker invocation, all 12 tests in that module passed when rerun with defaults'
+    focused: '200 API, secret-store, jobs and architecture checks passed after the failure-path fixes'
+    initial_run: 'The initial full run overlapped source edits, invalidating cached release-evidence fingerprints; a synthetic userinfo URL also triggered the scanner. Source was frozen and the fixture constructed at runtime before the rerun; none of those failures remained'
+    checks: 'Lint, mypy, citation repair, docs-check and git diff --check passed'
+    contract: 'circleci testsuite run contract: 2012 passed; includes the unchanged MCP sealing contract'
+    postgres: 'circleci testsuite run integration: 24 passed across secret store, jobs, migration and MCP persistence atoms on an isolated disposable PostgreSQL 16 cluster'
+    native: 'make test-apple: 1040 core tests and four contrast tests passed'
+    security_evidence: 'Owner/RLS isolation, ciphertext AAD/tamper/wrong-key refusal, transaction rollback, concurrent CAS/cap/retries, tombstones, fresh worker processes after replacement/deletion, and synthetic ciphertext snapshot restore with a separately supplied key'
+    boundary_evidence: 'Metadata-only authenticated API, content-free validation/errors/logging, no-store failures, dedicated transient native input, stable retry identity, grant-bound composed HTTP reads and encoded-echo refusal'
+    red_tests:
+    - 'circleci testsuite run static -t test_integration_secrets_api: expected PUT 200 initially returned 404'
+    - 'circleci testsuite run contract -t test_integration_secret_store_contract: expected the composed repository; it was absent'
+    - 'circleci testsuite run static -t test_integration_secret_jobs: stored reference initially rejected by JobAccess'
+    - 'make test-apple: Integration keys was absent from the Settings sections'
+    - 'Additional regressions first reproduced wrong-key overwrite, incorrect 503 mapping, missing no-store on 500, lowercase URL-escape and numeric JSON echoes, and noncanonical origins'
+    activation_preflight: '2026-10-31: Confirmed the nightly backup takes a database dump and state tar. Verified the master-key exclusion with a synthetic archive. Escrowed the new key in the owner-designated off-host login Keychain and successfully recovered a synthetic row through pg_dump/pg_restore into a separate database with a fresh escrow read. A wrong key failed.'
+    review_regression: 'The loader initially rejected the root-owned 0440 ACL-backed credential from the production systemd version. The corrected loader admitted a synthetic unit-only credential on that host and refused foreign, group-readable, missing-ACL and ordinary-path variants in tests.'
+    production_evidence: 'Hosted final CI, merged delivery and live enablement pending at PR submission.'
+  implementation_authorized: true
+  production_activation_authorized: true
+  remaining_work:
+  - Complete review, final hosted verification and merged delivery
+  - Enable trusted roles, verify the live Settings lifecycle and keep provider permissions scoped
 
 agent_jobs_mvp:
   adr: docs/adr/0268-agent-written-jobs.md

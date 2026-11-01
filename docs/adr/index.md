@@ -320,5 +320,8 @@ implementation without one.
 - [ADR-0272: Jobs and semantic recall coexist](0272-jobs-and-semantic-recall-coexist.md)
 - [ADR-0273: Diagnose a widget from owner chat](0273-cockpit-widget-diagnostics.md)
 - [ADR-0274: Continue an active recall trial across equivalent releases](0274-continuous-recall-trial-across-equivalent-releases.md)
-- [ADR-0275: Send proposals are interactive work and read the mailbox once (Proposed)](0275-send-proposals-are-interactive-work.md)
-- [ADR-0276: One-press Send with Undo (Accepted)](0276-one-press-send-with-undo.md)
+
+- [ADR-0275: An in-app store for integration keys](0275-in-app-integration-secrets.md)
+- [ADR-0276: Inspect one public image in chat (Accepted)](0276-public-image-inspection.md)
+- [ADR-0278: Send proposals are interactive work and read the mailbox once (Proposed)](0278-send-proposals-are-interactive-work.md)
+- [ADR-0279: One-press Send with Undo (Accepted)](0279-one-press-send-with-undo.md)

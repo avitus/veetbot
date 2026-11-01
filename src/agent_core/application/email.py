@@ -1283,7 +1283,7 @@ class EmailExperienceService:
                     "deadline_at": deadline,
                 },
             )
-            # A consented send is parked for the undo window first (ADR-0276).
+            # A consented send is parked for the undo window first (ADR-0279).
             scheduled_for = now + timedelta(seconds=self.send_undo_seconds) if consented else now
             run = Run(
                 id=self.ids.new_id(),
@@ -1578,7 +1578,7 @@ class EmailExperienceService:
             raise AuthorizationError("approval requires a distinct resolver")
 
     def _require_send(self, principal: Principal, account_id: str) -> None:
-        """Preflight current authority before storing a send consent (ADR-0276)."""
+        """Preflight current authority before storing a send consent (ADR-0279)."""
         for scope in (
             "email.read",
             "email.write",
@@ -1740,7 +1740,7 @@ class EmailExperienceService:
         lease: WorkerLease | None,
         approval_id: UUID,
     ) -> None:
-        """Consume the press through ordinary one-time approval resolution (ADR-0276)."""
+        """Consume the press through ordinary one-time approval resolution (ADR-0279)."""
         task = await self.validate_send(principal, run, lease)
         consent = task.send_consent
         assert consent is not None and task.draft_id is not None

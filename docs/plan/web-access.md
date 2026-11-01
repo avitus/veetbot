@@ -178,15 +178,16 @@ rewritten. This is bootstrap curation, not runtime or model-directed routing.
 
 ## Policy, egress, and trust
 
-All three tools declare `NETWORK_READ`, `LOW`, `READ_ONLY`, parallel execution,
+All four web tools declare `NETWORK_READ`, `LOW`, `READ_ONLY`, parallel execution,
 bounded time and output, and `target_kind: web_provider`. Registration accepts
 that target only for builtin `web.*` tools with this exact read-only
 classification and `EXTERNAL_UNTRUSTED` output.
 
 The deterministic policy's `host_on_allowlist` condition recognizes the
-`web_provider` target because the composition root selects the adapter and the
-adapter hard-codes its HTTPS API endpoint. A model-authored `url` or
-`host_allowed` argument cannot create this target or change its egress host.
+registered web tools. Search, page extraction, and JSON extraction connect
+to fixed provider API endpoints. For photo inspection, the model-supplied
+URL selects the destination. The worker's image reader validates and pins the
+public address on each hop. Tool arguments cannot select the policy target.
 Sandbox networking remains default-deny, and model-generated code receives no
 provider credential.
 
@@ -291,3 +292,7 @@ pipeline retains ownership of any retry decision within the run deadline.
 These seven registry-backed gates, the shared port contract, and repository
 checks are the tranche's blocking delivery contract. They do not advance the
 verified gate ceiling until Milestone 10 as a whole completes.
+
+## Public photo inspection
+
+With web fetch enabled, `web.inspect_image` accepts a public image URL or a selected SmugMug photo permalink. The worker connects directly to the URL through `PublicImageReader`, which checks every DNS answer and pins each connection, including redirects, to a validated public address. It returns an external-untrusted image for a vision-capable model. A gallery without a selected photo requires a more specific link. See [ADR-0276](../adr/0276-public-image-inspection.md).

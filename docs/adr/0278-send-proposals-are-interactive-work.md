@@ -1,4 +1,4 @@
-# ADR-0275: Send proposals are interactive work and read the mailbox once
+# ADR-0278: Send proposals are interactive work and read the mailbox once
 
 - Status: Proposed — the owner asked on 2026-10-31 for a quicker, clearer
   email reply flow and chose these repairs first, ahead of a one-press send.

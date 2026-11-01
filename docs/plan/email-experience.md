@@ -571,12 +571,12 @@ The send flow is:
 1. Send is one press on the exact current revision (⌘↩ on the Mac). The press
    is the owner's consent to that exact message — mailbox, recipients, subject,
    body and thread — recorded with the durable send task as an authenticated
-   gesture, as the Archive gesture is (ADR-0095, ADR-0276). The client sends
+   gesture, as the Archive gesture is (ADR-0095, ADR-0279). The client sends
    the draft revision and the thread revision it displayed; the server derives
    everything else from that immutable revision. A thread that moved on, a
    stale draft, or a draft in another send state refuses the press in plain
    words. It reads nothing from the mailbox first: the owner is waiting, so
-   the task joins the interactive class (ADR-0275).
+   the task joins the interactive class (ADR-0278).
 2. The task is parked for the undo window (`AGENT_EMAIL_SEND_UNDO_SECONDS`,
    ten seconds by default). Undo within the window cancels the parked task
    and returns the draft to editing with its text intact; once a worker has
@@ -835,7 +835,7 @@ normal contract naming review:
 | `/v1/email/feedback` | Create, inspect, correct, undo scoped owner feedback and attention judgments. |
 | `/v1/email/learning` | Inspect profile/coverage, pause/resume learning, reset derived preferences or exclude a source. |
 | `/v1/email/threads/{id}/drafts` and draft detail | Start/refine a governed generation run; read/save revisions; discard internal proposals. |
-| `/v1/email/drafts/{id}/send` and `/send-undo` | Admit one consented send of an exact draft revision at the displayed thread revision (ADR-0276); cancel it while it is still parked in the undo window. |
+| `/v1/email/drafts/{id}/send` and `/send-undo` | Admit one consented send of an exact draft revision at the displayed thread revision (ADR-0279); cancel it while it is still parked in the undo window. |
 | `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references (older clients). |
 | `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
 | `/v1/email/threads/{id}/spam` and `/spam-flag` | Milestone 31 (ADR-0165), behind its flag: admit an owner's Report spam or Not spam with Archive's gesture; clear or restore a suspected-spam flag without a mailbox change. |
@@ -891,7 +891,7 @@ scopes. The typed task performs no model work and consumes no automatic-email
 dollar reservation. The owner is waiting on the gesture, so the task is queued in
 the interactive class (event-log-and-persistence.md:698) and never waits behind
 refresh or draft work, which stays asynchronous; a send proposal and its
-approved send share that class (ADR-0275). It uses the existing
+approved send share that class (ADR-0278). It uses the existing
 tool pipeline and approval floor, validating the immutable, expiring owner
 request against the exact pending action before ordinary one-time resolution. Preserve requested/resolved audit
 ordering, policy revalidation, worker fencing, and uncertain-effect rules.
