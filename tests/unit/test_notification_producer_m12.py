@@ -312,10 +312,11 @@ async def test_required_trigger_identifiers_fail_closed() -> None:
             )
 
 
-@pytest.mark.parametrize("lifetime_seconds", [30, 60, 90])
+@pytest.mark.parametrize("lifetime_seconds", [30, 60, 90, 120])
 async def test_a_short_lived_approval_keeps_the_thirty_second_grace(lifetime_seconds: int) -> None:
-    """An approval that expires within the ninety-second grace is still delivered: it keeps
-    the thirty-second grace, so the dispatcher claims it before it expires."""
+    """An approval that expires within the ninety-second grace plus the dispatcher's
+    thirty-second fallback poll keeps the thirty-second grace, so a scan still finds it
+    before it expires."""
     clock, factory = await memory_uow_factory()
     producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
     async with factory() as uow:
