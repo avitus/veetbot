@@ -762,7 +762,9 @@ async def test_preview_with_live_data_renders_the_current_feed_without_publishin
             artifacts=writer,
         )
         assert result.ok and result.structured and result.structured["fixture"] == "live"
-        assert "live" in result.content[0].text and "synthetic" not in result.content[0].text
+        summary = result.content[0]
+        assert isinstance(summary, TextPart)
+        assert "live" in summary.text and "synthetic" not in summary.text
         image = result.content[-1]
         assert isinstance(image, ImageReferencePart) and image.filename == "weather-live-sm.png"
         assert result.output_trust == TrustLevel.EXTERNAL_UNTRUSTED

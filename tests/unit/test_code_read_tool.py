@@ -6,9 +6,17 @@ from pathlib import Path
 import pytest
 
 from agent_core.adapters.code.source_tree import FilesystemSourceTree
+from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.tools import ToolExecutionContext, ToolResult
 from agent_core.tools.code import CodeReadTool
 from tests.contract.support import principal, tool_context
+
+
+def _text(result: ToolResult) -> str:
+    part = result.content[0]
+    assert isinstance(part, TextPart)
+    return part.text
 
 
 @pytest.fixture
@@ -37,7 +45,7 @@ def tree(tmp_path: Path) -> FilesystemSourceTree:
     return FilesystemSourceTree(tmp_path, release_id="20261101-120000-abc1234")
 
 
-def _context():
+def _context() -> ToolExecutionContext:
     return replace(
         tool_context(), principal=principal().model_copy(update={"scopes": {"code.read"}})
     )
@@ -57,15 +65,15 @@ async def test_read_pages_a_file_by_line_within_the_inline_budget(
     tool = CodeReadTool(tree)
     first = await tool.execute({"operation": "read", "path": "src/agent_core/jobs.py"}, _context())
     assert first.ok and first.structured is not None
-    assert first.content[0].text.startswith("1: line 1 ")
-    assert len(first.content[0].text.encode()) <= 3900
+    assert _text(first).startswith("1: line 1 ")
+    assert len(_text(first).encode()) <= 3900
     following = first.structured["next_line"]
     assert following > 1
     second = await tool.execute(
         {"operation": "read", "path": "src/agent_core/jobs.py", "start_line": following},
         _context(),
     )
-    assert second.content[0].text.startswith(f"{following}: line {following} ")
+    assert _text(second).startswith(f"{following}: line {following} ")
 
 
 async def test_list_shows_only_source(tree: FilesystemSourceTree) -> None:
@@ -88,7 +96,7 @@ async def test_search_finds_source_and_skips_generated_and_private_files(
         {"operation": "search", "pattern": "maximum_response_bytes"}, _context()
     )
     assert found.ok and found.structured is not None
-    text = found.content[0].text
+    text = _text(found)
     assert "src/agent_core/jobs.py:1:" in text
     assert "node_modules" not in text and "__pycache__" not in text
     assert found.structured["truncated"] is True
@@ -99,7 +107,7 @@ async def test_search_finds_source_and_skips_generated_and_private_files(
     narrowed = await tool.execute(
         {"operation": "search", "pattern": "GraphQL", "path": "docs"}, _context()
     )
-    assert "docs/jobs.md:1:" in narrowed.content[0].text
+    assert "docs/jobs.md:1:" in _text(narrowed)
 
 
 async def test_search_treats_a_flag_shaped_pattern_as_text(tree: FilesystemSourceTree) -> None:

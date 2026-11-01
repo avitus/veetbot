@@ -17,11 +17,19 @@ from agent_core.domain.code import (
     CodeFinding,
     CodeProposal,
 )
+from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, SideEffectClass, TrustLevel
+from agent_core.domain.tools import ToolResult
 from agent_core.tools.code import CodeDraftTool, CodeProposeTool, CodeTestTool, CodeToolset
 from tests.contract.support import NOW, memory_uow_factory, principal, tool_context
 
 RELEASE = "20261101-120000-abc1234"
+
+
+def _text(result: ToolResult) -> str:
+    part = result.content[0]
+    assert isinstance(part, TextPart)
+    return part.text
 
 
 class Checker:
@@ -102,22 +110,25 @@ async def test_an_edit_needs_one_exact_match_and_show_gives_the_diff(harness: Ha
     await _open(harness)
     ambiguous = await _edit(harness, old="limit = 1", new="limit = 2")
     assert not ambiguous.ok
+    assert ambiguous.failure is not None
     assert ambiguous.failure.reason_code == "code.old_not_unique"
     assert "2 times" in ambiguous.failure.detail
 
     changed = await _edit(harness, old="other = 2", new="other = 3")
     assert changed.ok, changed.failure
+    assert changed.structured is not None
     assert changed.structured["files"] == ["src/app.py"]
 
     shown = await harness.draft.execute({"operation": "show", "slug": "fix-limit"}, _context())
-    assert "-other = 2" in shown.content[0].text
-    assert "+other = 3" in shown.content[0].text
+    assert "-other = 2" in _text(shown)
+    assert "+other = 3" in _text(shown)
 
 
 async def test_returning_a_file_to_its_release_content_drops_the_change(harness: Harness) -> None:
     await _open(harness)
     await _edit(harness, old="other = 2", new="other = 3")
     restored = await _edit(harness, old="other = 3", new="other = 2")
+    assert restored.structured is not None
     assert restored.structured["files"] == []
 
 
@@ -140,6 +151,7 @@ async def test_people_keep_ci_deployment_and_policy_files(
         {"operation": "edit", "slug": "fix-limit", "path": path, "content": "x"}, _context()
     )
     assert not result.ok
+    assert result.failure is not None
     assert result.failure.reason_code == reason
 
 
@@ -150,10 +162,12 @@ async def test_a_new_release_makes_a_draft_stale_instead_of_mixing_two_bases(
     await _edit(harness, old="other = 2", new="other = 3")
     harness.tree._release_id = "20261102-120000-def5678"
     stale = await _edit(harness, old="other = 3", new="other = 4")
+    assert stale.failure is not None
     assert stale.failure.reason_code == "code.draft_stale"
     tested = await harness.test.execute(
         {"slug": "fix-limit", "kind": "pytest", "targets": ["tests/unit"]}, _context()
     )
+    assert tested.failure is not None
     assert tested.failure.reason_code == "code.draft_stale"
     assert harness.checker.check is None
 
@@ -171,8 +185,9 @@ async def test_a_check_gets_the_draft_and_its_output_is_untrusted(harness: Harne
         kind=CodeCheckKind.PYTEST, targets=("tests/unit",), keyword="limit"
     )
     assert result.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
+    assert result.structured is not None
     assert result.structured["passed"] is True
-    assert "3 passed" in result.content[0].text
+    assert "3 passed" in _text(result)
 
 
 async def test_a_sandbox_failure_is_never_read_as_a_pass(harness: Harness) -> None:
@@ -186,6 +201,7 @@ async def test_a_sandbox_failure_is_never_read_as_a_pass(harness: Harness) -> No
         {"slug": "fix-limit", "kind": "pytest", "targets": ["tests/unit"]}, _context()
     )
     assert not result.ok
+    assert result.failure is not None
     assert result.failure.reason_code == "code.check_failed"
 
 
@@ -202,6 +218,7 @@ async def test_changes_start_only_in_interactive_chat(harness: Harness, changes:
     ):
         result = await tool.execute(arguments, context)
         assert not result.ok
+        assert result.failure is not None
         assert result.failure.reason_code == "code.interactive_only"
 
 
@@ -223,6 +240,7 @@ async def test_a_screen_hit_publishes_nothing_and_never_repeats_the_value(
     result = await harness.propose.execute(
         {"slug": "fix-limit", "title": "Fix the limit", "summary": "Why."}, _context()
     )
+    assert result.failure is not None
     assert result.failure.reason_code == "code.screen_refused"
     assert "owner@example.com" not in result.failure.detail
     # Only added lines are screened: the file's existing lines are already public.
@@ -238,6 +256,7 @@ async def test_an_empty_draft_is_not_proposed(harness: Harness) -> None:
     result = await harness.propose.execute(
         {"slug": "fix-limit", "title": "T", "summary": "S"}, _context()
     )
+    assert result.failure is not None
     assert result.failure.reason_code == "code.draft_empty"
 
 
@@ -250,10 +269,11 @@ async def test_a_proposal_queues_for_the_worker_and_a_replay_opens_nothing_new(
 
     queued = await harness.propose.execute(arguments, _context())
     assert queued.ok
+    assert queued.structured is not None
     assert queued.structured["state"] == "proposing"
     assert queued.structured["branch"].startswith("veetbot/fix-limit-")
     assert queued.structured["pull_url"] is None
-    assert "queued" in queued.content[0].text
+    assert "queued" in _text(queued)
 
     async with harness.factory() as uow:
         draft = await uow.code_drafts.get(principal(), "fix-limit")
@@ -278,8 +298,9 @@ async def test_a_proposal_queues_for_the_worker_and_a_replay_opens_nothing_new(
     harness.screen.message = None
     replay = await harness.propose.execute(arguments, _context())
     assert replay.ok
+    assert replay.structured is not None
     assert replay.structured["pull_url"] == "https://example.test/pull/9"
-    assert "https://example.test/pull/9" in replay.content[0].text
+    assert "https://example.test/pull/9" in _text(replay)
     assert harness.screen.message is None
 
 
@@ -313,9 +334,10 @@ async def test_a_check_must_name_its_targets_and_skips_files_it_cannot_read(
     untargeted = await harness.test.execute(
         {"slug": "fix-limit", "kind": "pytest", "targets": []}, _context()
     )
+    assert untargeted.failure is not None
     assert untargeted.failure.reason_code == "code.targets_required"
     result = await harness.test.execute(
         {"slug": "fix-limit", "kind": "ruff", "targets": ["src"]}, _context()
     )
     assert set(harness.checker.files) == {"src/app.py"}
-    assert "Not applied, outside what checks read: docs/new.md" in result.content[0].text
+    assert "Not applied, outside what checks read: docs/new.md" in _text(result)
