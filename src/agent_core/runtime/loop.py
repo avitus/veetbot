@@ -163,7 +163,8 @@ async def _complete_reply(context: RunContext, message: AssistantMessage) -> Ass
     reply = message
     async with context.uow_factory() as uow:
         exported = reply_attachments(
-            await uow.artifacts.list_for_run(context.run.id, context.principal)
+            await uow.artifacts.list_for_run(context.run.id, context.principal),
+            now=context.clock.now(),
         )
         if exported:
             retained = await uow.artifacts.retain_for_reply(

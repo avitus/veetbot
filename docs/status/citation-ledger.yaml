@@ -7,10 +7,10 @@
 # drift even when the range's first line is untouched.
 
 citations:
-  - cite: "docs/plan/bootstrap-and-composition.md#docs/plan/sandbox-isolation.md:1333"
+  - cite: "docs/plan/bootstrap-and-composition.md#docs/plan/sandbox-isolation.md:1334"
     excerpt: "`fake` is added here and it is the fourth value the setting "
     digest: "36ac629a7f0b90b3"
-  - cite: "docs/plan/bootstrap-and-composition.md#docs/plan/sandbox-isolation.md:1686"
+  - cite: "docs/plan/bootstrap-and-composition.md#docs/plan/sandbox-isolation.md:1687"
     excerpt: "17. **`fake` is a fourth `SandboxMechanism` value and a prod"
     digest: "cc6a37fcae6c6649"
   - cite: "docs/plan/cockpit.md#docs/plan/context-engine.md:381-385"
@@ -22,7 +22,7 @@ citations:
   - cite: "docs/plan/cockpit.md#docs/plan/email-experience.md:52-53"
     excerpt: "Persona, Schedules, and Settings remain global. Adding a fut"
     digest: "59f144454fd5a1fe"
-  - cite: "docs/plan/cockpit.md#docs/plan/sandbox-isolation.md:1759-1763"
+  - cite: "docs/plan/cockpit.md#docs/plan/sandbox-isolation.md:1760-1764"
     excerpt: "7. Should the sandbox image be per-tenant configurable? One "
     digest: "b8626cd25fd538a8"
   - cite: "docs/plan/email-experience.md#docs/plan/event-log-and-persistence.md:698"

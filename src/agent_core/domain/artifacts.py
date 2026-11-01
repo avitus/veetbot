@@ -33,14 +33,19 @@ REPLY_ATTACHMENT_ORIGINS = frozenset(
 )
 
 
-def reply_attachments(artifacts: list[ArtifactRef]) -> list[ArtifactRef]:
-    """Choose a run's exported files in creation order, once per name and content."""
+def reply_attachments(artifacts: list[ArtifactRef], *, now: datetime) -> list[ArtifactRef]:
+    """Choose a run's exported files in creation order, once per name and content.
+
+    A file already expired, such as one `artifact.delete` removed earlier in the
+    run (ADR-0277), is left off: attaching it would clear the expiry.
+    """
 
     chosen: list[ArtifactRef] = []
     seen: set[tuple[str, str]] = set()
     for artifact in sorted(artifacts, key=lambda item: (item.created_at, item.id)):
         key = (artifact.name, artifact.sha256)
-        if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen:
+        expired = artifact.expires_at is not None and artifact.expires_at <= now
+        if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen or expired:
             continue
         seen.add(key)
         chosen.append(artifact)

@@ -26,7 +26,8 @@ conversation. The owner wants Chat to be allowed to delete what it generated.
    nothing deletable fails with `artifact.not_deletable`.
 3. Deletion sets the file's `expires_at` to now. The artifact read routes
    already answer 404 for an expired file, and the existing sweeper removes its
-   bytes and then its row. No second deletion path exists.
+   bytes and then its row. No second deletion path exists. A final reply skips
+   already-expired files, because attaching one clears its expiry (ADR-0122).
 4. Classification: `side_effect: NONE`, `risk: MEDIUM`, `IDEMPOTENT`,
    `artifact.write`, serial, `INTERNAL_TOOL`. `NONE` needs no approval card and
    no policy-profile edit. A repeat call reports files that are already

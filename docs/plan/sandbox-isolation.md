@@ -1258,7 +1258,8 @@ asked for.
 The owner can ask Chat to delete files it generated, and
 `artifact.delete@1.0.0` does it the same way: it sets `expires_at` to now,
 the read routes answer `404` from that moment, and the sweeper removes the
-bytes and then the row. It takes one to fifty artifact ids. It deletes a file
+bytes and then the row. A final reply never attaches a file that is already
+expired, so a file deleted in the run that made it stays deleted. It takes one to fifty artifact ids. It deletes a file
 only when that file belongs to the caller and the current chat and has origin
 `SANDBOX_EXPORT` or `MODEL_OUTPUT`, the origins a reply attaches. Uploads,
 captures, knowledge sources and trajectory exports are never eligible. Each
