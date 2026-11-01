@@ -225,6 +225,10 @@ public final class RunStateReducer: ObservableObject {
 
     public var isRunActive: Bool { runStatus?.isActive == true }
     public var needsApprovalIDs: [UUID] { Array(pendingApprovalIDs) }
+    /// Whether a card waits on the owner above the composer: an approval or a question.
+    public var docksAttention: Bool {
+        clarifyingQuestion != nil || approvals.contains { $0.status.isPending }
+    }
     /// Interleave messages and tool activity, then group eligible adjacent tool outcomes.
     public var activityTimeline: [ConversationActivity] {
         let activities = activityOrder.compactMap { reference in

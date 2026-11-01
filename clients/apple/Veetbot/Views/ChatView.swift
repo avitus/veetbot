@@ -585,18 +585,7 @@ public struct ChatView: View {
     private func bottomDock(maxCardHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: VeetSpace.s2) {
             AttentionDock(model: model, state: state, maxHeight: maxCardHeight)
-            if let activityLabel {
-                HStack(spacing: VeetSpace.s2) {
-                    ProgressView().controlSize(.small)
-                    Text(activityLabel)
-                        .veetType(.meta)
-                        .foregroundColor(AppTheme.inkSoft)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .padding(.horizontal, VeetSpace.s2)
-                .accessibilityIdentifier("chat.activity")
-            }
+            ChatActivityRow(label: activityLabel, holdsPlace: state.docksAttention)
             if let offer = model.websiteOffer, model.showsWebsiteOffer {
                 WebsiteOfferCard(
                     offer: offer,
@@ -913,7 +902,7 @@ private struct AttentionDock: View {
     /// Keeps actionable requests visible independently of transcript scrolling.
     var body: some View {
         let pending = state.approvals.filter { $0.status.isPending }
-        if !pending.isEmpty || state.clarifyingQuestion != nil {
+        if state.docksAttention {
             // The dock scrolls like the transcript: it hugs the cards up to the
             // pane's share and scrolls past it, and a card laid out outside a
             // scroll container left the whole window undrawn on macOS 26. The
@@ -961,6 +950,35 @@ private struct AttentionDock: View {
             .frame(height: contentHeight > 0 ? min(contentHeight, max(maxHeight, 120)) : nil)
             .fixedSize(horizontal: false, vertical: contentHeight == 0)
         }
+    }
+}
+
+/// What the run is doing, directly above the composer. While a card is docked
+/// above it the row keeps its height with nothing to say: the run parks and
+/// resumes around each answer, and the card must not move under the owner's
+/// finger as the line comes and goes.
+struct ChatActivityRow: View {
+    let label: String?
+    let holdsPlace: Bool
+
+    var body: some View {
+        if let label {
+            row(label).accessibilityIdentifier("chat.activity")
+        } else if holdsPlace {
+            row(" ").hidden()
+        }
+    }
+
+    private func row(_ text: String) -> some View {
+        HStack(spacing: VeetSpace.s2) {
+            ProgressView().controlSize(.small)
+            Text(text)
+                .veetType(.meta)
+                .foregroundColor(AppTheme.inkSoft)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, VeetSpace.s2)
     }
 }
 

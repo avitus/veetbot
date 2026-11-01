@@ -332,7 +332,9 @@ and dismisses the software keyboard, before waiting for the server. A persistent
 activity row above the composer shows **Sending…** during submission, then
 **Working…** or **Reasoning…** while the accepted run is active, even when the
 transcript is scrolled away from the bottom. The indicator clears when work ends
-or needs input. A failed submission restores the draft if the composer is still
+or needs input. While an approval or question is docked above it, the row keeps
+its height with nothing to show, so the card does not move as the indicator comes
+and goes. A failed submission restores the draft if the composer is still
 empty, without overwriting newer text. A delayed success does not dismiss a
 keyboard reopened to write the next message.
 

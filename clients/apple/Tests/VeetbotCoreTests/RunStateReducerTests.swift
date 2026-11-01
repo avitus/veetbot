@@ -1201,6 +1201,36 @@ import Testing
         )
     }
 
+    /// What the dock shows above the composer: a pending approval or a
+    /// question, and nothing once the approval has been answered.
+    @Test
+    func aPendingApprovalOrQuestionDocksAttention() throws {
+        let reducer = RunStateReducer()
+        #expect(!reducer.docksAttention)
+
+        reducer.mergeApproval(try WireModelsTests.contractApproval("resolved_for_task"))
+        #expect(!reducer.docksAttention)
+
+        let waiting = RunStateReducer()
+        waiting.mergeApproval(try WireModelsTests.contractApproval("offered"))
+        #expect(waiting.docksAttention)
+
+        let runID = UUID()
+        reducer.begin(runID: runID, status: .waitingForUser)
+        reducer.reduce(
+            SSEFrame(
+                id: 1,
+                event: "run.waiting_for_user",
+                data: [
+                    "run_id": .string(runID.uuidString),
+                    "question_id": .string(UUID().uuidString),
+                    "question": .string("Which day?"),
+                ]
+            )
+        )
+        #expect(reducer.docksAttention)
+    }
+
     /// A run parked with nothing left for the owner to decide is still working:
     /// an answered approval resuming, or a delegated child, whose wait reuses
     /// the waiting-for-approval status (runtime-loop.md).
