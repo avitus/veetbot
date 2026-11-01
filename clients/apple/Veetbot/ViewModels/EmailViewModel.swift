@@ -826,6 +826,19 @@ public final class EmailViewModel: ObservableObject {
 
     private func mergeDraft(_ value: EmailDraftView) {
         guard value.threadID == selectedThreadID else { return }
+        // A key kept after a lost response is retired once a refresh proves that press
+        // landed or that the draft moved on: a new run, a send state, a failure, or a
+        // restored draft. An unchanged ready draft keeps it, since admission may still
+        // be in doubt.
+        if let previous = draft, previous.id == value.id, let cached = sendKeys[value.id],
+           cached.0 == value.revision {
+            let runChanged = previous.runID != value.runID && (previous.runID != nil || value.runID != nil)
+            let restored = previous.status == "ready" && previous.runID == nil
+                && value.status == "ready" && value.runID == nil && value.updatedAt > previous.updatedAt
+            if runChanged || value.status == "sending" || value.status == "failed" || restored {
+                sendKeys.removeValue(forKey: value.id)
+            }
+        }
         draft = value
         if let local = edits[value.id], local.isDirty {
             if local.base.revision != value.revision { conflict = value }
@@ -1035,7 +1048,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Saves edits and proposes the exact draft for approval, retaining accepted work if Email is hidden.
     public func prepareSend() async {
-        guard canReview, let api = makeAPIClient() else { return }
+        guard canReview, let api = makeAPIClient(), let pressed = draft else { return }
         isPreparingSend = true
         sendProgressMessage = nil
         pendingReviewRunID = nil
@@ -1048,9 +1061,10 @@ public final class EmailViewModel: ObservableObject {
         for _ in 0..<3 {
             autosaveTask?.cancel()
             guard currentEdit?.isDirty == true else { break }
-            guard await saveDraft() else { return }
+            guard await saveDraft(pressed.id) else { return }
         }
-        guard let draft else { return }
+        // The press belongs to the draft it was made on, never to one opened since.
+        guard let draft, draft.id == pressed.id, selectedThreadID == draft.threadID else { return }
         guard !draft.stale else {
             draftActionError = "This draft is out of date. Refresh the thread and review the draft again."
             return
@@ -1612,7 +1626,7 @@ public final class EmailViewModel: ObservableObject {
     /// One press sends the exact revision at the thread revision on screen: no proposal, no
     /// sheet. The server parks it for the undo window and this watches it through to Sent.
     public func sendNow() async {
-        guard canReview, let api = makeAPIClient() else { return }
+        guard canReview, let api = makeAPIClient(), let pressed = draft else { return }
         isPreparingSend = true
         sendProgressMessage = nil
         pendingReviewRunID = nil
@@ -1621,9 +1635,12 @@ public final class EmailViewModel: ObservableObject {
         for _ in 0..<3 {
             autosaveTask?.cancel()
             guard currentEdit?.isDirty == true else { break }
-            guard await saveDraft() else { return }
+            guard await saveDraft(pressed.id) else { return }
         }
-        guard let draft, let thread, thread.id == draft.threadID else { return }
+        // The press belongs to the draft it was made on. If the owner moved to another
+        // conversation while that save settled, nothing is sent from here.
+        guard let draft, draft.id == pressed.id, let thread, thread.id == draft.threadID,
+              selectedThreadID == draft.threadID else { return }
         guard !draft.stale else {
             draftActionError = staleMailMessage() ?? Self.sendEndedByNewMailMessage
             return
@@ -1676,6 +1693,7 @@ public final class EmailViewModel: ObservableObject {
             guard generation == connection else { return }
             draftActionError = nil
             mergeDraft(restored)
+            sendKeys.removeValue(forKey: restored.id)
         } catch {
             guard generation == connection else { return }
             report(error, draft: true)

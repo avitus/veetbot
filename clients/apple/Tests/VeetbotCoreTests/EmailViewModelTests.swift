@@ -1811,6 +1811,83 @@ import SwiftUI
         #expect(keys.count == 2 && keys[0] != keys[1])
     }
 
+    /// A press whose response was lost keeps its key only until a refresh proves the
+    /// press landed or the draft moved on; a failed draft at the same revision then gets
+    /// a new key on the next press.
+    @Test func testARefreshThatShowsTheLostPressFailedRetiresItsKey() async throws {
+        let requests = EmailRequestRecorder()
+        let failed = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }.count
+                if sends <= 2 { throw URLError(.networkConnectionLost) }
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            return (200, self.threadJSON(draft: failed.isSet
+                ? self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")
+                : self.draftJSON(revision: 2, body: "Edited before sending")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.draftActionMessage?.isEmpty == false)
+        // The server had admitted that press after all; a refresh shows it failed.
+        failed.set()
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draft?.status == "failed")
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 3)
+        #expect(keys[0] == keys[1] && keys[1] != keys[2])
+    }
+
+    /// A press belongs to the draft it was made on. Moving to another conversation
+    /// while that press's save settles must not send the newly opened draft.
+    @Test func testSendPressedOnOneDraftNeverSendsAnotherOpenedDuringItsSave() async throws {
+        let requests = EmailRequestRecorder()
+        let saveGate = EmailArchiveResponseGate()
+        let otherThreadID = UUID(uuidString: "00000000-0000-0000-0000-000000000811")!
+        let otherDraftID = UUID(uuidString: "00000000-0000-0000-0000-000000000812")!
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "PUT" {
+                return (200, self.draftJSON(revision: 2, body: "Edited on the first draft"), saveGate)
+            }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}", nil)
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED"), nil) }
+            if request.url!.path.hasSuffix(otherThreadID.uuidString) {
+                let other = self.threadJSON(draft: self.draftJSON(body: "A clean reply on the other thread"))
+                    .replacingOccurrences(of: self.threadID.uuidString, with: otherThreadID.uuidString)
+                    .replacingOccurrences(of: self.draftID.uuidString, with: otherDraftID.uuidString)
+                return (200, other, nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { saveGate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited on the first draft")
+        let pressed = Task { await model.sendNow() }
+        try await waitForEmailTestCondition { saveGate.isWaiting }
+        await model.openThread(otherThreadID)
+        #expect(model.draft?.id == otherDraftID)
+        saveGate.release()
+        await pressed.value
+
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }, "nothing may be sent from a press made on another draft")
+        #expect(model.draft?.id == otherDraftID)
+        #expect(model.draft?.status == "ready")
+    }
+
     /// A refused Undo (the send was already claimed) keeps watching that send so its
     /// outcome is still reported, instead of leaving a silent "sending" draft.
     @Test func testRefusedUndoKeepsWatchingTheSend() async throws {
