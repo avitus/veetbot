@@ -1594,6 +1594,74 @@ import SwiftUI
         #expect(model.draftActionMessage == nil)
     }
 
+    /// The revision survives an Undo, so a second press must carry a new idempotency key;
+    /// replaying the cancelled send's key would be refused as already done.
+    @Test func testSendAfterUndoUsesANewIdempotencyKey() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.hasSuffix("/send-undo") {
+                return (200, self.draftJSON(revision: 2, body: "Edited before sending").replacingOccurrences(
+                    of: "\"approval_id\":\"\(self.approvalID)\"", with: "\"approval_id\":null"))
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("/send-undo") }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: undone
+                ? self.draftJSON(revision: 2, body: "Edited before sending")
+                : sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.canUndoSend)
+        await model.undoSend()
+        #expect(model.draft?.status == "ready")
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        #expect(sends.count == 2)
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 2 && keys[0] != keys[1])
+    }
+
+    /// A refused Undo (the send was already claimed) keeps watching that send so its
+    /// outcome is still reported, instead of leaving a silent "sending" draft.
+    @Test func testRefusedUndoKeepsWatchingTheSend() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.hasSuffix("/send-undo") {
+                return (409, Self.error("invalid_state", "This reply is already on its way and can't be undone."))
+            }
+            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("/send-undo") }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: undone ? "FAILED" : "QUEUED")) }
+            return (200, self.threadJSON(draft: undone
+                ? self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")
+                : self.parkedDraftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        await model.undoSend()
+        #expect(model.draftActionMessage == "This reply is already on its way and can't be undone.")
+        // The restarted watcher reports the send's own outcome once it lands.
+        try await waitForEmailTestCondition { model.draftActionMessage == EmailViewModel.sendFailedMessage }
+        #expect(model.draft?.status == "failed")
+    }
+
     /// A press the server refuses because mail arrived shows that mail, in the server's words.
     @Test func testSendRefusedForUnseenMailShowsTheNewMail() async throws {
         let requests = EmailRequestRecorder()

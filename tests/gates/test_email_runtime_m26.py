@@ -2282,3 +2282,54 @@ async def test_consented_send_ends_without_dispatch_when_mail_arrives_before_the
             for call in calls
             if call.tool_name.endswith("send_message")
         )
+
+
+async def test_new_mail_during_the_undo_window_returns_the_parked_send_to_editing() -> None:
+    """A refresh that imports new mail while a consented send is parked cancels the parked run
+    and must leave the draft editable, not stuck in a send state nothing can recover."""
+    from dataclasses import replace
+
+    from agent_core.domain.email import EmailDraftEdit
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+
+        async def parked(run_id: UUID) -> None:
+            return None
+
+        app.services.email.dispatch = parked
+        operation = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="send-then-new-mail",
+        )
+        session = await app.sessions.create()
+        moved = await app.services.email.import_thread(
+            app.principal, "default", _page(changed=True), session
+        )
+        assert moved.revision == thread.revision + 1
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.CANCELLED
+        current = await app.services.email.draft(app.principal, draft.id)
+        assert current.stale
+        assert current.status.value == "ready"
+        assert current.run_id is None and current.send_undo_until is None
+        edited = await app.services.email.edit_draft(
+            app.principal,
+            draft.id,
+            EmailDraftEdit(
+                expected_revision=1,
+                source_revision=moved.revision,
+                to=draft.to,
+                cc=draft.cc,
+                bcc=draft.bcc,
+                subject=draft.subject,
+                body="Updated after reading the new mail.",
+            ),
+        )
+        assert edited.revision == 2 and edited.status.value == "ready" and not edited.stale

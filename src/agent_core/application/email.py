@@ -2770,12 +2770,22 @@ class EmailExperienceService:
                     EmailDraftStatus.UNCERTAIN,
                 }:
                     await self._cancel_obsolete_send(uow, principal, draft)
+                    update: dict[str, Any] = {"stale": True}
+                    if draft.status is EmailDraftStatus.SENDING and draft.send_claim_id is None:
+                        # The parked one-press send was just cancelled; no worker
+                        # will run to return the draft, so return it here (ADR-0279).
+                        update.update(
+                            status=EmailDraftStatus.READY,
+                            run_id=None,
+                            approval_id=None,
+                            send_undo_until=None,
+                        )
                     await save_value(
                         uow.email,
                         principal,
                         "draft",
                         str(draft.id),
-                        draft.model_copy(update={"stale": True}),
+                        draft.model_copy(update=update),
                         now,
                     )
             await save_value(uow.email, principal, "thread", str(thread.id), thread, now)

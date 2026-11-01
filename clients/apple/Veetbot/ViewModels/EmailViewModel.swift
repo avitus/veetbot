@@ -1659,18 +1659,31 @@ public final class EmailViewModel: ObservableObject {
     public func undoSend() async {
         guard let draft, canUndoSend, let api = makeAPIClient() else { return }
         let connection = generation
-        undoneRunIDs.insert(draft.runID ?? UUID())
+        // Record the undo before the watcher can read the cancellation as a failure.
+        let undoneRunID = draft.runID
+        if let undoneRunID { undoneRunIDs.insert(undoneRunID) }
         sendWatchTask?.cancel()
         isPerformingAction = true
         defer { if generation == connection { isPerformingAction = false } }
         do {
             let restored = try await api.undoEmailSend(draft)
             guard generation == connection else { return }
+            // The revision survives an undo; the next press must be a new request,
+            // not a replay of the send the owner just took back.
+            sendKeys.removeValue(forKey: draft.id)
             draftActionError = nil
             mergeDraft(restored)
         } catch {
             guard generation == connection else { return }
             report(error, draft: true)
+            // Undo was refused (usually: already claimed), so the send goes on; watch
+            // it again so its outcome is still reported.
+            if let undoneRunID {
+                undoneRunIDs.remove(undoneRunID)
+                Task { [weak self] in
+                    await self?.watchSend(undoneRunID, threadID: draft.threadID, connection: connection)
+                }
+            }
             await openThread(draft.threadID, refreshOnly: true)
         }
     }
