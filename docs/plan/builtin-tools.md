@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Forty-four more model-callable tools are declared at build time by other
+Fifty more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -150,9 +150,11 @@ knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
 web.fetch_json                capability  web-access
+web.inspect_image             capability  web-access
 browser.navigate              capability  browser-automation
 browser.observe               capability  browser-automation
 browser.act                   capability  browser-automation
+browser.upload                capability  browser-automation
 schedule.create               capability  scheduling
 schedule.list                 capability  scheduling
 schedule.update               capability  scheduling
@@ -177,10 +179,14 @@ cockpit.check                 capability  cockpit
 cockpit.widget.write          capability  cockpit
 cockpit.configure             capability  cockpit
 cockpit.feed.publish          capability  cockpit
+cockpit.prepare               capability  cockpit
+cockpit.install               capability  cockpit
+job.manage                    capability  cockpit
+job.run                       capability  cockpit
 ```
 
-Fifty-nine model-callable builtin tools in total: the original roster of
-eight, the forty-four above, the two media-generation tools in ADR-0140, and the
+Sixty-five model-callable builtin tools in total: the original roster of
+eight, the fifty above, the two media-generation tools in ADR-0140, and the
 five from ADR-0281, [listed below](#platform-diagnostics-and-code-tools).
 ADR-0261 added `artifact.read_capture`, which
 [tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
@@ -201,9 +207,9 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty-four, `artifact.read_capture`, `artifact.delete`, `skill.manage`, `web.search`,
-`web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
-five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
+nothing else.** Of the other fifty, `artifact.read_capture`, `artifact.delete`, `skill.manage`, `web.search`,
+`web.fetch`, `web.fetch_json`, `web.inspect_image`, the four `browser.*` tools, the six `schedule.*` tools, the
+seven `cockpit.*` tools, and the two `job.*` tools are fully classified in their subject specifications, and the four `email.*`,
 three `people.*`, and six `records.*` tools in this document's Milestone 26,
 28, 31, and 34 sections below;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
@@ -225,15 +231,17 @@ that is a function of the deployment. Twenty-one identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `artifact.read_capture`, `artifact.delete`, `context.update_working_state`, the four `memory.*` tools,
-`skill.load`, `tool.call`, `run.inspect`, and the two `knowledge.*` tools. The other thirty-eight register only
-with their flag or provider: `skill.manage` with skill authoring, the three
-`web.*` and three `browser.*` tools with their providers, `delegate.run` with
+`skill.load`, `tool.call`, `run.inspect`, and the two `knowledge.*` tools. The other forty-four register only
+with their flag or provider: `skill.manage` with skill authoring, the four
+`web.*` and four `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
 and worker, the three `people.*` tools with People, `email.context` and
 `email.feedback` with Email mode, and `email.subscriptions` and
 `email.unsubscribe` with email unsubscribe, the six `records.*` tools with
-`AGENT_RECORDS_ENABLED=1`, the five `cockpit.*` tools with
-`AGENT_COCKPIT_ENABLED=1`, `code.read`, `code.draft` and `code.test` with
+`AGENT_RECORDS_ENABLED=1`, the five other `cockpit.*` tools with
+`AGENT_COCKPIT_ENABLED=1`, `job.manage` and `job.run` with `AGENT_JOBS_ENABLED=1`,
+`cockpit.prepare` and `cockpit.install` with Cockpit, jobs and both scheduling roles,
+`code.read`, `code.draft` and `code.test` with
 `AGENT_CODE_TOOLS_ENABLED=1`, `code.propose` with `AGENT_CODE_PROPOSALS_ENABLED=1`, and
 `image.generate` and `video.generate` with the TensorScale credential. Historical versions of
 `memory.remember`, `skill.load`, `artifact.export`, `schedule.list`, `image.generate`,
@@ -1688,9 +1696,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; fifty-nine model-callable builtin tools
-    are declared at build time across the corpus, and forty-four of them
-    belong to other specifications. Resolved by naming those forty-four here,
+    is the original roster; sixty-five model-callable builtin tools
+    are declared at build time across the corpus, and fifty of them
+    belong to other specifications. Resolved by naming those fifty here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
