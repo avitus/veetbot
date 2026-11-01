@@ -1054,8 +1054,8 @@ async def suspend_for_browser_question(
             if wait.resume_url is not None:
                 sign_in["origin"] = browser_origin(wait.resume_url)
             sign_in["expires_at"] = wait.model_dump(mode="json")["expires_at"]
-            if context.run.deadline_at is not None:
-                sign_in["run_deadline_at"] = context.run.deadline_at.isoformat()
+        if context.run.deadline_at is not None:
+            sign_in["run_deadline_at"] = context.run.deadline_at.isoformat()
         suspension["sign_in"] = sign_in
     return RunOutcome(kind=OutcomeKind.SUSPENDED, suspension=suspension)
 

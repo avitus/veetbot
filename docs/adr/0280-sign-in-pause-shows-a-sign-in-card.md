@@ -28,9 +28,11 @@ owner had to scroll to the top of the thread to reach it.
 1. The `run.waiting_for_user` event's `suspension` carries `sign_in` when the
    question is the runtime's sign-in pause. It holds `browser_profile_id`,
    `origin` and `expires_at` when the run waits for a verified sign-in to that
-   saved website, and is an empty object when there is no such wait (the owner
-   signs in and then replies). Model-authored questions never carry it. None of
-   these fields is page or model content: all come from the trusted wait binding.
+   saved website, and holds none of them when there is no such wait (the owner
+   signs in and then replies). A run with its own deadline adds `run_deadline_at`
+   in both cases. Model-authored questions never carry `sign_in`. None of these
+   fields is page or model content: all come from the trusted wait binding or
+   the run.
 2. The app shows a sign-in card in the attention dock in place of the question
    card. With a waiting website it names the website and offers **Sign in to
    <host>**, which opens the device sign-in for that saved login, and **Stop
@@ -38,10 +40,9 @@ owner had to scroll to the top of the thread to reach it.
    while the wait lasts: verified sign-in resumes the run. Past `expires_at`
    the server no longer resumes it by itself, so the card adds **I've signed
    in** and the composer can answer again; the reply's fresh read and the
-   two-pause bound still apply. A run with its own deadline also carries
-   `run_deadline_at`: past it nothing can continue the run, so the card says it
-   ran out of time and offers only **Stop task**. Without a
-   waiting website it offers **Open Website Access** and **I've signed in**,
+   two-pause bound still apply. Past `run_deadline_at` nothing can continue the
+   run, so either card says it ran out of time and offers only **Stop task**.
+   Without a waiting website it offers **Open Website Access** and **I've signed in**,
    which answers the question with fixed text, and **Stop task**. The
    transcript's waiting line says "Waiting for you to sign in." and the chat
    status says "Needs you to sign in". The sign-in window starts at the

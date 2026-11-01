@@ -1125,23 +1125,21 @@ import Testing
     }
 
     /// Past the run's own deadline a reply could only make it fail, so none is sent.
-    @Test
-    func aReplyCannotAnswerAPausePastItsRunDeadline() async throws {
+    @Test(arguments: [true, false])
+    func aReplyCannotAnswerAPausePastItsRunDeadline(waitsOnAWebsite: Bool) async throws {
         let server = Self.inputAcceptingServer()
         let model = try await configuredModel(server)
         let runID = UUID()
+        var signIn: [String: JSONValue] = ["run_deadline_at": .string("2020-01-01T00:00:00Z")]
+        if waitsOnAWebsite {
+            signIn["browser_profile_id"] = .string(UUID().uuidString)
+            signIn["expires_at"] = .string("2020-01-01T00:00:00Z")
+        }
         model.runState.begin(runID: runID, status: .running)
         model.runState.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
             "run_id": .string(runID.uuidString),
             "question_id": .string(UUID().uuidString),
-            "suspension": .object([
-                "kind": .string("user"),
-                "sign_in": .object([
-                    "browser_profile_id": .string(UUID().uuidString),
-                    "expires_at": .string("2020-01-01T00:00:00Z"),
-                    "run_deadline_at": .string("2020-01-01T00:00:00Z"),
-                ]),
-            ]),
+            "suspension": .object(["kind": .string("user"), "sign_in": .object(signIn)]),
         ]))
         let prompt = try #require(model.runState.clarifyingQuestion)
 

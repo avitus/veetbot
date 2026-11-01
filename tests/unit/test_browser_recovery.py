@@ -494,7 +494,8 @@ async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: b
     assert sign_in == expected
 
 
-async def test_sign_in_pause_names_a_run_deadline_that_ends_the_wait() -> None:
+@pytest.mark.parametrize("bound", [True, False])
+async def test_sign_in_pause_names_a_run_deadline_that_ends_the_wait(bound: bool) -> None:
     """ADR-0280: past its own deadline a run can only fail, so the card must not offer a reply."""
     from datetime import UTC, datetime, timedelta
 
@@ -511,17 +512,23 @@ async def test_sign_in_pause_names_a_run_deadline_that_ends_the_wait() -> None:
         browser_provider_override=provider,
         limits=RunLimits(deadline_at=deadline),
     ) as composition:
-        await seed_browser_authority(composition)
-        created = await composition.services.sessions.create(
-            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
-        )
-        run_id = await composition.runs.submit("Read my account.", created.id)
+        session_id = None
+        if bound:
+            await seed_browser_authority(composition)
+            created = await composition.services.sessions.create(
+                composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+            )
+            session_id = created.id
+        run_id = await composition.runs.submit("Read my account.", session_id)
         events = await composition.runs.events(run_id)
     waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
     assert len(waiting) == 1
     sign_in = waiting[0].payload["suspension"]["sign_in"]
-    assert datetime.fromisoformat(sign_in["expires_at"]) == deadline
     assert datetime.fromisoformat(sign_in["run_deadline_at"]) == deadline
+    if bound:
+        assert datetime.fromisoformat(sign_in["expires_at"]) == deadline
+    else:
+        assert set(sign_in) == {"run_deadline_at"}
 
 
 async def test_model_authored_question_carries_no_sign_in_marker() -> None:
