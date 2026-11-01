@@ -104,6 +104,7 @@ class CodeReadTool:
         self._tree = tree
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Dispatch one read, search, list or status, turning refusals into failures."""
         del context
         operation = arguments["operation"]
         path = arguments.get("path", "")
@@ -142,6 +143,7 @@ class CodeReadTool:
             )
 
     def _status(self) -> ToolResult:
+        """Name the running release, so an answer can say what it read."""
         release = self._tree.release_id
         body = {
             "release_id": release,
@@ -150,6 +152,7 @@ class CodeReadTool:
         return _read_result(f"Running release {release or 'unknown'}.", body)
 
     async def _list(self, path: str) -> ToolResult:
+        """List one directory of served source."""
         entries = await self._tree.list_directory(path)
         shown = entries[:_MAXIMUM_ENTRIES]
         body = {
@@ -166,6 +169,7 @@ class CodeReadTool:
         return _read_result(text or "(empty)", body)
 
     async def _read(self, path: str, start_line: int) -> ToolResult:
+        """Return one page of a file by line, within the inline budget."""
         lines = (await self._tree.read_text(path)).splitlines()
         shown: list[str] = []
         used = 0
@@ -181,6 +185,7 @@ class CodeReadTool:
         return _read_result("\n".join(shown) or "(no lines at or after start_line)", body)
 
     async def _search(self, pattern: str, path: str, *, fixed: bool) -> ToolResult:
+        """Search served source and return the matches that fit the inline budget."""
         found = await self._tree.search(pattern, path=path, fixed=fixed, maximum_bytes=_PAGE_BYTES)
         body = {"matches": len(found.lines), "truncated": found.truncated}
         return _read_result("\n".join(found.lines) or "(no matches)", body)
@@ -221,6 +226,7 @@ def _refused(exc: CodeDraftRefusedError) -> ToolResult:
 
 
 def _draft_body(draft: CodeDraft) -> dict[str, Any]:
+    """The structured summary of a draft that each draft operation returns."""
     return {
         "slug": draft.slug,
         "state": draft.state.value,
@@ -275,6 +281,7 @@ class CodeDraftTool:
         self._toolset = toolset
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Dispatch one draft operation in the owner's interactive chat."""
         refusal = await _owner_chat(self._toolset, context)
         if refusal is not None:
             return refusal
@@ -327,6 +334,7 @@ class CodeDraftTool:
         return _read_result(json.dumps(body, separators=(",", ":")), body)
 
     async def _show(self, slug: str, start_line: int, context: ToolExecutionContext) -> ToolResult:
+        """Return one page of the draft's diff."""
         async with self._toolset.uow_factory() as uow:
             draft = await uow.code_drafts.get(context.principal, slug)
         lines = await self._toolset.drafts.diff(draft)
@@ -384,6 +392,7 @@ class CodeTestTool:
         self._toolset = toolset
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Run one named check over the draft and report what it could not read."""
         refusal = await _owner_chat(self._toolset, context)
         if refusal is not None:
             return refusal
@@ -485,6 +494,7 @@ class CodeProposeTool:
         self._toolset = toolset
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Screen the approved draft, queue it for the worker and report the outcome."""
         refusal = await _owner_chat(self._toolset, context)
         if refusal is not None:
             return refusal
@@ -555,6 +565,7 @@ class CodeProposeTool:
         return await self._await_pull(proposing, context)
 
     async def _await_pull(self, draft: CodeDraft, context: ToolExecutionContext) -> ToolResult:
+        """Wait briefly for the worker to open the pull request."""
         toolset = self._toolset
         waited = 0.0
         while draft.state is CodeDraftState.PROPOSING and waited < toolset.proposal_wait_seconds:

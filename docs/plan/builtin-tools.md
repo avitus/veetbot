@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Forty-two more model-callable tools are declared at build time by other
+Forty-four more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -179,9 +179,9 @@ cockpit.configure             capability  cockpit
 cockpit.feed.publish          capability  cockpit
 ```
 
-Fifty-three model-callable builtin tools in total: the original roster of
-eight, the forty-three above, and the two media-generation tools in ADR-0140.
-ADR-0281 adds five more, [listed below](#platform-diagnostics-and-code-tools).
+Fifty-nine model-callable builtin tools in total: the original roster of
+eight, the forty-four above, the two media-generation tools in ADR-0140, and the
+five from ADR-0281, [listed below](#platform-diagnostics-and-code-tools).
 ADR-0261 added `artifact.read_capture`, which
 [tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
 declares and classifies, and ADR-0277 added `artifact.delete`, which
@@ -201,7 +201,7 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty-three, `artifact.read_capture`, `artifact.delete`, `skill.manage`, `web.search`,
+nothing else.** Of the other forty-four, `artifact.read_capture`, `artifact.delete`, `skill.manage`, `web.search`,
 `web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
 five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
 three `people.*`, and six `records.*` tools in this document's Milestone 26,
@@ -1687,9 +1687,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; fifty-three model-callable builtin tools
-    are declared at build time across the corpus, and forty-three of them
-    belong to other specifications. Resolved by naming those forty-three here,
+    is the original roster; fifty-nine model-callable builtin tools
+    are declared at build time across the corpus, and forty-four of them
+    belong to other specifications. Resolved by naming those forty-four here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
@@ -2107,13 +2107,16 @@ duration, plus a machine code and repair hint when the message is one; free text
 a job or provider wrote is withheld, so this operation keeps internal trust.
 `run` returns one run's status and failure with a timeline of its events,
 offset from the run's creation. Tool calls show only their name and reason code.
-Job log lines are shown, which makes that result untrusted.
+Job log lines are shown, and so is a failure message that is not a recognized
+platform error, and either makes that result untrusted.
 
 **`code.read`.** It reads `AGENT_CODE_SOURCE_ROOT`, the running release's
 directory. A release has no `.git` and keeps private files beside its source, so
 the tree serves an allowlist of top-level names and refuses, at every depth,
-dotted names, generated directories, key-shaped suffixes and symbolic links.
-Search runs `grep` with no shell and a ten-second limit.
+generated directories, key-shaped suffixes, symbolic links and dotted names. The
+only dotted names it serves are the allowlisted top-level `.circleci` and
+`.github`, which search skips. Search runs `grep` with no shell and a ten-second
+limit, and says when it stopped early.
 
 **`code.draft`.** A draft is one owner-scoped set of whole-file changes against
 one release, stored in PostgreSQL. An edit is one exact replacement, a whole

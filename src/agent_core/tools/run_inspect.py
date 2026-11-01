@@ -79,6 +79,7 @@ def _code(run: Run) -> str | None:
 
 
 def _hint(run: Run) -> str | None:
+    """The repair hint for a known job failure code."""
     if run.failure is None:
         return None
     return _HINTS.get(_code(run) or run.failure.reason.value)
@@ -154,6 +155,7 @@ class RunInspectTool:
         self._uow_factory = uow_factory
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Answer one inspection, reading only what the owner's scopes allow."""
         operation = arguments["operation"]
         identifier = arguments.get("schedule_id" if operation == "schedule_history" else "run_id")
         if not identifier:
@@ -180,6 +182,7 @@ class RunInspectTool:
     async def _schedule_history(
         self, schedule_id: UUID, scan: int, context: ToolExecutionContext
     ) -> ToolResult:
+        """A schedule's state and recent failures, with free text withheld."""
         principal = context.principal
         counts: Counter[str] = Counter()
         failures: list[dict[str, Any]] = []
@@ -242,6 +245,7 @@ class RunInspectTool:
     async def _run(
         self, run_id: UUID, after_sequence: int, context: ToolExecutionContext
     ) -> ToolResult:
+        """One run's status, failure and paged timed event timeline."""
         principal = context.principal
         async with self._uow_factory() as uow:
             run = await uow.runs.get(run_id, principal)

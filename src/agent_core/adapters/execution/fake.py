@@ -174,6 +174,7 @@ class FakeExecutionEnvironment:
         live_leases: frozenset[tuple[object, int]],
         is_live: Callable[[UUID, int], Awaitable[bool]] | None = None,
     ) -> int:
+        """Remove sandboxes whose lease or own deadline has ended, as Docker does."""
         stale: list[str] = []
         now = self._clock.now()
         for environment_id, specification in tuple(self._live.items()):

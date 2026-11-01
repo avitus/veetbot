@@ -80,6 +80,7 @@ class InMemoryCodeDraftRepository:
 
 
 def _values(draft: CodeDraft) -> dict[str, Any]:
+    """The draft's mutable columns, in row form."""
     return {
         "id": draft.id,
         "base_release": draft.base_release,
@@ -95,6 +96,7 @@ def _values(draft: CodeDraft) -> dict[str, Any]:
 
 
 def _to_domain(row: CodeDraftRow) -> CodeDraft:
+    """Rebuild the domain draft from its row."""
     return CodeDraft(
         id=row.id,
         tenant_id=row.tenant_id,

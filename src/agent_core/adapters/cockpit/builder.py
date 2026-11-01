@@ -84,6 +84,7 @@ def _diagnostic(raw: object) -> BuildDiagnostic:
 
 
 def _preview(report: dict[str, Any], selection: Mapping[str, str]) -> WidgetPreview:
+    """Read the builder's preview, refusing one that does not match what was selected."""
     value = report.get("preview")
     sizes = report["manifest"].get("sizes")
     if not isinstance(value, dict) or not isinstance(sizes, list) or not sizes:

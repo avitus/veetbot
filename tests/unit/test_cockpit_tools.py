@@ -781,6 +781,58 @@ async def test_preview_with_live_data_renders_the_current_feed_without_publishin
             assert await uow.cockpit_widgets.list_widgets(OWNER) == []
 
 
+@pytest.mark.parametrize(
+    "feeds",
+    [
+        None,
+        "agent.weather",
+        {"id": "agent.weather"},
+        [None, 3, {"id": {"nested": 1}}],
+        [{"id": "agent.weather", "history": float("inf")}],
+    ],
+)
+async def test_a_live_preview_leaves_a_malformed_feed_list_to_the_builder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    feeds: Any,
+) -> None:
+    """The builder owns manifest diagnostics, so reading live values must not raise first."""
+
+    async with harness(tmp_path) as h:
+        preview = WidgetPreview("live", "sm", "Live City", b"synthetic-preview")
+        builder = AsyncMock(return_value=WidgetBuild(ok=True, diagnostics=(), preview=preview))
+        monkeypatch.setattr(type(h.stack.builder), "build", builder)
+        context = h.context()
+        writer = ArtifactWriterFactory(
+            h.stack.uow_factory,
+            FilesystemArtifactStore(tmp_path),
+            h.stack.clock,
+            SequenceIdFactory(),
+        ).for_run(
+            tenant_id=OWNER.tenant_id,
+            principal_id=OWNER.principal_id,
+            session_id=CHAT,
+            run_id=context.run_id,
+            origin=ArtifactOrigin.SANDBOX_EXPORT,
+        )
+        result = await h.call(
+            "cockpit.check",
+            {
+                "operation": "preview",
+                "slug": "weather",
+                "files": {
+                    **package(),
+                    "widget.json": json.dumps({"schema": 1, "slug": "weather", "feeds": feeds}),
+                },
+                "live": True,
+            },
+            artifacts=writer,
+        )
+        assert result.ok, result.failure
+        assert builder.await_args is not None
+        assert json.loads(builder.await_args.kwargs["preview"]["live"])["feeds"] == {}
+
+
 async def test_a_live_preview_cannot_also_name_a_fixture(tmp_path: Path) -> None:
     async with harness(tmp_path) as h:
         result = await h.call(

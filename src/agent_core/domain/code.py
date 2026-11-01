@@ -82,6 +82,7 @@ class CodeDraft(BaseModel):
 
     @model_validator(mode="after")
     def _bounded(self) -> CodeDraft:
+        """Hold a draft to its limits on files and bytes."""
         if len(self.files) > MAXIMUM_DRAFT_FILES:
             raise ValueError(f"A draft changes at most {MAXIMUM_DRAFT_FILES} files.")
         size = sum(len((content or "").encode()) for content in self.files.values())

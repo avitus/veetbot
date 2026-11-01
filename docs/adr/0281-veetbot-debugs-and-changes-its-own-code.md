@@ -34,8 +34,8 @@ source, and it could not test a fix or offer one.
 3. **Reproduction.** `code.draft` keeps one owner-scoped set of edits against the
    running release. `code.test` runs a closed set of checks (pytest, ruff, mypy
    and the Cockpit tests) over that draft in a fresh sandbox built from the same
-   release, with networking off, a read-only root, an empty environment and no
-   credentials. Its output is untrusted.
+   release, with networking off, a read-only root, a minimal explicit environment
+   and no credentials. Its output is untrusted.
 4. **Proposal.** `code.propose` opens a pull request from a new `veetbot/<slug>`
    branch to `dev`. Veetbot's power stops there:
    - It never merges, approves, deploys, force-pushes, or writes to `main`,

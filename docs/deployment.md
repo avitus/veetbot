@@ -160,7 +160,7 @@ uses the deployment identity's existing Docker trust boundary; application
 identities still receive no Docker access.
 
 Image retention runs only after every verification above has passed. For each
-of the three repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
+of the four repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
 first and removes every tag after the second, which keeps the active release's
 image and its predecessor, the manual rollback target. It never removes the tag
 just released, a tag that `docker ps` reports a container running, or a tag

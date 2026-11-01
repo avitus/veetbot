@@ -54,6 +54,7 @@ _SEARCH_SECONDS = 10.0
 
 
 def _segments_allowed(parts: tuple[str, ...]) -> bool:
+    """Whether every path segment is served source; the empty path is the root."""
     for index, part in enumerate(parts):
         is_top = index == 0
         if part in _REFUSED_DIRECTORIES or part.endswith(_REFUSED_SUFFIXES):
@@ -75,6 +76,7 @@ class FilesystemSourceTree:
         return self._release_id
 
     def _checked(self, path: str) -> tuple[Path, tuple[str, ...]]:
+        """Resolve a path inside the root, refusing private names and symbolic links."""
         pure = PurePosixPath(path)
         if pure.is_absolute() or ".." in pure.parts or not _segments_allowed(pure.parts):
             raise SourcePathRefusedError(path)
@@ -86,6 +88,7 @@ class FilesystemSourceTree:
         return current, pure.parts
 
     def allows(self, path: str) -> bool:
+        """Whether a path could hold source, including a file a draft has yet to add."""
         try:
             _, parts = self._checked(path)
         except SourcePathRefusedError:
@@ -93,6 +96,7 @@ class FilesystemSourceTree:
         return bool(parts)
 
     async def list_directory(self, path: str) -> list[SourceEntry]:
+        """List a directory's served entries, leaving out what the tree refuses."""
         directory, parts = self._checked(path)
         if not directory.is_dir():
             raise SourcePathRefusedError(path)
@@ -110,6 +114,7 @@ class FilesystemSourceTree:
         return entries
 
     async def read_text(self, path: str) -> str:
+        """Read one bounded source file, refusing a binary or oversized one."""
         file, parts = self._checked(path)
         if not parts or not file.is_file():
             raise SourcePathRefusedError(path)
@@ -126,6 +131,7 @@ class FilesystemSourceTree:
     async def search(
         self, pattern: str, *, path: str = "", fixed: bool = False, maximum_bytes: int
     ) -> SourceSearch:
+        """Search served source with grep, reporting when the output stopped early."""
         _, parts = self._checked(path)
         targets = (
             [path]
@@ -153,24 +159,37 @@ class FilesystemSourceTree:
             stderr=asyncio.subprocess.DEVNULL,
         )
         assert process.stdout is not None
+        output = bytearray()
         try:
-            async with asyncio.timeout(_SEARCH_SECONDS):
-                output = await process.stdout.read(_MAXIMUM_SEARCH_OUTPUT)
-                overflowed = len(output) >= _MAXIMUM_SEARCH_OUTPUT
-                if overflowed:
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(_SEARCH_SECONDS):
+                    while len(output) < _MAXIMUM_SEARCH_OUTPUT:
+                        chunk = await process.stdout.read(_MAXIMUM_SEARCH_OUTPUT - len(output))
+                        if not chunk:
+                            break
+                        output += chunk
+            finished = process.stdout.at_eof()
+            if not finished:
+                with contextlib.suppress(ProcessLookupError):
                     process.kill()
-                code = await process.wait()
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
-            await process.wait()
-            return SourceSearch(lines=(), truncated=True)
+                # asyncio's wait returns only after the pipe closes, so read it to the end.
+                while await process.stdout.read(_MAXIMUM_SEARCH_OUTPUT):
+                    pass
+            code = await process.wait()
+        finally:
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
         if code == 2 and not output:
             raise SourcePatternInvalidError(pattern)
+        overflowed = not finished
+        if overflowed:
+            # The stop can fall inside a line, and a cut line is not a match.
+            del output[output.rfind(b"\n") + 1 :]
         lines: list[str] = []
         used = 0
         truncated = overflowed
-        for raw in output.decode(errors="replace").splitlines():
+        for raw in bytes(output).decode(errors="replace").splitlines():
             name = raw.split(":", 1)[0]
             if not _segments_allowed(PurePosixPath(name).parts):
                 continue

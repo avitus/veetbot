@@ -85,6 +85,7 @@ def _components(path: object, label: str) -> tuple[str, ...]:
 
 
 def _parse_request(raw: bytes) -> tuple[dict[str, str | None], str, tuple[str, ...], str | None]:
+    """Validate the sandbox's request into its files, check and targets."""
     if len(raw) > _MAXIMUM_REQUEST_BYTES:
         raise _RefusedError("Refused request: larger than the limit.")
     try:
@@ -166,6 +167,7 @@ def _apply_file(workspace: Path, path: str, content: str | None) -> None:
 
 
 def _apply_files(workspace: Path, files: Mapping[str, str | None]) -> None:
+    """Write the draft over the workspace; deleting an absent file changes nothing."""
     for path, content in files.items():
         try:
             _apply_file(workspace, path, content)
@@ -178,6 +180,7 @@ def _apply_files(workspace: Path, files: Mapping[str, str | None]) -> None:
 
 
 def _require_real_path(workspace: Path, parts: Sequence[str], target: str) -> None:
+    """Refuse a target that is missing or passes through a symbolic link."""
     current = workspace
     for part in parts:
         current = current / part
@@ -190,6 +193,7 @@ def _require_real_path(workspace: Path, parts: Sequence[str], target: str) -> No
 
 
 def _validated_targets(workspace: Path, kind: str, targets: Sequence[str]) -> tuple[str, ...]:
+    """The targets to check, or this check's defaults when none were named."""
     for target in targets:
         parts = _components(target, "target")
         _require_real_path(workspace, parts, target)
@@ -248,6 +252,7 @@ class _Tail:
         self._lock = threading.Lock()
 
     def collect(self, descriptor: int) -> None:
+        """Keep only the tail of a stream until it closes."""
         while chunk := os.read(descriptor, 65536):
             with self._lock:
                 self._buffer += chunk

@@ -26,6 +26,7 @@ _MAXIMUM_OUTPUT_BYTES = 256 * 1024
 
 
 def _findings(result: ExecutionResult) -> tuple[CodeFinding, ...]:
+    """Parse the screen's report; anything short of a clean verdict fails closed."""
     if (
         result.timed_out
         or result.killed_by is not None
@@ -62,6 +63,7 @@ class SandboxCodeScreen:
         names: tuple[str, ...],
         settings_values: tuple[str, ...],
     ) -> tuple[CodeFinding, ...]:
+        """Screen a draft's added lines and commit message in the offline builder sandbox."""
         # As the builder's: keyed by a fresh id and held to its own deadline, so
         # one run lease may screen more than once.
         del run_id, lease_epoch

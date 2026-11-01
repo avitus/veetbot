@@ -645,6 +645,7 @@ class CockpitCheckTool(PreviousCockpitCheckTool):
     )
 
     async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Render a preview through the builder; every other operation is the parent's."""
         if arguments["operation"] != "preview":
             return await super()._run(arguments, context)
         selection = {k: str(arguments[k]) for k in ("fixture", "size") if k in arguments}
@@ -730,6 +731,7 @@ class CockpitLiveCheckTool(CockpitCheckTool):
     spec.input_schema["properties"].update({"live": {"type": "boolean"}})
 
     async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Add the owner's current feeds and settings to a preview that asks for live data."""
         if not (arguments["operation"] == "preview" and arguments.get("live")):
             return await super()._run(arguments, context)
         if "fixture" in arguments:
@@ -753,13 +755,17 @@ class CockpitLiveCheckTool(CockpitCheckTool):
             manifest = json.loads(dict(arguments["files"]).get("widget.json", "{}"))
         except ValueError:
             manifest = {}
+        declared_feeds = manifest.get("feeds") if isinstance(manifest, dict) else None
         feeds: dict[str, Any] = {}
-        for declared in manifest.get("feeds", []) if isinstance(manifest, dict) else []:
+        # The builder reports a malformed manifest; reading values only skips what it cannot use.
+        for declared in declared_feeds if isinstance(declared_feeds, list) else []:
+            if not isinstance(declared, dict) or not isinstance(declared.get("id"), str):
+                continue
             try:
                 reading = await self._toolset.feeds.read(
                     principal, declared["id"], history=int(declared.get("history", 0))
                 )
-            except (KeyError, TypeError, ValueError, NotFoundError):
+            except (OverflowError, TypeError, ValueError, NotFoundError):
                 continue
             if reading.current is None:
                 continue

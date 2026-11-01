@@ -83,6 +83,7 @@ class CodeProposalWorker:
         return proposed
 
     async def _attempt(self, draft: CodeDraft) -> int:
+        """Publish one draft and save the outcome; return 1 when it became proposed."""
         proposal = draft.proposal
         if proposal is None:
             logger.warning("code_proposal_missing", extra={"draft_id": str(draft.id)})

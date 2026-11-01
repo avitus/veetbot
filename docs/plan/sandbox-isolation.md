@@ -1817,7 +1817,8 @@ check tools in a virtual environment, and Node with the Cockpit packages. The
 project is not installed, so a check imports the draft from its workspace.
 
 It runs under the same isolation as the builder: networking off, a read-only
-root, a no-exec `/tmp`, an empty environment and no credentials. Each check gets
+root, a no-exec `/tmp`, a minimal explicit environment that inherits nothing from
+the application, and no credentials. Each check gets
 a fresh sandbox labelled `purpose=code_check`, held to its own wall-clock deadline
 and released when the check returns.
 

@@ -98,6 +98,7 @@ class CodeDrafts:
         return draft
 
     async def _base(self, path: str) -> str | None:
+        """A path's content in the release, refusing private and protected paths."""
         if not self._tree.allows(path):
             raise CodeDraftRefusedError(
                 "code.path_refused", "That path is not tracked source, or it is private."
@@ -177,6 +178,7 @@ class CodeDrafts:
             return await uow.code_drafts.put(updated, expected_version=draft.version)
 
     async def discard(self, principal: Principal, slug: str) -> CodeDraft:
+        """Discard the owner's draft unless it is already being proposed."""
         async with self._uow_factory() as uow:
             draft = await uow.code_drafts.get(principal, slug)
             if draft.state is CodeDraftState.PROPOSING:
@@ -195,6 +197,7 @@ class CodeDrafts:
             )
 
     async def diff(self, draft: CodeDraft) -> list[str]:
+        """A unified diff of the draft against the release, with long lines clipped."""
         lines: list[str] = []
         for path in sorted(draft.files):
             base = await self._base(path)

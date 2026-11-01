@@ -162,3 +162,66 @@ async def test_each_broker_call_records_its_outcome_and_duration_without_its_arg
         },
     ]
     assert "private-path" not in str([event.payload for event in events])
+
+
+async def test_a_lost_timing_event_does_not_lose_the_broker_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The call already happened, so the program must still receive its result."""
+
+    clock, factory = await memory_uow_factory()
+    owner = principal()
+    saved = record(owner)
+    grant = saved.grants[str(UUID(int=2))]
+    saved = saved.model_copy(
+        update={
+            "grants": {
+                str(grant.id): grant.model_copy(
+                    update={"access": JobAccess({"items": [1]}, {"api.example.com": None})}
+                )
+            }
+        }
+    )
+    async with factory() as uow:
+        await uow.jobs.put(saved, expected_version=None)
+        await uow.runs.create(run())
+        events = type(uow.events)
+    append = events.append
+
+    async def failing_append(self: Any, event: Any, *args: Any, **kwargs: Any) -> Any:
+        if event.event_type == "job.broker.completed":
+            raise ConnectionError("database went away")
+        return await append(self, event, *args, **kwargs)
+
+    monkeypatch.setattr(events, "append", failing_append)
+    calls = 0
+
+    async def http(**kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"status": 200, "json": {}}
+
+    async def unused(**kwargs: Any) -> dict[str, Any]:
+        pytest.fail("No model call was expected.")
+
+    service = JobExecution(
+        uow_factory=factory,
+        clock=clock,
+        runner=lambda timeout: BrokerCallingRunner(clock),
+        schema_check=Draft202012SchemaCheck(),
+        http=http,
+        feeds=CockpitFeeds(
+            uow_factory=factory, clock=clock, schema_check=Draft202012SchemaCheck(), history_max=10
+        ),
+    )
+    result = await service.run(
+        principal=owner,
+        slug=saved.slug,
+        revision_id=UUID(int=1),
+        grant_id=UUID(int=2),
+        run_id=RUN_ID,
+        lease_epoch=1,
+        model=unused,
+    )
+    assert result.value == {"outcomes": ["succeeded", "succeeded"]}
+    assert calls == 2

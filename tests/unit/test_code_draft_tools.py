@@ -27,6 +27,7 @@ RELEASE = "20261101-120000-abc1234"
 
 
 def _text(result: ToolResult) -> str:
+    """The result's first content part, as text."""
     part = result.content[0]
     assert isinstance(part, TextPart)
     return part.text

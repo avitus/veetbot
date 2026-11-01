@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
@@ -16,6 +17,8 @@ from agent_core.ports.cockpit import JsonSchemaCheck
 from agent_core.ports.determinism import Clock
 from agent_core.ports.jobs import JobRunner
 from agent_core.ports.persistence import UnitOfWorkFactory
+
+logger = logging.getLogger(__name__)
 
 
 class JobExecution:
@@ -180,6 +183,7 @@ class JobExecution:
         broker = JobBroker(access, http=http, model=model, feed=feed, log=log, trial=trial)
 
         async def dispatch(call: str, arguments: dict[str, Any], call_id: str) -> dict[str, Any]:
+            """Run one broker call, recording its outcome and time but never its arguments."""
             logs.append(f"Broker request: {call}")
             # Deliberately omit arguments: URLs, bodies and prompts stay out of the log.
             await event(
@@ -187,18 +191,30 @@ class JobExecution:
             )
             started = self.clock.now()
             result = await broker.dispatch(call, arguments, call_id)
-            # Outcome and time only, so a slow or failed run shows where it stopped.
-            await event(
-                "job.broker.completed",
-                {
-                    "operation": call,
-                    "call_id": call_id,
-                    "trial": trial,
-                    "outcome": result["status"],
-                    "reason_code": result.get("reason_code"),
-                    "duration_ms": int((self.clock.now() - started).total_seconds() * 1000),
-                },
-            )
+            # Outcome and time only, so a slow or failed run shows where it stopped. The call has
+            # already happened, so losing this record must not lose the program's result; the
+            # requested event stays as the trace, with no completion beside it.
+            try:
+                await event(
+                    "job.broker.completed",
+                    {
+                        "operation": call,
+                        "call_id": call_id,
+                        "trial": trial,
+                        "outcome": result["status"],
+                        "reason_code": result.get("reason_code"),
+                        "duration_ms": int((self.clock.now() - started).total_seconds() * 1000),
+                    },
+                )
+            except Exception as error:
+                logger.warning(
+                    "job_broker_completion_not_recorded",
+                    extra={
+                        "run_id": str(run_id),
+                        "call_id": call_id,
+                        "error_class": type(error).__name__,
+                    },
+                )
             return result
 
         async with asyncio.timeout(access.timeout_seconds):

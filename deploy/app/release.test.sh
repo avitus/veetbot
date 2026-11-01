@@ -476,6 +476,8 @@ fi
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
 grep -Fxq 'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
   "$DEPLOY_ROOT/releases/$release_id/.release.env"
+grep -Fxq 'AGENT_CODE_SANDBOX_IMAGE=veetbot-code-sandbox:production' \
+  "$DEPLOY_ROOT/releases/$release_id/.release.env"
 grep -Fq 'alembic upgrade head' "$LOG_FILE"
 # Services cannot write bytecode under ProtectSystem=strict, so the release
 # compiles it before promotion or every process start recompiles its imports.

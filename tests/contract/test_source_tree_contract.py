@@ -54,3 +54,31 @@ async def test_search_is_bounded_and_rejects_a_bad_pattern(tree: SourceTree) -> 
     assert (await tree.search("SECRET", maximum_bytes=4096)).lines == ()
     with pytest.raises(SourcePatternInvalidError):
         await tree.search("(", maximum_bytes=4096)
+
+
+async def test_a_search_reads_grep_output_past_its_first_chunk(tmp_path: Path) -> None:
+    """Grep writes in chunks; every match counts until the cap, and none is lost silently."""
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/many.py").write_text("".join(f"needle {n} {'x' * 90}\n" for n in range(3000)))
+    tree = FilesystemSourceTree(tmp_path, release_id="20261101-120000-abc1234")
+
+    found = await tree.search("needle", maximum_bytes=1024 * 1024)
+
+    assert len(found.lines) == 3000
+    assert not found.truncated
+
+
+async def test_a_search_past_the_output_cap_keeps_whole_lines_and_says_so(tmp_path: Path) -> None:
+    """A wide match ends at the cap with the matches it read, never a hung grep."""
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/many.py").write_text("".join(f"needle {n} {'x' * 90}\n" for n in range(20000)))
+    tree = FilesystemSourceTree(tmp_path, release_id="20261101-120000-abc1234")
+
+    found = await tree.search("needle", maximum_bytes=4 * 1024 * 1024)
+
+    assert found.truncated
+    assert len(found.lines) > 1000
+    # The cap can fall inside a line; a cut line must not be presented as a match.
+    assert found.lines[-1].endswith("x" * 90)

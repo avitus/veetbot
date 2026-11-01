@@ -14,6 +14,7 @@ from tests.contract.support import principal, tool_context
 
 
 def _text(result: ToolResult) -> str:
+    """The result's first content part, as text."""
     part = result.content[0]
     assert isinstance(part, TextPart)
     return part.text

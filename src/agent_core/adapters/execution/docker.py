@@ -1110,6 +1110,7 @@ class DockerExecutionEnvironment:
         live_leases: frozenset[tuple[object, int]],
         is_live: Callable[[UUID, int], Awaitable[bool]] | None = None,
     ) -> int:
+        """Remove sandboxes whose lease or own deadline has ended, and count them."""
         raw = await _docker(
             "ps",
             "--all",

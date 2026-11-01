@@ -45,6 +45,7 @@ class CodeProposalRefusedError(ConflictError):
 
 
 def _branch_allowed(branch: str) -> bool:
+    """Whether a branch sits under the Veetbot prefix and is a valid ref name."""
     if not branch.startswith(BRANCH_PREFIX) or ".." in branch:
         return False
     tail = branch.removeprefix(BRANCH_PREFIX)
@@ -122,6 +123,7 @@ class GitHubCodeProposals:
         params: Mapping[str, str | int] | None = None,
         accept: tuple[int, ...] = (200,),
     ) -> httpx.Response:
+        """Send one repository request, replacing a rejected token once."""
         for attempt in range(2):
             token = await self._tokens.token()
             try:
@@ -175,6 +177,7 @@ class GitHubCodeProposals:
         return sha
 
     async def _create_branch(self, draft: CodeDraft, proposal: CodeProposal) -> str:
+        """Commit the draft on the release's base and create its new branch."""
         base = await self._request("GET", f"/commits/{draft.base_revision}")
         body = base.json()
         base_sha = str(body["sha"])
@@ -243,6 +246,7 @@ class GitHubCodeProposals:
         return entries
 
     async def _find_pull(self, branch: str) -> dict[str, Any] | None:
+        """The open pull request from this branch to the base branch, if any."""
         response = await self._request(
             "GET",
             "/pulls",
@@ -252,6 +256,7 @@ class GitHubCodeProposals:
         return dict(found[0]) if found else None
 
     async def _open_pull(self, proposal: CodeProposal) -> dict[str, Any]:
+        """Return the branch's pull request, opening it only when none exists."""
         existing = await self._find_pull(proposal.branch)
         if existing is not None:
             return existing

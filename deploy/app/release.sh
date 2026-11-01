@@ -231,6 +231,8 @@ fi
 umask 027
 printf 'VEETBOT_RELEASE_ID=%s\nAGENT_EXECUTION_SERVICE_SOCKET=%s\n' \
   "$RELEASE_ID" "$EXECUTION_SERVICE_SOCKET" >"$STAGE/.release.env"
+# The execution service admits only this tag, so a host need not repeat it (ADR-0281).
+printf 'AGENT_CODE_SANDBOX_IMAGE=%s\n' "$CODE_SANDBOX_PRODUCTION_IMAGE" >>"$STAGE/.release.env"
 
 cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"

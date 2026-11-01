@@ -26,6 +26,7 @@ from tests.contract.test_schedule_repository_contract import SCHEDULE_ID, revisi
 
 
 def _text(result: ToolResult) -> str:
+    """The result's first content part, as text."""
     part = result.content[0]
     assert isinstance(part, TextPart)
     return part.text

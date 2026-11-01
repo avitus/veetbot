@@ -64,6 +64,7 @@ def code_check_sandbox(
 
 
 def _verdict(result: ExecutionResult) -> CodeCheckResult:
+    """Parse a finished check's report; a run past its limits is an error, never a pass."""
     if (
         result.timed_out
         or result.killed_by is not None
@@ -94,6 +95,7 @@ class SandboxCodeChecker:
         *,
         timeout_seconds: int = CODE_CHECK_TIMEOUT_SECONDS,
     ) -> None:
+        """Keep the sandbox manager and the deadline every check is held to."""
         if timeout_seconds <= 0:
             raise ValueError("the check timeout must be positive")
         self._manager = manager
@@ -109,6 +111,7 @@ class SandboxCodeChecker:
         files: Mapping[str, str | None],
         check: CodeCheck,
     ) -> CodeCheckResult:
+        """Run one check over the draft in a fresh sandbox, which is always released."""
         # The calling run neither holds nor shares the sandbox; see code_check_sandbox.
         del run_id, lease_epoch
         request = {

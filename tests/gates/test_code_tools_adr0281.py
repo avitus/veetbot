@@ -41,6 +41,7 @@ def _environment(root: Path) -> dict[str, str]:
 
 
 def _turns(*calls: Any) -> list[ScriptedTurn]:
+    """One scripted turn per tool call, then the closing text."""
     return [
         *(ScriptedTurn(tool_calls=[call], stop_reason=StopReason.TOOL_USE) for call in calls),
         ScriptedTurn(text="Done.", stop_reason=StopReason.END_TURN),
@@ -48,6 +49,7 @@ def _turns(*calls: Any) -> list[ScriptedTurn]:
 
 
 async def _results(app: Any, session_id: Any) -> dict[str, list[dict[str, Any]]]:
+    """Each tool's completed and failed payloads, by tool name."""
     results: dict[str, list[dict[str, Any]]] = {}
     for event in await _session_events(app, session_id):
         if event.event_type in {"tool.call.completed", "tool.call.failed"}:
@@ -141,6 +143,7 @@ async def test_a_proposal_waits_for_the_owner_and_shows_the_diff(tmp_path: Path)
 
 
 async def _until_waiting(app: Any, run_id: Any) -> None:
+    """Wait for the run to reach its approval; finishing first fails the test."""
     while True:
         run = await app.runs.get(run_id)
         if run.status is RunStatus.WAITING_FOR_APPROVAL:
