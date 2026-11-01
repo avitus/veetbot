@@ -81,6 +81,7 @@ reclaim_image_storage() {
   fi
   prune_release_images "$SANDBOX_REPOSITORY" "$running"
   prune_release_images "$BUILDER_REPOSITORY" "$running"
+  prune_release_images "$CODE_SANDBOX_REPOSITORY" "$running"
   prune_release_images "$PROFILE_REPOSITORY" "$running"
   docker builder prune --all --force --filter until=48h >/dev/null || \
     printf 'warning: could not prune the build cache; continuing.\n' >&2
@@ -119,6 +120,9 @@ PRODUCTION_IMAGE="$SANDBOX_REPOSITORY:production"
 BUILDER_REPOSITORY="veetbot-cockpit-builder"
 BUILDER_RELEASE_IMAGE="$BUILDER_REPOSITORY:$RELEASE_ID"
 BUILDER_PRODUCTION_IMAGE="$BUILDER_REPOSITORY:production"
+CODE_SANDBOX_REPOSITORY="veetbot-code-sandbox"
+CODE_SANDBOX_RELEASE_IMAGE="$CODE_SANDBOX_REPOSITORY:$RELEASE_ID"
+CODE_SANDBOX_PRODUCTION_IMAGE="$CODE_SANDBOX_REPOSITORY:production"
 PROFILE_RELEASE_IMAGE="$PROFILE_REPOSITORY:$RELEASE_ID"
 PREVIOUS_RELEASE=""
 PROMOTED=0
@@ -211,6 +215,7 @@ for required in \
   deploy/systemd/veetbot-call-ingress.service \
   execution/sandbox.Dockerfile \
   execution/cockpit-builder.Dockerfile \
+  execution/code-sandbox.Dockerfile \
   scripts/check_schedule_database_permissions.py \
   scripts/check_surface_database_permissions.py \
   scripts/database_role_permissions.py \
@@ -226,6 +231,8 @@ fi
 umask 027
 printf 'VEETBOT_RELEASE_ID=%s\nAGENT_EXECUTION_SERVICE_SOCKET=%s\n' \
   "$RELEASE_ID" "$EXECUTION_SERVICE_SOCKET" >"$STAGE/.release.env"
+# The execution service admits only this tag, so a host need not repeat it (ADR-0281).
+printf 'AGENT_CODE_SANDBOX_IMAGE=%s\n' "$CODE_SANDBOX_PRODUCTION_IMAGE" >>"$STAGE/.release.env"
 
 cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
@@ -238,6 +245,7 @@ uv sync --frozen --no-dev --compile-bytecode
 docker build -f deploy/postgres.Dockerfile -t veetbot-postgres:16-alpine-vector0.8.7 .
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
 docker build -f execution/cockpit-builder.Dockerfile -t "$BUILDER_RELEASE_IMAGE" .
+docker build -f execution/code-sandbox.Dockerfile -t "$CODE_SANDBOX_RELEASE_IMAGE" .
 docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
 # The Cockpit builder canary: a reference widget must build under gVisor with
 # no network, a read-only root, no credentials and the sandbox's flags, or the
@@ -482,6 +490,7 @@ docker compose --env-file "$ENV_FILE" \
 export VEETBOT_RELEASE_ID="$RELEASE_ID"
 export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
 export AGENT_COCKPIT_BUILDER_IMAGE="$BUILDER_RELEASE_IMAGE"
+export AGENT_CODE_SANDBOX_IMAGE="$CODE_SANDBOX_RELEASE_IMAGE"
 "$STAGE/.venv/bin/alembic" upgrade head
 "$STAGE/.venv/bin/python" scripts/check_production_deployment.py
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
@@ -619,6 +628,7 @@ cp "$COCKPIT_RUNTIME_STAGE/manifest.json" "$COCKPIT_RUNTIME_DIR/.manifest.json.n
 mv -f "$COCKPIT_RUNTIME_DIR/.manifest.json.next" "$COCKPIT_RUNTIME_DIR/manifest.json"
 docker tag "$RELEASE_IMAGE" "$PRODUCTION_IMAGE"
 docker tag "$BUILDER_RELEASE_IMAGE" "$BUILDER_PRODUCTION_IMAGE"
+docker tag "$CODE_SANDBOX_RELEASE_IMAGE" "$CODE_SANDBOX_PRODUCTION_IMAGE"
 sudo systemctl enable --now "${UNITS[@]}"
 sudo systemctl restart "${UNITS[@]}"
 for calling_unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do

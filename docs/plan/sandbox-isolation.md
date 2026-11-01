@@ -1808,6 +1808,32 @@ builds a canary under runsc.
 Tenants still cannot choose an image. The per-tenant question remains open.
 [cockpit.md](cockpit.md) owns the build contract.
 
+## Code check image
+
+[ADR-0281](../adr/0281-veetbot-debugs-and-changes-its-own-code.md) adds a third
+platform-owned image, `execution/code-sandbox.Dockerfile`, for `code.test`. It
+holds the release's tracked source at `/source`, the locked dependencies and
+check tools in a virtual environment, and Node with the Cockpit packages. The
+project is not installed, so a check imports the draft from its workspace.
+
+It runs under the same isolation as the builder: networking off, a read-only
+root, a no-exec `/tmp`, a minimal explicit environment that inherits nothing from
+the application, and no credentials. Each check gets
+a fresh sandbox labelled `purpose=code_check`, held to its own wall-clock deadline
+and released when the check returns.
+
+The entry point, `agent_core/execution/code_checks.py`, runs a closed command per
+kind. A target must be an existing path under `tests/`, `src/`, `cockpit/`,
+`execution/` or `scripts/`, and is never an option. A draft file may only be written below the same
+directories, never through a symbolic link.
+
+A pass here says less than hosted CI. The sandbox has no PostgreSQL, Docker,
+browser engine, `.git` or installed `agent` command, so tests that need one fail
+or skip. `tests/native` and the two Cockpit tests that start a browser
+(`builder`, `realm`) never run.
+All of `tests/unit` does not finish inside the check's deadline, so a check names
+the tests a draft concerns.
+
 ## Agent-written jobs MVP (ADR-0268)
 
 The owner authorized implementation on 2026-10-29. A job is a Python module

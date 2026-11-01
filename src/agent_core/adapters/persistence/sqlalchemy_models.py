@@ -3140,6 +3140,38 @@ class JobRecordRow(Base):
     body: Mapped[dict[str, Any]] = mapped_column(JSONB)
 
 
+class CodeDraftRow(Base):
+    """One owner's edits against a release, and the outbox entry that proposes them."""
+
+    __tablename__ = "code_drafts"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "slug", name="pk_code_drafts"),
+        Index(
+            "ix_code_drafts_due_proposals",
+            "tenant_id",
+            "next_attempt_at",
+            postgresql_where=text("state = 'proposing'"),
+        ),
+        CheckConstraint("version >= 1", name="version"),
+        CheckConstraint("state IN ('open', 'proposing', 'proposed', 'discarded')", name="state"),
+        CheckConstraint("(proposal IS NULL) = (next_attempt_at IS NULL)", name="next_attempt_at"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(Text)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    base_release: Mapped[str] = mapped_column(Text)
+    base_revision: Mapped[str] = mapped_column(Text)
+    files: Mapped[dict[str, str | None]] = mapped_column(JSONB)
+    state: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    proposal: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    # Copied out of `proposal` so the outbox scan compares timestamps, not JSON text.
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class IntegrationSecretRow(Base):
     __tablename__ = "integration_secrets"
     __table_args__ = (

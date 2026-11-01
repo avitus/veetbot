@@ -309,7 +309,8 @@ struct CockpitModeView: View {
                             model.hostReported(message)
                             if case .select(let slug) = message { Task { await model.openDetail(slug) } }
                         },
-                        onUnresponsive: { model.quarantineNewest() }
+                        onUnresponsive: { model.quarantineNewest() },
+                        isVisible: isVisible
                     )
                     .background(AppTheme.paper)
                 }

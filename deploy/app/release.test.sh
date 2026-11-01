@@ -309,6 +309,7 @@ make_stage() {
     "$stage/deploy/veetbot-call-ingress.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/execution/cockpit-builder.Dockerfile" \
+    "$stage/execution/code-sandbox.Dockerfile" \
     "$stage/scripts/check_schedule_database_permissions.py" \
     "$stage/scripts/check_surface_database_permissions.py" \
     "$stage/scripts/database_role_permissions.py" \
@@ -345,7 +346,7 @@ make_stage() {
     >"$stage/deploy/systemd/veetbot-surface.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
-  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nprintf "cockpit builder image %%s\\n" "${AGENT_COCKPIT_BUILDER_IMAGE:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "$*" == "-m scripts.check_schedule_database_permissions" ]]; then exit 1; fi\n' \
+  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nprintf "cockpit builder image %%s\\n" "${AGENT_COCKPIT_BUILDER_IMAGE:-missing}" >>"$VEETBOT_TEST_LOG"\nprintf "code sandbox image %%s\\n" "${AGENT_CODE_SANDBOX_IMAGE:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "$*" == "-m scripts.check_schedule_database_permissions" ]]; then exit 1; fi\n' \
     >"$stage/.venv/bin/python"
   chmod +x "$stage/.venv/bin/alembic" "$stage/.venv/bin/python"
   cat >>"$stage/.venv/bin/python" <<'PYTHON_STUB'
@@ -440,6 +441,11 @@ printf '%s\n' \
   20260809-120001-0000001 \
   20260809-120002-0000002 \
   20260809-120003-0000003 >"$DOCKER_IMAGES/veetbot-cockpit-builder"
+printf '%s\n' \
+  production \
+  20260809-120001-0000001 \
+  20260809-120002-0000002 \
+  20260809-120003-0000003 >"$DOCKER_IMAGES/veetbot-code-sandbox"
 running_images="$(printf '%s\n' \
   'veetbot-browser-profile-service:20260809-120001-0000001' \
   'agent-core-sandbox:production')"
@@ -470,6 +476,8 @@ fi
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
 grep -Fxq 'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
   "$DEPLOY_ROOT/releases/$release_id/.release.env"
+grep -Fxq 'AGENT_CODE_SANDBOX_IMAGE=veetbot-code-sandbox:production' \
+  "$DEPLOY_ROOT/releases/$release_id/.release.env"
 grep -Fq 'alembic upgrade head' "$LOG_FILE"
 # Services cannot write bytecode under ProtectSystem=strict, so the release
 # compiles it before promotion or every process start recompiles its imports.
@@ -483,6 +491,12 @@ grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fxq \
   "docker build -f execution/cockpit-builder.Dockerfile -t veetbot-cockpit-builder:$release_id ." \
   "$LOG_FILE"
+grep -Fxq \
+  "docker build -f execution/code-sandbox.Dockerfile -t veetbot-code-sandbox:$release_id ." \
+  "$LOG_FILE"
+[[ "$(grep -Fnx "docker build -f execution/code-sandbox.Dockerfile -t veetbot-code-sandbox:$release_id ." \
+  "$LOG_FILE" | cut -d: -f1)" -lt \
+  "$(grep -Fn 'alembic upgrade head' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 # The Cockpit builder canary builds a reference widget offline under gVisor,
 # with the sandbox's isolation flags, before anything is migrated or promoted.
 builder_canary="docker run --rm --pull=never --runtime runsc --network none --read-only"
@@ -493,6 +507,7 @@ grep -Fxq "$builder_canary" "$LOG_FILE"
 [[ "$(grep -Fnx "$builder_canary" "$LOG_FILE" | cut -d: -f1)" -lt \
   "$(grep -Fn 'alembic upgrade head' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 grep -Fxq "cockpit builder image veetbot-cockpit-builder:$release_id" "$LOG_FILE"
+grep -Fxq "code sandbox image veetbot-code-sandbox:$release_id" "$LOG_FILE"
 # The board's runtime leaves the builder image for the artifact root, where the
 # API serves it by hash; a content-addressed asset already there is never
 # rewritten, and the manifest names this release's runtime.
@@ -510,6 +525,12 @@ grep -Fxq \
   "docker tag veetbot-cockpit-builder:$release_id veetbot-cockpit-builder:production" \
   "$LOG_FILE"
 [[ "$(grep -Fnx "docker tag veetbot-cockpit-builder:$release_id veetbot-cockpit-builder:production" \
+  "$LOG_FILE" | cut -d: -f1)" -lt \
+  "$(grep -Fn 'systemctl restart veetbot-execution' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
+grep -Fxq \
+  "docker tag veetbot-code-sandbox:$release_id veetbot-code-sandbox:production" \
+  "$LOG_FILE"
+[[ "$(grep -Fnx "docker tag veetbot-code-sandbox:$release_id veetbot-code-sandbox:production" \
   "$LOG_FILE" | cut -d: -f1)" -lt \
   "$(grep -Fn 'systemctl restart veetbot-execution' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
@@ -546,6 +567,12 @@ expected_builder_tags="$(printf '%s\n' production 20260809-120003-0000003 "$rele
   cat "$DOCKER_IMAGES/veetbot-cockpit-builder" >&2
   exit 1
 }
+expected_code_tags="$(printf '%s\n' production 20260809-120003-0000003 "$release_id")"
+[[ "$(cat "$DOCKER_IMAGES/veetbot-code-sandbox")" == "$expected_code_tags" ]] || {
+  printf 'unexpected code sandbox tags after retention:\n' >&2
+  cat "$DOCKER_IMAGES/veetbot-code-sandbox" >&2
+  exit 1
+}
 expected_profile_tags="$(printf '%s\n' \
   local 20260809-120001-0000001 20260809-120003-0000003 "$release_id")"
 [[ "$(cat "$DOCKER_IMAGES/veetbot-browser-profile-service")" == "$expected_profile_tags" ]] || {
@@ -558,6 +585,7 @@ grep -Fq 'docker image rm agent-core-sandbox:20260809-120001-0000001' "$LOG_FILE
 grep -Fq 'docker image rm veetbot-browser-profile-service:20260809-120002-0000002' "$LOG_FILE"
 assert_log_lacks 'docker image rm agent-core-sandbox:production'
 assert_log_lacks 'docker image rm veetbot-cockpit-builder:production'
+assert_log_lacks 'docker image rm veetbot-code-sandbox:production'
 assert_log_lacks 'docker image rm veetbot-browser-profile-service:local'
 assert_log_lacks 'docker image rm veetbot-browser-profile-service:20260809-120001-0000001'
 grep -Fq 'could not remove stale image agent-core-sandbox:20260809-120002-0000002' \
@@ -618,6 +646,7 @@ grep -Fq 'the Cockpit builder could not build its canary offline under runsc' \
 assert_log_lacks 'alembic upgrade'
 assert_log_lacks 'systemctl stop'
 assert_log_lacks "docker tag veetbot-cockpit-builder:$canary_id"
+assert_log_lacks "docker tag veetbot-code-sandbox:$canary_id"
 
 stale_id="20260809-010101-1234567"
 make_stage "$stale_id"
@@ -775,6 +804,7 @@ ln -s "$DEPLOY_ROOT/releases/$equal_timestamp_id" "$PROCESS_ROOT/4242/cwd"
 printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/agent-core-sandbox"
 printf '%s\n' "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-browser-profile-service"
 printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-cockpit-builder"
+printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-code-sandbox"
 : >"$LOG_FILE"
 # A release may switch device sign-in off (ADR-0128); compose reads the value.
 device_off_env="$TEST_ROOT/device-off.env"

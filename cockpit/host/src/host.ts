@@ -1,8 +1,8 @@
 // The trusted host page. Native code is its only source of data; it gives the
 // realm, for each widget, exactly the declared feeds (at the declared history
 // depth) and that widget's own settings, and nothing else. It also runs the
-// watchdog: an unresponsive or navigated realm is reloaded and the most
-// recently changed widget quarantined.
+// watchdog: a realm that navigates, or stops answering while this page is
+// awake and visible, is reloaded and the most recently changed widget quarantined.
 import type { FeedView, IntentKind } from '../../kit/src/index';
 import type { FeedEnvelope, HostToNative, HostToRealm, NativeMessage, RealmTile, RealmToHost, WidgetPlacement } from './protocol';
 
@@ -26,6 +26,7 @@ let snapshot: Snapshot | null = null;
 let frame: HTMLIFrameElement | null = null;
 let ready = false;
 let lastPong = Date.now();
+let lastTick = Date.now();
 let pingId = 0;
 const quarantined = new Set<string>();
 
@@ -181,6 +182,12 @@ window.cockpitHost = {
 
 window.addEventListener('message', fromRealm);
 window.setInterval(() => {
+  // A late tick or a hidden page means the page itself was asleep or throttled,
+  // which says nothing about a widget. Native code catches a widget that blocks
+  // this timer, so the clock restarts here.
+  const now = Date.now();
+  if (document.hidden || now - lastTick > DEADLINE_MS) lastPong = now;
+  lastTick = now;
   if (!ready) {
     if (Date.now() - lastPong > DEADLINE_MS) quarantineNewest('unresponsive');
     return;

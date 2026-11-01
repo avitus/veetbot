@@ -289,6 +289,11 @@ origin would need CORS headers the scheme handler does not send.
     deadline, native code reloads the view and leaves the most recently
     changed widget out of the next snapshot.
 
+  Only silence from a page that is awake and on screen counts. A late heartbeat,
+  a hidden board, or a web process the system ended while the board was hidden
+  restarts the deadline and quarantines nothing, because sleep and hidden pages
+  stop answering through no fault of a widget.
+
   A quarantined widget shows a "paused" state natively until its next
   revision or the owner's retry.
 - **Data flow.** The realm receives only, per widget, its declared feeds at
@@ -1497,3 +1502,10 @@ uses the fixture clock. Chat receives the rendered text and an image
 reference, and the owner can open the private PNG attached to the reply.
 Only `cockpit.read` and `cockpit.check` advance to version 1.1.0. Runs pinned
 to 1.0.0 retain their original definitions.
+
+`cockpit.check` 1.2.0 ([ADR-0281](../adr/0281-veetbot-debugs-and-changes-its-own-code.md))
+adds `live: true`, which previews the submitted package with the owner's current
+declared feeds and settings instead of a fixture. It shows what a widget really
+displays. The values travel to the offline builder beside the package, never in
+it, so they reach neither the privacy screen nor the public branch. The rendered
+text and PNG are untrusted and private. A run's own failures are in `run.inspect`.

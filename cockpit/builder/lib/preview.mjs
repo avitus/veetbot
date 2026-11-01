@@ -1,5 +1,6 @@
 // Serve only the built runtime and this bundle to an isolated WebKit page.
-// No local file URLs, private screen inputs, live data or browser bridge.
+// No local file URLs, private screen inputs or browser bridge. Live feed values
+// reach this offline sandbox only when the owner's chat asks for them (ADR-0281).
 import { existsSync, readFileSync } from 'node:fs';
 import { fixtureProps } from './fixtures.mjs';
 
@@ -9,12 +10,13 @@ const types = { html: 'text/html', js: 'text/javascript', css: 'text/css' };
 
 export async function previewWidget(build, files, selection) {
   const { manifest, bundle, sha256 } = build;
-  const fixture = selection.fixture ?? 'fixtures/typical.json';
+  const live = typeof selection.live === 'string';
+  const fixture = live ? 'live' : selection.fixture ?? 'fixtures/typical.json';
   const size = selection.size ?? manifest.sizes[0];
-  if (!fixture.startsWith('fixtures/') || !files.has(fixture) || !manifest.sizes.includes(size)) {
+  if ((!live && (!fixture.startsWith('fixtures/') || !files.has(fixture))) || !manifest.sizes.includes(size)) {
     return { diagnostics: [{ rule: 'preview.selection', message: 'Choose a packaged fixture and a declared size.' }] };
   }
-  const props = fixtureProps(JSON.parse(files.get(fixture)), manifest);
+  const props = fixtureProps(JSON.parse(live ? selection.live : files.get(fixture)), manifest);
   // The sandbox starts commands with an empty environment. The release image
   // installs the pinned browser with Playwright's hermetic location setting.
   if (existsSync(new URL('../../node_modules/playwright-core/.local-browsers/', import.meta.url))) {

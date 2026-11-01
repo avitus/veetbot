@@ -92,8 +92,10 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 3. installs a release-local `.venv` from `uv.lock` using a shared download
    cache, and compiles the bytecode of its dependencies and of `src`, because
    the units' read-only filesystem keeps Python from caching it at run time;
-4. builds `agent-core-sandbox:<release-id>` and
-   `veetbot-cockpit-builder:<release-id>`, then requires the builder to build
+4. builds `agent-core-sandbox:<release-id>`,
+   `veetbot-cockpit-builder:<release-id>` and
+   `veetbot-code-sandbox:<release-id>` (ADR-0281; the preflight requires it, and
+   it has no canary), then requires the builder to build
    a reference widget under runsc with no network, a read-only root and the
    sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`). It copies the
    board's content-addressed runtime out of the builder image into
@@ -105,7 +107,7 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    `alembic upgrade head`, and runs the production preflight;
 7. stops both run workers, rechecks active provider pins, then switches
    `/opt/veetbot/current`, switches the board's runtime manifest to this
-   release's, tags the sandbox and builder images as `production`, and
+   release's, tags the sandbox, builder and code sandbox images as `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
@@ -115,7 +117,8 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    promoted directory;
 9. retains the five newest valid releases; and
 10. retains the two newest timestamped `agent-core-sandbox`,
-    `veetbot-cockpit-builder` and `veetbot-browser-profile-service` image
+    `veetbot-cockpit-builder`, `veetbot-code-sandbox` and
+    `veetbot-browser-profile-service` image
     tags and prunes build cache that
     no build has used for 48 hours.
 
@@ -157,7 +160,7 @@ uses the deployment identity's existing Docker trust boundary; application
 identities still receive no Docker access.
 
 Image retention runs only after every verification above has passed. For each
-of the three repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
+of the four repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
 first and removes every tag after the second, which keeps the active release's
 image and its predecessor, the manual rollback target. It never removes the tag
 just released, a tag that `docker ps` reports a container running, or a tag
@@ -1285,7 +1288,8 @@ automatic Alembic downgrade as part of rollback. Run the complete block in one
 shell so file descriptor 9 holds the same deployment lock from before writer
 quiescence through readiness verification. The block retags the target's
 Cockpit builder image as `production` when the target has one; a target from
-before Milestone 35 has none, and the newer builder tag stays, unused by it.
+before Milestone 35 has none, and the newer builder tag stays, unused by it. The
+code sandbox image (ADR-0281) follows the same rule.
 
 ```bash
 set -euo pipefail
@@ -1331,6 +1335,14 @@ if docker image inspect "veetbot-cockpit-builder:$target_id" >/dev/null 2>&1; th
 fi
 previous_builder_image="$(
   docker image inspect --format '{{.Id}}' veetbot-cockpit-builder:production 2>/dev/null || true
+)"
+# A release from before ADR-0281 has no code sandbox image.
+target_code_sandbox_image=""
+if docker image inspect "veetbot-code-sandbox:$target_id" >/dev/null 2>&1; then
+  target_code_sandbox_image="veetbot-code-sandbox:$target_id"
+fi
+previous_code_sandbox_image="$(
+  docker image inspect --format '{{.Id}}' veetbot-code-sandbox:production 2>/dev/null || true
 )"
 # The board's runtime lives under the artifact root the release exported it to.
 cockpit_runtime_dir="$({
@@ -1397,6 +1409,9 @@ rollback_on_exit() {
     if test -n "$previous_builder_image"; then
       docker tag "$previous_builder_image" veetbot-cockpit-builder:production
     fi
+    if test -n "$previous_code_sandbox_image"; then
+      docker tag "$previous_code_sandbox_image" veetbot-code-sandbox:production
+    fi
     sudo systemctl restart "${managed_units[@]}"
   fi
   if test -n "$health_headers"; then
@@ -1451,6 +1466,9 @@ ln -s "$website_target" "$website_next"
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
 if test -n "$target_builder_image"; then
   docker tag "$target_builder_image" veetbot-cockpit-builder:production
+fi
+if test -n "$target_code_sandbox_image"; then
+  docker tag "$target_code_sandbox_image" veetbot-code-sandbox:production
 fi
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
@@ -1686,6 +1704,12 @@ it on `avitus/veetbot` only, then note the App id and the installation id.
   deleted, with the admin and write roles exempt, so only the App is fenced;
 - nobody may force-push or delete `cockpit/widgets`;
 - no CircleCI workflow and no CodeRabbit review applies to `cockpit/widgets`.
+
+Code proposals (ADR-0281) need two more grants, and only when
+`AGENT_CODE_PROPOSALS_ENABLED=1`: the App's **Pull requests: Read and write**
+permission, and an exception to the first ruleset that lets the App create and
+update branches matching `veetbot/**`. The adapter never writes another branch,
+and it has no merge or review call.
 
 **The key.** Generate a private key for the App and install it as
 `/etc/veetbot/secrets/cockpit-github-app.pem`, owned by root with mode `0400`.

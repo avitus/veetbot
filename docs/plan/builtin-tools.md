@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Forty-two more model-callable tools are declared at build time by other
+Fifty more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -150,9 +150,11 @@ knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
 web.fetch_json                capability  web-access
+web.inspect_image             capability  web-access
 browser.navigate              capability  browser-automation
 browser.observe               capability  browser-automation
 browser.act                   capability  browser-automation
+browser.upload                capability  browser-automation
 schedule.create               capability  scheduling
 schedule.list                 capability  scheduling
 schedule.update               capability  scheduling
@@ -177,10 +179,15 @@ cockpit.check                 capability  cockpit
 cockpit.widget.write          capability  cockpit
 cockpit.configure             capability  cockpit
 cockpit.feed.publish          capability  cockpit
+cockpit.prepare               capability  cockpit
+cockpit.install               capability  cockpit
+job.manage                    capability  cockpit
+job.run                       capability  cockpit
 ```
 
-Fifty-three model-callable builtin tools in total: the original roster of
-eight, the forty-three above, and the two media-generation tools in ADR-0140.
+Sixty-five model-callable builtin tools in total: the original roster of
+eight, the fifty above, the two media-generation tools in ADR-0140, and the
+five from ADR-0281, [listed below](#platform-diagnostics-and-code-tools).
 ADR-0261 added `artifact.read_capture`, which
 [tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
 declares and classifies, and ADR-0277 added `artifact.delete`, which
@@ -200,9 +207,9 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty-three, `artifact.read_capture`, `artifact.delete`, `skill.manage`, `web.search`,
-`web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
-five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
+nothing else.** Of the other fifty, `artifact.read_capture`, `artifact.delete`, `skill.manage`, `web.search`,
+`web.fetch`, `web.fetch_json`, `web.inspect_image`, the four `browser.*` tools, the six `schedule.*` tools, the
+seven `cockpit.*` tools, and the two `job.*` tools are fully classified in their subject specifications, and the four `email.*`,
 three `people.*`, and six `records.*` tools in this document's Milestone 26,
 28, 31, and 34 sections below;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
@@ -220,20 +227,23 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is every builtin the composition root registers, and
-that is a function of the deployment. Twenty identities are always
+that is a function of the deployment. Twenty-one identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `artifact.read_capture`, `artifact.delete`, `context.update_working_state`, the four `memory.*` tools,
-`skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-four register only
-with their flag or provider: `skill.manage` with skill authoring, the three
-`web.*` and three `browser.*` tools with their providers, `delegate.run` with
+`skill.load`, `tool.call`, `run.inspect`, and the two `knowledge.*` tools. The other forty-four register only
+with their flag or provider: `skill.manage` with skill authoring, the four
+`web.*` and four `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
 and worker, the three `people.*` tools with People, `email.context` and
 `email.feedback` with Email mode, and `email.subscriptions` and
 `email.unsubscribe` with email unsubscribe, the six `records.*` tools with
-`AGENT_RECORDS_ENABLED=1`, the five `cockpit.*` tools with
-`AGENT_COCKPIT_ENABLED=1`, and `image.generate` and `video.generate` with the
-TensorScale credential. Historical versions of
+`AGENT_RECORDS_ENABLED=1`, the five other `cockpit.*` tools with
+`AGENT_COCKPIT_ENABLED=1`, `job.manage` and `job.run` with `AGENT_JOBS_ENABLED=1`,
+`cockpit.prepare` and `cockpit.install` with Cockpit, jobs and both scheduling roles,
+`code.read`, `code.draft` and `code.test` with
+`AGENT_CODE_TOOLS_ENABLED=1`, `code.propose` with `AGENT_CODE_PROPOSALS_ENABLED=1`, and
+`image.generate` and `video.generate` with the TensorScale credential. Historical versions of
 `memory.remember`, `skill.load`, `artifact.export`, `schedule.list`, `image.generate`,
 `video.generate`, `delegate.run`, and `people.history` (ADR-0126) register
 beside their current versions, and step 6 validates every registered version.
@@ -1686,9 +1696,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; fifty-three model-callable builtin tools
-    are declared at build time across the corpus, and forty-three of them
-    belong to other specifications. Resolved by naming those forty-three here,
+    is the original roster; sixty-five model-callable builtin tools
+    are declared at build time across the corpus, and fifty of them
+    belong to other specifications. Resolved by naming those fifty here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
@@ -2079,3 +2089,78 @@ owner-chat-only, run serially, and have a 660-second timeout and 64-KiB output
 limit. The install tool may be repeated with the same preparation IDs to resume
 pending publication. Preparation and job errors carry bounded untrusted repair
 feedback. See [the installation design](cockpit.md#one-approval-for-widget-installation-adr-0270).
+
+## Platform diagnostics and code tools
+
+[ADR-0281](../adr/0281-veetbot-debugs-and-changes-its-own-code.md) adds the
+`run` and `code` domains so the assistant can establish why something of its own
+failed, read the code involved, test a repair and offer it for review. All five
+tools are unindexed deferred entries: the default instructions name them, they
+use no definition slot and no index entry, and they are reached through
+`tool.call`.
+
+| Tool | Registered when | Side effect | Scope | Output trust |
+| --- | --- | --- | --- | --- |
+| `run.inspect` | always | `none` | `run.read`; its schedule history also needs `schedule.read` | internal, untrusted when it carries text a run wrote |
+| `code.read` | `AGENT_CODE_TOOLS_ENABLED` | `none` | `code.read` | internal |
+| `code.draft` | `AGENT_CODE_TOOLS_ENABLED` | `none` | `code.write` | internal |
+| `code.test` | `AGENT_CODE_TOOLS_ENABLED` | `code_execution` in a `sandbox` target | `code.write` | untrusted |
+| `code.propose` | `AGENT_CODE_PROPOSALS_ENABLED` | `publication` | `code.write` | internal |
+
+Every answer fits the 4 KiB inline budget by paging.
+
+**`run.inspect`.** `schedule_history` returns the schedule's state, pause reason,
+failure counter, failure limit and timeout, a count of recent occurrences by
+outcome, and up to eight failures. A failure names its reason, error class and
+duration, plus a machine code and repair hint when the message is one; free text
+a job or provider wrote is withheld, so this operation keeps internal trust.
+`run` returns one run's status and failure with a timeline of its events,
+offset from the run's creation. Tool calls show only their name and reason code.
+Job log lines are shown, and so is a failure message that is not a recognized
+platform error, and either makes that result untrusted.
+
+**`code.read`.** It reads `AGENT_CODE_SOURCE_ROOT`, the running release's
+directory. A release has no `.git` and keeps private files beside its source, so
+the tree serves an allowlist of top-level names and refuses, at every depth,
+generated directories, key-shaped suffixes, symbolic links and dotted names. The
+only dotted names it serves are the allowlisted top-level `.circleci` and
+`.github`, which search skips. Search runs `grep` with no shell and a ten-second
+limit, and says when it stopped early.
+
+**`code.draft`.** A draft is one owner-scoped set of whole-file changes against
+one release, stored in PostgreSQL. An edit is one exact replacement, a whole
+file or a deletion. `.circleci/`, `.github/`, `deploy/`, `policy/` and
+`src/agent_core/policy/` are refused. When a newer release runs, the draft is
+stale and refuses further edits, tests and proposals, because its base file
+contents are gone.
+
+**`code.test`.** A fresh sandbox from the release's `AGENT_CODE_SANDBOX_IMAGE`
+copies the baked source, applies the draft and runs one closed command: pytest,
+ruff, mypy or the Cockpit tests, with validated repository paths and a validated
+keyword. Networking is off, the root is read-only, the environment is empty and
+the run has no credentials. A timeout or a malformed report is an error, never a
+pass. Tests that need PostgreSQL, Docker or a browser cannot pass here, so a pass
+is partial evidence and hosted CI remains the full verification.
+
+**`code.propose`.** It asks the owner through the ordinary `publication` approval,
+which no `tool_rules` entry skips, and shows the whole diff and summary. The
+approval view keeps 50 items a list and cuts longer strings, so the card pages the
+diff and splits a long line across entries, continuing it with `> `. A change past
+400 entries cannot be shown whole, so its card says so and the tool refuses with
+`code.diff_too_large`. Text shaped like a credential is masked on the card with
+its count stated, leaving the rest of its line visible, and the secret screen
+still checks it. Its arguments carry
+the digest `code.draft` reports, over the draft's files and base, so an approval
+covers exactly the content on its card. A draft that has moved since refuses
+with `code.draft_changed` and publishes nothing, and a card for a moved draft
+shows no diff. The tool refuses any
+run that is not interactive or any session that is not the owner's chat. Added
+lines, the title and the summary pass the Cockpit privacy screen with a
+high-confidence secret rule, because `token: str` is ordinary code here. A hit
+publishes nothing and never repeats the value. The tool then records an outbox
+entry; the maintenance role's worker, the only holder of the key, creates a new
+`veetbot/<slug>-<id>-<digest>` branch from the release's revision, commits and opens a pull
+request to `dev`. A retry finds its own branch by commit trailer and its open pull
+request. The adapter refuses any other ref or a protected path before calling
+GitHub, and it has no merge, review or force operation. A push starts no CI, and
+the ordinary review loop applies.

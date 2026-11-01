@@ -52,6 +52,9 @@ PLATFORM_SCOPES = frozenset(
         "cockpit.write",
         "jobs.write",
         "jobs.run",
+        # ADR-0281: reading the running release's source; drafting and proposing changes.
+        "code.read",
+        "code.write",
         "persona.read",
         "persona.write",
         "settings.read",

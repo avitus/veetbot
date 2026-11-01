@@ -80,13 +80,16 @@ def _model_policy_failures(settings: Settings) -> list[str]:
 
 
 def _image_failures(settings: Settings) -> list[str]:
-    """The run sandbox image and the Cockpit builder image must both be present."""
+    """The run sandbox and Cockpit builder images must be present, and the code sandbox's if on."""
 
     failures: list[str] = []
-    for label, reference in (
+    images = [
         ("sandbox image", settings.sandbox_image),
         ("Cockpit builder image", settings.cockpit_builder_image),
-    ):
+    ]
+    if settings.code_tools_enabled:
+        images.append(("code sandbox image", settings.code_sandbox_image))
+    for label, reference in images:
         if _run("docker", "image", "inspect", reference).returncode != 0:
             failures.append(f"{label} is unavailable: {reference}")
     return failures
