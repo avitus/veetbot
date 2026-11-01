@@ -19,9 +19,11 @@ from sqlalchemy import (
     and_,
     any_,
     bindparam,
+    case,
     delete,
     false,
     func,
+    literal,
     not_,
     or_,
     select,
@@ -105,6 +107,7 @@ from agent_core.domain.memory import (
     TracedBelief,
     TracedPassage,
     TracedPersonContext,
+    lexical_query_forms,
     lexical_query_terms,
     recall_query_terms,
     recall_term_forms,
@@ -1706,6 +1709,13 @@ def _chunk(row: KnowledgeChunkRow) -> KnowledgeChunk:
     )
 
 
+_DOCUMENT_AUTHORITY_WEIGHT = {
+    DocumentAuthority.PRINCIPAL_AUTHORED: 1.0,
+    DocumentAuthority.PRINCIPAL_SUPPLIED: 0.7,
+    DocumentAuthority.FETCHED: 0.4,
+}
+
+
 class PostgresKnowledgeStore:
     def __init__(self, session: AsyncSession, clock: Clock) -> None:
         self._session = session
@@ -1757,8 +1767,8 @@ class PostgresKnowledgeStore:
 
     async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]:
         as_of = query.as_of or self._clock.now()
-        terms = lexical_query_terms(query.text)
-        if not terms:
+        forms = lexical_query_forms(query.text)
+        if not forms:
             return []
         vector = func.to_tsvector(
             "simple",
@@ -1766,10 +1776,32 @@ class PostgresKnowledgeStore:
         )
         # Any-term semantics, as `lexical_query_terms` documents and the in-memory
         # store answers: a question rarely shares every word with its passage.
-        term_queries = [func.plainto_tsquery("simple", term) for term in terms]
+        # Each term matches any of its folded spellings (ADR-0284).
+        term_queries = [func.plainto_tsquery("simple", form) for group in forms for form in group]
         any_term: Any = term_queries[0]
         for term_query in term_queries[1:]:
             any_term = any_term.op("||")(term_query)
+        # Coverage, the number of distinct query terms a passage holds, ranks
+        # ahead of density: a passage about the question beats a passage that
+        # repeats one of its words (ADR-0284).
+        coverage = sum(
+            (
+                case(
+                    (
+                        or_(
+                            *[
+                                vector.op("@@")(func.plainto_tsquery("simple", form))
+                                for form in group
+                            ]
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+                for group in forms
+            ),
+            literal(0),
+        )
         rank = func.ts_rank_cd(vector, any_term)
         visibility = or_(
             KnowledgeDocumentRow.visibility == KnowledgeVisibility.TENANT.value,
@@ -1785,7 +1817,12 @@ class PostgresKnowledgeStore:
         rows = list(
             (
                 await self._session.execute(
-                    select(KnowledgeChunkRow, KnowledgeDocumentRow, rank.label("rank"))
+                    select(
+                        KnowledgeChunkRow,
+                        KnowledgeDocumentRow,
+                        coverage.label("coverage"),
+                        rank.label("rank"),
+                    )
                     .join(
                         KnowledgeDocumentRow,
                         KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
@@ -1804,17 +1841,24 @@ class PostgresKnowledgeStore:
                         visibility,
                         vector.op("@@")(any_term),
                     )
-                    .order_by(rank.desc(), KnowledgeChunkRow.chunk_id)
+                    .order_by(coverage.desc(), rank.desc(), KnowledgeChunkRow.chunk_id)
                     .limit(max(query.max_passages * 8, 64))
                 )
             ).all()
         )
         per_document: defaultdict[UUID, int] = defaultdict(int)
         passages: list[RetrievedPassage] = []
-        for chunk, document, raw_rank in rows:
+        for chunk, document, raw_coverage, _raw_rank in rows:
             if per_document[document.document_id] >= query.max_per_document:
                 continue
-            score = min(1.0, float(raw_rank) + 0.25)
+            # The same formula the in-memory store answers with: coverage first,
+            # then the document's authority and its affinity with the scope.
+            score = min(
+                1.0,
+                0.75 * (int(raw_coverage) / len(forms))
+                + 0.15 * _DOCUMENT_AUTHORITY_WEIGHT[DocumentAuthority(document.authority)]
+                + 0.1 * (1.0 if document.project_scope == query.current_scope else 0.5),
+            )
             if score < query.min_score:
                 continue
             per_document[document.document_id] += 1

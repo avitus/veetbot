@@ -178,7 +178,10 @@ Specified below. Deterministic under a `chunker_version`.
 
 ### 6. Index
 
-Postgres full-text search over the chunk text plus its heading path.
+Postgres full-text search over the chunk text plus its heading path. A PDF's
+bookmarks are written into its text as Markdown headings on the pages they
+open, so a manual's sections become its chunks' heading paths
+([ADR-0284](../adr/0284-knowledge-search-ranks-by-coverage.md)).
 
 ### 7. Commit
 
@@ -188,6 +191,12 @@ eleven sections is worse than a failed ingest, because nothing about the result
 announces that it is partial.
 
 ### Owner-sent attachments (ADR-0120)
+
+[ADR-0283](../adr/0283-chat-uploads-back-off-and-report-failed-ingestion.md):
+a failed automatic ingestion backs off one minute and then fifteen before its
+next attempt, logs `upload_knowledge_ingest_failed` with the error class, is
+told to the model through the attachment marker's `failed` and `refused`
+knowledge states, and can be queued again with `agent knowledge retry`.
 
 A text, Markdown, or PDF file the owner attaches to a chat message is ingested
 automatically, and only that. Sending the message marks the attachment pending
@@ -286,7 +295,12 @@ is every place it differs, because the differences are the design.
    that this one does not.
 2. **There is no structured arm.** A belief has a subject and a type to look up
    directly. A passage has neither. Lexical is always on, semantic arrives on evidence,
-   and graph expansion is not applicable. The **query former is shared** with memory —
+   and graph expansion is not applicable. The lexical arm ranks by **coverage**, the
+   number of distinct query terms a passage holds, before term density, and each term
+   matches any spelling that folds to its stem, the folding relevance recall uses
+   ([ADR-0284](../adr/0284-knowledge-search-ranks-by-coverage.md)); both stores score
+   a passage by the same formula, three quarters coverage with the document's authority
+   and scope affinity making up the rest. The **query former is shared** with memory —
    the same objective, the same active entities, the same aliasing — because the task
    is the same task. The arms are not shared.
 3. **Knowledge has its own budget class**, and this is the most consequential decision

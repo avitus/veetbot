@@ -172,3 +172,31 @@ async def test_sensitivity_ceiling_and_validity_window_are_hard_filters() -> Non
     assert _ids(await store.search(ceiling)) == [UUID(int=2_002)]
     historical = _query(as_of=NOW - timedelta(days=2))
     assert _ids(await store.search(historical)) == [UUID(int=2_003)]
+
+
+async def test_a_question_finds_a_passage_in_another_spelling_of_its_words() -> None:
+    """ADR-0284: "valves" finds "valve"; prose rarely repeats the question's exact forms."""
+    store = await _store(
+        _document(1, "A valve opens and closes to equalise tank pressure after parking."),
+        _document(2, "Unrelated text about rollback procedures."),
+    )
+
+    found = await store.search(_query(text="valves closing after I parked"))
+
+    assert _ids(found) == [UUID(int=2_001)]
+
+
+async def test_coverage_outranks_density() -> None:
+    """ADR-0284: a passage holding more of the question beats one repeating a word of it."""
+    store = await _store(
+        _document(
+            1,
+            "Parking parking parking. Park here, park there, parking everywhere, parking.",
+        ),
+        _document(2, "After parking, a valve may click while the fuel system checks itself."),
+    )
+
+    ranked = await store.search(_query(text="valve noise after parking"))
+
+    assert _ids(ranked) == [UUID(int=2_002), UUID(int=2_001)]
+    assert ranked[0].score > ranked[1].score

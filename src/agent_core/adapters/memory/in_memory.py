@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import MutableMapping, Sequence
 from datetime import UTC, datetime
 from uuid import UUID
@@ -42,6 +42,7 @@ from agent_core.domain.memory import (
     TracedPassage,
     TracedPersonContext,
     decay_eligible_lifecycle,
+    lexical_query_forms,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
@@ -1012,7 +1013,7 @@ class InMemoryKnowledgeStore:
 
     async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]:
         as_of = query.as_of or self._clock.now()
-        terms = _terms(query.text)
+        forms = lexical_query_forms(query.text)
         per_document: defaultdict[UUID, int] = defaultdict(int)
         scored: list[RetrievedPassage] = []
         async with self._lock:
@@ -1031,7 +1032,7 @@ class InMemoryKnowledgeStore:
                     > SENSITIVITY_ORDER[query.sensitivity_ceiling]
                 ):
                     continue
-                match = _lexical_score(terms, f"{' '.join(chunk.heading_path)} {chunk.text}")
+                match = _coverage(forms, f"{' '.join(chunk.heading_path)} {chunk.text}")
                 if match <= 0:
                     continue
                 scope = 1.0 if document.project_scope == query.current_scope else 0.5
@@ -1106,16 +1107,23 @@ def _tokens(text: str) -> list[str]:
     ).split()
 
 
-def _terms(text: str) -> Counter[str]:
-    return Counter(_tokens(text))
+def _coverage(forms: list[tuple[str, ...]], text: str) -> float:
+    """The share of query terms the text holds in any folded spelling (ADR-0284).
 
-
-def _lexical_score(terms: Counter[str], text: str) -> float:
-    if not terms:
+    A term with punctuation inside it ("restart,service") matches the way
+    PostgreSQL's `plainto_tsquery` reads it: every word of it must be present.
+    """
+    if not forms:
         return 0
-    words = Counter(_tokens(text))
-    hits = sum(min(count, words[term]) for term, count in terms.items())
-    return hits / sum(terms.values())
+    words = set(_tokens(text))
+    matched = 0
+    for group in forms:
+        for form in group:
+            parts = _tokens(form)
+            if parts and all(part in words for part in parts):
+                matched += 1
+                break
+    return matched / len(forms)
 
 
 def _visible(document: KnowledgeDocument, query: KnowledgeQuery) -> bool:

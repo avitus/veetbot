@@ -20,13 +20,51 @@ def _pdf_text(content: bytes) -> str:
         raise ToolValidationError("knowledge source could not be read") from exc
     if reader.is_encrypted:
         raise ToolValidationError("knowledge source is encrypted")
+    headings = _outline_headings(reader)
     pages: list[str] = []
     try:
-        for page in reader.pages:
-            pages.append(page.extract_text() or "")
+        for number, page in enumerate(reader.pages):
+            text = (page.extract_text() or "").strip()
+            lead = "\n".join(f"{'#' * depth} {title}" for depth, title in headings.get(number, ()))
+            if lead:
+                text = f"{lead}\n\n{text}" if text else lead
+            pages.append(text)
     except Exception as exc:
         raise ToolValidationError("knowledge source could not be read") from exc
-    return "\n\n".join(text.strip() for text in pages if text.strip())
+    return "\n\n".join(text for text in pages if text)
+
+
+def _outline_headings(reader: PdfReader) -> dict[int, list[tuple[int, str]]]:
+    """The document's bookmarks as Markdown headings on the pages they open.
+
+    A manual's sections then become the chunks' heading paths, the way a
+    Markdown document's headings do, so a passage about parking carries
+    "Parking > Park Distance Control" into the index (ADR-0284). A PDF without
+    an outline, or one whose outline cannot be read, keeps plain page text.
+    """
+
+    headings: dict[int, list[tuple[int, str]]] = {}
+
+    def walk(items: object, depth: int) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if isinstance(item, list):
+                walk(item, depth + 1)
+                continue
+            try:
+                title = " ".join(str(item.title).split())
+                page = reader.get_destination_page_number(item)
+            except Exception:
+                continue
+            if title and isinstance(page, int) and page >= 0:
+                headings.setdefault(page, []).append((min(depth, 6), title))
+
+    try:
+        walk(reader.outline, 1)
+    except Exception:
+        return {}
+    return headings
 
 
 class PdfTextExtractor:

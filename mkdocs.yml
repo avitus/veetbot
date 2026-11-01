@@ -417,4 +417,8 @@ nav:
       - 'ADR-0278: Send proposals are interactive work': adr/0278-send-proposals-are-interactive-work.md
       - 'ADR-0279: One-press Send with Undo': adr/0279-one-press-send-with-undo.md
       - "ADR-0280: A sign-in pause shows a sign-in card": adr/0280-sign-in-pause-shows-a-sign-in-card.md
+      - "ADR-0281: Recall preparation keeps its own clock": adr/0281-recall-preparation-keeps-its-own-clock.md
+      - "ADR-0282: Owner possessions reach recall and corroborate": adr/0282-owner-possessions-reach-recall-and-corroborate.md
+      - "ADR-0283: Chat uploads back off and report failed ingestion": adr/0283-chat-uploads-back-off-and-report-failed-ingestion.md
+      - "ADR-0284: Knowledge search ranks by coverage": adr/0284-knowledge-search-ranks-by-coverage.md
   - Changelog: changelog.md

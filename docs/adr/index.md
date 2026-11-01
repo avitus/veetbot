@@ -327,3 +327,7 @@ implementation without one.
 - [ADR-0278: Send proposals are interactive work and read the mailbox once (Proposed)](0278-send-proposals-are-interactive-work.md)
 - [ADR-0279: One-press Send with Undo (Accepted)](0279-one-press-send-with-undo.md)
 - [ADR-0280: A sign-in pause shows a sign-in card, not a question (Accepted)](0280-sign-in-pause-shows-a-sign-in-card.md)
+- [ADR-0281: Recall preparation keeps its own clock and the automatic round refreshes (Accepted)](0281-recall-preparation-keeps-its-own-clock.md)
+- [ADR-0282: Owner possessions reach recall from "do I" questions and corroborate across chats (Accepted)](0282-owner-possessions-reach-recall-and-corroborate.md)
+- [ADR-0283: Chat uploads back off between ingest attempts and report a failed ingestion (Accepted)](0283-chat-uploads-back-off-and-report-failed-ingestion.md)
+- [ADR-0284: Knowledge search ranks by coverage with folded terms, and PDF outlines become heading paths (Accepted)](0284-knowledge-search-ranks-by-coverage.md)
