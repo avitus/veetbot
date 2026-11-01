@@ -114,8 +114,17 @@ class NotificationProducer:
                     if kind is NotificationKind.APPROVAL_REQUESTED
                     else now + timedelta(hours=24)
                 ),
+                # Attention requests wait ninety seconds for an answer on another
+                # device (ADR-0143); an approval that would expire inside that wait
+                # keeps the thirty-second grace so it is still delivered in time.
                 next_attempt_at=(
-                    now + timedelta(seconds=90)
+                    now + timedelta(seconds=30)
+                    if (
+                        kind is NotificationKind.APPROVAL_REQUESTED
+                        and approval_expires_at is not None
+                        and approval_expires_at <= now + timedelta(seconds=90)
+                    )
+                    else now + timedelta(seconds=90)
                     if kind
                     in {NotificationKind.APPROVAL_REQUESTED, NotificationKind.QUESTION_ASKED}
                     else now

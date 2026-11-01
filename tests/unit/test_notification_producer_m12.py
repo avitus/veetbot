@@ -312,6 +312,27 @@ async def test_required_trigger_identifiers_fail_closed() -> None:
             )
 
 
+@pytest.mark.parametrize("lifetime_seconds", [30, 60, 90])
+async def test_a_short_lived_approval_keeps_the_thirty_second_grace(lifetime_seconds: int) -> None:
+    """An approval that expires within the ninety-second grace is still delivered: it keeps
+    the thirty-second grace, so the dispatcher claims it before it expires."""
+    clock, factory = await memory_uow_factory()
+    producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
+    async with factory() as uow:
+        await producer.for_run_transition(
+            uow,
+            run=run(status=RunStatus.WAITING_FOR_APPROVAL),
+            principal_id=principal().principal_id,
+            status=RunStatus.WAITING_FOR_APPROVAL,
+            approval_id=UUID(int=902),
+            approval_expires_at=NOW + timedelta(seconds=lifetime_seconds),
+        )
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+    assert notification.next_attempt_at == NOW + timedelta(seconds=30)
+    assert notification.expires_at is not None
+    assert notification.next_attempt_at <= notification.expires_at
+
+
 @pytest.mark.parametrize("status", [RunStatus.WAITING_FOR_APPROVAL, RunStatus.WAITING_FOR_USER])
 async def test_attention_requests_allow_ninety_seconds_to_answer_on_another_device(
     status: RunStatus,
