@@ -1253,6 +1253,26 @@ still deleted on schedule; the reference remains and resolves to a
 across the event log — is a distributed garbage collector nobody
 asked for.
 
+### Owner-requested deletion (ADR-0277)
+
+The owner can ask Chat to delete files it generated, and
+`artifact.delete@1.0.0` does it the same way: it sets `expires_at` to now,
+the read routes answer `404` from that moment, and the sweeper removes the
+bytes and then the row. A final reply never attaches a file that is already
+expired, so a file deleted in the run that made it stays deleted. It takes one to fifty artifact ids. It deletes a file
+only when that file belongs to the caller and the current chat and has origin
+`SANDBOX_EXPORT` or `MODEL_OUTPUT`, the origins a reply attaches. Uploads,
+captures, knowledge sources and trajectory exports are never eligible. Each
+id is reported as `deleted`, `already_deleted` or `not_deletable`, and a call
+with nothing deletable fails with `artifact.not_deletable`. The tool is
+classified `NONE` / `MEDIUM` / `IDEMPOTENT`, requires `artifact.write`, runs
+serially, and returns `INTERNAL_TOOL` output. It refuses any turn whose origin
+trust is `EXTERNAL_UNTRUSTED` with `artifact.untrusted_turn`. Like
+`artifact.read_capture`, it is an unindexed deferral: the default agent
+instructions name it, and it takes no deferred-index entry. The session
+transcript omits a reply's file block once its artifact is gone
+([http-api-and-streaming.md](http-api-and-streaming.md#durable-session-transcript)).
+
 ## Nothing outlives its lease
 
 A sandbox is created by a worker holding a lease and must not survive

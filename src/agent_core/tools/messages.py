@@ -168,6 +168,16 @@ TOOL_MESSAGES: dict[str, str] = {
         "No capture with that id can be read in this chat. Use an artifact id from a "
         "capture marker or truncation pointer in this conversation."
     ),
+    # ADR-0277: artifact.delete removes only files Chat generated in this chat.
+    "artifact.not_deletable": (
+        "Nothing was deleted. None of those ids is a file you generated in this chat; the "
+        "user's uploads and other chats' files cannot be deleted. Use the artifact ids "
+        "shown on files in this conversation."
+    ),
+    "artifact.untrusted_turn": (
+        "Nothing was deleted. This turn read external content, so it cannot delete files. "
+        "Ask the user to repeat the request in a new message."
+    ),
     "tool.capture.section_out_of_range": (
         "That section is past the end of the capture. The capture marker and every "
         "section header give the number of sections."

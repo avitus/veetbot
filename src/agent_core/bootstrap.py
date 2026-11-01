@@ -715,6 +715,7 @@ from agent_core.skills.package import SkillPackageValidator
 from agent_core.titles.generator import ConversationTitleGenerator
 from agent_core.titles.profiles import TitleProfiles
 from agent_core.titles.titling import ConversationTitlePass, request_title_after_run
+from agent_core.tools.artifact_delete import ArtifactDeleteTool
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.artifact_read_capture import ArtifactReadCaptureTool
 from agent_core.tools.ask_user import AskUserTool
@@ -1164,7 +1165,9 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "For other generated images or videos, use "
     "image.generate or video.generate when available. These tools attach the file to "
     "your reply automatically. Never say a file is attached unless its export or "
-    "generation tool succeeded. When the owner asks you to learn from or remember a named "
+    "generation tool succeeded. To delete files you generated in this chat when the owner "
+    "asks, call artifact.delete through tool.call with their artifact ids; it never deletes "
+    "the owner's uploads. When the owner asks you to learn from or remember a named "
     "website, proactively retain useful separate observations with memory.learn after reading "
     "it. Use observations with call_id and an exact 8-512 character quote; omit claim and "
     "subject to save the excerpt itself, without a paraphrase or explanatory wrapper. "
@@ -4597,6 +4600,7 @@ async def _compose(
                 run_maximum_reads=capture_run_maximum_reads,
             )
         )
+        registry.register(ArtifactDeleteTool(uow_factory, clock))
 
         async def reconcile_artifact_orphans() -> int:
             async def metadata_exists(artifact_id: UUID) -> bool:
@@ -6680,6 +6684,7 @@ async def build(
         ),
         "sandbox.run_command",
         "artifact.export",
+        ArtifactDeleteTool.spec.name,
         *(["image.generate", "video.generate"] if media_enabled else []),
         WORKING_STATE_TOOL_NAME,
         SKILL_LOAD_TOOL_NAME,
@@ -6784,6 +6789,9 @@ async def build(
             *JOB_TOOL_NAMES,
             *INSTALL_TOOL_NAMES,
             CAPTURE_READER_TOOL_NAME,
+            # ADR-0277: unindexed, like the capture reader; the default
+            # instructions name it, so it takes no index entry.
+            ArtifactDeleteTool.spec.name,
         )
         if name in default_enabled_tools
     ]
