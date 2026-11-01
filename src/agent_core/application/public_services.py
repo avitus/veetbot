@@ -1778,6 +1778,11 @@ class PublicRunService:
                     "run is not waiting for user input",
                     details={"run_status": run.status.value},
                 )
+            if run.deadline_at is not None and run.deadline_at <= self._clock.now():
+                raise InvalidStateTransition(
+                    "run deadline has passed",
+                    details={"run_status": run.status.value},
+                )
             result = await self._deliver_input_in(uow, principal, run, content, question_id)
         await self._dispatcher.resume(run.id)
         return result

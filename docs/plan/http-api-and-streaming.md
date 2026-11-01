@@ -985,7 +985,7 @@ reason `active_run_exists`. Without `offer_id` the endpoint is unchanged.
 1. Authenticate, producing the `Principal`.
 2. Check `run.write`.
 3. Load the session in the principal's tenant, or 404.
-4. Reject a `CLOSED` session with `invalid_state` and status 409.
+4. Reject a `CLOSED` session with `invalid_state_transition` and status 409.
 5. Validate the content blocks. Since ADR-0120 an `image` or `file` block
    must name an upload of the caller in this session that has not expired,
    or it is `not_found`; the stored parts take the upload's recorded type,
@@ -1296,11 +1296,13 @@ no expiry to wait for: the owner signs in and replies at any time. A run with a
 deadline adds `run_deadline_at` in both cases, past which the card offers only
 stopping the run (ADR-0280).
 
-**A run not in `WAITING_FOR_USER` is `invalid_state` with status 409.**
+**A run not in `WAITING_FOR_USER` is `invalid_state_transition` with status 409.**
 Not 404: the run exists, and telling a client its answer arrived too
-late is more useful than telling it the run is gone. A run that timed
-out waiting has already failed with `INPUT_DEADLINE_EXCEEDED`, and the
-409 body's `details` names that.
+late is more useful than telling it the run is gone. A waiting run whose own
+deadline has passed gets the same answer and stays waiting, because only
+stopping it remains (ADR-0280). A message sent to its session instead still
+ends it with `deadline_exceeded`, which frees the chat on surfaces that cannot
+stop a run.
 
 The response is `202` with the same body as message submission, so a
 client that answered a question and a client that started a turn hold
