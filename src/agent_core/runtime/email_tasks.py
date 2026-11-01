@@ -2137,6 +2137,7 @@ class _TaskIO:
         )
 
     async def send(self) -> RunOutcome:
+        """Send one frozen draft revision: recover a prior dispatch, or read, claim, send once."""
         c = self.context
         if self.task.draft_id is None:
             raise ConflictError("send task has no draft")
@@ -2326,6 +2327,7 @@ class _TaskIO:
     async def _draft_status(
         self, status: EmailDraftStatus, *, approval_id: UUID | None = None
     ) -> None:
+        """Record this run's outcome on its own draft revision; another run's draft is untouched."""
         c = self.context
         assert self.task.draft_id is not None
         async with c.uow_factory() as uow, uow.email.lock(c.principal):

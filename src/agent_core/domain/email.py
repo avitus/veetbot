@@ -178,14 +178,17 @@ class EmailSendConsent(EmailValue):
 
     @property
     def tool_name(self) -> str:
+        """The one account-bound send capability this press may satisfy."""
         return f"mcp.{self.send_server_id}.send_message"
 
     @property
     def digest(self) -> str:
+        """Fingerprint of the whole consent, recorded in the gesture event."""
         return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
 
 
 def send_arguments_digest(arguments: dict[str, Any]) -> str:
+    """A stable digest of the exact send arguments, so the task record never holds mail content."""
     return hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest()
 
 

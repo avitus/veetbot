@@ -2149,6 +2149,7 @@ async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_r
 
 
 async def test_undo_within_the_window_returns_the_parked_send_to_editing() -> None:
+    """Undo cancels the parked run, clears the window and leaves the draft editable (ADR-0279)."""
     from dataclasses import replace
     from datetime import timedelta
 
@@ -2202,6 +2203,7 @@ async def test_undo_within_the_window_returns_the_parked_send_to_editing() -> No
 
 
 async def test_undo_is_refused_once_the_send_was_claimed() -> None:
+    """A send a worker has claimed is on its way; Undo says so and the draft stays sent."""
     from dataclasses import replace
 
     from agent_core.domain.errors import ConflictError
@@ -2225,6 +2227,7 @@ async def test_undo_is_refused_once_the_send_was_claimed() -> None:
 
 
 async def test_one_press_send_refuses_a_thread_the_owner_has_not_seen() -> None:
+    """A press at a thread revision that moved on admits nothing and names the new mail."""
     from dataclasses import replace
 
     from agent_core.domain.errors import ConflictError
@@ -2253,6 +2256,7 @@ async def test_one_press_send_refuses_a_thread_the_owner_has_not_seen() -> None:
 
 
 async def test_consented_send_ends_without_dispatch_when_mail_arrives_before_the_read() -> None:
+    """The fresh read after the press still fails closed: nothing is sent and the draft returns."""
     from dataclasses import replace
 
     from tests.gates.test_email_m18 import _email_settings
