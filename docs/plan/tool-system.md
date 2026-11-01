@@ -579,7 +579,10 @@ present in the model request that produced this call.** It is not a property of
 the arguments at all; it answers "was untrusted content in the room". It is
 cheap, it is deterministic, it requires no matching, and it is exactly the
 signal a rule like *require approval for external writes when the turn saw
-untrusted content* needs.
+untrusted content* needs. In a serial batch, the results of the calls before
+this one count as present, although the conversation receives them only when
+the batch ends, and so do a sandbox script's earlier bridge results for each
+later bridge call (ADR-0277).
 
 **`argument_trust` defaults to `EXTERNAL_UNTRUSTED` for every argument**,
 because the model produced them and ADR-0002 labels model output
@@ -2600,7 +2603,8 @@ checked-in table:
 
 Schema failures return the ordinary `tool.arguments_invalid`.
 
-**Roster.** The tool is the one *unindexed deferral*. The default agent
+**Roster.** The tool is an *unindexed deferral*, the first of two;
+`artifact.delete` (ADR-0277) is the other. The default agent
 enables and defers it. The planner pins it with the deferred tools, and
 `tool.call` resolves it like any of them, but the index renders no entry for
 it, and it counts against neither index cap

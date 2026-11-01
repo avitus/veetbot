@@ -139,6 +139,7 @@ context.update_working_state  control     context-engine
 skill.load                    control     skills
 tool.call                     control     tool-system
 artifact.read_capture         capability  tool-system
+artifact.delete               capability  sandbox-isolation
 skill.manage                  capability  skills
 memory.remember               capability  memory-formation
 memory.learn                  capability  memory-formation
@@ -182,6 +183,8 @@ Fifty-three model-callable builtin tools in total: the original roster of
 eight, the forty-three above, and the two media-generation tools in ADR-0140.
 ADR-0261 added `artifact.read_capture`, which
 [tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
+declares and classifies, and ADR-0277 added `artifact.delete`, which
+[sandbox-isolation.md](sandbox-isolation.md#owner-requested-deletion-adr-0277)
 declares and classifies.
 Tools a paired device contributes are not builtins: they
 register in the reserved `device` domain when the device attaches. The rule
@@ -197,7 +200,7 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other forty-three, `artifact.read_capture`, `skill.manage`, `web.search`,
+nothing else.** Of the other forty-three, `artifact.read_capture`, `artifact.delete`, `skill.manage`, `web.search`,
 `web.fetch`, `web.fetch_json`, the three `browser.*` tools, the six `schedule.*` tools, and the
 five `cockpit.*` tools are fully classified in their subject specifications, and the four `email.*`,
 three `people.*`, and six `records.*` tools in this document's Milestone 26,
@@ -217,10 +220,10 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is every builtin the composition root registers, and
-that is a function of the deployment. Nineteen identities are always
+that is a function of the deployment. Twenty identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
-`artifact.export`, `artifact.read_capture`, `context.update_working_state`, the four `memory.*` tools,
+`artifact.export`, `artifact.read_capture`, `artifact.delete`, `context.update_working_state`, the four `memory.*` tools,
 `skill.load`, `tool.call`, and the two `knowledge.*` tools. The other thirty-four register only
 with their flag or provider: `skill.manage` with skill authoring, the three
 `web.*` and three `browser.*` tools with their providers, `delegate.run` with

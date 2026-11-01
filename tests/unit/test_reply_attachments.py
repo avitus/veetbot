@@ -248,7 +248,9 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
     upload = _ref(ArtifactOrigin.UPLOAD, name="owner.pdf", sha="c", second=2)
     captured = _ref(ArtifactOrigin.TOOL_OUTPUT, name="web-fetch-output.json", sha="d", second=4)
 
-    chosen = reply_attachments([first, written, repeat, renamed, upload, captured])
+    chosen = reply_attachments(
+        [first, written, repeat, renamed, upload, captured], now=datetime(2026, 9, 23, tzinfo=UTC)
+    )
 
     assert {ArtifactOrigin.SANDBOX_EXPORT.value, ArtifactOrigin.MODEL_OUTPUT.value} == set(
         REPLY_ATTACHMENT_ORIGINS
@@ -260,3 +262,14 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
         filename="notes.md",
         size_bytes=1,
     )
+
+
+def test_a_file_deleted_before_the_reply_is_not_attached() -> None:
+    # ADR-0277: deletion is an expiry; attaching would clear it and undo the delete.
+    kept = _ref(ArtifactOrigin.MODEL_OUTPUT, name="final.png", sha="a", second=1)
+    deleted = _ref(ArtifactOrigin.MODEL_OUTPUT, name="draft.png", sha="b", second=2)
+    deleted = deleted.model_copy(update={"expires_at": deleted.created_at})
+
+    chosen = reply_attachments([kept, deleted], now=deleted.created_at)
+
+    assert [artifact.id for artifact in chosen] == [kept.id]

@@ -875,7 +875,9 @@ It requires `session.read` and returns the standard page shape:
 
 Items are ordered by ascending immutable session sequence. The default page size
 is 100 and the server clamps it to 200. The cursor is opaque and identifies the
-last returned message sequence; an invalid cursor is `malformed_request`. As on
+last sequence counted toward the page, which is a reply left empty by a deletion
+when one ends the page; a client continues with `next_cursor` even when `items`
+is empty. An invalid cursor is `malformed_request`. As on
 the point read, a missing, cross-tenant, or differently owned session is 404.
 
 The route is a transcript projection rather than an event-log export. Ordinary
@@ -883,7 +885,10 @@ The route is a transcript projection rather than an event-log export. Ordinary
 and the response converts their content to the public content-block vocabulary.
 An assistant item carries a `file` block for each file its run exported
 (ADR-0122), after the text; the block names an artifact the owner reads through
-`GET /v1/artifacts/{artifact_id}/content`.
+`GET /v1/artifacts/{artifact_id}/content`. An assistant item omits a file or image
+block whose artifact is expired or gone, as after `artifact.delete` (ADR-0277).
+The event keeps the reference. A reply left with no block still counts toward the
+page and moves the cursor, so a page can hold fewer items than its limit.
 The scheduler-authored `user.message.created` event that seeds a scheduled run
 is context-only and does not produce a transcript item; its complete
 instruction remains available through the authorized schedule point read. Tool
