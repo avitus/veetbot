@@ -36,7 +36,8 @@ conversation. The owner wants Chat to be allowed to delete what it generated.
    trust overlay does not escalate `NONE`.
 6. The session transcript (`GET /v1/sessions/{id}/messages`) omits an
    assistant item's file or image block whose artifact is expired or gone. The
-   event log keeps its references, because it is append-only.
+   event log keeps its references, because it is append-only. A reply left
+   with no block still counts toward its page and advances the cursor.
 7. The tool is the second *unindexed deferral* after `artifact.read_capture`.
    The deferred index is held to ten free entries (ADR-0267), and the fullest
    production chat would otherwise take 41 of 50. One sentence in the default

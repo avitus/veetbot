@@ -631,7 +631,9 @@ class PublicSessionService:
         require_scope(principal, "session.read")
         effective_limit = min(max(limit, 1), 200)
         after_sequence = _decode_message_cursor(cursor)
-        messages: list[SessionMessageView] = []
+        # A reply left with nothing to show by a deletion (ADR-0277) still takes
+        # its place on the page, so the cursor moves past it and paging goes on.
+        messages: list[tuple[int, SessionMessageView | None]] = []
         async with self._uow_factory() as uow:
             events = await uow.events.list_conversation_after(
                 session_id,
@@ -653,23 +655,24 @@ class PublicSessionService:
                     content = [part for part in item.content if _part_artifact(part) not in deleted]
                 else:
                     continue
-                if not content:
-                    continue
                 messages.append(
-                    SessionMessageView(
-                        sequence=sequence,
-                        role=role,
-                        content=_content_view(content),
+                    (
+                        sequence,
+                        SessionMessageView(
+                            sequence=sequence,
+                            role=role,
+                            content=_content_view(content),
+                        )
+                        if content
+                        else None,
                     )
                 )
         has_more = len(messages) > effective_limit
         page_messages = messages[:effective_limit]
         return Page[SessionMessageView](
-            items=page_messages,
+            items=[view for _sequence, view in page_messages if view is not None],
             next_cursor=(
-                _encode_message_cursor(page_messages[-1].sequence)
-                if has_more and page_messages
-                else None
+                _encode_message_cursor(page_messages[-1][0]) if has_more and page_messages else None
             ),
         )
 

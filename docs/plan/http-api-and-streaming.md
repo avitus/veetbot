@@ -885,7 +885,8 @@ An assistant item carries a `file` block for each file its run exported
 (ADR-0122), after the text; the block names an artifact the owner reads through
 `GET /v1/artifacts/{artifact_id}/content`. An assistant item omits a file or image
 block whose artifact is expired or gone, as after `artifact.delete` (ADR-0277).
-The event keeps the reference.
+The event keeps the reference. A reply left with no block still counts toward the
+page and moves the cursor, so a page can hold fewer items than its limit.
 The scheduler-authored `user.message.created` event that seeds a scheduled run
 is context-only and does not produce a transcript item; its complete
 instruction remains available through the authorized schedule point read. Tool
