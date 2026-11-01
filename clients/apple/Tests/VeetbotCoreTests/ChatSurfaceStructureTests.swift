@@ -45,6 +45,10 @@ import Testing
         #expect(!activity[card.lowerBound..<cardEnd.lowerBound].contains("TextField"))
         let canSend = try #require(chat.range(of: "var canSendDraft: Bool"))
         #expect(chat[canSend.lowerBound...].prefix(600).contains("awaitsVerifiedSignIn"))
+        // The card and the composer change when the wait expires, with no event to redraw them.
+        #expect(chat.contains(".task(id: state.clarifyingQuestion?.signIn?.expiresAt)"))
+        #expect(chat.contains("resumesByItself: prompt.awaitsVerifiedSignIn()"))
+        #expect(activity[card.lowerBound..<cardEnd.lowerBound].contains("if !resumesByItself {"))
 
         let toolbar = try #require(chat.range(of: "struct ChatToolbarActions"))
         #expect(chat[toolbar.lowerBound...].contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))

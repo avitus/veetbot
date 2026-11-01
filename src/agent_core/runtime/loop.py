@@ -1053,6 +1053,7 @@ async def suspend_for_browser_question(
             sign_in["browser_profile_id"] = str(wait.profile_id)
             if wait.resume_url is not None:
                 sign_in["origin"] = browser_origin(wait.resume_url)
+            sign_in["expires_at"] = wait.model_dump(mode="json")["expires_at"]
         suspension["sign_in"] = sign_in
     return RunOutcome(kind=OutcomeKind.SUSPENDED, suspension=suspension)
 

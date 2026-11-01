@@ -26,16 +26,19 @@ owner had to scroll to the top of the thread to reach it.
 ## Decision
 
 1. The `run.waiting_for_user` event's `suspension` carries `sign_in` when the
-   question is the runtime's sign-in pause. It holds `browser_profile_id` and
-   `origin` when the run waits for a verified sign-in to that saved website,
-   and is an empty object when there is no such wait (the owner signs in and
-   then replies). Model-authored questions never carry it. Neither field is
-   page or model content: both come from the trusted wait binding.
+   question is the runtime's sign-in pause. It holds `browser_profile_id`,
+   `origin` and `expires_at` when the run waits for a verified sign-in to that
+   saved website, and is an empty object when there is no such wait (the owner
+   signs in and then replies). Model-authored questions never carry it. None of
+   these fields is page or model content: all come from the trusted wait binding.
 2. The app shows a sign-in card in the attention dock in place of the question
    card. With a waiting website it names the website and offers **Sign in to
    <host>**, which opens the device sign-in for that saved login, and **Stop
    task**. It has no answer field and the chat composer cannot send an answer
-   while it shows: verified sign-in resumes the run. Without a
+   while the wait lasts: verified sign-in resumes the run. Past `expires_at`
+   the server no longer resumes it by itself, so the card adds **I've signed
+   in** and the composer can answer again; the reply's fresh read and the
+   two-pause bound still apply. Without a
    waiting website it offers **Open Website Access** and **I've signed in**,
    which answers the question with fixed text, and **Stop task**. The
    transcript's waiting line says "Waiting for you to sign in." and the chat

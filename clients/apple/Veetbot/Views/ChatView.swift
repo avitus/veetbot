@@ -297,6 +297,15 @@ public struct ChatView: View {
                 "settled session=\(sessionID.uuidString, privacy: .public) rows=\(rows) content=\(content) viewport=\(viewport)"
             )
         }
+        // No event marks a sign-in wait's expiry; redraw the card and the composer at it.
+        .task(id: state.clarifyingQuestion?.signIn?.expiresAt) {
+            guard let expiresAt = state.clarifyingQuestion?.signIn?.expiresAt else { return }
+            let remaining = expiresAt.timeIntervalSinceNow
+            guard remaining > 0 else { return }
+            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            state.objectWillChange.send()
+        }
         .task(id: model.selectedSessionID) {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -764,7 +773,7 @@ public struct ChatView: View {
         let hasText = !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let answering = state.runStatus == .waitingForUser
         // ADR-0280: a verified sign-in resumes this run, so no reply can answer it.
-        let awaitsSignIn = answering && state.clarifyingQuestion?.awaitsVerifiedSignIn == true
+        let awaitsSignIn = answering && state.clarifyingQuestion?.awaitsVerifiedSignIn() == true
         // Attachments alone make a message, but an answer to a question is text.
         return (hasText || (!model.attachments.isEmpty && !answering))
             && (answering || model.attachmentsReady)
@@ -946,6 +955,7 @@ private struct AttentionDock: View {
                         if prompt.signIn != nil {
                             SignInRequiredCard(
                                 prompt: prompt,
+                                resumesByItself: prompt.awaitsVerifiedSignIn(),
                                 signIn: { await model.signInToContinue(prompt) },
                                 openWebsiteAccess: { model.isWebsiteAccessPresented = true },
                                 confirmSignedIn: {

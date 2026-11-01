@@ -553,6 +553,8 @@ struct ClarifyingQuestionCard: View {
 /// nothing to type; otherwise the owner signs in and says so.
 struct SignInRequiredCard: View {
     let prompt: ClarifyingQuestionPrompt
+    /// A verified sign-in continues the run; false once the wait has expired.
+    let resumesByItself: Bool
     let signIn: () async -> Void
     let openWebsiteAccess: () -> Void
     let confirmSignedIn: () async -> Bool
@@ -567,6 +569,15 @@ struct SignInRequiredCard: View {
         return "\(host) signed you out"
     }
 
+    private var explanation: String {
+        if resumesByItself {
+            return "Veetbot paused this task. It continues on its own once you are signed in."
+        }
+        return waitsForWebsite
+            ? "Sign in, then let Veetbot know to continue."
+            : "Sign in from Website Access, then let Veetbot know to continue."
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             AttentionCardLabel(title: "Sign-in needed")
@@ -574,11 +585,7 @@ struct SignInRequiredCard: View {
                 .veetType(.ui, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("sign-in-card.title")
-            Text(
-                waitsForWebsite
-                    ? "Veetbot paused this task. It continues on its own once you are signed in."
-                    : "Sign in from Website Access, then let Veetbot know to continue."
-            )
+            Text(explanation)
             .veetType(.meta)
             .foregroundColor(AppTheme.inkSoft)
             .fixedSize(horizontal: false, vertical: true)
@@ -593,6 +600,8 @@ struct SignInRequiredCard: View {
                     Button("Open Website Access", action: openWebsiteAccess)
                         .primaryCapsule()
                         .accessibilityIdentifier("sign-in-card.website-access")
+                }
+                if !resumesByItself {
                     Button("I've signed in") { run { _ = await confirmSignedIn() } }
                         .buttonStyle(QuietCapsuleButtonStyle())
                         .accessibilityIdentifier("sign-in-card.signed-in")

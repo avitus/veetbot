@@ -1797,7 +1797,7 @@ the failed call is already complete and is not replayed on resume. Existing
 profile generation checks invalidate old leases, approvals and grants. Uncertain
 writes retain `tool.browser.outcome_unknown` and are never automatically resent. The
 sign-in question's `run.waiting_for_user` suspension carries `sign_in`, with
-`browser_profile_id` and `origin` from the trusted wait when one exists, and the
+`browser_profile_id`, `origin` and `expires_at` from the trusted wait when one exists, and the
 app shows a sign-in card in place of a question card (ADR-0280).
 
 For small model budgets, retain coverage scope/version, limit flags and omission

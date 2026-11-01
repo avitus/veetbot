@@ -174,7 +174,10 @@ public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
 
     public var id: UUID { questionID }
     /// The run resumes on a verified sign-in to a saved website, not on a reply.
-    public var awaitsVerifiedSignIn: Bool { signIn?.profileID != nil }
+    public func awaitsVerifiedSignIn(at now: Date = Date()) -> Bool {
+        guard let signIn, signIn.profileID != nil else { return false }
+        return signIn.expiresAt.map { now < $0 } ?? true
+    }
 }
 
 /// The website a sign-in pause waits on, from the server's trusted wait. Both
@@ -182,6 +185,8 @@ public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
 public struct BrowserSignInPause: Equatable, Sendable {
     public let profileID: UUID?
     public let origin: String?
+    /// When the server stops resuming the run by itself.
+    public var expiresAt: Date? = nil
 
     public var host: String? { origin.flatMap { URL(string: $0)?.host } }
 }
@@ -754,7 +759,8 @@ public final class RunStateReducer: ObservableObject {
         let signIn = (nested?["sign_in"]?.objectValue).map { fields in
             BrowserSignInPause(
                 profileID: fields["browser_profile_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
-                origin: fields["origin"]?.stringValue
+                origin: fields["origin"]?.stringValue,
+                expiresAt: fields["expires_at"]?.stringValue.flatMap(ServerDates.date(from:))
             )
         }
         clarifyingQuestion = ClarifyingQuestionPrompt(

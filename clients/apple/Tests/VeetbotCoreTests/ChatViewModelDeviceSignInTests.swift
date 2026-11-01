@@ -1050,7 +1050,7 @@ import Testing
 
     /// The open chat's run pauses for sign-in to `profileID`, as the stream reports it.
     private static func waitForSignIn(
-        _ model: ChatViewModel, profileID: UUID, origin: String
+        _ model: ChatViewModel, profileID: UUID, origin: String, expiresAt: String = future
     ) -> ClarifyingQuestionPrompt? {
         let runID = UUID()
         model.runState.begin(runID: runID, status: .running)
@@ -1062,6 +1062,7 @@ import Testing
                 "sign_in": .object([
                     "browser_profile_id": .string(profileID.uuidString),
                     "origin": .string(origin),
+                    "expires_at": .string(expiresAt),
                 ]),
             ]),
         ]))
@@ -1101,6 +1102,26 @@ import Testing
         #expect(!answered)
         #expect(!server.routes.contains { $0.hasSuffix("/input") })
         #expect(model.runState.clarifyingQuestion?.questionID == prompt.questionID)
+    }
+
+    /// Once the wait expires the server no longer resumes the run by itself, so
+    /// a reply is again the way to continue it.
+    @Test(arguments: ["composer", "card"])
+    func aReplyAnswersAPauseWhoseWaitHasExpired(path: String) async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let prompt = try #require(Self.waitForSignIn(
+            model, profileID: UUID(), origin: "https://example.org",
+            expiresAt: "2020-01-01T00:00:00Z"
+        ))
+        #expect(!prompt.awaitsVerifiedSignIn())
+
+        let delivered = path == "composer"
+            ? await model.send("I signed in")
+            : await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(delivered)
+        #expect(server.routes.contains { $0.hasSuffix("/input") })
     }
 
     /// Without a waiting website nothing else can resume the run, so the card's

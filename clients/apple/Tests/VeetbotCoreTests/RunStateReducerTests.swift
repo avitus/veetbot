@@ -290,12 +290,18 @@ import Testing
                 "sign_in": .object([
                     "browser_profile_id": .string(profileID.uuidString),
                     "origin": .string("https://www.example.org"),
+                    "expires_at": .string("2099-09-25T12:15:00Z"),
                 ]),
             ]),
         ]))
-        let signIn = try #require(reducer.clarifyingQuestion?.signIn)
+        let prompt = try #require(reducer.clarifyingQuestion)
+        let signIn = try #require(prompt.signIn)
         #expect(signIn.profileID == profileID)
         #expect(signIn.host == "www.example.org")
+        let expiry = Date(timeIntervalSince1970: 4_094_021_700)
+        #expect(signIn.expiresAt == expiry)
+        #expect(prompt.awaitsVerifiedSignIn(at: expiry.addingTimeInterval(-1)))
+        #expect(!prompt.awaitsVerifiedSignIn(at: expiry))
 
         reducer.reduce(SSEFrame(id: 2, event: "run.waiting_for_user", data: [
             "run_id": .string(runID.uuidString),

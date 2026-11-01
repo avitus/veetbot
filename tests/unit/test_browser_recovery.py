@@ -459,6 +459,8 @@ async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_
 @pytest.mark.parametrize("bound", [True, False])
 async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: bool) -> None:
     """ADR-0280: the app shows a sign-in card, not a question, from trusted wait fields."""
+    from datetime import datetime, timedelta
+
     from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 
     provider = InterruptedBrowser()
@@ -481,10 +483,15 @@ async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: b
         events = await composition.runs.events(run_id)
     waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
     assert len(waiting) == 1
+    sign_in = dict(waiting[0].payload["suspension"]["sign_in"])
+    if bound:
+        expires_at = datetime.fromisoformat(sign_in.pop("expires_at"))
+        assert expires_at - waiting[0].created_at <= timedelta(minutes=15)
+        assert expires_at > waiting[0].created_at + timedelta(minutes=14)
     expected = (
         {"browser_profile_id": str(PROFILE_ID), "origin": "https://example.org"} if bound else {}
     )
-    assert waiting[0].payload["suspension"]["sign_in"] == expected
+    assert sign_in == expected
 
 
 async def test_model_authored_question_carries_no_sign_in_marker() -> None:
