@@ -249,8 +249,11 @@ async def test_observation_runs_in_postgres_and_reaches_the_reader(
     assert row["planning_calls"] == int(search_planning == "reader")
     automatic_slots = 2 if path == "automatic" else 0
     assert row["recall_work"]["searches"] == automatic_slots + int(searched)
-    assert row["recall_work"]["rounds"] == int(path == "automatic") + int(searched)
-    assert 1 <= row["executed_searches"] <= row["recall_work"]["searches"] <= 4
+    # ADR-0281: the automatic round reserves slots but no round; only the
+    # reader's deliberate search counts as one.
+    assert row["recall_work"]["rounds"] == int(searched)
+    assert row["executed_searches"] >= 1
+    assert row["executed_deliberate"] == int(searched) <= row["recall_work"]["searches"] <= 4
     from datetime import UTC, datetime
 
     from agent_core.evals.general_recall_observation import compile_runtime_observation
@@ -649,7 +652,7 @@ async def test_dated_semantic_tool_result_survives_actual_reader_context(
     assert row["runtime_status"] == "COMPLETED" and row["answer_success"]
     assert "previous-mobility" in row["rendered"]
     assert row["tool_calls"] == 1 and row["planning_calls"] == 1
-    assert row["executed_searches"] <= 4
+    assert row["executed_deliberate"] <= 4
     final_request = inner.requests[-1]
     encoded = final_request.model_dump_json()
     assert "User requires step-free routes" in encoded

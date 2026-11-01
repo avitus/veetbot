@@ -998,7 +998,13 @@ allowance per assembly, shortened to the run's remaining deadline. This bound al
 applies when optional semantic preparation is disabled; it never renews or
 replaces a stricter runtime search permit. A timed-out read is cancelled and
 awaited, not detached or retried. Base timeout supplies a fixed limitation marker
-instead of implying that no memory exists. Delta timeout preserves completed base
+instead of implying that no memory exists. Optional provider preparation runs
+before assembly on its own five-second clock and never spends this allowance
+([ADR-0281](../adr/0281-recall-preparation-keeps-its-own-clock.md)). A base read
+refused by the runtime permit or timed out here is also logged as
+`context_memory_recall_limited` and marked on the request, and the runtime
+records `memory.recall.limited` with the reason: a turn without recall is
+observable, not silent. Delta timeout preserves completed base
 evidence. Mandatory frozen-snapshot corrections still run and remain in context;
 browser evidence, tool-call/result pairs and the frozen prefix are unchanged.
 Caller cancellation still propagates. This prevents optional recall from consuming

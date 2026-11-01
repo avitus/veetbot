@@ -40,6 +40,10 @@ class MemoryHealthReport(BaseModel):
     until: datetime
     # Usage feedback (diagnostic).
     recalled_runs: int = Field(default=0, ge=0)
+    # Runs whose automatic recall was refused or timed out at some step (ADR-0281).
+    limited_runs: int = Field(default=0, ge=0)
+    limited_exhausted: int = Field(default=0, ge=0)
+    limited_timed_out: int = Field(default=0, ge=0)
     delivered_runs: int = Field(default=0, ge=0)
     cited_runs: int = Field(default=0, ge=0)
     cited_beliefs: int = Field(default=0, ge=0)
@@ -100,6 +104,11 @@ def render_memory_health_report(report: MemoryHealthReport) -> str:
             + ("" if rate is None else f" ({rate:.1%} of delivered)")
             + f"; {report.cited_beliefs} citations, {report.charged_beliefs} charged, "
             f"{report.ambiguous_citations} ambiguous."
+        ),
+        (
+            f"Without recall: {report.limited_runs} runs went without automatic recall at "
+            f"some step ({report.limited_exhausted} exhausted, {report.limited_timed_out} "
+            "timed out)."
         ),
         (
             f"Traces: {report.traces} (lexical {report.traces_with_lexical}, structured "

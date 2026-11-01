@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -231,6 +232,15 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
                 context.principal,
             )
         pressure = assembled.pressure
+        limitation = assembled.request.metadata.get("recall_limitation")
+        if limitation is not None and pressure.fits:
+            # The turn went without automatic recall. The marker in context
+            # tells the model; this event tells the operator (ADR-0281).
+            await _append_event(
+                context,
+                "memory.recall.limited",
+                {"step_number": step.step_number, "reason": limitation},
+            )
         if pressure.yield_steps or not pressure.fits:
             await _append_event(
                 context,
@@ -282,6 +292,17 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         await checkpoint(context, "compaction")
 
 
+# Provider preparation (query vectors) and the searches it serves keep separate
+# clocks: preparation may take at most RECALL_PREPARATION_SECONDS, and the
+# searches get RECALL_SEARCH_SECONDS from the moment preparation returns. The
+# durable reservation bounds both together (ADR-0281; ADR-0190 and ADR-0196
+# set the original single ten-second deadline).
+logger = logging.getLogger(__name__)
+
+RECALL_PREPARATION_SECONDS = 5.0
+RECALL_SEARCH_SECONDS = 10.0
+
+
 async def prepare_recall(
     context: RunContext, *, pending_batch_budget: dict[str, int] | None = None
 ) -> None:
@@ -291,6 +312,7 @@ async def prepare_recall(
     context.token.raise_if_cancelled()
     started = context.clock.now()
     execution_bound = bool(getattr(context.prepare_recall, "execution_budget", False))
+    elapsed_time = context.recall_elapsed_time or (lambda: context.clock.now().timestamp())
     if execution_bound:
         context.recall_permit = RecallExecutionPermit(
             context.principal.tenant_id,
@@ -300,12 +322,16 @@ async def prepare_recall(
             0,
             started,
             context.clock.now,
-            context.recall_elapsed_time or (lambda: context.clock.now().timestamp()),
+            elapsed_time,
         )
     budget = context.checkpoint.recall_work
-    if budget is not None and (
-        budget.searches >= 4 or budget.rounds >= 2 or started >= budget.deadline_at
-    ):
+    deliberate = bool(context.checkpoint.pending_tool_calls)
+    # A later build step refreshes the automatic round already reserved for
+    # this run: fresh search clock, no new slots, no checkpoint write.
+    refresh = budget is not None and budget.automatic and not deliberate
+    if budget is not None and started >= budget.deadline_at:
+        return
+    if budget is not None and not refresh and (budget.searches >= 4 or budget.rounds >= 2):
         return
     try:
         async with asyncio.timeout(1):
@@ -314,39 +340,59 @@ async def prepare_recall(
         return  # Execution-bound planning failure retains the zero-search permit for this step.
     context.token.raise_if_cancelled()
     remaining = 4 - (0 if budget is None else budget.searches)
-    deadline = started + timedelta(seconds=10) if budget is None else budget.deadline_at
-    slots = len(queries) * (
-        2 if execution_bound and not context.checkpoint.pending_tool_calls else 1
+    reservation_seconds = (
+        RECALL_PREPARATION_SECONDS + RECALL_SEARCH_SECONDS if execution_bound else 10
     )
-    if not 1 <= slots <= remaining or context.clock.now() >= deadline:
-        return
-    context.checkpoint.recall_work = RecallWorkBudget(
-        searches=slots + (0 if budget is None else budget.searches),
-        rounds=1 + (0 if budget is None else budget.rounds),
-        deadline_at=deadline,
+    deadline = (
+        started + timedelta(seconds=reservation_seconds) if budget is None else budget.deadline_at
     )
-    # This write is authoritative and must not be swallowed as optional work.
-    await checkpoint(context, "memory_preparation", pending_batch_budget=pending_batch_budget)
+    slots = len(queries) * (2 if execution_bound and not deliberate else 1)
+    if refresh:
+        if not queries or context.clock.now() >= deadline:
+            return
+    else:
+        if not 1 <= slots <= remaining or context.clock.now() >= deadline:
+            return
+        context.checkpoint.recall_work = RecallWorkBudget(
+            searches=slots + (0 if budget is None else budget.searches),
+            rounds=(1 if deliberate else 0) + (0 if budget is None else budget.rounds),
+            deadline_at=deadline,
+            automatic=(not deliberate) or (budget is not None and budget.automatic),
+        )
+        # This write is authoritative and must not be swallowed as optional work.
+        await checkpoint(context, "memory_preparation", pending_batch_budget=pending_batch_budget)
+    try:
+        remaining_seconds = (deadline - context.clock.now()).total_seconds()
+        if remaining_seconds > 0:
+            # Preparation never spends the searches' own window. Existing
+            # cleanup may take three seconds; it cannot admit new work.
+            preparation_seconds = (
+                min(RECALL_PREPARATION_SECONDS, remaining_seconds)
+                if execution_bound
+                else remaining_seconds + 3
+            )
+            async with asyncio.timeout(preparation_seconds):
+                await context.prepare_recall.prepare(context.run, queries)
+    except TimeoutError:
+        logger.warning(
+            "recall_preparation_timed_out",
+            extra={"run_id": str(context.run.id), "step_number": context.run.step_count},
+        )
+    except Exception:
+        pass  # Sparse recall remains available; the reservation stays consumed.
+    context.token.raise_if_cancelled()
     if execution_bound:
+        # The searches' clock starts now, inside the durable reservation.
         context.recall_permit = RecallExecutionPermit(
             context.principal.tenant_id,
             context.principal.principal_id,
             context.run.session_id,
             context.run.id,
             slots,
-            deadline,
+            min(deadline, context.clock.now() + timedelta(seconds=RECALL_SEARCH_SECONDS)),
             context.clock.now,
-            context.recall_elapsed_time or (lambda: context.clock.now().timestamp()),
+            elapsed_time,
         )
-    try:
-        remaining_seconds = (deadline - context.clock.now()).total_seconds()
-        if remaining_seconds > 0:
-            # Existing cleanup may take three seconds; it cannot admit new work.
-            async with asyncio.timeout(remaining_seconds + 3):
-                await context.prepare_recall.prepare(context.run, queries)
-    except Exception:
-        pass  # Sparse recall remains available; the reservation stays consumed.
-    context.token.raise_if_cancelled()
 
 
 def _apply_context_origin_trust(checkpoint_state: RunCheckpoint, request: ModelRequest) -> None:

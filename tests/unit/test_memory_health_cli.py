@@ -25,6 +25,9 @@ def _report() -> MemoryHealthReport:
         since=_SINCE,
         until=_SINCE + timedelta(days=14),
         recalled_runs=40,
+        limited_runs=3,
+        limited_exhausted=4,
+        limited_timed_out=1,
         delivered_runs=30,
         cited_runs=12,
         cited_beliefs=15,
@@ -71,6 +74,8 @@ def test_render_reports_shares_rates_and_coverage_without_belief_text() -> None:
     assert "536 of 622 live beliefs vectorised (86.2%)" in rendered
     assert "memory.retired x2 (affirmed, lowest 0.15)" in rendered
     assert "p95 480ms; 1 over 1s" in rendered
+    assert "Without recall: 3 runs went without automatic recall at some step" in rendered
+    assert "(4 exhausted, 1 timed out)" in rendered
     assert "[m:" not in rendered
 
 

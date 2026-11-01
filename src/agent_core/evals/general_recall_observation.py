@@ -82,14 +82,19 @@ class RuntimeObservation(BaseModel):
     observed_at: AwareDatetime
     source_events: dict[str, SourceEvent] = Field(max_length=100)
     formed_records: tuple[MemoryRecord, ...] = Field(max_length=10000)
-    recall_observations: tuple[SearchObservation, ...] = Field(min_length=1, max_length=4)
+    # One per admitted read: the automatic refresh of every build step counts
+    # (ADR-0281), bounded by the run's step cap, base and delta each.
+    recall_observations: tuple[SearchObservation, ...] = Field(min_length=1, max_length=72)
     context_ranking: ContextRecallRanking | None = None
     attributed_usage: tuple[ModelUsage, ...] = Field(min_length=1, max_length=130)
     provider_attempts: tuple[ProviderAttempt, ...] = Field(min_length=1, max_length=130)
     formation_bank_sha256: Digest | None
     formation_replayed_calls: int = Field(ge=0, le=128)
     recall_work: RecallWorkBudget
-    executed_searches: int = Field(ge=1, le=4)
+    # Every admitted read, including the automatic refresh each build step
+    # makes (ADR-0281); the reservation bounds the deliberate ones.
+    executed_searches: int = Field(ge=1, le=256)
+    executed_deliberate: int = Field(default=0, ge=0, le=4)
     rendered_memory: str = Field(max_length=100000)
     answer: str = Field(max_length=100000)
     elapsed_ms: float = Field(ge=0, allow_inf_nan=False)
@@ -147,9 +152,12 @@ def compile_runtime_observation(
         "formed records are duplicated",
     )
     _require(
-        len(observed.recall_observations)
-        <= observed.executed_searches
-        <= observed.recall_work.searches,
+        len(observed.recall_observations) <= observed.executed_searches,
+        "recall observations exceed the executed searches",
+    )
+    _require(
+        observed.executed_deliberate
+        <= observed.recall_work.searches - (2 if observed.recall_work.automatic else 0),
         "executed searches exceed the durable reservation",
     )
     _require(
@@ -297,7 +305,9 @@ def compile_runtime_observation(
             )
         ),
         boundary_failures=tuple(sorted(boundary)),
-        searches=observed.executed_searches,
+        # The release value is what the run spent against its allowance; the
+        # automatic refreshes beyond it are not charged (ADR-0281).
+        searches=min(observed.executed_searches, observed.recall_work.searches),
         rounds=observed.recall_work.rounds,
         context_tokens=sum(
             max(result.tokens, (len(result.rendered.encode()) + 3) // 4) for result in visible

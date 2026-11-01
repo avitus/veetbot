@@ -20,13 +20,13 @@ gates: twenty-nine say what memory must never do and Milestone 16's twenty say
 how well it works, and not one of them shows anybody a belief. The only surface
 that answers *what do you actually believe about me* is a terminal on the host:
 `agent memory list`, `get`, `formations`, `diagnose`, and `trace`
-(memory-formation-and-consolidation.md:582-592). That surface is right for an
+(memory-formation-and-consolidation.md:586-596). That surface is right for an
 operator and useless to the person the beliefs are about, who reaches the
 platform through the native client.
 
 The retrieval design already drew the line this milestone builds on. A recall
 trace explains one answer; browsing everything the agent believes is *a
-different surface* (memory-retrieval-and-ranking.md:826-827), and that surface
+different surface* (memory-retrieval-and-ranking.md:832-833), and that surface
 has never existed anywhere but the command line. Milestone 17 builds it: two
 GET routes, one exact scope, one default-off flag, and a browser in the Apple
 client.
@@ -67,7 +67,7 @@ find it here should find the reason here.
    not safe behind a route at any ceiling. That predicate must be added, and
    the trace store's contract suite must observe it, before a trace route is
    designed. Beyond the defect, a trace view owes the minimum-of-two-ceilings
-   rule (memory-retrieval-and-ranking.md:831-837), which is a second ceiling
+   rule (memory-retrieval-and-ranking.md:837-843), which is a second ceiling
    mechanism in a milestone whose whole ceiling story is one parameter.
 3. **Consolidation and formation audit routes.** `formations` and `diagnose`
    expose model selection, watermarks, and attempt audits — operator-tier
@@ -197,7 +197,7 @@ extends the existing cross-tenant-404 rule
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
-(memory-retrieval-and-ranking.md:831-837).
+(memory-retrieval-and-ranking.md:837-843).
 
 ### `GET /v1/memories/{memory_id}/evidence`
 

@@ -1441,6 +1441,7 @@ memory.reinforced            memory-formation-and-consolidation.md
 memory.superseded            memory-formation-and-consolidation.md
 memory.needs_confirmation    memory-formation-and-consolidation.md
 memory.recalled              memory-retrieval-and-ranking.md
+memory.recall.limited        context-engine.md, ADR-0281
 knowledge.document.ingested  knowledge-documents.md
 browser.task_grant.created   browser-automation.md, ADR-0129
 browser.task_grant.ended     browser-automation.md, ADR-0129

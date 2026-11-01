@@ -130,6 +130,9 @@ class _RecallBundle:
     delta: str | None = None
     corrections: tuple[MemoryCorrection, ...] = ()
     rankings: tuple[RecallRankingBlock | None, ...] = ()
+    # Why the base read produced a limitation marker instead of memory, so the
+    # runtime can record that the turn went without recall (ADR-0281).
+    limitation: str | None = None
 
 
 def current_user_text(items: list[ConversationItem]) -> str | None:
@@ -911,6 +914,11 @@ class BudgetedContextBuilder:
                     if plan.memory_snapshot or recall_items or correction_items
                     else TrustLevel.USER.value
                 ),
+                **(
+                    {}
+                    if recalled.limitation is None
+                    else {"recall_limitation": recalled.limitation}
+                ),
             },
             cache_hints=CacheHints(
                 session_key=session_cache_key(run.tenant_id, run.session_id),
@@ -1117,8 +1125,15 @@ class BudgetedContextBuilder:
                 return _RecallBundle(corrections=tuple(exhausted_corrections))
             base = await recall(queries[0])
         except (RecallBudgetExceededError, TimeoutError) as error:
-            limitation = (
-                EXHAUSTED if isinstance(error, RecallBudgetExceededError) else RECALL_TIMED_OUT
+            exhausted = isinstance(error, RecallBudgetExceededError)
+            limitation = EXHAUSTED if exhausted else RECALL_TIMED_OUT
+            reason = "exhausted" if exhausted else "timed_out"
+            # A turn that goes without recall is a measurable outcome, not a
+            # silent one: the marker reaches the model, the log and the run's
+            # events (ADR-0281).
+            logger.warning(
+                "context_memory_recall_limited",
+                extra={"run_id": str(run.id), "reason": reason},
             )
             # Optional search exhaustion cannot hide mandatory frozen corrections.
             try:
@@ -1134,8 +1149,10 @@ class BudgetedContextBuilder:
                     "context_memory_recall_failed",
                     extra={"run_id": str(run.id), "error_class": type(exc).__name__},
                 )
-                return _RecallBundle(base=limitation)
-            return _RecallBundle(base=limitation, corrections=tuple(exhausted_corrections))
+                return _RecallBundle(base=limitation, limitation=reason)
+            return _RecallBundle(
+                base=limitation, corrections=tuple(exhausted_corrections), limitation=reason
+            )
         except Exception as exc:
             logger.warning(
                 "context_memory_recall_failed",

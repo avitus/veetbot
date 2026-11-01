@@ -353,7 +353,7 @@ async def test_runtime_observation_compiler_recomputes_stages_and_answers(
         elif change == "statement":
             altered["recall_observations"][0]["result"]["items"][0]["statement"] = "Different claim"
         elif change == "budget":
-            altered["executed_searches"] = 5
+            altered["executed_deliberate"] = 4
         elif change == "usage":
             altered["attributed_usage"][0]["cost"] = "NaN"
         elif change == "unattributed_usage":

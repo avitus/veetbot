@@ -41,6 +41,7 @@ from agent_core.domain.memory import (
     MemoryRecord,
     MemoryStatus,
     Portability,
+    RecallProfile,
     RecallQuery,
     RecallResult,
     Sensitivity,
@@ -156,11 +157,16 @@ class _ObservedRetriever(HybridMemoryRetriever):
         self.results: list[RecallResult] = []
         self.elapsed_ms = 0.0
         self.executed_searches = 0
+        # Deliberate searches are the ones the durable reservation bounds one
+        # for one; automatic reads refresh on every build step (ADR-0281).
+        self.executed_deliberate = 0
 
     async def _execute_recall(self, query: RecallQuery, **kwargs: Any) -> RecallResult:
         # The public method acquires the execution permit before entering here.
         # Failed admitted searches count; refused calls do not claim a DB read.
         self.executed_searches += 1
+        if query.profile is RecallProfile.DEEP:
+            self.executed_deliberate += 1
         return await super()._execute_recall(query, **kwargs)
 
     async def recall(self, query: RecallQuery, **kwargs: Any) -> RecallResult:
@@ -870,6 +876,7 @@ async def evaluate_fixture(
                 if runtime is None or runtime.checkpoint.recall_work is None
                 else runtime.checkpoint.recall_work.model_dump(mode="json"),
                 "executed_searches": retriever.executed_searches,
+                "executed_deliberate": retriever.executed_deliberate,
                 "activation_evidence": False,
                 "scenario_id": case.id,
                 "pipeline": pipeline,

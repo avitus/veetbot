@@ -146,7 +146,16 @@ deliberate rounds reserve one slot per validated search. All execute under the
 same deadline and four-slot/two-round ceiling. Exhaustion supplies an explicit
 limitation while retaining mandatory corrections. Unused and failed reservations
 cannot be renewed after resume. The runtime evaluator uses this same allowance
-for sparse and semantic arms. Context assembly now records its existing block
+for sparse and semantic arms.
+[ADR-0281](../adr/0281-recall-preparation-keeps-its-own-clock.md) amends that
+accounting after a production outage: provider preparation runs on its own
+five-second clock and the searches get their own ten seconds from the moment it
+returns, inside one fifteen-second durable reservation; the automatic round is
+reserved once per run and refreshed on later build steps without new slots or
+rounds, while deliberate searches reserve one slot each from the two it leaves,
+in at most two deliberate rounds; and a refused or timed-out automatic recall
+appends `memory.recall.limited` with its reason beside the limitation marker.
+Context assembly now records its existing block
 priority as one deduplicated twenty-original rank prefix, as specified in
 [ADR-0192](../adr/0192-recovered-source-evaluation.md). The scorer verifies that
 runtime receipt against exact observed blocks; it never invents a cross-query

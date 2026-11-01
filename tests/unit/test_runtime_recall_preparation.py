@@ -172,13 +172,20 @@ async def test_reserved_allowance_bounds_actual_sparse_searches_across_all_turns
         async with app.uow_factory() as uow:
             saved = await uow.checkpoints.latest(run_id)
         assert saved is not None and saved.recall_work is not None
-        assert len(actual) <= 4, "Optional preparation must not leave unlimited sparse execution"
+        # ADR-0281: the automatic round is reserved once and refreshed on every
+        # build step; deliberate searches share the two slots it leaves.
+        deliberate = [query for query in actual if (query.text or "").startswith("constraint")]
+        automatic = [query for query in actual if query not in deliberate]
+        assert len(deliberate) == 2, "Deliberate searches must stop at the reserved slots"
+        # Base and delta on each of the five build steps.
+        assert len(automatic) == 10, "Automatic recall refreshes on every build step"
+        assert saved.recall_work.searches == 4 and saved.recall_work.rounds == 2
         refusals = [
             item
             for item in saved.conversation
             if isinstance(item, ToolResultItem) and item.is_error
         ]
-        assert len(refusals) == 3
+        assert len(refusals) == 2
         assert all("memory_recall_budget_exhausted" in item.model_dump_json() for item in refusals)
 
 
@@ -240,8 +247,9 @@ async def test_preparation_reads_durable_task_before_model_and_tool_execution(
         run_id = await app.runs.submit("Suggest breakfast options")
         outcome = await app.runs.wait_terminal(run_id)
         assert outcome.status is RunStatus.COMPLETED, outcome.failure
-        assert calls == [(1, False), (1, True)], (
-            "The two admitted rounds save their exact task before provider work"
+        assert calls == [(1, False), (1, True), (2, False)], (
+            "The automatic round, the deliberate batch and the step-two refresh "
+            "each save their exact task before provider work"
         )
 
 
@@ -307,7 +315,10 @@ async def test_optional_preparation_budget_is_shared_and_durable(
         run_id = await app.runs.submit("Suggest breakfast options")
         outcome = await app.runs.wait_terminal(run_id)
         assert outcome.status is RunStatus.COMPLETED, outcome.failure
-        assert calls == ([(1, 1)] if expired else [(1, 1), (4, 2)]), (
+        # The automatic round reserves one slot and no round for this probe;
+        # the three-search batch fills the allowance; the one-search batch is
+        # refused; the two later build steps refresh without reserving.
+        assert calls == ([(1, 0)] if expired else [(1, 0), (4, 1), (4, 1), (4, 1)]), (
             "Each new context or tool batch must share the persisted run allowance"
         )
         async with app.uow_factory() as uow:
@@ -382,3 +393,96 @@ async def test_checkpoint_loss_recovers_budget_after_the_history_boundary() -> N
         await uow.checkpoints.delete_nonterminal(RUN_ID)
         again = await DurableCheckpointSeeder(clock)(uow, live, source.sequence, None, principal())
         assert again.recall_work == budget
+
+
+def _bound_preparation(app: Any, clock: FixedClock, *, advance_seconds: float) -> Any:
+    """An execution-bound preparation whose first provider call takes `advance_seconds`."""
+    from datetime import timedelta
+
+    class SlowPreparation:
+        execution_budget = True
+        prepared = 0
+
+        async def plan(self, run: Run, checkpoint: RunCheckpoint) -> list[RecallQuery]:
+            return [
+                RecallQuery(
+                    tenant_id=app.principal.tenant_id,
+                    principal_id=app.principal.principal_id,
+                    current_scope="general",
+                    text="breakfast constraints",
+                    subjects=[],
+                    budget_tokens=2000,
+                    max_items=20,
+                    min_score=0.1,
+                )
+            ]
+
+        async def prepare(self, run: Run, queries: Sequence[RecallQuery]) -> None:
+            self.prepared += 1
+            if self.prepared == 1:
+                clock.advance(timedelta(seconds=advance_seconds))
+
+    return SlowPreparation()
+
+
+def _search_then_done() -> FakeModelScript:
+    return FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="memory.search",
+                        call_id="search",
+                        arguments={"text": "breakfast constraints", "scope": "general"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Done"),
+        ]
+    )
+
+
+async def test_slow_provider_preparation_does_not_spend_the_search_deadline() -> None:
+    """Preparation has its own clock: an eleven-second provider wait still leaves recall."""
+    from agent_core.domain.messages import ToolResultItem
+
+    clock = FixedClock(NOW)
+    async with build(settings=_settings(), script=_search_then_done(), clock=clock) as app:
+        app.executor._prepare_recall = _bound_preparation(app, clock, advance_seconds=11)
+        run_id = await app.runs.submit("Suggest breakfast options")
+        outcome = await app.runs.wait_terminal(run_id)
+        assert outcome.status is RunStatus.COMPLETED, outcome.failure
+        async with app.uow_factory() as uow:
+            saved = await uow.checkpoints.latest(run_id)
+            events = await uow.events.list_after(
+                outcome.session_id, 0, app.principal, run_id=run_id
+            )
+        assert saved is not None
+        refusals = [
+            item
+            for item in saved.conversation
+            if isinstance(item, ToolResultItem) and item.is_error
+        ]
+        assert refusals == [], "A slow preparation must not refuse the turn's searches"
+        recalled = [event for event in events if event.event_type == "memory.recalled"]
+        assert recalled, "Automatic recall must still run after a slow preparation"
+        assert not [event for event in events if event.event_type == "memory.recall.limited"]
+
+
+async def test_refused_automatic_recall_leaves_an_event() -> None:
+    """A recall refused past the outer bound is recorded, not silently dropped."""
+    clock = FixedClock(NOW)
+    async with build(settings=_settings(), script=_search_then_done(), clock=clock) as app:
+        app.executor._prepare_recall = _bound_preparation(app, clock, advance_seconds=20)
+        run_id = await app.runs.submit("Suggest breakfast options")
+        outcome = await app.runs.wait_terminal(run_id)
+        assert outcome.status is RunStatus.COMPLETED, outcome.failure
+        async with app.uow_factory() as uow:
+            events = await uow.events.list_after(
+                outcome.session_id, 0, app.principal, run_id=run_id
+            )
+        limited = [event for event in events if event.event_type == "memory.recall.limited"]
+        assert limited, "A refused automatic recall must leave a memory.recall.limited event"
+        assert limited[0].payload["reason"] == "exhausted"
+        assert limited[0].payload["step_number"] == 1
