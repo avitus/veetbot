@@ -3335,10 +3335,15 @@ class PostgresArtifactRepository:
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef:
         row = await self._owned_for_update(artifact_id, principal)
         row.metadata_json = auto_ingest_metadata(
-            dict(row.metadata_json), state=state, reason=reason, attempts=attempts
+            dict(row.metadata_json),
+            state=state,
+            reason=reason,
+            attempts=attempts,
+            not_before=not_before,
         )
         await self._session.flush()
         return artifact_to_domain(row)

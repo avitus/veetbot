@@ -1760,6 +1760,7 @@ class InMemoryArtifactRepository:
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)
@@ -1771,7 +1772,11 @@ class InMemoryArtifactRepository:
             recorded = artifact.model_copy(
                 update={
                     "metadata": auto_ingest_metadata(
-                        artifact.metadata, state=state, reason=reason, attempts=attempts
+                        artifact.metadata,
+                        state=state,
+                        reason=reason,
+                        attempts=attempts,
+                        not_before=not_before,
                     )
                 },
                 deep=True,

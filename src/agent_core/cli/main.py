@@ -137,10 +137,12 @@ approval_app = typer.Typer(name="approval", no_args_is_help=True)
 memory_app = typer.Typer(name="memory", no_args_is_help=True)
 reconsolidations_app = typer.Typer(name="reconsolidations", no_args_is_help=True)
 memory_app.add_typer(reconsolidations_app)
+knowledge_app = typer.Typer(name="knowledge", no_args_is_help=True)
 email_app = typer.Typer(name="email", no_args_is_help=True)
 persona_app = typer.Typer(name="persona", no_args_is_help=True)
 surface_app = typer.Typer(name="surface", no_args_is_help=True)
 app.add_typer(run_app)
+app.add_typer(knowledge_app)
 app.add_typer(session_app)
 app.add_typer(eval_app)
 app.add_typer(approval_app)
@@ -1317,6 +1319,72 @@ def memory_reconcile_conflicts(
 
     try:
         result = asyncio.run(_memory_reconcile_conflicts(confirm))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
+
+
+async def _knowledge_retry(artifact_id: UUID) -> Any:
+    from agent_core.domain.artifacts import AUTO_INGEST_PENDING
+
+    async with build(storage="postgres") as composition:
+        async with composition.uow_factory() as uow:
+            artifact = await uow.artifacts.record_auto_ingest(
+                artifact_id,
+                composition.principal,
+                state=AUTO_INGEST_PENDING,
+                reason=None,
+                attempts=0,
+            )
+        return {"artifact_id": str(artifact.id), "name": artifact.name, "auto_ingest": "pending"}
+
+
+@knowledge_app.command("retry")
+def knowledge_retry(
+    artifact_id: Annotated[
+        UUID, typer.Argument(help="The chat upload to send to knowledge again.")
+    ],
+) -> None:
+    """Queue a failed or refused chat upload for ingestion again (ADR-0283).
+
+    The maintenance sweep picks it up on its next round with a fresh attempt
+    count; the outcome is recorded on the upload as before.
+    """
+
+    try:
+        result = asyncio.run(_knowledge_retry(artifact_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result))
+
+
+async def _memory_merge_possessions(confirm: bool) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.merge_possessions(confirm=confirm)
+
+
+@memory_app.command("merge-possessions")
+def memory_merge_possessions(
+    confirm: Annotated[
+        bool,
+        typer.Option(
+            "--confirm",
+            help="Write the repair; without it the pass only reports what it would change.",
+        ),
+    ] = False,
+) -> None:
+    """Fold the owner's duplicate possession beliefs into one active belief (ADR-0282).
+
+    Live direct possessions that share the narrow restatement key become one
+    corroborated active belief, the newest, with the rest superseded; a
+    possession whose object is a single character is retired as a formation
+    placeholder. Never a SQL status edit.
+    """
+
+    try:
+        result = asyncio.run(_memory_merge_possessions(confirm))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

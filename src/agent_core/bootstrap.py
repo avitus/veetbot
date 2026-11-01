@@ -5923,7 +5923,10 @@ async def _compose(
                         title_pass.run_once if title_pass is not None else None
                     ),
                     sweep_upload_ingests=UploadAutoIngest(
-                        uow_factory=uow_factory, knowledge=knowledge_service, principal=principal
+                        uow_factory=uow_factory,
+                        knowledge=knowledge_service,
+                        principal=principal,
+                        clock=clock,
                     ).sweep_once,
                     folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(

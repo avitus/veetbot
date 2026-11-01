@@ -9,6 +9,7 @@ runs with `USER` origin trust; every other ingestion step still applies.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.domain.agents import Principal
@@ -16,6 +17,7 @@ from agent_core.domain.artifacts import (
     AUTO_INGEST_ATTEMPTS_KEY,
     AUTO_INGEST_FAILED,
     AUTO_INGEST_INGESTED,
+    AUTO_INGEST_NOT_BEFORE_KEY,
     AUTO_INGEST_PENDING,
     AUTO_INGEST_REFUSED,
 )
@@ -29,11 +31,15 @@ from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.knowledge.service import KnowledgeService
+from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 logger = logging.getLogger(__name__)
 
 MAX_INGEST_ATTEMPTS = 3
+# A failed attempt waits before the next one: a transient cause gets time to
+# clear instead of three tries in thirty seconds (ADR-0283).
+RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=15))
 _REFUSAL_CODES = (
     ("secret scan", "secret_scan"),
     ("encrypted", "encrypted"),
@@ -69,11 +75,13 @@ class UploadAutoIngest:
         uow_factory: UnitOfWorkFactory,
         knowledge: KnowledgeService,
         principal: Principal,
+        clock: Clock,
         batch_size: int = 10,
     ) -> None:
         self._uow_factory = uow_factory
         self._knowledge = knowledge
         self._principal = principal
+        self._clock = clock
         self._batch_size = batch_size
 
     async def sweep_once(self) -> int:
@@ -84,7 +92,10 @@ class UploadAutoIngest:
                 self._principal, limit=self._batch_size
             )
         admitted = 0
+        now = self._clock.now()
         for artifact in pending:
+            if not _due(artifact, now):
+                continue
             attempts = int(artifact.metadata.get(AUTO_INGEST_ATTEMPTS_KEY, 0)) + 1
             request = KnowledgeIngestRequest(
                 source=artifact,
@@ -102,24 +113,58 @@ class UploadAutoIngest:
             except NotFoundError:
                 await self._record(artifact, AUTO_INGEST_REFUSED, "not_found", attempts)
                 continue
-            except Exception:
+            except Exception as exc:
+                # The class names the cause for the operator; the message could
+                # carry document text, so it stays out of the log (ADR-0283).
                 logger.warning(
                     "upload_knowledge_ingest_failed",
-                    extra={"artifact_id": str(artifact.id), "attempt": attempts},
+                    extra={
+                        "artifact_id": str(artifact.id),
+                        "attempt": attempts,
+                        "error_class": type(exc).__name__,
+                    },
                 )
-                state = (
-                    AUTO_INGEST_FAILED if attempts >= MAX_INGEST_ATTEMPTS else AUTO_INGEST_PENDING
+                failed = attempts >= MAX_INGEST_ATTEMPTS
+                await self._record(
+                    artifact,
+                    AUTO_INGEST_FAILED if failed else AUTO_INGEST_PENDING,
+                    "transient",
+                    attempts,
+                    not_before=None
+                    if failed
+                    else (now + RETRY_DELAYS[min(attempts, len(RETRY_DELAYS)) - 1]).isoformat(),
                 )
-                await self._record(artifact, state, "transient", attempts)
                 continue
             await self._record(artifact, AUTO_INGEST_INGESTED, None, 0)
             admitted += 1
         return admitted
 
     async def _record(
-        self, artifact: ArtifactRef, state: str, reason: str | None, attempts: int
+        self,
+        artifact: ArtifactRef,
+        state: str,
+        reason: str | None,
+        attempts: int,
+        *,
+        not_before: str | None = None,
     ) -> None:
         async with self._uow_factory() as uow:
             await uow.artifacts.record_auto_ingest(
-                artifact.id, self._principal, state=state, reason=reason, attempts=attempts
+                artifact.id,
+                self._principal,
+                state=state,
+                reason=reason,
+                attempts=attempts,
+                not_before=not_before,
             )
+
+
+def _due(artifact: ArtifactRef, now: datetime) -> bool:
+    """Whether a pending attachment's backoff, if any, has elapsed."""
+    recorded = artifact.metadata.get(AUTO_INGEST_NOT_BEFORE_KEY)
+    if not isinstance(recorded, str):
+        return True
+    try:
+        return datetime.fromisoformat(recorded) <= now
+    except ValueError:
+        return True

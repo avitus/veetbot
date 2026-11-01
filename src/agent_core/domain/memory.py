@@ -593,6 +593,26 @@ def recall_term_forms(text: str | None, *, fold: bool) -> list[tuple[str, ...]]:
     return forms
 
 
+def lexical_query_forms(text: str | None) -> list[tuple[str, ...]]:
+    """Each knowledge query term with the spellings that count as matching it.
+
+    Knowledge passages are prose, so a question's "valves" must find a
+    passage's "valve" (ADR-0284). The folding is the one relevance recall
+    uses: a plain ASCII word also matches every word with the same stem; a
+    term with digits or other letters keeps only itself.
+    """
+
+    forms: list[tuple[str, ...]] = []
+    for term in lexical_query_terms(text):
+        if _FOLDABLE_WORD.fullmatch(term) is None:
+            forms.append((term,))
+            continue
+        stem = fold_word(term)
+        spellings = (term, stem, f"{stem}s", f"{stem}es", f"{stem[:-1]}ies")
+        forms.append(tuple(dict.fromkeys(form for form in spellings if fold_word(form) == stem)))
+    return forms
+
+
 def recall_term_lexemes(text: str | None, *, fold: bool) -> list[tuple[frozenset[str], ...]]:
     """Each recall term's alternative lexeme sets, one per form."""
 
@@ -971,6 +991,25 @@ class ConflictReconciliation(BaseModel):
     pairs_examined: int = Field(ge=0)
     pairs_cleared: int = Field(ge=0)
     flags_cleared: int = Field(ge=0)
+    dry_run: bool
+
+
+class PossessionMerge(BaseModel):
+    """What a `merge-possessions` pass examined and, unless a dry run, changed (ADR-0282).
+
+    `groups_examined` counts possession keys held by two or more live beliefs;
+    `beliefs_merged` the duplicates superseded into their canonical; `promoted`
+    the canonicals that became active; `placeholders_retired` the possessions
+    whose object was a single character, a formation defect with no owner fact
+    behind it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    groups_examined: int = Field(ge=0)
+    beliefs_merged: int = Field(ge=0)
+    promoted: int = Field(ge=0)
+    placeholders_retired: int = Field(ge=0)
     dry_run: bool
 
 

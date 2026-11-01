@@ -194,6 +194,11 @@ def _personal_belief_types(text: str, *, owner_questions: bool = True) -> list[B
     return sorted(types, key=lambda item: item.value)
 
 
+_POSSESSION_QUESTION = re.compile(
+    r"\b(?:do|did)\s+i\s+(?:still\s+)?(?:have|own|drive|use|wear)\b", re.I
+)
+
+
 def recalls_owned_resources(
     text: str, *, deliberate: bool = False, owner_questions: bool = True
 ) -> bool:
@@ -210,6 +215,12 @@ def recalls_owned_resources(
         if re.search(r"\bmy\s+\w", clause, re.I) or (
             deliberate and re.search(r"\b(?:user|owner)\b", clause, re.I)
         ):
+            return True
+        # "What car do I drive?" asks about a possession without saying "my":
+        # a profile question whose verb is one the canonical possession
+        # statement uses (ADR-0282). Advice ("should I buy") and residence
+        # ("where do I live") keep their own anchors.
+        if BeliefType.USER_MODEL_ATTR in types and _POSSESSION_QUESTION.search(clause):
             return True
     return False
 

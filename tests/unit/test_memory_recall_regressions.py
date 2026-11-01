@@ -102,6 +102,28 @@ async def test_personal_advice_recalls_older_owned_model_before_candidate_flood(
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "What car do I drive?",
+        "Which phone do I use?",
+        "What kind of car do I have?",
+        "Do I own a bike?",
+    ],
+)
+def test_do_i_possession_questions_browse_possessions(question: str) -> None:
+    """ADR-0282: "What car do I drive?" asks about a possession without saying "my"."""
+    assert DeterministicQueryFormer(principal()).from_text(question)[0].include_owned_resources
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Which car should I buy?", "What do I like for breakfast?", "Where do I live?"],
+)
+def test_other_do_i_questions_do_not_browse_possessions(question: str) -> None:
+    assert not DeterministicQueryFormer(principal()).from_text(question)[0].include_owned_resources
+
+
+@pytest.mark.parametrize(
     "question", ["Who is my mother?", "Who is my emergency contact?", "How do I like my coffee?"]
 )
 def test_explicit_relationship_and_preference_queries_do_not_browse_possessions(

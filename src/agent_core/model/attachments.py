@@ -105,6 +105,16 @@ _KNOWLEDGE_NOTES: dict[KnowledgeState, str] = {
     KnowledgeState.INGESTED: (
         " The owner's file is in knowledge: use knowledge.search to find its passages."
     ),
+    KnowledgeState.FAILED: (
+        " The owner's file could not be added to knowledge: knowledge.search will not "
+        "find its passages. Tell the owner the file was not indexed, and read the "
+        "attachment itself when a question needs it."
+    ),
+    KnowledgeState.REFUSED: (
+        " The owner's file was refused by knowledge (unreadable, encrypted, empty, too "
+        "large, or it failed the secret scan): knowledge.search will not find its "
+        "passages. Tell the owner the file was not indexed."
+    ),
 }
 
 

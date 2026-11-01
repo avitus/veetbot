@@ -51,6 +51,7 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    PossessionMerge,
     RecallQuery,
     RecallTrace,
     RejectionKind,
@@ -2264,6 +2265,10 @@ class DeterministicSalience:
         return explicit or len(value.split()) >= 3
 
 
+# "User has a X." is a formation placeholder, not a possession (ADR-0282).
+_PLACEHOLDER_POSSESSION = re.compile(r"(?:has|drives|uses) [a-z0-9]")
+
+
 def _resource_restatement_key(statement: str) -> str | None:
     """A narrow owner assertion, preserving numbers, negation and the full object."""
     match = re.fullmatch(
@@ -2345,12 +2350,13 @@ class DeterministicConflictResolver:
         if not comparable(existing_claim, incoming_claim):
             return "independent"
         if (
-            same_session
-            and existing.belief_type is BeliefType.USER_MODEL_ATTR
+            existing.belief_type is BeliefType.USER_MODEL_ATTR
             and existing.polarity is polarity is Polarity.ASSERT
             and (resource := _resource_restatement_key(statement)) is not None
             and resource == _resource_restatement_key(existing.statement)
         ):
+            # A possession restated in any session is the same possession
+            # (ADR-0282 widens ADR-0232's same-session rule).
             return "duplicate"
         if existing.belief_type is BeliefType.RELATIONSHIP and polarity is Polarity.ASSERT:
             generalization = re.fullmatch(
@@ -2709,11 +2715,13 @@ class GovernedMemoryService:
                     )
                 )
                 known = {record.id for record in related}
+                # ADR-0282: the owner naming the same possession in another
+                # chat is the same possession; the narrow key, not the
+                # session, is the identity.
                 related.extend(
                     record
                     for record in candidates
                     if record.id not in known
-                    and record.source_session_id == session_id
                     and record.polarity is Polarity.ASSERT
                     and record.derivation is derivation
                     and resource_key == _resource_restatement_key(record.statement)
@@ -4342,6 +4350,148 @@ class GovernedMemoryService:
                     )
                 )
             return result
+
+    async def merge_possessions(self, *, confirm: bool) -> PossessionMerge:
+        """Fold duplicate possession beliefs into one active belief (ADR-0282).
+
+        Before ADR-0282 a possession the owner restated in another chat formed a
+        second provisional belief, so the same car sat in the store three
+        times and never promoted. Live direct possessions sharing the narrow
+        restatement key are folded into the newest one, which takes the group's
+        corroboration, sources and scopes and becomes active; the rest are
+        superseded by it. A possession whose object is a single character is a
+        formation placeholder and is retired. A dry run reports the same counts
+        and writes nothing. Never a status edit in SQL.
+        """
+        async with self._uow_factory() as uow, uow.people.lock(self._principal):
+            groups: dict[str, list[MemoryRecord]] = {}
+            placeholders: list[MemoryRecord] = []
+            for record in await self._live_possessions(uow):
+                key = _resource_restatement_key(record.statement)
+                assert key is not None
+                if _PLACEHOLDER_POSSESSION.fullmatch(key):
+                    placeholders.append(record)
+                    continue
+                groups.setdefault(key, []).append(record)
+            duplicates = {key: members for key, members in groups.items() if len(members) > 1}
+            result = PossessionMerge(
+                groups_examined=len(duplicates),
+                beliefs_merged=sum(len(members) - 1 for members in duplicates.values()),
+                promoted=sum(
+                    1
+                    for members in duplicates.values()
+                    if all(member.status is not MemoryStatus.ACTIVE for member in members)
+                ),
+                placeholders_retired=len(placeholders),
+                dry_run=not confirm,
+            )
+            if not confirm:
+                return result
+            now = self._clock.now()
+            for key in sorted(duplicates):
+                members = sorted(duplicates[key], key=lambda item: item.store_position)
+                canonical, folded = members[-1], members[:-1]
+                was_active = canonical.status is MemoryStatus.ACTIVE
+                sources = sorted(
+                    {sequence for member in members for sequence in member.source_event_ids}
+                )
+                scopes = list(
+                    dict.fromkeys(scope for member in members for scope in member.origin_scopes)
+                )
+                promoted = canonical.model_copy(
+                    update={
+                        "status": MemoryStatus.ACTIVE,
+                        "corroboration_count": sum(
+                            member.corroboration_count for member in members
+                        ),
+                        "evidence_count": max(len(sources), canonical.evidence_count),
+                        "source_event_ids": (
+                            sources
+                            if all(
+                                member.source_session_id == canonical.source_session_id
+                                for member in members
+                            )
+                            else canonical.source_event_ids
+                        ),
+                        "origin_scopes": scopes,
+                        "confidence": min(
+                            1.0,
+                            max(member.confidence for member in members) + 0.1 * len(folded),
+                        ),
+                        "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
+                        "last_evidence_at": max(member.last_evidence_at for member in members),
+                        "last_reinforced_at": now,
+                        "store_position": await uow.memories.next_position(),
+                        "updated_at": now,
+                    },
+                    deep=True,
+                )
+                stored = await uow.memories.reinforce(promoted)
+                await self._append_event(
+                    uow,
+                    _source_session(stored),
+                    None,
+                    "memory.reinforced" if was_active else "memory.promoted",
+                    stored,
+                )
+                for member in folded:
+                    superseded = member.model_copy(
+                        update={
+                            "status": MemoryStatus.SUPERSEDED,
+                            "valid_to": now,
+                            "superseded_by": stored.id,
+                            "store_position": await uow.memories.next_position(),
+                            "updated_at": now,
+                        },
+                        deep=True,
+                    )
+                    gone = await uow.memories.reinforce(superseded)
+                    await self._append_event(
+                        uow, _source_session(gone), None, "memory.superseded", gone
+                    )
+            for record in placeholders:
+                retired = record.model_copy(
+                    update={
+                        "status": MemoryStatus.RETIRED,
+                        "valid_to": now,
+                        "store_position": await uow.memories.next_position(),
+                        "updated_at": now,
+                    },
+                    deep=True,
+                )
+                gone = await uow.memories.reinforce(retired)
+                await self._append_event(uow, _source_session(gone), None, "memory.retired", gone)
+            return result
+
+    async def _live_possessions(self, uow: RepositoryUnitOfWork) -> list[MemoryRecord]:
+        """Every live, direct, affirmative owner possession with a restatement key."""
+        found: list[MemoryRecord] = []
+        cursor: tuple[int, UUID] | None = None
+        while True:
+            page = await uow.memories.browse(
+                MemoryBrowseQuery(
+                    tenant_id=self._principal.tenant_id,
+                    principal_id=self._principal.principal_id,
+                    ceiling=Sensitivity.RESTRICTED,
+                    limit=200,
+                    cursor=cursor,
+                )
+            )
+            rows = page[:200]
+            found.extend(
+                record
+                for record in rows
+                if record.status in LIVE_MEMORY_STATUSES
+                and record.belief_type is BeliefType.USER_MODEL_ATTR
+                and record.derivation is MemoryDerivation.DIRECT
+                and record.polarity is Polarity.ASSERT
+                and record.claim_kind in {MemoryClaimKind.PROJECT_FACT, MemoryClaimKind.RESOURCE}
+                and not record.subject.casefold().startswith("person:")
+                and _resource_restatement_key(record.statement) is not None
+            )
+            if len(page) <= 200 or not rows:
+                return found
+            cursor = (rows[-1].store_position, rows[-1].id)
 
     async def _live_conflicted(self, uow: RepositoryUnitOfWork) -> list[MemoryRecord]:
         found: list[MemoryRecord] = []

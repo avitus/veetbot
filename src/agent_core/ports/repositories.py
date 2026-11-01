@@ -433,6 +433,7 @@ class ArtifactRepository(Protocol):
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef: ...
 
 

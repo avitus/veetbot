@@ -337,7 +337,13 @@ to active or puts them into the frozen snapshot.
 Personal context also needs an ownership lookup: "What fuel should I use for
 my car?" need not share a word with "User has a 2026 Aster S8." A possessive
 `my` reference anchors direct affirmative ownership/use statements in
-`user_model_attr`, limited to `project_fact` and `resource` claims. Deliberate
+`user_model_attr`, limited to `project_fact` and `resource` claims. So does a
+profile question whose verb is one the canonical possession statement uses:
+"What car do I drive?", "Which phone do I use?" and "Do I own a bike?" ask about a
+possession without saying "my"
+([ADR-0282](../adr/0282-owner-possessions-reach-recall-and-corroborate.md));
+advice ("Which car should I buy?") and residence ("Where do I live?") keep their
+own anchors. Deliberate
 `memory.search` also recognizes keyword queries naming the `user` or `owner`.
 The canonical statement starts with "User" (optionally "The user") and
 "has", "owns", "drives", or "uses"; negated or past-use prefixes do not

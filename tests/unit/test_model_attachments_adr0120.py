@@ -279,3 +279,22 @@ def test_a_marker_for_a_document_sent_to_knowledge_points_at_knowledge_search() 
     assert done is not None
     assert "is in knowledge: use knowledge.search to find its passages." in done
     assert "still being added" not in done
+
+
+def test_a_marker_for_a_document_knowledge_could_not_add_says_so() -> None:
+    """ADR-0283: a failed or refused ingest is told to the model, never implied as pending."""
+    failed, refused = _pdf(1, pages=424, size=5_764_203), _pdf(2, pages=424, size=5_764_203)
+    decisions = attachments.select_attachments([UserMessage(content=[failed, refused])])
+    rendered = attachments.render_attachments(
+        decisions,
+        ModelCapabilities(images=True, files=True),
+        {},
+        knowledge={UUID(int=1): KnowledgeState.FAILED, UUID(int=2): KnowledgeState.REFUSED},
+    )
+    first, second = rendered[(0, 0)].marker, rendered[(0, 1)].marker
+    assert first is not None and second is not None
+    assert "could not be added to knowledge" in first
+    assert "Tell the owner the file was not indexed" in first
+    assert "still being added" not in first
+    assert "was refused by knowledge" in second
+    assert "knowledge.search will not find its passages" in second

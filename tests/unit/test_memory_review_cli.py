@@ -54,6 +54,59 @@ def test_memory_review_takes_one_outcome_and_prints_the_reviewed_belief(
     assert with_text.exit_code == 2
 
 
+def test_knowledge_retry_queues_the_upload_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR-0283: a failed upload goes back to pending with a fresh attempt count."""
+    from uuid import UUID
+
+    seen: list[UUID] = []
+
+    async def fake_retry(artifact_id: UUID) -> dict[str, str]:
+        seen.append(artifact_id)
+        return {"artifact_id": str(artifact_id), "name": "manual.pdf", "auto_ingest": "pending"}
+
+    monkeypatch.setattr(cli_main, "_knowledge_retry", fake_retry)
+    runner = CliRunner()
+    result = runner.invoke(app, ["knowledge", "retry", str(UUID(int=7))])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["auto_ingest"] == "pending"
+    assert seen == [UUID(int=7)]
+
+
+def test_memory_merge_possessions_reports_by_default_and_writes_on_confirm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0282: the dry run is the default; --confirm writes the repair."""
+    from agent_core.domain.memory import PossessionMerge
+
+    seen: list[bool] = []
+
+    async def fake_merge(confirm: bool) -> PossessionMerge:
+        seen.append(confirm)
+        return PossessionMerge(
+            groups_examined=1,
+            beliefs_merged=2,
+            promoted=1,
+            placeholders_retired=1,
+            dry_run=not confirm,
+        )
+
+    monkeypatch.setattr(cli_main, "_memory_merge_possessions", fake_merge)
+    runner = CliRunner()
+    dry = runner.invoke(app, ["memory", "merge-possessions"])
+    assert dry.exit_code == 0, dry.output
+    assert json.loads(dry.stdout) == {
+        "groups_examined": 1,
+        "beliefs_merged": 2,
+        "promoted": 1,
+        "placeholders_retired": 1,
+        "dry_run": True,
+    }
+    committed = runner.invoke(app, ["memory", "merge-possessions", "--confirm"])
+    assert committed.exit_code == 0, committed.output
+    assert json.loads(committed.stdout)["dry_run"] is False
+    assert seen == [False, True]
+
+
 def test_memory_reconcile_conflicts_reports_by_default_and_writes_on_confirm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
