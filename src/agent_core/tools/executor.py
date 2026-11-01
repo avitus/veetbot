@@ -9,7 +9,7 @@ import logging
 import math
 import re
 from collections import Counter, deque
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -437,8 +437,16 @@ def _research_not_covered(standing: StandingAuthorization | None) -> str | None:
     return reason if reason in RESEARCH_NOT_COVERED_REASONS else None
 
 
-def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive") -> TrustLevel:
-    """Conservatively taint writes when the active turn consumed external content."""
+def _turn_origin_trust(
+    checkpoint: RunCheckpoint,
+    run_kind: str = "interactive",
+    batch_results: Sequence[ToolResultItem] = (),
+) -> TrustLevel:
+    """Conservatively taint writes when the active turn consumed external content.
+
+    `batch_results` are the results earlier calls of the same serial batch
+    returned; the conversation receives them only when the batch ends.
+    """
 
     origin_trust = checkpoint.context_origin_trust
     active_turn: list[object] = []
@@ -465,7 +473,7 @@ def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive")
         for call_id, calls in calls_by_id.items()
         if len(calls) == 1 and calls[0].name == SKILL_LOAD_TOOL_NAME
     }
-    for active_item in active_turn:
+    for active_item in [*active_turn, *batch_results]:
         if isinstance(active_item, ToolResultItem) and active_item.trust in {
             TrustLevel.EXTERNAL_UNTRUSTED,
             TrustLevel.KNOWLEDGE,
@@ -925,6 +933,7 @@ class ToolPipeline:
                     token=token,
                     lease=lease,
                     parallel_group=None,
+                    batch_results=tuple(results),
                 )
             )
             token.raise_if_cancelled()
@@ -942,6 +951,7 @@ class ToolPipeline:
         token: CancellationToken,
         lease: WorkerLease | None,
         parallel_group: UUID | None,
+        batch_results: Sequence[ToolResultItem] = (),
     ) -> ToolResultItem:
         progress: list[int] = []
         through_index = False
@@ -1054,6 +1064,7 @@ class ToolPipeline:
             lease=lease,
             parallel_group=parallel_group,
             progress=progress,
+            batch_results=batch_results,
         )
         if not result_item.is_error and tuple(progress) == PIPELINE_STEP_SEQUENCE:
             self._completed_traces.append(
@@ -1118,6 +1129,7 @@ class ToolPipeline:
         prepared_candidate: ToolInvocation | None = None,
         prepared_decision: PolicyDecision | None = None,
         lock_acquired: bool = False,
+        batch_results: Sequence[ToolResultItem] = (),
     ) -> ToolResultItem:
         """Authorize, dispatch, and persist one invocation with effect accounting."""
         decision = prepared_decision
@@ -1143,7 +1155,7 @@ class ToolPipeline:
                 normalized_arguments_hash=arguments_hash,
                 effective_arguments_hash=arguments_hash,
                 idempotency_key=key,
-                origin_trust=_turn_origin_trust(checkpoint, run.kind.value),
+                origin_trust=_turn_origin_trust(checkpoint, run.kind.value, batch_results),
                 parallel_group=parallel_group,
                 created_at=now,
                 updated_at=now,

@@ -579,7 +579,9 @@ present in the model request that produced this call.** It is not a property of
 the arguments at all; it answers "was untrusted content in the room". It is
 cheap, it is deterministic, it requires no matching, and it is exactly the
 signal a rule like *require approval for external writes when the turn saw
-untrusted content* needs.
+untrusted content* needs. In a serial batch, the results of the calls before
+this one count as present, although the conversation receives them only when
+the batch ends (ADR-0277).
 
 **`argument_trust` defaults to `EXTERNAL_UNTRUSTED` for every argument**,
 because the model produced them and ADR-0002 labels model output

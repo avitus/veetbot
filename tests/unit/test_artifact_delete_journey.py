@@ -14,6 +14,7 @@ from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, Script
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import ContentBlock, FileContentBlock, TextContentBlock
 from tests.unit.test_reply_attachments import _export, _settings
+from tests.unit.test_web_tools import FakeWebProvider
 
 
 async def test_a_deleted_file_leaves_the_chat_and_the_kept_file_stays(tmp_path: Path) -> None:
@@ -112,3 +113,50 @@ async def test_a_reply_left_empty_by_a_deletion_does_not_end_paging(tmp_path: Pa
         ("user", [TextContentBlock(text="And a later question.")]),
         ("assistant", [TextContentBlock(text="Later answer.")]),
     ]
+
+
+async def test_a_web_read_earlier_in_the_same_step_blocks_the_delete(tmp_path: Path) -> None:
+    # Serial calls of one step see the trust of the results before them, so a
+    # page read in the same batch cannot steer a deletion.
+    delete = ScriptedToolCall(name="tool.call", arguments={}, call_id="delete-draft")
+    read = ScriptedToolCall(
+        name="web.fetch", arguments={"url": "https://example.org/jev"}, call_id="read-page"
+    )
+    script = FakeModelScript(
+        turns=[
+            _export("draft", call_id="export-draft", filename="draft.txt"),
+            ScriptedTurn(text="Draft attached.", stop_reason=StopReason.END_TURN),
+            ScriptedTurn(tool_calls=[read, delete], stop_reason=StopReason.TOOL_USE),
+            ScriptedTurn(text="Done.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    provider = FakeWebProvider()
+    async with build(
+        settings=_settings(tmp_path),
+        script=script,
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        first = await composition.runs.wait_terminal(
+            await composition.runs.submit("Give me a draft file.")
+        )
+        async with composition.uow_factory() as uow:
+            [draft] = await uow.artifacts.list_for_run(first.id, composition.principal)
+        delete.arguments = {
+            "name": "artifact.delete",
+            "arguments": {"artifact_ids": [str(draft.id)]},
+        }
+        second_id = await composition.runs.submit("Read the page, then tidy up.", first.session_id)
+        second = await composition.runs.wait_terminal(second_id)
+        events = await composition.runs.events(second_id)
+        assert await composition.services.artifacts.get(composition.principal, draft.id)
+
+    assert second.status is RunStatus.COMPLETED, second.failure
+    [refused] = [
+        event.payload
+        for event in events
+        if event.event_type in {"tool.call.failed", "tool.call.completed"}
+        and event.payload.get("call_id") == "delete-draft"
+    ]
+    assert refused["name"] == "artifact.delete"
+    assert refused["reason_code"] == "artifact.untrusted_turn"

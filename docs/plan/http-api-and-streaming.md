@@ -875,7 +875,9 @@ It requires `session.read` and returns the standard page shape:
 
 Items are ordered by ascending immutable session sequence. The default page size
 is 100 and the server clamps it to 200. The cursor is opaque and identifies the
-last returned message sequence; an invalid cursor is `malformed_request`. As on
+last sequence counted toward the page, which is a reply left empty by a deletion
+when one ends the page; a client continues with `next_cursor` even when `items`
+is empty. An invalid cursor is `malformed_request`. As on
 the point read, a missing, cross-tenant, or differently owned session is 404.
 
 The route is a transcript projection rather than an event-log export. Ordinary
