@@ -442,6 +442,7 @@ async def _assert_deleted_session_is_superseded_without_transport_call() -> None
 
 
 async def _assert_resolved_or_expired_approval_is_superseded_without_send() -> None:
+    """A resolved or expired approval is superseded before any device send."""
     for expired in (False, True):
         clock, factory = await memory_uow_factory()
         ids = SequenceIdFactory()
@@ -478,6 +479,7 @@ async def _assert_resolved_or_expired_approval_is_superseded_without_send() -> N
 
 
 async def _assert_answered_question_or_run_no_longer_waiting_is_superseded() -> None:
+    """An answered question or a run no longer waiting is superseded."""
     for answered in (False, True):
         clock, factory = await memory_uow_factory()
         ids = SequenceIdFactory()
@@ -609,6 +611,7 @@ async def test_crash_after_transport_accept_replays_with_same_collapse_key() -> 
 async def test_resolution_during_fanout_keeps_first_delivery_and_suppresses_remaining_devices() -> (
     None
 ):
+    """Resolution mid-fanout keeps the first delivery and stops the rest."""
     clock, factory = await memory_uow_factory()
     ids = SequenceIdFactory()
     approval = approval_request()

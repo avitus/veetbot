@@ -285,6 +285,7 @@ async def _seed_draft(app: Composition) -> tuple[EmailThread, EmailDraft]:
 async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
     profile_address: str,
 ) -> None:
+    """The proposal freezes the exact value, reads nothing, and the approved send reads once."""
     from dataclasses import replace
 
     from agent_core.domain.approvals import ApprovalResolutionType
@@ -341,6 +342,7 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
 
 
 async def test_external_reply_after_approval_invalidates_send_without_dispatch() -> None:
+    """A reply observed by the post-approval read cancels the send before dispatch."""
     from dataclasses import replace
 
     from agent_core.domain.approvals import ApprovalResolutionType
@@ -377,6 +379,7 @@ async def test_external_reply_after_approval_invalidates_send_without_dispatch()
 
 
 async def test_uncertain_send_is_preserved_and_cannot_be_resubmitted() -> None:
+    """An uncertain dispatch stays uncertain and refuses a second send."""
     from dataclasses import replace
 
     import pytest
@@ -406,6 +409,7 @@ async def test_uncertain_send_is_preserved_and_cannot_be_resubmitted() -> None:
 
 
 async def test_failed_freshness_preserves_draft_and_never_dispatches_send() -> None:
+    """A failed freshness read after approval defers the send and keeps the draft."""
     from dataclasses import replace
 
     from agent_core.domain.approvals import ApprovalResolutionType
@@ -1181,6 +1185,7 @@ async def test_body_continuation_keeps_header_provenance_across_refresh_sessions
 
 
 async def test_recovery_after_send_dispatch_preserves_uncertainty_before_any_fresh_read() -> None:
+    """Recovery of a possibly dispatched send never reads the mailbox first."""
     from dataclasses import replace
 
     from agent_core.domain.tools import ToolInvocationStatus
@@ -1219,6 +1224,7 @@ async def test_recovery_after_send_dispatch_preserves_uncertainty_before_any_fre
 
 
 async def test_editing_pending_send_cancels_old_approval_and_allows_new_exact_proposal() -> None:
+    """An edit cancels the pending proposal; the new exact proposal is approved and sent once."""
     from dataclasses import replace
 
     import pytest
@@ -1639,6 +1645,7 @@ async def test_refresh_recovery_accounts_completed_pending_read_before_new_work(
 
 
 async def test_send_recovery_accounts_confirmed_outcome_without_redispatch() -> None:
+    """A crash after dispatch is recovered as sent without a second provider write."""
     from dataclasses import replace
 
     import pytest
@@ -1928,6 +1935,7 @@ async def test_partial_large_thread_does_not_block_other_current_mail() -> None:
 async def test_invalid_json_mailbox_result_preserves_account_and_draft(
     kind: Literal["refresh", "send"],
 ) -> None:
+    """A malformed mailbox result ends the task with the account and draft intact."""
     from dataclasses import replace
 
     from agent_core.domain.approvals import ApprovalResolutionType
@@ -2303,6 +2311,7 @@ async def test_new_mail_during_the_undo_window_returns_the_parked_send_to_editin
         thread, draft = await _seed_draft(app)
 
         async def parked(run_id: UUID) -> None:
+            """The worker has not claimed the task yet."""
             return None
 
         app.services.email.dispatch = parked
@@ -2355,6 +2364,7 @@ async def test_a_press_and_a_proposal_for_the_same_revision_never_coalesce() -> 
         thread, draft = await _seed_draft(app)
 
         async def parked(run_id: UUID) -> None:
+            """The worker has not claimed the task yet."""
             return None
 
         app.services.email.dispatch = parked
@@ -2404,3 +2414,53 @@ async def test_a_press_and_a_proposal_for_the_same_revision_never_coalesce() -> 
                 source_revision=thread.revision + 1,
                 idempotency_key="press-three",
             )
+
+
+async def test_a_refused_consent_releases_its_claim_so_the_next_press_can_send() -> None:
+    """A press refused after the claim (consent or authority no longer matches) returns the
+    draft to editing without a leftover send claim; the next press is admitted and sends."""
+    from dataclasses import replace
+
+    from agent_core.domain.errors import ConflictError
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory(
+        [
+            ("get_profile", _profile()),
+            ("get_thread_page", _page()),
+            ("get_profile", _profile()),
+            ("get_thread_page", _page()),
+        ]
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        genuine = app.services.email.approve_send
+
+        async def refused(*args: object, **kwargs: object) -> None:
+            raise ConflictError("approval does not match the consented send")
+
+        app.services.email.approve_send = refused  # type: ignore[method-assign]
+        first = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="press-refused",
+        )
+        assert (await app.runs.get(first.run_id)).status is RunStatus.COMPLETED
+        after = await app.services.email.draft(app.principal, draft.id)
+        assert after.status.value == "ready" and after.send_claim_id is None
+        assert after.run_id is None or after.run_id == first.run_id
+        app.services.email.approve_send = genuine  # type: ignore[method-assign]
+        second = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=1,
+            source_revision=thread.revision,
+            idempotency_key="press-again",
+        )
+        run = await app.runs.get(second.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"

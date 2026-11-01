@@ -146,6 +146,7 @@ def _occurrence(
 
 
 async def test_exact_transition_catalog_builds_content_free_deduplicated_rows() -> None:
+    """Every catalogued transition builds one content-free, deduplicated row."""
     clock, factory = await memory_uow_factory()
     producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
     approval_id = UUID(int=410)
@@ -315,6 +316,7 @@ async def test_required_trigger_identifiers_fail_closed() -> None:
 async def test_attention_requests_allow_ninety_seconds_to_answer_on_another_device(
     status: RunStatus,
 ) -> None:
+    """Attention requests wait ninety seconds for an answer on another device."""
     clock, factory = await memory_uow_factory()
     producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
     async with factory() as uow:

@@ -2344,8 +2344,19 @@ class _TaskIO:
                     update={
                         "status": status,
                         "approval_id": approval_id or draft.approval_id,
-                        # Whatever settled the send, the undo window is over.
+                        # Whatever settled the send, the undo window is over, and a
+                        # draft back in editing keeps no claim from the attempt.
                         "send_undo_until": None,
+                        "send_claim_id": (
+                            draft.send_claim_id
+                            if status
+                            in {
+                                EmailDraftStatus.SENDING,
+                                EmailDraftStatus.SENT,
+                                EmailDraftStatus.UNCERTAIN,
+                            }
+                            else None
+                        ),
                         "updated_at": c.clock.now(),
                     }
                 ),

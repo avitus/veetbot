@@ -106,6 +106,7 @@ async def test_sync_validates_scope_body_and_unknown_runs_without_partial_succes
 
 
 async def test_read_receipt_precedes_enqueue_and_cleanup_preserves_pending_requests() -> None:
+    """A read receipt before enqueue suppresses delivery, and cleanup keeps pending requests."""
     from datetime import timedelta
 
     from agent_core.adapters.determinism import SequenceIdFactory

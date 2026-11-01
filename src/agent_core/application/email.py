@@ -616,6 +616,7 @@ class EmailExperienceService:
         *,
         idempotency_key: str | None = None,
     ) -> EmailDraft:
+        """Save one owner edit as a new revision, preserving both versions on a conflict."""
         require_scope(principal, "email.write")
         if any(c in edit.subject for c in "\r\n\x00"):
             raise ValueError("subject contains a header delimiter")
@@ -677,6 +678,8 @@ class EmailExperienceService:
                     "status": EmailDraftStatus.READY,
                     "approval_id": None,
                     "run_id": None,
+                    # A new revision is a new action; no earlier attempt owns it.
+                    "send_claim_id": None,
                     "updated_at": self.clock.now(),
                 }
             )
@@ -755,6 +758,7 @@ class EmailExperienceService:
         *,
         editing: bool = False,
     ) -> None:
+        """Cancel a parked send the draft no longer stands for; a running one refuses edits."""
         if draft.run_id is None:
             return
         try:

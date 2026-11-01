@@ -62,6 +62,7 @@ class NotificationProducer:
         approval_expires_at: datetime | None = None,
         approval_tool_name: str | None = None,
     ) -> bool:
+        """Build the content-free notification one run status change calls for, if any."""
         now = self._clock.now()
         notification_id = self._ids.new_id()
         if status is RunStatus.WAITING_FOR_APPROVAL:
@@ -142,6 +143,7 @@ class NotificationProducer:
         revision: ScheduleRevision,
         run: Run,
     ) -> bool:
+        """Build the notification for a schedule run whose outcome was accounted."""
         if (
             occurrence.disposition is not OccurrenceDisposition.MATERIALIZED
             or occurrence.session_id is None
@@ -207,6 +209,7 @@ class NotificationProducer:
         occurrence: ScheduleOccurrence,
         revision: ScheduleRevision,
     ) -> bool:
+        """Build the notification for a skipped or finished schedule occurrence."""
         if occurrence.disposition is OccurrenceDisposition.MATERIALIZED:
             return False
         if occurrence.disposition not in {
