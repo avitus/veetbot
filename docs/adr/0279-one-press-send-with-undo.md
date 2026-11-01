@@ -42,7 +42,7 @@ when the frozen invocation matches the consent.
    parked task and returns the draft to editing with its text intact; once a
    worker has claimed the task, Undo is refused and the send proceeds. The
    client shows "Sending to … · Undo" with a countdown, then Sent. Undo
-   names the run it takes back, so a late or repeated Undo meant for an
+   must name the run it takes back, so a late or repeated Undo meant for an
    earlier press cannot cancel a later press of the unchanged draft. The
    in-memory composition's inline dispatcher parks the run in a background
    task for the same window and skips one taken back meanwhile, so the

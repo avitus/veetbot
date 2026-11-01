@@ -1650,7 +1650,7 @@ class EmailExperienceService:
         draft_id: UUID,
         *,
         expected_revision: int,
-        run_id: UUID | None = None,
+        run_id: UUID,
     ) -> EmailDraft:
         """Cancel a send still parked in its undo window; a claimed send is on its way.
 
@@ -1665,7 +1665,7 @@ class EmailExperienceService:
             if draft.run_id is None and draft.status is EmailDraftStatus.READY:
                 # Already back in editing: a repeated Undo changes nothing.
                 return draft
-            if run_id is not None and draft.run_id != run_id:
+            if draft.run_id != run_id:
                 raise ConflictError("That send is no longer the one on this reply.")
             run = None if draft.run_id is None else await uow.runs.get(draft.run_id, principal)
             task = (

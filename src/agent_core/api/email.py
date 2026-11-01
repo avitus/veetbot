@@ -48,9 +48,9 @@ class SendRequest(BaseModel):
 
 
 class SendUndoRequest(RevisionRequest):
-    """Undo names the send it takes back; an older client may omit it."""
+    """Undo names the send it takes back, so a late Undo cannot cancel a later press."""
 
-    run_id: UUID | None = None
+    run_id: UUID
 
 
 class ArchiveRequest(RevisionRequest):

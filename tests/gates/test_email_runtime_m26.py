@@ -2210,7 +2210,9 @@ async def test_undo_within_the_window_returns_the_parked_send_to_editing() -> No
         parked_draft = await app.services.email.draft(app.principal, draft.id)
         assert parked_draft.status.value == "sending"
         assert parked_draft.send_undo_until == queued.scheduled_for
-        restored = await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
+        restored = await app.services.email.undo_send(
+            app.principal, draft.id, expected_revision=1, run_id=operation.run_id
+        )
         assert restored.status.value == "ready"
         assert restored.send_undo_until is None and restored.run_id is None
         assert (await app.runs.get(operation.run_id)).status is RunStatus.CANCELLED
@@ -2244,7 +2246,7 @@ async def test_undo_is_refused_once_the_send_was_claimed() -> None:
         clock=_fixed_clock(),
     ) as app:
         thread, draft = await _seed_draft(app)
-        await app.services.email.send(
+        claimed = await app.services.email.send(
             app.principal,
             draft.id,
             expected_revision=1,
@@ -2253,7 +2255,9 @@ async def test_undo_is_refused_once_the_send_was_claimed() -> None:
         )
         await _drain(app)
         with pytest.raises(ConflictError, match="already"):
-            await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
+            await app.services.email.undo_send(
+                app.principal, draft.id, expected_revision=1, run_id=claimed.run_id
+            )
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sent"
 
 
@@ -2519,7 +2523,7 @@ async def test_undo_is_refused_once_the_window_has_passed_even_if_unclaimed() ->
             return None
 
         app.services.email.dispatch = parked
-        await app.services.email.send(
+        late = await app.services.email.send(
             app.principal,
             draft.id,
             expected_revision=1,
@@ -2528,7 +2532,9 @@ async def test_undo_is_refused_once_the_window_has_passed_even_if_unclaimed() ->
         )
         clock.advance(timedelta(seconds=11))
         with pytest.raises(ConflictError, match="already"):
-            await app.services.email.undo_send(app.principal, draft.id, expected_revision=1)
+            await app.services.email.undo_send(
+                app.principal, draft.id, expected_revision=1, run_id=late.run_id
+            )
         assert (await app.services.email.draft(app.principal, draft.id)).status.value == "sending"
 
 

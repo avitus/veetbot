@@ -279,7 +279,8 @@ async def test_one_press_send_waits_out_its_undo_window_then_sends_once() -> Non
         # Parked: the worker will not claim it before the window closes.
         assert not await interactive.run_once()
         undone = await client.post(
-            f"/v1/email/drafts/{draft.id}/send-undo", json={"expected_revision": draft.revision}
+            f"/v1/email/drafts/{draft.id}/send-undo",
+            json={"expected_revision": draft.revision, "run_id": pressed.json()["run_id"]},
         )
         assert undone.status_code == 200, undone.text
         assert undone.json()["status"] == "ready" and undone.json()["send_undo_until"] is None
@@ -306,6 +307,7 @@ async def test_one_press_send_waits_out_its_undo_window_then_sends_once() -> Non
         assert sent.json()["status"] == "sent" and sent.json()["send_undo_until"] is None
         assert len(writes) == 1 and writes[0][1]["body"] == draft.body
         late = await client.post(
-            f"/v1/email/drafts/{draft.id}/send-undo", json={"expected_revision": draft.revision}
+            f"/v1/email/drafts/{draft.id}/send-undo",
+            json={"expected_revision": draft.revision, "run_id": again.json()["run_id"]},
         )
         assert late.status_code == 409, late.text

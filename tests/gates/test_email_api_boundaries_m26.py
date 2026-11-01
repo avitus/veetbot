@@ -73,7 +73,7 @@ COMMANDS = (
         "POST",
         "/v1/email/drafts/{d}/send-undo",
         "email.write",
-        {"expected_revision": 1},
+        {"expected_revision": 1, "run_id": "{r}"},
     ),
     Command("discuss", "POST", "/v1/email/threads/{t}/discussion", "email.write"),
     Command(
@@ -150,6 +150,7 @@ async def _request(
             json={"expected_revision": 1, "source_revision": 1, "idempotency_key": "parked"},
         )
         assert response.status_code == 200, response.text
+        identities["r"] = UUID(response.json()["run_id"])
     if command.name == "operation":
         response = await client.post("/v1/email/refresh")
         assert response.status_code == 200

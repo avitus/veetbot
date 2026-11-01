@@ -1024,7 +1024,7 @@ class EmailService(Protocol):
         draft_id: UUID,
         *,
         expected_revision: int,
-        run_id: UUID | None = None,
+        run_id: UUID,
     ) -> EmailDraft: ...
 
     async def archive(
