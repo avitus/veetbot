@@ -1124,6 +1124,35 @@ import Testing
         #expect(server.routes.contains { $0.hasSuffix("/input") })
     }
 
+    /// Past the run's own deadline a reply could only make it fail, so none is sent.
+    @Test
+    func aReplyCannotAnswerAPausePastItsRunDeadline() async throws {
+        let server = Self.inputAcceptingServer()
+        let model = try await configuredModel(server)
+        let runID = UUID()
+        model.runState.begin(runID: runID, status: .running)
+        model.runState.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object([
+                "kind": .string("user"),
+                "sign_in": .object([
+                    "browser_profile_id": .string(UUID().uuidString),
+                    "expires_at": .string("2020-01-01T00:00:00Z"),
+                    "run_deadline_at": .string("2020-01-01T00:00:00Z"),
+                ]),
+            ]),
+        ]))
+        let prompt = try #require(model.runState.clarifyingQuestion)
+
+        let sent = await model.send("I signed in")
+        let answered = await model.answerQuestion(prompt, answer: "I've signed in.")
+
+        #expect(!sent)
+        #expect(!answered)
+        #expect(!server.routes.contains { $0.hasSuffix("/input") })
+    }
+
     /// Without a waiting website nothing else can resume the run, so the card's
     /// fixed reply and the composer both still answer it.
     @Test(arguments: ["composer", "card"])

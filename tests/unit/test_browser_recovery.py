@@ -494,6 +494,36 @@ async def test_sign_in_pause_marks_its_waiting_event_for_a_sign_in_card(bound: b
     assert sign_in == expected
 
 
+async def test_sign_in_pause_names_a_run_deadline_that_ends_the_wait() -> None:
+    """ADR-0280: past its own deadline a run can only fail, so the card must not offer a reply."""
+    from datetime import UTC, datetime, timedelta
+
+    from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
+
+    provider = InterruptedBrowser()
+    provider.reason = "tool.browser.needs_user"
+    deadline = datetime.now(UTC) + timedelta(minutes=5)
+    async with build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[navigation(), ScriptedTurn(text="Done.")]),
+        sequential_ids=True,
+        enabled_tools=["browser.navigate", "browser.observe", "conversation.ask_user"],
+        browser_provider_override=provider,
+        limits=RunLimits(deadline_at=deadline),
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await composition.runs.submit("Read my account.", created.id)
+        events = await composition.runs.events(run_id)
+    waiting = [e for e in events if e.event_type == "run.waiting_for_user"]
+    assert len(waiting) == 1
+    sign_in = waiting[0].payload["suspension"]["sign_in"]
+    assert datetime.fromisoformat(sign_in["expires_at"]) == deadline
+    assert datetime.fromisoformat(sign_in["run_deadline_at"]) == deadline
+
+
 async def test_model_authored_question_carries_no_sign_in_marker() -> None:
     """Only the runtime's own sign-in pause is marked; the model cannot claim one."""
     async with build(

@@ -291,6 +291,7 @@ import Testing
                     "browser_profile_id": .string(profileID.uuidString),
                     "origin": .string("https://www.example.org"),
                     "expires_at": .string("2099-09-25T12:15:00Z"),
+                    "run_deadline_at": .string("2099-09-25T12:20:00Z"),
                 ]),
             ]),
         ]))
@@ -302,6 +303,14 @@ import Testing
         #expect(signIn.expiresAt == expiry)
         #expect(prompt.awaitsVerifiedSignIn(at: expiry.addingTimeInterval(-1)))
         #expect(!prompt.awaitsVerifiedSignIn(at: expiry))
+        // A verified sign-in resumes the run, then a reply does, then nothing can.
+        let deadline = expiry.addingTimeInterval(300)
+        #expect(signIn.runDeadlineAt == deadline)
+        #expect(!prompt.acceptsReply(at: expiry.addingTimeInterval(-1)))
+        #expect(prompt.acceptsReply(at: expiry))
+        #expect(!prompt.runDeadlinePassed(at: deadline.addingTimeInterval(-1)))
+        #expect(prompt.runDeadlinePassed(at: deadline))
+        #expect(!prompt.acceptsReply(at: deadline))
 
         reducer.reduce(SSEFrame(id: 2, event: "run.waiting_for_user", data: [
             "run_id": .string(runID.uuidString),

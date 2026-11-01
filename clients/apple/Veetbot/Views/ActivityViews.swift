@@ -555,6 +555,8 @@ struct SignInRequiredCard: View {
     let prompt: ClarifyingQuestionPrompt
     /// A verified sign-in continues the run; false once the wait has expired.
     let resumesByItself: Bool
+    /// The run's own deadline has passed, so only stopping it is left.
+    let ranOutOfTime: Bool
     let signIn: () async -> Void
     let openWebsiteAccess: () -> Void
     let confirmSignedIn: () async -> Bool
@@ -570,6 +572,9 @@ struct SignInRequiredCard: View {
     }
 
     private var explanation: String {
+        if ranOutOfTime {
+            return "This task ran out of time. Stop it, then start it again."
+        }
         if resumesByItself {
             return "Veetbot paused this task. It continues on its own once you are signed in."
         }
@@ -590,7 +595,9 @@ struct SignInRequiredCard: View {
             .foregroundColor(AppTheme.inkSoft)
             .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: VeetSpace.s2) {
-                if waitsForWebsite {
+                if ranOutOfTime {
+                    EmptyView()
+                } else if waitsForWebsite {
                     Button(prompt.signIn?.host.map { "Sign in to \($0)" } ?? "Sign in") {
                         run { await signIn() }
                     }
@@ -601,7 +608,7 @@ struct SignInRequiredCard: View {
                         .primaryCapsule()
                         .accessibilityIdentifier("sign-in-card.website-access")
                 }
-                if !resumesByItself {
+                if !resumesByItself && !ranOutOfTime {
                     Button("I've signed in") { run { _ = await confirmSignedIn() } }
                         .buttonStyle(QuietCapsuleButtonStyle())
                         .accessibilityIdentifier("sign-in-card.signed-in")

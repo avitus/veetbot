@@ -178,6 +178,16 @@ public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
         guard let signIn, signIn.profileID != nil else { return false }
         return signIn.expiresAt.map { now < $0 } ?? true
     }
+
+    /// Past the run's own deadline neither a sign-in nor a reply can continue it.
+    public func runDeadlinePassed(at now: Date = Date()) -> Bool {
+        signIn?.runDeadlineAt.map { now >= $0 } ?? false
+    }
+
+    /// Whether a typed reply can continue the run now.
+    public func acceptsReply(at now: Date = Date()) -> Bool {
+        !awaitsVerifiedSignIn(at: now) && !runDeadlinePassed(at: now)
+    }
 }
 
 /// The website a sign-in pause waits on, from the server's trusted wait. Both
@@ -187,6 +197,8 @@ public struct BrowserSignInPause: Equatable, Sendable {
     public let origin: String?
     /// When the server stops resuming the run by itself.
     public var expiresAt: Date? = nil
+    /// When the run itself ends, if it has a deadline.
+    public var runDeadlineAt: Date? = nil
 
     public var host: String? { origin.flatMap { URL(string: $0)?.host } }
 }
@@ -760,7 +772,8 @@ public final class RunStateReducer: ObservableObject {
             BrowserSignInPause(
                 profileID: fields["browser_profile_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
                 origin: fields["origin"]?.stringValue,
-                expiresAt: fields["expires_at"]?.stringValue.flatMap(ServerDates.date(from:))
+                expiresAt: fields["expires_at"]?.stringValue.flatMap(ServerDates.date(from:)),
+                runDeadlineAt: fields["run_deadline_at"]?.stringValue.flatMap(ServerDates.date(from:))
             )
         }
         clarifyingQuestion = ClarifyingQuestionPrompt(

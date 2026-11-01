@@ -44,11 +44,16 @@ import Testing
         let cardEnd = try #require(activity.range(of: "struct WorkingStatePanel"))
         #expect(!activity[card.lowerBound..<cardEnd.lowerBound].contains("TextField"))
         let canSend = try #require(chat.range(of: "var canSendDraft: Bool"))
-        #expect(chat[canSend.lowerBound...].prefix(600).contains("awaitsVerifiedSignIn"))
-        // The card and the composer change when the wait expires, with no event to redraw them.
-        #expect(chat.contains(".task(id: state.clarifyingQuestion?.signIn?.expiresAt)"))
+        #expect(chat[canSend.lowerBound...].prefix(600).contains("acceptsReply()"))
+        // The card and the composer change when the wait or the run's deadline
+        // passes, with no event to redraw them.
+        #expect(chat.contains("state.clarifyingQuestion?.signIn?.expiresAt"))
+        #expect(chat.contains("state.clarifyingQuestion?.signIn?.runDeadlineAt"))
         #expect(chat.contains("resumesByItself: prompt.awaitsVerifiedSignIn()"))
-        #expect(activity[card.lowerBound..<cardEnd.lowerBound].contains("if !resumesByItself {"))
+        #expect(chat.contains("ranOutOfTime: prompt.runDeadlinePassed()"))
+        let cardSource = activity[card.lowerBound..<cardEnd.lowerBound]
+        #expect(cardSource.contains("if !resumesByItself && !ranOutOfTime {"))
+        #expect(cardSource.contains("This task ran out of time."))
 
         let toolbar = try #require(chat.range(of: "struct ChatToolbarActions"))
         #expect(chat[toolbar.lowerBound...].contains(".accessibilityIdentifier(\"chat.websiteAccess\")"))

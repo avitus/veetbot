@@ -38,7 +38,9 @@ owner had to scroll to the top of the thread to reach it.
    while the wait lasts: verified sign-in resumes the run. Past `expires_at`
    the server no longer resumes it by itself, so the card adds **I've signed
    in** and the composer can answer again; the reply's fresh read and the
-   two-pause bound still apply. Without a
+   two-pause bound still apply. A run with its own deadline also carries
+   `run_deadline_at`: past it nothing can continue the run, so the card says it
+   ran out of time and offers only **Stop task**. Without a
    waiting website it offers **Open Website Access** and **I've signed in**,
    which answers the question with fixed text, and **Stop task**. The
    transcript's waiting line says "Waiting for you to sign in." and the chat
