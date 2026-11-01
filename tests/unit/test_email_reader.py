@@ -1,5 +1,6 @@
 """Synthetic mail only: reading cleanup must never replace source evidence."""
 
+import time
 from typing import cast
 
 from agent_core.application.email_reader import reading_body
@@ -81,7 +82,8 @@ On Tuesday, Alex wrote:
 > What are the risks?
 """
     result = reading_body(source)
-    assert result == source.strip()
+    # Every word stays; the sign-off's own line break now survives rendering.
+    assert result == source.strip().replace("Best,\n", "Best,\\\n")
 
 
 def test_no_blind_tail_deletion_or_remote_link_resolution() -> None:
@@ -224,3 +226,198 @@ def test_html_text_cannot_author_a_link_but_an_anchor_still_can() -> None:
     assert r"\[Verify account\](https://attacker.example/login)" in result
     assert r"[\[1\] report](https://example.com/report)" in result
     assert r"\<tel:+15551234567>" in result
+
+
+# The plain-text part Gmail generates: an anchor becomes `text <url>`, a detected
+# phone number gains its own target, and every line wraps by its full width.
+GMAIL_SIGNATURE = """Riley Example
+Partner, Example <https://www.example.com/>
+650.555.0100
+riley@example.com
+Bio <https://www.example.com/team/riley-example>|LinkedIn
+<https://www.linkedin.example/in/rileyexample/>|X <https://x.example/riley>|
+20VC <https://www.example.com/podcasts#20VC>"""
+
+READER_SIGNATURE = (
+    "Riley Example\\\n"
+    "Partner, [Example](https://www.example.com/)\\\n"
+    "650.555.0100\\\n"
+    "riley@example.com\\\n"
+    "[Bio](https://www.example.com/team/riley-example) | "
+    "[LinkedIn](https://www.linkedin.example/in/rileyexample/) | "
+    "[X](https://x.example/riley) | "
+    "[20VC](https://www.example.com/podcasts#20VC)"
+)
+
+
+def test_gmail_signature_links_its_labels_and_keeps_its_lines() -> None:
+    assert reading_body(GMAIL_SIGNATURE) == READER_SIGNATURE
+
+
+def test_link_target_links_the_word_before_it() -> None:
+    result = reading_body("See the report <https://example.com/report> for more.")
+    assert result == "See the [report](https://example.com/report) for more."
+
+
+def test_link_target_without_a_word_before_it_names_its_host() -> None:
+    result = reading_body("Source: <https://example.com/a>\n\nBefore, <https://example.com/b>")
+    assert result == (
+        "Source: [example.com](https://example.com/a)\n\n"
+        "Before, [example.com](https://example.com/b)"
+    )
+
+
+def test_address_shaped_label_names_only_its_own_destination() -> None:
+    result = reading_body(
+        "pay.example <https://attacker.example/login>\n\nwww.example.com <https://www.example.com/>"
+    )
+    assert "[pay.example]" not in result
+    assert "pay.example [attacker.example](https://attacker.example/login)" in result
+    assert "[www.example.com](https://www.example.com/)" in result
+
+
+def test_sender_text_around_a_link_target_stays_inert() -> None:
+    result = reading_body(
+        "[Verify](https://attacker.example/a) now <https://example.com/b> <tel:1>"
+    )
+    assert r"\[Verify\](https://attacker.example/a)" in result
+    assert "[now](https://example.com/b)" in result
+    assert r"\<tel:1>" in result
+
+
+def test_gmail_phone_target_is_removed_without_touching_other_angle_text() -> None:
+    assert reading_body("650.555.0100 <(650)%20555-0100>") == "650.555.0100"
+    assert reading_body("+1 650 555 0100 <+1%20650%20555%200100>") == "+1 650 555 0100"
+    assert reading_body("Size 12 <34> today") == r"Size 12 \<34> today"
+
+
+def test_gmail_links_and_phone_targets_are_cleaned_inside_quotes() -> None:
+    source = ">> Partner, Example <https://www.example.com/>\n>> 650.555.0100 <(650)%20555-0100>"
+    assert reading_body(source) == (
+        ">> Partner, [Example](https://www.example.com/)\\\n>> 650.555.0100"
+    )
+
+
+def test_wrapped_prose_flows_and_lines_the_writer_ended_stay() -> None:
+    source = """As if they were one combined fund? We would start with the first capital
+call and include all the cash flows.
+Short closing line.
+
+>>> Monday fine
+>>> Yes to method
+>>>
+>>> On Fri, Oct 30, 2026 at 5:35 PM Riley Example With A Long Name <riley@example.com>
+>>> wrote:
+"""
+    assert reading_body(source) == (
+        "As if they were one combined fund? We would start with the first capital "
+        "call and include all the cash flows.\\\n"
+        "Short closing line.\n\n"
+        ">>> Monday fine\\\n"
+        ">>> Yes to method\n"
+        ">>>\n"
+        ">>> On Fri, Oct 30, 2026 at 5:35 PM Riley Example With A Long Name "
+        "\\<riley@example.com> wrote:"
+    )
+
+
+def test_a_line_break_is_never_written_where_the_paragraph_ends() -> None:
+    """A hard break before a new block would show the reader a stray backslash."""
+    source = """Intro line
+- first
+- second
+After the list
+
+A line
+> a quote
+Line before a table
+| a | b |
+|---|---|
+| 1 | 2 |
+
+A title
+---
+Body line"""
+    assert "\\\n" not in reading_body(source)
+
+
+def test_signature_delimiter_does_not_turn_the_sign_off_into_a_heading() -> None:
+    result = reading_body("Thanks,\nJamie\n--\nJamie Example")
+    assert result == "Thanks,\\\nJamie\n\n--\\\nJamie Example"
+
+
+def test_code_fences_keep_their_lines_untouched() -> None:
+    source = "```\nshort\nlines\n```"
+    assert reading_body(source) == source
+
+
+def test_repeated_signature_is_shown_once_however_it_wrapped() -> None:
+    rewrapped = """Riley Example
+Partner, Example <https://www.example.com/>
+650.555.0100 <(650)%20555-0100>
+riley@example.com
+Bio <https://www.example.com/team/riley-example>|LinkedIn
+<https://www.linkedin.example/in/rileyexample/>|X
+<https://x.example/riley>|20VC
+<https://www.example.com/podcasts#20VC>"""
+    quoted = "\n".join(f"> {line}" for line in rewrapped.split("\n"))
+    deeper = "\n".join(f">> {line}" for line in rewrapped.split("\n"))
+    source = (
+        f"Latest note.\n\n{GMAIL_SIGNATURE}\n\nOn Friday Sam wrote:\n\n> A reply.\n>\n{quoted}\n>\n"
+        f"> On Friday Riley wrote:\n>\n>> The first question.\n>>\n{deeper}\n"
+    )
+    result = reading_body(source)
+    assert result.count("Riley Example") == 1
+    assert READER_SIGNATURE in result
+    assert "> A reply." in result
+    assert ">> The first question." in result
+    # What is left stays one quote, so the client can fold the whole chain.
+    assert "\n\n>" not in result.split("On Friday Sam wrote:")[1].strip()
+
+
+def test_short_repeats_and_differing_blocks_stay() -> None:
+    source = """Yes.
+
+Best,
+Jamie
+
+> Yes.
+>
+> Best,
+> Jamie
+>
+> One
+> Two
+> Three
+>
+> One
+> Two
+> Four
+"""
+    result = reading_body(source)
+    assert result.count("Yes.") == 2
+    assert result.count("Jamie") == 2
+    assert result.count("One") == 2
+
+
+def test_a_link_target_on_its_own_line_inside_a_quote_labels_the_line_before() -> None:
+    source = "> The article title\n> <https://example.com/article>\n> and it continues here."
+    assert reading_body(source) == (
+        "> [The article title](https://example.com/article)\n> and it continues here."
+    )
+
+
+def test_gmail_promotional_control_goes_with_its_inline_target() -> None:
+    result = reading_body(
+        "Article text.\n\nUnsubscribe <https://example.com/leave>\n\nA postscript."
+    )
+    assert result == "Article text.\n\nA postscript."
+
+
+def test_cleanup_stays_quick_on_hostile_lines() -> None:
+    """Runs on every thread read, so sender text must not make it quadratic."""
+    started = time.monotonic()
+    reading_body("a" * 50_000 + "! <https://example.com/x>")
+    reading_body("a" + " " * 50_000 + "b")
+    reading_body("\n".join(["word " * 16] * 2_000))
+    assert time.monotonic() - started < 5

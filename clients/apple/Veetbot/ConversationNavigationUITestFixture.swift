@@ -1561,7 +1561,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         let readerFields: String
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-reader") {
             let original = "Research and discovery\n<https://example.com/article>\n\nBy Jane Writer\n\nA careful reading starts with clear evidence.\n\nUnsubscribe\n<https://example.com/leave>"
-            let reader = "## Research and discovery\n\nBy Jane Writer\n\nA careful reading starts with [clear evidence](https://example.com/article)."
+            let reader = "## Research and discovery\n\nBy Jane Writer\n\nA careful reading starts with [clear evidence](https://example.com/article).\n\nOn Friday Alex wrote:\n\n> The earlier question."
             let sourceJSON = String(data: try! JSONEncoder().encode(original), encoding: .utf8)!
             let readerJSON = String(data: try! JSONEncoder().encode(reader), encoding: .utf8)!
             readerFields = "\"body\":\(sourceJSON),\"reader_body\":\(readerJSON),"

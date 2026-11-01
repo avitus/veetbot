@@ -523,7 +523,7 @@ struct MarkdownContentView: View {
     }
 }
 
-private struct MarkdownBlocksView: View {
+struct MarkdownBlocksView: View {
     let blocks: [MarkdownContentBlock]
 
     var body: some View {
