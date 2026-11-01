@@ -581,7 +581,8 @@ The send flow is:
    ten seconds by default). Undo within the window cancels the parked task
    and returns the draft to editing with its text intact; once a worker has
    claimed the task, Undo is refused and the send proceeds. The draft carries
-   `send_undo_until` so every device shows the same window.
+   `send_undo_until` so every device shows the same window; the in-memory
+   composition's inline dispatcher waits out the same window.
 3. Perform a fresh governed Gmail thread read, then recheck account authority,
    policy, the consent, draft/source revision, and action content. A failed
    freshness read defers sending and preserves the draft. An observed new

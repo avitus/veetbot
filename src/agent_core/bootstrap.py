@@ -5242,8 +5242,24 @@ async def _compose(
                 else None
             ),
         )
+
+        async def queued_delay(run_id: UUID) -> float | None:
+            """Seconds until a queued run may start; None once it is no longer queued."""
+            async with uow_factory() as uow:
+                queued = await uow.runs.get(run_id, principal)
+            if queued.status is not RunStatus.QUEUED:
+                return None
+            if queued.scheduled_for is None:
+                return 0.0
+            return max(0.0, (queued.scheduled_for - clock.now()).total_seconds())
+
         dispatcher = (
-            InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
+            InlineRunDispatcher(
+                executor.execute,
+                unit_of_work_open=uow_factory.is_open,
+                delay_before=queued_delay,
+                sleep=lambda seconds: clock.sleep(seconds),
+            )
             if storage == "memory"
             else PostgresRunDispatcher()
         )

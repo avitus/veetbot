@@ -457,7 +457,8 @@ async def exercise_surface_role(role_url: str) -> None:
 
         async def poll(surface: SurfaceWorkerComposition) -> list[tuple[int, str]]:
             # Two minutes per poll: past the ninety-second attention grace before a
-            # prompt dispatches (ADR-0143), and still under the per-sender rate window.
+            # prompt dispatches (ADR-0143), and lets the one-minute per-sender window
+            # expire between polls.
             clock.advance(timedelta(minutes=2))
             await surface.worker.run_once()
             return bot.take()

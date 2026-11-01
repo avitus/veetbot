@@ -41,7 +41,9 @@ when the frozen invocation matches the consent.
    `send_undo_until`. `POST /v1/email/drafts/{id}/send-undo` cancels the
    parked task and returns the draft to editing with its text intact; once a
    worker has claimed the task, Undo is refused and the send proceeds. The
-   client shows "Sending to … · Undo" with a countdown, then Sent.
+   client shows "Sending to … · Undo" with a countdown, then Sent. The
+   in-memory composition's inline dispatcher waits out the same window and
+   skips a run taken back meanwhile, so the window holds without a worker.
 3. **The consent satisfies the ordinary approval, once.** The task performs
    the identity check and the fresh thread read, revalidates the consent
    (owner, account, servers, draft revision, source revision, expiry, the

@@ -946,7 +946,7 @@ async def test_a_schedule_made_in_chat_runs_while_away_and_its_result_reaches_th
     `schedule_run_finished` in the same transaction. The separate production
     notification process delivers both alerts to the device registered over
     HTTP: the approval alert while the run waits, the result once it finishes,
-    each after the thirty-second attention grace period (ADR-0143).
+    each after the ninety-second attention grace period (ADR-0143).
     The pinned title may ride along (ADR-0091); the instruction and the
     scheduled reply may not.
     """

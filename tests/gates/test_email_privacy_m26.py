@@ -7,6 +7,7 @@ import logging
 import shlex
 import sys
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -16,6 +17,7 @@ import pytest
 from mcp.types import CallToolResult
 from pydantic import ValidationError
 
+from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.mcp.scripted import ScriptedMCPClient
 from agent_core.adapters.mcp.sdk import SDKMCPClient
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -241,6 +243,7 @@ async def _consented_send_notification() -> None:
             notification_dispatch_enabled=True,
         ),
         mcp_client_factory=factory,
+        clock=FixedClock(datetime(2026, 10, 31, 12, tzinfo=UTC)),
     ) as app:
         thread, draft = await _seed_draft(app)
         draft = await app.services.email.edit_draft(
