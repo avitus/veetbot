@@ -1002,11 +1002,7 @@ import Testing
             }
         }
         let model = try await configuredModel(server)
-        let prompt = ClarifyingQuestionPrompt(
-            questionID: UUID(), runID: UUID(), question: "Please sign in.",
-            signIn: BrowserSignInPause(profileID: profileID, origin: origin)
-        )
-        model.runState.begin(runID: prompt.runID, status: .waitingForUser)
+        let prompt = try #require(Self.waitForSignIn(model, profileID: profileID, origin: origin))
 
         await model.signInToContinue(prompt)
 
@@ -1021,10 +1017,10 @@ import Testing
         #expect(model.deviceSignInRequest(for: .chat) == nil)
     }
 
-    /// A card from a run that is no longer the open chat's opens nothing: the
-    /// owner may have moved on while the saved logins loaded.
-    @Test
-    func aSignInCardFromAnotherRunOpensNothing() async throws {
+    /// A card the run no longer waits on opens nothing: the owner may have
+    /// moved on, or the run resumed or ended, while the saved logins loaded.
+    @Test(arguments: ["another run", "resumed", "ended"])
+    func aSignInCardTheRunNoLongerWaitsOnOpensNothing(change: String) async throws {
         let profileID = UUID()
         let server = DeviceFlowServer { request in
             Self.route(request) == "GET veetbot.test /v1/browser-profiles"
@@ -1032,16 +1028,44 @@ import Testing
                 : nil
         }
         let model = try await configuredModel(server)
-        model.runState.begin(runID: UUID(), status: .running)
-        let prompt = ClarifyingQuestionPrompt(
-            questionID: UUID(), runID: UUID(), question: "Please sign in.",
-            signIn: BrowserSignInPause(profileID: profileID, origin: "https://example.org")
-        )
+        let prompt = try #require(Self.waitForSignIn(model, profileID: profileID, origin: "https://example.org"))
+        switch change {
+        case "another run":
+            model.runState.begin(runID: UUID(), status: .running)
+        case "resumed":
+            model.runState.reduce(SSEFrame(id: 2, event: "run.resumed", data: [
+                "run_id": .string(prompt.runID.uuidString),
+            ]))
+        default:
+            model.runState.reduce(SSEFrame(id: 2, event: "run.cancelled", data: [
+                "run_id": .string(prompt.runID.uuidString),
+            ]))
+        }
 
         await model.signInToContinue(prompt)
 
         #expect(model.deviceSignInRequest == nil)
         #expect(!model.isWebsiteAccessPresented)
+    }
+
+    /// The open chat's run pauses for sign-in to `profileID`, as the stream reports it.
+    private static func waitForSignIn(
+        _ model: ChatViewModel, profileID: UUID, origin: String
+    ) -> ClarifyingQuestionPrompt? {
+        let runID = UUID()
+        model.runState.begin(runID: runID, status: .running)
+        model.runState.reduce(SSEFrame(id: 1, event: "run.waiting_for_user", data: [
+            "run_id": .string(runID.uuidString),
+            "question_id": .string(UUID().uuidString),
+            "suspension": .object([
+                "kind": .string("user"),
+                "sign_in": .object([
+                    "browser_profile_id": .string(profileID.uuidString),
+                    "origin": .string(origin),
+                ]),
+            ]),
+        ]))
+        return model.runState.clarifyingQuestion
     }
 
     /// Without a waiting website the card opens Website Access instead.
