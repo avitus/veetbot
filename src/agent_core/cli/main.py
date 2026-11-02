@@ -1326,8 +1326,7 @@ def memory_reconcile_conflicts(
 
 
 async def _knowledge_retry(artifact_id: UUID) -> Any:
-    from agent_core.domain.artifacts import AUTO_INGEST_PENDING
-    from agent_core.knowledge.uploads import retry_refusal
+    from agent_core.domain.artifacts import AUTO_INGEST_PENDING, retry_refusal
 
     async with build(storage="postgres") as composition:
         async with composition.uow_factory() as uow:

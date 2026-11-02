@@ -17,10 +17,8 @@ from agent_core.domain.artifacts import (
     AUTO_INGEST_ATTEMPTS_KEY,
     AUTO_INGEST_FAILED,
     AUTO_INGEST_INGESTED,
-    AUTO_INGEST_KEY,
     AUTO_INGEST_PENDING,
     AUTO_INGEST_REFUSED,
-    ArtifactOrigin,
 )
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import (
@@ -156,21 +154,3 @@ class UploadAutoIngest:
                 attempts=attempts,
                 not_before=not_before,
             )
-
-
-def retry_refusal(artifact: ArtifactRef) -> str | None:
-    """Why `knowledge retry` must not reopen this artifact, or None when it may.
-
-    Only a chat upload whose automatic ingestion failed or was refused goes
-    back to pending; anything else would send a non-upload to the knowledge
-    service or re-extract a document already in knowledge (ADR-0283).
-    """
-
-    if artifact.origin != ArtifactOrigin.UPLOAD.value:
-        return "only a chat upload can be retried"
-    state = artifact.metadata.get(AUTO_INGEST_KEY)
-    if state in {AUTO_INGEST_FAILED, AUTO_INGEST_REFUSED}:
-        return None
-    if state == AUTO_INGEST_INGESTED:
-        return "the upload is already in knowledge"
-    return "the upload is still pending ingestion"

@@ -21,6 +21,7 @@ from agent_core.domain.artifacts import (
     AUTO_INGEST_KEY,
     AUTO_INGEST_NOT_BEFORE_KEY,
     AUTO_INGEST_REASON_KEY,
+    retry_refusal,
 )
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import KnowledgeIngestRequest
@@ -31,7 +32,6 @@ from agent_core.knowledge.uploads import (
     MAX_INGEST_ATTEMPTS,
     UploadAutoIngest,
     refusal_code,
-    retry_refusal,
     upload_document_id,
 )
 from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, memory_uow_factory
