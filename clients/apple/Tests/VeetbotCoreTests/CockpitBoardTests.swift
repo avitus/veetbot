@@ -257,4 +257,36 @@ import Testing
         #expect(!CockpitBoard.delivers("sessionId", to: "approvals", in: snapshot))
         #expect(!CockpitBoard.delivers(session, to: "missing", in: snapshot))
     }
+
+    @Test
+    func watchdogStaysQuietAcrossSleepAndWhileHidden() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var watchdog = CockpitWatchdog(deadline: 6, now: start)
+
+        // The Mac slept for an hour: the first beat after it is no evidence.
+        #expect(watchdog.beat(now: start.addingTimeInterval(3_600), displayed: true) == .ping)
+        // Hidden for a long time with beats running on schedule: no evidence either.
+        var moment = start.addingTimeInterval(3_600)
+        for _ in 0..<10 {
+            moment.addTimeInterval(2)
+            #expect(watchdog.beat(now: moment, displayed: false) == .ping)
+        }
+        // Back on screen, the clock starts again.
+        #expect(watchdog.beat(now: moment.addingTimeInterval(2), displayed: true) == .ping)
+    }
+
+    @Test
+    func watchdogReportsAHostThatStopsAnsweringOnScreen() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var watchdog = CockpitWatchdog(deadline: 6, now: start)
+
+        #expect(watchdog.beat(now: start.addingTimeInterval(2), displayed: true) == .ping)
+        watchdog.answered(now: start.addingTimeInterval(2))
+        #expect(watchdog.beat(now: start.addingTimeInterval(4), displayed: true) == .ping)
+        #expect(watchdog.beat(now: start.addingTimeInterval(6), displayed: true) == .ping)
+        #expect(watchdog.beat(now: start.addingTimeInterval(8), displayed: true) == .ping)
+        #expect(watchdog.beat(now: start.addingTimeInterval(10), displayed: true) == .unresponsive)
+        // Reported once; the host gets a fresh deadline after its reload.
+        #expect(watchdog.beat(now: start.addingTimeInterval(12), displayed: true) == .ping)
+    }
 }

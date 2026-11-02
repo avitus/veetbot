@@ -85,6 +85,7 @@ class SandboxPurpose(StrEnum):
 
     RUN = "run"
     COCKPIT_BUILD = "cockpit_build"
+    CODE_CHECK = "code_check"
 
 
 @dataclass(frozen=True, slots=True)

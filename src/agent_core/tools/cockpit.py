@@ -645,9 +645,12 @@ class CockpitCheckTool(PreviousCockpitCheckTool):
     )
 
     async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Render a preview through the builder; every other operation is the parent's."""
         if arguments["operation"] != "preview":
             return await super()._run(arguments, context)
         selection = {k: str(arguments[k]) for k in ("fixture", "size") if k in arguments}
+        if "_live" in arguments:
+            selection["live"] = str(arguments["_live"])
         build = await self._toolset.publication.check(
             context.principal,
             str(arguments["slug"]),
@@ -666,13 +669,18 @@ class CockpitCheckTool(PreviousCockpitCheckTool):
             async def stream() -> AsyncIterator[bytes]:
                 yield rendered.png
 
-            name = f"{arguments['slug']}-{rendered.fixture.split('/')[-1][:-5]}-{rendered.size}.png"
+            case = rendered.fixture.split("/")[-1].removesuffix(".json")
+            name = f"{arguments['slug']}-{case}-{rendered.size}.png"
             trust = TrustLevel.EXTERNAL_UNTRUSTED
             ref = await cast(ArtifactWriter, context.artifacts).create(
                 stream(), name, "image/png", trust
             )
             result = _ok(
-                "Rendered the synthetic fixture in WebKit.",
+                (
+                    "Rendered the current live data in WebKit."
+                    if rendered.fixture == "live"
+                    else "Rendered the synthetic fixture in WebKit."
+                ),
                 {
                     "ok": True,
                     "fixture": rendered.fixture,
@@ -704,6 +712,84 @@ class CockpitCheckTool(PreviousCockpitCheckTool):
                 "diagnostics": _diagnostics(build),
             },
             trust=TrustLevel.EXTERNAL_UNTRUSTED,
+        )
+
+
+class CockpitLiveCheckTool(CockpitCheckTool):
+    """Preview a widget with the owner's current feed values, in the offline builder (ADR-0281)."""
+
+    spec = CockpitCheckTool.spec.model_copy(
+        deep=True,
+        update={
+            "version": "1.2.0",
+            "description": (
+                "Validate a widget or preview it in WebKit as text and a PNG, with a fixture or "
+                "with live: true for the current feeds and settings, which stay private." + _PUBLIC
+            ),
+        },
+    )
+    spec.input_schema["properties"].update({"live": {"type": "boolean"}})
+
+    async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Add the owner's current feeds and settings to a preview that asks for live data."""
+        if not (arguments["operation"] == "preview" and arguments.get("live")):
+            return await super()._run(arguments, context)
+        if "fixture" in arguments:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "cockpit.preview_selection",
+                "Preview a fixture or live data, not both.",
+            )
+        return await super()._run(
+            {
+                **{key: value for key, value in arguments.items() if key != "live"},
+                "_live": await self._live_values(arguments, context),
+            },
+            context,
+        )
+
+    async def _live_values(self, arguments: dict[str, Any], context: ToolExecutionContext) -> str:
+        """The widget's declared feeds and settings, in the shape of a fixture."""
+        principal = context.principal
+        try:
+            manifest = json.loads(dict(arguments["files"]).get("widget.json", "{}"))
+        except ValueError:
+            manifest = {}
+        declared_feeds = manifest.get("feeds") if isinstance(manifest, dict) else None
+        feeds: dict[str, Any] = {}
+        # The builder reports a malformed manifest; reading values only skips what it cannot use.
+        for declared in declared_feeds if isinstance(declared_feeds, list) else []:
+            if not isinstance(declared, dict) or not isinstance(declared.get("id"), str):
+                continue
+            try:
+                reading = await self._toolset.feeds.read(
+                    principal, declared["id"], history=int(declared.get("history", 0))
+                )
+            except (OverflowError, TypeError, ValueError, NotFoundError):
+                continue
+            if reading.current is None:
+                continue
+            feeds[declared["id"]] = {
+                "observedAt": reading.current.observed_at.isoformat(),
+                "expectedIntervalSec": reading.current.expected_interval_seconds,
+                "error": reading.current.error,
+                "data": reading.current.data,
+                "history": [
+                    {"observedAt": item.observed_at.isoformat(), "data": item.data}
+                    for item in reading.history
+                ],
+            }
+        settings: dict[str, Any] = {}
+        async with self._toolset.uow_factory() as uow:
+            stored = await uow.cockpit_widgets.get_settings(principal, str(arguments["slug"]))
+        if stored is not None:
+            settings = dict(stored.values)
+        return json.dumps(
+            {
+                "now": self._toolset.clock.now().isoformat(),
+                "settings": settings,
+                "feeds": feeds,
+            }
         )
 
 
@@ -1051,7 +1137,7 @@ class CockpitFeedPublishTool(_CockpitTool):
 def cockpit_tools(toolset: CockpitToolset) -> tuple[_CockpitTool, ...]:
     return (
         CockpitReadTool(toolset),
-        CockpitCheckTool(toolset),
+        CockpitLiveCheckTool(toolset),
         CockpitWidgetWriteTool(toolset),
         CockpitConfigureTool(toolset),
         CockpitFeedPublishTool(toolset),

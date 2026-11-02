@@ -57,6 +57,10 @@ from agent_core.adapters.cockpit.github import (
     load_app_private_key,
 )
 from agent_core.adapters.cockpit.runtime import Draft202012SchemaCheck, FileCockpitRuntime
+from agent_core.adapters.code.github import GitHubCodeProposals
+from agent_core.adapters.code.sandbox import SandboxCodeChecker, code_check_sandbox
+from agent_core.adapters.code.screen import SandboxCodeScreen
+from agent_core.adapters.code.source_tree import FilesystemSourceTree
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -127,6 +131,10 @@ from agent_core.adapters.persistence.cockpit import (
     PostgresFeedStore,
     PostgresWidgetCommitOutbox,
     PostgresWidgetStore,
+)
+from agent_core.adapters.persistence.code_drafts import (
+    InMemoryCodeDraftRepository,
+    PostgresCodeDraftRepository,
 )
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
@@ -339,6 +347,8 @@ from agent_core.application.cockpit_projector import (
     PlatformFeedSource,
 )
 from agent_core.application.cockpit_views import CockpitBoard, CockpitRetention
+from agent_core.application.code_drafts import CodeDrafts
+from agent_core.application.code_proposals import CodeProposalWorker
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_ingest import DeviceMessageIngestService
 from agent_core.application.device_management import (
@@ -499,6 +509,15 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile, BrowserRunState
 from agent_core.domain.browser_act_views import TaskGrantSessionContext
 from agent_core.domain.captures import CAPTURE_READER_TOOL_NAME
+from agent_core.domain.code import (
+    CODE_DRAFT_TOOL_NAME,
+    CODE_PROPOSE_TOOL_NAME,
+    CODE_READ_TOOL_NAME,
+    CODE_TEST_TOOL_NAME,
+    CODE_TOOL_NAMES,
+    CODE_WRITE_TOOL_NAMES,
+    RUN_INSPECT_TOOL_NAME,
+)
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -733,6 +752,7 @@ from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.cockpit import (
     COCKPIT_TOOL_NAMES,
+    CockpitCheckTool,
     CockpitToolset,
     PreviousCockpitCheckTool,
     PreviousCockpitReadTool,
@@ -744,6 +764,13 @@ from agent_core.tools.cockpit_installation import (
     INSTALL_TOOL_NAMES,
     CockpitInstallTool,
     CockpitPrepareTool,
+)
+from agent_core.tools.code import (
+    CodeDraftTool,
+    CodeProposeTool,
+    CodeReadTool,
+    CodeTestTool,
+    CodeToolset,
 )
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
@@ -789,6 +816,7 @@ from agent_core.tools.records import (
     RecordsQueryTool,
 )
 from agent_core.tools.registry import StaticToolRegistry
+from agent_core.tools.run_inspect import RunInspectTool
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
     COCKPIT_FEED_SCOPES,
@@ -1032,10 +1060,23 @@ class _CockpitMaintenance:
                 package_kind="job",
             )
 
+        code_proposals = (
+            CodeProposalWorker(
+                uow_factory=self._uow_factory,
+                clock=self._clock,
+                publisher=GitHubCodeProposals(
+                    self._client, tokens, repository=settings.cockpit_github_repository
+                ),
+            )
+            if settings.code_proposals_enabled
+            else None
+        )
+
         async def flush_packages() -> int:
-            """Flush enabled widget and job queues through their separate repositories."""
+            """Flush enabled widget, job and code proposal queues through their own adapters."""
             count = await widget_outbox.run_once() if settings.cockpit_enabled else 0
-            return count + (await self.jobs.flush(self._principal) if self.jobs is not None else 0)
+            count += await self.jobs.flush(self._principal) if self.jobs is not None else 0
+            return count + (await code_proposals.run_once() if code_proposals is not None else 0)
 
         async def import_packages() -> int:
             """Import enabled widget and job branches without mixing their package namespaces."""
@@ -1107,6 +1148,7 @@ class Composition:
     # The Cockpit builder and its own sandbox manager, only behind the flag (M35).
     cockpit_builder: WidgetBuilder | None = None
     cockpit_sandbox: SandboxManager | None = None
+    code_sandbox: SandboxManager | None = None
     cockpit_publication: CockpitPublication | None = None
     job_publication: JobPublication | None = None
     job_execution: JobExecution | None = None
@@ -1167,7 +1209,12 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "your reply automatically. Never say a file is attached unless its export or "
     "generation tool succeeded. To delete files you generated in this chat when the owner "
     "asks, call artifact.delete through tool.call with their artifact ids; it never deletes "
-    "the owner's uploads. When the owner asks you to learn from or remember a named "
+    "the owner's uploads. When a schedule, job or widget fails, find the cause before answering, "
+    "never asking the owner for errors you can read: call run.inspect through tool.call, and "
+    "cockpit.read's diagnostics for a widget. A tile showing Paused is the device's watchdog, "
+    "not a paused schedule. Where enabled, code.read, code.draft, code.test and code.propose "
+    "read your source, then change, test and propose it for the owner's review. "
+    "When the owner asks you to learn from or remember a named "
     "website, proactively retain useful separate observations with memory.learn after reading "
     "it. Use observations with call_id and an exact 8-512 character quote; omit claim and "
     "subject to save the excerpt itself, without a paraphrase or explanatory wrapper. "
@@ -1210,7 +1257,8 @@ def _session_tool_filter(
             kept = [
                 tool
                 for tool in kept
-                if tool.name not in {COCKPIT_WIDGET_WRITE_TOOL, *INSTALL_TOOL_NAMES}
+                if tool.name
+                not in {COCKPIT_WIDGET_WRITE_TOOL, *INSTALL_TOOL_NAMES, *CODE_WRITE_TOOL_NAMES}
             ]
         return kept
 
@@ -1664,6 +1712,7 @@ def _memory_uow_repositories(
         records=records,
         integration_secrets=InMemoryIntegrationSecretStore(),
         jobs=InMemoryJobStore(),
+        code_drafts=InMemoryCodeDraftRepository(),
         job_outbox=InMemoryWidgetCommitOutbox(),
         cockpit_widgets=InMemoryWidgetStore(),
         cockpit_outbox=InMemoryWidgetCommitOutbox(),
@@ -1773,6 +1822,7 @@ def _postgres_repository_factory(
             records=records,
             integration_secrets=PostgresIntegrationSecretStore(session),
             jobs=PostgresJobStore(session),
+            code_drafts=PostgresCodeDraftRepository(session),
             job_outbox=PostgresWidgetCommitOutbox(session, package_kind="job"),
             cockpit_widgets=PostgresWidgetStore(session),
             cockpit_outbox=PostgresWidgetCommitOutbox(session),
@@ -3090,6 +3140,7 @@ async def _compose(
             raise ConfigurationError(f"MCP {name} must be a positive integer")
         warmup_limits[name] = value
     cockpit_sandbox: SandboxManager | None = None
+    code_sandbox: SandboxManager | None = None
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         job_environment: Any = fake_environment
@@ -3106,6 +3157,10 @@ async def _compose(
             cockpit_sandbox = cockpit_build_sandbox(
                 fake_environment, image_digest=fake_image_digest(), limits=sandbox_limits
             )
+        if settings.code_tools_enabled:
+            code_sandbox = code_check_sandbox(
+                fake_environment, image_digest=fake_image_digest(), limits=sandbox_limits
+            )
     elif settings.sandbox.value in {"docker", "gvisor"}:
         execution_environment: ExecutionServiceClient | DockerExecutionEnvironment
         if settings.execution_service_socket is not None:
@@ -3118,6 +3173,10 @@ async def _compose(
                 execution_environment.resolve_image_digest,
                 settings.cockpit_builder_image,
             )
+            code_image_resolver = partial(
+                execution_environment.resolve_image_digest,
+                settings.code_sandbox_image,
+            )
         else:
             execution_environment = DockerExecutionEnvironment(
                 clock, ids, runtime="runsc" if settings.sandbox.value == "gvisor" else None
@@ -3126,6 +3185,7 @@ async def _compose(
             builder_image_resolver = partial(
                 resolve_local_image_digest, settings.cockpit_builder_image
             )
+            code_image_resolver = partial(resolve_local_image_digest, settings.code_sandbox_image)
         job_environment = execution_environment
         job_image_options = {"resolve_image_digest": image_resolver}
         sandbox_manager = SandboxManager(
@@ -3140,6 +3200,12 @@ async def _compose(
             cockpit_sandbox = cockpit_build_sandbox(
                 execution_environment,
                 resolve_image_digest=builder_image_resolver,
+                limits=sandbox_limits,
+            )
+        if settings.code_tools_enabled:
+            code_sandbox = code_check_sandbox(
+                execution_environment,
+                resolve_image_digest=code_image_resolver,
                 limits=sandbox_limits,
             )
     else:
@@ -3344,6 +3410,32 @@ async def _compose(
         registry.register(JobRunTool(job_toolset))
         if integration_secrets is not None:
             registry.register(StoredKeyJobRunTool(job_toolset))
+    registry.register(RunInspectTool(uow_factory))
+    if settings.code_tools_enabled and settings.code_source_root is not None:
+        source_tree = FilesystemSourceTree(
+            settings.code_source_root, release_id=settings.release_id
+        )
+        code_toolset = CodeToolset(
+            drafts=CodeDrafts(tree=source_tree, uow_factory=uow_factory, clock=clock, ids=ids),
+            uow_factory=uow_factory,
+            clock=clock,
+            checker=None if code_sandbox is None else SandboxCodeChecker(code_sandbox, ids),
+            screen=(
+                SandboxCodeScreen(cockpit_sandbox, ids)
+                if settings.code_proposals_enabled and cockpit_sandbox is not None
+                else None
+            ),
+            owner_names=(
+                (settings.call_configuration.public_name,)
+                if settings.call_configuration is not None
+                else ()
+            ),
+        )
+        registry.register(CodeReadTool(source_tree))
+        registry.register(CodeDraftTool(code_toolset))
+        registry.register(CodeTestTool(code_toolset))
+        if settings.code_proposals_enabled:
+            registry.register(CodeProposeTool(code_toolset))
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
     registry.register(ToolCallTool())
@@ -4177,6 +4269,9 @@ async def _compose(
             if cockpit_sandbox is not None:
                 with suppress(BaseException):
                     await cockpit_sandbox.close()
+            if code_sandbox is not None:
+                with suppress(BaseException):
+                    await code_sandbox.close()
             for provider in effective_providers.values():
                 with suppress(BaseException):
                     await provider.close()
@@ -4378,6 +4473,7 @@ async def _compose(
     if cockpit_toolset is not None:
         registry.register(PreviousCockpitReadTool(cockpit_toolset))
         registry.register(PreviousCockpitCheckTool(cockpit_toolset))
+        registry.register(CockpitCheckTool(cockpit_toolset))
         for cockpit_tool in cockpit_tools(cockpit_toolset):
             registry.register(cockpit_tool)
     registry.register(MemoryRecallEpisodesTool(episode_search))
@@ -5952,6 +6048,7 @@ async def _compose(
                 sandbox=sandbox_manager,
                 cockpit_builder=cockpit_builder,
                 cockpit_sandbox=cockpit_sandbox,
+                code_sandbox=code_sandbox,
                 cockpit_publication=cockpit_publication,
                 job_publication=job_publication,
                 job_execution=job_execution,
@@ -6000,6 +6097,9 @@ async def _compose(
         if cockpit_sandbox is not None:
             with suppress(BaseException):
                 await cockpit_sandbox.close()
+        if code_sandbox is not None:
+            with suppress(BaseException):
+                await code_sandbox.close()
         for provider in effective_providers.values():
             with suppress(BaseException):
                 await provider.close()
@@ -6746,6 +6846,13 @@ async def build(
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(COCKPIT_TOOL_NAMES if effective_settings.cockpit_enabled else ()),
         *(JOB_TOOL_NAMES if effective_settings.jobs_enabled else ()),
+        RUN_INSPECT_TOOL_NAME,
+        *(
+            (CODE_READ_TOOL_NAME, CODE_DRAFT_TOOL_NAME, CODE_TEST_TOOL_NAME)
+            if effective_settings.code_tools_enabled
+            else ()
+        ),
+        *((CODE_PROPOSE_TOOL_NAME,) if effective_settings.code_proposals_enabled else ()),
         *(
             INSTALL_TOOL_NAMES
             if effective_settings.jobs_enabled
@@ -6805,6 +6912,9 @@ async def build(
             *COCKPIT_TOOL_NAMES,
             *JOB_TOOL_NAMES,
             *INSTALL_TOOL_NAMES,
+            # ADR-0281: reached when something failed, or when the code itself is the subject.
+            RUN_INSPECT_TOOL_NAME,
+            *CODE_TOOL_NAMES,
             CAPTURE_READER_TOOL_NAME,
             # ADR-0277: unindexed, like the capture reader; the default
             # instructions name it, so it takes no index entry.
@@ -7235,6 +7345,14 @@ async def build(
                 except Exception as exc:
                     logger.warning(
                         "cockpit_sandbox_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
+            if composition.code_sandbox is not None:
+                try:
+                    await composition.code_sandbox.close()
+                except Exception as exc:
+                    logger.warning(
+                        "code_sandbox_close_failed",
                         extra={"error_class": type(exc).__name__},
                     )
             for proxy in (composition.mcp_proxy, composition.owner_mcp_proxy):

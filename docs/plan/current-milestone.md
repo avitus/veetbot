@@ -4,6 +4,15 @@ title: Current Milestone
 
 # Current milestone
 
+- **Veetbot's code power — ADR-0281:** On 2026-11-01 the owner asked for
+  first-class coding and debugging power after Veetbot could not explain a
+  failing widget, and chose power up to opening pull requests. Five deferred
+  tools read run failures, read the running release's source, draft and test a
+  change offline, and open a pull request to `dev` after the owner approves. The
+  tools never merge or deploy. Default off behind `AGENT_CODE_TOOLS_ENABLED` and
+  `AGENT_CODE_PROPOSALS_ENABLED`, except the read-only `run.inspect`. Activation
+  needs the owner's GitHub App change. No milestone or gate moves.
+
 - **Integration keys MVP — ADR-0275:** On 2026-10-30 the owner accepted
   [the decision](../adr/0275-in-app-integration-secrets.md) and authorized its
   implementation on `secret-store`. The default-off MVP reuses PostgreSQL,
