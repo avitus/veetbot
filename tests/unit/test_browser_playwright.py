@@ -1400,6 +1400,26 @@ async def test_a_frame_that_stalls_cannot_hold_up_the_scan(
     assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
 
 
+async def test_a_stalled_frame_does_not_hide_a_field_in_another(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signed-out page with one slow embed must still read as signed out."""
+    monkeypatch.setattr(playwright_adapter, "_FRAME_SCAN_SECONDS", 0.05)
+
+    async def never_answers() -> int:
+        await asyncio.Event().wait()
+        return 0
+
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(fake_frame(count=AsyncMock(side_effect=never_answers)))
+    page.frames.append(fake_frame(count=AsyncMock(return_value=1)))
+    runtime = ceremony_runtime(page)
+
+    status = await asyncio.wait_for(runtime.authentication_status(), timeout=5)
+
+    assert status is BrowserAuthenticationStatus.NEEDS_USER
+
+
 async def test_a_field_in_a_frame_with_no_visible_owner_is_no_challenge() -> None:
     page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
     page.frames.append(fake_frame(count=AsyncMock(return_value=1), frame_visible=False))

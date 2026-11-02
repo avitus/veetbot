@@ -2076,6 +2076,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     @discardableResult
+    /// Creates a new website's login and begins its remote ceremony, returning the launch link.
     public func createWebsiteAccess(
         websiteURL: String,
         additionalOrigins: String = ""
@@ -2095,6 +2096,7 @@ public final class ChatViewModel: ObservableObject {
         for origin in extraOrigins where !normalizedOrigins.contains(origin) {
             normalizedOrigins.append(origin)
         }
+        let generation = connectionGeneration
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
         var createdProfileID: UUID?
@@ -2103,11 +2105,15 @@ public final class ChatViewModel: ObservableObject {
             let profile = try await api.createBrowserProfile(
                 allowedOrigins: normalizedOrigins
             )
+            // After a connection change this sends nothing more: the old client
+            // would carry the new credential.
+            guard generation == connectionGeneration else { return nil }
             createdProfileID = profile.id
             let ceremony = try await api.beginBrowserAuthentication(
                 profileID: profile.id,
                 loginURL: normalizedLoginURL
             )
+            guard generation == connectionGeneration else { return nil }
             browserAuthentication = ceremony
             websiteAuthenticationLaunchURL = ceremony.launchURL
             browserProfiles.removeAll { $0.id == profile.id }
@@ -2116,10 +2122,12 @@ public final class ChatViewModel: ObservableObject {
             do {
                 try await reloadBrowserProfiles(using: api)
             } catch {
-                present(error)
+                if generation == connectionGeneration { present(error) }
             }
+            guard generation == connectionGeneration else { return nil }
             return ceremony.launchURL
         } catch {
+            guard generation == connectionGeneration else { return nil }
             let creationError = error
             if let createdProfileID {
                 let cleanupError = await discardUnusedBrowserProfile(
@@ -2127,6 +2135,7 @@ public final class ChatViewModel: ObservableObject {
                     profileID: createdProfileID,
                     authenticationID: nil
                 )
+                guard generation == connectionGeneration else { return nil }
                 browserProfiles.removeAll { $0.id == createdProfileID }
                 if browserAuthentication?.profileID == createdProfileID {
                     clearWebsiteAuthenticationState()
@@ -2150,6 +2159,7 @@ public final class ChatViewModel: ObservableObject {
         websiteAuthenticationLaunchURL = nil
     }
 
+    /// The secure login page could not open: ends the ceremony, keeping a saved login.
     public func websiteAuthenticationLaunchFailed() async {
         await discardCurrentWebsiteAccess(
             successMessage: remoteSignInKeepsProfileID == nil
@@ -2245,8 +2255,8 @@ public final class ChatViewModel: ObservableObject {
         adoptedOrigin: String?,
         addedOrigins: [String] = []
     ) async -> DeviceSignInResult {
-        // The remote browser is the alternative when this device cannot start
-        // or carry the sign-in (B5, ADR-0288).
+        /// The remote browser is the alternative when this device cannot start
+        /// or carry the sign-in (B5, ADR-0288).
         func failure(_ message: String, canRetry: Bool = true) -> DeviceSignInResult {
             let remoteMayHelp =
                 message == DeviceSignInMessage.couldNotStart
@@ -2490,20 +2500,27 @@ public final class ChatViewModel: ObservableObject {
         profileID: UUID, loginURL: String, from surface: DeviceSignInSurface
     ) async -> URL? {
         guard let api else { return nil }
+        let generation = connectionGeneration
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
         switch await beginCeremony(
-            using: api, profileID: profileID, loginURL: loginURL, mode: .remote, while: { true }
+            using: api, profileID: profileID, loginURL: loginURL, mode: .remote,
+            while: { generation == connectionGeneration }
         ) {
         case .success(let ceremony):
+            // After a connection change this sends nothing more: the old client
+            // would carry the new credential.
+            guard generation == connectionGeneration else { return nil }
             browserAuthentication = ceremony
             websiteAuthenticationLaunchURL = ceremony.launchURL
             remoteSignInKeepsProfileID = profileID
             errorMessage = nil
             try? await reloadBrowserProfiles(using: api)
+            guard generation == connectionGeneration else { return nil }
             if surface == .chat { isWebsiteAccessPresented = true }
             return ceremony.launchURL
         case .failure(let error):
+            guard generation == connectionGeneration else { return nil }
             errorMessage = error.message == DeviceSignInMessage.couldNotStart
                 ? DeviceSignInMessage.couldNotStartRemote : error.message
             return nil
@@ -2780,6 +2797,8 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Ends the current remote ceremony. A new website's unused login goes with it;
+    /// a saved login stays (ADR-0288).
     private func discardCurrentWebsiteAccess(successMessage: String?) async {
         guard let api, let authentication = browserAuthentication else {
             if let successMessage { errorMessage = successMessage }

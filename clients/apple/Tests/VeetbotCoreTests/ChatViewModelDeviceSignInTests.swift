@@ -194,6 +194,66 @@ import Testing
         #expect(begin["login_url"] as? String == "https://example.org/")
     }
 
+    /// The old client would carry the new credential, so the attempt sends
+    /// nothing more and nothing of it shows on the new connection.
+    @Test
+    func aConnectionChangeDuringARemoteSignInSendsNothingMore() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = remoteSignInServer(profileID: profileID, ceremonyID: ceremonyID)
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let begin = "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"
+        let beginning = server.hold(begin)
+        let switching = Task { await model.switchDeviceSignInToRemoteBrowser(request) }
+        #expect(await server.arrival(of: begin))
+
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "another-token"))
+        server.clear()
+        beginning.open()
+        let launch = await switching.value
+
+        #expect(launch == nil)
+        #expect(server.routes.isEmpty)
+        #expect(model.browserAuthentication == nil)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+    }
+
+    /// The same for a new website, whichever of its two requests was answering.
+    @Test(arguments: [true, false])
+    func aConnectionChangeWhileANewWebsiteStartsSendsNothingMore(whileCreating: Bool) async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles":
+                return (201, Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true, remote: true))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let route = whileCreating
+            ? "POST veetbot.test /v1/browser-profiles"
+            : "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"
+        let answering = server.hold(route)
+        let creating = Task { await model.createWebsiteAccess(websiteURL: "example.org") }
+        #expect(await server.arrival(of: route))
+
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "another-token"))
+        server.clear()
+        answering.open()
+        let launch = await creating.value
+
+        #expect(launch == nil)
+        #expect(server.routes.isEmpty)
+        #expect(model.browserAuthentication == nil)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+        #expect(model.errorMessage == nil)
+    }
+
     /// Start over belongs to a new website's setup, where it removes the unused
     /// login. On a saved login it must only end the ceremony.
     @Test

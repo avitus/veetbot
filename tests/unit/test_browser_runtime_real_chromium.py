@@ -409,6 +409,17 @@ async def _code_form(request: Request) -> Response:
     return html("<input autocomplete='one-time-code' name='code'>")
 
 
+async def _sectioned_code(request: Request) -> Response:
+    """`autocomplete` is a case-insensitive token list, not one exact value."""
+    del request
+    return html("<input autocomplete='section-login ONE-TIME-CODE' name='code'>")
+
+
+async def _framed_sectioned_code(request: Request) -> Response:
+    del request
+    return html("<iframe src='/sectioned-code' width='400'></iframe>")
+
+
 async def _hidden_frames(request: Request) -> Response:
     """Signed-in pages keep invisible frames, such as silent token refreshers."""
     del request
@@ -440,6 +451,8 @@ FRAMED_SIGN_IN_ROUTES = [
     Route("/logon-form", _logon_form),
     Route("/framed-code", _framed_code),
     Route("/code-form", _code_form),
+    Route("/sectioned-code", _sectioned_code),
+    Route("/framed-sectioned-code", _framed_sectioned_code),
     Route("/hidden-frames", _hidden_frames),
     Route("/frame-field-hidden", _frame_field_hidden),
     Route("/frame-with-hidden-field", _frame_with_hidden_field),
@@ -467,6 +480,24 @@ async def test_a_one_time_code_field_in_a_frame_still_needs_the_user() -> None:
         await runtime.navigate(site.url("/framed-code"))
 
         assert await runtime.authentication_status() is BrowserAuthenticationStatus.NEEDS_USER
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("/sectioned-code", id="in-the-page"),
+        pytest.param("/framed-sectioned-code", id="in-a-frame"),
+    ],
+)
+async def test_a_one_time_code_token_among_others_is_a_challenge(path: str) -> None:
+    async with browsing(FRAMED_SIGN_IN_ROUTES) as (site, runtime):
+        await runtime.navigate(site.url(path))
+
+        assert await runtime.authentication_status() is BrowserAuthenticationStatus.NEEDS_USER
+        with pytest.raises(BrowserProviderError) as refused:
+            await runtime.check_automation_ready()
+
+    assert refused.value.reason_code == "tool.browser.needs_user"
 
 
 async def test_verification_sees_a_sign_in_form_in_a_frame() -> None:

@@ -373,6 +373,22 @@ class _ReadinessRequests:
 
 
 _FRAME_SCAN_SECONDS = 1.0
+# `autocomplete` is a case-insensitive token list, such as "section-login one-time-code".
+_CREDENTIAL_FIELDS = "input[type=password],input[autocomplete~='one-time-code' i]"
+
+
+async def _frame_shows_credential_field(frame: Frame) -> bool:
+    """Report a visible credential field in one visible frame; a detached frame shows none."""
+    with suppress(PlaywrightError):
+        owner = await frame.frame_element()
+        frame_visible = await owner.is_visible()
+        await owner.dispose()
+        if frame_visible:
+            fields = frame.locator(_CREDENTIAL_FIELDS)
+            for index in range(await fields.count()):
+                if await fields.nth(index).is_visible():
+                    return True
+    return False
 
 
 async def _credential_field_in_frame(page: Page) -> bool:
@@ -382,23 +398,23 @@ async def _credential_field_in_frame(page: Page) -> bool:
     credential fields count there: a CAPTCHA class or challenge wording inside
     an embedded widget says nothing about this page. A frame that goes away or
     stalls during the scan shows no field, so it cannot fail a typed key or a
-    verification load.
+    verification load. Frames are scanned together, so a stalled one cannot
+    hide a field in another.
     """
-    with suppress(TimeoutError):
-        async with asyncio.timeout(_FRAME_SCAN_SECONDS):
-            for frame in page.frames:
-                if frame == page.main_frame:
-                    continue
-                with suppress(PlaywrightError):
-                    owner = await frame.frame_element()
-                    frame_visible = await owner.is_visible()
-                    await owner.dispose()
-                    if not frame_visible:
-                        continue
-                    fields = frame.locator("input[type=password],input[autocomplete=one-time-code]")
-                    for index in range(await fields.count()):
-                        if await fields.nth(index).is_visible():
-                            return True
+    scans = [
+        asyncio.create_task(_frame_shows_credential_field(frame))
+        for frame in page.frames
+        if frame != page.main_frame
+    ]
+    try:
+        with suppress(TimeoutError):
+            for finished in asyncio.as_completed(scans, timeout=_FRAME_SCAN_SECONDS):
+                if await finished:
+                    return True
+    finally:
+        for scan in scans:
+            scan.cancel()
+        await asyncio.gather(*scans, return_exceptions=True)
     return False
 
 
@@ -1583,6 +1599,7 @@ class PythonPlaywrightRuntime:
         return cast(dict[str, object], await self._context.storage_state(indexed_db=True))
 
     async def check_automation_ready(self) -> None:
+        """Refuse to act while the page shows a sign-in challenge, so the owner is asked."""
         page = self._current_page()
         if await page.evaluate(AUTHENTICATION_SCRIPT) or await _credential_field_in_frame(page):
             await self._forget_observation()
@@ -1592,7 +1609,7 @@ class PythonPlaywrightRuntime:
     async def _sign_in_challenge_visible(page: Page) -> bool:
         """Report a password, one-time-code, CAPTCHA, passkey, MFA, or consent prompt."""
         intervention = page.locator(
-            "input[type=password],input[autocomplete=one-time-code],"
+            f"{_CREDENTIAL_FIELDS},"
             "iframe[src*='captcha' i],iframe[title*='captcha' i],"
             "[class*='captcha' i],[id*='captcha' i]"
         )

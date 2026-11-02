@@ -10,7 +10,7 @@ AUTHENTICATION_SCRIPT = (
     while (node && scanned++ < 8192) {
         const element = node.nodeType === 1;
         const credential = element && node.matches(
-            'input[type="password"],input[autocomplete="one-time-code"]');
+            'input[type="password"],input[autocomplete~="one-time-code" i]');
         const captcha = element && !node.closest('.grecaptcha-badge') && node.matches(
             'iframe[src*="captcha" i],iframe[title*="captcha" i],'
             + '[id*="captcha" i],[class*="captcha" i]');
