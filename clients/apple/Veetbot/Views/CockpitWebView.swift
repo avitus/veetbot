@@ -97,8 +97,10 @@ final class CockpitWebController: NSObject, WKNavigationDelegate, WKUIDelegate, 
     private var runtime: CockpitRuntime?
     private var pendingMessage: JSONValue?
     private var hostReady = false
+    /// Whether Cockpit is the visible mode; the window's own state is read at each beat.
+    var isBoardVisible = true
     private var watchdog: Timer?
-    private var lastAnswer = Date()
+    private var heartbeat = CockpitWatchdog(deadline: deadlineSeconds, now: Date())
     private var rulesInstalled = false
     static let heartbeatSeconds: TimeInterval = 2
     static let deadlineSeconds: TimeInterval = 6
@@ -176,7 +178,7 @@ final class CockpitWebController: NSObject, WKNavigationDelegate, WKUIDelegate, 
 
     private func startWatchdog() {
         watchdog?.invalidate()
-        lastAnswer = Date()
+        heartbeat = CockpitWatchdog(deadline: Self.deadlineSeconds, now: Date())
         watchdog = Timer.scheduledTimer(withTimeInterval: Self.heartbeatSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.beat() }
         }
@@ -185,16 +187,25 @@ final class CockpitWebController: NSObject, WKNavigationDelegate, WKUIDelegate, 
     /// Ping the host from outside the web view; a widget that never yields stops the host too.
     private func beat() {
         guard hostReady else { return }
-        if Date().timeIntervalSince(lastAnswer) > Self.deadlineSeconds {
+        if heartbeat.beat(now: Date(), displayed: isOnScreen) == .unresponsive {
             hostReady = false
-            lastAnswer = Date()
             onUnresponsive()
             webView.reload()
             return
         }
         webView.callAsyncJavaScript("return 1", arguments: [:], in: nil, in: .page) { [weak self] result in
-            if case .success = result { self?.lastAnswer = Date() }
+            if case .success = result { self?.heartbeat.answered(now: Date()) }
         }
+    }
+
+    /// The board is in a window the owner can see, in the visible mode of an active scene.
+    private var isOnScreen: Bool {
+        guard isBoardVisible, let window = webView.window else { return false }
+        #if os(macOS)
+        return window.occlusionState.contains(.visible)
+        #else
+        return window.windowScene?.activationState == .foregroundActive
+        #endif
     }
 
     // MARK: WKScriptMessageHandler
@@ -204,7 +215,7 @@ final class CockpitWebController: NSObject, WKNavigationDelegate, WKUIDelegate, 
         else { return }
         if parsed == .ready {
             hostReady = true
-            lastAnswer = Date()
+            heartbeat.answered(now: Date())
             if let pendingMessage { push(pendingMessage) }
         }
         onMessage(parsed)
@@ -232,7 +243,8 @@ final class CockpitWebController: NSObject, WKNavigationDelegate, WKUIDelegate, 
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         hostReady = false
-        onUnresponsive()
+        // The system ends a hidden board's web process on its own; that is no widget's doing.
+        if isOnScreen { onUnresponsive() }
         webView.reload()
     }
 
@@ -268,6 +280,7 @@ struct CockpitWebView {
     let fetch: @Sendable (String) async throws -> CockpitAssetData
     let onMessage: (CockpitHostMessage) -> Void
     let onUnresponsive: () -> Void
+    let isVisible: Bool
 
     @MainActor
     func makeCoordinator() -> CockpitWebController { CockpitWebController(fetch: fetch) }
@@ -276,6 +289,7 @@ struct CockpitWebView {
     private func update(_ controller: CockpitWebController) {
         controller.onMessage = onMessage
         controller.onUnresponsive = onUnresponsive
+        controller.isBoardVisible = isVisible
         controller.show(runtime: runtime, allowed: allowed, message: message)
     }
 }

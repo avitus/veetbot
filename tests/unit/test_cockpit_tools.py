@@ -714,6 +714,141 @@ async def test_preview_returns_visible_text_and_private_image_without_publicatio
             assert await uow.cockpit_widgets.list_widgets(OWNER) == []
 
 
+async def test_preview_with_live_data_renders_the_current_feed_without_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with harness(tmp_path) as h:
+        preview = WidgetPreview("live", "sm", "Live City", b"synthetic-preview")
+        builder = AsyncMock(return_value=WidgetBuild(ok=True, diagnostics=(), preview=preview))
+        monkeypatch.setattr(type(h.stack.builder), "build", builder)
+        schema = {"type": "object", "properties": {"city": {"type": "string"}}}
+        published = await h.call(
+            "cockpit.feed.publish",
+            {
+                "feed": "agent.weather",
+                "data": {"city": "Live City"},
+                "expected_interval_seconds": 900,
+                "schema": schema,
+            },
+        )
+        assert published.ok, published.failure
+        context = h.context()
+        writer = ArtifactWriterFactory(
+            h.stack.uow_factory,
+            FilesystemArtifactStore(tmp_path),
+            h.stack.clock,
+            SequenceIdFactory(),
+        ).for_run(
+            tenant_id=OWNER.tenant_id,
+            principal_id=OWNER.principal_id,
+            session_id=CHAT,
+            run_id=context.run_id,
+            origin=ArtifactOrigin.SANDBOX_EXPORT,
+        )
+        result = await h.call(
+            "cockpit.check",
+            {
+                "operation": "preview",
+                "slug": "weather",
+                "files": {
+                    **package(),
+                    "widget.json": json.dumps(
+                        {"schema": 1, "slug": "weather", "feeds": [{"id": "agent.weather"}]}
+                    ),
+                },
+                "live": True,
+            },
+            artifacts=writer,
+        )
+        assert result.ok and result.structured and result.structured["fixture"] == "live"
+        summary = result.content[0]
+        assert isinstance(summary, TextPart)
+        assert "live" in summary.text and "synthetic" not in summary.text
+        image = result.content[-1]
+        assert isinstance(image, ImageReferencePart) and image.filename == "weather-live-sm.png"
+        assert result.output_trust == TrustLevel.EXTERNAL_UNTRUSTED
+        assert builder.await_args is not None
+        selection = builder.await_args.kwargs["preview"]
+        assert "fixture" not in selection
+        live = json.loads(selection["live"])
+        assert live["feeds"]["agent.weather"]["data"] == {"city": "Live City"}
+        assert live["feeds"]["agent.weather"]["expectedIntervalSec"] == 900
+        assert live["now"]
+        # Live values stay out of the package the screen and the public branch see.
+        assert "Live City" not in str(builder.await_args.args)
+        async with h.stack.uow_factory() as uow:
+            assert await uow.cockpit_widgets.list_widgets(OWNER) == []
+
+
+@pytest.mark.parametrize(
+    "feeds",
+    [
+        None,
+        "agent.weather",
+        {"id": "agent.weather"},
+        [None, 3, {"id": {"nested": 1}}],
+        [{"id": "agent.weather", "history": float("inf")}],
+    ],
+)
+async def test_a_live_preview_leaves_a_malformed_feed_list_to_the_builder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    feeds: Any,
+) -> None:
+    """The builder owns manifest diagnostics, so reading live values must not raise first."""
+
+    async with harness(tmp_path) as h:
+        preview = WidgetPreview("live", "sm", "Live City", b"synthetic-preview")
+        builder = AsyncMock(return_value=WidgetBuild(ok=True, diagnostics=(), preview=preview))
+        monkeypatch.setattr(type(h.stack.builder), "build", builder)
+        context = h.context()
+        writer = ArtifactWriterFactory(
+            h.stack.uow_factory,
+            FilesystemArtifactStore(tmp_path),
+            h.stack.clock,
+            SequenceIdFactory(),
+        ).for_run(
+            tenant_id=OWNER.tenant_id,
+            principal_id=OWNER.principal_id,
+            session_id=CHAT,
+            run_id=context.run_id,
+            origin=ArtifactOrigin.SANDBOX_EXPORT,
+        )
+        result = await h.call(
+            "cockpit.check",
+            {
+                "operation": "preview",
+                "slug": "weather",
+                "files": {
+                    **package(),
+                    "widget.json": json.dumps({"schema": 1, "slug": "weather", "feeds": feeds}),
+                },
+                "live": True,
+            },
+            artifacts=writer,
+        )
+        assert result.ok, result.failure
+        assert builder.await_args is not None
+        assert json.loads(builder.await_args.kwargs["preview"]["live"])["feeds"] == {}
+
+
+async def test_a_live_preview_cannot_also_name_a_fixture(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        result = await h.call(
+            "cockpit.check",
+            {
+                "operation": "preview",
+                "slug": "weather",
+                "files": package(),
+                "live": True,
+                "fixture": "fixtures/typical.json",
+            },
+        )
+        assert not result.ok and result.failure is not None
+        assert result.failure.reason_code == "cockpit.preview_selection"
+
+
 async def test_failed_first_import_is_diagnosable_without_a_widget(tmp_path: Path) -> None:
     async with harness(tmp_path) as h:
         async with h.stack.uow_factory() as uow:

@@ -114,6 +114,7 @@ def test_required_make_targets_exist() -> None:
         "cockpit-install",
         "test-cockpit",
         "cockpit-builder-image",
+        "code-sandbox-image",
         "cockpit-runtime",
     ):
         assert f"{target}:" in text
@@ -561,10 +562,11 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "agent worker --role async" in async_worker
     assert "SupplementaryGroups=docker" not in async_worker
     assert "agent execution-service" in execution
-    # The service admits only the two production images (docs/plan/cockpit.md).
+    # The service admits only the production images (docs/plan/cockpit.md, ADR-0281).
     assert (
         "--allow-image agent-core-sandbox:production "
-        "--allow-image veetbot-cockpit-builder:production"
+        "--allow-image veetbot-cockpit-builder:production "
+        "--allow-image veetbot-code-sandbox:production"
     ) in execution
     assert "--runtime" not in execution
     assert "User=veetbot-exec" in execution
@@ -981,10 +983,14 @@ def test_production_preflight_normalizes_command_timeout(
     assert "timed out" in result.stderr
 
 
-def test_production_preflight_requires_the_sandbox_and_cockpit_builder_images(
+def test_production_preflight_requires_the_sandbox_builder_and_code_images(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    present = {"agent-core-sandbox:20260810-152233-abcdef0"}
+    present = {
+        "agent-core-sandbox:20260810-152233-abcdef0",
+        "veetbot-code-sandbox:20260810-152233-abcdef0",
+    }
     inspected: list[tuple[str, ...]] = []
 
     def inspect(*command: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
@@ -1001,6 +1007,9 @@ def test_production_preflight_requires_the_sandbox_and_cockpit_builder_images(
             "SANDBOX_MECHANISM": "docker",
             "AGENT_SANDBOX_IMAGE": "agent-core-sandbox:20260810-152233-abcdef0",
             "AGENT_COCKPIT_BUILDER_IMAGE": "veetbot-cockpit-builder:20260810-152233-abcdef0",
+            "AGENT_CODE_TOOLS_ENABLED": "1",
+            "AGENT_CODE_SOURCE_ROOT": str(tmp_path),
+            "AGENT_CODE_SANDBOX_IMAGE": "veetbot-code-sandbox:20260810-152233-abcdef0",
         }
     )
     assert production_check._image_failures(settings) == [
@@ -1008,7 +1017,34 @@ def test_production_preflight_requires_the_sandbox_and_cockpit_builder_images(
     ]
     present.add("veetbot-cockpit-builder:20260810-152233-abcdef0")
     assert production_check._image_failures(settings) == []
+    present.remove("veetbot-code-sandbox:20260810-152233-abcdef0")
+    assert production_check._image_failures(settings) == [
+        "code sandbox image is unavailable: veetbot-code-sandbox:20260810-152233-abcdef0"
+    ]
+    present.add("veetbot-code-sandbox:20260810-152233-abcdef0")
     assert {command[:3] for command in inspected} == {("docker", "image", "inspect")}
+
+
+def test_production_preflight_skips_the_code_image_while_code_tools_are_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host that never enabled code tools has no reason to hold their image."""
+
+    def inspect(*command: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
+        del timeout
+        missing = command[-1].startswith("veetbot-code-sandbox:")
+        return subprocess.CompletedProcess(command, 1 if missing else 0, "", "")
+
+    monkeypatch.setattr(production_check, "_run", inspect)
+    settings = load_settings(
+        {
+            "DATABASE_URL": "postgresql+asyncpg://" + "agent:agent@localhost:5432/agent",
+            "DEPLOYMENT_MODE": "development",
+            "AUTH_MODE": "dev",
+            "SANDBOX_MECHANISM": "docker",
+        }
+    )
+    assert production_check._image_failures(settings) == []
 
 
 def test_production_preflight_requires_the_chat_default_provider_credential(tmp_path: Path) -> None:

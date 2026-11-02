@@ -51,6 +51,8 @@ BUILTIN_DOMAINS = frozenset(
         "records",
         "cockpit",
         "job",
+        "run",
+        "code",
         "email",
         "knowledge",
         "web",

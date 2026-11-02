@@ -1,3 +1,8 @@
+# ADR-0281: On 2026-11-01 the owner asked for first-class coding and debugging
+# power and chose power up to opening pull requests: run.inspect, code.read,
+# code.draft, code.test and code.propose, which never merge or deploy. The widget
+# watchdog stops counting sleep and hidden pages against a widget. Accepted; no
+# milestone or gate moves.
 # ADR-0279: On 2026-10-31 the owner authorized one-press Send with Undo: the
 # press is the owner's consent to the exact draft revision at the thread
 # revision on screen (the Archive gesture pattern), the task is parked for

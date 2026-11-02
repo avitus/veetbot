@@ -26,7 +26,7 @@ endif
 	test-browser-cases \
 	test-sandbox test-apple test-apple-ui test-apple-ui-macos test-apple-ui-macos-vm \
 	test-apple-ui-ios \
-	test-deploy sandbox-image cockpit-builder-image browser-image test-browser-image \
+	test-deploy sandbox-image cockpit-builder-image code-sandbox-image browser-image test-browser-image \
 	production-check \
 	docs docs-serve docs-check citations-fix website-install test-website cockpit-install test-cockpit \
 	cockpit-widgets-worktree cockpit-runtime
@@ -130,6 +130,10 @@ sandbox-image:
 # The Cockpit widget builder sandbox image (docs/plan/cockpit.md).
 cockpit-builder-image:
 	docker build -f execution/cockpit-builder.Dockerfile -t veetbot-cockpit-builder:dev .
+
+# The offline sandbox behind code.test (ADR-0281).
+code-sandbox-image:
+	docker build -f execution/code-sandbox.Dockerfile -t veetbot-code-sandbox:dev .
 
 test-sandbox: sandbox-image cockpit-builder-image
 	uv run pytest -m sandbox
