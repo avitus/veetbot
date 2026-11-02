@@ -1954,15 +1954,16 @@ the first production case.
 the narrow restatement key and reports the duplicate groups it would fold, the
 canonicals it would promote and the single-character placeholders it would
 retire; `--confirm` writes the repair through the governed path (the newest
-copy becomes the active canonical with the group's corroboration, the rest
-are superseded with `memory.superseded` events, fresh store positions, no
-SQL). Run the dry run first; the three provisional copies of the owner's car
+copy becomes the active canonical with the group's corroboration, strongest
+authority and durability, the rest are superseded with `memory.superseded`
+events, fresh store positions, no SQL). Run the dry run first; the three provisional copies of the owner's car
 formed between September and October 2026 are the first production case.
 
 ### Chat upload ingestion retry (ADR-0283)
 
 `agent knowledge retry <artifact id>` returns a chat upload whose automatic
-ingestion failed or was refused to pending with a fresh attempt count; the
+ingestion failed or was refused to pending with a fresh attempt count, and
+refuses a pending or ingested upload or an artifact of another origin; the
 maintenance sweep ingests it on its next round and records the outcome on the
 upload as usual. A failed attempt is logged as `upload_knowledge_ingest_failed`
 with the error class, and the retries back off one minute and then fifteen.

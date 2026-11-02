@@ -295,6 +295,8 @@ def test_a_marker_for_a_document_knowledge_could_not_add_says_so() -> None:
     assert first is not None and second is not None
     assert "could not be added to knowledge" in first
     assert "Tell the owner the file was not indexed" in first
+    assert "ask the owner for an excerpt or a retry" in first
+    assert "read the attachment itself" not in first
     assert "still being added" not in first
     assert "was refused by knowledge" in second
     assert "knowledge.search will not find its passages" in second

@@ -1,8 +1,10 @@
 """Synthetic write-path regressions; names and model numbers are fabricated."""
 
+from datetime import timedelta
+
 import pytest
 
-from agent_core.domain.memory import BeliefType, MemoryStatus
+from agent_core.domain.memory import BeliefType, MemoryAuthority, MemoryLongevity, MemoryStatus
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from tests.contract.memory_fixtures import formation_stack
 from tests.contract.support import principal
@@ -239,10 +241,25 @@ async def test_merge_possessions_folds_legacy_duplicates_and_retires_placeholder
                     "statement": statement,
                     "subject": subject,
                     "store_position": newest.store_position - 1 - index,
+                    # The oldest copy was the owner's own, durable record.
+                    "authority": MemoryAuthority.USER if index == 1 else newest.authority,
+                    "longevity": MemoryLongevity.DURABLE,
+                    "expires_at": None,
                 },
                 deep=True,
             )
             legacy.append(await uow.memories.upsert_belief(copy))
+        # The newest copy, the one the repair keeps, was inferred and expiring.
+        newest = await uow.memories.reinforce(
+            newest.model_copy(
+                update={
+                    "authority": MemoryAuthority.INFERRED,
+                    "longevity": MemoryLongevity.ONGOING,
+                    "expires_at": newest.valid_from + timedelta(days=90),
+                },
+                deep=True,
+            )
+        )
     dry = await service.merge_possessions(confirm=False)
     assert dry.model_dump() == {
         "groups_examined": 1,
@@ -263,6 +280,10 @@ async def test_merge_possessions_folds_legacy_duplicates_and_retires_placeholder
         kept = await uow.memories.get(other.id, principal())
     assert canonical.status is MemoryStatus.ACTIVE
     assert canonical.corroboration_count == 3
+    # The canonical belief keeps the group's strongest authority and its durability.
+    assert canonical.authority is MemoryAuthority.USER
+    assert canonical.longevity is MemoryLongevity.DURABLE
+    assert canonical.expires_at is None
     assert canonical.confidence == pytest.approx(min(1.0, newest.confidence + 0.2))
     assert all(record.status is MemoryStatus.SUPERSEDED for record in folded)
     assert all(record.superseded_by == canonical.id for record in folded)

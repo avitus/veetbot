@@ -123,6 +123,18 @@ def claimed_upload(artifact: ArtifactRef, *, run_id: UUID, auto_ingest: bool) ->
     return artifact.model_copy(update=update, deep=True)
 
 
+def auto_ingest_due(metadata: dict[str, Any], now: datetime) -> bool:
+    """Whether a pending upload's backoff, if any, has elapsed (ADR-0283)."""
+
+    recorded = metadata.get(AUTO_INGEST_NOT_BEFORE_KEY)
+    if not isinstance(recorded, str):
+        return True
+    try:
+        return datetime.fromisoformat(recorded) <= now
+    except ValueError:
+        return True
+
+
 def auto_ingest_metadata(
     metadata: dict[str, Any],
     *,

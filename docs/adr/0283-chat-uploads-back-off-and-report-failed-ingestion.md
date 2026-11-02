@@ -27,20 +27,30 @@ another attempt short of sending the file again.
 ## Decision
 
 1. **Attempts back off.** A failed attempt records when the next may run: one
-   minute after the first failure, fifteen minutes after the second. The
-   sweep skips an upload whose backoff has not elapsed. The third failure
-   still marks the upload failed; the `auto_ingest_not_before` key is cleared
-   with the other attempt bookkeeping when ingestion succeeds.
+   minute after the first failure, fifteen minutes after the second, counted
+   from the moment the failure is recorded, so a slow attempt still earns its
+   full wait. The repository lists only uploads whose backoff has elapsed, so
+   an upload still waiting is neither swept nor counted against the batch
+   and never holds a later, due upload back. The third failure still marks
+   the upload failed; the `auto_ingest_not_before` key is cleared with the
+   other attempt bookkeeping when ingestion succeeds.
 2. **The warning names the error class.** `upload_knowledge_ingest_failed`
    carries `error_class` beside the artifact id and attempt number. The
    message stays out of the log, since it can carry document text.
 3. **The model is told.** The knowledge states gain `failed` and `refused`,
    and the attachment marker renders a note for each: the file could not be
    added to knowledge, `knowledge.search` will not find it, tell the owner it
-   was not indexed, and read the attachment itself when a question needs it.
+   was not indexed, and when a question needs its content use the file only
+   if it is rendered in the message, otherwise ask the owner for an excerpt
+   or a retry. A large PDF reaches the model as a marker, not as content, and
+   no tool reads an upload back, so the note never points at text the model
+   cannot see.
 4. **The owner can retry.** `agent knowledge retry <artifact id>` returns a
-   failed or refused upload to pending with a fresh attempt count; the
-   maintenance sweep takes it from there and records the outcome as before.
+   chat upload whose ingestion failed or was refused to pending with a fresh
+   attempt count, and refuses anything else: a pending or ingested upload,
+   or an artifact of another origin. The sweep lists chat uploads only. The
+   maintenance sweep takes the retried upload from there and records the
+   outcome as before.
 
 ## Consequences
 
@@ -55,8 +65,12 @@ another attempt short of sending the file again.
 ## Verification
 
 - `tests/unit/test_upload_auto_ingest_failures.py`: the retries wait one and
-  fifteen minutes, the warning carries the error class and not the message,
-  and success clears the backoff.
+  fifteen minutes from the recorded failure, the warning carries the error
+  class and not the message, success clears the backoff, and only a failed or
+  refused chat upload may be retried.
+- `tests/contract/test_artifact_repository_contract.py`: a deferred upload is
+  neither listed nor counted against the batch limit, and a non-upload
+  artifact carrying the marker is never listed.
 - `tests/unit/test_model_attachments_adr0120.py`: failed and refused files
   render the new notes.
 - `tests/unit/test_memory_review_cli.py`: the retry command queues the upload

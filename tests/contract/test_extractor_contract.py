@@ -94,3 +94,17 @@ async def test_pdf_extractor_turns_bookmarks_into_headings() -> None:
         text, "Manual", document_row_id=UUID(int=1), document_id=UUID(int=2), version=1
     )
     assert chunks[0].heading_path == ["Parking", "Fuel system check"]
+
+    # A scan with bookmarks but no text layer still has no extractable text:
+    # headings alone never pass ingestion.
+    scan = PdfWriter()
+    scan.add_blank_page(width=200, height=200)
+    scan.add_outline_item("Parking", 0)
+    scanned = io.BytesIO()
+    scan.write(scanned)
+    assert (
+        await PdfTextExtractor(maximum_bytes=1024 * 1024).extract(
+            _source(scanned.getvalue()), "application/pdf"
+        )
+        == ""
+    )

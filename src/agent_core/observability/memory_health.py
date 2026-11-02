@@ -107,8 +107,8 @@ def render_memory_health_report(report: MemoryHealthReport) -> str:
         ),
         (
             f"Without recall: {report.limited_runs} runs went without automatic recall at "
-            f"some step ({report.limited_exhausted} exhausted, {report.limited_timed_out} "
-            "timed out)."
+            f"some step ({report.limited_exhausted} exhausted and {report.limited_timed_out} "
+            "timed-out limitation events)."
         ),
         (
             f"Traces: {report.traces} (lexical {report.traces_with_lexical}, structured "

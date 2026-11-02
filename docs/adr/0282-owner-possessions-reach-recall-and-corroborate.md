@@ -46,8 +46,10 @@ wording "my car" it scores 0.438, and either would have been returned.
 3. **A one-time repair folds the existing duplicates.** `agent memory
    merge-possessions` groups live direct possessions by the restatement key.
    The newest member of a group becomes the canonical belief: active, carrying
-   the group's corroboration count, sources and scopes, and the group's best
-   confidence raised by 0.1 per folded copy; the others are superseded by it,
+   the group's corroboration count, sources and scopes, the group's strongest
+   authority, durable longevity with no expiry when any member is durable or
+   unexpiring (otherwise the latest expiry), and the group's best confidence
+   raised by 0.1 per folded copy; the others are superseded by it,
    each with a `memory.superseded` event. A possession whose object is a
    single character ("User has a X.") is a formation placeholder and is
    retired. The dry run is the default; `--confirm` writes through the
@@ -68,7 +70,8 @@ wording "my car" it scores 0.438, and either would have been returned.
   questions anchor; advice and residence questions do not.
 - `tests/unit/test_owner_memory_formation_incident.py`: the same car stated
   in another session is one active belief with corroboration two; the repair
-  folds two legacy copies, promotes the newest, retires the placeholder,
-  leaves a lone possession alone, and is idempotent.
+  folds two legacy copies, promotes the newest with the group's user authority
+  and durability, retires the placeholder, leaves a lone possession alone,
+  and is idempotent.
 - `tests/unit/test_memory_review_cli.py`: the command reports by default and
   writes on `--confirm`.

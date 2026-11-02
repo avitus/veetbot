@@ -193,10 +193,13 @@ announces that it is partial.
 ### Owner-sent attachments (ADR-0120)
 
 [ADR-0283](../adr/0283-chat-uploads-back-off-and-report-failed-ingestion.md):
-a failed automatic ingestion backs off one minute and then fifteen before its
-next attempt, logs `upload_knowledge_ingest_failed` with the error class, is
-told to the model through the attachment marker's `failed` and `refused`
-knowledge states, and can be queued again with `agent knowledge retry`.
+a failed automatic ingestion backs off one minute and then fifteen from the
+recorded failure before its next attempt (the sweep lists only chat uploads
+whose backoff has elapsed, so a waiting upload never holds a due one back),
+logs `upload_knowledge_ingest_failed` with the error class, is told to the
+model through the attachment marker's `failed` and `refused` knowledge
+states, and, once failed or refused, can be queued again with
+`agent knowledge retry`.
 
 A text, Markdown, or PDF file the owner attaches to a chat message is ingested
 automatically, and only that. Sending the message marks the attachment pending

@@ -9,7 +9,7 @@ runs with `USER` origin trust; every other ingestion step still applies.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.domain.agents import Principal
@@ -17,9 +17,10 @@ from agent_core.domain.artifacts import (
     AUTO_INGEST_ATTEMPTS_KEY,
     AUTO_INGEST_FAILED,
     AUTO_INGEST_INGESTED,
-    AUTO_INGEST_NOT_BEFORE_KEY,
+    AUTO_INGEST_KEY,
     AUTO_INGEST_PENDING,
     AUTO_INGEST_REFUSED,
+    ArtifactOrigin,
 )
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import (
@@ -89,13 +90,10 @@ class UploadAutoIngest:
 
         async with self._uow_factory() as uow:
             pending = await uow.artifacts.pending_auto_ingest(
-                self._principal, limit=self._batch_size
+                self._principal, now=self._clock.now(), limit=self._batch_size
             )
         admitted = 0
-        now = self._clock.now()
         for artifact in pending:
-            if not _due(artifact, now):
-                continue
             attempts = int(artifact.metadata.get(AUTO_INGEST_ATTEMPTS_KEY, 0)) + 1
             request = KnowledgeIngestRequest(
                 source=artifact,
@@ -125,14 +123,15 @@ class UploadAutoIngest:
                     },
                 )
                 failed = attempts >= MAX_INGEST_ATTEMPTS
+                # The clock is read at the failure, so a slow attempt still earns
+                # its full backoff.
+                deadline = self._clock.now() + RETRY_DELAYS[min(attempts, len(RETRY_DELAYS)) - 1]
                 await self._record(
                     artifact,
                     AUTO_INGEST_FAILED if failed else AUTO_INGEST_PENDING,
                     "transient",
                     attempts,
-                    not_before=None
-                    if failed
-                    else (now + RETRY_DELAYS[min(attempts, len(RETRY_DELAYS)) - 1]).isoformat(),
+                    not_before=None if failed else deadline.isoformat(),
                 )
                 continue
             await self._record(artifact, AUTO_INGEST_INGESTED, None, 0)
@@ -159,12 +158,19 @@ class UploadAutoIngest:
             )
 
 
-def _due(artifact: ArtifactRef, now: datetime) -> bool:
-    """Whether a pending attachment's backoff, if any, has elapsed."""
-    recorded = artifact.metadata.get(AUTO_INGEST_NOT_BEFORE_KEY)
-    if not isinstance(recorded, str):
-        return True
-    try:
-        return datetime.fromisoformat(recorded) <= now
-    except ValueError:
-        return True
+def retry_refusal(artifact: ArtifactRef) -> str | None:
+    """Why `knowledge retry` must not reopen this artifact, or None when it may.
+
+    Only a chat upload whose automatic ingestion failed or was refused goes
+    back to pending; anything else would send a non-upload to the knowledge
+    service or re-extract a document already in knowledge (ADR-0283).
+    """
+
+    if artifact.origin != ArtifactOrigin.UPLOAD.value:
+        return "only a chat upload can be retried"
+    state = artifact.metadata.get(AUTO_INGEST_KEY)
+    if state in {AUTO_INGEST_FAILED, AUTO_INGEST_REFUSED}:
+        return None
+    if state == AUTO_INGEST_INGESTED:
+        return "the upload is already in knowledge"
+    return "the upload is still pending ingestion"

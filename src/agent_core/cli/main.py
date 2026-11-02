@@ -1327,9 +1327,14 @@ def memory_reconcile_conflicts(
 
 async def _knowledge_retry(artifact_id: UUID) -> Any:
     from agent_core.domain.artifacts import AUTO_INGEST_PENDING
+    from agent_core.knowledge.uploads import retry_refusal
 
     async with build(storage="postgres") as composition:
         async with composition.uow_factory() as uow:
+            current = await uow.artifacts.get(artifact_id, composition.principal)
+            refusal = retry_refusal(current)
+            if refusal is not None:
+                raise ValueError(f"{current.name} cannot be retried: {refusal}")
             artifact = await uow.artifacts.record_auto_ingest(
                 artifact_id,
                 composition.principal,
@@ -1354,7 +1359,7 @@ def knowledge_retry(
 
     try:
         result = asyncio.run(_knowledge_retry(artifact_id))
-    except (ConfigurationError, NotFoundError) as exc:
+    except (ConfigurationError, NotFoundError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(json.dumps(result))

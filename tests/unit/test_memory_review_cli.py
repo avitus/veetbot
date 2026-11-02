@@ -71,6 +71,14 @@ def test_knowledge_retry_queues_the_upload_again(monkeypatch: pytest.MonkeyPatch
     assert json.loads(result.stdout)["auto_ingest"] == "pending"
     assert seen == [UUID(int=7)]
 
+    async def refuse_retry(artifact_id: UUID) -> dict[str, str]:
+        raise ValueError("the upload is already in knowledge")
+
+    monkeypatch.setattr(cli_main, "_knowledge_retry", refuse_retry)
+    refused = runner.invoke(app, ["knowledge", "retry", str(UUID(int=7))])
+    assert refused.exit_code == 1
+    assert "already in knowledge" in refused.output
+
 
 def test_memory_merge_possessions_reports_by_default_and_writes_on_confirm(
     monkeypatch: pytest.MonkeyPatch,

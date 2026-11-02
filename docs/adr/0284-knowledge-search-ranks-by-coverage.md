@@ -38,7 +38,9 @@ suite could not see the production ranking.
 3. **A PDF's outline becomes Markdown headings.** The extractor writes each
    bookmark as a heading on the page it opens, nested by outline depth, so the
    chunker gives a manual's sections real heading paths. A PDF without an
-   outline, or with one that cannot be read, keeps plain page text.
+   outline, or with one that cannot be read, keeps plain page text; a scan
+   with bookmarks but no text layer still has no extractable text, so
+   headings alone never pass ingestion.
 
 Automatic pre-turn knowledge retrieval stays where the knowledge design left
 it, a later step behind an evaluation gate; this decision changes only what

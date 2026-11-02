@@ -4398,9 +4398,28 @@ class GovernedMemoryService:
                 scopes = list(
                     dict.fromkeys(scope for member in members for scope in member.origin_scopes)
                 )
+                # The newest copy is kept, but the group's strongest authority
+                # and its durability travel with it: an owner's durable record
+                # is never weakened by a later inferred, expiring copy.
+                strongest = max(members, key=lambda item: _AUTHORITY_RANK[item.authority])
+                durable = any(
+                    member.longevity is MemoryLongevity.DURABLE or member.expires_at is None
+                    for member in members
+                )
                 promoted = canonical.model_copy(
                     update={
                         "status": MemoryStatus.ACTIVE,
+                        "authority": strongest.authority,
+                        "longevity": (MemoryLongevity.DURABLE if durable else canonical.longevity),
+                        "expires_at": (
+                            None
+                            if durable
+                            else max(
+                                member.expires_at
+                                for member in members
+                                if member.expires_at is not None
+                            )
+                        ),
                         "corroboration_count": sum(
                             member.corroboration_count for member in members
                         ),

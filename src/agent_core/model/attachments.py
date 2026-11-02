@@ -107,8 +107,9 @@ _KNOWLEDGE_NOTES: dict[KnowledgeState, str] = {
     ),
     KnowledgeState.FAILED: (
         " The owner's file could not be added to knowledge: knowledge.search will not "
-        "find its passages. Tell the owner the file was not indexed, and read the "
-        "attachment itself when a question needs it."
+        "find its passages. Tell the owner the file was not indexed; when a question "
+        "needs its content, use the file only if it is rendered in this message, and "
+        "otherwise ask the owner for an excerpt or a retry."
     ),
     KnowledgeState.REFUSED: (
         " The owner's file was refused by knowledge (unreadable, encrypted, empty, too "

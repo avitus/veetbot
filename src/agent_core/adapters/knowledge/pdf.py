@@ -22,15 +22,21 @@ def _pdf_text(content: bytes) -> str:
         raise ToolValidationError("knowledge source is encrypted")
     headings = _outline_headings(reader)
     pages: list[str] = []
+    has_text = False
     try:
         for number, page in enumerate(reader.pages):
             text = (page.extract_text() or "").strip()
+            has_text = has_text or bool(text)
             lead = "\n".join(f"{'#' * depth} {title}" for depth, title in headings.get(number, ()))
             if lead:
                 text = f"{lead}\n\n{text}" if text else lead
             pages.append(text)
     except Exception as exc:
         raise ToolValidationError("knowledge source could not be read") from exc
+    # A scan with bookmarks but no text layer still has no extractable text:
+    # headings alone would pass ingestion as a passage of nothing but titles.
+    if not has_text:
+        return ""
     return "\n\n".join(text for text in pages if text)
 
 
