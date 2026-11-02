@@ -1450,6 +1450,13 @@ exact host permissions, credential references, feed permissions and limits
 remain in private grants. The grant is immutable and names its job; an expanded
 request creates a new approval rather than editing an existing grant.
 
+A publication failure belongs to its entry and never stops the flush, so every
+other job's due entry still commits. A repository outage, a moved branch or a
+version conflict retries after thirty seconds. Any other error, such as an
+unavailable privacy screen or a refused path, is logged and retries after a delay
+that doubles from thirty seconds to fifteen minutes. The stored error names only
+the exception's type.
+
 The per-execution broker admits each operation against that grant. HTTP reads
 resolve a permitted public hostname once and dial the checked address with the
 original TLS hostname. Explicit model completions offer no tools, reserve a

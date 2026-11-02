@@ -11,8 +11,9 @@ from agent_core.adapters.cockpit.runtime import Draft202012SchemaCheck
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.application.jobs import JobPublication
 from agent_core.domain.agents import Principal
-from agent_core.domain.cockpit import BuildDiagnostic
-from agent_core.domain.jobs import JobManifest
+from agent_core.domain.cockpit import BuildDiagnostic, CommitOutboxEntry
+from agent_core.domain.errors import ConflictError
+from agent_core.domain.jobs import JobBrokerError, JobManifest, JobRecord, JobRevision
 from agent_core.ports.cockpit import BuildScreen, WidgetRepositoryUnavailableError
 from tests.contract.support import memory_uow_factory, principal
 
@@ -495,3 +496,165 @@ async def test_new_privacy_match_does_not_block_removal_of_public_code() -> None
     head = await repository.head()
     assert head is not None
     assert await repository.read_widget("count-items", at=head) is None
+
+
+async def _save(service: JobPublication, slug: str, **arguments: Any) -> JobRevision:
+    """Queue one job revision for the default owner."""
+    return await service.write(
+        principal=principal(),
+        slug=slug,
+        source="def main(inputs, job): return 1",
+        manifest=JobManifest(title="Count items"),
+        expected_revision=arguments.pop("expected_revision", None),
+        request_key=arguments.pop("request_key", f"save-{slug}"),
+        **arguments,
+    )
+
+
+async def _queued(factory: Any, service: JobPublication) -> dict[str, CommitOutboxEntry]:
+    """Read every queued job commit by slug, whether or not it is due."""
+    async with factory() as uow:
+        entries = await uow.job_outbox.due(
+            principal().tenant_id, now=service.clock.now() + timedelta(days=1), limit=10
+        )
+    return {entry.slug: entry for entry in entries}
+
+
+@pytest.mark.parametrize("cause", ["screen", "repository"])
+async def test_one_jobs_unexpected_failure_leaves_the_other_jobs_publishing(
+    cause: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The failing entry retries on its own; a later job still publishes in the same flush."""
+    factory, service, repository, screen = await setup()
+    owner = principal()
+    failing = await _save(service, "first-job")
+    other = await _save(service, "second-job")
+    healthy_check, healthy_write = screen.check, repository.write_widget
+
+    async def check(
+        principal: Principal, files: Mapping[str, str], *, screen: BuildScreen
+    ) -> tuple[BuildDiagnostic, ...]:
+        if "first-job" in (screen.commit_message or ""):
+            raise JobBrokerError("job.screen_unavailable", retryable=True)
+        return await healthy_check(principal, files, screen=screen)
+
+    async def write(slug: str, *args: Any, **kwargs: Any) -> str:
+        if slug == "first-job":
+            raise RuntimeError("Unexpected private detail")
+        return await healthy_write(slug, *args, **kwargs)
+
+    if cause == "screen":
+        screen.check = check  # type: ignore[method-assign]
+    else:
+        repository.write_widget = write  # type: ignore[method-assign]
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        published = await uow.jobs.get(owner, "second-job")
+        waiting = await uow.jobs.get(owner, "first-job")
+    assert published.live_revision_id == other.id
+    assert waiting.revisions[str(failing.id)].state == "pending_commit"
+    entry = (await _queued(factory, service))["first-job"]
+    assert entry.attempts == 1
+    assert entry.next_attempt_at == service.clock.now() + timedelta(seconds=30)
+    kind = "JobBrokerError" if cause == "screen" else "RuntimeError"
+    assert entry.last_error == f"Job publication failed: {kind}"
+    assert any(item.message == "job_publication_entry_failed" for item in caplog.records)
+    screen.check, repository.write_widget = healthy_check, healthy_write  # type: ignore[method-assign]
+    cast(FixedClock, service.clock).advance(timedelta(seconds=30))
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        assert (await uow.jobs.get(owner, "first-job")).live_revision_id == failing.id
+
+
+async def test_an_unexpected_failure_backs_off_to_fifteen_minutes() -> None:
+    """A permanent failure settles to a slow retry rather than one every thirty seconds."""
+    factory, service, repository, _ = await setup()
+    await _save(service, "first-job")
+
+    async def write(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("Unexpected")
+
+    repository.write_widget = write  # type: ignore[method-assign]
+    for attempt, delay in enumerate((30, 60, 120, 240, 480, 900, 900), start=1):
+        assert await service.flush(principal()) == 0
+        entry = (await _queued(factory, service))["first-job"]
+        assert entry.attempts == attempt
+        assert entry.next_attempt_at == service.clock.now() + timedelta(seconds=delay)
+        cast(FixedClock, service.clock).advance(timedelta(seconds=delay))
+
+
+async def test_a_repository_outage_keeps_its_steady_thirty_second_retry() -> None:
+    """An outage ends on its own, so its retry does not back off."""
+    factory, service, repository, _ = await setup()
+    await _save(service, "first-job")
+
+    async def unavailable() -> str:
+        raise WidgetRepositoryUnavailableError("Offline")
+
+    repository.ensure_branch = unavailable  # type: ignore[method-assign]
+    for attempt in (1, 2, 3):
+        assert await service.flush(principal()) == 0
+        entry = (await _queued(factory, service))["first-job"]
+        assert entry.attempts == attempt
+        assert entry.next_attempt_at == service.clock.now() + timedelta(seconds=30)
+        cast(FixedClock, service.clock).advance(timedelta(seconds=30))
+
+
+async def test_archiving_an_archived_job_does_not_hold_up_another_job() -> None:
+    """A real route to a refused path: the package is already off the branch."""
+    factory, service, _, _ = await setup()
+    owner = principal()
+    first = await _save(service, "first-job")
+    await service.flush(owner)
+    archived = await _save(
+        service, "first-job", expected_revision=first.id, request_key="archive", archive=True
+    )
+    await service.flush(owner)
+    await _save(
+        service, "first-job", expected_revision=archived.id, request_key="again", archive=True
+    )
+    other = await _save(service, "second-job")
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        assert (await uow.jobs.get(owner, "second-job")).live_revision_id == other.id
+    entry = (await _queued(factory, service))["first-job"]
+    assert entry.last_error == "Job publication failed: WidgetPathRefusedError"
+
+
+async def test_a_privacy_rejection_that_cannot_be_saved_retries_alone() -> None:
+    """Recording the rejection is part of the attempt, so its failure stays with the entry."""
+    factory, service, _, screen = await setup()
+    owner = principal()
+    rejected = await _save(service, "first-job")
+    other = await _save(service, "second-job")
+    healthy_check = screen.check
+
+    async def check(
+        principal: Principal, files: Mapping[str, str], *, screen: BuildScreen
+    ) -> tuple[BuildDiagnostic, ...]:
+        if "first-job" in (screen.commit_message or ""):
+            return (BuildDiagnostic(rule="screen.name", message="Contains a known name."),)
+        return await healthy_check(principal, files, screen=screen)
+
+    screen.check = check  # type: ignore[method-assign]
+    async with factory() as uow:
+        store = uow.jobs
+    healthy_put = store.put
+
+    async def put(record: JobRecord, *, expected_version: int | None) -> Any:
+        if record.slug == "first-job":
+            raise ConflictError("The job changed.", reason="job_changed")
+        return await healthy_put(record, expected_version=expected_version)
+
+    store.put = put
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        assert (await uow.jobs.get(owner, "second-job")).live_revision_id == other.id
+    assert (await _queued(factory, service))["first-job"].attempts == 1
+    store.put = healthy_put
+    cast(FixedClock, service.clock).advance(timedelta(seconds=30))
+    assert await service.flush(owner) == 0
+    async with factory() as uow:
+        saved = await uow.jobs.get(owner, "first-job")
+    assert saved.revisions[str(rejected.id)].state == "rejected"
+    assert await _queued(factory, service) == {}
