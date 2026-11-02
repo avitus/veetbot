@@ -21,6 +21,7 @@ from agent_core.domain.correspondence import (
     EmailCorrespondenceSummary,
 )
 from agent_core.domain.email import (
+    EMAIL_ARRIVAL_DAYS,
     EMAIL_HISTORY_DAYS,
     EMAIL_POLICY_VERSION,
     EmailAccount,
@@ -28,6 +29,7 @@ from agent_core.domain.email import (
     EmailDraft,
     EmailDraftBody,
     EmailDraftStatus,
+    EmailRecord,
     EmailSyncState,
     EmailTask,
     EmailThread,
@@ -281,6 +283,8 @@ class _TaskIO:
         self.imported: dict[UUID, EmailThread] = {}
         # Provider threads whose retained window this slice's discovery waited on.
         self.window_waiting: set[tuple[str, str]] = set()
+        # Anything a server check saw that makes it more than an empty look (ADR-0286).
+        self.found_work = False
         counts = context.checkpoint.working_state.setdefault("email_read_counts", {})
         if not isinstance(counts, dict):
             raise ConflictError("email read counters are malformed")
@@ -779,8 +783,6 @@ class _TaskIO:
             async with c.uow_factory() as uow, uow.email.lock(c.principal):
                 await self._write_fence(uow)
                 prior = await uow.email.get(c.principal, "thread_progress", progress_key)
-                from agent_core.domain.email import EmailRecord
-
                 revision = 0 if prior is None else prior.revision
                 await uow.email.put(
                     EmailRecord(
@@ -897,7 +899,9 @@ class _TaskIO:
         """Advance bounded discovery, assessment, and eligible automatic drafts."""
         c = self.context
         # Above the learning share only new mail is read and ranked (ADR-0256).
-        new_mail_only = self.task.scope == "new_mail"
+        # A server check goes further and handles only arrivals (ADR-0286).
+        arrival_check = self.task.scope == "arrivals"
+        new_mail_only = self.task.scope != "full"
         for account_id in self.task.account_ids:
             account, sync = await self._state(account_id)
             try:
@@ -970,7 +974,7 @@ class _TaskIO:
                     )
                     sync.inbox_page_open = False
                     await self._save_sync(account, sync)
-                expired = await self._expired_inbox(account_id)
+                expired = [] if arrival_check else await self._expired_inbox(account_id)
                 for thread in sorted(expired, key=lambda item: -item.priority):
                     if not (await self._import(account_id, thread.provider_thread_id))[0]:
                         break
@@ -995,6 +999,7 @@ class _TaskIO:
                 )
                 await self._save_sync(account, sync)
             except EmailToolError:
+                self.found_work = True
                 latest, sync = await self._state(account_id)
                 await self._save_sync(
                     latest.model_copy(
@@ -1007,6 +1012,9 @@ class _TaskIO:
                     ),
                     sync,
                 )
+        if arrival_check:
+            await self._assess_arrivals()
+            return
         # Cached mail also reranks after a profile change without another Gmail read.
         cutoff = body_cutoff(c.clock.now())
         async with c.uow_factory() as uow:
@@ -1019,24 +1027,6 @@ class _TaskIO:
             }
         learning = await self.service.learning_context(c.principal, None)
         revision = int(str(learning.get("profile_revision", 0)))
-
-        def assessment_current(thread: EmailThread) -> bool:
-            """Require matching source, model, policy, profile, and completed analysis."""
-            prior = assessments.get(str(thread.id))
-            return (
-                thread.assessment_version == EMAIL_POLICY_VERSION
-                and thread.profile_revision == revision
-                and prior is not None
-                and self._junk_current(prior.payload, thread)
-                # Relationship memory can change without an email-profile bump.
-                # Revisit bypasses in the existing four-thread bounded rotation;
-                # assess() reuses the receipt when protections remain unchanged.
-                and not prior.payload.get("junk_bypassed")
-                and prior.payload.get("analysis_complete") is True
-                and prior.payload.get("retry_pending") is not True
-                and self._model_current(prior.payload.get("model_revision"))
-                and prior.payload.get("source_fingerprint") == thread.source_fingerprint
-            )
 
         def assessment_order(thread: EmailThread) -> tuple[bool, float, float, str]:
             """Prioritize the oldest unfinished assessments with deterministic tie breaking."""
@@ -1062,7 +1052,7 @@ class _TaskIO:
                     and message.sent_at >= c.clock.now() - timedelta(days=EMAIL_HISTORY_DAYS)
                     for message in thread.messages
                 )
-                and not assessment_current(thread)
+                and not self._assessment_current(thread, assessments.get(str(thread.id)), revision)
             ),
             key=assessment_order,
         )
@@ -1114,6 +1104,140 @@ class _TaskIO:
             }
         learning = await self.service.learning_context(c.principal, None)
         revision = int(str(learning.get("profile_revision", 0)))
+        for thread in self._draft_candidates(candidates, assessments, revision):
+            if thread.draft_id is None:
+                # A rejected proposal leaves only this thread undrafted.
+                with suppress(EmailModelResultError):
+                    await self.generate_draft(thread.id)
+        await self._verify_subscriptions()
+        if not new_mail_only:
+            await self._summarize_correspondence()
+
+    async def _assess_arrivals(self) -> None:
+        """Assess and draft only mail with new evidence, then record an empty look (ADR-0286).
+
+        A profile, model or prompt revision alone leaves a conversation for
+        foreground slices, so a check's cost follows arriving mail, not the backlog.
+        """
+        c = self.context
+        now = c.clock.now()
+        since = now - timedelta(days=EMAIL_ARRIVAL_DAYS)
+        cutoff = body_cutoff(now)
+
+        def waiting(thread: EmailThread) -> bool:
+            return (thread.account_id, thread.provider_thread_id) in self.window_waiting
+
+        def arrival(thread: EmailThread, prior: EmailRecord | None) -> bool:
+            """A completed assessment of this exact source is the only thing that ends one."""
+            return (
+                prior is None
+                or prior.payload.get("source_fingerprint") != thread.source_fingerprint
+                or prior.payload.get("analysis_complete") is not True
+                or prior.payload.get("retry_pending") is True
+            )
+
+        async with c.uow_factory() as uow:
+            recent = [
+                summary
+                async for summary in thread_summaries(uow.email, c.principal)
+                if summary.account_id in self.task.account_ids
+                and ((summary.in_inbox and summary.updated_at >= since) or waiting(summary))
+            ]
+            selected = [
+                summary
+                for summary in recent
+                if arrival(summary, await uow.email.get(c.principal, "assessment", str(summary.id)))
+            ]
+        selected.sort(key=lambda thread: (not waiting(thread), -thread.updated_at.timestamp()))
+        assessed: list[UUID] = []
+        for summary in selected:
+            if len(assessed) >= 4:
+                break
+            async with c.uow_factory() as uow:
+                stored = await read_value(
+                    uow.email, c.principal, "thread", str(summary.id), EmailThread
+                )
+            if stored is None:
+                continue
+            thread = retained_thread(stored, cutoff)
+            if not any(
+                message.body and message.sent_at >= now - timedelta(days=EMAIL_HISTORY_DAYS)
+                for message in thread.messages
+            ):
+                continue
+            assessed.append(thread.id)
+            learning = await self.service.learning_context(c.principal, thread)
+            try:
+                await self.assess(thread, learning)
+            except ConflictError as exc:
+                if exc.reason != "email_assessment_stale":
+                    raise
+        if assessed:
+            await self._draft_assessed(assessed, cutoff)
+        elif not (self.found_work or self.imported or any(self.full_reads.values())):
+            async with c.uow_factory() as uow, uow.email.lock(c.principal):
+                await self._write_fence(uow)
+                await save_value(
+                    uow.email,
+                    c.principal,
+                    "task",
+                    str(c.run.id),
+                    self.task.model_copy(update={"empty_check": True}),
+                    c.clock.now(),
+                )
+
+    async def _draft_assessed(self, assessed: list[UUID], cutoff: datetime) -> None:
+        """Prepare automatic drafts for this check's own conversations only."""
+        c = self.context
+        async with c.uow_factory() as uow:
+            feedback = await self.service._feedback(uow.email, c.principal)
+            candidates = []
+            assessments = {}
+            for thread_id in assessed:
+                stored = await read_value(
+                    uow.email, c.principal, "thread", str(thread_id), EmailThread
+                )
+                row = await uow.email.get(c.principal, "assessment", str(thread_id))
+                if stored is None or row is None:
+                    continue
+                candidates.append(
+                    apply_feedback(retained_thread(stored, cutoff), feedback, now=c.clock.now())
+                )
+                assessments[str(thread_id)] = row
+        learning = await self.service.learning_context(c.principal, None)
+        revision = int(str(learning.get("profile_revision", 0)))
+        for thread in self._draft_candidates(candidates, assessments, revision):
+            if thread.draft_id is None:
+                with suppress(EmailModelResultError):
+                    await self.generate_draft(thread.id)
+
+    def _assessment_current(
+        self, thread: EmailThread, prior: EmailRecord | None, revision: int
+    ) -> bool:
+        """Require matching source, model, policy, profile, and completed analysis."""
+        return (
+            thread.assessment_version == EMAIL_POLICY_VERSION
+            and thread.profile_revision == revision
+            and prior is not None
+            and self._junk_current(prior.payload, thread)
+            # Relationship memory can change without an email-profile bump.
+            # Revisit bypasses in the existing four-thread bounded rotation;
+            # assess() reuses the receipt when protections remain unchanged.
+            and not prior.payload.get("junk_bypassed")
+            and prior.payload.get("analysis_complete") is True
+            and prior.payload.get("retry_pending") is not True
+            and self._model_current(prior.payload.get("model_revision"))
+            and prior.payload.get("source_fingerprint") == thread.source_fingerprint
+        )
+
+    def _draft_candidates(
+        self,
+        candidates: list[EmailThread],
+        assessments: dict[str, EmailRecord],
+        revision: int,
+    ) -> list[EmailThread]:
+        """The three highest-priority conversations eligible for an automatic draft."""
+        c = self.context
         eligible = [
             thread
             for thread in candidates
@@ -1128,18 +1252,9 @@ class _TaskIO:
             )
             and not thread.reply_blocked_reason
             and thread.dismissed_revision != thread.revision
-            and assessment_current(thread)
+            and self._assessment_current(thread, assessments.get(str(thread.id)), revision)
         ]
-        for thread in sorted(
-            eligible, key=lambda item: (-item.priority, -item.updated_at.timestamp())
-        )[:3]:
-            if thread.draft_id is None:
-                # A rejected proposal leaves only this thread undrafted.
-                with suppress(EmailModelResultError):
-                    await self.generate_draft(thread.id)
-        await self._verify_subscriptions()
-        if not new_mail_only:
-            await self._summarize_correspondence()
+        return sorted(eligible, key=lambda item: (-item.priority, -item.updated_at.timestamp()))[:3]
 
     async def _summarize_correspondence(self) -> None:
         """Give observed exchanges a short summary, newest first (ADR-0126).
@@ -1257,6 +1372,8 @@ class _TaskIO:
                 ).hexdigest()
                 for item in page["changes"]
             }
+            if page["changes"] or page["resync_required"]:
+                self.found_work = True
             if (
                 page["resync_required"]
                 or len(discovered | sync.change_events.keys()) > EMAIL_CHANGE_EVENT_LIMIT

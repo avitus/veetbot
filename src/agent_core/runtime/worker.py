@@ -257,6 +257,7 @@ class MaintenanceWorker:
         sweep_exports: Callable[[], Awaitable[int]] | None = None,
         sweep_artifacts: Callable[[], Awaitable[int]] | None = None,
         sweep_email_cache: Callable[[], Awaitable[int]] | None = None,
+        sweep_email_check: Callable[[], Awaitable[int]] | None = None,
         sweep_sandboxes: SandboxSweep | None = None,
         sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
         sweep_memory: Callable[[], Awaitable[int]] | None = None,
@@ -283,6 +284,7 @@ class MaintenanceWorker:
         sweep_cockpit_feed_history: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
+        email_check_sweep_interval_seconds: float = 60,
         memory_decay_interval_seconds: float = 86_400,
         terminal_schedule_sweep_interval_seconds: float = 3600,
         folder_proposal_interval_seconds: float = 900,
@@ -298,6 +300,7 @@ class MaintenanceWorker:
         self._sweep_exports = sweep_exports
         self._sweep_artifacts = sweep_artifacts
         self._sweep_email_cache = sweep_email_cache
+        self._sweep_email_check = sweep_email_check
         self._sweep_sandboxes = sweep_sandboxes
         self._sweep_artifact_orphans = sweep_artifact_orphans
         self._sweep_memory = sweep_memory
@@ -325,6 +328,8 @@ class MaintenanceWorker:
             raise ValueError("artifact orphan interval must be positive")
         if email_cache_sweep_interval_seconds <= 0:
             raise ValueError("email cache sweep interval must be positive")
+        if email_check_sweep_interval_seconds <= 0:
+            raise ValueError("email check sweep interval must be positive")
         if memory_decay_interval_seconds <= 0:
             raise ValueError("memory decay interval must be positive")
         if terminal_schedule_sweep_interval_seconds <= 0:
@@ -349,6 +354,8 @@ class MaintenanceWorker:
         # only reclaims storage and need not rescan every few seconds.
         self._email_cache_sweep_interval = timedelta(seconds=email_cache_sweep_interval_seconds)
         self._last_email_cache_sweep_at: datetime | None = None
+        self._email_check_sweep_interval = timedelta(seconds=email_check_sweep_interval_seconds)
+        self._last_email_check_sweep_at: datetime | None = None
         # Decay is a slow sweep on its own timer: the maintenance pass runs
         # every few seconds, and a belief may lose one step per interval.
         self._memory_decay_interval = timedelta(seconds=memory_decay_interval_seconds)
@@ -531,6 +538,17 @@ class MaintenanceWorker:
                 await self._sweep_email_cache()
             except Exception:
                 logger.exception("email cache expiry sweep failed")
+        # The service decides whether a check is due; this only bounds how often it asks.
+        if self._sweep_email_check is not None and (
+            self._last_email_check_sweep_at is None
+            or self._clock.now() - self._last_email_check_sweep_at
+            >= self._email_check_sweep_interval
+        ):
+            self._last_email_check_sweep_at = self._clock.now()
+            try:
+                await self._sweep_email_check()
+            except Exception:
+                logger.exception("email arrival check failed")
         if self._sweep_memory is not None:
             try:
                 await self._sweep_memory()

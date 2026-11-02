@@ -329,3 +329,4 @@ implementation without one.
 - [ADR-0280: A sign-in pause shows a sign-in card, not a question (Accepted)](0280-sign-in-pause-shows-a-sign-in-card.md)
 - [ADR-0282: The device sign-in window asks before a new website adds another address (Proposed)](0282-device-sign-in-allows-another-address.md)
 - [ADR-0283: A saved login can sign in again through the remote browser (Accepted)](0283-saved-login-signs-in-through-the-remote-browser.md)
+- [ADR-0286: The server checks for new mail while Email is closed (Accepted)](0286-server-checks-for-new-mail.md)

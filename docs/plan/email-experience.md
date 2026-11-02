@@ -242,12 +242,42 @@ An account awaiting its first update is shown as waiting; a recorded failure
 remains distinct even when that account has never completed synchronization.
 
 Each foreground request may admit a bounded slice. The server does not schedule
-the next slice itself: it requires a fresh active client request. On leaving
-Email, stop admitting new slices; an admitted slice may finish its bounded work
-and persist its checkpoint. Reopening resumes. This adds no recurring schedule,
-Gmail push subscription, notification digest, or general device-presence router.
-An explicitly requested email operation in Chat remains available through the
-ordinary agent independently of the Email refresh timer.
+the next foreground slice itself: it requires a fresh active client request. On
+leaving Email, stop admitting new foreground slices; an admitted slice may finish
+its bounded work and persist its checkpoint. Reopening resumes. This adds no
+schedule row, Gmail push subscription, notification digest, or general
+device-presence router. An explicitly requested email operation in Chat remains
+available through the ordinary agent independently of the Email refresh timer.
+
+### Server arrival checks
+
+Behind `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED`, off by default, the server also
+checks for new mail while Email is closed (ADR-0286). The maintenance worker
+admits a typed refresh with `scope` `arrivals` through the ordinary admission path,
+for its owner principal. A check is due when no refresh of any scope was created
+within `email.check_interval_seconds` (default 300), read from durable task
+records. Foreground requests therefore defer checks, and existing coalescing joins
+a request to any refresh already running.
+
+An arrival is an Inbox conversation with activity in the last seven days whose
+current source has no completed assessment: never assessed, source changed,
+analysis unfinished, or its one promised retry pending. A check reads Gmail changes
+with the usual eight reads per account, and a resynchronization's first Inbox page.
+It assesses at most four arrivals, newest first, after any retained window a change
+is waiting on, and prepares eligible automatic drafts only for conversations it
+assessed. It does not re-assess a conversation only because a profile, model or
+prompt revision changed, page further through the Inbox, advance the history pass,
+re-read expired bodies, verify unsubscribe evidence or write correspondence
+summaries. Foreground slices keep that work.
+
+A check is admitted only within 50% of the daily and 90% of the rolling thirty-day
+allowance. A refusal writes no client pause. Each consecutive failed, timed-out or
+conservatively charged check doubles the wait, to 10, 20, 40 and at most 60 minutes;
+a completed refresh resets it. When Gmail reports no change and no arrival is
+unfinished, the check loads no stored message content, makes no model call and
+requests no memory formation, and is marked empty. After seven days an empty check's
+session, events and task record are removed through session erasure. A check sends no
+notification; a failure surfaces through existing account status.
 
 ### Reliable synchronization
 
@@ -422,8 +452,8 @@ catch-up pages, the ninety-day history pass, other non-Inbox assessment and
 correspondence summaries wait until a refresh again passes the 75% admission
 check, counted spending and live reservations included. Owner-requested drafts
 and People imports use the full ceilings.
-Each refresh task records its admitted `scope`, `full` or `new_mail`; earlier
-tasks read as `full`.
+Each refresh task records its admitted `scope`, `full`, `new_mail` or `arrivals`
+(ADR-0286); earlier tasks read as `full`.
 
 The shipped `runtime/limits.yaml` values `email.daily_cost` and
 `email.monthly_cost` hold these defaults. A reviewed operator overlay under
@@ -995,7 +1025,7 @@ secret/material restrictions and policy gates remain mandatory.
 ## 9. Delivery sequence
 
 Owner approval authorizes this feature scope, not a silent declaration that
-earlier milestones have completed. Milestone 26 is assigned and its thirty-two gates are registered. Preserve the current verified
+earlier milestones have completed. Milestone 26 is assigned and its thirty-three gates are registered. Preserve the current verified
 milestone ceiling and record existing email activation gaps separately.
 
 | Phase | Deliverable | Exit evidence |
@@ -1132,7 +1162,7 @@ native editing and approved sending, and useful semantic email memories.
 
 It excludes another provider, self-service account onboarding, terminal UI work,
 autonomous sending, automatic Gmail writes, Gmail draft synchronization,
-background monitoring/digests, attachment processing, calendar operations,
+background monitoring beyond ADR-0286's arrival checks, digests, attachment processing, calendar operations,
 permanent mailbox deletion, offline-authoritative editing, a separate email
 persona, model routing changes, and a general learned memory policy. Existing
 Chat tools remain available under their existing contracts.
@@ -1167,7 +1197,7 @@ boundaries when the concrete work is ready.
 
 ## Hard gates
 
-These thirty-two blocking gates belong only to Milestone 26. Pending check
+These thirty-three blocking gates belong only to Milestone 26. Pending check
 references remain pending until matching implementation and verification exist.
 Private quality and owner-smoke evidence cannot be replaced by synthetic tests.
 
@@ -1235,6 +1265,8 @@ Private quality and owner-smoke evidence cannot be replaced by synthetic tests.
    `gate.email.experience_api_boundaries`. **M26.**
 32. **Integrated release evidence.** All functional and quality gates, native platform lanes, cost/performance calibration and authorized two-account mailbox smoke pass; final-head hosted review and merged-revision production evidence remain required before milestone completion. Registered as
    `gate.email.experience_release_evidence`. **M26.**
+33. **Background arrival check.** A server check admits only when due, defers to a recent refresh of any scope, selects arrivals only, stops at its own spending limits without a client pause, widens its interval after failures, makes no model call and requests no formation when nothing changed, and sends no notification. Registered as
+   `gate.email.experience_background_arrival_check`. **M26.**
 
 ## Persistence contract
 
@@ -1411,7 +1443,7 @@ reservation; its typed tasks follow the Archive task's interactive class,
 server preparation and owner-gesture consent; and its records are new kinds in
 `email_records` under this document's retention, source-erasure and privacy
 rules. Nothing in it monitors a mailbox or writes to Gmail without an owner
-act, so this milestone's exclusions and thirty-two gates are unchanged.
+act, so this milestone's exclusions and gates are unchanged.
 
 [ADR-0165](../adr/0165-suspected-spam-flag-and-thread-report-spam.md) extends
 that milestone into this one's assessment and projection. The assessment
@@ -1423,7 +1455,7 @@ zero and no reply needed, so it leaves the priority view and automatic
 drafts, and memory source validation treats it as bulk. Report spam on a
 thread is the Archive gesture above with a fixed `SPAM` delta. The rules are
 specified and gated in [email-unsubscribe.md](email-unsubscribe.md); this
-milestone's thirty-two gates are unchanged.
+milestone's gates are unchanged.
 
 ## Cheap junk screening
 
@@ -1460,8 +1492,8 @@ confers no authority, and Memory, Persona, Schedules and Settings stay global.
 
 The shell's two-way assumptions become exhaustive over three modes, and
 switching among the three preserves each mode's state. Email's retrieval rules
-are unchanged: Email still refreshes only while Email is visible, and Cockpit
-holds its own stream only while Cockpit is visible.
+are unchanged: clients still request Email refreshes only while Email is visible,
+and Cockpit holds its own stream only while Cockpit is visible.
 
 [cockpit.md](cockpit.md) owns the mode.
 

@@ -28,6 +28,14 @@ title: Changelog
   replies**, once you update the app. A reply written below a quote is never
   hidden, and **Show original** still shows the message unchanged.
 
+## 2026-11-01 — Server checks for new mail (ADR-0286)
+
+- Behind `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED`, off by default, the server checks
+  for new mail every five minutes while Email is closed, so mail can be ranked and
+  drafted before the owner opens it.
+- A check handles only new or changed conversations and stops at half the daily and
+  90% of the rolling allowance. It sends and notifies nothing.
+
 ## 2026-10-28 — Spent one-time repairs retired (ADR-0266)
 
 - Five pieces of code that existed only to bridge a state production no

@@ -419,4 +419,5 @@ nav:
       - "ADR-0280: A sign-in pause shows a sign-in card": adr/0280-sign-in-pause-shows-a-sign-in-card.md
       - "ADR-0282: The device sign-in window asks before adding an address": adr/0282-device-sign-in-allows-another-address.md
       - "ADR-0283: A saved login can sign in again through the remote browser": adr/0283-saved-login-signs-in-through-the-remote-browser.md
+      - "ADR-0286: The server checks for new mail": adr/0286-server-checks-for-new-mail.md
   - Changelog: changelog.md

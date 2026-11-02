@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from agent_core.runtime.worker import MaintenanceWorker
@@ -49,3 +51,45 @@ async def test_a_failing_title_sweep_leaves_the_round_standing(
     # A sweep that runs after the title pass in the same round still ran.
     assert later == ["email cache"]
     assert "conversation title sweep failed" in caplog.text
+
+
+async def test_the_email_check_sweep_runs_on_its_own_interval() -> None:
+    clock, uow_factory = await memory_uow_factory()
+    rounds: list[int] = []
+
+    async def sweep() -> int:
+        rounds.append(len(rounds))
+        return 0
+
+    worker = MaintenanceWorker(uow_factory=uow_factory, clock=clock, sweep_email_check=sweep)
+    await worker.run_once()
+    await worker.run_once()
+    assert rounds == [0]
+    clock.advance(timedelta(seconds=60))
+    await worker.run_once()
+    assert rounds == [0, 1]
+
+
+async def test_a_failing_email_check_leaves_the_round_standing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock, uow_factory = await memory_uow_factory()
+    later: list[str] = []
+
+    async def failing() -> int:
+        raise RuntimeError("mail down")
+
+    async def titles() -> int:
+        later.append("titles")
+        return 0
+
+    worker = MaintenanceWorker(
+        uow_factory=uow_factory,
+        clock=clock,
+        sweep_email_check=failing,
+        sweep_conversation_titles=titles,
+    )
+    await worker.run_once()
+
+    assert later == ["titles"]
+    assert "email arrival check failed" in caplog.text
