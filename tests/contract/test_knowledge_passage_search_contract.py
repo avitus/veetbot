@@ -176,7 +176,7 @@ async def test_sensitivity_ceiling_and_validity_window_are_hard_filters() -> Non
 
 
 async def test_a_question_finds_a_passage_in_another_spelling_of_its_words() -> None:
-    """ADR-0284: "valves" finds "valve"; prose rarely repeats the question's exact forms."""
+    """ADR-0285: "valves" finds "valve"; prose rarely repeats the question's exact forms."""
     store = await _store(
         _document(1, "A valve opens and closes to equalise tank pressure after parking."),
         _document(2, "Unrelated text about rollback procedures."),
@@ -188,7 +188,7 @@ async def test_a_question_finds_a_passage_in_another_spelling_of_its_words() -> 
 
 
 async def test_coverage_ranks_before_authority_and_scope() -> None:
-    """ADR-0284: coverage orders first in both stores; the score's other parts only break ties.
+    """ADR-0285: coverage orders first in both stores; the score's other parts only break ties.
 
     A nine-of-ten passage from an authored, in-scope document scores higher
     than a ten-of-ten passage from a fetched, out-of-scope one (0.88 against
@@ -219,7 +219,7 @@ async def test_coverage_ranks_before_authority_and_scope() -> None:
 
 
 async def test_coverage_outranks_density() -> None:
-    """ADR-0284: a passage holding more of the question beats one repeating a word of it."""
+    """ADR-0285: a passage holding more of the question beats one repeating a word of it."""
     store = await _store(
         _document(
             1,

@@ -1000,7 +1000,7 @@ replaces a stricter runtime search permit. A timed-out read is cancelled and
 awaited, not detached or retried. Base timeout supplies a fixed limitation marker
 instead of implying that no memory exists. Optional provider preparation runs
 before assembly on its own five-second clock and never spends this allowance
-([ADR-0281](../adr/0281-recall-preparation-keeps-its-own-clock.md)). A base read
+([ADR-0282](../adr/0282-recall-preparation-keeps-its-own-clock.md)). A base read
 refused by the runtime permit or timed out here is also logged as
 `context_memory_recall_limited` and marked on the request, and the runtime
 records `memory.recall.limited` with the reason: a turn without recall is

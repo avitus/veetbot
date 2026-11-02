@@ -1,8 +1,8 @@
-# ADR-0283: Chat uploads back off between ingest attempts and report a failed ingestion
+# ADR-0284: Chat uploads back off between ingest attempts and report a failed ingestion
 
 - Status: Accepted (owner direction on 2026-11-01)
 - Date: 2026-11-01
-- Related: ADR-0120, ADR-0281, ADR-0282
+- Related: ADR-0120, ADR-0282, ADR-0283
 - Detailed design: `docs/plan/knowledge-documents.md`
 
 ## Context

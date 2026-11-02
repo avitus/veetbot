@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 MAX_INGEST_ATTEMPTS = 3
 # A failed attempt waits before the next one: a transient cause gets time to
-# clear instead of three tries in thirty seconds (ADR-0283).
+# clear instead of three tries in thirty seconds (ADR-0284).
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=15))
 _REFUSAL_CODES = (
     ("secret scan", "secret_scan"),
@@ -111,7 +111,7 @@ class UploadAutoIngest:
                 continue
             except Exception as exc:
                 # The class names the cause for the operator; the message could
-                # carry document text, so it stays out of the log (ADR-0283).
+                # carry document text, so it stays out of the log (ADR-0284).
                 logger.warning(
                     "upload_knowledge_ingest_failed",
                     extra={

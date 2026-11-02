@@ -150,7 +150,7 @@ async def test_pending_ingestion_is_listed_in_upload_order_and_recorded() -> Non
         == []
     )
 
-    # ADR-0283: an upload in backoff is neither listed nor counted against the
+    # ADR-0284: an upload in backoff is neither listed nor counted against the
     # limit, so a deferred older upload never blocks a due later one; a
     # non-upload artifact carrying the marker is never swept.
     deferred = await repository.record_auto_ingest(

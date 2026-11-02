@@ -83,7 +83,7 @@ class RuntimeObservation(BaseModel):
     source_events: dict[str, SourceEvent] = Field(max_length=100)
     formed_records: tuple[MemoryRecord, ...] = Field(max_length=10000)
     # One per admitted read: the automatic refresh of every build step counts
-    # (ADR-0281), bounded by the run's step cap, base and delta each.
+    # (ADR-0282), bounded by the run's step cap, base and delta each.
     recall_observations: tuple[SearchObservation, ...] = Field(min_length=1, max_length=72)
     context_ranking: ContextRecallRanking | None = None
     attributed_usage: tuple[ModelUsage, ...] = Field(min_length=1, max_length=130)
@@ -92,7 +92,7 @@ class RuntimeObservation(BaseModel):
     formation_replayed_calls: int = Field(ge=0, le=128)
     recall_work: RecallWorkBudget
     # Every admitted read, including the automatic refresh each build step
-    # makes (ADR-0281); the reservation bounds the deliberate ones.
+    # makes (ADR-0282); the reservation bounds the deliberate ones.
     executed_searches: int = Field(ge=1, le=256)
     executed_deliberate: int = Field(default=0, ge=0, le=4)
     rendered_memory: str = Field(max_length=100000)
@@ -306,7 +306,7 @@ def compile_runtime_observation(
         ),
         boundary_failures=tuple(sorted(boundary)),
         # The release value is what the run spent against its allowance; the
-        # automatic refreshes beyond it are not charged (ADR-0281).
+        # automatic refreshes beyond it are not charged (ADR-0282).
         searches=min(observed.executed_searches, observed.recall_work.searches),
         rounds=observed.recall_work.rounds,
         context_tokens=sum(

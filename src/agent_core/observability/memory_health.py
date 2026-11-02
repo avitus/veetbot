@@ -40,7 +40,7 @@ class MemoryHealthReport(BaseModel):
     until: datetime
     # Usage feedback (diagnostic).
     recalled_runs: int = Field(default=0, ge=0)
-    # Runs whose automatic recall was refused or timed out at some step (ADR-0281).
+    # Runs whose automatic recall was refused or timed out at some step (ADR-0282).
     limited_runs: int = Field(default=0, ge=0)
     limited_exhausted: int = Field(default=0, ge=0)
     limited_timed_out: int = Field(default=0, ge=0)

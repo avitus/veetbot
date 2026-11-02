@@ -249,7 +249,7 @@ async def test_observation_runs_in_postgres_and_reaches_the_reader(
     assert row["planning_calls"] == int(search_planning == "reader")
     automatic_slots = 2 if path == "automatic" else 0
     assert row["recall_work"]["searches"] == automatic_slots + int(searched)
-    # ADR-0281: the automatic round reserves slots but no round; only the
+    # ADR-0282: the automatic round reserves slots but no round; only the
     # reader's deliberate search counts as one.
     assert row["recall_work"]["rounds"] == int(searched)
     assert row["executed_searches"] >= 1

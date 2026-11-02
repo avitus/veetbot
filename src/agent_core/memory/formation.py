@@ -2265,7 +2265,7 @@ class DeterministicSalience:
         return explicit or len(value.split()) >= 3
 
 
-# "User has a X." is a formation placeholder, not a possession (ADR-0282).
+# "User has a X." is a formation placeholder, not a possession (ADR-0283).
 _PLACEHOLDER_POSSESSION = re.compile(r"(?:has|drives|uses) [a-z0-9]")
 
 
@@ -2356,7 +2356,7 @@ class DeterministicConflictResolver:
             and resource == _resource_restatement_key(existing.statement)
         ):
             # A possession restated in any session is the same possession
-            # (ADR-0282 widens ADR-0232's same-session rule).
+            # (ADR-0283 widens ADR-0232's same-session rule).
             return "duplicate"
         if existing.belief_type is BeliefType.RELATIONSHIP and polarity is Polarity.ASSERT:
             generalization = re.fullmatch(
@@ -2715,7 +2715,7 @@ class GovernedMemoryService:
                     )
                 )
                 known = {record.id for record in related}
-                # ADR-0282: the owner naming the same possession in another
+                # ADR-0283: the owner naming the same possession in another
                 # chat is the same possession; the narrow key, not the
                 # session, is the identity.
                 related.extend(
@@ -4352,9 +4352,9 @@ class GovernedMemoryService:
             return result
 
     async def merge_possessions(self, *, confirm: bool) -> PossessionMerge:
-        """Fold duplicate possession beliefs into one active belief (ADR-0282).
+        """Fold duplicate possession beliefs into one active belief (ADR-0283).
 
-        Before ADR-0282 a possession the owner restated in another chat formed a
+        Before ADR-0283 a possession the owner restated in another chat formed a
         second provisional belief, so the same car sat in the store three
         times and never promoted. Live direct possessions sharing the narrow
         restatement key are folded into the newest one, which takes the group's

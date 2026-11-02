@@ -1016,7 +1016,7 @@ class InMemoryKnowledgeStore:
         forms = lexical_query_forms(query.text)
         per_document: defaultdict[UUID, int] = defaultdict(int)
         # Coverage ranks first, as the PostgreSQL store orders it; the combined
-        # score and the chunk id only break ties (ADR-0284).
+        # score and the chunk id only break ties (ADR-0285).
         scored: list[tuple[float, RetrievedPassage]] = []
         async with self._lock:
             for chunk in self._chunks.values():
@@ -1115,7 +1115,7 @@ def _tokens(text: str) -> list[str]:
 
 
 def _coverage(forms: list[tuple[str, ...]], text: str) -> float:
-    """The share of query terms the text holds in any folded spelling (ADR-0284).
+    """The share of query terms the text holds in any folded spelling (ADR-0285).
 
     A term with punctuation inside it ("restart,service") matches the way
     PostgreSQL's `plainto_tsquery` reads it: every word of it must be present.

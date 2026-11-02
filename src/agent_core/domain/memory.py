@@ -597,7 +597,7 @@ def lexical_query_forms(text: str | None) -> list[tuple[str, ...]]:
     """Each knowledge query term with the spellings that count as matching it.
 
     Knowledge passages are prose, so a question's "valves" must find a
-    passage's "valve" (ADR-0284). The folding is the one relevance recall
+    passage's "valve" (ADR-0285). The folding is the one relevance recall
     uses: a plain ASCII word also matches every word with the same stem; a
     term with digits or other letters keeps only itself.
     """
@@ -995,7 +995,7 @@ class ConflictReconciliation(BaseModel):
 
 
 class PossessionMerge(BaseModel):
-    """What a `merge-possessions` pass examined and, unless a dry run, changed (ADR-0282).
+    """What a `merge-possessions` pass examined and, unless a dry run, changed (ADR-0283).
 
     `groups_examined` counts possession keys held by two or more live beliefs;
     `beliefs_merged` the duplicates superseded into their canonical; `promoted`

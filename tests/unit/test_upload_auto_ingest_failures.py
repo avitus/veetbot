@@ -117,7 +117,7 @@ async def _metadata(factory: Any, number: int) -> dict[str, Any]:
 async def test_a_transient_failure_retries_until_its_third_attempt_fails_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """ADR-0283: the retries back off (one minute, then fifteen) and name the error class."""
+    """ADR-0284: the retries back off (one minute, then fifteen) and name the error class."""
     assert MAX_INGEST_ATTEMPTS == 3
     factory, knowledge, sweep, clock = await _stack_with_clock(
         {1: [RuntimeError("database blip")] * 3}
@@ -170,7 +170,7 @@ async def test_the_backoff_starts_when_the_failure_is_recorded() -> None:
 
 
 def test_only_a_failed_or_refused_upload_can_be_retried() -> None:
-    """ADR-0283: `knowledge retry` reopens a chat upload whose ingestion ended badly, only."""
+    """ADR-0284: `knowledge retry` reopens a chat upload whose ingestion ended badly, only."""
     failed = _upload(1).model_copy(update={"metadata": {AUTO_INGEST_KEY: "failed"}})
     refused = _upload(2).model_copy(update={"metadata": {AUTO_INGEST_KEY: "refused"}})
     ingested = _upload(3).model_copy(update={"metadata": {AUTO_INGEST_KEY: "ingested"}})

@@ -1,14 +1,14 @@
-# ADR-0282: Owner possessions reach recall from "do I" questions and corroborate across chats
+# ADR-0283: Owner possessions reach recall from "do I" questions and corroborate across chats
 
 - Status: Accepted (owner direction on 2026-11-01)
 - Date: 2026-11-01
-- Related: ADR-0232, ADR-0247, ADR-0248, ADR-0259, ADR-0281
+- Related: ADR-0232, ADR-0247, ADR-0248, ADR-0259, ADR-0282
 - Detailed design: `docs/plan/memory-retrieval-and-ranking.md`,
   `docs/plan/memory-formation-and-consolidation.md`
 
 ## Context
 
-After ADR-0281 restored recall, the owner asked a fresh chat "What car do I
+After ADR-0282 restored recall, the owner asked a fresh chat "What car do I
 drive?" and Veetbot answered that it did not reliably know. The recall traces
 show the belief "User has a 2026 BMW X3 M50." as a candidate in every read of
 that chat, dropped for budget every time. Replaying the scoring gives 0.338

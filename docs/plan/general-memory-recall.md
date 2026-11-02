@@ -147,7 +147,7 @@ same deadline and four-slot/two-round ceiling. Exhaustion supplies an explicit
 limitation while retaining mandatory corrections. Unused and failed reservations
 cannot be renewed after resume. The runtime evaluator uses this same allowance
 for sparse and semantic arms.
-[ADR-0281](../adr/0281-recall-preparation-keeps-its-own-clock.md) amends that
+[ADR-0282](../adr/0282-recall-preparation-keeps-its-own-clock.md) amends that
 accounting after a production outage: provider preparation runs on its own
 five-second clock and the searches get their own ten seconds from the moment it
 returns, inside one fifteen-second durable reservation; the automatic round is

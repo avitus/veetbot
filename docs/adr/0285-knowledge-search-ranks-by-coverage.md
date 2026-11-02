@@ -1,8 +1,8 @@
-# ADR-0284: Knowledge search ranks by coverage with folded terms, and PDF outlines become heading paths
+# ADR-0285: Knowledge search ranks by coverage with folded terms, and PDF outlines become heading paths
 
 - Status: Accepted (owner direction on 2026-11-01)
 - Date: 2026-11-01
-- Related: ADR-0120, ADR-0259, ADR-0283
+- Related: ADR-0120, ADR-0259, ADR-0284
 - Detailed design: `docs/plan/knowledge-documents.md`
 
 ## Context

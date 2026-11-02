@@ -111,7 +111,7 @@ async def test_personal_advice_recalls_older_owned_model_before_candidate_flood(
     ],
 )
 def test_do_i_possession_questions_browse_possessions(question: str) -> None:
-    """ADR-0282: "What car do I drive?" asks about a possession without saying "my"."""
+    """ADR-0283: "What car do I drive?" asks about a possession without saying "my"."""
     assert DeterministicQueryFormer(principal()).from_text(question)[0].include_owned_resources
 
 

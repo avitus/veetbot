@@ -150,7 +150,7 @@ class RecallWorkBudget(BaseModel):
     `searches` counts every reserved slot: the automatic round's two, then one
     per deliberate search. `rounds` counts deliberate batches only; the
     automatic round is reserved once per run and refreshed on later build
-    steps without new slots (ADR-0281). Reservations written before that
+    steps without new slots (ADR-0282). Reservations written before that
     decision counted the automatic round as a round, which `automatic` cannot
     see; they keep their stricter accounting.
     """

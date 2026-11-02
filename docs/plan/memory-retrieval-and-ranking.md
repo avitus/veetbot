@@ -341,7 +341,7 @@ my car?" need not share a word with "User has a 2026 Aster S8." A possessive
 profile question whose verb is one the canonical possession statement uses:
 "What car do I drive?", "Which phone do I use?" and "Do I own a bike?" ask about a
 possession without saying "my"
-([ADR-0282](../adr/0282-owner-possessions-reach-recall-and-corroborate.md));
+([ADR-0283](../adr/0283-owner-possessions-reach-recall-and-corroborate.md));
 advice ("Which car should I buy?") and residence ("Where do I live?") keep their
 own anchors. Deliberate
 `memory.search` also recognizes keyword queries naming the `user` or `owner`.

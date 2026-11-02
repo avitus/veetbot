@@ -282,7 +282,7 @@ def test_a_marker_for_a_document_sent_to_knowledge_points_at_knowledge_search() 
 
 
 def test_a_marker_for_a_document_knowledge_could_not_add_says_so() -> None:
-    """ADR-0283: a failed or refused ingest is told to the model, never implied as pending."""
+    """ADR-0284: a failed or refused ingest is told to the model, never implied as pending."""
     failed, refused = _pdf(1, pages=424, size=5_764_203), _pdf(2, pages=424, size=5_764_203)
     decisions = attachments.select_attachments([UserMessage(content=[failed, refused])])
     rendered = attachments.render_attachments(

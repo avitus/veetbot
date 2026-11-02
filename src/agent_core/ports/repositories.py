@@ -428,7 +428,7 @@ class ArtifactRepository(Protocol):
 
         Oldest first, at most `limit`; an upload still in backoff is neither
         listed nor counted against the limit, and an artifact of any other
-        origin is never listed (ADR-0283).
+        origin is never listed (ADR-0284).
         """
         ...
 

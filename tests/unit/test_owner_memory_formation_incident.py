@@ -147,7 +147,7 @@ def test_provider_possession_is_an_attribute_while_frozen_policy_stays_unchanged
 
 
 async def test_the_same_possession_stated_in_another_chat_corroborates() -> None:
-    """ADR-0282: an owner who names the same car in three chats has one active car."""
+    """ADR-0283: an owner who names the same car in three chats has one active car."""
     from uuid import UUID
 
     from agent_core.domain.events import NewEvent
@@ -195,7 +195,7 @@ async def test_the_same_possession_stated_in_another_chat_corroborates() -> None
 
 
 async def test_merge_possessions_folds_legacy_duplicates_and_retires_placeholders() -> None:
-    """ADR-0282: three provisional copies of one car become one active belief."""
+    """ADR-0283: three provisional copies of one car become one active belief."""
     from uuid import UUID
 
     from tests.contract.support import principal

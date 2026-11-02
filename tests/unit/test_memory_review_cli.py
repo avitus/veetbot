@@ -55,7 +55,7 @@ def test_memory_review_takes_one_outcome_and_prints_the_reviewed_belief(
 
 
 def test_knowledge_retry_queues_the_upload_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ADR-0283: a failed upload goes back to pending with a fresh attempt count."""
+    """ADR-0284: a failed upload goes back to pending with a fresh attempt count."""
     from uuid import UUID
 
     seen: list[UUID] = []
@@ -83,7 +83,7 @@ def test_knowledge_retry_queues_the_upload_again(monkeypatch: pytest.MonkeyPatch
 def test_memory_merge_possessions_reports_by_default_and_writes_on_confirm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ADR-0282: the dry run is the default; --confirm writes the repair."""
+    """ADR-0283: the dry run is the default; --confirm writes the repair."""
     from agent_core.domain.memory import PossessionMerge
 
     seen: list[bool] = []

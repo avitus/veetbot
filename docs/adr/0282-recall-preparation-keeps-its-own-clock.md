@@ -1,4 +1,4 @@
-# ADR-0281: Recall preparation keeps its own clock and the automatic round refreshes
+# ADR-0282: Recall preparation keeps its own clock and the automatic round refreshes
 
 - Status: Accepted (owner direction on 2026-11-01)
 - Date: 2026-11-01

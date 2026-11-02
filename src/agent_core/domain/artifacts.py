@@ -96,7 +96,7 @@ AUTO_INGEST_PENDING = "pending"
 AUTO_INGEST_INGESTED = "ingested"
 AUTO_INGEST_REFUSED = "refused"
 AUTO_INGEST_FAILED = "failed"
-# When the next ingestion attempt may run; a failed attempt backs off (ADR-0283).
+# When the next ingestion attempt may run; a failed attempt backs off (ADR-0284).
 AUTO_INGEST_NOT_BEFORE_KEY = "auto_ingest_not_before"
 UPLOAD_UNCLAIMED_TTL = timedelta(hours=24)
 
@@ -128,7 +128,7 @@ def retry_refusal(artifact: ArtifactRef) -> str | None:
 
     Only a chat upload whose automatic ingestion failed or was refused goes
     back to pending; anything else would send a non-upload to the knowledge
-    service or re-extract a document already in knowledge (ADR-0283).
+    service or re-extract a document already in knowledge (ADR-0284).
     """
 
     if artifact.origin != ArtifactOrigin.UPLOAD.value:
@@ -142,7 +142,7 @@ def retry_refusal(artifact: ArtifactRef) -> str | None:
 
 
 def auto_ingest_due(metadata: dict[str, Any], now: datetime) -> bool:
-    """Whether a pending upload's backoff, if any, has elapsed (ADR-0283)."""
+    """Whether a pending upload's backoff, if any, has elapsed (ADR-0284)."""
 
     recorded = metadata.get(AUTO_INGEST_NOT_BEFORE_KEY)
     if not isinstance(recorded, str):

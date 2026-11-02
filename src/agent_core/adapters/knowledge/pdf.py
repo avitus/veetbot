@@ -45,7 +45,7 @@ def _outline_headings(reader: PdfReader) -> dict[int, list[tuple[int, str]]]:
 
     A manual's sections then become the chunks' heading paths, the way a
     Markdown document's headings do, so a passage about parking carries
-    "Parking > Park Distance Control" into the index (ADR-0284). A PDF without
+    "Parking > Park Distance Control" into the index (ADR-0285). A PDF without
     an outline, or one whose outline cannot be read, keeps plain page text.
     """
 

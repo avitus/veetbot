@@ -172,7 +172,7 @@ async def test_reserved_allowance_bounds_actual_sparse_searches_across_all_turns
         async with app.uow_factory() as uow:
             saved = await uow.checkpoints.latest(run_id)
         assert saved is not None and saved.recall_work is not None
-        # ADR-0281: the automatic round is reserved once and refreshed on every
+        # ADR-0282: the automatic round is reserved once and refreshed on every
         # build step; deliberate searches share the two slots it leaves.
         deliberate = [query for query in actual if (query.text or "").startswith("constraint")]
         automatic = [query for query in actual if query not in deliberate]

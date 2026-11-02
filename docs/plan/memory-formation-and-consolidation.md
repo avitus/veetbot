@@ -233,7 +233,7 @@ the project it was learned in, and is defined in
 [ADR-0232](../adr/0232-owner-memory-incident-repairs.md) adds a bounded,
 same-session possession-restatement match without using broad subject similarity
 as identity;
-[ADR-0282](../adr/0282-owner-possessions-reach-recall-and-corroborate.md) lets
+[ADR-0283](../adr/0283-owner-possessions-reach-recall-and-corroborate.md) lets
 that narrow assertion key match across sessions, so a possession the owner
 states in three chats is one corroborated active belief rather than three
 provisional ones. A generic child-existence claim cannot supersede a named child.

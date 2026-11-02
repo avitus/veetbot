@@ -218,7 +218,7 @@ def recalls_owned_resources(
             return True
         # "What car do I drive?" asks about a possession without saying "my":
         # a profile question whose verb is one the canonical possession
-        # statement uses (ADR-0282). Advice ("should I buy") and residence
+        # statement uses (ADR-0283). Advice ("should I buy") and residence
         # ("where do I live") keep their own anchors.
         if BeliefType.USER_MODEL_ATTR in types and _POSSESSION_QUESTION.search(clause):
             return True

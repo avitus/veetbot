@@ -131,7 +131,7 @@ class _RecallBundle:
     corrections: tuple[MemoryCorrection, ...] = ()
     rankings: tuple[RecallRankingBlock | None, ...] = ()
     # Why the base read produced a limitation marker instead of memory, so the
-    # runtime can record that the turn went without recall (ADR-0281).
+    # runtime can record that the turn went without recall (ADR-0282).
     limitation: str | None = None
 
 
@@ -1130,7 +1130,7 @@ class BudgetedContextBuilder:
             reason = "exhausted" if exhausted else "timed_out"
             # A turn that goes without recall is a measurable outcome, not a
             # silent one: the marker reaches the model, the log and the run's
-            # events (ADR-0281).
+            # events (ADR-0282).
             logger.warning(
                 "context_memory_recall_limited",
                 extra={"run_id": str(run.id), "reason": reason},

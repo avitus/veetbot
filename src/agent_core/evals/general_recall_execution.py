@@ -158,7 +158,7 @@ class _ObservedRetriever(HybridMemoryRetriever):
         self.elapsed_ms = 0.0
         self.executed_searches = 0
         # Deliberate searches are the ones the durable reservation bounds one
-        # for one; automatic reads refresh on every build step (ADR-0281).
+        # for one; automatic reads refresh on every build step (ADR-0282).
         self.executed_deliberate = 0
 
     async def _execute_recall(self, query: RecallQuery, **kwargs: Any) -> RecallResult:

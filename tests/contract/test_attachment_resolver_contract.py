@@ -181,7 +181,7 @@ async def test_resolver_reports_the_knowledge_state_of_the_runs_documents() -> N
             clock=FixedClock(composition.clock.now()),
         )
         asked = [pending, ingested, refused, failed, unmarked, elsewhere, UUID(int=99)]
-        # ADR-0283: a failed or refused ingestion reaches the marker too, so the
+        # ADR-0284: a failed or refused ingestion reaches the marker too, so the
         # model can say the file was not indexed instead of calling it searchable.
         assert await resolver.knowledge_states(asked, run_id=submitted.run_id) == {
             pending: KnowledgeState.PENDING,

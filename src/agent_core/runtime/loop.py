@@ -235,7 +235,7 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         limitation = assembled.request.metadata.get("recall_limitation")
         if limitation is not None and pressure.fits:
             # The turn went without automatic recall. The marker in context
-            # tells the model; this event tells the operator (ADR-0281).
+            # tells the model; this event tells the operator (ADR-0282).
             await _append_event(
                 context,
                 "memory.recall.limited",
@@ -295,7 +295,7 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
 # Provider preparation (query vectors) and the searches it serves keep separate
 # clocks: preparation may take at most RECALL_PREPARATION_SECONDS, and the
 # searches get RECALL_SEARCH_SECONDS from the moment preparation returns. The
-# durable reservation bounds both together (ADR-0281; ADR-0190 and ADR-0196
+# durable reservation bounds both together (ADR-0282; ADR-0190 and ADR-0196
 # set the original single ten-second deadline).
 logger = logging.getLogger(__name__)
 

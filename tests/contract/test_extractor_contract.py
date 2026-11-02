@@ -66,7 +66,7 @@ async def test_routing_extractor_dispatches_by_declared_type() -> None:
 
 
 async def test_pdf_extractor_turns_bookmarks_into_headings() -> None:
-    """ADR-0284: a PDF outline becomes Markdown headings, so chunks carry heading paths."""
+    """ADR-0285: a PDF outline becomes Markdown headings, so chunks carry heading paths."""
 
     import io
 

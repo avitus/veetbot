@@ -1776,14 +1776,14 @@ class PostgresKnowledgeStore:
         )
         # Any-term semantics, as `lexical_query_terms` documents and the in-memory
         # store answers: a question rarely shares every word with its passage.
-        # Each term matches any of its folded spellings (ADR-0284).
+        # Each term matches any of its folded spellings (ADR-0285).
         term_queries = [func.plainto_tsquery("simple", form) for group in forms for form in group]
         any_term: Any = term_queries[0]
         for term_query in term_queries[1:]:
             any_term = any_term.op("||")(term_query)
         # Coverage, the number of distinct query terms a passage holds, ranks
         # ahead of density: a passage about the question beats a passage that
-        # repeats one of its words (ADR-0284).
+        # repeats one of its words (ADR-0285).
         coverage = sum(
             (
                 case(

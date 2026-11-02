@@ -1948,7 +1948,7 @@ positions, no SQL). Run the dry run first and keep its output with the
 authorization; the owner's affirmed home address and its seven partners are
 the first production case.
 
-### Possession merge (ADR-0282)
+### Possession merge (ADR-0283)
 
 `agent memory merge-possessions` groups the owner's live direct possessions by
 the narrow restatement key and reports the duplicate groups it would fold, the
@@ -1959,7 +1959,7 @@ authority and durability, the rest are superseded with `memory.superseded`
 events, fresh store positions, no SQL). Run the dry run first; the three provisional copies of the owner's car
 formed between September and October 2026 are the first production case.
 
-### Chat upload ingestion retry (ADR-0283)
+### Chat upload ingestion retry (ADR-0284)
 
 `agent knowledge retry <artifact id>` returns a chat upload whose automatic
 ingestion failed or was refused to pending with a fresh attempt count, and

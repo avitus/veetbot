@@ -1350,7 +1350,7 @@ def knowledge_retry(
         UUID, typer.Argument(help="The chat upload to send to knowledge again.")
     ],
 ) -> None:
-    """Queue a failed or refused chat upload for ingestion again (ADR-0283).
+    """Queue a failed or refused chat upload for ingestion again (ADR-0284).
 
     The maintenance sweep picks it up on its next round with a fresh attempt
     count; the outcome is recorded on the upload as before.
@@ -1379,7 +1379,7 @@ def memory_merge_possessions(
         ),
     ] = False,
 ) -> None:
-    """Fold the owner's duplicate possession beliefs into one active belief (ADR-0282).
+    """Fold the owner's duplicate possession beliefs into one active belief (ADR-0283).
 
     Live direct possessions that share the narrow restatement key become one
     corroborated active belief, the newest, with the rest superseded; a

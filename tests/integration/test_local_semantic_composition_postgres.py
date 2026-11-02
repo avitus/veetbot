@@ -158,7 +158,7 @@ async def test_bootstrap_prepares_local_vectors_for_actual_context_and_search(
         assert actual.recall_work is not None
         # The automatic round reserves its base and possible delta even when
         # only the base executes; unused reservations remain spent (ADR-0196).
-        # ADR-0281: the automatic round is not a round of the budget, only a
+        # ADR-0282: the automatic round is not a round of the budget, only a
         # deliberate one counts, and an execution-bound reservation spans the
         # five-second preparation clock plus the ten-second search clock.
         assert actual.recall_work.searches == (3 if path == "deliberate" else 2)
