@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-01 — Email: replies and forwards from Gmail read cleanly
+
+- Links in a Gmail message's text now show as their label and open the right
+  page. Before, the address showed in full, and the blue link often ran into
+  the next word and opened a page that does not exist.
+- Signatures keep their lines, lose Gmail's repeated phone number, and appear
+  once however many replies quote them. Short lines the writer ended stay on
+  their own lines, and wrapped sentences flow again.
+- The chain of earlier replies below a message now waits behind **Show earlier
+  replies**, once you update the app. A reply written below a quote is never
+  hidden, and **Show original** still shows the message unchanged.
+
 ## 2026-10-28 — Spent one-time repairs retired (ADR-0266)
 
 - Five pieces of code that existed only to bridge a state production no

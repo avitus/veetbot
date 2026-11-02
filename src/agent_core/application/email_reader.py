@@ -6,6 +6,7 @@ survives; the client always offers the unchanged retained source alongside this 
 
 import re
 from html.parser import HTMLParser
+from itertools import groupby
 from urllib.parse import urlsplit
 
 _INVISIBLE = str.maketrans("", "", "\u00ad\u034f\u200b\ufeff")
@@ -17,6 +18,22 @@ _PROMOTIONS = re.compile(
     r"get shareable link|download on the app store|\[image: download on the app store\])$",
     re.I,
 )
+_QUOTE_PREFIX = re.compile(r"(?:>[ \t]?)+")
+# Gmail's plain text writes an anchor as `text <url>` and repeats a phone number
+# it detected as a percent-encoded target.
+_LINK_TARGET = re.compile(r"<(https?://[^\s<>]+)>", re.I)
+_PHONE_TARGET = re.compile(r"(?<=\d)\s*<\+?\(?\d[\d()%.+-]{5,}>")
+_LABEL_BOUNDARY = re.compile(r"[\s|<>\[\]]")
+_LABELED_LINE = re.compile(r"\[([^\]]+)\]\(https?://[^\s]+\)|([^<>]+)<https?://[^\s<>]+>")
+_LINK_SEPARATOR = re.compile(r"\)\s*\|\s*\[")
+# Mailers wrap only when the next word would not fit, and few wrap narrower than this.
+_WRAP_WIDTH = 70
+_BLOCK_START = re.compile(r" {4}|\t|#{1,6}(?:\s|$)|[-*+]\s|\d+[.)]\s")
+_RULE = re.compile(r"(?:[-*_]\s*){3,}")
+_UNDERLINE = re.compile(r"-+|=+")
+_TABLE_RULE = re.compile(r"[\s|:-]+")
+# Fewer lines than this can repeat by chance; a sign-off is not a signature.
+_REPEATED_BLOCK_LINES = 3
 
 
 def _safe_url(value: str) -> str | None:
@@ -47,6 +64,121 @@ def _link(label: str, url: str) -> str:
     """Link an already inert label to a checked destination."""
     safe = _safe_url(url)
     return f"[{label}]({safe})" if safe else label
+
+
+def _host(url: str) -> str:
+    try:
+        return urlsplit(url).hostname or "Open link"
+    except ValueError:
+        return "Open link"
+
+
+def _may_name(label: str, url: str) -> bool:
+    """A label shaped like an address may name only its own destination."""
+    return not re.search(r"[./:@]", label) or (
+        label.lower().removeprefix("www.") == _host(url).lower().removeprefix("www.")
+    )
+
+
+def _with_targets(text: str) -> str:
+    """Escape sender text and link the word before each target a mailer wrote for an anchor."""
+    text = _PHONE_TARGET.sub("", text)
+    parts: list[str] = []
+    position = 0
+    for target in _LINK_TARGET.finditer(text):
+        before = text[position : target.start()].rstrip()
+        label = _LABEL_BOUNDARY.split(before)[-1]
+        if label[-1:].isalnum() and _may_name(label, target[1]):
+            parts += [_inert(before[: -len(label)]), _link(_inert(label), target[1])]
+        else:
+            parts += [_inert(before), " " if before else "", _link(_host(target[1]), target[1])]
+        position = target.end()
+    parts.append(_inert(text[position:]))
+    return _LINK_SEPARATOR.sub(") | [", "".join(parts))
+
+
+def _quoted(line: str) -> tuple[str, str]:
+    """Split a line into its quote prefix and what it says."""
+    prefix = _QUOTE_PREFIX.match(line)
+    return (prefix[0], line[prefix.end() :]) if prefix else ("", line)
+
+
+def _starts_block(content: str) -> bool:
+    return bool(_BLOCK_START.match(content) or _RULE.fullmatch(content))
+
+
+def _unwrap(lines: list[str]) -> list[str]:
+    """Rejoin what a mailer wrapped; a line with room for the next word ended on purpose."""
+    result: list[str] = []
+    for index, line in enumerate(lines):
+        previous = lines[index - 1] if index else ""
+        prefix, content = _quoted(line)
+        previous_prefix, before = _quoted(previous)
+        if before and content and prefix.count(">") == previous_prefix.count(">"):
+            if _UNDERLINE.fullmatch(content):
+                # A sender's rule or signature delimiter must not underline a heading.
+                result.append(prefix.rstrip())
+            elif (
+                not _starts_block(content)
+                and not _RULE.fullmatch(before)
+                and not _UNDERLINE.fullmatch(before)
+                and not _URL_LINE.fullmatch(before)
+                # A lone URL labels its whole line before, unless that line has targets.
+                and (not _URL_LINE.fullmatch(content) or _LINK_TARGET.search(before))
+                and (
+                    # A target beginning a line belongs to the word that ended the last.
+                    content.lower().startswith("<http")
+                    or len(previous) + 1 + len(content.split()[0]) > _WRAP_WIDTH
+                )
+            ):
+                result[-1] += " " + content.strip()
+                continue
+        result.append(line)
+    return result
+
+
+def _without_repeated_blocks(lines: list[str]) -> list[str]:
+    """Show a signature once, however each quote level wrapped it."""
+
+    def depth(line: str) -> int | None:
+        prefix, content = _quoted(line)
+        return prefix.count(">") if content else None
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for level, group in groupby(lines, key=depth):
+        block = list(group)
+        if level is not None and len(block) >= _REPEATED_BLOCK_LINES:
+            key = "".join("".join(_quoted(line)[1].split()) for line in block).casefold()
+            if key in seen:
+                # Blank at its own depth, so the quote around it stays one quote.
+                block = [">" * level] * len(block)
+            seen.add(key)
+        result += block
+    return result
+
+
+def _with_line_breaks(lines: list[str], flowing: set[int]) -> list[str]:
+    """Mark each line the writer ended, except where its paragraph ends anyway."""
+    result = list(lines)
+    for index, line in enumerate(lines[:-1]):
+        following = lines[index + 1]
+        if index in flowing or line.endswith("\n") or following.startswith("\n"):
+            continue
+        prefix, content = _quoted(line)
+        following_prefix, next_content = _quoted(following)
+        after = _quoted(lines[index + 2])[1] if index + 2 < len(lines) else ""
+        if (
+            content
+            and next_content
+            and prefix.count(">") == following_prefix.count(">")
+            and not _starts_block(content)
+            and not _starts_block(next_content)
+            and not _TABLE_RULE.fullmatch(after)
+            and not ("|" in content and "|" in next_content)
+        ):
+            result[index] = line + "\\"
+    return result
 
 
 class _HTMLText(HTMLParser):
@@ -162,6 +294,10 @@ def reading_body(body: str, *, subject: str = "") -> str:
         parser.close()
         text = "".join(parser.parts)
     lines = _forwarded([line.strip() for line in text.split("\n")])
+    # Lines inside a code fence are the writer's own; a mail with one keeps them all.
+    reflows = not extracted and "```" not in text and "~~~" not in text
+    if reflows:
+        lines = _unwrap(lines)
     title = re.sub(r"^(?:(?:fwd?|re):\s*)+", "", subject.strip(), flags=re.I)
     # Copyright/address furniture is removable only when directly paired with
     # a newsletter's unsubscribe control near its end, never by chopping a tail.
@@ -178,6 +314,8 @@ def reading_body(body: str, *, subject: str = "") -> str:
                     lines[start:end] = [""] * (end - start)
                 break
     result: list[str] = []
+    # A link line made from the line before it continues that line's sentence.
+    flowing: set[int] = set()
     index = 0
     while index < len(lines):
         line = lines[index]
@@ -210,25 +348,26 @@ def reading_body(body: str, *, subject: str = "") -> str:
             continue
         following = _URL_LINE.fullmatch(lines[index + 1]) if index + 1 < len(lines) else None
         # Exact UI labels are clutter only when accompanied by a destination.
-        embedded = re.fullmatch(r"\[([^\]]+)\]\(https?://[^\s]+\)", line)
-        label = embedded[1] if embedded else line
+        embedded = _LABELED_LINE.fullmatch(line)
+        label = (embedded[1] or embedded[2].rstrip()) if embedded else line
         if _PROMOTIONS.fullmatch(label) and (following or embedded):
             index += 2 if following else 1
             continue
-        match = _URL_LINE.fullmatch(line)
+        prefix, content = _quoted(line)
+        match = _URL_LINE.fullmatch(content)
         if match:
             url, closing_emphasis = match.groups()
-            if result and result[-1] and not result[-1].startswith(">") and "](" not in result[-1]:
-                result[-1] = _link(result[-1] + closing_emphasis, url)
+            previous_prefix, before = _quoted(result[-1]) if result else ("", "")
+            if before and previous_prefix.count(">") == prefix.count(">") and "](" not in before:
+                result[-1] = prefix + _link(before + closing_emphasis, url)
+                flowing.add(len(result) - 1)
             else:
-                try:
-                    host = urlsplit(url).hostname or "Open link"
-                except ValueError:
-                    host = "Open link"
-                result.append(_link(host, url) + closing_emphasis)
+                result.append(prefix + _link(_host(url), url) + closing_emphasis)
         else:
-            result.append(line if extracted else _inert(line))
+            result.append(line if extracted else _with_targets(line))
         index += 1
+    if reflows:
+        result = _without_repeated_blocks(result)
     title = _inert(title)
     if title:
         for index, line in enumerate(result):
@@ -244,5 +383,7 @@ def reading_body(body: str, *, subject: str = "") -> str:
                             result[byline + 1] = ""
                         break
                 break
+    if reflows:
+        result = _with_line_breaks(result, flowing)
     cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(result)).strip()
     return cleaned

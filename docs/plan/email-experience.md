@@ -142,10 +142,29 @@ postscripts remain. No link is fetched or resolved during cleanup. Only the
 reader makes a link, from an HTML anchor or a source URL whose destination it
 checked: brackets, angle brackets and backslashes in the sender's own text are
 escaped, so that text cannot author a Markdown link, image or markup, while its
-emphasis and lists still format. Native text renders the result at a
-comfortable line width, with external HTTP(S) links opened
-only by a user gesture and a **Show original** toggle for the unchanged retained
-body. This is presentation, not a summary or rewrite: it makes no model call,
+emphasis and lists still format.
+
+A mailer's plain-text part gets the same treatment at every quote level. A
+`text <url>` target links the word before it, unless that word is shaped like an
+address other than the destination, which then stays plain beside a link naming
+the real host. A phone number's percent-encoded target is removed. A line the
+mailer wrapped rejoins its sentence, judged by whether the next word would have
+fit within 70 columns; a line the writer ended keeps its break as a Markdown hard
+break, so a signature stays a stack of lines and a short answer stays two answers.
+A message containing a code fence keeps its lines as they are. A block of three or
+more lines that repeats an earlier block of the same message, however it wrapped,
+is shown once, which is how a signature quoted at every level appears. No other
+prose is removed for repeating.
+
+Native text renders the result at a comfortable line width, with external
+HTTP(S) links opened only by a user gesture and a **Show original** toggle for
+the unchanged retained body. A quoted chain folds behind **Show earlier replies**
+only when an `On … wrote:` line introduces it, it ends the message, and the
+message has text of its own above it. A reply written below a quote, a message
+that is all quote, and a quote the writer introduced some other way stay in view.
+Only English attributions are recognized.
+
+This is presentation, not a summary or rewrite: it makes no model call,
 stores no extra body copy, and never replaces drafting or memory evidence. The
 additive `reader_body` message field is absent on older servers; clients then show
 the original text. Source incompleteness and attachment notices remain visible in

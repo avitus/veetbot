@@ -1967,6 +1967,29 @@ private struct EmailGistBlock: View {
     }
 }
 
+/// A message's own text, and the quoted chain ending it that the reading view folds.
+struct EmailReaderSections: Equatable {
+    let current: [MarkdownContentBlock]
+    let earlier: [MarkdownContentBlock]
+
+    /// Only a chain that ends the message and follows text of its own folds: a
+    /// reply written below a quote, or a message that is all quote, stays in view.
+    init(markdown: String) {
+        let blocks = MarkdownContentParser.parse(markdown)
+        let start = blocks.count - 2
+        if start > 0, case .paragraph(let line) = blocks[start],
+            case .blockquote = blocks[start + 1],
+            line.lowercased().hasPrefix("on "), line.lowercased().hasSuffix(" wrote:")
+        {
+            current = Array(blocks[..<start])
+            earlier = Array(blocks[start...])
+        } else {
+            current = blocks
+            earlier = []
+        }
+    }
+}
+
 /// Native text only: links open on a gesture; remote images and HTML never load.
 private struct EmailReadingView: View {
     let message: EmailMessageView
@@ -1974,6 +1997,7 @@ private struct EmailReadingView: View {
     /// its own Reading view and Show original switch.
     var showsOriginal: Bool? = nil
     @State private var showingOriginal = false
+    @State private var showingEarlier = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1993,21 +2017,44 @@ private struct EmailReadingView: View {
                 if showsOriginal ?? showingOriginal {
                     original
                 } else {
-                    MarkdownContentView(text: reader)
-                        .veetType(.ui).lineSpacing(5)
+                    reading(EmailReaderSections(markdown: reader))
                         .environment(\.openURL, OpenURLAction { url in
                             guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
                                   url.host != nil else { return .discarded }
                             return .systemAction
                         })
-                        .accessibilityIdentifier("email.reader.content")
                 }
             } else {
                 original
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: message.id) { showingOriginal = false }
+        .onChange(of: message.id) {
+            showingOriginal = false
+            showingEarlier = false
+        }
+    }
+
+    private func reading(_ sections: EmailReaderSections) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            markdown(sections.current).accessibilityIdentifier("email.reader.content")
+            if !sections.earlier.isEmpty {
+                Button(showingEarlier ? "Hide earlier replies" : "Show earlier replies") {
+                    showingEarlier.toggle()
+                }
+                .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+                .accessibilityIdentifier("email.reader.earlier")
+                if showingEarlier {
+                    markdown(sections.earlier).accessibilityIdentifier("email.reader.earlierContent")
+                }
+            }
+        }
+    }
+
+    private func markdown(_ blocks: [MarkdownContentBlock]) -> some View {
+        MarkdownBlocksView(blocks: blocks)
+            .textSelection(.enabled)
+            .veetType(.ui).lineSpacing(5)
     }
 
     private var original: some View {
