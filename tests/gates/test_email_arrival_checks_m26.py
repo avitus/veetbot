@@ -528,6 +528,26 @@ async def _assert_a_failed_foreground_refresh_is_not_a_failed_check() -> None:
         assert await service.admit_arrival_check(app.principal) is not None
 
 
+async def _assert_a_completed_foreground_refresh_resets_the_wait() -> None:
+    """Any completed refresh resets the count, even one that took a conservative charge."""
+    clock = FixedClock(NOW - timedelta(hours=3))
+    async with _app(clock, await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        first = await service.admit_arrival_check(app.principal)
+        assert first is not None
+        base = await _run_of(app, first.run_id)
+        clock.advance(timedelta(hours=1))
+        await _seed_refresh(app, base, clock.now(), RunStatus.FAILED)
+        clock.advance(timedelta(minutes=1))
+        await _seed_refresh(app, base, clock.now(), RunStatus.COMPLETED, charge="1", scope="full")
+
+        clock.advance(timedelta(minutes=5, seconds=-1))
+        assert await service.admit_arrival_check(app.principal) is None
+        clock.advance(timedelta(seconds=1))
+        assert await service.admit_arrival_check(app.principal) is not None
+
+
 CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_is_admitted_only_when_due,
     _assert_a_check_handles_only_arrivals,
@@ -537,6 +557,7 @@ CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_failures_widen_the_interval,
     _assert_a_failed_check_reaches_nobody,
     _assert_a_failed_foreground_refresh_is_not_a_failed_check,
+    _assert_a_completed_foreground_refresh_resets_the_wait,
     _assert_a_check_with_nothing_new_stays_cheap,
     _assert_a_check_that_found_mail_is_not_empty,
     _assert_empty_checks_are_removed_after_seven_days,

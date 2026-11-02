@@ -1563,7 +1563,11 @@ class EmailExperienceService:
                     continue
                 if run.status not in TERMINAL_RUN_STATUSES:
                     return False
-                if run.status is RunStatus.COMPLETED and task.budget_charge is None:
+                # A completed refresh resets the count, unless it is a check charged
+                # conservatively, which counts as a failure.
+                if run.status is RunStatus.COMPLETED and (
+                    task.scope != "arrivals" or task.budget_charge is None
+                ):
                     break
                 failures += failed
         if not recent:
