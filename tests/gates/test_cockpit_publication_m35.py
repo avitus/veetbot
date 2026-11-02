@@ -456,3 +456,52 @@ async def test_a_restore_is_refused_when_another_package_went_live_while_it_buil
         with pytest.raises(ConflictError) as refused:
             await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
         assert refused.value.reason == "revision_changed"
+
+
+async def test_a_restore_is_refused_while_a_newer_package_waits_on_the_deleted_widget() -> None:
+    """Accepting it would let the worker publish the new package, then replace it with the old."""
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        newer = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=None
+        )
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert refused.value.reason == "revision_changed"
+        head = await stack.publication.head_revision(PRINCIPAL, "weather")
+        assert head is not None and head.id == newer.id
+
+
+async def test_a_second_create_is_refused_while_the_first_waits_on_the_deleted_widget() -> None:
+    async with publication_stack() as stack:
+        await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        await stack.publication.write(PRINCIPAL, "weather", package("v2"), expected_revision=None)
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.write(
+                PRINCIPAL, "weather", package("v3"), expected_revision=None
+            )
+        assert refused.value.reason == "revision_changed"
+
+
+async def test_a_restore_is_refused_when_a_create_lands_during_its_build() -> None:
+    async with publication_stack() as stack:
+        await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        build = stack.builder.build
+
+        async def build_while_a_create_lands(*args: Any, **kwargs: Any) -> Any:
+            stack.builder.build = build  # type: ignore[method-assign]
+            await stack.publication.write(
+                PRINCIPAL, "weather", package("v2"), expected_revision=None
+            )
+            return await build(*args, **kwargs)
+
+        stack.builder.build = build_while_a_create_lands  # type: ignore[method-assign]
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather")
+        assert refused.value.reason == "revision_changed"

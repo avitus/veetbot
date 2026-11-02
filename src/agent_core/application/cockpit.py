@@ -267,15 +267,18 @@ class CockpitPublication:
         """The newest accepted revision: one waiting for its commit, or else the live one.
 
         An update names it as `expected_revision`, so a change accepted but not yet
-        committed is never silently overwritten. A deleted widget has none.
+        committed is never silently overwritten. A deleted widget has none unless a
+        package accepted since is waiting: restoring or creating over it would replace it.
         """
 
-        if widget is None or widget.state is WidgetState.DELETED:
+        if widget is None:
             return None
         recent = await uow.cockpit_widgets.list_revisions(principal, widget.slug, limit=50)
         waiting = (RevisionState.PENDING_COMMIT, RevisionState.COMMITTED)
         newest = next((revision for revision in recent if revision.state in waiting), None)
-        return newest.id if newest is not None else widget.live_revision_id
+        if newest is not None:
+            return newest.id
+        return None if widget.state is WidgetState.DELETED else widget.live_revision_id
 
     async def _check_rate(self, uow: RepositoryUnitOfWork, principal: Principal, slug: str) -> None:
         since = self._clock.now() - _HOUR
@@ -437,7 +440,10 @@ class CockpitPublication:
         )
 
     async def head_revision(self, principal: Principal, slug: str) -> WidgetRevision | None:
-        """The revision an update names as `expected_revision`; None for a new or deleted widget."""
+        """The revision an update names as `expected_revision`.
+
+        None for a new widget, or a deleted one with no package waiting.
+        """
 
         async with self._uow_factory() as uow:
             head = await self._head(uow, principal, await self._widget(uow, principal, slug))
@@ -574,9 +580,12 @@ class CockpitPublication:
 
         async with self._uow_factory() as uow:
             widget = await uow.cockpit_widgets.get_widget(principal, slug)
+            waiting = await self._head(uow, principal, widget)
         if widget.state is not WidgetState.DELETED or widget.live_revision_id is None:
             raise ConflictError(f"{slug} is not deleted", reason="widget_not_deleted")
-        if expected_live is not None and expected_live != widget.live_revision_id:
+        if waiting is not None or (
+            expected_live is not None and expected_live != widget.live_revision_id
+        ):
             raise ConflictError(f"{slug} is at another revision", reason="revision_changed")
         return await self._republish(
             principal, widget, widget.live_revision_id, request_key, expected_live
