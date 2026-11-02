@@ -1328,6 +1328,8 @@ class FakeCeremonyPage:
             insert_text=AsyncMock(), type=AsyncMock(), press=AsyncMock()
         )
         self.mouse = SimpleNamespace(click=AsyncMock())
+        self.main_frame = object()
+        self.frames: list[object] = [self.main_frame]
 
     def locator(self, selector: str) -> Mock:
         """Return the challenge fields; a hidden password input stays in the DOM."""
@@ -1350,6 +1352,62 @@ class FakeCeremonyPage:
         )
         matches.nth.return_value = match
         return matches
+
+
+def fake_frame(*, count: AsyncMock, frame_visible: bool = True) -> Mock:
+    """A subframe holding one candidate field, whose count the test controls."""
+    field = Mock(spec=Locator)
+    field.is_visible = AsyncMock(return_value=True)
+    fields = Mock(spec=Locator)
+    fields.count = count
+    fields.nth.return_value = field
+    owner = SimpleNamespace(is_visible=AsyncMock(return_value=frame_visible), dispose=AsyncMock())
+    return Mock(frame_element=AsyncMock(return_value=owner), locator=Mock(return_value=fields))
+
+
+async def test_a_frame_that_goes_away_during_the_scan_shows_no_field_and_loses_no_key() -> None:
+    """Typing must survive an embed that detaches, which pages do constantly."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(
+        fake_frame(count=AsyncMock(side_effect=PlaywrightError("Frame was detached")))
+    )
+    page.frames.append(fake_frame(count=AsyncMock(return_value=1)))
+    runtime = ceremony_runtime(page)
+
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+
+    page.keyboard.type.assert_awaited_once_with("synthetic-entry")
+    # The scan went past the detached frame to the one showing a field.
+    assert await runtime.authentication_status() is BrowserAuthenticationStatus.NEEDS_USER
+
+
+async def test_a_frame_that_stalls_cannot_hold_up_the_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A key press and a verification load both wait on this scan."""
+    monkeypatch.setattr(playwright_adapter, "_FRAME_SCAN_SECONDS", 0.01)
+
+    async def never_answers() -> int:
+        await asyncio.Event().wait()
+        return 0
+
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(fake_frame(count=AsyncMock(side_effect=never_answers)))
+    runtime = ceremony_runtime(page)
+
+    status = await asyncio.wait_for(runtime.authentication_status(), timeout=5)
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+
+
+async def test_a_field_in_a_frame_with_no_visible_owner_is_no_challenge() -> None:
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(fake_frame(count=AsyncMock(return_value=1), frame_visible=False))
+    runtime = ceremony_runtime(page)
+
+    assert (
+        await runtime.authentication_status() is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    )
 
 
 def ceremony_runtime(page: FakeCeremonyPage) -> PythonPlaywrightRuntime:

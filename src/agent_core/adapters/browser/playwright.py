@@ -372,6 +372,36 @@ class _ReadinessRequests:
         return True
 
 
+_FRAME_SCAN_SECONDS = 1.0
+
+
+async def _credential_field_in_frame(page: Page) -> bool:
+    """Report a visible password or one-time-code field in a visible frame of ``page``.
+
+    Some websites keep their whole sign-in form in a frame (ADR-0283). Only
+    credential fields count there: a CAPTCHA class or challenge wording inside
+    an embedded widget says nothing about this page. A frame that goes away or
+    stalls during the scan shows no field, so it cannot fail a typed key or a
+    verification load.
+    """
+    with suppress(TimeoutError):
+        async with asyncio.timeout(_FRAME_SCAN_SECONDS):
+            for frame in page.frames:
+                if frame == page.main_frame:
+                    continue
+                with suppress(PlaywrightError):
+                    owner = await frame.frame_element()
+                    frame_visible = await owner.is_visible()
+                    await owner.dispose()
+                    if not frame_visible:
+                        continue
+                    fields = frame.locator("input[type=password],input[autocomplete=one-time-code]")
+                    for index in range(await fields.count()):
+                        if await fields.nth(index).is_visible():
+                            return True
+    return False
+
+
 class PythonPlaywrightRuntime:
     """Own one Chromium process, headed for every hosted use, and one non-persistent context."""
 
@@ -1553,7 +1583,8 @@ class PythonPlaywrightRuntime:
         return cast(dict[str, object], await self._context.storage_state(indexed_db=True))
 
     async def check_automation_ready(self) -> None:
-        if await self._current_page().evaluate(AUTHENTICATION_SCRIPT):
+        page = self._current_page()
+        if await page.evaluate(AUTHENTICATION_SCRIPT) or await _credential_field_in_frame(page):
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.needs_user", retryable=False)
 
@@ -1578,7 +1609,7 @@ class PythonPlaywrightRuntime:
         for index in range(await interactive_text.count()):
             if await interactive_text.nth(index).is_visible():
                 return True
-        return False
+        return await _credential_field_in_frame(page)
 
     async def authentication_status(self) -> BrowserAuthenticationStatus:
         page = self._current_page()
