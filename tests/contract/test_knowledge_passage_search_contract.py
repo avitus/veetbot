@@ -186,6 +186,12 @@ async def test_a_question_finds_a_passage_in_another_spelling_of_its_words() -> 
 
     assert _ids(found) == [UUID(int=2_001)]
 
+    # A hyphenated word is indexed whole and in parts, as PostgreSQL's parser
+    # holds it, so "blind" reaches the manual's "blind-spot".
+    hyphenated = await _store(_document(3, "The blind-spot indicator lights when a car passes."))
+    assert _ids(await hyphenated.search(_query(text="blind"))) == [UUID(int=2_003)]
+    assert _ids(await hyphenated.search(_query(text="blind-spot"))) == [UUID(int=2_003)]
+
 
 async def test_coverage_ranks_before_authority_and_scope() -> None:
     """ADR-0285: coverage orders first in both stores; the score's other parts only break ties.

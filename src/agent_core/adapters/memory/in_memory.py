@@ -46,6 +46,7 @@ from agent_core.domain.memory import (
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
+    lexical_tokens,
     owner_anchored,
     recall_term_lexemes,
     review_reason,
@@ -1105,28 +1106,21 @@ class InMemoryKnowledgeStore:
             return refs
 
 
-_PUNCTUATION = ".,:;!?()[]{}\"'"
-
-
-def _tokens(text: str) -> list[str]:
-    return "".join(
-        " " if character in _PUNCTUATION else character for character in text.casefold()
-    ).split()
-
-
 def _coverage(forms: list[tuple[str, ...]], text: str) -> float:
     """The share of query terms the text holds in any folded spelling (ADR-0285).
 
-    A term with punctuation inside it ("restart,service") matches the way
-    PostgreSQL's `plainto_tsquery` reads it: every word of it must be present.
+    Words come from the same parser the belief stores share, so a hyphenated
+    word is held whole and in parts the way `to_tsvector('simple', ...)`
+    holds it, and a term with punctuation inside it ("restart,service")
+    matches the way `plainto_tsquery` reads it: every word of it present.
     """
     if not forms:
         return 0
-    words = set(_tokens(text))
+    words = lexical_tokens(text)
     matched = 0
     for group in forms:
         for form in group:
-            parts = _tokens(form)
+            parts = lexical_tokens(form)
             if parts and all(part in words for part in parts):
                 matched += 1
                 break

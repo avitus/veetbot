@@ -258,6 +258,9 @@ async def test_runtime_measurement_uses_the_independently_selected_principal(
     raw = {**result, "storage": "postgres", "clock": "elapsed", "observed_at": AT.isoformat()}
     compiled = compile_runtime_observation(case, raw, identity_sha256="a" * 64, principal=owner)
     assert compiled.boundary_failures == ()
+    # The released search count is the nonrefundable reservation, not the
+    # executions: an unused delta slot is still spent (ADR-0196, ADR-0282).
+    assert compiled.searches == result["recall_work"]["searches"]
     assert compile_runtime_observation(case, raw, identity_sha256="a" * 64).boundary_failures
 
 

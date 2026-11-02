@@ -45,6 +45,22 @@ def call_ids(items: Sequence[ConversationItem]) -> list[str]:
     return result
 
 
+async def test_an_admitted_search_timeout_is_recorded_as_timed_out_not_exhausted() -> None:
+    """A slow search is a timeout in the health report, not a spent slot (ADR-0282)."""
+    from agent_core.context.builder import RECALL_TIMED_OUT
+    from agent_core.domain.recall_execution import RecallSearchTimeoutError
+
+    class Slow(CurrentRetriever):
+        async def recall(self, *args: Any, **kwargs: Any) -> Any:
+            raise RecallSearchTimeoutError()
+
+    request = await _builder(Slow()).build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+    assert request.metadata.get("recall_limitation") == "timed_out"
+    assert RECALL_TIMED_OUT in request.model_dump_json()
+
+
 async def test_actual_search_exhaustion_keeps_mandatory_corrections_and_explains_limit() -> None:
     from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
 
@@ -57,6 +73,7 @@ async def test_actual_search_exhaustion_keeps_mandatory_corrections_and_explains
         run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
     )
     assert EXHAUSTED in request.model_dump_json()
+    assert request.metadata.get("recall_limitation") == "exhausted"
     assert _correction_line() in request.model_dump_json()
     assert len(retriever.correction_calls) == 1
 

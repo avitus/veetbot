@@ -631,7 +631,7 @@ citations:
   - cite: "docs/plan/thread-folders.md#docs/plan/persona-surface.md:65-68"
     excerpt: "1. **Any automatic promotion.** No confidence threshold, cor"
     digest: "6725d3a01e9f18fd"
-  - cite: "docs/plan/thread-folders.md#docs/plan/runtime-loop.md:1540"
+  - cite: "docs/plan/thread-folders.md#docs/plan/runtime-loop.md:1542"
     excerpt: "A PostgreSQL advisory lock makes the maintenance role safe t"
     digest: "ff4fd5a72409b0ca"
   - cite: "docs/plan/typed-judgment.md#docs/plan/bootstrap-and-composition.md:345-347"

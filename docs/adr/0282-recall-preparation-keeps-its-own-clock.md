@@ -59,8 +59,13 @@ lose automatic context; in practice a three-step chat lost it.
 - The valve-sounds failure mode cannot recur from slow preparation alone: a
   slow or unavailable vector provider costs at most five seconds and then the
   sparse arms run.
-- Automatic recall now executes on every build step of a run, as it already
-  did in production under sparse fallback, where no permit is composed.
+- Automatic recall refreshes on every build step while its durable
+  reservation remains valid; once the reservation has expired a later step
+  records recall as limited instead. Sparse fallback, where no permit is
+  composed, keeps running on every step as it already did in production.
+- An admitted search that outlives the shared deadline is reported as
+  `timed_out`, not as an exhausted allowance: the permit raises a timeout
+  subclass of its budget error, and the builder keeps the distinction.
 - Recall health can be read from events: a run whose interactive turns show
   `memory.recall.limited` instead of `memory.recalled` is degraded, and the
   reason says why.
@@ -70,8 +75,14 @@ lose automatic context; in practice a three-step chat lost it.
 ## Verification
 
 - `tests/unit/test_runtime_recall_preparation.py`: an eleven-second
-  preparation no longer refuses the turn's searches; a twenty-second one
-  leaves `memory.recall.limited`; the reservation counters follow the new
-  accounting across five build steps.
+  preparation no longer refuses the turn's searches; a preparation that
+  jumps a fixed clock twenty seconds, past the whole fifteen-second
+  reservation without ever suspending (so the five-second timeout cannot
+  cut it), leaves `memory.recall.limited`; a preparation that hangs for real
+  is cancelled at the preparation clock and recall still runs; the
+  reservation counters follow the new accounting across five build steps.
+- `tests/unit/test_run_recall_execution_budget.py` and
+  `tests/unit/test_context_memory_budget.py`: a search past the deadline is
+  a `RecallSearchTimeoutError` and reaches the request as `timed_out`.
 - `tests/unit/test_context_memory_budget.py`: the limitation reaches the
   request metadata.

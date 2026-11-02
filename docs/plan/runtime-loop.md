@@ -1420,7 +1420,7 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Twenty-two more belong to subsystems this document does not touch. They are
+Twenty-three more belong to subsystems this document does not touch. They are
 listed here for the same reason: Section 6.8's list is where an implementer
 looks for the vocabulary, and these are not in it either.
 
@@ -1451,11 +1451,13 @@ records.entry.deleted        owner-records.md, ADR-0239
 records.series.deleted       owner-records.md, ADR-0239
 ```
 
-Twenty-four in Section 6.8 plus these thirty-seven is the whole vocabulary
-of session-scoped events: sixty-one persisted event types, not one of
-them introduced here. The four `records.*` types arrived with Milestone 34
-and are appended to the run's session in the same unit of work as the
-record write.
+Twenty-four in Section 6.8 plus these thirty-eight is the whole vocabulary
+of session-scoped events: sixty-two persisted event types. One of them,
+`memory.recall.limited`, was introduced by ADR-0282 and is appended by the
+loop when a build step goes without automatic recall; every other one
+arrived with the document that owns it. The four `records.*` types arrived
+with Milestone 34 and are appended to the run's session in the same unit of
+work as the record write.
 
 Two of the original eighteen were declared after this consolidation was written and
 never folded into it. `mcp.server.reauthenticated` sits in the same
@@ -1474,8 +1476,8 @@ the run, under a span root that is explicitly not `agent.run`. A harness
 event has no session, and `events.session_id` is `NOT NULL`. They are event
 types by every other measure and they cannot be rows in `events` as the
 schema stands — the same wall `multi-device-and-surfaces.md` hits for
-device lifecycle events and leaves open. Sixty-one plus these four is
-sixty-five declared types, of which sixty-one have somewhere to be
+device lifecycle events and leaves open. Sixty-two plus these four is
+sixty-six declared types, of which sixty-two have somewhere to be
 stored.
 
 Two ownership assignments close gaps that were nobody's:

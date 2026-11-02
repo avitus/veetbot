@@ -192,6 +192,12 @@ async def test_the_same_possession_stated_in_another_chat_corroborates() -> None
     assert second.status is MemoryStatus.ACTIVE
     assert second.corroboration_count == 2
     assert sorted(second.origin_scopes) == ["project-a"]
+    # Event sequences are per session: the other chat's event must not be read
+    # as one of the first chat's, so provenance stays with the first session
+    # and the corroboration still counts as evidence.
+    assert second.source_session_id == first.source_session_id
+    assert second.source_event_ids == first.source_event_ids
+    assert second.evidence_count == first.evidence_count + 1
 
 
 async def test_merge_possessions_folds_legacy_duplicates_and_retires_placeholders() -> None:

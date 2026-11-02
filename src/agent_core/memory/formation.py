@@ -2801,7 +2801,14 @@ class GovernedMemoryService:
             )
             if promotable is not None:
                 evidence_instant = evidence_at or self._clock.now()
-                all_sources = sorted(set(promotable.source_event_ids).union(sources))
+                # Event sequences are per session (ADR-0283): another chat's
+                # events corroborate but never join this belief's provenance.
+                same_session = promotable.source_session_id == session_id
+                all_sources = (
+                    sorted(set(promotable.source_event_ids).union(sources))
+                    if same_session
+                    else list(promotable.source_event_ids)
+                )
                 promoted_expiry = expires_at
                 if not explicit and promoted_expiry is None:
                     if longevity is MemoryLongevity.TENTATIVE:
@@ -2819,7 +2826,9 @@ class GovernedMemoryService:
                         "derivation": MemoryDerivation.DIRECT,
                         "longevity": longevity,
                         "last_evidence_at": max(promotable.last_evidence_at, evidence_instant),
-                        "evidence_count": len(all_sources),
+                        "evidence_count": (
+                            len(all_sources) if same_session else promotable.evidence_count + 1
+                        ),
                         "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
                         "confidence": min(
                             1.0,
@@ -2882,6 +2891,15 @@ class GovernedMemoryService:
                             )
                         return stored, "reinforced"
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))
+                    # Event sequences are per session (ADR-0283): a restatement
+                    # from another chat counts as evidence without lending the
+                    # belief that chat's event numbers.
+                    same_session = current.source_session_id == session_id
+                    merged_sources = (
+                        sorted(set(current.source_event_ids).union(sources))
+                        if same_session
+                        else list(current.source_event_ids)
+                    )
                     portable_scope_promoted = (
                         current.portability is not Portability.LOCAL and len(origin_scopes) >= 2
                     )
@@ -2889,9 +2907,7 @@ class GovernedMemoryService:
                         update={
                             "scope": "user" if portable_scope_promoted else current.scope,
                             "origin_scopes": origin_scopes,
-                            "source_event_ids": sorted(
-                                set(current.source_event_ids).union(sources)
-                            ),
+                            "source_event_ids": merged_sources,
                             "corroboration_count": current.corroboration_count + 1,
                             "claim_kind": effective_claim_kind,
                             "derivation": (
@@ -2908,7 +2924,9 @@ class GovernedMemoryService:
                                 current.last_evidence_at,
                                 evidence_at or self._clock.now(),
                             ),
-                            "evidence_count": len(set(current.source_event_ids).union(sources)),
+                            "evidence_count": (
+                                len(merged_sources) if same_session else current.evidence_count + 1
+                            ),
                             "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
                             "confidence": min(1.0, current.confidence + 0.1),
                             "status": MemoryStatus.ACTIVE,

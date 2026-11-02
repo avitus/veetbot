@@ -305,9 +305,11 @@ def compile_runtime_observation(
             )
         ),
         boundary_failures=tuple(sorted(boundary)),
-        # The release value is what the run spent against its allowance; the
-        # automatic refreshes beyond it are not charged (ADR-0282).
-        searches=min(observed.executed_searches, observed.recall_work.searches),
+        # The release value is the nonrefundable reservation the run spent: an
+        # unused delta slot stays spent, and the automatic refreshes beyond the
+        # reservation are not charged (ADR-0196, ADR-0282). Executions are
+        # reported separately as `executed_searches`.
+        searches=observed.recall_work.searches,
         rounds=observed.recall_work.rounds,
         context_tokens=sum(
             max(result.tokens, (len(result.rendered.encode()) + 3) // 4) for result in visible

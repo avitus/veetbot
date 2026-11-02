@@ -63,7 +63,11 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
+from agent_core.domain.recall_execution import (
+    EXHAUSTED,
+    RecallBudgetExceededError,
+    RecallSearchTimeoutError,
+)
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.domain.tool_output import content_bytes, context_view, output_excerpt
 from agent_core.domain.tools import ToolSpec, deferred_definition_text
@@ -1125,7 +1129,11 @@ class BudgetedContextBuilder:
                 return _RecallBundle(corrections=tuple(exhausted_corrections))
             base = await recall(queries[0])
         except (RecallBudgetExceededError, TimeoutError) as error:
-            exhausted = isinstance(error, RecallBudgetExceededError)
+            # An admitted search that outlived the permit's deadline arrives as
+            # a budget error too; it is a timeout, not a spent slot.
+            exhausted = isinstance(error, RecallBudgetExceededError) and not isinstance(
+                error, RecallSearchTimeoutError
+            )
             limitation = EXHAUSTED if exhausted else RECALL_TIMED_OUT
             reason = "exhausted" if exhausted else "timed_out"
             # A turn that goes without recall is a measurable outcome, not a
