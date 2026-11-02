@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -696,6 +697,71 @@ async def test_creating_over_a_deleted_widget_shows_every_file_it_publishes(tmp_
             h, {"operation": "create", "slug": "weather", "files": package()}
         )
     assert f"+{_V1}" in entries
+
+
+async def test_a_create_card_shows_every_file_even_while_a_delete_is_queued(
+    tmp_path: Path,
+) -> None:
+    """The create succeeds only once the delete lands, and it then publishes everything."""
+    async with harness(tmp_path) as h:
+        await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        entries = await _card_entries(
+            h, {"operation": "create", "slug": "weather", "files": package()}
+        )
+    assert f"+{_V1}" in entries
+
+
+async def test_a_delete_card_names_the_revision_it_shows(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        pending = await _live_v1_and_pending_v2(h)
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {"operation": "delete", "slug": "weather"},
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    assert approval_argument_view(presentation.arguments)["removes_revision"] == pending
+
+
+@pytest.mark.parametrize("card_is_current", [True, False], ids=["current", "stale"])
+async def test_an_approved_delete_removes_only_the_revision_its_card_showed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, card_is_current: bool
+) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        shown = created.structured["revision_id"]
+        if not card_is_current:
+            await h.call(
+                "cockpit.widget.write",
+                {
+                    "operation": "update",
+                    "slug": "weather",
+                    "files": package("v2"),
+                    "expected_revision": shown,
+                },
+            )
+
+        async def card(*_args: Any) -> Any:
+            return SimpleNamespace(arguments={"diff": {}, "removes_revision": shown})
+
+        monkeypatch.setattr(
+            "agent_core.tools.cockpit.CockpitWidgetWriteTool._approval", card, raising=False
+        )
+        result = await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+    if card_is_current:
+        assert result.ok, result.failure
+    else:
+        assert not result.ok and result.failure is not None
+        assert result.failure.reason_code == "cockpit.revision_changed"
 
 
 def test_the_stored_history_bound_is_the_manifest_schema_ceiling() -> None:

@@ -720,7 +720,9 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
   says approving publishes nothing, and the tool refuses it with
   `cockpit.change_too_large`. A card whose diff could not be built is refused
   with `cockpit.change_not_shown`. These refusals apply only to a write that
-  asked for approval. `cockpit.install`
+  asked for approval. A create card compares against nothing, because a create
+  publishes the whole package. A delete card names the revision it shows, and a
+  newer head refuses the removal with `cockpit.revision_changed`. `cockpit.install`
   keeps its own summarized approval (ADR-0270), which names the source being
   published without showing it.
 

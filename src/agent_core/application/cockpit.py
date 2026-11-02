@@ -564,15 +564,28 @@ class CockpitPublication:
         return await self._republish(principal, widget, widget.live_revision_id, request_key)
 
     async def delete(
-        self, principal: Principal, slug: str, *, request_key: str | None = None
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        request_key: str | None = None,
+        expected_head: UUID | None = None,
     ) -> CommitOutboxEntry:
-        """Queue the directory's removal; the widget is deleted once it is committed."""
+        """Queue the directory's removal; the widget is deleted once it is committed.
+
+        `expected_head` is the revision an approval card showed being removed, so a newer
+        one is never removed unseen.
+        """
 
         now = self._clock.now()
         async with self._uow_factory() as uow:
             widget = await uow.cockpit_widgets.get_widget(principal, slug)
             if widget.state is WidgetState.DELETED:
                 raise ConflictError(f"{slug} is already deleted", reason="widget_deleted")
+            if expected_head is not None and expected_head != await self._head(
+                uow, principal, widget
+            ):
+                raise ConflictError(f"{slug} is at another revision", reason="revision_changed")
             operation_id = self._ids.new_id()
             await self._record_request(
                 uow, principal, request_key, slug, OutboxOperation.REMOVE, operation_id

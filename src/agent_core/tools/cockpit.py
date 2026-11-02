@@ -25,7 +25,7 @@ from agent_core.application.cockpit_diagnostics import diagnostics
 from agent_core.application.cockpit_feeds import CockpitFeedRefusedError, CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.domain.agents import Principal
-from agent_core.domain.approvals import ApprovalPresentation
+from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest
 from agent_core.domain.argument_views import card_source_lines
 from agent_core.domain.cockpit import (
     FEED_ERROR_MAX_CHARS,
@@ -799,6 +799,29 @@ class CockpitLiveCheckTool(CockpitCheckTool):
         )
 
 
+def _unshown_change_refusal(approval: ApprovalRequest | None) -> ToolResult | None:
+    """The refusal when this call's approval card did not show the owner the whole change.
+
+    A write that never asked has no approval and is unaffected. A card with no diff
+    either said the change was too large or fell back when its presenter failed.
+    """
+
+    if approval is None or "diff" in approval.arguments:
+        return None
+    if approval.arguments.get("diff_status") == _DIFF_TOO_LARGE:
+        return _invalid(
+            "This change was too large to show the owner whole, so nothing was published. "
+            "Make a smaller change, or tell the owner it can be asked for in a new chat "
+            "that reads no outside content.",
+            "cockpit.change_too_large",
+        )
+    return _invalid(
+        "The approval card could not show the owner this change, so nothing was published. "
+        "Tell the owner, and try again.",
+        "cockpit.change_not_shown",
+    )
+
+
 class CockpitWidgetWriteTool(_CockpitTool):
     spec = _spec(
         WIDGET_WRITE_TOOL,
@@ -846,7 +869,8 @@ class CockpitWidgetWriteTool(_CockpitTool):
             return await self._outcome(principal, replayed.revision_id, operation)
         if operation in {"create", "update"} and "files" not in arguments:
             return _invalid(f"{operation} carries the package's files")
-        refusal = await self._unshown_change_refusal(context)
+        approval = await self._approval(context)
+        refusal = _unshown_change_refusal(approval)
         if refusal is not None:
             return refusal
         expected: UUID | None = None
@@ -858,7 +882,13 @@ class CockpitWidgetWriteTool(_CockpitTool):
             expected = UUID(str(arguments["expected_revision"]))
         await context.mark_effect_sent()
         if operation == "delete":
-            await publication.delete(principal, slug, request_key=context.idempotency_key)
+            shown = None if approval is None else approval.arguments.get("removes_revision")
+            await publication.delete(
+                principal,
+                slug,
+                request_key=context.idempotency_key,
+                expected_head=None if shown is None else UUID(str(shown)),
+            )
             return await self._removal(principal, slug)
         if operation == "restore":
             revision = await publication.restore(
@@ -875,29 +905,11 @@ class CockpitWidgetWriteTool(_CockpitTool):
             )
         return await self._outcome(principal, revision.id, operation)
 
-    async def _unshown_change_refusal(self, context: ToolExecutionContext) -> ToolResult | None:
-        """The refusal when this call's approval card did not show the owner the whole change.
-
-        A write that never asked has no approval and is unaffected. A card with no diff
-        either said the change was too large or fell back when its presenter failed.
-        """
+    async def _approval(self, context: ToolExecutionContext) -> ApprovalRequest | None:
+        """This call's approval; a write that never asked has none."""
 
         async with self._toolset.uow_factory() as uow:
-            approval = await uow.approvals.get_by_action(context.invocation_id)
-        if approval is None or "diff" in approval.arguments:
-            return None
-        if approval.arguments.get("diff_status") == _DIFF_TOO_LARGE:
-            return _invalid(
-                "This change was too large to show the owner whole, so nothing was published. "
-                "Make a smaller change, or tell the owner it can be asked for in a new chat "
-                "that reads no outside content.",
-                "cockpit.change_too_large",
-            )
-        return _invalid(
-            "The approval card could not show the owner this change, so nothing was published. "
-            "Tell the owner, and try again.",
-            "cockpit.change_not_shown",
-        )
+            return await uow.approvals.get_by_action(context.invocation_id)
 
     async def _in_chat(self, context: ToolExecutionContext) -> bool:
         """The session filter withholds the tool elsewhere; a call by name is refused here."""
@@ -989,12 +1001,15 @@ class CockpitWidgetWriteTool(_CockpitTool):
                 live = dict(revision.files)
         head = await self._toolset.publication.head_revision(principal, slug)
         accepted = {} if head is None else dict(head.files)
+        files = dict(arguments.get("files") or {})
         if operation == "delete":
             before, after = accepted, {}
         elif operation == "restore":
             before, after = {}, live
+        elif operation == "create":
+            before, after = {}, files
         else:
-            before, after = accepted, dict(arguments.get("files") or {})
+            before, after = accepted, files
         changes = sorted(name for name in {*before, *after} if before.get(name) != after.get(name))
         lines: list[str] = []
         for name in changes:
@@ -1021,6 +1036,8 @@ class CockpitWidgetWriteTool(_CockpitTool):
         }
         if "expected_revision" in arguments:
             view["expected_revision"] = arguments["expected_revision"]
+        if operation == "delete" and head is not None:
+            view["removes_revision"] = str(head.id)
         summary = f"{verb} the Cockpit widget {slug} {where} the public branch"
         entries, hidden = card_diff(lines)
         if len(entries) > CARD_DIFF_ENTRIES:
