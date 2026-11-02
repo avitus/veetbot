@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-01 — Website Access: logins for websites like Chase
+
+- A website that keeps its sign-in form in a frame, as Chase does, can now be
+  saved through Veetbot's remote browser. Before, the website accepted the
+  sign-in, but Veetbot saved nothing and the login stayed unfinished.
+- Once you update the app, the sign-in window offers **Use Veetbot's remote
+  browser** for a saved login as well as a new website. Backing out keeps the
+  login.
+- Also in the update, when a new website's sign-in moves to another of its
+  addresses, the window names that address and adds it to the login only if you
+  allow it. Other websites stay refused.
+
 ## 2026-11-01 — Email: replies and forwards from Gmail read cleanly
 
 - Links in a Gmail message's text now show as their label and open the right
