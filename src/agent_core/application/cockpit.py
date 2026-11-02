@@ -549,6 +549,10 @@ class CockpitPublication:
                 raise NotFoundError(f"widget revision {revision_id} not found")
             await self._check_rate(uow, principal, slug)
             parent = await self._live_commit(uow, principal, widget)
+            if widget.state is WidgetState.DELETED:
+                # A restore undoes a delete newer than the live commit, so it is based
+                # on the importer's cursor: every person's commit after it is unseen.
+                parent = await import_cursor(uow, principal) or parent
             head = await self._head(uow, principal, widget)
         return await self._accept(
             principal,

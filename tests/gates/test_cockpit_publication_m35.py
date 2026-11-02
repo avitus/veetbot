@@ -578,6 +578,87 @@ async def test_a_newer_write_waits_behind_the_one_it_updates() -> None:
         assert stack.head_files("weather") == package("v3")
 
 
+def _person_commits(stack: Stack, marker: str | None) -> str:
+    """A person's commit of the whole weather package; no marker removes it."""
+
+    return stack.remote.commit_as_person(
+        {
+            f"cockpit/widgets/weather/{name}": None if marker is None else text
+            for name, text in package(marker or "").items()
+        },
+        message="a person changes weather\n",
+    )
+
+
+async def _restore_after_a_persons_delete(stack: Stack) -> UUID:
+    shown = await _create_live(stack)
+    await stack.importer.run_once()
+    _person_commits(stack, None)
+    await stack.importer.run_once()
+    assert await stack.publication.head_revision(PRINCIPAL, "weather") is None
+    return (await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)).id
+
+
+async def test_a_restore_goes_live_over_a_delete_a_person_made_on_the_branch() -> None:
+    """The imported delete is what the owner is undoing, not a newer change to yield to."""
+    async with publication_stack() as stack:
+        restored = await _restore_after_a_persons_delete(stack)
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored) is RevisionState.LIVE
+        assert stack.head_files("weather") == package()
+        head = await stack.repository.head()
+        assert head is not None
+        assert stack.remote.commits[head].message.startswith("cockpit: restore weather\n")
+        assert await stack.importer.run_once() == 1
+        async with stack.uow_factory() as uow:
+            widget = await uow.cockpit_widgets.get_widget(PRINCIPAL, "weather")
+        assert (widget.state, widget.live_revision_id) == (WidgetState.ACTIVE, restored)
+
+
+async def test_a_restore_brings_back_the_version_a_person_published_and_then_deleted() -> None:
+    async with publication_stack() as stack:
+        _person_commits(stack, "p")
+        await stack.importer.run_once()
+        shown = await _live(stack)
+        stack.later()
+        _person_commits(stack, None)
+        await stack.importer.run_once()
+        stack.later()
+        restored = await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored.id) is RevisionState.LIVE
+        assert stack.head_files("weather") == package("p")
+
+
+async def test_a_restore_ignores_other_widgets_changed_since_the_persons_delete() -> None:
+    async with publication_stack() as stack:
+        restored = await _restore_after_a_persons_delete(stack)
+        stack.remote.commit_as_person(
+            {"cockpit/widgets/markets/widget.json": "{}"}, message="start markets\n"
+        )
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored) is RevisionState.LIVE
+
+
+@pytest.mark.parametrize(
+    ("marker", "imported"),
+    [("p", False), ("p", True), ("REJECT", True)],
+    ids=["still-on-the-branch", "already-imported", "imported-as-invalid"],
+)
+async def test_a_person_committing_after_a_restore_was_accepted_still_wins(
+    marker: str, imported: bool
+) -> None:
+    async with publication_stack() as stack:
+        restored = await _restore_after_a_persons_delete(stack)
+        human = _person_commits(stack, marker)
+        if imported:
+            assert await stack.importer.run_once() == 1
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored) is RevisionState.CONFLICTED
+        assert await stack.repository.head() == human
+        assert stack.trailer_count(restored) == 0
+
+
 async def test_a_restore_is_refused_when_another_package_went_live_while_it_built() -> None:
     """The check runs when the restore is accepted, after the build, not only before it."""
     async with publication_stack() as stack:
