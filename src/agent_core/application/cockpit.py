@@ -347,6 +347,11 @@ class CockpitPublication:
                         updated_at=now,
                     )
                 )
+            elif await uow.cockpit_outbox.removal_queued(principal, slug):
+                # The removal's card showed an earlier revision, and it would take this one too.
+                raise ConflictError(
+                    f"{slug}'s removal is waiting for its commit", reason="removal_queued"
+                )
             elif await self._head(uow, principal, widget) != expected_head or (
                 expected_live is not None and widget.live_revision_id != expected_live
             ):
@@ -665,7 +670,8 @@ class CommitOutboxWorker:
             )
         blocked: set[str] = set()
         settled = 0
-        for entry in queued:
+        # Acceptance order, not attempt order: a retry in backoff still goes first for its widget.
+        for entry in sorted(queued, key=lambda item: (item.created_at, str(item.revision_id))):
             if entry.principal_id != self._principal.principal_id or entry.slug in blocked:
                 continue
             if entry.next_attempt_at > now:

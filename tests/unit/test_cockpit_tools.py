@@ -786,6 +786,33 @@ async def test_an_approved_delete_whose_card_showed_no_revision_removes_nothing(
     assert result.failure.reason_code == "cockpit.revision_changed"
 
 
+async def test_an_update_while_a_removal_is_queued_is_refused_in_platform_words(
+    tmp_path: Path,
+) -> None:
+    from agent_core.tools.messages import TOOL_MESSAGES
+
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        queued = await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        assert queued.structured is not None and queued.structured["state"] == "queued"
+        result = await h.call(
+            "cockpit.widget.write",
+            {
+                "operation": "update",
+                "slug": "weather",
+                "files": package(),
+                "expected_revision": created.structured["revision_id"],
+            },
+        )
+    assert not result.ok and result.failure is not None
+    assert result.failure.reason_code == "cockpit.removal_queued"
+    assert "Not published" in TOOL_MESSAGES["cockpit.removal_queued"]
+
+
 async def test_a_restore_card_names_the_revision_it_shows(tmp_path: Path) -> None:
     async with harness(tmp_path) as h:
         created = await h.call(

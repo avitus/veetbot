@@ -437,8 +437,8 @@ ever touches a branch under `cockpit/`.
 
 ### Writing
 
-The outbox worker in the maintenance role takes entries in order per widget.
-For each one it:
+The outbox worker in the maintenance role takes each widget's entries in the
+order they were accepted, whenever their retries fall due. For each one it:
 
 1. reads the branch head;
 2. creates blobs, a tree based on the head's tree that changes only
@@ -489,7 +489,10 @@ read them.
 the entry retries with backoff and the previous live revision keeps rendering
 from PostgreSQL. Any other failure of one entry is handled the same way: the
 entry is logged and rescheduled with backoff, later entries for its widget wait
-behind it, and the other widgets' entries in the same pass still commit.
+behind it, and the other widgets' entries in the same pass still commit. So a
+later change never lands first and is then replaced or removed by the entry it
+came after, and an earlier write never brings back a widget a later delete
+removed.
 
 ### Ambiguity and conflict
 
@@ -536,7 +539,14 @@ which is theirs and already public.
 
 - **Delete.** Commits the directory's removal, then removes the widget from
   every layout and marks it `deleted`. Private settings remain until the purge
-  window (knob) passes.
+  window (knob) passes. While a removal is queued, including through its
+  backoff, any write, revert or restore of that widget is refused with
+  `removal_queued`, under the same row lock. The delete's approval card showed
+  an earlier revision, so a newer one must not be accepted and then removed
+  unseen. The refusal also covers a removal whose response was lost, which may
+  already be on the branch. Once the widget is deleted, the change can be made
+  again. A person's commit that wins over the removal also clears it from the
+  queue, as in Ambiguity and conflict.
 - **Restore.** Commits the last live package again, as a new commit, and
   reactivates it.
 - **Revert.** Selecting an earlier revision creates a new `revert` revision

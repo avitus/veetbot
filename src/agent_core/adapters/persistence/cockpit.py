@@ -323,6 +323,16 @@ class InMemoryWidgetCommitOutbox:
                 default=None,
             )
 
+    async def removal_queued(self, principal: Principal, slug: str) -> bool:
+        owned = _owner(principal)
+        async with self._lock:
+            return any(
+                key[:2] == owned
+                and entry.slug == slug
+                and entry.operation is OutboxOperation.REMOVE
+                for key, entry in self._entries.items()
+            )
+
     async def due(
         self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]:
@@ -1050,6 +1060,20 @@ class PostgresWidgetCommitOutbox:
             .limit(1)
         )
         return _entry_from_row(row) if row else None
+
+    async def removal_queued(self, principal: Principal, slug: str) -> bool:
+        row = await self._session.scalar(
+            select(CockpitCommitOutboxRow.revision_id)
+            .where(
+                CockpitCommitOutboxRow.package_kind == self._kind,
+                CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                CockpitCommitOutboxRow.principal_id == principal.principal_id,
+                CockpitCommitOutboxRow.slug == slug,
+                CockpitCommitOutboxRow.operation == OutboxOperation.REMOVE.value,
+            )
+            .limit(1)
+        )
+        return row is not None
 
     async def due(
         self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None

@@ -29,13 +29,14 @@ def entry(
     revision_id: UUID | None = None,
     due_in_minutes: int = 0,
     created_minutes: int = 0,
+    operation: OutboxOperation = OutboxOperation.WRITE,
 ) -> CommitOutboxEntry:
     return CommitOutboxEntry(
         tenant_id=owner.tenant_id,
         principal_id=owner.principal_id,
         revision_id=revision_id or uuid4(),
         slug="weather",
-        operation=OutboxOperation.WRITE,
+        operation=operation,
         next_attempt_at=NOW + timedelta(minutes=due_in_minutes),
         expected_parent_sha=COMMIT_A,
         created_at=NOW + timedelta(minutes=created_minutes),
@@ -109,6 +110,29 @@ async def a_retry_is_rescheduled_and_completion_removes_it(
     await outbox.complete(owner, queued.revision_id)
     await outbox.complete(owner, queued.revision_id)
     assert await _due(outbox, owner, 10) == []
+
+
+@scenario
+async def a_removal_counts_as_queued_through_its_backoff_and_only_for_its_owner_and_widget(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    write = await outbox.enqueue(entry(owner))
+    assert not await outbox.removal_queued(owner, "weather")
+    removal = await outbox.enqueue(entry(owner, operation=OutboxOperation.REMOVE))
+    assert await outbox.removal_queued(owner, "weather")
+    await outbox.reschedule(
+        owner,
+        removal.revision_id,
+        attempts=1,
+        next_attempt_at=NOW + timedelta(hours=1),
+        last_error="github unavailable",
+    )
+    assert await outbox.removal_queued(owner, "weather")
+    assert not await outbox.removal_queued(foreign(owner), "weather")
+    assert not await outbox.removal_queued(owner, "markets")
+    await outbox.complete(owner, removal.revision_id)
+    assert not await outbox.removal_queued(owner, "weather")
+    await outbox.complete(owner, write.revision_id)
 
 
 @scenario

@@ -289,6 +289,11 @@ TOOL_MESSAGES: dict[str, str] = {
         "That widget is deleted. Restore it with the restore operation, or use another slug."
     ),
     "cockpit.widget_not_deleted": "Only a deleted widget can be restored.",
+    "cockpit.removal_queued": (
+        "Not published. The owner approved removing this widget and that removal is still "
+        "waiting for its commit, so it would take this change with it. Tell the owner. Once "
+        "the widget is deleted, restore it or create it again."
+    ),
     "cockpit.layout_changed": (
         "The layout changed since it was read. Call cockpit.read get_layouts and pass its "
         "revision as expected_revision."

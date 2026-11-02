@@ -113,13 +113,18 @@ class WidgetCommitOutbox(Protocol):
 
     One entry per revision (`ConflictError` reason `commit_queued`). `due`
     returns the tenant's entries whose next attempt is at or before `now`,
-    oldest first. An optional principal filter is applied before the limit.
+    soonest attempt first, so a retry in backoff sorts after an entry accepted
+    later. An optional principal filter is applied before the limit.
     """
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry: ...
 
     async def first_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
         """The oldest outstanding operation for this owned widget, including backoff."""
+        ...
+
+    async def removal_queued(self, principal: Principal, slug: str) -> bool:
+        """Whether this owned widget has an outstanding removal, including backoff."""
         ...
 
     async def due(
