@@ -47,3 +47,134 @@ import WebKit
         #expect(!source.contains("Logger("))
     }
 }
+
+/// ADR-0282: the window holds back a move to another address of the website
+/// until the owner allows it, then goes there.
+@Suite(.serialized) @MainActor struct DeviceSignInOfferedAddressTests {
+    private final class StubNavigationAction: WKNavigationAction {
+        private let stubbedRequest: URLRequest
+
+        init(_ raw: String) {
+            stubbedRequest = URLRequest(url: URL(string: raw)!)
+            super.init()
+        }
+
+        override var request: URLRequest { stubbedRequest }
+        override var targetFrame: WKFrameInfo? { nil }
+    }
+
+    private let www = "https://www.sign-in.test"
+    private let secure = "https://secure.sign-in.test"
+
+    private func session(
+        profileID: UUID? = nil, adoptable: String? = nil
+    ) -> DeviceSignInWebSession {
+        DeviceSignInWebSession(
+            request: DeviceSignInRequest(
+                startURL: URL(string: www + "/")!, allowedOrigins: [www],
+                profileID: profileID, adoptableOrigin: adoptable
+            )
+        )
+    }
+
+    private func navigate(
+        _ session: DeviceSignInWebSession, to raw: String
+    ) throws -> WKNavigationActionPolicy {
+        let webView = try #require(session.webView)
+        var policy: WKNavigationActionPolicy?
+        session.webView(webView, decidePolicyFor: StubNavigationAction(raw)) { policy = $0 }
+        return try #require(policy)
+    }
+
+    @Test
+    func theMoveIsHeldBackUntilTheOwnerAllowsIt() async throws {
+        let session = session()
+        defer { Task { await session.destroy() } }
+
+        #expect(try navigate(session, to: secure + "/login?step=1") == .cancel)
+        #expect(session.offeredOrigin == secure)
+        #expect(session.blockedHost == nil)
+        #expect(session.allowedOrigins == [www])
+        #expect(session.addedOrigins.isEmpty)
+
+        session.addOfferedOrigin()
+
+        #expect(session.allowedOrigins == [www, secure])
+        #expect(session.addedOrigins == [secure])
+        #expect(session.offeredOrigin == nil)
+        // The window goes on to the page it held back.
+        let webView = try #require(session.webView)
+        for _ in 0..<40 where webView.url?.host != "secure.sign-in.test" {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(webView.url?.absoluteString == secure + "/login?step=1")
+        #expect(try navigate(session, to: secure + "/next") == .allow)
+    }
+
+    @Test
+    func anExistingProfileGetsTheOldRefusal() throws {
+        let session = session(profileID: UUID())
+        defer { Task { await session.destroy() } }
+
+        #expect(try navigate(session, to: secure + "/login") == .cancel)
+        #expect(session.offeredOrigin == nil)
+        #expect(session.blockedHost == "secure.sign-in.test")
+        session.addOfferedOrigin()
+        #expect(session.allowedOrigins == [www])
+    }
+
+    /// Adoption replaces the list, which would lose an address the owner allowed.
+    @Test
+    func anAllowedAddressEndsFirstLoadAdoption() throws {
+        let session = session(adoptable: "https://sign-in.test")
+        defer { Task { await session.destroy() } }
+
+        _ = try navigate(session, to: secure + "/login")
+        session.addOfferedOrigin()
+
+        #expect(try navigate(session, to: "https://sign-in.test/") == .cancel)
+        #expect(session.offeredOrigin == "https://sign-in.test")
+        #expect(session.adoptedOrigin == nil)
+        #expect(session.allowedOrigins == [www, secure])
+    }
+
+    @Test
+    func aRefusedPageDoesNotLeaveAnOldOfferBehind() throws {
+        let session = session()
+        defer { Task { await session.destroy() } }
+
+        _ = try navigate(session, to: secure + "/login")
+        #expect(try navigate(session, to: "https://identity.example/") == .cancel)
+        #expect(session.offeredOrigin == nil)
+        #expect(session.blockedHost == "identity.example")
+        session.addOfferedOrigin()
+        #expect(session.allowedOrigins == [www])
+    }
+
+    /// ADR-0283: a website may refuse this window, as Chase does, so a saved
+    /// login needs the remote browser here too.
+    @Test
+    func theWindowOffersTheRemoteBrowserForASavedLogin() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/DeviceSignInSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("if failure == nil || failure?.offersRemoteBrowser == true {"))
+        #expect(!source.contains("request.profileID == nil, failure == nil"))
+    }
+
+    @Test
+    func theSheetOffersTheAddressByName() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/DeviceSignInSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("device-sign-in.allow-address"))
+        #expect(source.contains("session.addOfferedOrigin()"))
+        #expect(source.contains("addedOrigins: session.addedOrigins"))
+    }
+}

@@ -10,7 +10,9 @@
   model, profile generation, authentication ceremony, hard gate 9). ADR-0106
   and ADR-0058 each gain an `Amended by` header line naming this ADR.
 - Amended by: ADR-0145 (2026-10-01), which makes the two verification browsers
-  of decision 6 headed
+  of decision 6 headed; ADR-0282 (proposed 2026-11-01), which lets a new
+  website's window add another address of that website when the owner allows it;
+  ADR-0283 (2026-11-01), which offers the remote browser for a saved login too
 - Amended: 2026-10-06, below, adding one diagnostic to decision 7 for a
   verification that cannot finish
 - Detailed design: `docs/plan/browser-automation.md` (device sign-in ceremony),

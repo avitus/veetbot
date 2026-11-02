@@ -234,7 +234,10 @@ public final class ChatViewModel: ObservableObject {
     private var titleRefreshTask: Task<Void, Never>?
     /// The profile a device sign-in window created and that has not become
     /// ready, so closing the window can remove it.
-    private var deviceSignInCreatedProfile: (requestID: UUID, profileID: UUID)?
+    private var deviceSignInCreatedProfile: (requestID: UUID, profileID: UUID, origins: [String])?
+    /// The saved login an open remote ceremony signs in again; backing out of
+    /// that ceremony keeps it (ADR-0283).
+    private var remoteSignInKeepsProfileID: UUID?
     /// The device sign-in whose I'm signed in is being handled, if any.
     private var confirmingDeviceSignInID: UUID?
     /// A device sign-in whose window closed while I'm signed in was being
@@ -2149,8 +2152,9 @@ public final class ChatViewModel: ObservableObject {
 
     public func websiteAuthenticationLaunchFailed() async {
         await discardCurrentWebsiteAccess(
-            successMessage:
-                "Veetbot couldn’t open the secure login page. The unused login was removed; try again."
+            successMessage: remoteSignInKeepsProfileID == nil
+                ? "Veetbot couldn’t open the secure login page. The unused login was removed; try again."
+                : "Veetbot couldn’t open the secure login page. Your saved login was kept; try again."
         )
     }
 
@@ -2238,11 +2242,11 @@ public final class ChatViewModel: ObservableObject {
     public func completeDeviceSignIn(
         _ request: DeviceSignInRequest,
         handoff: DeviceSessionHandoff,
-        adoptedOrigin: String?
+        adoptedOrigin: String?,
+        addedOrigins: [String] = []
     ) async -> DeviceSignInResult {
-        let offersRemote = request.profileID == nil
         // The remote browser is the alternative when this device cannot start
-        // or carry the sign-in of a new website (B5).
+        // or carry the sign-in (B5, ADR-0283).
         func failure(_ message: String, canRetry: Bool = true) -> DeviceSignInResult {
             let remoteMayHelp =
                 message == DeviceSignInMessage.couldNotStart
@@ -2251,14 +2255,14 @@ public final class ChatViewModel: ObservableObject {
                 DeviceSignInFailure(
                     message: message,
                     canRetry: canRetry,
-                    offersRemoteBrowser: offersRemote && remoteMayHelp
+                    offersRemoteBrowser: remoteMayHelp
                 )
             )
         }
         guard let api else { return failure(DeviceSignInMessage.couldNotStart) }
         let generation = connectionGeneration
         let origins = request.profileID == nil
-            ? (adoptedOrigin.map { [$0] } ?? request.allowedOrigins)
+            ? (adoptedOrigin.map { [$0] } ?? request.allowedOrigins) + addedOrigins
             : request.allowedOrigins
         let body: Data
         do {
@@ -2319,10 +2323,19 @@ public final class ChatViewModel: ObservableObject {
         let profileID: UUID
         if let existing = request.profileID {
             profileID = existing
-        } else if let created = deviceSignInCreatedProfile, created.requestID == request.id {
+        } else if let created = deviceSignInCreatedProfile, created.requestID == request.id,
+            created.origins == origins
+        {
             profileID = created.profileID
             createdProfileID = profileID
         } else {
+            // The owner allowed another address after an earlier attempt. A
+            // profile's origins never change, so its unused one gives way.
+            if let unused = deviceSignInCreatedProfile, unused.requestID == request.id {
+                deviceSignInCreatedProfile = nil
+                await discardDeviceSignInProfile(unused.profileID, using: api)
+                guard !superseded() else { return await settle(stopped) }
+            }
             let profile: BrowserProfileView
             do {
                 profile = try await api.createBrowserProfile(allowedOrigins: origins)
@@ -2331,7 +2344,7 @@ public final class ChatViewModel: ObservableObject {
             }
             createdProfileID = profile.id
             guard !superseded() else { return await settle(stopped) }
-            deviceSignInCreatedProfile = (request.id, profile.id)
+            deviceSignInCreatedProfile = (request.id, profile.id, origins)
             profileID = profile.id
         }
 
@@ -2339,8 +2352,8 @@ public final class ChatViewModel: ObservableObject {
         // is allowed by construction and keeps the page's path and query off
         // the API.
         let ceremony: BrowserAuthenticationView
-        switch await beginDeviceCeremony(
-            using: api, profileID: profileID, loginURL: confirmedOrigin + "/",
+        switch await beginCeremony(
+            using: api, profileID: profileID, loginURL: confirmedOrigin + "/", mode: .device,
             while: { !superseded() }
         ) {
         case .success(let begun):
@@ -2456,13 +2469,45 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// The owner chose the remote browser from the sign-in window of a new
-    /// website: the device attempt is abandoned and today's remote path begins.
+    /// The owner chose the remote browser from the sign-in window: the device
+    /// attempt is abandoned and the remote path begins, on the saved login if
+    /// the window has one (ADR-0283).
     @discardableResult
     public func switchDeviceSignInToRemoteBrowser(_ request: DeviceSignInRequest) async -> URL? {
+        let surface = deviceSignInSurface
         await abandonDeviceSignIn()
-        guard request.profileID == nil else { return nil }
-        return await createWebsiteAccess(websiteURL: request.startURL.absoluteString)
+        guard let profileID = request.profileID else {
+            return await createWebsiteAccess(websiteURL: request.startURL.absoluteString)
+        }
+        return await beginRemoteSignIn(
+            profileID: profileID, loginURL: request.startURL.absoluteString, from: surface
+        )
+    }
+
+    /// Signs a saved login in again through the remote browser. Only Website
+    /// Access shows the launch link, so a chat's sign-in opens it.
+    private func beginRemoteSignIn(
+        profileID: UUID, loginURL: String, from surface: DeviceSignInSurface
+    ) async -> URL? {
+        guard let api else { return nil }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        switch await beginCeremony(
+            using: api, profileID: profileID, loginURL: loginURL, mode: .remote, while: { true }
+        ) {
+        case .success(let ceremony):
+            browserAuthentication = ceremony
+            websiteAuthenticationLaunchURL = ceremony.launchURL
+            remoteSignInKeepsProfileID = profileID
+            errorMessage = nil
+            try? await reloadBrowserProfiles(using: api)
+            if surface == .chat { isWebsiteAccessPresented = true }
+            return ceremony.launchURL
+        case .failure(let error):
+            errorMessage = error.message == DeviceSignInMessage.couldNotStart
+                ? DeviceSignInMessage.couldNotStartRemote : error.message
+            return nil
+        }
     }
 
     /// The app became active or Website Access appeared: re-read an open remote
@@ -2489,15 +2534,16 @@ public final class ChatViewModel: ObservableObject {
     /// cancelling the newest open one (D20, 0128-design §2.5 item 9).
     /// `isCurrent` is checked before each request after the first: a closed
     /// window or a changed connection stops the recovery.
-    private func beginDeviceCeremony(
+    private func beginCeremony(
         using api: VeetbotAPIClient,
         profileID: UUID,
         loginURL: String,
+        mode: BrowserAuthenticationMode,
         while isCurrent: () -> Bool
     ) async -> Result<BrowserAuthenticationView, DeviceSignInError> {
         func begin() async throws -> BrowserAuthenticationView {
             try await api.beginBrowserAuthentication(
-                profileID: profileID, loginURL: loginURL, mode: .device
+                profileID: profileID, loginURL: loginURL, mode: mode
             )
         }
         let conflict: Bool
@@ -2742,6 +2788,10 @@ public final class ChatViewModel: ObservableObject {
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
         let profileID = authentication.profileID
+        if remoteSignInKeepsProfileID == profileID {
+            await endRemoteSignIn(authentication, using: api, message: successMessage)
+            return
+        }
         let cleanupError = await discardUnusedBrowserProfile(
             using: api,
             profileID: profileID,
@@ -2766,6 +2816,28 @@ public final class ChatViewModel: ObservableObject {
                 "The login setup could not be fully removed: \(displayMessage(for: cleanupError)). Refresh Website Access and use the trash button to try again."
         } else {
             errorMessage = successMessage
+        }
+    }
+
+    /// Backs out of a saved login's remote ceremony: the ceremony ends and the
+    /// login stays, because it is not this ceremony's to remove.
+    private func endRemoteSignIn(
+        _ authentication: BrowserAuthenticationView, using api: VeetbotAPIClient, message: String?
+    ) async {
+        var failed: Error?
+        if !authentication.status.isTerminal {
+            do {
+                _ = try await api.cancelBrowserAuthentication(authentication.id)
+            } catch {
+                failed = error
+            }
+        }
+        clearWebsiteAuthenticationState()
+        try? await reloadBrowserProfiles(using: api)
+        if let failed {
+            present(failed)
+        } else {
+            errorMessage = message
         }
     }
 
@@ -2799,6 +2871,7 @@ public final class ChatViewModel: ObservableObject {
     private func clearWebsiteAuthenticationState() {
         browserAuthentication = nil
         websiteAuthenticationLaunchURL = nil
+        remoteSignInKeepsProfileID = nil
     }
 
     private func discardUnusedBrowserProfile(

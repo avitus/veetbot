@@ -327,3 +327,5 @@ implementation without one.
 - [ADR-0278: Send proposals are interactive work and read the mailbox once (Proposed)](0278-send-proposals-are-interactive-work.md)
 - [ADR-0279: One-press Send with Undo (Accepted)](0279-one-press-send-with-undo.md)
 - [ADR-0280: A sign-in pause shows a sign-in card, not a question (Accepted)](0280-sign-in-pause-shows-a-sign-in-card.md)
+- [ADR-0282: The device sign-in window asks before a new website adds another address (Proposed)](0282-device-sign-in-allows-another-address.md)
+- [ADR-0283: A saved login can sign in again through the remote browser (Accepted)](0283-saved-login-signs-in-through-the-remote-browser.md)

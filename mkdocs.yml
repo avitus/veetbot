@@ -417,4 +417,6 @@ nav:
       - 'ADR-0278: Send proposals are interactive work': adr/0278-send-proposals-are-interactive-work.md
       - 'ADR-0279: One-press Send with Undo': adr/0279-one-press-send-with-undo.md
       - "ADR-0280: A sign-in pause shows a sign-in card": adr/0280-sign-in-pause-shows-a-sign-in-card.md
+      - "ADR-0282: The device sign-in window asks before adding an address": adr/0282-device-sign-in-allows-another-address.md
+      - "ADR-0283: A saved login can sign in again through the remote browser": adr/0283-saved-login-signs-in-through-the-remote-browser.md
   - Changelog: changelog.md

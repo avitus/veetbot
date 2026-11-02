@@ -765,7 +765,10 @@ can assert success. In the remote ceremony a caller cannot submit a
 credential. In the device ceremony the user's client submits the site session
 once, and the service's own verification decides the outcome. CAPTCHA, MFA,
 reauthentication, consent, password fields, and one-time-code fields keep a
-remote ceremony in `needs_user` until the user completes them directly.
+remote ceremony in `needs_user` until the user completes them directly. A
+password or one-time-code field counts in a visible frame of the page as well as
+in the page itself, because some websites keep their sign-in form in a frame
+(ADR-0283).
 
 In the remote ceremony the runtime reports `ready` only on evidence of a sign-in
 it mediated itself: during this ceremony the user sent text while one of those
@@ -836,7 +839,13 @@ script, script message handler, or automation setting, so it reads nothing the
 user types. Top-level navigation stays on the profile's allowed origins. New
 windows, downloads, and other schemes are refused; subframes load as the site's
 resources do. Before a new profile exists, the first load may adopt a redirect
-between a bare hostname and its `www` subdomain as the profile's origin. When
+between a bare hostname and its `www` subdomain as the profile's origin. Also
+before a new profile exists, a top-level move to another host of the same
+registrable domain, approximated as for website offers and on the default HTTPS
+port, is held back and named to the user, who may allow that exact origin. The window then
+loads the page, and the profile is created with every allowed origin, up to the
+64-origin limit (ADR-0282). A page cannot add an origin by itself, any other host
+stays refused, and an existing profile's origins never change. When
 the user confirms, the client reads the store's cookies and keeps those whose
 domain is an allowed host or a parent of one. It reads `localStorage` of the
 allowed origins it visited in an isolated script world, and sends them once with
@@ -1022,7 +1031,8 @@ login page. An omitted scheme defaults to HTTPS. The client derives the primary
 allowed origin from that URL and opens the full URL, preserving its path, query,
 and fragment. It signs in on the device by default and offers the remote
 browser as the alternative, and any profile that is not revoked can be signed
-in again on the device. Website scripts, stylesheets, images, fonts,
+in again on the device or, from that window, through the remote browser, where
+backing out keeps the profile (ADR-0283). Website scripts, stylesheets, images, fonts,
 cross-origin APIs, and embedded verification frames load automatically without
 CDN configuration. This resource permission also applies when an existing
 profile is reused. A resource origin cannot authorize top-level navigation or an

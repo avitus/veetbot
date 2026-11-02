@@ -22,16 +22,24 @@ final class DeviceSignInWebSession: NSObject, ObservableObject {
     @Published private(set) var allowedOrigins: [String]
     /// The origin a new profile adopted from its first load (D11), if any.
     @Published private(set) var adoptedOrigin: String?
+    /// Another address of this website the page tried to open, held back
+    /// unless the owner allows it (ADR-0282).
+    @Published private(set) var offeredOrigin: String?
+    /// The addresses the owner allowed in this window, in order.
+    @Published private(set) var addedOrigins: [String] = []
 
     private(set) var webView: WKWebView?
     private var dataStore: WKWebsiteDataStore?
     private var adoptableOrigin: String?
+    private let canAddOrigins: Bool
+    private var offeredRequest: URLRequest?
     private var visitedOrigins: Set<String> = []
     private var observations: [NSKeyValueObservation] = []
 
     init(request: DeviceSignInRequest) {
         allowedOrigins = request.allowedOrigins
         adoptableOrigin = request.profileID == nil ? request.adoptableOrigin : nil
+        canAddOrigins = request.profileID == nil
         super.init()
         let store = Self.makeDataStore()
         let webView = WKWebView(frame: .zero, configuration: Self.makeConfiguration(dataStore: store))
@@ -108,6 +116,7 @@ final class DeviceSignInWebSession: NSObject, ObservableObject {
     func destroy() async {
         observations.forEach { $0.invalidate() }
         observations = []
+        offeredRequest = nil
         webView?.stopLoading()
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
@@ -144,6 +153,19 @@ final class DeviceSignInWebSession: NSObject, ObservableObject {
         return try await Self.readStorage(in: hidden, scope: scope)
     }
 
+    /// The owner allowed the held-back address: the new profile will include
+    /// it, and the window goes on to the page it held back.
+    func addOfferedOrigin() {
+        guard let origin = offeredOrigin, let request = offeredRequest else { return }
+        allowedOrigins.append(origin)
+        addedOrigins.append(origin)
+        // Adoption replaces the list, which would lose this address.
+        adoptableOrigin = nil
+        offeredOrigin = nil
+        offeredRequest = nil
+        webView?.load(request)
+    }
+
     private func adopt(_ origin: String) {
         allowedOrigins = [origin]
         adoptedOrigin = origin
@@ -161,7 +183,8 @@ extension DeviceSignInWebSession: WKNavigationDelegate, WKUIDelegate {
             url: navigationAction.request.url,
             isMainFrame: navigationAction.targetFrame?.isMainFrame ?? true,
             allowedOrigins: Set(allowedOrigins),
-            adoptableOrigin: adoptableOrigin
+            adoptableOrigin: adoptableOrigin,
+            canAddOrigins: canAddOrigins
         )
         switch decision {
         case .allow:
@@ -169,8 +192,15 @@ extension DeviceSignInWebSession: WKNavigationDelegate, WKUIDelegate {
         case .adopt(let origin):
             adopt(origin)
             decisionHandler(.allow)
+        case .askToAdd(let origin):
+            offeredOrigin = origin
+            offeredRequest = navigationAction.request
+            blockedHost = nil
+            decisionHandler(.cancel)
         case .cancel(let host):
             blockedHost = host
+            offeredOrigin = nil
+            offeredRequest = nil
             decisionHandler(.cancel)
         }
     }
@@ -352,6 +382,23 @@ struct DeviceSignInSheet: View {
                     .background(AppTheme.amberText.opacity(0.08))
                     .accessibilityIdentifier("device-sign-in.blocked")
             }
+            if let offeredOrigin = session.offeredOrigin {
+                let address = URL(string: offeredOrigin)?.host ?? offeredOrigin
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(
+                        "This website continues on \(address). Allow it if you expect this address; this login will then include it.",
+                        systemImage: "arrow.triangle.branch"
+                    )
+                    .veetType(.meta).foregroundColor(AppTheme.amberText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Button("Allow \(address)") { session.addOfferedOrigin() }
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
+                        .disabled(isConfirming)
+                        .accessibilityIdentifier("device-sign-in.allow-address")
+                }
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.amberText.opacity(0.08))
+            }
             DeviceSignInWebView(webView: session.webView)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -415,7 +462,7 @@ struct DeviceSignInSheet: View {
                 ) || (failure.map { !$0.canRetry } ?? false))
                 .accessibilityIdentifier("device-sign-in.confirm")
             }
-            if request.profileID == nil, failure == nil || failure?.offersRemoteBrowser == true {
+            if failure == nil || failure?.offersRemoteBrowser == true {
                 Button("Use Veetbot's remote browser") {
                     Task {
                         await session.destroy()
@@ -440,14 +487,15 @@ struct DeviceSignInSheet: View {
             do {
                 let handoff = try await session.collect()
                 result = await model.completeDeviceSignIn(
-                    request, handoff: handoff, adoptedOrigin: session.adoptedOrigin
+                    request, handoff: handoff, adoptedOrigin: session.adoptedOrigin,
+                    addedOrigins: session.addedOrigins
                 )
             } catch {
                 result = .failed(
                     DeviceSignInFailure(
                         message: DeviceSignInMessage.couldNotStart,
                         canRetry: true,
-                        offersRemoteBrowser: request.profileID == nil
+                        offersRemoteBrowser: true
                     )
                 )
             }

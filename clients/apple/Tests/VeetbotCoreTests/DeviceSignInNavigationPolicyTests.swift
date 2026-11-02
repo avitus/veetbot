@@ -76,4 +76,81 @@ import Testing
         )
         #expect(!DeviceSignInNavigationPolicy.canConfirm(currentURL: nil, isLoading: false, allowedOrigins: allowed))
     }
+
+    // MARK: - Another address of the same website (ADR-0282)
+
+    private func decideForNewWebsite(
+        _ raw: String, allowed: Set<String>, mainFrame: Bool = true, adoptable: String? = nil
+    ) -> DeviceSignInNavigationPolicy.Decision {
+        DeviceSignInNavigationPolicy.decide(
+            url: URL(string: raw), isMainFrame: mainFrame,
+            allowedOrigins: allowed, adoptableOrigin: adoptable, canAddOrigins: true
+        )
+    }
+
+    /// The owner's report: www.chase.com signs in on secure.chase.com, whose
+    /// pages lead back to www.chase.com, so neither address alone could finish.
+    @Test
+    func aNewWebsiteAsksBeforeItsSignInMovesToAnotherAddressOfTheSite() {
+        #expect(
+            decideForNewWebsite("https://secure.chase.com/web/auth/dashboard", allowed: ["https://www.chase.com"])
+                == .askToAdd(origin: "https://secure.chase.com")
+        )
+        #expect(
+            decideForNewWebsite("https://www.chase.com/", allowed: ["https://secure.chase.com"])
+                == .askToAdd(origin: "https://www.chase.com")
+        )
+        #expect(
+            decideForNewWebsite("https://LOGIN.example.co.uk:443/in", allowed: ["https://www.example.co.uk"])
+                == .askToAdd(origin: "https://login.example.co.uk")
+        )
+    }
+
+    @Test
+    func anExistingProfileNeverAsks() {
+        #expect(
+            DeviceSignInNavigationPolicy.decide(
+                url: URL(string: "https://secure.chase.com/"), isMainFrame: true,
+                allowedOrigins: ["https://www.chase.com"], adoptableOrigin: nil, canAddOrigins: false
+            ) == .cancel(blockedHost: "secure.chase.com")
+        )
+    }
+
+    @Test
+    func onlyAnotherAddressOfTheSameSiteIsAsked() {
+        let chase: Set<String> = ["https://www.chase.com"]
+        #expect(decideForNewWebsite("https://accounts.identity.example/", allowed: chase) == .cancel(blockedHost: "accounts.identity.example"))
+        #expect(decideForNewWebsite("https://secure.chase.com.evil.example/", allowed: chase) == .cancel(blockedHost: "secure.chase.com.evil.example"))
+        #expect(decideForNewWebsite("https://notchase.com/", allowed: chase) == .cancel(blockedHost: "notchase.com"))
+        #expect(decideForNewWebsite("http://secure.chase.com/", allowed: chase) == .cancel(blockedHost: "secure.chase.com"))
+        #expect(decideForNewWebsite("https://secure.chase.com:8443/", allowed: chase) == .cancel(blockedHost: "secure.chase.com"))
+        #expect(decideForNewWebsite("mailto:owner@chase.com", allowed: chase) == .cancel(blockedHost: "mailto"))
+        // A country's second-level suffix is not a website.
+        #expect(
+            decideForNewWebsite("https://other.co.uk/", allowed: ["https://www.example.co.uk"])
+                == .cancel(blockedHost: "other.co.uk")
+        )
+        // Neither is the tail of an IP address.
+        #expect(decideForNewWebsite("https://10.0.0.2/", allowed: ["https://10.0.0.1"]) == .cancel(blockedHost: "10.0.0.2"))
+    }
+
+    @Test
+    func adoptionAndSubframesKeepTheirOwnRules() {
+        #expect(
+            decideForNewWebsite("https://www.chase.com/", allowed: ["https://chase.com"], adoptable: "https://www.chase.com")
+                == .adopt(origin: "https://www.chase.com")
+        )
+        #expect(decideForNewWebsite("https://secure.chase.com/frame", allowed: ["https://www.chase.com"], mainFrame: false) == .allow)
+        #expect(decideForNewWebsite("https://secure.chase.com/", allowed: ["https://secure.chase.com"]) == .allow)
+    }
+
+    /// The server refuses a profile with more origins than this.
+    @Test
+    func theAskingStopsAtTheServersOriginLimit() {
+        let full = Set((0..<WebsiteSessionScope.maximumOrigins).map { "https://host\($0).chase.com" })
+        #expect(decideForNewWebsite("https://secure.chase.com/", allowed: full) == .cancel(blockedHost: "secure.chase.com"))
+        var roomForOne = full
+        roomForOne.remove("https://host0.chase.com")
+        #expect(decideForNewWebsite("https://secure.chase.com/", allowed: roomForOne) == .askToAdd(origin: "https://secure.chase.com"))
+    }
 }
