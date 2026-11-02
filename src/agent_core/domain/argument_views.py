@@ -9,6 +9,7 @@ use them without importing the executor, which already imports policy code.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import re
 from typing import Any, cast
@@ -24,6 +25,28 @@ CREDENTIAL_SHAPE = re.compile(r"(?:api[_-]?key|secret|password|token|bearer)\s*[
 # its full value is published as a digest instead, so exact client-side
 # verification survives redaction.
 APPROVAL_ARGUMENT_CEILING = 512
+
+
+def _card_source_lines(text: str) -> list[str]:
+    """Source lines split so no character can vanish.
+
+    `str.splitlines` also splits on carriage returns, form feeds and vertical tabs,
+    and drops them, so a card built from it hides a change to any of them, and to the
+    final newline.
+    """
+    return text.split("\n") if text else []
+
+
+def card_file_diff(before: str, after: str, *, fromfile: str, tofile: str) -> list[str]:
+    """One file's diff for an approval card; an empty file added or removed keeps its headers."""
+    lines = difflib.unified_diff(
+        _card_source_lines(before),
+        _card_source_lines(after),
+        fromfile=fromfile,
+        tofile=tofile,
+        lineterm="",
+    )
+    return list(lines) or [f"--- {fromfile}", f"+++ {tofile}"]
 
 
 def approval_argument_value(value: Any, *, key: str | None = None) -> Any:

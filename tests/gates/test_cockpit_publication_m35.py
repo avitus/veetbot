@@ -8,6 +8,7 @@ the sandbox suite repeats the screen and rejection gates with the real one.
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -23,6 +24,7 @@ from agent_core.domain.cockpit import (
     WidgetState,
     commit_trailers,
 )
+from agent_core.domain.errors import ConflictError
 from agent_core.ports.cockpit import BranchMovedError, WidgetPathRefusedError
 from tests.contract.fake_github import NAME, OWNER
 from tests.gates.cockpit_publication_support import PRINCIPAL, Stack, package, publication_stack
@@ -430,3 +432,94 @@ async def _a_person_version_imported_while_a_create_waits_still_wins() -> None:
             assert widget.live_revision_id is not None
             live = await uow.cockpit_widgets.get_revision(PRINCIPAL, widget.live_revision_id)
         assert live.source is RevisionSource.OWNER_GIT
+
+
+async def test_a_restore_is_refused_when_another_package_went_live_while_it_built() -> None:
+    """The check runs when the restore is accepted, after the build, not only before it."""
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        build = stack.builder.build
+
+        async def build_while_another_lands(*args: Any, **kwargs: Any) -> Any:
+            stack.builder.build = build  # type: ignore[method-assign]
+            await stack.publication.write(
+                PRINCIPAL, "weather", package("v2"), expected_revision=None
+            )
+            await stack.outbox.run_once()
+            await stack.publication.delete(PRINCIPAL, "weather")
+            await stack.outbox.run_once()
+            return await build(*args, **kwargs)
+
+        stack.builder.build = build_while_another_lands  # type: ignore[method-assign]
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert refused.value.reason == "revision_changed"
+
+
+async def test_a_restore_is_refused_while_a_newer_package_waits_on_the_deleted_widget() -> None:
+    """Accepting it would let the worker publish the new package, then replace it with the old."""
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        newer = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=None
+        )
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert refused.value.reason == "revision_changed"
+        head = await stack.publication.head_revision(PRINCIPAL, "weather")
+        assert head is not None and head.id == newer.id
+
+
+async def test_a_second_create_is_refused_while_the_first_waits_on_the_deleted_widget() -> None:
+    async with publication_stack() as stack:
+        await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        await stack.publication.write(PRINCIPAL, "weather", package("v2"), expected_revision=None)
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.write(
+                PRINCIPAL, "weather", package("v3"), expected_revision=None
+            )
+        assert refused.value.reason == "revision_changed"
+
+
+async def test_a_restore_is_refused_when_a_create_lands_during_its_build() -> None:
+    async with publication_stack() as stack:
+        await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        build = stack.builder.build
+
+        async def build_while_a_create_lands(*args: Any, **kwargs: Any) -> Any:
+            stack.builder.build = build  # type: ignore[method-assign]
+            await stack.publication.write(
+                PRINCIPAL, "weather", package("v2"), expected_revision=None
+            )
+            return await build(*args, **kwargs)
+
+        stack.builder.build = build_while_a_create_lands  # type: ignore[method-assign]
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather")
+        assert refused.value.reason == "revision_changed"
+
+
+async def test_rejected_builds_cannot_hide_a_package_waiting_on_a_deleted_widget() -> None:
+    """Rejections are not rate limited, so enough of them must not push the package out of view."""
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        waiting = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=None
+        )
+        for _ in range(50):
+            await stack.publication.write(
+                PRINCIPAL, "weather", {"widget.tsx": "REJECT"}, expected_revision=waiting.id
+            )
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert refused.value.reason == "revision_changed"

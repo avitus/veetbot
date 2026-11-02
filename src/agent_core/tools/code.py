@@ -10,7 +10,6 @@ from agent_core.application.cockpit import screen_names, screen_settings_values
 from agent_core.application.code_drafts import CodeDraftRefusedError, CodeDrafts
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalPresentation
-from agent_core.domain.argument_views import APPROVAL_ARGUMENT_CEILING, CREDENTIAL_SHAPE
 from agent_core.domain.code import (
     CHECKED_ROOTS,
     CODE_DRAFT_TOOL_NAME,
@@ -43,6 +42,13 @@ from agent_core.ports.code import (
 )
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.tools.approval_cards import (
+    card_diff,
+    card_entries,
+    card_pages,
+    fits_card,
+    hidden_sentence,
+)
 from agent_core.tools.cockpit import offers_widget_writes
 
 # Tool results reach the model whole only up to the 4 KiB inline budget.
@@ -195,13 +201,6 @@ class CodeReadTool:
 
 _DRAFT_SLUG = {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,47}$"}
 _INTERACTIVE = "interactive"
-# The most a card can show whole. A change past this cannot be approved into publication.
-_CARD_DIFF_ENTRIES = 400
-# The approval view keeps 50 items a list and cuts longer strings, so a card fits inside both.
-_CARD_PAGE_ENTRIES = 50
-_CARD_ENTRY_CHARACTERS = APPROVAL_ARGUMENT_CEILING - 2
-_CARD_CONTINUED = "> "
-_CARD_HIDDEN = "[credential-shaped text hidden]"
 _POLL_SECONDS = 1.0
 _CARD_PUBLISH = (
     "Publish this change to the public repository as a new branch and a pull request "
@@ -252,35 +251,6 @@ def _draft_changed() -> ToolResult:
         "Show it again and propose the current digest.",
         ToolFailureKind.INVALID_ARGUMENTS,
     )
-
-
-def _card_entries(text: str) -> tuple[list[str], int]:
-    """Split text into entries the approval view keeps whole, and count what was masked.
-
-    The view replaces a whole string that holds a credential shape, which would let a
-    line hide its code behind one `token: x`. Masking only the match keeps the rest.
-    """
-    masked, hidden = CREDENTIAL_SHAPE.subn(_CARD_HIDDEN, text)
-    entries = [masked[:_CARD_ENTRY_CHARACTERS]]
-    for start in range(_CARD_ENTRY_CHARACTERS, len(masked), _CARD_ENTRY_CHARACTERS):
-        entries.append(_CARD_CONTINUED + masked[start : start + _CARD_ENTRY_CHARACTERS])
-    return entries, hidden
-
-
-def _card_diff(lines: list[str]) -> tuple[list[str], int]:
-    """The diff's card entries, and how many credential shapes they mask."""
-    entries: list[str] = []
-    hidden = 0
-    for line in lines:
-        pieces, masked = _card_entries(line)
-        entries.extend(pieces)
-        hidden += masked
-    return entries, hidden
-
-
-def _fits_card(lines: list[str]) -> bool:
-    """Whether the owner's approval card can show this whole diff."""
-    return len(_card_diff(lines)[0]) <= _CARD_DIFF_ENTRIES
 
 
 def _draft_body(draft: CodeDraft) -> dict[str, Any]:
@@ -596,7 +566,7 @@ class CodeProposeTool:
             )
         if draft_digest(draft) != digest:
             return _draft_changed()
-        if not _fits_card(await toolset.drafts.complete_diff(draft)):
+        if not fits_card(await toolset.drafts.complete_diff(draft)):
             return _failure(
                 "code.diff_too_large",
                 "This change is too large to show the owner whole, so nothing was published. "
@@ -677,8 +647,8 @@ class CodeProposeTool:
         """The whole change, or why approving it publishes nothing, in server-authored words."""
         del run, turn, not_covered
         slug = str(arguments.get("slug", ""))
-        summary, summary_hidden = _card_entries(str(arguments.get("summary", "")))
-        title, title_hidden = _card_entries(str(arguments.get("title", "")))
+        summary, summary_hidden = card_entries(str(arguments.get("summary", "")))
+        title, title_hidden = card_entries(str(arguments.get("title", "")))
         view: dict[str, Any] = {
             "slug": slug,
             "title": title[0],
@@ -695,24 +665,20 @@ class CodeProposeTool:
         if draft_digest(draft) != arguments.get("digest"):
             view["diff_status"] = "changed"
             return ApprovalPresentation(summary=_CARD_CHANGED, arguments=view)
-        if not _fits_card(lines):
+        if not fits_card(lines):
             view["diff_status"] = "too_large"
             return ApprovalPresentation(summary=_CARD_TOO_LARGE, arguments=view)
-        entries, hidden = _card_diff(lines)
+        entries, hidden = card_diff(lines)
         view.update(
             file_changes=sorted(draft.files),
-            diff={
-                f"{page // _CARD_PAGE_ENTRIES + 1:03d}": entries[page : page + _CARD_PAGE_ENTRIES]
-                for page in range(0, len(entries), _CARD_PAGE_ENTRIES)
-            },
+            diff=card_pages(entries),
         )
         hidden += summary_hidden + title_hidden
         if not hidden:
             return ApprovalPresentation(summary=_CARD_PUBLISH, arguments=view)
         return ApprovalPresentation(
             summary=(
-                f"{_CARD_PUBLISH} {hidden} piece(s) of text shaped like a credential are hidden "
-                "here; the secret screen still checks them."
+                f"{_CARD_PUBLISH} {hidden_sentence(hidden)} The secret screen still checks them."
             ),
-            arguments={**view, "hidden_credential_shapes": hidden},
+            arguments={**view, "hidden_text_pieces": hidden},
         )

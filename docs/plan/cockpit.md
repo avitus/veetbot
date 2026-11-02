@@ -710,7 +710,24 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
   interactive and any session that carries a schedule, a run kind, an
   operational email marker or a purpose.
 - **Approval view.** When an escalation produces an approval, the approval
-  view shows the file diff and the preview image.
+  view shows the file diff and the preview image. The preview image is still
+  required and the card does not carry it yet, an open item in
+  `docs/status/milestones.md`. The diff is the whole change against the newest
+  accepted revision, which may still be waiting for its commit: it is paged, a
+  long line continues on the next entry, it keeps every character a line split
+  would drop, and credential-shaped text is masked and counted rather than
+  hiding its line. A change past 400 entries cannot be shown whole, so its card
+  says approving publishes nothing, and the tool refuses it with
+  `cockpit.change_too_large`. A card whose diff could not be built is refused
+  with `cockpit.change_not_shown`. These refusals apply only to a write that
+  asked for approval. A create card compares against nothing, because a create
+  publishes the whole package. A delete or restore card names the revision it
+  shows, and any other revision, or a card that showed none, refuses it with
+  `cockpit.revision_changed`. These checks run under the widget row lock the
+  worker's activation takes. An empty file added or removed still gets its
+  file headers. `cockpit.install`
+  keeps its own summarized approval (ADR-0270), which names the source being
+  published without showing it.
 
 **`cockpit.read`** returns revision content with output trust derived from
 provenance:

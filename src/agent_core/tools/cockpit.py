@@ -11,7 +11,6 @@ untrusted wherever it is read.
 
 from __future__ import annotations
 
-import difflib
 import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
@@ -25,7 +24,8 @@ from agent_core.application.cockpit_diagnostics import diagnostics
 from agent_core.application.cockpit_feeds import CockpitFeedRefusedError, CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.domain.agents import Principal
-from agent_core.domain.approvals import ApprovalPresentation
+from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest
+from agent_core.domain.argument_views import card_file_diff
 from agent_core.domain.cockpit import (
     FEED_ERROR_MAX_CHARS,
     WIDGET_FILE_MAX_BYTES,
@@ -66,6 +66,12 @@ from agent_core.ports.artifacts import ArtifactWriter
 from agent_core.ports.cockpit import WidgetBuild, WidgetBuildFailedError
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.tools.approval_cards import (
+    CARD_DIFF_ENTRIES,
+    card_diff,
+    card_pages,
+    hidden_sentence,
+)
 
 COCKPIT_TOOL_NAMES = (
     "cockpit.read",
@@ -79,6 +85,8 @@ REASON_CODES = (
     "cockpit.not_found",
     "cockpit.kit_unknown",
     "cockpit.revision_changed",
+    "cockpit.change_too_large",
+    "cockpit.change_not_shown",
     "cockpit.expected_revision_required",
     "cockpit.widget_deleted",
     "cockpit.widget_not_deleted",
@@ -115,7 +123,6 @@ _CONFLICT_CODES = {
     "widget_not_deleted": "cockpit.widget_not_deleted",
     "layout_changed": "cockpit.layout_changed",
 }
-_DIFF_MAX_LINES = 400
 # Every tool answer reaches the model inline up to 4 KiB (tools/limits.yaml), so the
 # kit, a widget's files and the diagnostics come in pieces that fit.
 _KIT_DETAIL_MAX = 4
@@ -125,7 +132,9 @@ _RECENT_REVISIONS = 5
 _FEED_HISTORY_READ = 10
 _DIAGNOSTICS_SHOWN = 10
 _DIAGNOSTIC_MAX_CHARS = 300
-_DIFF_LINE_MAX_CHARS = 240
+_DIFF_TOO_LARGE = "too_large"
+# A delete or restore names no revision in its arguments, so its card records the one it shows.
+_CARD_REVISION_KEYS = {"delete": "removes_revision", "restore": "restores_revision"}
 _FEED_NAME_PATTERN = r"^(agent\.)?[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$"
 _FEED_PREFIX = "agent."
 _OUTPUT_SCHEMA: dict[str, Any] = {"type": "object"}
@@ -793,6 +802,29 @@ class CockpitLiveCheckTool(CockpitCheckTool):
         )
 
 
+def _unshown_change_refusal(approval: ApprovalRequest | None) -> ToolResult | None:
+    """The refusal when this call's approval card did not show the owner the whole change.
+
+    A write that never asked has no approval and is unaffected. A card with no diff
+    either said the change was too large or fell back when its presenter failed.
+    """
+
+    if approval is None or "diff" in approval.arguments:
+        return None
+    if approval.arguments.get("diff_status") == _DIFF_TOO_LARGE:
+        return _invalid(
+            "This change was too large to show the owner whole, so nothing was published. "
+            "Make a smaller change, or tell the owner it can be asked for in a new chat "
+            "that reads no outside content.",
+            "cockpit.change_too_large",
+        )
+    return _invalid(
+        "The approval card could not show the owner this change, so nothing was published. "
+        "Tell the owner, and try again.",
+        "cockpit.change_not_shown",
+    )
+
+
 class CockpitWidgetWriteTool(_CockpitTool):
     spec = _spec(
         WIDGET_WRITE_TOOL,
@@ -840,6 +872,19 @@ class CockpitWidgetWriteTool(_CockpitTool):
             return await self._outcome(principal, replayed.revision_id, operation)
         if operation in {"create", "update"} and "files" not in arguments:
             return _invalid(f"{operation} carries the package's files")
+        approval = await self._approval(context)
+        refusal = _unshown_change_refusal(approval)
+        if refusal is not None:
+            return refusal
+        shown: UUID | None = None
+        if approval is not None and operation in _CARD_REVISION_KEYS:
+            revision_on_card = approval.arguments.get(_CARD_REVISION_KEYS[operation])
+            if revision_on_card is None:
+                return _invalid(
+                    "The approval card showed no revision for this change, so nothing changed.",
+                    "cockpit.revision_changed",
+                )
+            shown = UUID(str(revision_on_card))
         expected: UUID | None = None
         if operation == "update":
             if "expected_revision" not in arguments:
@@ -849,11 +894,13 @@ class CockpitWidgetWriteTool(_CockpitTool):
             expected = UUID(str(arguments["expected_revision"]))
         await context.mark_effect_sent()
         if operation == "delete":
-            await publication.delete(principal, slug, request_key=context.idempotency_key)
+            await publication.delete(
+                principal, slug, request_key=context.idempotency_key, expected_head=shown
+            )
             return await self._removal(principal, slug)
         if operation == "restore":
             revision = await publication.restore(
-                principal, slug, request_key=context.idempotency_key
+                principal, slug, request_key=context.idempotency_key, expected_live=shown
             )
         else:
             revision = await publication.write(
@@ -865,6 +912,14 @@ class CockpitWidgetWriteTool(_CockpitTool):
                 request_key=context.idempotency_key,
             )
         return await self._outcome(principal, revision.id, operation)
+
+    async def _approval(self, context: ToolExecutionContext) -> ApprovalRequest | None:
+        """This write's own approval. A write that never asked has none, and neither does one
+        made by `cockpit.install`, whose single summarized approval has its own card."""
+
+        async with self._toolset.uow_factory() as uow:
+            approval = await uow.approvals.get_by_action(context.invocation_id)
+        return approval if approval and approval.tool_name == WIDGET_WRITE_TOOL else None
 
     async def _in_chat(self, context: ToolExecutionContext) -> bool:
         """The session filter withholds the tool elsewhere; a call by name is refused here."""
@@ -938,7 +993,7 @@ class CockpitWidgetWriteTool(_CockpitTool):
         turn: object,
         not_covered: object,
     ) -> ApprovalPresentation:
-        """The change as a bounded diff against the live files, in server-authored words."""
+        """The whole change against the live files, or why approving it publishes nothing."""
 
         del run, turn, not_covered
         operation = str(arguments.get("operation", ""))
@@ -954,23 +1009,26 @@ class CockpitWidgetWriteTool(_CockpitTool):
                     principal, widget.live_revision_id
                 )
                 live = dict(revision.files)
+        head = await self._toolset.publication.head_revision(principal, slug)
+        accepted = {} if head is None else dict(head.files)
+        files = dict(arguments.get("files") or {})
         if operation == "delete":
-            before, after = live, {}
+            before, after = accepted, {}
         elif operation == "restore":
             before, after = {}, live
+        elif operation == "create":
+            before, after = {}, files
         else:
-            before, after = live, dict(arguments.get("files") or {})
+            before, after = accepted, files
         changes = sorted(name for name in {*before, *after} if before.get(name) != after.get(name))
         lines: list[str] = []
         for name in changes:
             lines.extend(
-                line[:_DIFF_LINE_MAX_CHARS]
-                for line in difflib.unified_diff(
-                    before.get(name, "").splitlines(),
-                    after.get(name, "").splitlines(),
+                card_file_diff(
+                    before.get(name, ""),
+                    after.get(name, ""),
                     fromfile=f"a/{name}" if name in before else "/dev/null",
                     tofile=f"b/{name}" if name in after else "/dev/null",
-                    lineterm="",
                 )
             )
         verb = {
@@ -984,13 +1042,31 @@ class CockpitWidgetWriteTool(_CockpitTool):
             "operation": operation,
             "slug": slug,
             "file_changes": changes,
-            "diff": lines[:_DIFF_MAX_LINES],
-            "diff_truncated": len(lines) > _DIFF_MAX_LINES,
         }
         if "expected_revision" in arguments:
             view["expected_revision"] = arguments["expected_revision"]
+        if operation == "delete" and head is not None:
+            view[_CARD_REVISION_KEYS["delete"]] = str(head.id)
+        if operation == "restore" and widget is not None and widget.live_revision_id is not None:
+            view[_CARD_REVISION_KEYS["restore"]] = str(widget.live_revision_id)
+        summary = f"{verb} the Cockpit widget {slug} {where} the public branch"
+        entries, hidden = card_diff(lines)
+        if len(entries) > CARD_DIFF_ENTRIES:
+            view["diff_status"] = _DIFF_TOO_LARGE
+            return ApprovalPresentation(
+                summary=(
+                    f"{summary}: this change is too large to show here whole, so approving "
+                    "this publishes nothing. Ask Veetbot for a smaller change, or for this one "
+                    "in a new chat that reads no outside content."
+                ),
+                arguments=view,
+            )
+        view["diff"] = card_pages(entries)
+        if not hidden:
+            return ApprovalPresentation(summary=summary, arguments=view)
         return ApprovalPresentation(
-            summary=f"{verb} the Cockpit widget {slug} {where} the public branch", arguments=view
+            summary=f"{summary}. {hidden_sentence(hidden)}",
+            arguments={**view, "hidden_text_pieces": hidden},
         )
 
 

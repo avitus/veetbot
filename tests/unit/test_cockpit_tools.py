@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -28,6 +29,7 @@ from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.cockpit_feeds import CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.cockpit.catalogue import load_kit_catalogue
+from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.cockpit import BuildDiagnostic, CockpitEventKind, ImportFailure
 from agent_core.domain.messages import ImageReferencePart, TextPart
@@ -553,9 +555,330 @@ async def test_the_write_approval_shows_the_change_as_a_diff(tmp_path: Path) -> 
         )
         assert presentation.summary == "Update the Cockpit widget weather on the public branch"
         assert presentation.arguments["file_changes"] == ["widget.tsx"]
-        diff = "\n".join(presentation.arguments["diff"])
+        diff = "\n".join(
+            entry for page in presentation.arguments["diff"].values() for entry in page
+        )
         assert "-export default function Weather() { return null; } // v1" in diff
         assert "+export default function Weather() { return null; } // v2" in diff
+
+
+async def test_a_removed_credential_shape_hides_only_itself_and_the_card_counts_it(
+    tmp_path: Path,
+) -> None:
+    """A delete carries no files for the hardline rule to read, so the card must cope."""
+    async with harness(tmp_path) as h:
+        files = {**package(), "widget.tsx": "fetch(url); const token: str = load(); done();\n"}
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": files}
+        )
+        assert created.ok and created.structured is not None, created.failure
+        assert created.structured["state"] != "rejected", created.structured
+        await h.stack.outbox.run_once()
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {"operation": "delete", "slug": "weather"},
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    shown = approval_argument_view(presentation.arguments)
+    entries = [entry for page in shown["diff"].values() for entry in page]
+    [line] = [entry for entry in entries if entry.startswith("-fetch")]
+    assert "fetch(url); const" in line and "= load(); done();" in line
+    assert ": str" not in line
+    assert shown["hidden_text_pieces"] == 1
+    assert "1 piece(s) of text shaped like a credential" in presentation.summary
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "shown"),
+    [
+        ("const a = 1;\nconst b = 2;", "const a = 1;\r\nconst b = 2;", "+const a = 1;\r"),
+        ("const a = 1;", "// note\fconst a = 1;", "+// note\fconst a = 1;"),
+        ("const a = 1;", "const a = 1;\n", "+"),
+    ],
+    ids=["line_ending", "form_feed", "final_newline"],
+)
+async def test_the_card_shows_a_change_to_invisible_characters(
+    tmp_path: Path, before: str, after: str, shown: str
+) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write",
+            {
+                "operation": "create",
+                "slug": "weather",
+                "files": {**package(), "widget.tsx": before},
+            },
+        )
+        assert created.ok and created.structured is not None, created.failure
+        await h.stack.outbox.run_once()
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {
+                "operation": "update",
+                "slug": "weather",
+                "files": {**package(), "widget.tsx": after},
+                "expected_revision": created.structured["revision_id"],
+            },
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    entries = [entry for page in presentation.arguments["diff"].values() for entry in page]
+    assert shown in entries
+
+
+async def _card_entries(h: Any, arguments: dict[str, Any]) -> list[str]:
+    presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+        arguments, run=None, principal=OWNER, turn=None, not_covered=None
+    )
+    return [entry for page in presentation.arguments["diff"].values() for entry in page]
+
+
+_V1 = "export default function Weather() { return null; } // v1"
+_V2 = "export default function Weather() { return null; } // v2"
+
+
+async def _live_v1_and_pending_v2(h: Any) -> str:
+    created = await h.call(
+        "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+    )
+    assert created.structured is not None
+    await h.stack.outbox.run_once()
+    pending = await h.call(
+        "cockpit.widget.write",
+        {
+            "operation": "update",
+            "slug": "weather",
+            "files": package("v2"),
+            "expected_revision": created.structured["revision_id"],
+        },
+    )
+    assert pending.structured is not None and pending.structured["state"] == "pending_commit"
+    return str(pending.structured["revision_id"])
+
+
+async def test_an_update_card_compares_against_the_revision_the_update_replaces(
+    tmp_path: Path,
+) -> None:
+    """Files matching the live revision still change a pending one, so the card must say so."""
+    async with harness(tmp_path) as h:
+        pending = await _live_v1_and_pending_v2(h)
+        entries = await _card_entries(
+            h,
+            {
+                "operation": "update",
+                "slug": "weather",
+                "files": package(),
+                "expected_revision": pending,
+            },
+        )
+    assert f"-{_V2}" in entries
+    assert f"+{_V1}" in entries
+
+
+async def test_a_delete_card_shows_the_pending_revision_it_also_removes(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        await _live_v1_and_pending_v2(h)
+        entries = await _card_entries(h, {"operation": "delete", "slug": "weather"})
+    assert f"-{_V2}" in entries
+
+
+async def test_creating_over_a_deleted_widget_shows_every_file_it_publishes(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        await h.stack.outbox.run_once()
+        entries = await _card_entries(
+            h, {"operation": "create", "slug": "weather", "files": package()}
+        )
+    assert f"+{_V1}" in entries
+
+
+async def test_a_create_card_shows_every_file_even_while_a_delete_is_queued(
+    tmp_path: Path,
+) -> None:
+    """The create succeeds only once the delete lands, and it then publishes everything."""
+    async with harness(tmp_path) as h:
+        await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        entries = await _card_entries(
+            h, {"operation": "create", "slug": "weather", "files": package()}
+        )
+    assert f"+{_V1}" in entries
+
+
+async def test_a_delete_card_names_the_revision_it_shows(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        pending = await _live_v1_and_pending_v2(h)
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {"operation": "delete", "slug": "weather"},
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    assert approval_argument_view(presentation.arguments)["removes_revision"] == pending
+
+
+@pytest.mark.parametrize("card_is_current", [True, False], ids=["current", "stale"])
+async def test_an_approved_delete_removes_only_the_revision_its_card_showed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, card_is_current: bool
+) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        shown = created.structured["revision_id"]
+        if not card_is_current:
+            await h.call(
+                "cockpit.widget.write",
+                {
+                    "operation": "update",
+                    "slug": "weather",
+                    "files": package("v2"),
+                    "expected_revision": shown,
+                },
+            )
+
+        async def card(*_args: Any) -> Any:
+            return SimpleNamespace(arguments={"diff": {}, "removes_revision": shown})
+
+        monkeypatch.setattr(
+            "agent_core.tools.cockpit.CockpitWidgetWriteTool._approval", card, raising=False
+        )
+        result = await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+    if card_is_current:
+        assert result.ok, result.failure
+    else:
+        assert not result.ok and result.failure is not None
+        assert result.failure.reason_code == "cockpit.revision_changed"
+
+
+def _stub_card(monkeypatch: pytest.MonkeyPatch, arguments: dict[str, Any]) -> None:
+    async def card(*_args: Any) -> Any:
+        return SimpleNamespace(arguments={"diff": {}, **arguments})
+
+    monkeypatch.setattr("agent_core.tools.cockpit.CockpitWidgetWriteTool._approval", card)
+
+
+async def test_an_approved_delete_whose_card_showed_no_revision_removes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A widget created after the card was built is one the owner never saw."""
+    async with harness(tmp_path) as h:
+        await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        await h.stack.outbox.run_once()
+        _stub_card(monkeypatch, {})
+        result = await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+    assert not result.ok and result.failure is not None
+    assert result.failure.reason_code == "cockpit.revision_changed"
+
+
+async def test_a_restore_card_names_the_revision_it_shows(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        await h.stack.outbox.run_once()
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {"operation": "restore", "slug": "weather"},
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    assert presentation.arguments["restores_revision"] == created.structured["revision_id"]
+
+
+@pytest.mark.parametrize("shown", ["current", "other", "absent"])
+async def test_an_approved_restore_republishes_only_the_revision_its_card_showed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shown: str
+) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        await h.stack.outbox.run_once()
+        revisions = {
+            "current": {"restores_revision": created.structured["revision_id"]},
+            "other": {"restores_revision": "00000000-0000-4000-8000-000000000001"},
+            "absent": {},
+        }
+        _stub_card(monkeypatch, revisions[shown])
+        result = await h.call("cockpit.widget.write", {"operation": "restore", "slug": "weather"})
+    if shown == "current":
+        assert result.ok, result.failure
+    else:
+        assert not result.ok and result.failure is not None
+        assert result.failure.reason_code == "cockpit.revision_changed"
+
+
+async def test_an_update_card_shows_an_empty_file_being_added(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        entries = await _card_entries(
+            h,
+            {
+                "operation": "update",
+                "slug": "weather",
+                "files": {**package(), "fixtures/blank.json": ""},
+                "expected_revision": created.structured["revision_id"],
+            },
+        )
+    assert entries[-2:] == ["--- /dev/null", "+++ b/fixtures/blank.json"]
+
+
+async def test_a_delete_card_shows_an_empty_file_being_removed(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write",
+            {
+                "operation": "create",
+                "slug": "weather",
+                "files": {**package(), "fixtures/blank.json": ""},
+            },
+        )
+        assert created.ok, created.failure
+        entries = await _card_entries(h, {"operation": "delete", "slug": "weather"})
+    assert "--- a/fixtures/blank.json" in entries
+    assert entries[entries.index("--- a/fixtures/blank.json") + 1] == "+++ /dev/null"
+
+
+@pytest.mark.parametrize(
+    ("reason", "words"),
+    [
+        ("cockpit.change_too_large", "too large"),
+        ("cockpit.change_not_shown", "could not show"),
+    ],
+)
+def test_a_refused_card_tells_the_model_why_and_what_to_do(reason: str, words: str) -> None:
+    from agent_core.tools.cockpit import REASON_CODES
+    from agent_core.tools.messages import TOOL_MESSAGES
+
+    assert reason in REASON_CODES
+    assert words in TOOL_MESSAGES[reason]
 
 
 def test_the_stored_history_bound_is_the_manifest_schema_ceiling() -> None:
