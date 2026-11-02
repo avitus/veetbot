@@ -23,7 +23,7 @@ final class DeviceSignInWebSession: NSObject, ObservableObject {
     /// The origin a new profile adopted from its first load (D11), if any.
     @Published private(set) var adoptedOrigin: String?
     /// Another address of this website the page tried to open, held back
-    /// unless the owner allows it (ADR-0282).
+    /// unless the owner allows it (ADR-0287).
     @Published private(set) var offeredOrigin: String?
     /// The addresses the owner allowed in this window, in order.
     @Published private(set) var addedOrigins: [String] = []

@@ -1110,6 +1110,7 @@ class DockerExecutionEnvironment:
         live_leases: frozenset[tuple[object, int]],
         is_live: Callable[[UUID, int], Awaitable[bool]] | None = None,
     ) -> int:
+        """Remove sandboxes whose lease or own deadline has ended, and count them."""
         raw = await _docker(
             "ps",
             "--all",
@@ -1148,9 +1149,13 @@ class DockerExecutionEnvironment:
                 )
             except (ValueError, TypeError):
                 continue
-            # A Cockpit build is not a run: no run lease holds it, and its own
-            # hard deadline is its lease. It is reaped only once that passes.
-            if not expired and raw_purpose == SandboxPurpose.COCKPIT_BUILD.value:
+            # A Cockpit build or code check is not a run: no run lease holds it,
+            # and its own hard deadline is its lease. It is reaped only once that
+            # passes.
+            if not expired and raw_purpose in (
+                SandboxPurpose.COCKPIT_BUILD.value,
+                SandboxPurpose.CODE_CHECK.value,
+            ):
                 continue
             if not expired:
                 if (run_id, lease_epoch) in live_leases:

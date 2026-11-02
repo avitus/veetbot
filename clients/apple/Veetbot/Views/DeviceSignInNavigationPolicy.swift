@@ -10,7 +10,7 @@ public enum DeviceSignInNavigationPolicy {
         /// the profile takes that origin instead (D11).
         case adopt(origin: String)
         /// A new profile's sign-in moved to another address of the same website;
-        /// it stays held back unless the owner allows that origin (ADR-0282).
+        /// it stays held back unless the owner allows that origin (ADR-0287).
         case askToAdd(origin: String)
     }
 

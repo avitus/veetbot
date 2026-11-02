@@ -289,6 +289,11 @@ origin would need CORS headers the scheme handler does not send.
     deadline, native code reloads the view and leaves the most recently
     changed widget out of the next snapshot.
 
+  Only silence from a page that is awake and on screen counts. A late heartbeat,
+  a hidden board, or a web process the system ended while the board was hidden
+  restarts the deadline and quarantines nothing, because sleep and hidden pages
+  stop answering through no fault of a widget.
+
   A quarantined widget shows a "paused" state natively until its next
   revision or the owner's retry.
 - **Data flow.** The realm receives only, per widget, its declared feeds at
@@ -705,7 +710,24 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
   interactive and any session that carries a schedule, a run kind, an
   operational email marker or a purpose.
 - **Approval view.** When an escalation produces an approval, the approval
-  view shows the file diff and the preview image.
+  view shows the file diff and the preview image. The preview image is still
+  required and the card does not carry it yet, an open item in
+  `docs/status/milestones.md`. The diff is the whole change against the newest
+  accepted revision, which may still be waiting for its commit: it is paged, a
+  long line continues on the next entry, it keeps every character a line split
+  would drop, and credential-shaped text is masked and counted rather than
+  hiding its line. A change past 400 entries cannot be shown whole, so its card
+  says approving publishes nothing, and the tool refuses it with
+  `cockpit.change_too_large`. A card whose diff could not be built is refused
+  with `cockpit.change_not_shown`. These refusals apply only to a write that
+  asked for approval. A create card compares against nothing, because a create
+  publishes the whole package. A delete or restore card names the revision it
+  shows, and any other revision, or a card that showed none, refuses it with
+  `cockpit.revision_changed`. These checks run under the widget row lock the
+  worker's activation takes. An empty file added or removed still gets its
+  file headers. `cockpit.install`
+  keeps its own summarized approval (ADR-0270), which names the source being
+  published without showing it.
 
 **`cockpit.read`** returns revision content with output trust derived from
 provenance:
@@ -1497,3 +1519,10 @@ uses the fixture clock. Chat receives the rendered text and an image
 reference, and the owner can open the private PNG attached to the reply.
 Only `cockpit.read` and `cockpit.check` advance to version 1.1.0. Runs pinned
 to 1.0.0 retain their original definitions.
+
+`cockpit.check` 1.2.0 ([ADR-0281](../adr/0281-veetbot-debugs-and-changes-its-own-code.md))
+adds `live: true`, which previews the submitted package with the owner's current
+declared feeds and settings instead of a fixture. It shows what a widget really
+displays. The values travel to the offline builder beside the package, never in
+it, so they reach neither the privacy screen nor the public branch. The rendered
+text and PNG are untrusted and private. A run's own failures are in `run.inspect`.

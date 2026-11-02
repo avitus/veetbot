@@ -1,11 +1,11 @@
-# ADR-0283: A saved login can sign in again through the remote browser
+# ADR-0288: A saved login can sign in again through the remote browser
 
 - Status: Accepted by the owner on 2026-11-01
 - Date: 2026-11-01
 - Amends: ADR-0128 (the device window offers the remote browser only for a new
   website); `docs/plan/browser-automation.md` (remote ceremony evidence, Website
   Access)
-- Related: ADR-0251, ADR-0280, ADR-0282
+- Related: ADR-0251, ADR-0280, ADR-0287
 - Scope: The Apple client's sign-in window and the browser service's sign-in
   challenge check. No API, policy or scope change; no milestone or gate moves.
 - Detailed design: `docs/plan/browser-automation.md`
@@ -27,7 +27,7 @@ for a login that was not ready, not a sign-out by Chase. Two defects combined.
    would not have paused for the owner.
 2. **A saved login had no way out of the device window.** Sign in again, the
    ADR-0280 card and the ADR-0251 offer all open that window, and Chase redirects
-   it to an unsupported-browser page (ADR-0282). The remote browser was offered
+   it to an unsupported-browser page (ADR-0287). The remote browser was offered
    only for a new website.
 
 ## Decision

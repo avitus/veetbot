@@ -40,7 +40,7 @@ public enum DeviceSignInSurface: Equatable, Sendable {
 public struct DeviceSignInFailure: Equatable, Sendable {
     public let message: String
     public let canRetry: Bool
-    /// The remote browser is offered as the alternative (ADR-0283).
+    /// The remote browser is offered as the alternative (ADR-0288).
     public let offersRemoteBrowser: Bool
 
     public init(message: String, canRetry: Bool, offersRemoteBrowser: Bool = false) {

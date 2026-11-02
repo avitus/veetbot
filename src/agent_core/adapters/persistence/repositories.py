@@ -88,7 +88,9 @@ from agent_core.domain.approvals import (
     approval_status_for,
 )
 from agent_core.domain.artifacts import (
+    AUTO_INGEST_NOT_BEFORE_KEY,
     REPLY_ATTACHMENT_ORIGINS,
+    ArtifactOrigin,
     auto_ingest_metadata,
     claimed_upload,
 )
@@ -3312,14 +3314,20 @@ class PostgresArtifactRepository:
         await self._session.flush()
         return claimed
 
-    async def pending_auto_ingest(self, principal: Principal, *, limit: int) -> list[ArtifactRef]:
+    async def pending_auto_ingest(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[ArtifactRef]:
+        not_before = ArtifactRow.metadata_json[AUTO_INGEST_NOT_BEFORE_KEY].astext
         rows = (
             await self._session.scalars(
                 select(ArtifactRow)
                 .where(
                     ArtifactRow.metadata_json["auto_ingest"].astext == "pending",
+                    ArtifactRow.origin == ArtifactOrigin.UPLOAD.value,
                     ArtifactRow.tenant_id == principal.tenant_id,
                     ArtifactRow.principal_id == principal.principal_id,
+                    # A deferred upload leaves the batch, so it never blocks a due one.
+                    or_(not_before.is_(None), sql_cast(not_before, DateTime(timezone=True)) <= now),
                 )
                 .order_by(ArtifactRow.created_at, ArtifactRow.id)
                 .limit(limit)
@@ -3335,10 +3343,15 @@ class PostgresArtifactRepository:
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef:
         row = await self._owned_for_update(artifact_id, principal)
         row.metadata_json = auto_ingest_metadata(
-            dict(row.metadata_json), state=state, reason=reason, attempts=attempts
+            dict(row.metadata_json),
+            state=state,
+            reason=reason,
+            attempts=attempts,
+            not_before=not_before,
         )
         await self._session.flush()
         return artifact_to_domain(row)

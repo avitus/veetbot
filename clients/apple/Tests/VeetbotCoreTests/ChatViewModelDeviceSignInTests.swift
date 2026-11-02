@@ -150,7 +150,7 @@ import Testing
         #expect(begin["login_url"] as? String == "https://www.example.org/")
     }
 
-    // MARK: - A saved login through the remote browser (ADR-0283)
+    // MARK: - A saved login through the remote browser (ADR-0288)
 
     /// Serves one saved login and one remote ceremony on it.
     private func remoteSignInServer(
@@ -328,7 +328,7 @@ import Testing
         #expect(!server.routes.contains("DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)"))
     }
 
-    /// ADR-0282: the website's sign-in moved to another address and the owner
+    /// ADR-0287: the website's sign-in moved to another address and the owner
     /// allowed it, so the profile has both and the begin names where they ended.
     @Test
     func aNewWebsitesProfileHasEveryAddressTheOwnerAllowed() async throws {
@@ -370,7 +370,7 @@ import Testing
         #expect(begin["login_url"] as? String == "https://secure.example.org/")
     }
 
-    /// ADR-0282: the first attempt created a profile and the owner then allowed
+    /// ADR-0287: the first attempt created a profile and the owner then allowed
     /// another address. A profile's origins never change, so the unused profile
     /// gives way to one with the whole list.
     @Test
@@ -608,7 +608,7 @@ import Testing
             adoptedOrigin: nil
         )
 
-        // ADR-0283: a saved login is offered the remote browser as well.
+        // ADR-0288: a saved login is offered the remote browser as well.
         #expect(
             result == .failed(
                 DeviceSignInFailure(

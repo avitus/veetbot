@@ -378,7 +378,7 @@ _FRAME_SCAN_SECONDS = 1.0
 async def _credential_field_in_frame(page: Page) -> bool:
     """Report a visible password or one-time-code field in a visible frame of ``page``.
 
-    Some websites keep their whole sign-in form in a frame (ADR-0283). Only
+    Some websites keep their whole sign-in form in a frame (ADR-0288). Only
     credential fields count there: a CAPTCHA class or challenge wording inside
     an embedded widget says nothing about this page. A frame that goes away or
     stalls during the scan shows no field, so it cannot fail a typed key or a

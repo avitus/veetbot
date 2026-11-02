@@ -171,6 +171,42 @@ public enum CockpitNavigationPolicy {
     }
 }
 
+/// Native code's half of the board's watchdog (docs/plan/cockpit.md, "The host
+/// and the realm"). Only silence from a page that is on screen and awake counts
+/// against a widget: a late beat or a hidden board restarts the clock, because
+/// sleep and hidden pages stop answering through no fault of a widget.
+public struct CockpitWatchdog: Equatable, Sendable {
+    public enum Verdict: Equatable, Sendable {
+        case ping
+        case unresponsive
+    }
+
+    private let deadline: TimeInterval
+    private var lastBeat: Date
+    private var lastAnswer: Date
+
+    public init(deadline: TimeInterval, now: Date) {
+        self.deadline = deadline
+        lastBeat = now
+        lastAnswer = now
+    }
+
+    public mutating func beat(now: Date, displayed: Bool) -> Verdict {
+        defer { lastBeat = now }
+        if !displayed || now.timeIntervalSince(lastBeat) > deadline {
+            lastAnswer = now
+            return .ping
+        }
+        guard now.timeIntervalSince(lastAnswer) > deadline else { return .ping }
+        lastAnswer = now
+        return .unresponsive
+    }
+
+    public mutating func answered(now: Date) {
+        lastAnswer = now
+    }
+}
+
 /// The host page's messages to native code; anything else is dropped.
 public enum CockpitHostMessage: Equatable, Sendable {
     case ready

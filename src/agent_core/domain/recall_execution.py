@@ -19,6 +19,20 @@ class RecallBudgetExceededError(Exception):
     """No search may begin, or an admitted search reached its shared deadline."""
 
 
+TIMED_OUT = "Memory recall reached this run's search deadline. This does not mean no memory exists."
+
+
+class RecallSearchTimeoutError(RecallBudgetExceededError):
+    """An admitted search outlived the shared deadline (ADR-0282).
+
+    A subclass, so every handler of an exceeded budget still catches it, and
+    the context builder can record `timed_out` rather than `exhausted`.
+    """
+
+    def __init__(self, message: str = TIMED_OUT) -> None:
+        super().__init__(message)
+
+
 @dataclass
 class RecallExecutionPermit:
     tenant_id: str
@@ -91,7 +105,7 @@ async def recall_search(
                 yield
         except TimeoutError as exc:
             if timeout.expired():
-                raise RecallBudgetExceededError(EXHAUSTED) from exc
+                raise RecallSearchTimeoutError() from exc
             raise
     finally:
         _entered.reset(token)

@@ -26,6 +26,8 @@ from agent_core.domain.approvals import (
 )
 from agent_core.domain.artifacts import (
     REPLY_ATTACHMENT_ORIGINS,
+    ArtifactOrigin,
+    auto_ingest_due,
     auto_ingest_metadata,
     claimed_upload,
 )
@@ -1740,14 +1742,18 @@ class InMemoryArtifactRepository:
             self._rows[artifact_id] = claimed
             return claimed.model_copy(deep=True)
 
-    async def pending_auto_ingest(self, principal: Principal, *, limit: int) -> list[ArtifactRef]:
+    async def pending_auto_ingest(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[ArtifactRef]:
         async with self._lock:
             pending = [
                 artifact
                 for artifact in self._rows.values()
                 if artifact.tenant_id == principal.tenant_id
                 and artifact.principal_id == principal.principal_id
+                and artifact.origin == ArtifactOrigin.UPLOAD.value
                 and artifact.metadata.get("auto_ingest") == "pending"
+                and auto_ingest_due(artifact.metadata, now)
             ]
         pending.sort(key=lambda artifact: (artifact.created_at, artifact.id))
         return [artifact.model_copy(deep=True) for artifact in pending[:limit]]
@@ -1760,6 +1766,7 @@ class InMemoryArtifactRepository:
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)
@@ -1771,7 +1778,11 @@ class InMemoryArtifactRepository:
             recorded = artifact.model_copy(
                 update={
                     "metadata": auto_ingest_metadata(
-                        artifact.metadata, state=state, reason=reason, attempts=attempts
+                        artifact.metadata,
+                        state=state,
+                        reason=reason,
+                        attempts=attempts,
+                        not_before=not_before,
                     )
                 },
                 deep=True,

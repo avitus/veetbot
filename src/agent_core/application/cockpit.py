@@ -253,10 +253,10 @@ class CockpitPublication:
         self._events = _Events(clock, ids)
 
     async def _widget(
-        self, uow: RepositoryUnitOfWork, principal: Principal, slug: str
+        self, uow: RepositoryUnitOfWork, principal: Principal, slug: str, *, lock: bool = False
     ) -> Widget | None:
         try:
-            return await uow.cockpit_widgets.get_widget(principal, slug)
+            return await uow.cockpit_widgets.get_widget(principal, slug, lock=lock)
         except NotFoundError:
             return None
 
@@ -267,15 +267,21 @@ class CockpitPublication:
         """The newest accepted revision: one waiting for its commit, or else the live one.
 
         An update names it as `expected_revision`, so a change accepted but not yet
-        committed is never silently overwritten. A deleted widget has none.
+        committed is never silently overwritten. A deleted widget has none unless a
+        package accepted since is waiting: restoring or creating over it would replace it.
         """
 
-        if widget is None or widget.state is WidgetState.DELETED:
+        if widget is None:
             return None
-        recent = await uow.cockpit_widgets.list_revisions(principal, widget.slug, limit=50)
-        waiting = (RevisionState.PENDING_COMMIT, RevisionState.COMMITTED)
-        newest = next((revision for revision in recent if revision.state in waiting), None)
-        return newest.id if newest is not None else widget.live_revision_id
+        waiting = await uow.cockpit_widgets.list_revisions(
+            principal,
+            widget.slug,
+            limit=1,
+            states=(RevisionState.PENDING_COMMIT, RevisionState.COMMITTED),
+        )
+        if waiting:
+            return waiting[0].id
+        return None if widget.state is WidgetState.DELETED else widget.live_revision_id
 
     async def _check_rate(self, uow: RepositoryUnitOfWork, principal: Principal, slug: str) -> None:
         since = self._clock.now() - _HOUR
@@ -319,6 +325,7 @@ class CockpitPublication:
         expected_parent_sha: str | None,
         origin_run_id: UUID | None,
         request_key: str | None,
+        expected_live: UUID | None = None,
     ) -> WidgetRevision:
         revision_id = self._ids.new_id()
         message = widget_commit_message(operation, slug, revision_id)
@@ -327,7 +334,8 @@ class CockpitPublication:
         )
         now = self._clock.now()
         async with self._uow_factory() as uow:
-            widget = await self._widget(uow, principal, slug)
+            # The row lock the worker's activation takes, so no head changes under this check.
+            widget = await self._widget(uow, principal, slug, lock=True)
             if widget is None:
                 widget = await uow.cockpit_widgets.create_widget(
                     Widget(
@@ -339,7 +347,9 @@ class CockpitPublication:
                         updated_at=now,
                     )
                 )
-            elif await self._head(uow, principal, widget) != expected_head:
+            elif await self._head(uow, principal, widget) != expected_head or (
+                expected_live is not None and widget.live_revision_id != expected_live
+            ):
                 raise ConflictError(f"{slug} changed while it was built", reason="revision_changed")
             revision = await uow.cockpit_widgets.add_revision(
                 self._revision(
@@ -433,7 +443,10 @@ class CockpitPublication:
         )
 
     async def head_revision(self, principal: Principal, slug: str) -> WidgetRevision | None:
-        """The revision an update names as `expected_revision`; None for a new or deleted widget."""
+        """The revision an update names as `expected_revision`.
+
+        None for a new widget, or a deleted one with no package waiting.
+        """
 
         async with self._uow_factory() as uow:
             head = await self._head(uow, principal, await self._widget(uow, principal, slug))
@@ -522,6 +535,7 @@ class CockpitPublication:
         widget: Widget,
         revision_id: UUID,
         request_key: str | None = None,
+        expected_live: UUID | None = None,
     ) -> WidgetRevision:
         slug = widget.slug
         async with self._uow_factory() as uow:
@@ -541,6 +555,7 @@ class CockpitPublication:
             expected_parent_sha=parent,
             origin_run_id=None,
             request_key=request_key,
+            expected_live=expected_live,
         )
 
     async def revert(self, principal: Principal, slug: str, revision_id: UUID) -> WidgetRevision:
@@ -553,26 +568,55 @@ class CockpitPublication:
         return await self._republish(principal, widget, revision_id)
 
     async def restore(
-        self, principal: Principal, slug: str, *, request_key: str | None = None
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        request_key: str | None = None,
+        expected_live: UUID | None = None,
     ) -> WidgetRevision:
-        """Commit a deleted widget's last live package again and reactivate it."""
+        """Commit a deleted widget's last live package again and reactivate it.
+
+        `expected_live` is the revision an approval card showed being restored, so
+        another package is never republished unseen.
+        """
 
         async with self._uow_factory() as uow:
             widget = await uow.cockpit_widgets.get_widget(principal, slug)
+            waiting = await self._head(uow, principal, widget)
         if widget.state is not WidgetState.DELETED or widget.live_revision_id is None:
             raise ConflictError(f"{slug} is not deleted", reason="widget_not_deleted")
-        return await self._republish(principal, widget, widget.live_revision_id, request_key)
+        if waiting is not None or (
+            expected_live is not None and expected_live != widget.live_revision_id
+        ):
+            raise ConflictError(f"{slug} is at another revision", reason="revision_changed")
+        return await self._republish(
+            principal, widget, widget.live_revision_id, request_key, expected_live
+        )
 
     async def delete(
-        self, principal: Principal, slug: str, *, request_key: str | None = None
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        request_key: str | None = None,
+        expected_head: UUID | None = None,
     ) -> CommitOutboxEntry:
-        """Queue the directory's removal; the widget is deleted once it is committed."""
+        """Queue the directory's removal; the widget is deleted once it is committed.
+
+        `expected_head` is the revision an approval card showed being removed, so a newer
+        one is never removed unseen.
+        """
 
         now = self._clock.now()
         async with self._uow_factory() as uow:
-            widget = await uow.cockpit_widgets.get_widget(principal, slug)
+            widget = await uow.cockpit_widgets.get_widget(principal, slug, lock=True)
             if widget.state is WidgetState.DELETED:
                 raise ConflictError(f"{slug} is already deleted", reason="widget_deleted")
+            if expected_head is not None and expected_head != await self._head(
+                uow, principal, widget
+            ):
+                raise ConflictError(f"{slug} is at another revision", reason="revision_changed")
             operation_id = self._ids.new_id()
             await self._record_request(
                 uow, principal, request_key, slug, OutboxOperation.REMOVE, operation_id

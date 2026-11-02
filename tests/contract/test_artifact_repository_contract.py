@@ -140,14 +140,47 @@ async def test_pending_ingestion_is_listed_in_upload_order_and_recorded() -> Non
             run_id=UUID(int=82),
             auto_ingest=True,
         )
-    pending = await repository.pending_auto_ingest(owner, limit=10)
+    now = datetime(2026, 9, 23, 2, tzinfo=UTC)
+    pending = await repository.pending_auto_ingest(owner, now=now, limit=10)
     assert [artifact.id for artifact in pending] == [earlier.id, later.id]
     assert (
         await repository.pending_auto_ingest(
-            Principal(tenant_id="tenant-a", principal_id="user-b"), limit=10
+            Principal(tenant_id="tenant-a", principal_id="user-b"), now=now, limit=10
         )
         == []
     )
+
+    # ADR-0284: an upload in backoff is neither listed nor counted against the
+    # limit, so a deferred older upload never blocks a due later one; a
+    # non-upload artifact carrying the marker is never swept.
+    deferred = await repository.record_auto_ingest(
+        earlier.id,
+        owner,
+        state="pending",
+        reason="transient",
+        attempts=1,
+        not_before=(now + timedelta(minutes=1)).isoformat(),
+    )
+    assert deferred.metadata["auto_ingest_not_before"] == (now + timedelta(minutes=1)).isoformat()
+    assert [
+        artifact.id for artifact in await repository.pending_auto_ingest(owner, now=now, limit=1)
+    ] == [later.id]
+    assert [
+        artifact.id
+        for artifact in await repository.pending_auto_ingest(
+            owner, now=now + timedelta(minutes=1), limit=10
+        )
+    ] == [earlier.id, later.id]
+    export = _upload(id=UUID(int=86), origin="tool_output", run_id=UUID(int=84))
+    await repository.create(
+        export.model_copy(update={"metadata": {**export.metadata, "auto_ingest": "pending"}})
+    )
+    assert export.id not in {
+        artifact.id
+        for artifact in await repository.pending_auto_ingest(
+            owner, now=now + timedelta(hours=1), limit=10
+        )
+    }
 
     refused = await repository.record_auto_ingest(
         earlier.id, owner, state="refused", reason="secret_scan", attempts=1
@@ -155,9 +188,12 @@ async def test_pending_ingestion_is_listed_in_upload_order_and_recorded() -> Non
     assert refused.metadata["auto_ingest"] == "refused"
     assert refused.metadata["auto_ingest_reason"] == "secret_scan"
     assert refused.metadata["attachment"] == {"kind": "text"}
-    assert [artifact.id for artifact in await repository.pending_auto_ingest(owner, limit=10)] == [
-        later.id
-    ]
+    assert [
+        artifact.id
+        for artifact in await repository.pending_auto_ingest(
+            owner, now=now + timedelta(hours=1), limit=10
+        )
+    ] == [later.id]
 
 
 def _export(**overrides: object) -> ArtifactRef:

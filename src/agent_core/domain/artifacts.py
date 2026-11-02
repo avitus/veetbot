@@ -96,6 +96,8 @@ AUTO_INGEST_PENDING = "pending"
 AUTO_INGEST_INGESTED = "ingested"
 AUTO_INGEST_REFUSED = "refused"
 AUTO_INGEST_FAILED = "failed"
+# When the next ingestion attempt may run; a failed attempt backs off (ADR-0284).
+AUTO_INGEST_NOT_BEFORE_KEY = "auto_ingest_not_before"
 UPLOAD_UNCLAIMED_TTL = timedelta(hours=24)
 
 
@@ -104,6 +106,8 @@ class KnowledgeState(StrEnum):
 
     PENDING = AUTO_INGEST_PENDING
     INGESTED = AUTO_INGEST_INGESTED
+    REFUSED = AUTO_INGEST_REFUSED
+    FAILED = AUTO_INGEST_FAILED
 
 
 def claimed_upload(artifact: ArtifactRef, *, run_id: UUID, auto_ingest: bool) -> ArtifactRef:
@@ -119,19 +123,56 @@ def claimed_upload(artifact: ArtifactRef, *, run_id: UUID, auto_ingest: bool) ->
     return artifact.model_copy(update=update, deep=True)
 
 
+def retry_refusal(artifact: ArtifactRef) -> str | None:
+    """Why `knowledge retry` must not reopen this artifact, or None when it may.
+
+    Only a chat upload whose automatic ingestion failed or was refused goes
+    back to pending; anything else would send a non-upload to the knowledge
+    service or re-extract a document already in knowledge (ADR-0284).
+    """
+
+    if artifact.origin != ArtifactOrigin.UPLOAD.value:
+        return "only a chat upload can be retried"
+    state = artifact.metadata.get(AUTO_INGEST_KEY)
+    if state in {AUTO_INGEST_FAILED, AUTO_INGEST_REFUSED}:
+        return None
+    if state == AUTO_INGEST_INGESTED:
+        return "the upload is already in knowledge"
+    return "the upload is still pending ingestion"
+
+
+def auto_ingest_due(metadata: dict[str, Any], now: datetime) -> bool:
+    """Whether a pending upload's backoff, if any, has elapsed (ADR-0284)."""
+
+    recorded = metadata.get(AUTO_INGEST_NOT_BEFORE_KEY)
+    if not isinstance(recorded, str):
+        return True
+    try:
+        return datetime.fromisoformat(recorded) <= now
+    except ValueError:
+        return True
+
+
 def auto_ingest_metadata(
-    metadata: dict[str, Any], *, state: str, reason: str | None, attempts: int
+    metadata: dict[str, Any],
+    *,
+    state: str,
+    reason: str | None,
+    attempts: int,
+    not_before: str | None = None,
 ) -> dict[str, Any]:
     recorded = {
         key: value
         for key, value in metadata.items()
-        if key not in {AUTO_INGEST_REASON_KEY, AUTO_INGEST_ATTEMPTS_KEY}
+        if key not in {AUTO_INGEST_REASON_KEY, AUTO_INGEST_ATTEMPTS_KEY, AUTO_INGEST_NOT_BEFORE_KEY}
     }
     recorded[AUTO_INGEST_KEY] = state
     if reason is not None:
         recorded[AUTO_INGEST_REASON_KEY] = reason
     if attempts:
         recorded[AUTO_INGEST_ATTEMPTS_KEY] = attempts
+    if not_before is not None:
+        recorded[AUTO_INGEST_NOT_BEFORE_KEY] = not_before
     return recorded
 
 

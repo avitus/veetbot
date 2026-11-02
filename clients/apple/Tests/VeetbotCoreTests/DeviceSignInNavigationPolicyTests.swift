@@ -77,7 +77,7 @@ import Testing
         #expect(!DeviceSignInNavigationPolicy.canConfirm(currentURL: nil, isLoading: false, allowedOrigins: allowed))
     }
 
-    // MARK: - Another address of the same website (ADR-0282)
+    // MARK: - Another address of the same website (ADR-0287)
 
     private func decideForNewWebsite(
         _ raw: String, allowed: Set<String>, mainFrame: Bool = true, adoptable: String? = nil

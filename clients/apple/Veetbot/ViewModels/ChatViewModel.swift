@@ -236,7 +236,7 @@ public final class ChatViewModel: ObservableObject {
     /// ready, so closing the window can remove it.
     private var deviceSignInCreatedProfile: (requestID: UUID, profileID: UUID, origins: [String])?
     /// The saved login an open remote ceremony signs in again; backing out of
-    /// that ceremony keeps it (ADR-0283).
+    /// that ceremony keeps it (ADR-0288).
     private var remoteSignInKeepsProfileID: UUID?
     /// The device sign-in whose I'm signed in is being handled, if any.
     private var confirmingDeviceSignInID: UUID?
@@ -2246,7 +2246,7 @@ public final class ChatViewModel: ObservableObject {
         addedOrigins: [String] = []
     ) async -> DeviceSignInResult {
         // The remote browser is the alternative when this device cannot start
-        // or carry the sign-in (B5, ADR-0283).
+        // or carry the sign-in (B5, ADR-0288).
         func failure(_ message: String, canRetry: Bool = true) -> DeviceSignInResult {
             let remoteMayHelp =
                 message == DeviceSignInMessage.couldNotStart
@@ -2471,7 +2471,7 @@ public final class ChatViewModel: ObservableObject {
 
     /// The owner chose the remote browser from the sign-in window: the device
     /// attempt is abandoned and the remote path begins, on the saved login if
-    /// the window has one (ADR-0283).
+    /// the window has one (ADR-0288).
     @discardableResult
     public func switchDeviceSignInToRemoteBrowser(_ request: DeviceSignInRequest) async -> URL? {
         let surface = deviceSignInSurface

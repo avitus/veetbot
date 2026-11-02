@@ -448,7 +448,7 @@ FRAMED_SIGN_IN_ROUTES = [
 
 
 async def test_a_remote_sign_in_through_a_frame_reaches_ready() -> None:
-    """ADR-0283: Chase's password field is in a frame, so its sign-in could never finish."""
+    """ADR-0288: Chase's password field is in a frame, so its sign-in could never finish."""
 
     async with browsing(FRAMED_SIGN_IN_ROUTES) as (site, runtime):
         await runtime.navigate(site.url("/framed-sign-in"))

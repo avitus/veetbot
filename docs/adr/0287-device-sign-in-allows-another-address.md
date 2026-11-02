@@ -1,4 +1,4 @@
-# ADR-0282: The device sign-in window asks before a new website adds another address
+# ADR-0287: The device sign-in window asks before a new website adds another address
 
 - Status: Proposed
 - Date: 2026-11-01
@@ -80,7 +80,7 @@ from `secure.chase.com` and Chase accepted, so the tokens were not added.
 
 Chase therefore cannot be signed in through this window: a real sign-in there
 ends on Chase's System Requirements page. The remote ceremony is the path for
-Chase and needs no rule change. ADR-0283 repairs the two defects that stopped that
+Chase and needs no rule change. ADR-0288 repairs the two defects that stopped that
 sign-in being saved and offers the remote ceremony to a saved login from this
 window.
 

@@ -48,7 +48,7 @@ import WebKit
     }
 }
 
-/// ADR-0282: the window holds back a move to another address of the website
+/// ADR-0287: the window holds back a move to another address of the website
 /// until the owner allows it, then goes there.
 @Suite(.serialized) @MainActor struct DeviceSignInOfferedAddressTests {
     private final class StubNavigationAction: WKNavigationAction {
@@ -151,7 +151,7 @@ import WebKit
         #expect(session.allowedOrigins == [www])
     }
 
-    /// ADR-0283: a website may refuse this window, as Chase does, so a saved
+    /// ADR-0288: a website may refuse this window, as Chase does, so a saved
     /// login needs the remote browser here too.
     @Test
     func theWindowOffersTheRemoteBrowserForASavedLogin() throws {

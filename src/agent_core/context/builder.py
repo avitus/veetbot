@@ -63,7 +63,11 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
+from agent_core.domain.recall_execution import (
+    EXHAUSTED,
+    RecallBudgetExceededError,
+    RecallSearchTimeoutError,
+)
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.domain.tool_output import content_bytes, context_view, output_excerpt
 from agent_core.domain.tools import ToolSpec, deferred_definition_text
@@ -130,6 +134,9 @@ class _RecallBundle:
     delta: str | None = None
     corrections: tuple[MemoryCorrection, ...] = ()
     rankings: tuple[RecallRankingBlock | None, ...] = ()
+    # Why the base read produced a limitation marker instead of memory, so the
+    # runtime can record that the turn went without recall (ADR-0282).
+    limitation: str | None = None
 
 
 def current_user_text(items: list[ConversationItem]) -> str | None:
@@ -911,6 +918,11 @@ class BudgetedContextBuilder:
                     if plan.memory_snapshot or recall_items or correction_items
                     else TrustLevel.USER.value
                 ),
+                **(
+                    {}
+                    if recalled.limitation is None
+                    else {"recall_limitation": recalled.limitation}
+                ),
             },
             cache_hints=CacheHints(
                 session_key=session_cache_key(run.tenant_id, run.session_id),
@@ -1117,8 +1129,19 @@ class BudgetedContextBuilder:
                 return _RecallBundle(corrections=tuple(exhausted_corrections))
             base = await recall(queries[0])
         except (RecallBudgetExceededError, TimeoutError) as error:
-            limitation = (
-                EXHAUSTED if isinstance(error, RecallBudgetExceededError) else RECALL_TIMED_OUT
+            # An admitted search that outlived the permit's deadline arrives as
+            # a budget error too; it is a timeout, not a spent slot.
+            exhausted = isinstance(error, RecallBudgetExceededError) and not isinstance(
+                error, RecallSearchTimeoutError
+            )
+            limitation = EXHAUSTED if exhausted else RECALL_TIMED_OUT
+            reason = "exhausted" if exhausted else "timed_out"
+            # A turn that goes without recall is a measurable outcome, not a
+            # silent one: the marker reaches the model, the log and the run's
+            # events (ADR-0282).
+            logger.warning(
+                "context_memory_recall_limited",
+                extra={"run_id": str(run.id), "reason": reason},
             )
             # Optional search exhaustion cannot hide mandatory frozen corrections.
             try:
@@ -1134,8 +1157,10 @@ class BudgetedContextBuilder:
                     "context_memory_recall_failed",
                     extra={"run_id": str(run.id), "error_class": type(exc).__name__},
                 )
-                return _RecallBundle(base=limitation)
-            return _RecallBundle(base=limitation, corrections=tuple(exhausted_corrections))
+                return _RecallBundle(base=limitation, limitation=reason)
+            return _RecallBundle(
+                base=limitation, corrections=tuple(exhausted_corrections), limitation=reason
+            )
         except Exception as exc:
             logger.warning(
                 "context_memory_recall_failed",

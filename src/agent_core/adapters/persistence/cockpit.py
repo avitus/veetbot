@@ -129,7 +129,8 @@ class InMemoryWidgetStore:
             owned[widget.slug] = widget
             return widget
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget:
+    async def get_widget(self, principal: Principal, slug: str, *, lock: bool = False) -> Widget:
+        del lock  # No in-memory call suspends, so a caller's check and write are one step.
         async with self._lock:
             return self._widget(principal, slug)
 
@@ -157,13 +158,18 @@ class InMemoryWidgetStore:
             return self._revision(principal, revision_id)
 
     async def list_revisions(
-        self, principal: Principal, slug: str, *, limit: int
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        limit: int,
+        states: Sequence[RevisionState] | None = None,
     ) -> list[WidgetRevision]:
         async with self._lock:
             revisions = [
                 item
                 for item in self._revisions.get(_owner(principal), {}).values()
-                if item.slug == slug
+                if item.slug == slug and (states is None or item.state in states)
             ]
             revisions.sort(key=lambda item: (item.created_at, str(item.id)), reverse=True)
             return revisions[:limit]
@@ -699,8 +705,8 @@ class PostgresWidgetStore:
         )
         return widget
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget:
-        return _widget_from_row(await self._widget_row(principal, slug))
+    async def get_widget(self, principal: Principal, slug: str, *, lock: bool = False) -> Widget:
+        return _widget_from_row(await self._widget_row(principal, slug, lock=lock))
 
     async def list_widgets(
         self, principal: Principal, *, include_deleted: bool = False
@@ -725,14 +731,25 @@ class PostgresWidgetStore:
         return _revision_from_row(await self._revision_row(principal, revision_id))
 
     async def list_revisions(
-        self, principal: Principal, slug: str, *, limit: int
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        limit: int,
+        states: Sequence[RevisionState] | None = None,
     ) -> list[WidgetRevision]:
+        narrowed = (
+            ()
+            if states is None
+            else (CockpitWidgetRevisionRow.state.in_([state.value for state in states]),)
+        )
         rows = (
             await self._session.execute(
                 select(CockpitWidgetRevisionRow)
                 .where(
                     *_owned_by(CockpitWidgetRevisionRow, principal),
                     CockpitWidgetRevisionRow.slug == slug,
+                    *narrowed,
                 )
                 .order_by(
                     CockpitWidgetRevisionRow.created_at.desc(), CockpitWidgetRevisionRow.id.desc()

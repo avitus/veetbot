@@ -22,6 +22,12 @@ _EVENTS = (
 )
 _USAGE = f"""
 select count(distinct e.run_id) filter (where e.event_type = 'memory.recalled') as recalled_runs,
+       count(distinct e.run_id) filter (where e.event_type = 'memory.recall.limited')
+         as limited_runs,
+       count(*) filter (where e.event_type = 'memory.recall.limited'
+         and e.payload->>'reason' = 'exhausted') as limited_exhausted,
+       count(*) filter (where e.event_type = 'memory.recall.limited'
+         and e.payload->>'reason' = 'timed_out') as limited_timed_out,
        count(distinct e.run_id) filter (where e.event_type = 'memory.delivered') as delivered_runs,
        count(distinct e.run_id) filter (where e.event_type = 'memory.cited'
          and jsonb_array_length(e.payload->'cited') > 0) as cited_runs,
@@ -141,6 +147,9 @@ async def read_memory_health_report(
         since=since,
         until=until,
         recalled_runs=usage.recalled_runs,
+        limited_runs=usage.limited_runs,
+        limited_exhausted=usage.limited_exhausted,
+        limited_timed_out=usage.limited_timed_out,
         delivered_runs=usage.delivered_runs,
         cited_runs=usage.cited_runs,
         cited_beliefs=int(usage.cited_beliefs),
