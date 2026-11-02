@@ -2921,11 +2921,16 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func reloadBrowserProfiles(using api: VeetbotAPIClient) async throws {
+        let generation = connectionGeneration
         var profiles: [BrowserProfileView] = []
         var cursor: String?
         var seen: Set<String> = []
         repeat {
             let page = try await api.listBrowserProfiles(cursor: cursor)
+            // After a connection change this asks and publishes nothing more: the
+            // old client would carry the new credential, and these logins are the
+            // old connection's.
+            guard generation == connectionGeneration else { return }
             profiles.append(contentsOf: page.items)
             cursor = try nextPageCursor(page.nextCursor, seen: &seen)
         } while cursor != nil

@@ -377,13 +377,22 @@ _FRAME_SCAN_SECONDS = 1.0
 _CREDENTIAL_FIELDS = "input[type=password],input[autocomplete~='one-time-code' i]"
 
 
+async def _frame_is_visible(frame: Frame) -> bool:
+    """Report a frame visible only if every frame around it is; each answers for its own page."""
+    while (parent := frame.parent_frame) is not None:
+        owner = await frame.frame_element()
+        visible = await owner.is_visible()
+        await owner.dispose()
+        if not visible:
+            return False
+        frame = parent
+    return True
+
+
 async def _frame_shows_credential_field(frame: Frame) -> bool:
     """Report a visible credential field in one visible frame; a detached frame shows none."""
     with suppress(PlaywrightError):
-        owner = await frame.frame_element()
-        frame_visible = await owner.is_visible()
-        await owner.dispose()
-        if frame_visible:
+        if await _frame_is_visible(frame):
             fields = frame.locator(_CREDENTIAL_FIELDS)
             for index in range(await fields.count()):
                 if await fields.nth(index).is_visible():

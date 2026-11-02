@@ -1362,7 +1362,11 @@ def fake_frame(*, count: AsyncMock, frame_visible: bool = True) -> Mock:
     fields.count = count
     fields.nth.return_value = field
     owner = SimpleNamespace(is_visible=AsyncMock(return_value=frame_visible), dispose=AsyncMock())
-    return Mock(frame_element=AsyncMock(return_value=owner), locator=Mock(return_value=fields))
+    return Mock(
+        frame_element=AsyncMock(return_value=owner),
+        locator=Mock(return_value=fields),
+        parent_frame=SimpleNamespace(parent_frame=None),
+    )
 
 
 async def test_a_frame_that_goes_away_during_the_scan_shows_no_field_and_loses_no_key() -> None:

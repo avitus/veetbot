@@ -219,6 +219,60 @@ import Testing
         #expect(model.websiteAuthenticationLaunchURL == nil)
     }
 
+    /// The old connection's logins must not appear on the new one.
+    @Test
+    func aConnectionChangeDuringAProfileReloadPublishesNothing() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = remoteSignInServer(profileID: profileID, ceremonyID: ceremonyID)
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let listing = "GET veetbot.test /v1/browser-profiles"
+        let reloading = server.hold(listing)
+        let switching = Task { await model.switchDeviceSignInToRemoteBrowser(request) }
+        #expect(await server.arrival(of: listing))
+
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "another-token"))
+        reloading.open()
+        let launch = await switching.value
+
+        #expect(launch == nil)
+        #expect(model.browserProfiles.isEmpty)
+    }
+
+    /// A further page would carry the new credential to the old connection.
+    @Test
+    func aConnectionChangeStopsAProfileReloadBetweenPages() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true, remote: true))
+            // The connection change itself ends this ceremony, before the credential changes.
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, #"{"items":[],"next_cursor":"more"}"#)
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let listing = "GET veetbot.test /v1/browser-profiles"
+        let reloading = server.hold(listing)
+        let switching = Task { await model.switchDeviceSignInToRemoteBrowser(request) }
+        #expect(await server.arrival(of: listing))
+
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "another-token"))
+        server.clear()
+        reloading.open()
+        _ = await switching.value
+
+        #expect(server.routes.isEmpty)
+    }
+
     /// The same for a new website, whichever of its two requests was answering.
     @Test(arguments: [true, false])
     func aConnectionChangeWhileANewWebsiteStartsSendsNothingMore(whileCreating: Bool) async throws {

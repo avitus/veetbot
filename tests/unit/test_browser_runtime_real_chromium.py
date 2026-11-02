@@ -439,6 +439,20 @@ async def _frame_with_hidden_field(request: Request) -> Response:
     return html("<h1>Accounts</h1><iframe src='/frame-field-hidden' width='400'></iframe>")
 
 
+async def _visible_inner_frame(request: Request) -> Response:
+    del request
+    return html("<iframe src='/logon-form' width='400' style='visibility:visible'></iframe>")
+
+
+async def _hidden_outer_frame(request: Request) -> Response:
+    """A frame reports its own page's visibility, so the hidden owner is one frame up."""
+    del request
+    return html(
+        "<h1>Accounts</h1>"
+        "<iframe src='/visible-inner-frame' width='400' style='visibility:hidden'></iframe>"
+    )
+
+
 async def _accounts(request: Request) -> Response:
     del request
     response = html("<h1>Accounts</h1>")
@@ -453,6 +467,8 @@ FRAMED_SIGN_IN_ROUTES = [
     Route("/code-form", _code_form),
     Route("/sectioned-code", _sectioned_code),
     Route("/framed-sectioned-code", _framed_sectioned_code),
+    Route("/visible-inner-frame", _visible_inner_frame),
+    Route("/hidden-outer-frame", _hidden_outer_frame),
     Route("/hidden-frames", _hidden_frames),
     Route("/frame-field-hidden", _frame_field_hidden),
     Route("/frame-with-hidden-field", _frame_with_hidden_field),
@@ -526,6 +542,7 @@ async def test_a_lease_stops_at_a_sign_in_form_in_a_frame() -> None:
     [
         pytest.param("/hidden-frames", id="invisible-frames"),
         pytest.param("/frame-with-hidden-field", id="hidden-field-in-a-visible-frame"),
+        pytest.param("/hidden-outer-frame", id="visible-frame-in-a-hidden-frame"),
     ],
 )
 async def test_an_invisible_sign_in_field_in_a_frame_is_not_a_challenge(path: str) -> None:
