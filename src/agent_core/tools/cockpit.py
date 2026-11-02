@@ -987,12 +987,14 @@ class CockpitWidgetWriteTool(_CockpitTool):
                     principal, widget.live_revision_id
                 )
                 live = dict(revision.files)
+        head = await self._toolset.publication.head_revision(principal, slug)
+        accepted = {} if head is None else dict(head.files)
         if operation == "delete":
-            before, after = live, {}
+            before, after = accepted, {}
         elif operation == "restore":
             before, after = {}, live
         else:
-            before, after = live, dict(arguments.get("files") or {})
+            before, after = accepted, dict(arguments.get("files") or {})
         changes = sorted(name for name in {*before, *after} if before.get(name) != after.get(name))
         lines: list[str] = []
         for name in changes:

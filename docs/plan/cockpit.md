@@ -712,7 +712,8 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
 - **Approval view.** When an escalation produces an approval, the approval
   view shows the file diff and the preview image. The preview image is still
   required and the card does not carry it yet, an open item in
-  `docs/status/milestones.md`. The diff is the whole change: it is paged, a
+  `docs/status/milestones.md`. The diff is the whole change against the newest
+  accepted revision, which may still be waiting for its commit: it is paged, a
   long line continues on the next entry, it keeps every character a line split
   would drop, and credential-shaped text is masked and counted rather than
   hiding its line. A change past 400 entries cannot be shown whole, so its card

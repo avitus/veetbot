@@ -628,6 +628,76 @@ async def test_the_card_shows_a_change_to_invisible_characters(
     assert shown in entries
 
 
+async def _card_entries(h: Any, arguments: dict[str, Any]) -> list[str]:
+    presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+        arguments, run=None, principal=OWNER, turn=None, not_covered=None
+    )
+    return [entry for page in presentation.arguments["diff"].values() for entry in page]
+
+
+_V1 = "export default function Weather() { return null; } // v1"
+_V2 = "export default function Weather() { return null; } // v2"
+
+
+async def _live_v1_and_pending_v2(h: Any) -> str:
+    created = await h.call(
+        "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+    )
+    assert created.structured is not None
+    await h.stack.outbox.run_once()
+    pending = await h.call(
+        "cockpit.widget.write",
+        {
+            "operation": "update",
+            "slug": "weather",
+            "files": package("v2"),
+            "expected_revision": created.structured["revision_id"],
+        },
+    )
+    assert pending.structured is not None and pending.structured["state"] == "pending_commit"
+    return str(pending.structured["revision_id"])
+
+
+async def test_an_update_card_compares_against_the_revision_the_update_replaces(
+    tmp_path: Path,
+) -> None:
+    """Files matching the live revision still change a pending one, so the card must say so."""
+    async with harness(tmp_path) as h:
+        pending = await _live_v1_and_pending_v2(h)
+        entries = await _card_entries(
+            h,
+            {
+                "operation": "update",
+                "slug": "weather",
+                "files": package(),
+                "expected_revision": pending,
+            },
+        )
+    assert f"-{_V2}" in entries
+    assert f"+{_V1}" in entries
+
+
+async def test_a_delete_card_shows_the_pending_revision_it_also_removes(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        await _live_v1_and_pending_v2(h)
+        entries = await _card_entries(h, {"operation": "delete", "slug": "weather"})
+    assert f"-{_V2}" in entries
+
+
+async def test_creating_over_a_deleted_widget_shows_every_file_it_publishes(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        await h.stack.outbox.run_once()
+        entries = await _card_entries(
+            h, {"operation": "create", "slug": "weather", "files": package()}
+        )
+    assert f"+{_V1}" in entries
+
+
 def test_the_stored_history_bound_is_the_manifest_schema_ceiling() -> None:
     from agent_core.domain.cockpit import FEED_HISTORY_MAX
 
