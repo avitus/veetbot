@@ -20,7 +20,9 @@ from agent_core.domain.knowledge import (
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
+    KnowledgeSemanticQuery,
     RetrievedPassage,
+    fuse_passage_arms,
 )
 from agent_core.domain.memory import (
     LIFECYCLE_POLICY_VERSION,
@@ -53,6 +55,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.memory_candidates import select_candidates
 from agent_core.domain.reconsolidation import SourceVersion
+from agent_core.domain.semantic_memory import checked_vector
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.memory.identity_recall import identity_scoped_records
 from agent_core.ports.determinism import Clock
@@ -962,6 +965,9 @@ class InMemoryKnowledgeStore:
         self._clock = clock
         self._documents: dict[UUID, KnowledgeDocument] = {}
         self._chunks: dict[str, KnowledgeChunk] = {}
+        # chunk id -> embedding space key -> unit vector; the PostgreSQL
+        # store's `knowledge_chunk_vectors` rows.
+        self._vectors: dict[str, dict[str, tuple[float, ...]]] = {}
         self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
@@ -1000,6 +1006,10 @@ class InMemoryKnowledgeStore:
             self._documents[document.row_id] = document.model_copy(deep=True)
             for chunk in prepared.chunks:
                 self._chunks[chunk.chunk_id] = chunk.model_copy(deep=True)
+            for embedding in prepared.embeddings:
+                self._vectors.setdefault(embedding.chunk_id, {})[embedding.space.key] = (
+                    checked_vector(embedding.vector, embedding.space)
+                )
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None:
         async with self._lock:
@@ -1012,13 +1022,19 @@ class InMemoryKnowledgeStore:
                 return None
             return max(rows, key=lambda item: item.version).model_copy(deep=True)
 
-    async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]:
+    async def search(
+        self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
+    ) -> list[RetrievedPassage]:
         as_of = query.as_of or self._clock.now()
         forms = lexical_query_forms(query.text)
         per_document: defaultdict[UUID, int] = defaultdict(int)
-        # Coverage ranks first, as the PostgreSQL store orders it; the combined
-        # score and the chunk id only break ties (ADR-0285).
-        scored: list[tuple[float, RetrievedPassage]] = []
+        # The lexical arm: coverage ranks first, as the PostgreSQL store
+        # orders it; the combined score and the chunk id only break ties
+        # (ADR-0285). With the semantic arm present, both arms are fused by
+        # the domain's shared rule and the fused match orders candidates.
+        lexical: list[tuple[str, float]] = []
+        semantic_arm: list[tuple[str, float]] = []
+        eligible: dict[str, tuple[KnowledgeChunk, KnowledgeDocument]] = {}
         async with self._lock:
             for chunk in self._chunks.values():
                 document = self._documents.get(chunk.document_row_id)
@@ -1035,38 +1051,55 @@ class InMemoryKnowledgeStore:
                     > SENSITIVITY_ORDER[query.sensitivity_ceiling]
                 ):
                     continue
-                match = _coverage(forms, f"{' '.join(chunk.heading_path)} {chunk.text}")
-                if match <= 0:
-                    continue
-                scope = 1.0 if document.project_scope == query.current_scope else 0.5
-                authority = {
-                    DocumentAuthority.PRINCIPAL_AUTHORED: 1.0,
-                    DocumentAuthority.PRINCIPAL_SUPPLIED: 0.7,
-                    DocumentAuthority.FETCHED: 0.4,
-                }[document.authority]
-                score = min(1.0, 0.75 * match + 0.15 * authority + 0.1 * scope)
-                if score < query.min_score:
-                    continue
-                scored.append(
-                    (
-                        match,
-                        RetrievedPassage(
-                            chunk_id=chunk.chunk_id,
-                            document_id=document.document_id,
-                            title=document.title,
-                            heading_path=list(chunk.heading_path),
-                            text=chunk.text,
-                            doc_date=document.doc_date,
-                            authority=document.authority,
-                            sensitivity=document.sensitivity,
-                            score=score,
-                            arms=["lexical"],
-                            instruction_like=chunk.contains_instruction_like_text,
-                        ),
-                    )
+                eligible[chunk.chunk_id] = (chunk, document)
+                if semantic is None or semantic.channel == "hybrid":
+                    match = _coverage(forms, f"{' '.join(chunk.heading_path)} {chunk.text}")
+                    if match > 0:
+                        lexical.append((chunk.chunk_id, match))
+                if semantic is not None:
+                    vector = self._vectors.get(chunk.chunk_id, {}).get(semantic.space.key)
+                    if vector is not None:
+                        similarity = sum(
+                            a * b for a, b in zip(semantic.vector, vector, strict=True)
+                        )
+                        semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, similarity))))
+        limit = max(query.max_passages * 8, 64)
+        lexical.sort(key=lambda item: (-item[1], _passage_score(eligible, query, item), item[0]))
+        semantic_arm.sort(key=lambda item: (-round(item[1], 7), item[0]))
+        semantic_arm = semantic_arm[:limit]
+        if semantic is None:
+            matches = {chunk_id: (match, ["lexical"]) for chunk_id, match in lexical}
+        else:
+            matches = fuse_passage_arms(lexical, semantic_arm, channel=semantic.channel)
+        scored: list[tuple[float, RetrievedPassage]] = []
+        for chunk_id, (match, arms) in matches.items():
+            chunk, document = eligible[chunk_id]
+            scope = 1.0 if document.project_scope == query.current_scope else 0.5
+            score = min(
+                1.0, 0.75 * match + 0.15 * _AUTHORITY_WEIGHT[document.authority] + 0.1 * scope
+            )
+            if score < query.min_score:
+                continue
+            scored.append(
+                (
+                    match,
+                    RetrievedPassage(
+                        chunk_id=chunk.chunk_id,
+                        document_id=document.document_id,
+                        title=document.title,
+                        heading_path=list(chunk.heading_path),
+                        text=chunk.text,
+                        doc_date=document.doc_date,
+                        authority=document.authority,
+                        sensitivity=document.sensitivity,
+                        score=score,
+                        arms=arms,
+                        instruction_like=chunk.contains_instruction_like_text,
+                    ),
                 )
+            )
         result: list[RetrievedPassage] = []
-        for _coverage_share, passage in sorted(
+        for _match, passage in sorted(
             scored, key=lambda item: (-item[0], -item[1].score, item[1].chunk_id)
         ):
             if per_document[passage.document_id] >= query.max_per_document:
@@ -1103,7 +1136,30 @@ class InMemoryKnowledgeStore:
                 for key, value in self._chunks.items()
                 if value.document_row_id not in row_ids
             }
+            self._vectors = {
+                key: value for key, value in self._vectors.items() if key in self._chunks
+            }
             return refs
+
+
+_AUTHORITY_WEIGHT = {
+    DocumentAuthority.PRINCIPAL_AUTHORED: 1.0,
+    DocumentAuthority.PRINCIPAL_SUPPLIED: 0.7,
+    DocumentAuthority.FETCHED: 0.4,
+}
+
+
+def _passage_score(
+    eligible: dict[str, tuple[KnowledgeChunk, KnowledgeDocument]],
+    query: KnowledgeQuery,
+    item: tuple[str, float],
+) -> float:
+    """The negated combined score, so a lexical tie breaks the way it always did."""
+
+    chunk_id, match = item
+    document = eligible[chunk_id][1]
+    scope = 1.0 if document.project_scope == query.current_scope else 0.5
+    return -min(1.0, 0.75 * match + 0.15 * _AUTHORITY_WEIGHT[document.authority] + 0.1 * scope)
 
 
 def _coverage(forms: list[tuple[str, ...]], text: str) -> float:

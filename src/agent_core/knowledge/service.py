@@ -4,21 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import html
+import logging
 import re
 from datetime import timedelta
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import StoredArtifactRef
+from agent_core.domain.embeddings import EmbeddingError
 from agent_core.domain.errors import ArtifactIntegrityError, NotFoundError, ToolValidationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.knowledge import (
+    KnowledgeChunkEmbedding,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeIngestRequest,
     KnowledgeQuery,
     KnowledgeResult,
+    KnowledgeSemanticQuery,
     RetrievedPassage,
+    knowledge_embedding_text,
 )
 from agent_core.domain.memory import (
     RecallMoment,
@@ -35,6 +40,7 @@ from agent_core.knowledge.chunking import (
     normalize_text,
     token_estimate,
 )
+from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.memory.profiles import DEFAULT_TRACE_PROFILE, TraceProfile
 from agent_core.ports.artifacts import ArtifactStore
 from agent_core.ports.determinism import Clock, IdFactory
@@ -42,6 +48,7 @@ from agent_core.ports.knowledge import Extractor
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 KNOWLEDGE_POLICY_VERSION = "knowledge@1"
+logger = logging.getLogger(__name__)
 _SECRET = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
     re.I,
@@ -60,6 +67,7 @@ class KnowledgeService:
         extractor: Extractor | None = None,
         chunker: DeterministicChunker | None = None,
         trace_retention: TraceProfile = DEFAULT_TRACE_PROFILE,
+        embedder: KnowledgeEmbedder | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._artifacts = artifacts
@@ -69,6 +77,9 @@ class KnowledgeService:
         self._extractor = extractor or PlainTextExtractor()
         self._chunker = chunker or DeterministicChunker()
         self._trace_retention = trace_retention
+        # The semantic arm (knowledge-documents.md, "Indexing"): present only
+        # when the composition turned it on with an admitted provider.
+        self._embedder = embedder
 
     @property
     def trace_retention(self) -> TraceProfile:
@@ -104,6 +115,9 @@ class KnowledgeService:
         if _SECRET.search(normalized) is not None:
             raise ToolValidationError("knowledge source failed the secret scan")
         document_id = request.document_id or self._ids.new_id()
+        # Chunk texts do not depend on the row that will hold them, so the
+        # provider call happens here, before any unit of work is open.
+        vectors = await self._embed_chunk_texts(normalized, request.title, document_id)
         async with self._uow_factory() as uow:
             latest = await uow.knowledge.latest(source.tenant_id, document_id)
             if (
@@ -149,7 +163,23 @@ class KnowledgeService:
             retained = await uow.artifacts.retain_for_knowledge(source.id, self._principal)
             if retained.sha256 != source.sha256:
                 raise ArtifactIntegrityError("knowledge artifact metadata changed during ingest")
-            await uow.knowledge.ingest(KnowledgeIngestPrepared(document=document, chunks=chunks))
+            embeddings: tuple[KnowledgeChunkEmbedding, ...] = ()
+            if vectors is not None:
+                assert self._embedder is not None
+                texts, values = vectors
+                if texts != [knowledge_embedding_text(c.heading_path, c.text) for c in chunks]:
+                    raise ArtifactIntegrityError(
+                        "knowledge chunks changed between embedding and ingest"
+                    )
+                embeddings = tuple(
+                    KnowledgeChunkEmbedding(
+                        chunk_id=chunk.chunk_id, space=self._embedder.space, vector=vector
+                    )
+                    for chunk, vector in zip(chunks, values, strict=True)
+                )
+            await uow.knowledge.ingest(
+                KnowledgeIngestPrepared(document=document, chunks=chunks, embeddings=embeddings)
+            )
             await uow.events.append(
                 NewEvent(
                     session_id=source.session_id,
@@ -161,10 +191,46 @@ class KnowledgeService:
                         "document_id": str(document_id),
                         "version": version,
                         "chunks": len(chunks),
+                        "embedded": len(embeddings),
                     },
                 )
             )
         return document
+
+    async def _embed_chunk_texts(
+        self, normalized: str, title: str, document_id: UUID
+    ) -> tuple[list[str], list[tuple[float, ...]]] | None:
+        """Embed the chunk texts the deterministic chunker will produce.
+
+        The chunker binds ids to the row and version chosen inside the unit of
+        work, but a chunk's heading path and text depend only on the bytes, so
+        the texts embedded here are the texts the stored chunks will carry;
+        ingestion checks that before writing. An embedding failure fails the
+        ingest, as every other step does: a document half of whose passages
+        the semantic arm can see is worse than one that is tried again.
+        """
+
+        if self._embedder is None:
+            return None
+        drafts = self._chunker.chunk(
+            normalized, title, document_row_id=UUID(int=0), document_id=document_id, version=1
+        )
+        texts = [knowledge_embedding_text(chunk.heading_path, chunk.text) for chunk in drafts]
+        if not texts:
+            return None
+        return texts, await self._embedder.embed_texts(texts)
+
+    async def _embed_question(self, text: str) -> KnowledgeSemanticQuery | None:
+        """Embed the question, or answer with the lexical arm alone when the provider cannot."""
+
+        if self._embedder is None:
+            return None
+        try:
+            return await self._embedder.embed_query(text)
+        except EmbeddingError as error:
+            # The message is content-free by contract; the question itself stays out.
+            logger.warning("knowledge_semantic_query_unavailable", extra={"reason": str(error)})
+            return None
 
     async def search(
         self,
@@ -175,14 +241,18 @@ class KnowledgeService:
         turn_id: UUID | None = None,
         surface_id: str = "private",
     ) -> KnowledgeResult:
+        authorized = query.tenant_id == self._principal.tenant_id and (
+            query.principal_id == self._principal.principal_id
+        )
+        semantic = await self._embed_question(query.text) if authorized else None
+        policy_version = KNOWLEDGE_POLICY_VERSION
+        if semantic is not None:
+            policy_version += f"+semantic@1:{semantic.space.key}:{semantic.channel}"
         async with self._uow_factory() as uow, uow.people.lock(self._principal):
-            authorized = query.tenant_id == self._principal.tenant_id and (
-                query.principal_id == self._principal.principal_id
-            )
             if not authorized:
                 passages: list[RetrievedPassage] = []
             else:
-                passages = await uow.knowledge.search(query)
+                passages = await uow.knowledge.search(query, semantic=semantic)
             selected: list[RetrievedPassage] = []
             tokens = 0
             for passage in passages:
@@ -229,7 +299,7 @@ class KnowledgeService:
                     )
                     for passage in selected
                 ],
-                retrieval_policy_version=KNOWLEDGE_POLICY_VERSION,
+                retrieval_policy_version=policy_version,
                 created_at=self._clock.now(),
                 operator_fields_expire_at=(
                     self._clock.now()

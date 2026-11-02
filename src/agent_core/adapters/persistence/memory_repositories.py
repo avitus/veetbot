@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from sqlalchemy import (
     DateTime,
     Integer,
+    Numeric,
     SQLColumnExpression,
     Text,
     and_,
@@ -59,6 +60,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ConsolidationWatermarkRow,
     IntegratedEpisodeRow,
     KnowledgeChunkRow,
+    KnowledgeChunkVectorRow,
     KnowledgeDocumentRow,
     MemoryRejectionRow,
     MemoryRevisionRow,
@@ -78,8 +80,10 @@ from agent_core.domain.knowledge import (
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
+    KnowledgeSemanticQuery,
     KnowledgeVisibility,
     RetrievedPassage,
+    fuse_passage_arms,
 )
 from agent_core.domain.memory import (
     HOME_LOCATION_PATTERN,
@@ -113,6 +117,7 @@ from agent_core.domain.memory import (
     recall_term_forms,
 )
 from agent_core.domain.reconsolidation import content_signature
+from agent_core.domain.semantic_memory import checked_vector
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
 from agent_core.ports.people import PeopleStore
@@ -1747,6 +1752,20 @@ class PostgresKnowledgeStore:
             pg_insert(KnowledgeChunkRow),
             [chunk.model_dump(mode="python") for chunk in prepared.chunks],
         )
+        if prepared.embeddings:
+            await self._session.execute(
+                pg_insert(KnowledgeChunkVectorRow),
+                [
+                    {
+                        "chunk_id": embedding.chunk_id,
+                        "space_key": embedding.space.key,
+                        "space": embedding.space.model_dump(mode="json"),
+                        "text_version": embedding.text_version,
+                        "embedding": list(checked_vector(embedding.vector, embedding.space)),
+                    }
+                    for embedding in prepared.embeddings
+                ],
+            )
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None:
         result = (
@@ -1765,44 +1784,14 @@ class PostgresKnowledgeStore:
         ).one_or_none()
         return None if result is None else _knowledge_document(result[0], result[1])
 
-    async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]:
+    async def search(
+        self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
+    ) -> list[RetrievedPassage]:
         as_of = query.as_of or self._clock.now()
         forms = lexical_query_forms(query.text)
-        if not forms:
+        if not forms and semantic is None:
             return []
-        vector = func.to_tsvector(
-            "simple",
-            func.concat(KnowledgeChunkRow.heading_path.cast(Text), " ", KnowledgeChunkRow.text),
-        )
-        # Any-term semantics, as `lexical_query_terms` documents and the in-memory
-        # store answers: a question rarely shares every word with its passage.
-        # Each term matches any of its folded spellings (ADR-0285).
-        term_queries = [func.plainto_tsquery("simple", form) for group in forms for form in group]
-        any_term: Any = term_queries[0]
-        for term_query in term_queries[1:]:
-            any_term = any_term.op("||")(term_query)
-        # Coverage, the number of distinct query terms a passage holds, ranks
-        # ahead of density: a passage about the question beats a passage that
-        # repeats one of its words (ADR-0285).
-        coverage = sum(
-            (
-                case(
-                    (
-                        or_(
-                            *[
-                                vector.op("@@")(func.plainto_tsquery("simple", form))
-                                for form in group
-                            ]
-                        ),
-                        1,
-                    ),
-                    else_=0,
-                )
-                for group in forms
-            ),
-            literal(0),
-        )
-        rank = func.ts_rank_cd(vector, any_term)
+        limit = max(query.max_passages * 8, 64)
         visibility = or_(
             KnowledgeDocumentRow.visibility == KnowledgeVisibility.TENANT.value,
             (
@@ -1814,48 +1803,121 @@ class PostgresKnowledgeStore:
                 & (KnowledgeDocumentRow.project_scope == query.current_scope)
             ),
         )
-        rows = list(
-            (
+        eligible = (
+            KnowledgeDocumentRow.tenant_id == query.tenant_id,
+            _knowledge_source_visible(),
+            KnowledgeDocumentRow.valid_from <= as_of,
+            or_(
+                KnowledgeDocumentRow.valid_to.is_(None),
+                KnowledgeDocumentRow.valid_to > as_of,
+            ),
+            KnowledgeDocumentRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
+            visibility,
+        )
+        candidates: dict[str, tuple[KnowledgeChunkRow, KnowledgeDocumentRow]] = {}
+        lexical: list[tuple[str, float]] = []
+        if forms and (semantic is None or semantic.channel == "hybrid"):
+            vector = func.to_tsvector(
+                "simple",
+                func.concat(KnowledgeChunkRow.heading_path.cast(Text), " ", KnowledgeChunkRow.text),
+            )
+            # Any-term semantics, as `lexical_query_terms` documents and the
+            # in-memory store answers: a question rarely shares every word with
+            # its passage. Each term matches any of its folded spellings (ADR-0285).
+            term_queries = [
+                func.plainto_tsquery("simple", form) for group in forms for form in group
+            ]
+            any_term: Any = term_queries[0]
+            for term_query in term_queries[1:]:
+                any_term = any_term.op("||")(term_query)
+            # Coverage, the number of distinct query terms a passage holds, ranks
+            # ahead of density: a passage about the question beats a passage that
+            # repeats one of its words (ADR-0285).
+            coverage = sum(
+                (
+                    case(
+                        (
+                            or_(
+                                *[
+                                    vector.op("@@")(func.plainto_tsquery("simple", form))
+                                    for form in group
+                                ]
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                    for group in forms
+                ),
+                literal(0),
+            )
+            rank = func.ts_rank_cd(vector, any_term)
+            rows = (
                 await self._session.execute(
-                    select(
-                        KnowledgeChunkRow,
+                    select(KnowledgeChunkRow, KnowledgeDocumentRow, coverage.label("coverage"))
+                    .join(
                         KnowledgeDocumentRow,
-                        coverage.label("coverage"),
-                        rank.label("rank"),
+                        KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+                    )
+                    .where(*eligible, vector.op("@@")(any_term))
+                    .order_by(coverage.desc(), rank.desc(), KnowledgeChunkRow.chunk_id)
+                    .limit(limit)
+                )
+            ).all()
+            for chunk, document, raw_coverage in rows:
+                candidates[chunk.chunk_id] = (chunk, document)
+                lexical.append((chunk.chunk_id, int(raw_coverage) / len(forms)))
+        semantic_arm: list[tuple[str, float]] = []
+        if semantic is not None:
+            # The semantic arm (knowledge-documents.md, "Indexing"): exact
+            # cosine distance over every eligible chunk vector in the query's
+            # space; PostgreSQL evaluates eligibility before the limit.
+            distance = KnowledgeChunkVectorRow.embedding.cosine_distance(
+                list(checked_vector(semantic.vector, semantic.space))
+            )
+            rows = (
+                await self._session.execute(
+                    select(KnowledgeChunkRow, KnowledgeDocumentRow, distance.label("distance"))
+                    .join(
+                        KnowledgeChunkVectorRow,
+                        KnowledgeChunkVectorRow.chunk_id == KnowledgeChunkRow.chunk_id,
                     )
                     .join(
                         KnowledgeDocumentRow,
                         KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
                     )
-                    .where(
-                        KnowledgeDocumentRow.tenant_id == query.tenant_id,
-                        _knowledge_source_visible(),
-                        KnowledgeDocumentRow.valid_from <= as_of,
-                        or_(
-                            KnowledgeDocumentRow.valid_to.is_(None),
-                            KnowledgeDocumentRow.valid_to > as_of,
-                        ),
-                        KnowledgeDocumentRow.sensitivity.in_(
-                            _allowed_sensitivities(query.sensitivity_ceiling)
-                        ),
-                        visibility,
-                        vector.op("@@")(any_term),
-                    )
-                    .order_by(coverage.desc(), rank.desc(), KnowledgeChunkRow.chunk_id)
-                    .limit(max(query.max_passages * 8, 64))
+                    .where(*eligible, KnowledgeChunkVectorRow.space_key == semantic.space.key)
+                    .order_by(func.round(distance.cast(Numeric), 7), KnowledgeChunkRow.chunk_id)
+                    .limit(limit)
                 )
             ).all()
+            for chunk, document, raw_distance in rows:
+                candidates[chunk.chunk_id] = (chunk, document)
+                semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, 1 - float(raw_distance)))))
+        if semantic is None:
+            matches = {chunk_id: (match, ["lexical"]) for chunk_id, match in lexical}
+        else:
+            matches = fuse_passage_arms(lexical, semantic_arm, channel=semantic.channel)
+        # The lexical order is the database's (coverage, density, chunk id);
+        # with the semantic arm the fused match orders candidates, as the
+        # in-memory store orders them.
+        ordered = (
+            [chunk_id for chunk_id, _ in lexical]
+            if semantic is None
+            else sorted(matches, key=lambda chunk_id: (-matches[chunk_id][0], chunk_id))
         )
         per_document: defaultdict[UUID, int] = defaultdict(int)
         passages: list[RetrievedPassage] = []
-        for chunk, document, raw_coverage, _raw_rank in rows:
+        for chunk_id in ordered:
+            chunk, document = candidates[chunk_id]
+            match, arms = matches[chunk_id]
             if per_document[document.document_id] >= query.max_per_document:
                 continue
-            # The same formula the in-memory store answers with: coverage first,
-            # then the document's authority and its affinity with the scope.
+            # The same formula the in-memory store answers with: the match
+            # first, then the document's authority and its affinity with the scope.
             score = min(
                 1.0,
-                0.75 * (int(raw_coverage) / len(forms))
+                0.75 * match
                 + 0.15 * _DOCUMENT_AUTHORITY_WEIGHT[DocumentAuthority(document.authority)]
                 + 0.1 * (1.0 if document.project_scope == query.current_scope else 0.5),
             )
@@ -1873,10 +1935,12 @@ class PostgresKnowledgeStore:
                     authority=DocumentAuthority(document.authority),
                     sensitivity=Sensitivity(document.sensitivity),
                     score=score,
-                    arms=["lexical"],
+                    arms=arms,
                     instruction_like=chunk.contains_instruction_like_text,
                 )
             )
+            if len(passages) >= query.max_passages:
+                break
         return passages
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:

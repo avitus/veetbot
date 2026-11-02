@@ -605,6 +605,7 @@ from agent_core.knowledge.chunking import (
     PlainTextExtractor,
     RoutingExtractor,
 )
+from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.knowledge.uploads import UploadAutoIngest
 from agent_core.mcp.configuration import (
@@ -4662,6 +4663,19 @@ async def _compose(
         general_artifact_store = FilesystemArtifactStore(
             artifact_root, maximum_bytes=artifact_maximum_bytes
         )
+        knowledge_embedder: KnowledgeEmbedder | None = None
+        if settings.knowledge_semantic_enabled:
+            # ADR-0289: the knowledge semantic arm embeds chunks and questions
+            # with the semantic index's admitted provider; without one, search
+            # stays lexical and says so once at startup.
+            if semantic_index_pass is None:
+                logger.warning("knowledge_semantic_unavailable_using_lexical")
+            else:
+                knowledge_embedder = KnowledgeEmbedder(
+                    semantic_index_pass.provider,
+                    semantic_index_pass.space,
+                    channel=settings.knowledge_semantic_channel,
+                )
         knowledge_service = KnowledgeService(
             uow_factory,
             general_artifact_store,
@@ -4676,6 +4690,7 @@ async def _compose(
                 ]
             ),
             trace_retention=memory_profiles.traces,
+            embedder=knowledge_embedder,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
         registry.register(KnowledgeSearchTool(knowledge_service))

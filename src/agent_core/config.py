@@ -16,7 +16,7 @@ from enum import StrEnum
 from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -145,6 +145,10 @@ class Settings:
     memory_semantic_index_enabled: bool = False
     memory_semantic_index_evidence: Path | None = None
     memory_semantic_index_manifest: Path | None = None
+    # The knowledge semantic arm (ADR-0289): default off; needs the composed
+    # semantic index's embedding provider, so it never turns on alone.
+    knowledge_semantic_enabled: bool = False
+    knowledge_semantic_channel: Literal["hybrid", "dense"] = "dense"
     memory_reconsolidation_enabled: bool = False
     memory_reconsolidation_evidence: Path | None = None
     memory_reconsolidation_residency_provider: str | None = None
@@ -731,6 +735,13 @@ def _parse_flag(values: Mapping[str, str], name: str, *, default: bool = False) 
     if raw not in {"0", "1"}:
         raise ConfigurationError(f"{name} must be 0 or 1")
     return raw == "1"
+
+
+def _parse_knowledge_semantic_channel(values: Mapping[str, str]) -> Literal["hybrid", "dense"]:
+    raw = values.get("AGENT_KNOWLEDGE_SEMANTIC_CHANNEL", "").strip().lower() or "dense"
+    if raw not in ("hybrid", "dense"):
+        raise ConfigurationError("AGENT_KNOWLEDGE_SEMANTIC_CHANNEL must be 'hybrid' or 'dense'")
+    return "hybrid" if raw == "hybrid" else "dense"
 
 
 def _optional_uuid(values: Mapping[str, str], name: str) -> UUID | None:
@@ -2245,6 +2256,8 @@ def _load_settings(
             if values.get("AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST", "").strip()
             else None
         ),
+        knowledge_semantic_enabled=_parse_flag(values, "AGENT_KNOWLEDGE_SEMANTIC_ENABLED"),
+        knowledge_semantic_channel=_parse_knowledge_semantic_channel(values),
         memory_reconsolidation_enabled=_parse_flag(values, "AGENT_MEMORY_RECONSOLIDATION_ENABLED"),
         memory_reconsolidation_evidence=(
             Path(values["AGENT_MEMORY_RECONSOLIDATION_EVIDENCE"]).expanduser()

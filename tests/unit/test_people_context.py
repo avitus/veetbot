@@ -556,7 +556,11 @@ async def test_knowledge_recall_registers_before_people_erasure_can_commit(
 
     from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
     from agent_core.adapters.memory.in_memory import InMemoryKnowledgeStore
-    from agent_core.domain.knowledge import KnowledgeQuery, RetrievedPassage
+    from agent_core.domain.knowledge import (
+        KnowledgeQuery,
+        KnowledgeSemanticQuery,
+        RetrievedPassage,
+    )
     from agent_core.knowledge.service import KnowledgeService
     from tests.contract.memory_fixtures import prepared_knowledge
 
@@ -569,9 +573,12 @@ async def test_knowledge_recall_registers_before_people_erasure_can_commit(
     original_search = InMemoryKnowledgeStore.search
 
     async def paused_search(
-        self: InMemoryKnowledgeStore, query: KnowledgeQuery
+        self: InMemoryKnowledgeStore,
+        query: KnowledgeQuery,
+        *,
+        semantic: KnowledgeSemanticQuery | None = None,
     ) -> list[RetrievedPassage]:
-        result = await original_search(self, query)
+        result = await original_search(self, query, semantic=semantic)
         queried.set()
         await release.wait()
         return result

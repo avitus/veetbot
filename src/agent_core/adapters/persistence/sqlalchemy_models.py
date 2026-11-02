@@ -1414,6 +1414,23 @@ class KnowledgeChunkRow(Base):
     content_sha256: Mapped[str] = mapped_column(String(64))
 
 
+class KnowledgeChunkVectorRow(Base):
+    """A chunk's derived vector in one embedding space (knowledge-documents.md, "Indexing")."""
+
+    __tablename__ = "knowledge_chunk_vectors"
+    __table_args__ = (
+        CheckConstraint("vector_dims(embedding) = (space->>'dimensions')::int", name="dimensions"),
+    )
+
+    chunk_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("knowledge_chunks.chunk_id", ondelete="CASCADE"), primary_key=True
+    )
+    space_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    space: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    text_version: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(VECTOR())
+
+
 class ScheduleRow(Base):
     __tablename__ = "schedules"
     __table_args__ = (
