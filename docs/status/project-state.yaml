@@ -2598,7 +2598,7 @@ milestones:
     authorized_on: 2026-09-11
     design: docs/plan/email-experience.md
     adr: docs/adr/0092-client-modes-and-email-experience.md
-    gates_registered: 32
+    gates_registered: 33
     authorized_scope:
       - shared Chat and Email presentation on iPhone, iPad and Mac
       - owner-requested archive and move-to-Inbox actions for one exact thread in the originating Gmail account
@@ -2623,7 +2623,7 @@ milestones:
       - Calibrate aggregate cost and performance with authorized representative mailbox work
       - Execute frozen private importance, reply relevance and writing-style evaluations with the owner
       - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
-      - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
+      - Pass all thirty-three Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
     evidence:
       - check: reply drafting after the retained body expires

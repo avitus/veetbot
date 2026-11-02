@@ -421,3 +421,12 @@ def test_cleanup_stays_quick_on_hostile_lines() -> None:
     reading_body("a" + " " * 50_000 + "b")
     reading_body("\n".join(["word " * 16] * 2_000))
     assert time.monotonic() - started < 5
+
+
+def test_cleanup_stays_quick_on_a_long_wrapped_paragraph() -> None:
+    """Rejoining must not copy the growing paragraph for every wrapped line."""
+    lines = [f"word{index} " + "wrapped " * 9 + "sentence" for index in range(200_000)]
+    started = time.monotonic()
+    result = reading_body("\n".join(lines))
+    assert time.monotonic() - started < 5
+    assert result == " ".join(lines)

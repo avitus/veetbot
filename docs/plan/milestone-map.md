@@ -1555,7 +1555,7 @@ record, and the scheduling record is what this document is. Gate 7 is
 Milestone 1 rather than Milestone 0 because the build-sequence table it
 reads is only meaningful once there are build steps to order.
 
-### Client modes and email experience, thirty-two gates
+### Client modes and email experience, thirty-three gates
 
 [email-experience.md](email-experience.md) declares thirty-three further gates in
 the existing `email` area, all at Milestone 26 under ADR-0092. They preserve
@@ -1952,7 +1952,7 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.persona.*` in an area of their own; Milestone 23 adds twelve more to
 `gate.schedule.*`, Milestone 24's twelve return to the existing
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
-area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
+area of their own. Milestone 26 adds thirty-three `gate.email.experience_*`
 entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
 and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29 adds thirteen
 `gate.folder.*` entries and four `gate.judgment.*` entries, and Milestone 30

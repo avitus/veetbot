@@ -1895,7 +1895,7 @@ under the conflict it settles.
 The owner approved the complete proposal, USD 20/day and USD 200/rolling
 thirty-day aggregate automatic-email budgets, and implementation as a new
 parallel milestone on 2026-09-11 under ADR-0092. The canonical
-[email-experience.md](email-experience.md) declares thirty-two blocking gates.
+[email-experience.md](email-experience.md) declares thirty-three blocking gates.
 Its readiness verdict is **Authorized and specified; implementation in progress**.
 No pending implementation or private quality evidence is marked complete, and the
 milestone does not move the verified sequential ceiling. It reuses the Gmail MCP boundary, shared

@@ -67,6 +67,7 @@ def _link(label: str, url: str) -> str:
 
 
 def _host(url: str) -> str:
+    """The link's host for its label, or a plain label when the address has none."""
     try:
         return urlsplit(url).hostname or "Open link"
     except ValueError:
@@ -104,12 +105,14 @@ def _quoted(line: str) -> tuple[str, str]:
 
 
 def _starts_block(content: str) -> bool:
+    """Report a line that begins its own block, so it never continues a paragraph."""
     return bool(_BLOCK_START.match(content) or _RULE.fullmatch(content))
 
 
 def _unwrap(lines: list[str]) -> list[str]:
     """Rejoin what a mailer wrapped; a line with room for the next word ended on purpose."""
-    result: list[str] = []
+    # Each line's pieces join once at the end: growing a string here is quadratic.
+    result: list[list[str]] = []
     for index, line in enumerate(lines):
         previous = lines[index - 1] if index else ""
         prefix, content = _quoted(line)
@@ -117,7 +120,7 @@ def _unwrap(lines: list[str]) -> list[str]:
         if before and content and prefix.count(">") == previous_prefix.count(">"):
             if _UNDERLINE.fullmatch(content):
                 # A sender's rule or signature delimiter must not underline a heading.
-                result.append(prefix.rstrip())
+                result.append([prefix.rstrip()])
             elif (
                 not _starts_block(content)
                 and not _RULE.fullmatch(before)
@@ -131,16 +134,17 @@ def _unwrap(lines: list[str]) -> list[str]:
                     or len(previous) + 1 + len(content.split()[0]) > _WRAP_WIDTH
                 )
             ):
-                result[-1] += " " + content.strip()
+                result[-1].append(content.strip())
                 continue
-        result.append(line)
-    return result
+        result.append([line])
+    return [" ".join(parts) for parts in result]
 
 
 def _without_repeated_blocks(lines: list[str]) -> list[str]:
     """Show a signature once, however each quote level wrapped it."""
 
     def depth(line: str) -> int | None:
+        """The quote level of a line with text, or None for a blank one."""
         prefix, content = _quoted(line)
         return prefix.count(">") if content else None
 

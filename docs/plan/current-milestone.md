@@ -425,7 +425,7 @@ title: Current Milestone
 - **Milestone 26 — Client modes and adaptive email experience:** authorized on
   2026-09-11 as a new independent parallel workstream under ADR-0092;
   [email-experience.md](email-experience.md) contains the approved complete
-  design and thirty-two gates. Twenty-seven backend and native acceptance checks
+  design and thirty-three gates. Twenty-eight backend and native acceptance checks
   are bound; four private quality gates and integrated release evidence remain
   pending, and the milestone remains in progress. Aggregate automatic
   email budgets are USD 20/day and USD 200/rolling thirty days. ADR-0096 limits

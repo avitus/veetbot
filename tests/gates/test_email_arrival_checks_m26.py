@@ -45,10 +45,12 @@ async def _mailbox(changes: list[str], calls: list[tuple[str, str]]) -> Any:
     def factory(
         config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
     ) -> ScriptedMCPClient:
+        """Wrap the scripted client so the test sees each call."""
         client = base(config, credential, environment)
         original = client.call_tool
 
         async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            """Record the call, answering sync_changes from the pending changes."""
             calls.append((name, str(arguments.get("thread_id", ""))))
             if name == "sync_changes":
                 value: dict[str, Any] = {
@@ -152,12 +154,14 @@ async def _run_of(app: Composition, run_id: Any) -> Any:
 
 
 async def _event_types(app: Composition, run: Any) -> list[str]:
+    """The event types recorded for a run."""
     async with app.uow_factory() as uow:
         events = await uow.events.list_after(run.session_id, 0, app.principal, run_id=run.id)
     return [event.event_type for event in events]
 
 
 async def _assert_a_check_is_admitted_only_when_due() -> None:
+    """A check waits its interval, and any recent refresh defers it."""
     clock = FixedClock(NOW)
     async with _app(clock, await _mailbox([], [])) as app:
         await _caught_up(app)
@@ -183,6 +187,7 @@ async def _assert_a_check_is_admitted_only_when_due() -> None:
 
 
 async def _assert_a_check_handles_only_arrivals() -> None:
+    """A check handles new Inbox arrivals and leaves other mail alone."""
     clock = FixedClock(NOW)
     calls: list[tuple[str, str]] = []
     turns = [_assessment_turn() for _ in range(5)]
@@ -219,6 +224,7 @@ async def _assert_a_check_handles_only_arrivals() -> None:
 
 
 async def _assert_a_check_assesses_at_most_four_and_skips_foreground_work() -> None:
+    """One check assesses at most four threads and leaves foreground work undone."""
     clock = FixedClock(NOW - timedelta(days=31))
     calls: list[tuple[str, str]] = []
     changes = [f"change-{index}" for index in range(6)]
@@ -244,6 +250,7 @@ async def _assert_a_check_assesses_at_most_four_and_skips_foreground_work() -> N
 
 
 async def _assert_a_check_drafts_only_what_it_assessed() -> None:
+    """A check prepares drafts only for threads it assessed itself."""
     clock = FixedClock(NOW)
     turns = [
         _assessment_turn(needs_reply=True),
@@ -294,6 +301,7 @@ async def _assert_a_check_stops_at_its_own_limits(today: str, earlier: str, admi
 
 
 async def _assert_budget_limits() -> None:
+    """A check stops at its own share of the daily and rolling allowances."""
     for today, earlier, admitted in [
         ("19", "0", True),
         ("19.5", "0", False),
@@ -325,6 +333,7 @@ async def _seed_refresh(
 
 
 async def _assert_failures_widen_the_interval() -> None:
+    """Consecutive failures widen the wait up to its limit, and a success resets it."""
     for failures, wait in [(1, 10), (2, 20), (3, 40), (4, 60), (6, 60)]:
         clock = FixedClock(NOW - timedelta(hours=3))
         async with _app(clock, await _mailbox([], [])) as app:
@@ -360,7 +369,8 @@ async def _assert_failures_widen_the_interval() -> None:
         assert await service.admit_arrival_check(app.principal) is not None
 
 
-async def _assert_a_check_with_nothing_new_stays_cheap(monkeypatch: pytest.MonkeyPatch) -> None:
+async def _assert_a_check_with_nothing_new_stays_cheap() -> None:
+    """With no changed mail a check makes no model call, memory request or notification."""
     clock = FixedClock(NOW)
     calls: list[tuple[str, str]] = []
 
@@ -368,26 +378,28 @@ async def _assert_a_check_with_nothing_new_stays_cheap(monkeypatch: pytest.Monke
         assert kind != "thread", "an empty check must not load stored message content"
         return records(store, principal, kind)
 
-    monkeypatch.setattr("agent_core.runtime.email_tasks.records", guarded)
-    async with _app(clock, await _mailbox([], calls)) as app:
-        await _caught_up(app)
-        service = app.services.email
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr("agent_core.runtime.email_tasks.records", guarded)
+        async with _app(clock, await _mailbox([], calls)) as app:
+            await _caught_up(app)
+            service = app.services.email
 
-        check = await service.admit_arrival_check(app.principal)
+            check = await service.admit_arrival_check(app.principal)
 
-        assert check is not None
-        run = await _run_of(app, check.run_id)
-        assert run.status is RunStatus.COMPLETED
-        assert run.model_call_count == 0
-        task = await service.get_task(app.principal, run.id)
-        assert task is not None and task.empty_check is True
-        assert FORMATION not in await _event_types(app, run)
-        async with app.uow_factory() as uow:
-            assert await uow.notification_outbox.list(app.principal, limit=10) == []
+            assert check is not None
+            run = await _run_of(app, check.run_id)
+            assert run.status is RunStatus.COMPLETED
+            assert run.model_call_count == 0
+            task = await service.get_task(app.principal, run.id)
+            assert task is not None and task.empty_check is True
+            assert FORMATION not in await _event_types(app, run)
+            async with app.uow_factory() as uow:
+                assert await uow.notification_outbox.list(app.principal, limit=10) == []
     assert {name for name, _ in calls} == {"get_profile", "sync_changes"}
 
 
 async def _assert_a_check_that_found_mail_is_not_empty() -> None:
+    """A check that assessed mail is not marked empty, and still notifies nobody."""
     clock = FixedClock(NOW)
     async with _app(clock, await _mailbox(["new"], []), _assessment_turn()) as app:
         await _caught_up(app)
@@ -436,6 +448,25 @@ async def _assert_empty_checks_are_removed_after_seven_days() -> None:
         assert await service.prune_empty_checks(app.principal) == 0
 
 
+async def _assert_an_empty_check_missed_for_months_is_still_removed() -> None:
+    """A check older than any accounting window is still found once maintenance returns."""
+    clock = FixedClock(NOW)
+    async with _app(clock, await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        empty = await service.admit_arrival_check(app.principal)
+        assert empty is not None
+
+        clock.advance(timedelta(days=90))
+
+        assert await service.prune_empty_checks(app.principal) == 1
+        async with app.uow_factory() as uow:
+            assert (
+                await read_value(uow.email, app.principal, "task", str(empty.run_id), EmailTask)
+                is None
+            )
+
+
 CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_is_admitted_only_when_due,
     _assert_a_check_handles_only_arrivals,
@@ -443,18 +474,16 @@ CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_drafts_only_what_it_assessed,
     _assert_budget_limits,
     _assert_failures_widen_the_interval,
+    _assert_a_check_with_nothing_new_stays_cheap,
     _assert_a_check_that_found_mail_is_not_empty,
     _assert_empty_checks_are_removed_after_seven_days,
+    _assert_an_empty_check_missed_for_months_is_still_removed,
 ]
 
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda check: check.__name__.removeprefix("_assert_"))
 async def test_arrival_check_gate(check: Callable[[], Awaitable[None]]) -> None:
     await check()
-
-
-async def test_arrival_check_with_nothing_new_is_cheap(monkeypatch: pytest.MonkeyPatch) -> None:
-    await _assert_a_check_with_nothing_new_stays_cheap(monkeypatch)
 
 
 def test_the_flag_needs_both_email_flags() -> None:
@@ -471,6 +500,7 @@ def test_the_flag_needs_both_email_flags() -> None:
 
 @pytest.mark.parametrize("enabled", [False, True])
 async def test_only_the_flag_gives_maintenance_a_check_sweep(enabled: bool) -> None:
+    """Maintenance gets a check sweep only when the flag is on."""
     settings = replace(
         _email_settings(), email_mode_enabled=True, email_background_checks_enabled=enabled
     )

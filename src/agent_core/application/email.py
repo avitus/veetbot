@@ -1575,14 +1575,11 @@ class EmailExperienceService:
         cutoff = now - timedelta(days=EMAIL_EMPTY_CHECK_RETENTION_DAYS)
         async with self.uow_factory() as uow:
             expired = [
-                task
-                async for row in task_records(
-                    uow.email, principal, created_since=now - timedelta(days=30)
+                EmailTask.model_validate(row.payload)
+                for row in await uow.email.list_empty_checks(
+                    principal, created_before=cutoff, limit=limit
                 )
-                if (task := EmailTask.model_validate(row.payload)).empty_check
-                and task.created_at < cutoff
-                and task.settled_cost == 0
-            ][:limit]
+            ]
         removed = 0
         for task in expired:
             try:

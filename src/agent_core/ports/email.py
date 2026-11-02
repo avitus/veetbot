@@ -79,6 +79,12 @@ class EmailStore(Protocol):
         """Unsettled tasks, plus tasks created since the optional accounting cutoff."""
         ...
 
+    async def list_empty_checks(
+        self, principal: Principal, *, created_before: datetime, limit: int = 100
+    ) -> builtins.list[EmailRecord]:
+        """Settled server checks that found nothing and cost nothing, created before the cutoff."""
+        ...
+
     async def put(self, record: EmailRecord, *, expected_revision: int) -> EmailRecord: ...
 
     async def delete(
