@@ -41,7 +41,9 @@ class WidgetStore(Protocol):
 
     async def create_widget(self, widget: Widget) -> Widget: ...
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget: ...
+    async def get_widget(
+        self, principal: Principal, slug: str, *, lock: bool = False
+    ) -> Widget: ...
 
     async def list_widgets(
         self, principal: Principal, *, include_deleted: bool = False

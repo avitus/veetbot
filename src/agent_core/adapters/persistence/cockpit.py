@@ -129,7 +129,8 @@ class InMemoryWidgetStore:
             owned[widget.slug] = widget
             return widget
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget:
+    async def get_widget(self, principal: Principal, slug: str, *, lock: bool = False) -> Widget:
+        del lock  # Every in-memory call already runs under the store's lock.
         async with self._lock:
             return self._widget(principal, slug)
 
@@ -699,8 +700,8 @@ class PostgresWidgetStore:
         )
         return widget
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget:
-        return _widget_from_row(await self._widget_row(principal, slug))
+    async def get_widget(self, principal: Principal, slug: str, *, lock: bool = False) -> Widget:
+        return _widget_from_row(await self._widget_row(principal, slug, lock=lock))
 
     async def list_widgets(
         self, principal: Principal, *, include_deleted: bool = False

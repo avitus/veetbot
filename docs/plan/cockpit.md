@@ -723,7 +723,8 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
   asked for approval. A create card compares against nothing, because a create
   publishes the whole package. A delete or restore card names the revision it
   shows, and any other revision, or a card that showed none, refuses it with
-  `cockpit.revision_changed`. An empty file added or removed still gets its
+  `cockpit.revision_changed`. These checks run under the widget row lock the
+  worker's activation takes. An empty file added or removed still gets its
   file headers. `cockpit.install`
   keeps its own summarized approval (ADR-0270), which names the source being
   published without showing it.

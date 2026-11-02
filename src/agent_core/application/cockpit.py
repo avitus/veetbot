@@ -253,10 +253,10 @@ class CockpitPublication:
         self._events = _Events(clock, ids)
 
     async def _widget(
-        self, uow: RepositoryUnitOfWork, principal: Principal, slug: str
+        self, uow: RepositoryUnitOfWork, principal: Principal, slug: str, *, lock: bool = False
     ) -> Widget | None:
         try:
-            return await uow.cockpit_widgets.get_widget(principal, slug)
+            return await uow.cockpit_widgets.get_widget(principal, slug, lock=lock)
         except NotFoundError:
             return None
 
@@ -319,6 +319,7 @@ class CockpitPublication:
         expected_parent_sha: str | None,
         origin_run_id: UUID | None,
         request_key: str | None,
+        expected_live: UUID | None = None,
     ) -> WidgetRevision:
         revision_id = self._ids.new_id()
         message = widget_commit_message(operation, slug, revision_id)
@@ -327,7 +328,8 @@ class CockpitPublication:
         )
         now = self._clock.now()
         async with self._uow_factory() as uow:
-            widget = await self._widget(uow, principal, slug)
+            # The row lock the worker's activation takes, so no head changes under this check.
+            widget = await self._widget(uow, principal, slug, lock=True)
             if widget is None:
                 widget = await uow.cockpit_widgets.create_widget(
                     Widget(
@@ -339,7 +341,9 @@ class CockpitPublication:
                         updated_at=now,
                     )
                 )
-            elif await self._head(uow, principal, widget) != expected_head:
+            elif await self._head(uow, principal, widget) != expected_head or (
+                expected_live is not None and widget.live_revision_id != expected_live
+            ):
                 raise ConflictError(f"{slug} changed while it was built", reason="revision_changed")
             revision = await uow.cockpit_widgets.add_revision(
                 self._revision(
@@ -522,6 +526,7 @@ class CockpitPublication:
         widget: Widget,
         revision_id: UUID,
         request_key: str | None = None,
+        expected_live: UUID | None = None,
     ) -> WidgetRevision:
         slug = widget.slug
         async with self._uow_factory() as uow:
@@ -541,6 +546,7 @@ class CockpitPublication:
             expected_parent_sha=parent,
             origin_run_id=None,
             request_key=request_key,
+            expected_live=expected_live,
         )
 
     async def revert(self, principal: Principal, slug: str, revision_id: UUID) -> WidgetRevision:
@@ -572,7 +578,9 @@ class CockpitPublication:
             raise ConflictError(f"{slug} is not deleted", reason="widget_not_deleted")
         if expected_live is not None and expected_live != widget.live_revision_id:
             raise ConflictError(f"{slug} is at another revision", reason="revision_changed")
-        return await self._republish(principal, widget, widget.live_revision_id, request_key)
+        return await self._republish(
+            principal, widget, widget.live_revision_id, request_key, expected_live
+        )
 
     async def delete(
         self,
@@ -590,7 +598,7 @@ class CockpitPublication:
 
         now = self._clock.now()
         async with self._uow_factory() as uow:
-            widget = await uow.cockpit_widgets.get_widget(principal, slug)
+            widget = await uow.cockpit_widgets.get_widget(principal, slug, lock=True)
             if widget.state is WidgetState.DELETED:
                 raise ConflictError(f"{slug} is already deleted", reason="widget_deleted")
             if expected_head is not None and expected_head != await self._head(
