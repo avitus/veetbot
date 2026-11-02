@@ -15,6 +15,7 @@ import pytest
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.mcp.scripted import ScriptedMCPClient
 from agent_core.application.email import read_value, save_value
+from agent_core.application.notification_relevance import notification_obsolete
 from agent_core.bootstrap import Composition, build
 from agent_core.config import ConfigurationError, load_config_document, load_settings
 from agent_core.domain.credentials import SecretValue
@@ -26,7 +27,8 @@ from agent_core.domain.email import (
 )
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.messages import FakeModelScript, ModelPermanentError, ScriptedTurn
+from agent_core.domain.notifications import NotificationKind
 from agent_core.domain.runs import RunStatus
 from agent_core.runtime.email_state import records
 from agent_core.runtime.worker import MaintenanceWorker
@@ -474,6 +476,40 @@ async def _assert_an_empty_check_missed_for_months_is_still_removed() -> None:
             )
 
 
+async def _assert_a_failed_check_reaches_nobody() -> None:
+    """A failure leaves an audit row that dispatch skips as obsolete, so no alert is sent."""
+    clock = FixedClock(NOW)
+    rejected = ModelPermanentError(
+        provider="fake",
+        model="scripted",
+        attempt_id=uuid4(),
+        message="The model provider rejected the request.",
+        http_status=400,
+        provider_code="invalid_json_schema",
+    )
+    async with build(
+        settings=replace(
+            _email_settings(),
+            email_mode_enabled=True,
+            notification_api_enabled=True,
+            notification_dispatch_enabled=True,
+        ),
+        clock=clock,
+        mcp_client_factory=await _mailbox(["new"], []),
+        script=FakeModelScript(turns=[ScriptedTurn(fail_with=rejected)]),
+    ) as app:
+        await _caught_up(app)
+
+        check = await app.services.email.admit_arrival_check(app.principal)
+
+        assert check is not None
+        assert (await _run_of(app, check.run_id)).status is RunStatus.FAILED
+        async with app.uow_factory() as uow:
+            rows = await uow.notification_outbox.list(app.principal, limit=10)
+            assert [row.kind for row in rows] == [NotificationKind.RUN_FAILED]
+            assert await notification_obsolete(uow, rows[0], clock.now())
+
+
 async def _assert_a_failed_foreground_refresh_is_not_a_failed_check() -> None:
     """It defers a check for the normal interval and leaves the wait unwidened."""
     clock = FixedClock(NOW - timedelta(hours=3))
@@ -499,6 +535,7 @@ CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_drafts_only_what_it_assessed,
     _assert_budget_limits,
     _assert_failures_widen_the_interval,
+    _assert_a_failed_check_reaches_nobody,
     _assert_a_failed_foreground_refresh_is_not_a_failed_check,
     _assert_a_check_with_nothing_new_stays_cheap,
     _assert_a_check_that_found_mail_is_not_empty,
