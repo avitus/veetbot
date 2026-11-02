@@ -470,6 +470,70 @@ async def test_slow_provider_preparation_does_not_spend_the_search_deadline() ->
         assert not [event for event in events if event.event_type == "memory.recall.limited"]
 
 
+async def test_hanging_provider_preparation_is_cancelled_and_recall_still_runs(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A preparation that never returns is cut at the preparation clock, not the run's.
+
+    The slow-clock test above advances a fixed clock without suspending; this
+    one blocks for real, so it proves the asyncio timeout cancels the hanging
+    call and the turn's automatic recall goes ahead afterwards.
+    """
+    import asyncio
+
+    from agent_core.domain.messages import ToolResultItem
+    from agent_core.runtime import loop as runtime_loop
+
+    monkeypatch.setattr(runtime_loop, "RECALL_PREPARATION_SECONDS", 0.2)
+    clock = FixedClock(NOW)
+
+    class HangingPreparation:
+        execution_budget = True
+        cancelled = 0
+
+        async def plan(self, run: Run, checkpoint: RunCheckpoint) -> list[RecallQuery]:
+            return [
+                RecallQuery(
+                    tenant_id=app.principal.tenant_id,
+                    principal_id=app.principal.principal_id,
+                    current_scope="general",
+                    text="breakfast constraints",
+                    subjects=[],
+                    budget_tokens=2000,
+                    max_items=20,
+                    min_score=0.1,
+                )
+            ]
+
+        async def prepare(self, run: Run, queries: Sequence[RecallQuery]) -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled += 1
+                raise
+
+    async with build(settings=_settings(), script=_search_then_done(), clock=clock) as app:
+        preparation = HangingPreparation()
+        app.executor._prepare_recall = preparation
+        with caplog.at_level("WARNING"):
+            run_id = await app.runs.submit("Suggest breakfast options")
+            outcome = await app.runs.wait_terminal(run_id)
+        assert outcome.status is RunStatus.COMPLETED, outcome.failure
+        async with app.uow_factory() as uow:
+            saved = await uow.checkpoints.latest(run_id)
+            events = await uow.events.list_after(
+                outcome.session_id, 0, app.principal, run_id=run_id
+            )
+    assert preparation.cancelled >= 1, "The timeout must cancel the hanging preparation"
+    assert any(record.msg == "recall_preparation_timed_out" for record in caplog.records)
+    assert saved is not None
+    assert not [
+        item for item in saved.conversation if isinstance(item, ToolResultItem) and item.is_error
+    ], "A cancelled preparation must not refuse the turn's searches"
+    assert [event for event in events if event.event_type == "memory.recalled"]
+    assert not [event for event in events if event.event_type == "memory.recall.limited"]
+
+
 async def test_refused_automatic_recall_leaves_an_event() -> None:
     """A recall refused past the outer bound is recorded, not silently dropped."""
     clock = FixedClock(NOW)

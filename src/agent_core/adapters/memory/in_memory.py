@@ -1015,7 +1015,9 @@ class InMemoryKnowledgeStore:
         as_of = query.as_of or self._clock.now()
         forms = lexical_query_forms(query.text)
         per_document: defaultdict[UUID, int] = defaultdict(int)
-        scored: list[RetrievedPassage] = []
+        # Coverage ranks first, as the PostgreSQL store orders it; the combined
+        # score and the chunk id only break ties (ADR-0284).
+        scored: list[tuple[float, RetrievedPassage]] = []
         async with self._lock:
             for chunk in self._chunks.values():
                 document = self._documents.get(chunk.document_row_id)
@@ -1045,22 +1047,27 @@ class InMemoryKnowledgeStore:
                 if score < query.min_score:
                     continue
                 scored.append(
-                    RetrievedPassage(
-                        chunk_id=chunk.chunk_id,
-                        document_id=document.document_id,
-                        title=document.title,
-                        heading_path=list(chunk.heading_path),
-                        text=chunk.text,
-                        doc_date=document.doc_date,
-                        authority=document.authority,
-                        sensitivity=document.sensitivity,
-                        score=score,
-                        arms=["lexical"],
-                        instruction_like=chunk.contains_instruction_like_text,
+                    (
+                        match,
+                        RetrievedPassage(
+                            chunk_id=chunk.chunk_id,
+                            document_id=document.document_id,
+                            title=document.title,
+                            heading_path=list(chunk.heading_path),
+                            text=chunk.text,
+                            doc_date=document.doc_date,
+                            authority=document.authority,
+                            sensitivity=document.sensitivity,
+                            score=score,
+                            arms=["lexical"],
+                            instruction_like=chunk.contains_instruction_like_text,
+                        ),
                     )
                 )
         result: list[RetrievedPassage] = []
-        for passage in sorted(scored, key=lambda item: (-item.score, item.chunk_id)):
+        for _coverage_share, passage in sorted(
+            scored, key=lambda item: (-item[0], -item[1].score, item[1].chunk_id)
+        ):
             if per_document[passage.document_id] >= query.max_per_document:
                 continue
             per_document[passage.document_id] += 1
