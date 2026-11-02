@@ -178,6 +178,43 @@ async def test_trial_marks_effect_before_running_approved_program() -> None:
     assert result.ok
 
 
+async def test_agent_is_told_when_its_archive_finds_the_job_already_archived() -> None:
+    from unittest.mock import AsyncMock
+
+    _, publication, _, _ = await setup()
+    context = tool_context()
+    context = replace(
+        context,
+        principal=context.principal.model_copy(update={"scopes": {"jobs.write"}}),
+    )
+    tool = JobManageTool(JobToolset(publication, AsyncMock(spec=JobExecution)))
+
+    async def manage(key: str, **arguments: Any) -> Any:
+        return await tool.execute(
+            {"slug": "count-items", **arguments}, replace(context, idempotency_key=key)
+        )
+
+    created = await manage(
+        "create",
+        operation="create",
+        source="def main(inputs, job): return 1",
+        manifest={"title": "Count items"},
+    )
+    assert created.ok and created.structured is not None
+    archived = await manage(
+        "archive", operation="archive", expected_revision=created.structured["revision_id"]
+    )
+    assert archived.ok and archived.structured is not None
+    assert archived.structured["state"] == "archived"
+    again = await manage(
+        "again", operation="archive", expected_revision=archived.structured["revision_id"]
+    )
+    assert not again.ok
+    assert again.failure is not None
+    assert again.failure.reason_code == "job.invalid_request"
+    assert again.failure.detail == "The job is already archived."
+
+
 def test_interrupted_job_schedule_update_preserves_uncertain_outcome() -> None:
     from agent_core.domain.policies import IdempotencyClass
     from agent_core.domain.tools import ToolInvocationStatus

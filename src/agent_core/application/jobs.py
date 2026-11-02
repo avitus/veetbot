@@ -117,6 +117,8 @@ class JobPublication:
                 raise ConflictError(
                     "The job revision changed or publication is pending.", reason="job_changed"
                 )
+            if archive and saved.archived:
+                raise ConflictError("The job is already archived.", reason="job_archived")
             names = await screen_names(uow, principal, self.owner_names)
             values = list(await screen_settings_values(uow, principal))
             for job in await uow.jobs.list(principal):
@@ -319,12 +321,21 @@ class JobPublication:
                     at=entry.expected_parent_sha,
                 )
             )
-            if current_files != expected_files:
-                # A human's newer package is never overwritten by a queued edit.
+            # A human's newer package is never overwritten by a queued edit. An archive
+            # with no package at its parent or now has nothing to remove and no attempt
+            # could succeed, so it settles without a commit and leaves the live pointer.
+            settled = (
+                "conflicted"
+                if current_files != expected_files
+                else "superseded"
+                if archive and current_files is None
+                else None
+            )
+            if settled is not None:
                 async with self.uow_factory() as uow:
                     revisions = {
                         **saved.revisions,
-                        str(revision.id): revision.model_copy(update={"state": "conflicted"}),
+                        str(revision.id): revision.model_copy(update={"state": settled}),
                     }
                     await uow.jobs.put(
                         saved.model_copy(

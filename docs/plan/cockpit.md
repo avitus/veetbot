@@ -1440,6 +1440,12 @@ grants. A revision records its public manifest and source, publication state,
 commit and creation time. Keeping the source locally makes pinned execution
 independent of GitHub availability. Archive hides the job from new runs without
 erasing its history; restore or revert publishes the selected source again.
+Archiving an archived job is refused when it is requested and queues nothing,
+since its package is already off the branch and a single pending revision blocks
+every later change to the job. A queued archive that finds no package at its
+parent or at the branch head settles as superseded without a commit, leaving the
+job archived and its current revision in place, so an entry queued before this
+refusal drains on its next flush with no repository or database repair.
 
 Publication follows the widget outbox protocol on the separate `cockpit/jobs`
 branch. The Git adapter shares its fast-forward and path checks, parameterized

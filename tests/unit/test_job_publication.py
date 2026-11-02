@@ -11,7 +11,7 @@ from agent_core.adapters.cockpit.runtime import Draft202012SchemaCheck
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.application.jobs import JobPublication
 from agent_core.domain.agents import Principal
-from agent_core.domain.cockpit import BuildDiagnostic, CommitOutboxEntry
+from agent_core.domain.cockpit import BuildDiagnostic, CommitOutboxEntry, OutboxOperation
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.jobs import JobBrokerError, JobManifest, JobRecord, JobRevision
 from agent_core.ports.cockpit import BuildScreen, WidgetRepositoryUnavailableError
@@ -600,25 +600,132 @@ async def test_a_repository_outage_keeps_its_steady_thirty_second_retry() -> Non
         cast(FixedClock, service.clock).advance(timedelta(seconds=30))
 
 
-async def test_archiving_an_archived_job_does_not_hold_up_another_job() -> None:
-    """A real route to a refused path: the package is already off the branch."""
-    factory, service, _, _ = await setup()
+async def _archived(factory: Any, service: JobPublication, slug: str) -> JobRevision:
+    """Publish one job and archive it, leaving nothing queued."""
+    first = await _save(service, slug)
+    await service.flush(principal())
+    archived = await _save(
+        service, slug, expected_revision=first.id, request_key=f"archive-{slug}", archive=True
+    )
+    await service.flush(principal())
+    async with factory() as uow:
+        saved: JobRecord = await uow.jobs.get(principal(), slug)
+    return saved.revisions[str(archived.id)]
+
+
+async def _queue_second_archive(factory: Any, service: JobPublication, slug: str) -> JobRevision:
+    """Leave the row an earlier release's second archive left: queued, nothing to remove."""
+    async with factory() as uow:
+        saved: JobRecord = await uow.jobs.get(principal(), slug)
+    assert saved.live_revision_id is not None
+    previous = saved.revisions[str(saved.live_revision_id)]
+    revision = previous.model_copy(
+        update={"id": service.ids.new_id(), "state": "pending_commit", "commit_sha": None}
+    )
+    async with factory() as uow:
+        await uow.jobs.put(
+            saved.model_copy(
+                update={
+                    "version": saved.version + 1,
+                    "revisions": {**saved.revisions, str(revision.id): revision},
+                }
+            ),
+            expected_version=saved.version,
+        )
+        await uow.job_outbox.enqueue(
+            CommitOutboxEntry(
+                tenant_id=saved.tenant_id,
+                principal_id=saved.principal_id,
+                revision_id=revision.id,
+                slug=slug,
+                operation=OutboxOperation.REMOVE,
+                next_attempt_at=service.clock.now(),
+                created_at=service.clock.now(),
+                expected_parent_sha=previous.commit_sha,
+            )
+        )
+    return revision
+
+
+async def test_archiving_an_archived_job_is_refused_and_restore_still_works() -> None:
+    """Nothing is queued for a package already off the branch, so the job stays editable."""
+    factory, service, repository, _ = await setup()
+    owner = principal()
+    archived = await _archived(factory, service, "first-job")
+    async with factory() as uow:
+        before = await uow.jobs.get(owner, "first-job")
+    head = await repository.head()
+    with pytest.raises(ConflictError) as refused:
+        await _save(
+            service, "first-job", expected_revision=archived.id, request_key="again", archive=True
+        )
+    assert refused.value.reason == "job_archived"
+    assert await _queued(factory, service) == {}
+    async with factory() as uow:
+        assert await uow.jobs.get(owner, "first-job") == before
+    retried = await _save(
+        service,
+        "first-job",
+        expected_revision=archived.id,
+        request_key="archive-first-job",
+        archive=True,
+    )
+    assert retried.id == archived.id
+    assert await service.flush(owner) == 0
+    assert await repository.head() == head
+    restored = await _save(
+        service, "first-job", expected_revision=archived.id, request_key="restore"
+    )
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        saved = await uow.jobs.get(owner, "first-job")
+    assert not saved.archived
+    assert saved.live_revision_id == restored.id
+
+
+async def test_a_queued_second_archive_settles_without_a_commit_and_frees_the_job() -> None:
+    """A row queued before the refusal drains on its next flush, holding up nothing."""
+    factory, service, repository, _ = await setup()
+    owner = principal()
+    archived = await _archived(factory, service, "first-job")
+    stuck = await _queue_second_archive(factory, service, "first-job")
+    other = await _save(service, "second-job")
+    assert await service.flush(owner) == 2
+    assert await _queued(factory, service) == {}
+    async with factory() as uow:
+        saved = await uow.jobs.get(owner, "first-job")
+        published = await uow.jobs.get(owner, "second-job")
+    assert published.live_revision_id == other.id
+    assert saved.revisions[str(stuck.id)].state == "superseded"
+    assert saved.revisions[str(stuck.id)].commit_sha is None
+    assert saved.archived
+    assert saved.live_revision_id == archived.id
+    assert await repository.find_revision(stuck.id, limit=200) is None
+    restored = await _save(
+        service, "first-job", expected_revision=archived.id, request_key="restore"
+    )
+    assert await service.flush(owner) == 1
+    async with factory() as uow:
+        assert (await uow.jobs.get(owner, "first-job")).live_revision_id == restored.id
+
+
+async def test_an_archive_whose_package_someone_else_removed_stays_a_conflict() -> None:
+    """Settling needs the package absent at its parent too; any other removal needs a look."""
+    factory, service, repository, _ = await setup()
     owner = principal()
     first = await _save(service, "first-job")
     await service.flush(owner)
-    archived = await _save(
+    archive = await _save(
         service, "first-job", expected_revision=first.id, request_key="archive", archive=True
     )
+    head = await repository.head()
+    assert head is not None
+    await repository.remove_widget("first-job", parent_sha=head, message="Jobs: Remove\n")
     await service.flush(owner)
-    await _save(
-        service, "first-job", expected_revision=archived.id, request_key="again", archive=True
-    )
-    other = await _save(service, "second-job")
-    assert await service.flush(owner) == 1
     async with factory() as uow:
-        assert (await uow.jobs.get(owner, "second-job")).live_revision_id == other.id
-    entry = (await _queued(factory, service))["first-job"]
-    assert entry.last_error == "Job publication failed: WidgetPathRefusedError"
+        saved = await uow.jobs.get(owner, "first-job")
+    assert saved.revisions[str(archive.id)].state == "conflicted"
+    assert await _queued(factory, service) == {}
 
 
 async def test_a_privacy_rejection_that_cannot_be_saved_retries_alone() -> None:
