@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 import pytest
@@ -312,8 +312,15 @@ async def _assert_budget_limits() -> None:
 
 
 async def _seed_refresh(
-    app: Composition, base: Any, created: datetime, status: RunStatus, charge: str | None = None
+    app: Composition,
+    base: Any,
+    created: datetime,
+    status: RunStatus,
+    charge: str | None = None,
+    *,
+    scope: Literal["full", "new_mail", "arrivals"] = "arrivals",
 ) -> None:
+    """Store a refresh task and its run, as an earlier check or refresh would leave them."""
     run = base.model_copy(update={"id": uuid4(), "status": status})
     task = EmailTask(
         id=uuid4(),
@@ -325,7 +332,7 @@ async def _seed_refresh(
         reservation=Decimal("1"),
         settled_cost=Decimal("0") if charge is None else None,
         budget_charge=None if charge is None else Decimal(charge),
-        scope="arrivals",
+        scope=scope,
     )
     async with app.uow_factory() as uow:
         await uow.runs.create(run)
@@ -467,6 +474,24 @@ async def _assert_an_empty_check_missed_for_months_is_still_removed() -> None:
             )
 
 
+async def _assert_a_failed_foreground_refresh_is_not_a_failed_check() -> None:
+    """It defers a check for the normal interval and leaves the wait unwidened."""
+    clock = FixedClock(NOW - timedelta(hours=3))
+    async with _app(clock, await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        first = await service.admit_arrival_check(app.principal)
+        assert first is not None
+        base = await _run_of(app, first.run_id)
+        clock.advance(timedelta(hours=1))
+        await _seed_refresh(app, base, clock.now(), RunStatus.FAILED, scope="full")
+
+        clock.advance(timedelta(minutes=5, seconds=-1))
+        assert await service.admit_arrival_check(app.principal) is None
+        clock.advance(timedelta(seconds=1))
+        assert await service.admit_arrival_check(app.principal) is not None
+
+
 CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_is_admitted_only_when_due,
     _assert_a_check_handles_only_arrivals,
@@ -474,6 +499,7 @@ CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_drafts_only_what_it_assessed,
     _assert_budget_limits,
     _assert_failures_widen_the_interval,
+    _assert_a_failed_foreground_refresh_is_not_a_failed_check,
     _assert_a_check_with_nothing_new_stays_cheap,
     _assert_a_check_that_found_mail_is_not_empty,
     _assert_empty_checks_are_removed_after_seven_days,

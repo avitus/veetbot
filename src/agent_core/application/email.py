@@ -1554,16 +1554,18 @@ class EmailExperienceService:
             recent.sort(key=lambda task: task.created_at, reverse=True)
             failures = 0
             for task in recent[:EMAIL_ARRIVAL_MAX_FAILURES_COUNTED]:
+                # A failed foreground refresh defers a check but is not a failed check.
+                failed = 1 if task.scope == "arrivals" else 0
                 try:
                     run = await uow.runs.get(task.run_id, principal)
                 except NotFoundError:
-                    failures += 1
+                    failures += failed
                     continue
                 if run.status not in TERMINAL_RUN_STATUSES:
                     return False
                 if run.status is RunStatus.COMPLETED and task.budget_charge is None:
                     break
-                failures += 1
+                failures += failed
         if not recent:
             return True
         wait = min(interval * 2**failures, max(interval, EMAIL_ARRIVAL_MAX_WAIT_SECONDS))
