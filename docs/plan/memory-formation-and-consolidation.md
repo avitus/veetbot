@@ -232,7 +232,13 @@ the project it was learned in, and is defined in
 
 [ADR-0232](../adr/0232-owner-memory-incident-repairs.md) adds a bounded,
 same-session possession-restatement match without using broad subject similarity
-as identity. A generic child-existence claim cannot supersede a named child.
+as identity;
+[ADR-0283](../adr/0283-owner-possessions-reach-recall-and-corroborate.md) lets
+that narrow assertion key match across sessions, so a possession the owner
+states in three chats is one corroborated active belief rather than three
+provisional ones; the belief keeps its own session's event numbers, the other
+chat's corroboration is remembered by the derivation key on the event it
+appends, and replaying that chat changes nothing. A generic child-existence claim cannot supersede a named child.
 Bare capitalized possessives alone do not establish possessions. The People
 provider path classifies direct owner possessions as attributes while preserving
 the frozen formation@9 classification. New `memory.remember` versions default

@@ -40,6 +40,7 @@ def _document(
     tenant_id: str = TENANT,
     valid_from: datetime = NOW,
     valid_to: datetime | None = None,
+    authority: DocumentAuthority = DocumentAuthority.PRINCIPAL_SUPPLIED,
 ) -> KnowledgeIngestPrepared:
     base = prepared_knowledge().document
     document = KnowledgeDocument.model_validate(
@@ -52,7 +53,7 @@ def _document(
             "project_scope": project_scope,
             "title": f"Document {number}",
             "sensitivity": sensitivity,
-            "authority": DocumentAuthority.PRINCIPAL_SUPPLIED,
+            "authority": authority,
             "valid_from": valid_from,
             "valid_to": valid_to,
             "source_ref": base.source_ref.model_copy(update={"tenant_id": tenant_id}),
@@ -172,3 +173,68 @@ async def test_sensitivity_ceiling_and_validity_window_are_hard_filters() -> Non
     assert _ids(await store.search(ceiling)) == [UUID(int=2_002)]
     historical = _query(as_of=NOW - timedelta(days=2))
     assert _ids(await store.search(historical)) == [UUID(int=2_003)]
+
+
+async def test_a_question_finds_a_passage_in_another_spelling_of_its_words() -> None:
+    """ADR-0285: "valves" finds "valve"; prose rarely repeats the question's exact forms."""
+    store = await _store(
+        _document(1, "A valve opens and closes to equalise tank pressure after parking."),
+        _document(2, "Unrelated text about rollback procedures."),
+    )
+
+    found = await store.search(_query(text="valves closing after I parked"))
+
+    assert _ids(found) == [UUID(int=2_001)]
+
+    # A hyphenated word is indexed whole and in parts, as PostgreSQL's parser
+    # holds it, so "blind" reaches the manual's "blind-spot".
+    hyphenated = await _store(_document(3, "The blind-spot indicator lights when a car passes."))
+    assert _ids(await hyphenated.search(_query(text="blind"))) == [UUID(int=2_003)]
+    assert _ids(await hyphenated.search(_query(text="blind-spot"))) == [UUID(int=2_003)]
+
+
+async def test_coverage_ranks_before_authority_and_scope() -> None:
+    """ADR-0285: coverage orders first in both stores; the score's other parts only break ties.
+
+    A nine-of-ten passage from an authored, in-scope document scores higher
+    than a ten-of-ten passage from a fetched, out-of-scope one (0.88 against
+    0.86), yet the fuller passage still ranks first, as the PostgreSQL store
+    orders it.
+    """
+    question = "alpha bravo charlie delta echo foxtrot golf hotel india juliet"
+    store = await _store(
+        _document(
+            1,
+            "alpha bravo charlie delta echo foxtrot golf hotel india kilo.",
+            visibility=KnowledgeVisibility.PROJECT,
+            project_scope="atlas",
+            authority=DocumentAuthority.PRINCIPAL_AUTHORED,
+        ),
+        _document(
+            2,
+            "alpha bravo charlie delta echo foxtrot golf hotel india juliet.",
+            visibility=KnowledgeVisibility.TENANT,
+            authority=DocumentAuthority.FETCHED,
+        ),
+    )
+
+    ranked = await store.search(_query(text=question, current_scope="atlas"))
+
+    assert _ids(ranked) == [UUID(int=2_002), UUID(int=2_001)]
+    assert ranked[0].score < ranked[1].score, "The fuller passage wins on coverage, not score"
+
+
+async def test_coverage_outranks_density() -> None:
+    """ADR-0285: a passage holding more of the question beats one repeating a word of it."""
+    store = await _store(
+        _document(
+            1,
+            "Parking parking parking. Park here, park there, parking everywhere, parking.",
+        ),
+        _document(2, "After parking, a valve may click while the fuel system checks itself."),
+    )
+
+    ranked = await store.search(_query(text="valve noise after parking"))
+
+    assert _ids(ranked) == [UUID(int=2_002), UUID(int=2_001)]
+    assert ranked[0].score > ranked[1].score

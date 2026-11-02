@@ -422,8 +422,15 @@ class ArtifactRepository(Protocol):
         ...
 
     async def pending_auto_ingest(
-        self, principal: Principal, *, limit: int
-    ) -> list[ArtifactRef]: ...
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[ArtifactRef]:
+        """The owner's chat uploads awaiting ingestion whose backoff has elapsed.
+
+        Oldest first, at most `limit`; an upload still in backoff is neither
+        listed nor counted against the limit, and an artifact of any other
+        origin is never listed (ADR-0284).
+        """
+        ...
 
     async def record_auto_ingest(
         self,
@@ -433,6 +440,7 @@ class ArtifactRepository(Protocol):
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef: ...
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import MutableMapping, Sequence
 from datetime import UTC, datetime
 from uuid import UUID
@@ -42,9 +42,11 @@ from agent_core.domain.memory import (
     TracedPassage,
     TracedPersonContext,
     decay_eligible_lifecycle,
+    lexical_query_forms,
     lexical_query_terms,
     lexical_term_lexemes,
     lexical_text_matches,
+    lexical_tokens,
     owner_anchored,
     recall_term_lexemes,
     review_reason,
@@ -1012,9 +1014,11 @@ class InMemoryKnowledgeStore:
 
     async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]:
         as_of = query.as_of or self._clock.now()
-        terms = _terms(query.text)
+        forms = lexical_query_forms(query.text)
         per_document: defaultdict[UUID, int] = defaultdict(int)
-        scored: list[RetrievedPassage] = []
+        # Coverage ranks first, as the PostgreSQL store orders it; the combined
+        # score and the chunk id only break ties (ADR-0285).
+        scored: list[tuple[float, RetrievedPassage]] = []
         async with self._lock:
             for chunk in self._chunks.values():
                 document = self._documents.get(chunk.document_row_id)
@@ -1031,7 +1035,7 @@ class InMemoryKnowledgeStore:
                     > SENSITIVITY_ORDER[query.sensitivity_ceiling]
                 ):
                     continue
-                match = _lexical_score(terms, f"{' '.join(chunk.heading_path)} {chunk.text}")
+                match = _coverage(forms, f"{' '.join(chunk.heading_path)} {chunk.text}")
                 if match <= 0:
                     continue
                 scope = 1.0 if document.project_scope == query.current_scope else 0.5
@@ -1044,22 +1048,27 @@ class InMemoryKnowledgeStore:
                 if score < query.min_score:
                     continue
                 scored.append(
-                    RetrievedPassage(
-                        chunk_id=chunk.chunk_id,
-                        document_id=document.document_id,
-                        title=document.title,
-                        heading_path=list(chunk.heading_path),
-                        text=chunk.text,
-                        doc_date=document.doc_date,
-                        authority=document.authority,
-                        sensitivity=document.sensitivity,
-                        score=score,
-                        arms=["lexical"],
-                        instruction_like=chunk.contains_instruction_like_text,
+                    (
+                        match,
+                        RetrievedPassage(
+                            chunk_id=chunk.chunk_id,
+                            document_id=document.document_id,
+                            title=document.title,
+                            heading_path=list(chunk.heading_path),
+                            text=chunk.text,
+                            doc_date=document.doc_date,
+                            authority=document.authority,
+                            sensitivity=document.sensitivity,
+                            score=score,
+                            arms=["lexical"],
+                            instruction_like=chunk.contains_instruction_like_text,
+                        ),
                     )
                 )
         result: list[RetrievedPassage] = []
-        for passage in sorted(scored, key=lambda item: (-item.score, item.chunk_id)):
+        for _coverage_share, passage in sorted(
+            scored, key=lambda item: (-item[0], -item[1].score, item[1].chunk_id)
+        ):
             if per_document[passage.document_id] >= query.max_per_document:
                 continue
             per_document[passage.document_id] += 1
@@ -1097,25 +1106,25 @@ class InMemoryKnowledgeStore:
             return refs
 
 
-_PUNCTUATION = ".,:;!?()[]{}\"'"
+def _coverage(forms: list[tuple[str, ...]], text: str) -> float:
+    """The share of query terms the text holds in any folded spelling (ADR-0285).
 
-
-def _tokens(text: str) -> list[str]:
-    return "".join(
-        " " if character in _PUNCTUATION else character for character in text.casefold()
-    ).split()
-
-
-def _terms(text: str) -> Counter[str]:
-    return Counter(_tokens(text))
-
-
-def _lexical_score(terms: Counter[str], text: str) -> float:
-    if not terms:
+    Words come from the same parser the belief stores share, so a hyphenated
+    word is held whole and in parts the way `to_tsvector('simple', ...)`
+    holds it, and a term with punctuation inside it ("restart,service")
+    matches the way `plainto_tsquery` reads it: every word of it present.
+    """
+    if not forms:
         return 0
-    words = Counter(_tokens(text))
-    hits = sum(min(count, words[term]) for term, count in terms.items())
-    return hits / sum(terms.values())
+    words = lexical_tokens(text)
+    matched = 0
+    for group in forms:
+        for form in group:
+            parts = lexical_tokens(form)
+            if parts and all(part in words for part in parts):
+                matched += 1
+                break
+    return matched / len(forms)
 
 
 def _visible(document: KnowledgeDocument, query: KnowledgeQuery) -> bool:

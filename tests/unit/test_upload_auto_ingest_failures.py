@@ -9,6 +9,7 @@ of the batch.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any, cast
 from uuid import UUID
@@ -18,7 +19,9 @@ import pytest
 from agent_core.domain.artifacts import (
     AUTO_INGEST_ATTEMPTS_KEY,
     AUTO_INGEST_KEY,
+    AUTO_INGEST_NOT_BEFORE_KEY,
     AUTO_INGEST_REASON_KEY,
+    retry_refusal,
 )
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import KnowledgeIngestRequest
@@ -38,12 +41,20 @@ from tests.contract.support import principal as owner
 class _Knowledge:
     """Answers each artifact with the next scripted outcome for it."""
 
-    def __init__(self, outcomes: dict[UUID, list[BaseException | None]]) -> None:
+    def __init__(
+        self,
+        outcomes: dict[UUID, list[BaseException | None]],
+        *,
+        on_ingest: Callable[[], None] | None = None,
+    ) -> None:
         self._outcomes = outcomes
+        self._on_ingest = on_ingest
         self.requests: list[tuple[KnowledgeIngestRequest, TrustLevel]] = []
 
     async def ingest(self, request: KnowledgeIngestRequest, *, origin_trust: TrustLevel) -> None:
         self.requests.append((request, origin_trust))
+        if self._on_ingest is not None:
+            self._on_ingest()
         outcome = self._outcomes[request.source.id].pop(0)
         if outcome is not None:
             raise outcome
@@ -72,17 +83,30 @@ def _upload(number: int) -> ArtifactRef:
 async def _stack(
     outcomes: dict[int, list[BaseException | None]],
 ) -> tuple[Any, _Knowledge, UploadAutoIngest]:
-    _clock, factory = await memory_uow_factory()
+    factory, knowledge, sweep, _clock = await _stack_with_clock(outcomes)
+    return factory, knowledge, sweep
+
+
+async def _stack_with_clock(
+    outcomes: dict[int, list[BaseException | None]],
+    *,
+    ingest_takes: timedelta | None = None,
+) -> tuple[Any, _Knowledge, UploadAutoIngest, Any]:
+    clock, factory = await memory_uow_factory()
     async with factory() as uow:
         for number in outcomes:
             await uow.artifacts.create(_upload(number))
-    knowledge = _Knowledge({UUID(int=number): list(script) for number, script in outcomes.items()})
+    knowledge = _Knowledge(
+        {UUID(int=number): list(script) for number, script in outcomes.items()},
+        on_ingest=None if ingest_takes is None else (lambda: clock.advance(ingest_takes)),
+    )
     sweep = UploadAutoIngest(
         uow_factory=factory,
         knowledge=cast(KnowledgeService, knowledge),
         principal=owner(),
+        clock=clock,
     )
-    return factory, knowledge, sweep
+    return factory, knowledge, sweep, clock
 
 
 async def _metadata(factory: Any, number: int) -> dict[str, Any]:
@@ -90,38 +114,86 @@ async def _metadata(factory: Any, number: int) -> dict[str, Any]:
         return dict((await uow.artifacts.get(UUID(int=number), owner())).metadata)
 
 
-async def test_a_transient_failure_retries_until_its_third_attempt_fails_it() -> None:
+async def test_a_transient_failure_retries_until_its_third_attempt_fails_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ADR-0284: the retries back off (one minute, then fifteen) and name the error class."""
     assert MAX_INGEST_ATTEMPTS == 3
-    factory, knowledge, sweep = await _stack({1: [RuntimeError("database blip")] * 3})
+    factory, knowledge, sweep, clock = await _stack_with_clock(
+        {1: [RuntimeError("database blip")] * 3}
+    )
 
-    assert await sweep.sweep_once() == 0
+    with caplog.at_level("WARNING"):
+        assert await sweep.sweep_once() == 0
     first = await _metadata(factory, 1)
     assert (first[AUTO_INGEST_KEY], first[AUTO_INGEST_REASON_KEY]) == ("pending", "transient")
     assert first[AUTO_INGEST_ATTEMPTS_KEY] == 1
+    assert first[AUTO_INGEST_NOT_BEFORE_KEY] == (NOW + timedelta(minutes=1)).isoformat()
+    logged = [record for record in caplog.records if record.msg == "upload_knowledge_ingest_failed"]
+    assert logged and getattr(logged[0], "error_class", None) == "RuntimeError"
+    assert "database blip" not in caplog.text
 
+    # The next round comes too soon: the file waits out its backoff untouched.
     assert await sweep.sweep_once() == 0
-    assert (await _metadata(factory, 1))[AUTO_INGEST_ATTEMPTS_KEY] == 2
+    assert len(knowledge.requests) == 1
 
+    clock.advance(timedelta(minutes=1))
+    assert await sweep.sweep_once() == 0
+    second = await _metadata(factory, 1)
+    assert second[AUTO_INGEST_ATTEMPTS_KEY] == 2
+    assert second[AUTO_INGEST_NOT_BEFORE_KEY] == (clock.now() + timedelta(minutes=15)).isoformat()
+
+    clock.advance(timedelta(minutes=15))
     assert await sweep.sweep_once() == 0
     failed = await _metadata(factory, 1)
     assert (failed[AUTO_INGEST_KEY], failed[AUTO_INGEST_REASON_KEY]) == ("failed", "transient")
     assert failed[AUTO_INGEST_ATTEMPTS_KEY] == 3
+    assert AUTO_INGEST_NOT_BEFORE_KEY not in failed
 
     # A failed file leaves the pending set: a later sweep never retries it.
+    clock.advance(timedelta(hours=1))
     assert await sweep.sweep_once() == 0
     assert len(knowledge.requests) == 3
 
 
-async def test_a_retry_that_succeeds_is_ingested_and_clears_its_attempts() -> None:
-    factory, knowledge, sweep = await _stack({1: [RuntimeError("blip"), None]})
+async def test_the_backoff_starts_when_the_failure_is_recorded() -> None:
+    """A slow attempt still earns its full minute: the deadline is read at the failure."""
+    factory, _knowledge, sweep, clock = await _stack_with_clock(
+        {1: [RuntimeError("slow blip")]}, ingest_takes=timedelta(minutes=2)
+    )
 
     assert await sweep.sweep_once() == 0
+
+    recorded = await _metadata(factory, 1)
+    assert clock.now() == NOW + timedelta(minutes=2)
+    assert recorded[AUTO_INGEST_NOT_BEFORE_KEY] == (clock.now() + timedelta(minutes=1)).isoformat()
+
+
+def test_only_a_failed_or_refused_upload_can_be_retried() -> None:
+    """ADR-0284: `knowledge retry` reopens a chat upload whose ingestion ended badly, only."""
+    failed = _upload(1).model_copy(update={"metadata": {AUTO_INGEST_KEY: "failed"}})
+    refused = _upload(2).model_copy(update={"metadata": {AUTO_INGEST_KEY: "refused"}})
+    ingested = _upload(3).model_copy(update={"metadata": {AUTO_INGEST_KEY: "ingested"}})
+    export = _upload(4).model_copy(update={"origin": "tool_output"})
+    assert retry_refusal(failed) is None
+    assert retry_refusal(refused) is None
+    assert retry_refusal(_upload(5)) == "the upload is still pending ingestion"
+    assert retry_refusal(ingested) == "the upload is already in knowledge"
+    assert retry_refusal(export) == "only a chat upload can be retried"
+
+
+async def test_a_retry_that_succeeds_is_ingested_and_clears_its_attempts() -> None:
+    factory, knowledge, sweep, clock = await _stack_with_clock({1: [RuntimeError("blip"), None]})
+
+    assert await sweep.sweep_once() == 0
+    clock.advance(timedelta(minutes=1))
     assert await sweep.sweep_once() == 1
 
     recorded = await _metadata(factory, 1)
     assert recorded[AUTO_INGEST_KEY] == "ingested"
     assert AUTO_INGEST_REASON_KEY not in recorded
     assert AUTO_INGEST_ATTEMPTS_KEY not in recorded
+    assert AUTO_INGEST_NOT_BEFORE_KEY not in recorded
     request, trust = knowledge.requests[-1]
     assert trust is TrustLevel.USER
     assert request.document_id == upload_document_id(_upload(1))
