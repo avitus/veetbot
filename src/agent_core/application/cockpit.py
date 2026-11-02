@@ -553,14 +553,25 @@ class CockpitPublication:
         return await self._republish(principal, widget, revision_id)
 
     async def restore(
-        self, principal: Principal, slug: str, *, request_key: str | None = None
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        request_key: str | None = None,
+        expected_live: UUID | None = None,
     ) -> WidgetRevision:
-        """Commit a deleted widget's last live package again and reactivate it."""
+        """Commit a deleted widget's last live package again and reactivate it.
+
+        `expected_live` is the revision an approval card showed being restored, so
+        another package is never republished unseen.
+        """
 
         async with self._uow_factory() as uow:
             widget = await uow.cockpit_widgets.get_widget(principal, slug)
         if widget.state is not WidgetState.DELETED or widget.live_revision_id is None:
             raise ConflictError(f"{slug} is not deleted", reason="widget_not_deleted")
+        if expected_live is not None and expected_live != widget.live_revision_id:
+            raise ConflictError(f"{slug} is at another revision", reason="revision_changed")
         return await self._republish(principal, widget, widget.live_revision_id, request_key)
 
     async def delete(

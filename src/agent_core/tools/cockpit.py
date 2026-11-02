@@ -11,7 +11,6 @@ untrusted wherever it is read.
 
 from __future__ import annotations
 
-import difflib
 import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
@@ -26,7 +25,7 @@ from agent_core.application.cockpit_feeds import CockpitFeedRefusedError, Cockpi
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest
-from agent_core.domain.argument_views import card_source_lines
+from agent_core.domain.argument_views import card_file_diff
 from agent_core.domain.cockpit import (
     FEED_ERROR_MAX_CHARS,
     WIDGET_FILE_MAX_BYTES,
@@ -86,6 +85,8 @@ REASON_CODES = (
     "cockpit.not_found",
     "cockpit.kit_unknown",
     "cockpit.revision_changed",
+    "cockpit.change_too_large",
+    "cockpit.change_not_shown",
     "cockpit.expected_revision_required",
     "cockpit.widget_deleted",
     "cockpit.widget_not_deleted",
@@ -132,6 +133,8 @@ _FEED_HISTORY_READ = 10
 _DIAGNOSTICS_SHOWN = 10
 _DIAGNOSTIC_MAX_CHARS = 300
 _DIFF_TOO_LARGE = "too_large"
+# A delete or restore names no revision in its arguments, so its card records the one it shows.
+_CARD_REVISION_KEYS = {"delete": "removes_revision", "restore": "restores_revision"}
 _FEED_NAME_PATTERN = r"^(agent\.)?[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$"
 _FEED_PREFIX = "agent."
 _OUTPUT_SCHEMA: dict[str, Any] = {"type": "object"}
@@ -873,6 +876,15 @@ class CockpitWidgetWriteTool(_CockpitTool):
         refusal = _unshown_change_refusal(approval)
         if refusal is not None:
             return refusal
+        shown: UUID | None = None
+        if approval is not None and operation in _CARD_REVISION_KEYS:
+            revision_on_card = approval.arguments.get(_CARD_REVISION_KEYS[operation])
+            if revision_on_card is None:
+                return _invalid(
+                    "The approval card showed no revision for this change, so nothing changed.",
+                    "cockpit.revision_changed",
+                )
+            shown = UUID(str(revision_on_card))
         expected: UUID | None = None
         if operation == "update":
             if "expected_revision" not in arguments:
@@ -882,17 +894,13 @@ class CockpitWidgetWriteTool(_CockpitTool):
             expected = UUID(str(arguments["expected_revision"]))
         await context.mark_effect_sent()
         if operation == "delete":
-            shown = None if approval is None else approval.arguments.get("removes_revision")
             await publication.delete(
-                principal,
-                slug,
-                request_key=context.idempotency_key,
-                expected_head=None if shown is None else UUID(str(shown)),
+                principal, slug, request_key=context.idempotency_key, expected_head=shown
             )
             return await self._removal(principal, slug)
         if operation == "restore":
             revision = await publication.restore(
-                principal, slug, request_key=context.idempotency_key
+                principal, slug, request_key=context.idempotency_key, expected_live=shown
             )
         else:
             revision = await publication.write(
@@ -1014,12 +1022,11 @@ class CockpitWidgetWriteTool(_CockpitTool):
         lines: list[str] = []
         for name in changes:
             lines.extend(
-                difflib.unified_diff(
-                    card_source_lines(before.get(name, "")),
-                    card_source_lines(after.get(name, "")),
+                card_file_diff(
+                    before.get(name, ""),
+                    after.get(name, ""),
                     fromfile=f"a/{name}" if name in before else "/dev/null",
                     tofile=f"b/{name}" if name in after else "/dev/null",
-                    lineterm="",
                 )
             )
         verb = {
@@ -1037,7 +1044,9 @@ class CockpitWidgetWriteTool(_CockpitTool):
         if "expected_revision" in arguments:
             view["expected_revision"] = arguments["expected_revision"]
         if operation == "delete" and head is not None:
-            view["removes_revision"] = str(head.id)
+            view[_CARD_REVISION_KEYS["delete"]] = str(head.id)
+        if operation == "restore" and widget is not None and widget.live_revision_id is not None:
+            view[_CARD_REVISION_KEYS["restore"]] = str(widget.live_revision_id)
         summary = f"{verb} the Cockpit widget {slug} {where} the public branch"
         entries, hidden = card_diff(lines)
         if len(entries) > CARD_DIFF_ENTRIES:

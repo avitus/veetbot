@@ -492,6 +492,20 @@ async def test_the_card_shows_a_character_a_line_split_would_hide(harness: Harne
     assert "+# note\fvalue = 1" in _card_lines(view)
 
 
+async def test_the_card_shows_an_empty_file_being_added(harness: Harness) -> None:
+    await _open(harness)
+    await harness.draft.execute(
+        {"operation": "edit", "slug": "fix-limit", "path": "src/blank.py", "content": ""},
+        _context(),
+    )
+
+    view = await harness.propose.approval_view_in_session(
+        await _proposal(harness), run=None, principal=principal(), turn=None, not_covered=None
+    )
+
+    assert "+++ b/src/blank.py" in _card_lines(view)
+
+
 async def test_a_credential_shape_hides_only_itself_and_the_card_says_so(harness: Harness) -> None:
     """One shape must not hide the code around it from the owner."""
     await _open(harness)

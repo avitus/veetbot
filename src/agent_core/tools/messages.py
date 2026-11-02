@@ -272,6 +272,15 @@ TOOL_MESSAGES: dict[str, str] = {
         "was read. Call cockpit.read read_widget and pass its head_revision_id as "
         "expected_revision to update it."
     ),
+    "cockpit.change_too_large": (
+        "Not published. This change was too large to show the owner whole. Make a smaller "
+        "change, or tell the owner it can be asked for in a new chat that reads no outside "
+        "content."
+    ),
+    "cockpit.change_not_shown": (
+        "Not published. The approval card could not show the owner this change. Tell the "
+        "owner, and try again."
+    ),
     "cockpit.expected_revision_required": (
         "An update names the widget's head_revision_id as expected_revision; call "
         "cockpit.read read_widget for it."

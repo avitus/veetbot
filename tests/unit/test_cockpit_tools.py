@@ -764,6 +764,123 @@ async def test_an_approved_delete_removes_only_the_revision_its_card_showed(
         assert result.failure.reason_code == "cockpit.revision_changed"
 
 
+def _stub_card(monkeypatch: pytest.MonkeyPatch, arguments: dict[str, Any]) -> None:
+    async def card(*_args: Any) -> Any:
+        return SimpleNamespace(arguments={"diff": {}, **arguments})
+
+    monkeypatch.setattr("agent_core.tools.cockpit.CockpitWidgetWriteTool._approval", card)
+
+
+async def test_an_approved_delete_whose_card_showed_no_revision_removes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A widget created after the card was built is one the owner never saw."""
+    async with harness(tmp_path) as h:
+        await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        await h.stack.outbox.run_once()
+        _stub_card(monkeypatch, {})
+        result = await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+    assert not result.ok and result.failure is not None
+    assert result.failure.reason_code == "cockpit.revision_changed"
+
+
+async def test_a_restore_card_names_the_revision_it_shows(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        await h.stack.outbox.run_once()
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {"operation": "restore", "slug": "weather"},
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    assert presentation.arguments["restores_revision"] == created.structured["revision_id"]
+
+
+@pytest.mark.parametrize("shown", ["current", "other", "absent"])
+async def test_an_approved_restore_republishes_only_the_revision_its_card_showed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shown: str
+) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        await h.call("cockpit.widget.write", {"operation": "delete", "slug": "weather"})
+        await h.stack.outbox.run_once()
+        revisions = {
+            "current": {"restores_revision": created.structured["revision_id"]},
+            "other": {"restores_revision": "00000000-0000-4000-8000-000000000001"},
+            "absent": {},
+        }
+        _stub_card(monkeypatch, revisions[shown])
+        result = await h.call("cockpit.widget.write", {"operation": "restore", "slug": "weather"})
+    if shown == "current":
+        assert result.ok, result.failure
+    else:
+        assert not result.ok and result.failure is not None
+        assert result.failure.reason_code == "cockpit.revision_changed"
+
+
+async def test_an_update_card_shows_an_empty_file_being_added(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": package()}
+        )
+        assert created.structured is not None
+        await h.stack.outbox.run_once()
+        entries = await _card_entries(
+            h,
+            {
+                "operation": "update",
+                "slug": "weather",
+                "files": {**package(), "fixtures/blank.json": ""},
+                "expected_revision": created.structured["revision_id"],
+            },
+        )
+    assert entries[-2:] == ["--- /dev/null", "+++ b/fixtures/blank.json"]
+
+
+async def test_a_delete_card_shows_an_empty_file_being_removed(tmp_path: Path) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write",
+            {
+                "operation": "create",
+                "slug": "weather",
+                "files": {**package(), "fixtures/blank.json": ""},
+            },
+        )
+        assert created.ok, created.failure
+        entries = await _card_entries(h, {"operation": "delete", "slug": "weather"})
+    assert "--- a/fixtures/blank.json" in entries
+    assert entries[entries.index("--- a/fixtures/blank.json") + 1] == "+++ /dev/null"
+
+
+@pytest.mark.parametrize(
+    ("reason", "words"),
+    [
+        ("cockpit.change_too_large", "too large"),
+        ("cockpit.change_not_shown", "could not show"),
+    ],
+)
+def test_a_refused_card_tells_the_model_why_and_what_to_do(reason: str, words: str) -> None:
+    from agent_core.tools.cockpit import REASON_CODES
+    from agent_core.tools.messages import TOOL_MESSAGES
+
+    assert reason in REASON_CODES
+    assert words in TOOL_MESSAGES[reason]
+
+
 def test_the_stored_history_bound_is_the_manifest_schema_ceiling() -> None:
     from agent_core.domain.cockpit import FEED_HISTORY_MAX
 
