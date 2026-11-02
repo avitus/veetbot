@@ -130,7 +130,7 @@ class InMemoryWidgetStore:
             return widget
 
     async def get_widget(self, principal: Principal, slug: str, *, lock: bool = False) -> Widget:
-        del lock  # Every in-memory call already runs under the store's lock.
+        del lock  # No in-memory call suspends, so a caller's check and write are one step.
         async with self._lock:
             return self._widget(principal, slug)
 
