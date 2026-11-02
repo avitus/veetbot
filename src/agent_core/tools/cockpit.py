@@ -914,10 +914,12 @@ class CockpitWidgetWriteTool(_CockpitTool):
         return await self._outcome(principal, revision.id, operation)
 
     async def _approval(self, context: ToolExecutionContext) -> ApprovalRequest | None:
-        """This call's approval; a write that never asked has none."""
+        """This write's own approval. A write that never asked has none, and neither does one
+        made by `cockpit.install`, whose single summarized approval has its own card."""
 
         async with self._toolset.uow_factory() as uow:
-            return await uow.approvals.get_by_action(context.invocation_id)
+            approval = await uow.approvals.get_by_action(context.invocation_id)
+        return approval if approval and approval.tool_name == WIDGET_WRITE_TOOL else None
 
     async def _in_chat(self, context: ToolExecutionContext) -> bool:
         """The session filter withholds the tool elsewhere; a call by name is refused here."""
