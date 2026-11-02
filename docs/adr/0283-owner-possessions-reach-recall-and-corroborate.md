@@ -42,7 +42,15 @@ wording "my car" it scores 0.438, and either would have been returned.
    sessions for direct affirmative `user_model_attr` claims not scoped to a
    person. The match reinforces and promotes through the existing duplicate
    path; it still never merges people, never uses subject similarity, and
-   never treats a changed number or a negation as a restatement.
+   never treats a changed number or a negation as a restatement. Event
+   sequences are per session, so the other chat's events never join the
+   belief's `source_event_ids`: the belief keeps its own session's provenance,
+   `evidence_count` grows by one, and the `memory.reinforced` or
+   `memory.promoted` event the corroboration appends carries a derivation key
+   naming the belief, the chat and its event numbers. Replaying that chat
+   finds the receipt and changes nothing. Later evidence in the belief's own
+   chat adds the new event numbers and raises the count by their number,
+   never resetting it to the length of the source list.
 3. **A one-time repair folds the existing duplicates.** `agent memory
    merge-possessions` groups live direct possessions by the restatement key.
    The newest member of a group becomes the canonical belief: active, carrying

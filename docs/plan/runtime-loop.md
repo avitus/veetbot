@@ -1420,8 +1420,10 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Twenty-three more belong to subsystems this document does not touch. They are
-listed here for the same reason: Section 6.8's list is where an implementer
+Twenty-two more belong to subsystems this document does not touch, and the
+loop-owned `memory.recall.limited` sits beside them because ADR-0282 added it
+to the loop's vocabulary after Section 6.8 was written. They are listed here
+for the same reason: Section 6.8's list is where an implementer
 looks for the vocabulary, and these are not in it either.
 
 ```text

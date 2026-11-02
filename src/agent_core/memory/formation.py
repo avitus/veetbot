@@ -6,7 +6,7 @@ import hashlib
 import logging
 import re
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack, suppress
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -2804,10 +2804,23 @@ class GovernedMemoryService:
                 # Event sequences are per session (ADR-0283): another chat's
                 # events corroborate but never join this belief's provenance.
                 same_session = promotable.source_session_id == session_id
+                receipt = (
+                    None
+                    if same_session
+                    else _corroboration_receipt(promotable.id, session_id, sources)
+                )
+                if (
+                    receipt is not None
+                    and await uow.events.get_by_derivation(receipt, self._principal) is not None
+                ):
+                    return promotable, "unchanged"
                 all_sources = (
                     sorted(set(promotable.source_event_ids).union(sources))
                     if same_session
                     else list(promotable.source_event_ids)
+                )
+                new_evidence = (
+                    len(set(sources) - set(promotable.source_event_ids)) if same_session else 1
                 )
                 promoted_expiry = expires_at
                 if not explicit and promoted_expiry is None:
@@ -2826,9 +2839,7 @@ class GovernedMemoryService:
                         "derivation": MemoryDerivation.DIRECT,
                         "longevity": longevity,
                         "last_evidence_at": max(promotable.last_evidence_at, evidence_instant),
-                        "evidence_count": (
-                            len(all_sources) if same_session else promotable.evidence_count + 1
-                        ),
+                        "evidence_count": promotable.evidence_count + new_evidence,
                         "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
                         "confidence": min(
                             1.0,
@@ -2847,7 +2858,9 @@ class GovernedMemoryService:
                     deep=True,
                 )
                 stored = await uow.memories.reinforce(promoted)
-                await self._append_event(uow, session_id, run_id, "memory.promoted", stored)
+                await self._append_event(
+                    uow, session_id, run_id, "memory.promoted", stored, derivation_key=receipt
+                )
                 if record_audit:
                     await uow.memories.record_consolidation(
                         formation_run.model_copy(
@@ -2895,10 +2908,23 @@ class GovernedMemoryService:
                     # from another chat counts as evidence without lending the
                     # belief that chat's event numbers.
                     same_session = current.source_session_id == session_id
+                    receipt = (
+                        None
+                        if same_session
+                        else _corroboration_receipt(current.id, session_id, sources)
+                    )
+                    if (
+                        receipt is not None
+                        and await uow.events.get_by_derivation(receipt, self._principal) is not None
+                    ):
+                        return current, "unchanged"
                     merged_sources = (
                         sorted(set(current.source_event_ids).union(sources))
                         if same_session
                         else list(current.source_event_ids)
+                    )
+                    new_evidence = (
+                        len(set(sources) - set(current.source_event_ids)) if same_session else 1
                     )
                     portable_scope_promoted = (
                         current.portability is not Portability.LOCAL and len(origin_scopes) >= 2
@@ -2924,9 +2950,7 @@ class GovernedMemoryService:
                                 current.last_evidence_at,
                                 evidence_at or self._clock.now(),
                             ),
-                            "evidence_count": (
-                                len(merged_sources) if same_session else current.evidence_count + 1
-                            ),
+                            "evidence_count": current.evidence_count + new_evidence,
                             "lifecycle_policy_version": LIFECYCLE_POLICY_VERSION,
                             "confidence": min(1.0, current.confidence + 0.1),
                             "status": MemoryStatus.ACTIVE,
@@ -2943,6 +2967,7 @@ class GovernedMemoryService:
                         run_id,
                         ("memory.promoted" if portable_scope_promoted else "memory.reinforced"),
                         stored,
+                        derivation_key=receipt,
                     )
                     if record_audit:
                         await uow.memories.record_consolidation(
@@ -5438,6 +5463,7 @@ class GovernedMemoryService:
         belief: MemoryRecord,
         *,
         actor_type: str | None = None,
+        derivation_key: str | None = None,
     ) -> None:
         # A belief's authority names who is speaking when the write follows a
         # statement; a background sweep is the memory itself acting, whatever
@@ -5453,8 +5479,21 @@ class GovernedMemoryService:
                 payload={"belief_id": str(belief.id)}
                 if event_type == "memory.deleted"
                 else {"belief": belief.model_dump(mode="json")},
+                derivation_key=derivation_key,
             )
         )
+
+
+def _corroboration_receipt(belief_id: UUID, session_id: UUID, sources: Sequence[int]) -> str:
+    """The derivation key of a cross-session corroboration's event (ADR-0283).
+
+    A belief keeps only its own session's event numbers, so another chat's
+    evidence is remembered by the `memory.reinforced` or `memory.promoted`
+    event it produced; replaying that chat finds the receipt and changes
+    nothing a second time.
+    """
+
+    return f"memory.corroborated:{belief_id}:{session_id}:{','.join(map(str, sorted(sources)))}"
 
 
 def _source_session(record: MemoryRecord) -> UUID:

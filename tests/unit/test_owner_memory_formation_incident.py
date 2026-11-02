@@ -199,6 +199,57 @@ async def test_the_same_possession_stated_in_another_chat_corroborates() -> None
     assert second.source_event_ids == first.source_event_ids
     assert second.evidence_count == first.evidence_count + 1
 
+    # Replaying the other chat's event is a no-op: the corroboration left a
+    # receipt, so the same evidence never counts twice.
+    replayed = await service.remember(
+        session_id=other_session,
+        run_id=None,
+        statement="User has a new 2027 Aster S8.",
+        subject="new 2027 Aster S8",
+        scope="project-a",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        portability=None,
+        source_event_ids=[event.sequence],
+        explicit=False,
+        authority=first.authority,
+        confidence=None,
+    )
+    assert replayed.id == first.id
+    assert replayed.corroboration_count == 2
+    assert replayed.evidence_count == second.evidence_count
+    assert replayed.confidence == second.confidence
+
+    # Later evidence in the first chat adds to the count instead of resetting
+    # it to the length of that chat's source list.
+    async with factory() as uow:
+        later = await uow.events.append(
+            NewEvent(
+                session_id=first.source_session_id,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=PRINCIPAL_ID,
+                payload={"content": "Still driving the 2027 Aster S8."},
+            )
+        )
+    third = await service.remember(
+        session_id=first.source_session_id,
+        run_id=None,
+        statement="User has a 2027 Aster S8.",
+        subject="2027 Aster S8",
+        scope="project-a",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        portability=None,
+        source_event_ids=[later.sequence],
+        explicit=False,
+        authority=first.authority,
+        confidence=None,
+    )
+    assert third.id == first.id
+    assert third.source_event_ids == sorted({*first.source_event_ids, later.sequence})
+    assert third.evidence_count == second.evidence_count + 1
+    assert third.corroboration_count == 3
+
 
 async def test_merge_possessions_folds_legacy_duplicates_and_retires_placeholders() -> None:
     """ADR-0283: three provisional copies of one car become one active belief."""
