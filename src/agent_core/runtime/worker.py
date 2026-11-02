@@ -246,6 +246,8 @@ class DurableWorker:
 
 
 class MaintenanceWorker:
+    """Run the periodic sweeps that keep durable state bounded and queues moving."""
+
     def __init__(
         self,
         *,
@@ -401,6 +403,7 @@ class MaintenanceWorker:
             logger.warning("Semantic index slice ended (%s)", type(exc).__name__)
 
     async def run_once(self) -> int:
+        """Run one maintenance pass over every sweep; returns how many queue items it reclaimed."""
         async with self._uow_factory() as uow:
             reclaimed = (
                 0 if uow.queue is None else await uow.queue.reclaim_expired(self._reclaim_limit)

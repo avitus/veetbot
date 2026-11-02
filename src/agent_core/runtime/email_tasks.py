@@ -1344,6 +1344,7 @@ class _TaskIO:
     async def _changes(
         self, account: EmailAccount, sync: EmailSyncState, *, read_limit: int = 8
     ) -> tuple[EmailAccount, EmailSyncState]:
+        """Page through one account's changes within this slice's read limit."""
         further = False
         # An exhausted history page may still have unread threads. Admit the
         # next delta from its watermark before draining those retained reads.

@@ -66,6 +66,7 @@ import Testing
         ).fittingSize.height
     }
 
+    /// Parks the run in `parked` and checks that the dock keeps its place.
     private func expectDockHolds(
         model: ChatViewModel, host: NSHostingView<ChatView>, runID: UUID, parked: RunStatus
     ) async throws {
@@ -121,12 +122,14 @@ import Testing
         return host.convert(panes[1].bounds, from: panes[1])
     }
 
+    /// Every scroll view under `view`, outermost first.
     private func scrollViews(in view: NSView) -> [NSScrollView] {
         let nested = view.subviews.flatMap { scrollViews(in: $0) }
         if let scroll = view as? NSScrollView { return [scroll] + nested }
         return nested
     }
 
+    /// The composer's text view under `view`, if it is showing.
     private func findComposer(in view: NSView) -> ComposerNSTextView? {
         if let composer = view as? ComposerNSTextView { return composer }
         return view.subviews.lazy.compactMap { findComposer(in: $0) }.first

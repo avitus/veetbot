@@ -36,6 +36,7 @@ final class DeviceSignInWebSession: NSObject, ObservableObject {
     private var visitedOrigins: Set<String> = []
     private var observations: [NSKeyValueObservation] = []
 
+    /// Prepares a window for one request, with its own non-persistent data store.
     init(request: DeviceSignInRequest) {
         allowedOrigins = request.allowedOrigins
         adoptableOrigin = request.profileID == nil ? request.adoptableOrigin : nil
@@ -174,6 +175,8 @@ final class DeviceSignInWebSession: NSObject, ObservableObject {
 }
 
 extension DeviceSignInWebSession: WKNavigationDelegate, WKUIDelegate {
+    /// Applies the navigation policy; a move to another address of the website
+    /// waits for the owner (ADR-0287).
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,

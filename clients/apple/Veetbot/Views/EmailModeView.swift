@@ -2035,6 +2035,7 @@ private struct EmailReadingView: View {
         }
     }
 
+    /// The message's own text, with any quoted chain of replies behind its button.
     private func reading(_ sections: EmailReaderSections) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             markdown(sections.current).accessibilityIdentifier("email.reader.content")
