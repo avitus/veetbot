@@ -422,4 +422,5 @@ nav:
       - "ADR-0283: Owner possessions reach recall and corroborate": adr/0283-owner-possessions-reach-recall-and-corroborate.md
       - "ADR-0284: Chat uploads back off and report failed ingestion": adr/0284-chat-uploads-back-off-and-report-failed-ingestion.md
       - "ADR-0285: Knowledge search ranks by coverage": adr/0285-knowledge-search-ranks-by-coverage.md
+      - "ADR-0289: Knowledge semantic arm": adr/0289-knowledge-semantic-arm.md
   - Changelog: changelog.md

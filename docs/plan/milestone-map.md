@@ -45,7 +45,7 @@ more, in a new thirteenth area, and is the first spec to declare
 gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 [event-log-and-persistence.md](event-log-and-persistence.md) each
 gained two more on a later pass, all four at Milestone 3.
-[knowledge-documents.md](knowledge-documents.md) declares twelve more, in a new
+[knowledge-documents.md](knowledge-documents.md) declares thirteen more, in a new
 fourteenth area, all of them at Milestone 9. [web-access.md](web-access.md)
 declares seven more in a fifteenth area, all at Milestone 10.
 [browser-automation.md](browser-automation.md) adds ten more in a
@@ -332,9 +332,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 38 subject specifications declare 634 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 643
-declarations, 640 registry entries once the 3 aliases are subtracted.
+The 38 subject specifications declare 635 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 644
+declarations, 641 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -863,11 +863,11 @@ corpus's seventeenth property test. Gate 11 is a corpus gate because
 single case would prove only the one it wrote. The remaining twelve
 need a running session and are cases.
 
-### Knowledge documents, twelve gates
+### Knowledge documents, thirteen gates
 
-Twelve gates, all new, in a new fourteenth area, and all of them
+Thirteen gates, all new, in a new fourteenth area, and all of them
 Milestone 9 — the milestone whose second half had none. Milestone 9
-goes from fourteen registry entries to twenty-six, which makes it the
+goes from fourteen registry entries to twenty-seven, which makes it the
 largest single milestone in the census after Milestone 1.
 
 ```text
@@ -885,6 +885,7 @@ largest single milestone in the census after Milestone 1.
 10  gate.knowledge.trace_complete   case         9
 11  gate.knowledge.no_belief_write  case         9
 12  gate.knowledge.corpus_recall    corpus       9
+13  gate.knowledge.paraphrase_lift  corpus       9
 ```
 
 Gate 3 is the corpus's eighteenth property test, gate 5 its nineteenth,
@@ -892,8 +893,10 @@ and gate 6 its twentieth — determinism, verbatim rendering, and
 citation resolution are each a statement over every chunk rather than
 over one, and a single case would prove only the chunk it wrote. Gate
 12 is a corpus gate because passage recall is a distribution over a
-labelled question set. The remaining eight need a running session and
-are cases. None is structural: every one of them is a statement about
+labelled question set, and gate 13 (ADR-0289) is one because the lift
+the semantic arm must show over lexical retrieval is measured over a
+set of paraphrased questions, not one. The remaining eight need a
+running session and are cases. None is structural: every one of them is a statement about
 what a run retrieves rather than about the shape of the repository.
 
 ### Web access, seven gates
@@ -1833,81 +1836,81 @@ milestone  new gates  cumulative  the earliest of them
 8                 17         140  the MCP adapter, authentication,
                                   the pinned catalog, the metadata
                                   boundary, package validation
-9                 26         166  formation, retrieval, ingestion,
+9                 27         167  formation, retrieval, ingestion,
                                   and the corpus
-10                38         204  the authoring loop, background review,
+10                38         205  the authoring loop, background review,
                                   governed memory maturation, public-web
                                   access, and browser automation
-11                23         227  recurrence, occurrence atomicity,
+11                23         228  recurrence, occurrence atomicity,
                                   authority refresh, offline results,
                                   contracts, migration, erasure, isolation
-12                20         247  device identity, the outbox, content-
+12                20         248  device identity, the outbox, content-
                                   free payloads, dispatch, the APNs
                                   transport, the offline inbox
-13                21         268  the brief, materialization, the
+13                21         269  the brief, materialization, the
                                   child-run suspension and join, derived
                                   limits, the ledger, the evidence
-14                21         289  pairing, the session key, ingress
+14                21         290  pairing, the session key, ingress
                                   atomicity, the scope ceiling, replies,
                                   the surface role's confinement
-15                16         305  the declared backup set, the
+15                16         306  the declared backup set, the
                                   rehearsal, alerts, rollback, the
                                   public boundary, the watchdog
-16                20         325  the benchmark corpus, the baseline,
+16                20         326  the benchmark corpus, the baseline,
                                   live evidence, decay, usage feedback,
                                   the recall delta, conflicts, expanded
                                   provider-formation coverage
-17                10         335  the required ceiling, the ceiling
+17                10         336  the required ceiling, the ceiling
                                   filter, principal isolation, keyset
                                   paging, the read-only router, the
                                   exposure list
-18                17         352  the package boundary, the server
+18                17         353  the package boundary, the server
                                   contract, honest classification,
                                   credential and token confinement,
                                   the bootstrap ceremony, named-account
                                   isolation, the monitoring recipe
-19                 5         357  the model-callable schedule contract,
+19                 5         358  the model-callable schedule contract,
                                   approval, exact-scope authorization,
                                   time validation, idempotent replay
-20                 6         363  monthly and yearly calendar rules,
+20                 6         364  monthly and yearly calendar rules,
                                   bounded catch-up, HTTP union parity,
                                   recurring conversational creation
-21                31         394  integrated episodes, causal anticipation,
+21                31         395  integrated episodes, causal anticipation,
                                   high-recall direct and hypothesis formation,
                                   evidence-based forgetting and activation,
                                   honest scoring, seeded evaluation, fallback
                                   restraint, verified coverage, segmentation,
                                   the repaired provider control, attributed
                                   communication sources
-22                14         408  the persona row, its cap and pinning,
+22                14         409  the persona row, its cap and pinning,
                                   human-only promotion, durable decline,
                                   snapshot de-duplication, exact scopes
-23                12         420  summary-only schedule discovery,
+23                12         421  summary-only schedule discovery,
                                   approved lifecycle and definition mutation,
                                   exact scopes, conflict handling,
                                   idempotent retry
-24                12         432  capability registration, the
+24                12         433  capability registration, the
                                   invocation lifecycle, the owner-tap
                                   send boundary, ingest idempotency,
                                   untrusted triage routing
-25                12         444  the signed webhook ingress, the
+25                12         445  the signed webhook ingress, the
                                   handshake, string-id idempotency,
                                   the template window, the loopback
                                   bind, inherited surface guarantees
-26                32         476  shared client modes, active email sync,
+26                32         477  shared client modes, active email sync,
                                   feedback, style, drafts, approved sends,
                                   shared semantic memory and lifecycle
-27                14         490  Bland calling and public correspondence intake
-28                36         526  People identity, temporal relationships, history and governed recall
-29                17         543  chat thread folders, owner-resolved grouping proposals, grounded grouping,
+27                14         491  Bland calling and public correspondence intake
+28                36         527  People identity, temporal relationships, history and governed recall
+29                17         544  chat thread folders, owner-resolved grouping proposals, grounded grouping,
                                   the typed-judgment port and judgment folder matching
-30                 5         548  restrictive-only advisory approval through the judgment port
-31                23         571  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent,
+30                 5         549  restrictive-only advisory approval through the judgment port
+31                23         572  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent,
                                   suspected-spam flag and thread Report spam
-32                24         595  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
-33                12         607  general recall: candidate relevance, semantic search, evidence use and comparative activation
-34                10         617  owner records: isolation, trust rows, replay, determinism, scans, erasure, formation and the catalog
-35                23         640  Cockpit: offline widget builds, the public data-free branch, commit-before-activate,
+32                24         596  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
+33                12         608  general recall: candidate relevance, semantic search, evidence use and comparative activation
+34                10         618  owner records: isolation, trust rows, replay, determinism, scans, erasure, formation and the catalog
+35                23         641  Cockpit: offline widget builds, the public data-free branch, commit-before-activate,
                                   the network-less realm, feeds, the stream and the three-mode shell
 ```
 

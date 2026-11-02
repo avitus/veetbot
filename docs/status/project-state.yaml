@@ -1,3 +1,11 @@
+# ADR-0289: On 2026-11-02 the owner's question about valve-like sounds from
+# the parked car missed the manual's passage under coverage ranking, and the
+# owner asked for the knowledge semantic arm the design defers on measured
+# lift. Built default-off behind AGENT_KNOWLEDGE_SEMANTIC_ENABLED with gate 13
+# (gate.knowledge.paraphrase_lift) as the measurement: the dense channel lifts
+# every corpus member into the top two, hybrid reciprocal-rank fusion with the
+# ADR-0285 lexical arm lifts none. Proposed; activation needs the gate
+# re-recorded with the production embedding space. No milestone or gate moves.
 # ADR-0281: On 2026-11-01 the owner asked for first-class coding and debugging
 # power and chose power up to opening pull requests: run.inspect, code.read,
 # code.draft, code.test and code.propose, which never merge or deploy. The widget
