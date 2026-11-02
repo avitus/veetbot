@@ -28,6 +28,7 @@ from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.cockpit_feeds import CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.cockpit.catalogue import load_kit_catalogue
+from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.cockpit import BuildDiagnostic, CockpitEventKind, ImportFailure
 from agent_core.domain.messages import ImageReferencePart, TextPart
@@ -553,9 +554,39 @@ async def test_the_write_approval_shows_the_change_as_a_diff(tmp_path: Path) -> 
         )
         assert presentation.summary == "Update the Cockpit widget weather on the public branch"
         assert presentation.arguments["file_changes"] == ["widget.tsx"]
-        diff = "\n".join(presentation.arguments["diff"])
+        diff = "\n".join(
+            entry for page in presentation.arguments["diff"].values() for entry in page
+        )
         assert "-export default function Weather() { return null; } // v1" in diff
         assert "+export default function Weather() { return null; } // v2" in diff
+
+
+async def test_a_removed_credential_shape_hides_only_itself_and_the_card_counts_it(
+    tmp_path: Path,
+) -> None:
+    """A delete carries no files for the hardline rule to read, so the card must cope."""
+    async with harness(tmp_path) as h:
+        files = {**package(), "widget.tsx": "fetch(url); const token: str = load(); done();\n"}
+        created = await h.call(
+            "cockpit.widget.write", {"operation": "create", "slug": "weather", "files": files}
+        )
+        assert created.ok and created.structured is not None, created.failure
+        assert created.structured["state"] != "rejected", created.structured
+        await h.stack.outbox.run_once()
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {"operation": "delete", "slug": "weather"},
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    shown = approval_argument_view(presentation.arguments)
+    entries = [entry for page in shown["diff"].values() for entry in page]
+    [line] = [entry for entry in entries if entry.startswith("-fetch")]
+    assert "fetch(url); const" in line and "= load(); done();" in line
+    assert ": str" not in line
+    assert shown["hidden_text_pieces"] == 1
+    assert "1 piece(s) of text shaped like a credential" in presentation.summary
 
 
 def test_the_stored_history_bound_is_the_manifest_schema_ceiling() -> None:

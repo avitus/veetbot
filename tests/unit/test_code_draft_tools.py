@@ -485,7 +485,7 @@ async def test_a_credential_shape_hides_only_itself_and_the_card_says_so(harness
     assert entry.startswith("+run_this()  # ")
     assert entry.endswith(" and_this()")
     assert "abc" not in entry
-    assert view.arguments["hidden_credential_shapes"] == 1
+    assert approval_argument_view(view.arguments)["hidden_text_pieces"] == 1
     assert "1 piece(s)" in view.summary
 
 

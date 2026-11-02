@@ -66,6 +66,12 @@ from agent_core.ports.artifacts import ArtifactWriter
 from agent_core.ports.cockpit import WidgetBuild, WidgetBuildFailedError
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.tools.approval_cards import (
+    CARD_DIFF_ENTRIES,
+    card_diff,
+    card_pages,
+    hidden_sentence,
+)
 
 COCKPIT_TOOL_NAMES = (
     "cockpit.read",
@@ -115,7 +121,6 @@ _CONFLICT_CODES = {
     "widget_not_deleted": "cockpit.widget_not_deleted",
     "layout_changed": "cockpit.layout_changed",
 }
-_DIFF_MAX_LINES = 400
 # Every tool answer reaches the model inline up to 4 KiB (tools/limits.yaml), so the
 # kit, a widget's files and the diagnostics come in pieces that fit.
 _KIT_DETAIL_MAX = 4
@@ -125,7 +130,7 @@ _RECENT_REVISIONS = 5
 _FEED_HISTORY_READ = 10
 _DIAGNOSTICS_SHOWN = 10
 _DIAGNOSTIC_MAX_CHARS = 300
-_DIFF_LINE_MAX_CHARS = 240
+_DIFF_TOO_LARGE = "too_large"
 _FEED_NAME_PATTERN = r"^(agent\.)?[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$"
 _FEED_PREFIX = "agent."
 _OUTPUT_SCHEMA: dict[str, Any] = {"type": "object"}
@@ -840,6 +845,13 @@ class CockpitWidgetWriteTool(_CockpitTool):
             return await self._outcome(principal, replayed.revision_id, operation)
         if operation in {"create", "update"} and "files" not in arguments:
             return _invalid(f"{operation} carries the package's files")
+        if await self._card_could_not_show(context):
+            return _invalid(
+                "This change was too large to show the owner whole, so nothing was published. "
+                "Make a smaller change, or tell the owner it can be asked for in a new chat "
+                "that reads no outside content.",
+                "cockpit.change_too_large",
+            )
         expected: UUID | None = None
         if operation == "update":
             if "expected_revision" not in arguments:
@@ -865,6 +877,13 @@ class CockpitWidgetWriteTool(_CockpitTool):
                 request_key=context.idempotency_key,
             )
         return await self._outcome(principal, revision.id, operation)
+
+    async def _card_could_not_show(self, context: ToolExecutionContext) -> bool:
+        """Whether this call's approval card told the owner approving publishes nothing."""
+
+        async with self._toolset.uow_factory() as uow:
+            approval = await uow.approvals.get_by_action(context.invocation_id)
+        return approval is not None and approval.arguments.get("diff_status") == _DIFF_TOO_LARGE
 
     async def _in_chat(self, context: ToolExecutionContext) -> bool:
         """The session filter withholds the tool elsewhere; a call by name is refused here."""
@@ -938,7 +957,7 @@ class CockpitWidgetWriteTool(_CockpitTool):
         turn: object,
         not_covered: object,
     ) -> ApprovalPresentation:
-        """The change as a bounded diff against the live files, in server-authored words."""
+        """The whole change against the live files, or why approving it publishes nothing."""
 
         del run, turn, not_covered
         operation = str(arguments.get("operation", ""))
@@ -964,8 +983,7 @@ class CockpitWidgetWriteTool(_CockpitTool):
         lines: list[str] = []
         for name in changes:
             lines.extend(
-                line[:_DIFF_LINE_MAX_CHARS]
-                for line in difflib.unified_diff(
+                difflib.unified_diff(
                     before.get(name, "").splitlines(),
                     after.get(name, "").splitlines(),
                     fromfile=f"a/{name}" if name in before else "/dev/null",
@@ -984,13 +1002,27 @@ class CockpitWidgetWriteTool(_CockpitTool):
             "operation": operation,
             "slug": slug,
             "file_changes": changes,
-            "diff": lines[:_DIFF_MAX_LINES],
-            "diff_truncated": len(lines) > _DIFF_MAX_LINES,
         }
         if "expected_revision" in arguments:
             view["expected_revision"] = arguments["expected_revision"]
+        summary = f"{verb} the Cockpit widget {slug} {where} the public branch"
+        entries, hidden = card_diff(lines)
+        if len(entries) > CARD_DIFF_ENTRIES:
+            view["diff_status"] = _DIFF_TOO_LARGE
+            return ApprovalPresentation(
+                summary=(
+                    f"{summary}: this change is too large to show here whole, so approving "
+                    "this publishes nothing. Ask Veetbot for a smaller change, or for this one "
+                    "in a new chat that reads no outside content."
+                ),
+                arguments=view,
+            )
+        view["diff"] = card_pages(entries)
+        if not hidden:
+            return ApprovalPresentation(summary=summary, arguments=view)
         return ApprovalPresentation(
-            summary=f"{verb} the Cockpit widget {slug} {where} the public branch", arguments=view
+            summary=f"{summary}. {hidden_sentence(hidden)}",
+            arguments={**view, "hidden_text_pieces": hidden},
         )
 
 
