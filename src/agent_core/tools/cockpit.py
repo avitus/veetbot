@@ -26,6 +26,7 @@ from agent_core.application.cockpit_feeds import CockpitFeedRefusedError, Cockpi
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalPresentation
+from agent_core.domain.argument_views import card_source_lines
 from agent_core.domain.cockpit import (
     FEED_ERROR_MAX_CHARS,
     WIDGET_FILE_MAX_BYTES,
@@ -845,13 +846,9 @@ class CockpitWidgetWriteTool(_CockpitTool):
             return await self._outcome(principal, replayed.revision_id, operation)
         if operation in {"create", "update"} and "files" not in arguments:
             return _invalid(f"{operation} carries the package's files")
-        if await self._card_could_not_show(context):
-            return _invalid(
-                "This change was too large to show the owner whole, so nothing was published. "
-                "Make a smaller change, or tell the owner it can be asked for in a new chat "
-                "that reads no outside content.",
-                "cockpit.change_too_large",
-            )
+        refusal = await self._unshown_change_refusal(context)
+        if refusal is not None:
+            return refusal
         expected: UUID | None = None
         if operation == "update":
             if "expected_revision" not in arguments:
@@ -878,12 +875,29 @@ class CockpitWidgetWriteTool(_CockpitTool):
             )
         return await self._outcome(principal, revision.id, operation)
 
-    async def _card_could_not_show(self, context: ToolExecutionContext) -> bool:
-        """Whether this call's approval card told the owner approving publishes nothing."""
+    async def _unshown_change_refusal(self, context: ToolExecutionContext) -> ToolResult | None:
+        """The refusal when this call's approval card did not show the owner the whole change.
+
+        A write that never asked has no approval and is unaffected. A card with no diff
+        either said the change was too large or fell back when its presenter failed.
+        """
 
         async with self._toolset.uow_factory() as uow:
             approval = await uow.approvals.get_by_action(context.invocation_id)
-        return approval is not None and approval.arguments.get("diff_status") == _DIFF_TOO_LARGE
+        if approval is None or "diff" in approval.arguments:
+            return None
+        if approval.arguments.get("diff_status") == _DIFF_TOO_LARGE:
+            return _invalid(
+                "This change was too large to show the owner whole, so nothing was published. "
+                "Make a smaller change, or tell the owner it can be asked for in a new chat "
+                "that reads no outside content.",
+                "cockpit.change_too_large",
+            )
+        return _invalid(
+            "The approval card could not show the owner this change, so nothing was published. "
+            "Tell the owner, and try again.",
+            "cockpit.change_not_shown",
+        )
 
     async def _in_chat(self, context: ToolExecutionContext) -> bool:
         """The session filter withholds the tool elsewhere; a call by name is refused here."""
@@ -984,8 +998,8 @@ class CockpitWidgetWriteTool(_CockpitTool):
         for name in changes:
             lines.extend(
                 difflib.unified_diff(
-                    before.get(name, "").splitlines(),
-                    after.get(name, "").splitlines(),
+                    card_source_lines(before.get(name, "")),
+                    card_source_lines(after.get(name, "")),
                     fromfile=f"a/{name}" if name in before else "/dev/null",
                     tofile=f"b/{name}" if name in after else "/dev/null",
                     lineterm="",

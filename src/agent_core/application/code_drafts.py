@@ -6,6 +6,7 @@ import difflib
 from datetime import datetime
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.argument_views import card_source_lines
 from agent_core.domain.code import (
     BRANCH_PREFIX,
     CodeDraft,
@@ -205,8 +206,8 @@ class CodeDrafts:
             after = draft.files[path]
             lines.extend(
                 difflib.unified_diff(
-                    (base or "").splitlines(),
-                    (after or "").splitlines(),
+                    card_source_lines(base or ""),
+                    card_source_lines(after or ""),
                     fromfile=f"a/{path}" if base is not None else "/dev/null",
                     tofile=f"b/{path}" if after is not None else "/dev/null",
                     lineterm="",

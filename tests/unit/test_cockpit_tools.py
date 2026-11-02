@@ -589,6 +589,45 @@ async def test_a_removed_credential_shape_hides_only_itself_and_the_card_counts_
     assert "1 piece(s) of text shaped like a credential" in presentation.summary
 
 
+@pytest.mark.parametrize(
+    ("before", "after", "shown"),
+    [
+        ("const a = 1;\nconst b = 2;", "const a = 1;\r\nconst b = 2;", "+const a = 1;\r"),
+        ("const a = 1;", "// note\fconst a = 1;", "+// note\fconst a = 1;"),
+        ("const a = 1;", "const a = 1;\n", "+"),
+    ],
+    ids=["line_ending", "form_feed", "final_newline"],
+)
+async def test_the_card_shows_a_change_to_invisible_characters(
+    tmp_path: Path, before: str, after: str, shown: str
+) -> None:
+    async with harness(tmp_path) as h:
+        created = await h.call(
+            "cockpit.widget.write",
+            {
+                "operation": "create",
+                "slug": "weather",
+                "files": {**package(), "widget.tsx": before},
+            },
+        )
+        assert created.ok and created.structured is not None, created.failure
+        await h.stack.outbox.run_once()
+        presentation = await h.tools["cockpit.widget.write"].approval_view_in_session(
+            {
+                "operation": "update",
+                "slug": "weather",
+                "files": {**package(), "widget.tsx": after},
+                "expected_revision": created.structured["revision_id"],
+            },
+            run=None,
+            principal=OWNER,
+            turn=None,
+            not_covered=None,
+        )
+    entries = [entry for page in presentation.arguments["diff"].values() for entry in page]
+    assert shown in entries
+
+
 def test_the_stored_history_bound_is_the_manifest_schema_ceiling() -> None:
     from agent_core.domain.cockpit import FEED_HISTORY_MAX
 

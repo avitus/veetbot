@@ -4,9 +4,12 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.messages import ScriptedTurn, StopReason
 from agent_core.domain.runs import RunStatus
+from agent_core.tools.cockpit import CockpitWidgetWriteTool
 from tests.gates.test_deferred_tools_adr0123 import _production, _session_events, _tool_call
 
 _ENVIRONMENT = {"AGENT_COCKPIT_ENABLED": "1"}
@@ -107,3 +110,33 @@ async def test_approving_a_change_too_large_to_show_publishes_nothing(tmp_path: 
         and event.payload["name"] == "cockpit.widget.write"
     ]
     assert failed["reason_code"] == "cockpit.change_too_large"
+
+
+async def test_approving_a_card_that_could_not_show_the_change_publishes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fails(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("the live revision could not be read")
+
+    monkeypatch.setattr(CockpitWidgetWriteTool, "approval_view_in_session", fails)
+    _factory, context = await _production(
+        tmp_path, _turns({"widget.tsx": "export const a = 1;"}), extra_environment=_ENVIRONMENT
+    )
+    async with context as app:
+        session_id = await app.sessions.create()
+        run_id = await app.runs.submit("Make the widget.", session_id)
+        await asyncio.wait_for(_until(app, run_id, RunStatus.WAITING_FOR_APPROVAL), timeout=30)
+        [approval] = await app.approvals.list_pending(run_id=run_id)
+        assert "diff" not in approval.arguments
+
+        await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        await asyncio.wait_for(_until(app, run_id, RunStatus.COMPLETED), timeout=30)
+        events = await _session_events(app, session_id)
+
+    [failed] = [
+        event.payload
+        for event in events
+        if event.event_type == "tool.call.failed"
+        and event.payload["name"] == "cockpit.widget.write"
+    ]
+    assert failed["reason_code"] == "cockpit.change_not_shown"

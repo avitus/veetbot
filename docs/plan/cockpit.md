@@ -710,12 +710,16 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
   interactive and any session that carries a schedule, a run kind, an
   operational email marker or a purpose.
 - **Approval view.** When an escalation produces an approval, the approval
-  view shows the file diff and the preview image. The diff is the whole
-  change: it is paged, a long line continues on the next entry, and
-  credential-shaped text is masked and counted rather than hiding its line. A
-  change past 400 entries cannot be shown whole, so its card says approving
-  publishes nothing, and the tool refuses it with `cockpit.change_too_large`.
-  The limit applies only to a write that asked for approval. `cockpit.install`
+  view shows the file diff and the preview image. The preview image is still
+  required and the card does not carry it yet, an open item in
+  `docs/status/milestones.md`. The diff is the whole change: it is paged, a
+  long line continues on the next entry, it keeps every character a line split
+  would drop, and credential-shaped text is masked and counted rather than
+  hiding its line. A change past 400 entries cannot be shown whole, so its card
+  says approving publishes nothing, and the tool refuses it with
+  `cockpit.change_too_large`. A card whose diff could not be built is refused
+  with `cockpit.change_not_shown`. These refusals apply only to a write that
+  asked for approval. `cockpit.install`
   keeps its own summarized approval (ADR-0270), which names the source being
   published without showing it.
 

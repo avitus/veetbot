@@ -472,6 +472,26 @@ async def test_every_line_of_a_long_diff_survives_the_approval_view(harness: Har
     assert not any("TRUNCATED" in line for line in lines)
 
 
+async def test_the_card_shows_a_character_a_line_split_would_hide(harness: Harness) -> None:
+    """A form feed splits nothing in Python source, so the card must not show two lines."""
+    await _open(harness)
+    await harness.draft.execute(
+        {
+            "operation": "edit",
+            "slug": "fix-limit",
+            "path": "src/large.py",
+            "content": "# note\fvalue = 1\n",
+        },
+        _context(),
+    )
+
+    view = await harness.propose.approval_view_in_session(
+        await _proposal(harness), run=None, principal=principal(), turn=None, not_covered=None
+    )
+
+    assert "+# note\fvalue = 1" in _card_lines(view)
+
+
 async def test_a_credential_shape_hides_only_itself_and_the_card_says_so(harness: Harness) -> None:
     """One shape must not hide the code around it from the owner."""
     await _open(harness)

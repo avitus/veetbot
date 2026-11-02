@@ -26,6 +26,16 @@ CREDENTIAL_SHAPE = re.compile(r"(?:api[_-]?key|secret|password|token|bearer)\s*[
 APPROVAL_ARGUMENT_CEILING = 512
 
 
+def card_source_lines(text: str) -> list[str]:
+    """Source lines for an approval card's diff, split so no character can vanish.
+
+    `str.splitlines` also splits on carriage returns, form feeds and vertical tabs,
+    and drops them, so a card built from it hides a change to any of them, and to the
+    final newline.
+    """
+    return text.split("\n") if text else []
+
+
 def approval_argument_value(value: Any, *, key: str | None = None) -> Any:
     if key is not None and SENSITIVE_ARGUMENT_KEY.search(key) is not None:
         return REDACTED
