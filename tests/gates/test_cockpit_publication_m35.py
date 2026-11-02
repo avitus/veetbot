@@ -505,3 +505,21 @@ async def test_a_restore_is_refused_when_a_create_lands_during_its_build() -> No
         with pytest.raises(ConflictError) as refused:
             await stack.publication.restore(PRINCIPAL, "weather")
         assert refused.value.reason == "revision_changed"
+
+
+async def test_rejected_builds_cannot_hide_a_package_waiting_on_a_deleted_widget() -> None:
+    """Rejections are not rate limited, so enough of them must not push the package out of view."""
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        await stack.publication.delete(PRINCIPAL, "weather")
+        await stack.outbox.run_once()
+        waiting = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=None
+        )
+        for _ in range(50):
+            await stack.publication.write(
+                PRINCIPAL, "weather", {"widget.tsx": "REJECT"}, expected_revision=waiting.id
+            )
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert refused.value.reason == "revision_changed"

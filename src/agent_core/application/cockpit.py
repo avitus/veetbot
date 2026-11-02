@@ -273,11 +273,14 @@ class CockpitPublication:
 
         if widget is None:
             return None
-        recent = await uow.cockpit_widgets.list_revisions(principal, widget.slug, limit=50)
-        waiting = (RevisionState.PENDING_COMMIT, RevisionState.COMMITTED)
-        newest = next((revision for revision in recent if revision.state in waiting), None)
-        if newest is not None:
-            return newest.id
+        waiting = await uow.cockpit_widgets.list_revisions(
+            principal,
+            widget.slug,
+            limit=1,
+            states=(RevisionState.PENDING_COMMIT, RevisionState.COMMITTED),
+        )
+        if waiting:
+            return waiting[0].id
         return None if widget.state is WidgetState.DELETED else widget.live_revision_id
 
     async def _check_rate(self, uow: RepositoryUnitOfWork, principal: Principal, slug: str) -> None:

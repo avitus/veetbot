@@ -54,9 +54,14 @@ class WidgetStore(Protocol):
     async def get_revision(self, principal: Principal, revision_id: UUID) -> WidgetRevision: ...
 
     async def list_revisions(
-        self, principal: Principal, slug: str, *, limit: int
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        limit: int,
+        states: Sequence[RevisionState] | None = None,
     ) -> list[WidgetRevision]:
-        """Newest first."""
+        """Newest first; `states` narrows the rows before the limit applies."""
         ...
 
     async def set_revision_state(
