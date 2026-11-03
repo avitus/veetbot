@@ -684,10 +684,13 @@ async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
         assert sync.payload["change_pending"] == []
 
 
+@pytest.mark.parametrize("arrival_check", [False, True])
 async def test_new_mail_slice_assesses_a_window_its_change_waits_on(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, arrival_check: bool
 ) -> None:
     """A new-mail slice still assesses a full window that discovery waits on (ADR-0256).
+
+    A server check does too, for the same reason (ADR-0286).
 
     The change belongs to an archived thread, so the window is not Inbox mail.
     If the slice skipped it, the window would never be analyzed and the
@@ -786,9 +789,12 @@ async def test_new_mail_slice_assesses_a_window_its_change_waits_on(
         # Each slice reads one page and assesses one passage: two slices fill
         # the window, two analyze it, and the fifth reads on.
         for _ in range(5):
-            operation = await service.submit_task(app.principal, kind="refresh")
+            operation = await service.submit_task(
+                app.principal, kind="refresh", arrival_check=arrival_check
+            )
             current = await app.runs.get(operation.run_id)
             assert current.status is RunStatus.COMPLETED, current.failure
             task = await service.get_task(app.principal, operation.run_id)
-            assert task is not None and task.scope == "new_mail"
+            assert task is not None
+            assert task.scope == ("arrivals" if arrival_check else "new_mail")
     assert reads == [0, 1, 2]

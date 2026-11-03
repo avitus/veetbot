@@ -4,6 +4,38 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-01 — Website Access: logins for websites like Chase
+
+- A website that keeps its sign-in form in a frame, as Chase does, can now be
+  saved through Veetbot's remote browser. Before, the website accepted the
+  sign-in, but Veetbot saved nothing and the login stayed unfinished.
+- Once you update the app, the sign-in window offers **Use Veetbot's remote
+  browser** for a saved login as well as a new website. Backing out keeps the
+  login.
+- Also in the update, when a new website's sign-in moves to another of its
+  addresses, the window names that address and adds it to the login only if you
+  allow it. Other websites stay refused.
+
+## 2026-11-01 — Email: replies and forwards from Gmail read cleanly
+
+- Links in a Gmail message's text now show as their label and open the right
+  page. Before, the address showed in full, and the blue link often ran into
+  the next word and opened a page that does not exist.
+- Signatures keep their lines, lose Gmail's repeated phone number, and appear
+  once however many replies quote them. Short lines the writer ended stay on
+  their own lines, and wrapped sentences flow again.
+- The chain of earlier replies below a message now waits behind **Show earlier
+  replies**, once you update the app. A reply written below a quote is never
+  hidden, and **Show original** still shows the message unchanged.
+
+## 2026-11-01 — Server checks for new mail (ADR-0286)
+
+- Behind `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED`, off by default, the server checks
+  for new mail every five minutes while Email is closed, so mail can be ranked and
+  drafted before the owner opens it.
+- A check handles only new or changed conversations and stops at half the daily and
+  90% of the rolling allowance. It sends and notifies nothing.
+
 ## 2026-10-28 — Spent one-time repairs retired (ADR-0266)
 
 - Five pieces of code that existed only to bridge a state production no

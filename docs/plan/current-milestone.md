@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Server email checks — ADR-0286:** On 2026-11-01 the owner accepted
+  [the decision](../adr/0286-server-checks-for-new-mail.md) and authorized its
+  implementation on `email-checks`. A default-off maintenance pass checks for new
+  mail every five minutes while Email is closed. It handles only new or changed
+  mail, within 50% of the daily and 90% of the rolling allowance. Activation needs
+  one measured production week and adds a thirty-third Milestone 26 gate.
+
 - **Veetbot's code power — ADR-0281:** On 2026-11-01 the owner asked for
   first-class coding and debugging power after Veetbot could not explain a
   failing widget, and chose power up to opening pull requests. Five deferred
@@ -418,7 +425,7 @@ title: Current Milestone
 - **Milestone 26 — Client modes and adaptive email experience:** authorized on
   2026-09-11 as a new independent parallel workstream under ADR-0092;
   [email-experience.md](email-experience.md) contains the approved complete
-  design and thirty-two gates. Twenty-seven backend and native acceptance checks
+  design and thirty-three gates. Twenty-eight backend and native acceptance checks
   are bound; four private quality gates and integrated release evidence remain
   pending, and the milestone remains in progress. Aggregate automatic
   email budgets are USD 20/day and USD 200/rolling thirty days. ADR-0096 limits
@@ -857,7 +864,7 @@ Milestone 23 completed when its twelve gates and the cumulative registry
 passed, the PostgreSQL lane passed, and hosted CI and a clean final CodeRabbit
 review passed on pull requests 89 and 98, the second merged on 2026-09-06.
 
-Milestone 26 completes only when all thirty-two gates and approved quality
+Milestone 26 completes only when all thirty-three gates and approved quality
 requirements, relevant local/PostgreSQL/native lanes, authorized owner mailbox
 smoke, final-head hosted review and production delivery evidence pass. Until then
 its status remains in progress; it does not move the verified sequential ceiling.

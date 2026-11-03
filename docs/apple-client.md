@@ -274,7 +274,9 @@ the window is a resizable sheet that opens at 1000 by 760 points and shrinks
 no smaller than 820 by 680. The app opens
 a `WKWebView` with a non-persistent data store, the platform's own user agent,
 no injected script or message handler, and top-level navigation confined to
-the profile's origins. The user types usernames, passwords, and one-time codes
+the profile's origins. For a new website, a move to another address of the same
+website is held back and named, and Allow adds that exact address to the new
+login and continues there (ADR-0287). The user types usernames, passwords, and one-time codes
 into the website itself, and the app reads none of them. When the user taps
 I'm signed in, the app creates the profile if it is new, begins a device
 ceremony, and sends that website's cookies and `localStorage` once, directly
@@ -285,9 +287,11 @@ page address is persisted, logged, or kept in view state. The service filters
 and verifies the session and decides the outcome. Passkeys and identity
 providers on other origins do not work in that window. Every profile row that
 is not revoked has Sign in again, which opens the same window for that
-profile. For a new website, Use Veetbot's remote browser is also available
-before a sign-in attempt and after a supported failure: it clears the window's
-data and continues with the remote ceremony below. While any task permission
+profile. Use Veetbot's remote browser is also available there, before a sign-in
+attempt and after a supported failure: it clears the window's data and continues
+with the remote ceremony below. For a saved login, backing out of that ceremony
+keeps the login, and a sign-in started from a chat opens Website Access for its
+link (ADR-0288). While any task permission
 is active (ADR-0129), a compact Task
 permissions row at the end of Website Access shows how many, and its menu
 stops any one of them at once.

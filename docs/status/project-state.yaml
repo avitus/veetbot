@@ -2598,7 +2598,7 @@ milestones:
     authorized_on: 2026-09-11
     design: docs/plan/email-experience.md
     adr: docs/adr/0092-client-modes-and-email-experience.md
-    gates_registered: 32
+    gates_registered: 33
     authorized_scope:
       - shared Chat and Email presentation on iPhone, iPad and Mac
       - owner-requested archive and move-to-Inbox actions for one exact thread in the originating Gmail account
@@ -2612,8 +2612,9 @@ milestones:
       - a separate seven-day owner-reviewed work-account Jev pilot, capped at fifty new bypasses per UTC day; implementation and production activation explicitly approved 2026-10-14 (ADR-0204)
       - standing owner-reviewed work-account junk filtering authorized 2026-10-24 after 198 confirmed bypasses; same protections and daily cap, no calendar expiry (ADR-0244)
       - an offline, non-activating importance replay comparing the production assessor with a typed-judgment arm (ADR-0110); it cannot satisfy or waive a Milestone 26 gate
+      - default-off server arrival checks every five minutes, limited to 50% of the daily and 90% of the rolling allowance; owner accepted and authorized implementation 2026-11-01 (ADR-0286)
     deferred_scope:
-      - unattended monitoring, Gmail push, scheduled digests and interval scheduling
+      - other unattended monitoring, Gmail push, scheduled digests and schedule-row interval scheduling
       - autonomous sending, automatic Gmail writes and Gmail draft synchronization
       - another provider, self-service OAuth, attachments and calendar operations
       - offline-authoritative editing, separate email persona and model routing
@@ -2622,7 +2623,7 @@ milestones:
       - Calibrate aggregate cost and performance with authorized representative mailbox work
       - Execute frozen private importance, reply relevance and writing-style evaluations with the owner
       - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
-      - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
+      - Pass all thirty-three Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
     evidence:
       - check: reply drafting after the retained body expires
