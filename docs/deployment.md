@@ -1941,8 +1941,9 @@ nothing about semantic activation.
 `AGENT_KNOWLEDGE_SEMANTIC_ENABLED=0` and restart, or change or remove the
 installed files: the knowledge arm reads the index's admission before every
 provider call, so the files withdraw its OpenAI calls with memory recall, and
-sparse recall and lexical search continue. Without a composed index the
-knowledge flag alone turns the arm off. A different encoder withdraws the
+sparse recall and lexical search continue; a restart with the index enabled
+but not admitted leaves the arm lexical as well. Only with the index flag off
+does the knowledge flag alone govern the arm. A different encoder withdraws the
 admission by itself; prepare and install the files again once the owner
 decides.
 

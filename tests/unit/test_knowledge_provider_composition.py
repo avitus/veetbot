@@ -96,3 +96,18 @@ async def test_the_openai_arm_reads_the_index_admission_when_one_is_composed() -
     assert embedder is not None and embedder.admitted()
     index._admitted = False
     assert not embedder.admitted(), "a withdrawn index withdraws the knowledge arm's egress"
+
+
+async def test_the_openai_arm_stays_lexical_when_the_enabled_index_was_not_admitted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A withdrawal followed by a restart withdraws the knowledge arm's egress as well."""
+
+    settings = _settings(
+        AGENT_KNOWLEDGE_SEMANTIC_PROVIDER="openai",
+        AGENT_MEMORY_SEMANTIC_INDEX_ENABLED="1",
+        VEETBOT_OPENAI_KEY="sk-test",
+    )
+    with caplog.at_level(logging.WARNING):
+        assert await _knowledge_embedder(settings, None, Resolver("sk-test")) is None
+    assert "knowledge_semantic_unavailable_using_lexical" in caplog.text

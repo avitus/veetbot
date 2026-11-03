@@ -1699,6 +1699,15 @@ async def _knowledge_embedder(
     if not settings.knowledge_semantic_enabled:
         return None
     if settings.knowledge_semantic_provider == "openai":
+        if settings.memory_semantic_index_enabled and index is None:
+            # The index is configured but its admission was rejected at
+            # startup (withdrawn files, ADR-0269's fallback): the knowledge
+            # arm's egress stays withdrawn with it rather than composing on
+            # the flag alone.
+            logger.warning(
+                "knowledge_semantic_unavailable_using_lexical", extra={"reason": "admission"}
+            )
+            return None
         key = ""
         with suppress(PermissionError):
             key = (await credentials.resolve(CredentialRef("openai"))).reveal()
