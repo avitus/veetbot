@@ -1,0 +1,33 @@
+{
+  "title": "Emerging market radar collector",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "focus",
+      "sources"
+    ],
+    "properties": {
+      "focus": {
+        "type": "string"
+      },
+      "fixture": {
+        "type": "object"
+      },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "additionalProperties": false
+  },
+  "calls": [
+    "feed.publish",
+    "http.request",
+    "model.complete"
+  ],
+  "feeds": [
+    "agent.emerging-market-radar"
+  ]
+}
