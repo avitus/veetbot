@@ -419,6 +419,8 @@ def create_profile_service_app(
 
     @app.exception_handler(BrowserProviderError)
     async def browser_error(request: Request, exc: BrowserProviderError) -> JSONResponse:
+        # The closed reason vocabulary is the only record of why; the caller sees a 409.
+        _LOGGER.info("browser operation rejected", extra={"failure_type": exc.reason_code})
         response = _error(409, exc.reason_code, "browser operation rejected")
         return _diagnostic_error_response(request, response)
 

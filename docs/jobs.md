@@ -106,6 +106,7 @@ An imported edit or deletion supersedes older queued publications. A delayed
 receipt records the old commit without reactivating it or undoing that deletion.
 Imported deletions retain an archived revision at the deletion commit, so the
 normal restore flow can republish saved source without repository repair.
+Archiving a job that is already archived is refused and queues nothing.
 Publication batches select the current owner's requests before applying their
 limit, so another owner's pending requests cannot block this job's publication.
 

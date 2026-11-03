@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
+
+import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.bootstrap import build
@@ -58,6 +61,52 @@ async def test_a_delete_and_a_write_wait_for_the_widget_lock_before_checking_the
             isinstance(result, ConflictError) and result.reason == "revision_changed"
             for result in results
         ), results
+
+
+async def test_a_queued_removal_refuses_a_write_and_entries_keep_their_order_on_postgres(
+    tmp_path: Path,
+) -> None:
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    async with (
+        build(settings=settings, storage="postgres") as composition,
+        publication_stack(
+            uow_factory=composition.uow_factory, clock=FixedClock(NOW), principal=PRINCIPAL
+        ) as stack,
+    ):
+        first = await stack.publication.write(
+            PRINCIPAL, "ordered", package("v1"), expected_revision=None
+        )
+        assert await stack.outbox.run_once() == 1
+
+        second = await stack.publication.write(
+            PRINCIPAL, "ordered", package("v2"), expected_revision=first.id
+        )
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        stack.clock.advance(timedelta(seconds=1))
+        third = await stack.publication.write(
+            PRINCIPAL, "ordered", package("v3"), expected_revision=second.id
+        )
+        assert await stack.outbox.run_once() == 0
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        async with stack.uow_factory() as uow:
+            widget = await uow.cockpit_widgets.get_widget(PRINCIPAL, "ordered")
+        assert widget.live_revision_id == third.id
+
+        await stack.publication.delete(PRINCIPAL, "ordered", expected_head=third.id)
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.write(
+                PRINCIPAL, "ordered", package("v4"), expected_revision=third.id
+            )
+        assert refused.value.reason == "removal_queued"
+        stack.later()
+        assert await stack.outbox.run_once() == 1
+        async with stack.uow_factory() as uow:
+            widget = await uow.cockpit_widgets.get_widget(PRINCIPAL, "ordered")
+        assert (widget.state, widget.live_revision_id) == (WidgetState.DELETED, third.id)
 
 
 async def test_publication_commits_imports_and_round_trips_on_postgres(tmp_path: Path) -> None:

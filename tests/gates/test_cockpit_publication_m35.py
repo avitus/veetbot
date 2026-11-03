@@ -8,15 +8,21 @@ the sandbox suite repeats the screen and rejection gates with the real one.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
+from agent_core.application.cockpit import OUTBOX_BATCH_SIZE
+from agent_core.application.cockpit_diagnostics import diagnostics
+from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import (
     CockpitEventKind,
+    CommitOutboxEntry,
     DeviceClass,
     Layout,
+    OutboxOperation,
     Placement,
     RevisionSource,
     RevisionState,
@@ -432,6 +438,419 @@ async def _a_person_version_imported_while_a_create_waits_still_wins() -> None:
             assert widget.live_revision_id is not None
             live = await uow.cockpit_widgets.get_revision(PRINCIPAL, widget.live_revision_id)
         assert live.source is RevisionSource.OWNER_GIT
+
+
+async def _queue_a_removal_that_failed(stack: Stack, shown: UUID, fault: str) -> UUID:
+    """A delete the card bound to `shown`, whose commit failed and is now in backoff."""
+    removal = await stack.publication.delete(PRINCIPAL, "weather", expected_head=shown)
+    stack.remote.fail_next("PATCH", BRANCH_REF, fault)
+    assert await stack.outbox.run_once() == 0
+    return removal.revision_id
+
+
+async def _assert_refused_while_removing(stack: Stack, shown: UUID) -> None:
+    with pytest.raises(ConflictError) as refused:
+        await stack.publication.write(
+            PRINCIPAL, "weather", package("newer"), expected_revision=shown
+        )
+    assert refused.value.reason == "removal_queued"
+
+
+async def test_a_write_cannot_overtake_a_queued_removal_and_be_removed_unseen() -> None:
+    """The delete card showed `shown`, so a newer revision must never go live and then vanish."""
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        await _queue_a_removal_that_failed(stack, shown, "unavailable")
+
+        await _assert_refused_while_removing(stack, shown)
+        assert await stack.outbox.run_once() == 0
+        assert await _live(stack) == shown
+        assert stack.head_files("weather") == package("v1")
+        async with stack.uow_factory() as uow:
+            waiting = await diagnostics(uow, PRINCIPAL, "weather", None)
+        assert waiting["publication"]["operation"] == "remove"
+
+        stack.later()
+        assert await stack.outbox.run_once() == 1
+        assert stack.head_files("weather") == {}
+        async with stack.uow_factory() as uow:
+            widget = await uow.cockpit_widgets.get_widget(PRINCIPAL, "weather")
+            revisions = await uow.cockpit_widgets.list_revisions(PRINCIPAL, "weather", limit=9)
+        assert (widget.state, [revision.id for revision in revisions]) == (
+            WidgetState.DELETED,
+            [shown],
+        )
+
+        # Nothing is lost for good: once the removal finished, the change can be made afresh.
+        again = await stack.publication.write(
+            PRINCIPAL, "weather", package("newer"), expected_revision=None
+        )
+        assert await stack.outbox.run_once() == 1
+        assert await _live(stack) == again.id
+
+
+async def test_a_removal_whose_response_was_lost_also_refuses_a_write_and_lands_once() -> None:
+    """Its commit may already be on the branch, so nothing accepted now could survive it."""
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        removal = await _queue_a_removal_that_failed(stack, shown, "lost")
+        await _assert_refused_while_removing(stack, shown)
+
+        stack.later()
+        assert await stack.outbox.run_once() == 1
+        assert stack.trailer_count(removal) == 1
+        async with stack.uow_factory() as uow:
+            assert (await uow.cockpit_widgets.get_widget(PRINCIPAL, "weather")).state is (
+                WidgetState.DELETED
+            )
+
+
+async def test_a_revert_is_refused_while_a_removal_is_queued() -> None:
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await _create_live(stack, "v2")
+        await _queue_a_removal_that_failed(stack, second, "unavailable")
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.revert(PRINCIPAL, "weather", first)
+        assert refused.value.reason == "removal_queued"
+
+
+async def test_a_restore_is_refused_while_a_removal_waits_on_a_widget_a_person_deleted() -> None:
+    async with publication_stack() as stack:
+        shown = await _create_live(stack)
+        await stack.importer.run_once()
+        await _queue_a_removal_that_failed(stack, shown, "unavailable")
+        stack.remote.commit_as_person(
+            {f"cockpit/widgets/weather/{name}": None for name in package()},
+            message="a person removes weather\n",
+        )
+        assert await stack.importer.run_once() == 1
+        with pytest.raises(ConflictError) as refused:
+            await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert refused.value.reason == "removal_queued"
+
+        stack.later()
+        assert await stack.outbox.run_once() == 1
+        # The person's commit beat the removal, which has left the queue, so a restore is accepted.
+        restored = await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert restored.state is RevisionState.PENDING_COMMIT
+
+
+async def test_a_delete_waits_behind_the_write_its_card_showed() -> None:
+    """Overtaking the write would remove the widget, and the write would then bring it back."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        shown = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        await stack.publication.delete(PRINCIPAL, "weather", expected_head=shown.id)
+
+        assert await stack.outbox.run_once() == 0
+        assert await _live(stack) == first
+
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert stack.head_files("weather") == {}
+        assert stack.trailer_count(shown.id) == 1
+        async with stack.uow_factory() as uow:
+            assert (await uow.cockpit_widgets.get_widget(PRINCIPAL, "weather")).state is (
+                WidgetState.DELETED
+            )
+
+
+async def test_a_newer_write_waits_behind_the_one_it_updates() -> None:
+    """Overtaking it would let the older package replace the newer one when its backoff ends."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        third = await stack.publication.write(
+            PRINCIPAL, "weather", package("v3"), expected_revision=second.id
+        )
+
+        assert await stack.outbox.run_once() == 0
+        assert await _live(stack) == first
+
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert await _live(stack) == third.id
+        assert await _state(stack, second.id) is RevisionState.SUPERSEDED
+        assert stack.head_files("weather") == package("v3")
+
+
+@pytest.mark.parametrize("step", [0, -60], ids=["same-instant", "clock-stepped-back"])
+async def test_a_newer_write_stays_behind_the_older_one_whatever_the_clock_says(step: int) -> None:
+    """The stored order is acceptance order, so the older package can never land last."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.clock.advance(timedelta(seconds=step))
+        third = await stack.publication.write(
+            PRINCIPAL, "weather", package("v3"), expected_revision=second.id
+        )
+        async with stack.uow_factory() as uow:
+            queued = await uow.cockpit_outbox.due(
+                PRINCIPAL.tenant_id, now=stack.clock.now() + timedelta(days=1), limit=10
+            )
+        accepted = {entry.revision_id: entry.created_at for entry in queued}
+        assert accepted[second.id] < accepted[third.id]
+
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert await _live(stack) == third.id
+        assert stack.head_files("weather") == package("v3")
+
+
+async def test_a_delete_stays_behind_the_write_it_showed_when_the_clock_steps_back() -> None:
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        shown = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.clock.advance(timedelta(seconds=-60))
+        await stack.publication.delete(PRINCIPAL, "weather", expected_head=shown.id)
+
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert stack.head_files("weather") == {}
+        assert stack.trailer_count(shown.id) == 1
+
+
+async def test_a_second_create_yields_to_a_person_imported_at_the_same_instant() -> None:
+    """A queue place can run ahead of the clock; the person's version still wins."""
+    async with publication_stack() as stack:
+        await stack.importer.run_once()
+        first = await stack.publication.write(
+            PRINCIPAL, "weather", package("v1"), expected_revision=None
+        )
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first.id
+        )
+        human = _person_commits(stack, "p")
+        assert await stack.importer.run_once() == 1
+
+        assert await stack.outbox.run_once() == 2
+        assert await _state(stack, first.id) is RevisionState.CONFLICTED
+        assert await _state(stack, second.id) is RevisionState.CONFLICTED
+        assert await stack.repository.head() == human
+
+
+async def test_a_queued_delete_yields_to_a_person_imported_at_the_same_instant() -> None:
+    async with publication_stack() as stack:
+        await stack.importer.run_once()
+        write = await stack.publication.write(
+            PRINCIPAL, "weather", package("v1"), expected_revision=None
+        )
+        await stack.publication.delete(PRINCIPAL, "weather", expected_head=write.id)
+        human = _person_commits(stack, "p")
+        assert await stack.importer.run_once() == 1
+
+        assert await stack.outbox.run_once() == 2
+        assert await _state(stack, write.id) is RevisionState.CONFLICTED
+        assert await stack.repository.head() == human
+        assert stack.head_files("weather") == package("p")
+
+
+async def _queue_entries(
+    stack: Stack, owner: Principal, slugs: list[str], *, accepted: timedelta
+) -> None:
+    """Entries with no revision behind them, due now and accepted `accepted` from now."""
+
+    now = stack.clock.now()
+    async with stack.uow_factory() as uow:
+        for slug in slugs:
+            await uow.cockpit_outbox.enqueue(
+                CommitOutboxEntry(
+                    tenant_id=owner.tenant_id,
+                    principal_id=owner.principal_id,
+                    revision_id=uuid4(),
+                    slug=slug,
+                    operation=OutboxOperation.WRITE,
+                    next_attempt_at=now,
+                    created_at=now + accepted,
+                )
+            )
+
+
+async def test_another_owners_queue_does_not_fill_this_workers_batch() -> None:
+    async with publication_stack() as stack:
+        someone_else = PRINCIPAL.model_copy(update={"principal_id": "someone-else"})
+        await _queue_entries(
+            stack,
+            someone_else,
+            [f"other-{index}" for index in range(OUTBOX_BATCH_SIZE)],
+            accepted=timedelta(hours=-1),
+        )
+        mine = await stack.publication.write(
+            PRINCIPAL, "weather", package("v1"), expected_revision=None
+        )
+        stack.later(1)
+
+        assert await stack.outbox.run_once() == 1
+        assert await _live(stack) == mine.id
+
+
+async def test_a_newer_write_waits_behind_an_older_one_in_backoff() -> None:
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        third = await stack.publication.write(
+            PRINCIPAL, "weather", package("v3"), expected_revision=second.id
+        )
+
+        assert await stack.outbox.run_once() == 0
+        assert await _live(stack) == first
+        assert stack.head_files("weather") == package("v1")
+
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert await _live(stack) == third.id
+        assert stack.head_files("weather") == package("v3")
+
+
+async def test_entries_waiting_behind_a_retry_cannot_crowd_it_out_of_the_batch() -> None:
+    """A long outage leaves a full batch of waiting entries due before the retry they wait on."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        await _queue_entries(
+            stack, PRINCIPAL, ["weather"] * OUTBOX_BATCH_SIZE, accepted=timedelta(hours=1)
+        )
+
+        stack.later()
+        assert await stack.outbox.run_once() == 1
+        assert await _live(stack) == second.id
+        assert stack.head_files("weather") == package("v2")
+
+
+async def test_the_head_is_the_newest_accepted_write_when_the_clock_stepped_back() -> None:
+    """A delete or a write naming the older one would replace a version nobody saw."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.clock.advance(timedelta(seconds=-60))
+        third = await stack.publication.write(
+            PRINCIPAL, "weather", package("v3"), expected_revision=second.id
+        )
+
+        head = await stack.publication.head_revision(PRINCIPAL, "weather")
+        assert head is not None and head.id == third.id
+        with pytest.raises(ConflictError):
+            await stack.publication.delete(PRINCIPAL, "weather", expected_head=second.id)
+        with pytest.raises(ConflictError):
+            await stack.publication.write(
+                PRINCIPAL, "weather", package("v4"), expected_revision=second.id
+            )
+
+
+async def test_the_head_stays_the_write_a_queued_delete_showed() -> None:
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        shown = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        await stack.publication.delete(PRINCIPAL, "weather", expected_head=shown.id)
+
+        head = await stack.publication.head_revision(PRINCIPAL, "weather")
+        assert head is not None and head.id == shown.id
+
+
+def _person_commits(stack: Stack, marker: str | None) -> str:
+    """A person's commit of the whole weather package; no marker removes it."""
+
+    return stack.remote.commit_as_person(
+        {
+            f"cockpit/widgets/weather/{name}": None if marker is None else text
+            for name, text in package(marker or "").items()
+        },
+        message="a person changes weather\n",
+    )
+
+
+async def _restore_after_a_persons_delete(stack: Stack) -> UUID:
+    shown = await _create_live(stack)
+    await stack.importer.run_once()
+    _person_commits(stack, None)
+    await stack.importer.run_once()
+    assert await stack.publication.head_revision(PRINCIPAL, "weather") is None
+    return (await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)).id
+
+
+async def test_a_restore_goes_live_over_a_delete_a_person_made_on_the_branch() -> None:
+    """The imported delete is what the owner is undoing, not a newer change to yield to."""
+    async with publication_stack() as stack:
+        restored = await _restore_after_a_persons_delete(stack)
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored) is RevisionState.LIVE
+        assert stack.head_files("weather") == package()
+        head = await stack.repository.head()
+        assert head is not None
+        assert stack.remote.commits[head].message.startswith("cockpit: restore weather\n")
+        assert await stack.importer.run_once() == 1
+        async with stack.uow_factory() as uow:
+            widget = await uow.cockpit_widgets.get_widget(PRINCIPAL, "weather")
+        assert (widget.state, widget.live_revision_id) == (WidgetState.ACTIVE, restored)
+
+
+async def test_a_restore_brings_back_the_version_a_person_published_and_then_deleted() -> None:
+    async with publication_stack() as stack:
+        _person_commits(stack, "p")
+        await stack.importer.run_once()
+        shown = await _live(stack)
+        stack.later()
+        _person_commits(stack, None)
+        await stack.importer.run_once()
+        stack.later()
+        restored = await stack.publication.restore(PRINCIPAL, "weather", expected_live=shown)
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored.id) is RevisionState.LIVE
+        assert stack.head_files("weather") == package("p")
+
+
+async def test_a_restore_ignores_other_widgets_changed_since_the_persons_delete() -> None:
+    async with publication_stack() as stack:
+        restored = await _restore_after_a_persons_delete(stack)
+        stack.remote.commit_as_person(
+            {"cockpit/widgets/markets/widget.json": "{}"}, message="start markets\n"
+        )
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored) is RevisionState.LIVE
+
+
+@pytest.mark.parametrize(
+    ("marker", "imported"),
+    [("p", False), ("p", True), ("REJECT", True)],
+    ids=["still-on-the-branch", "already-imported", "imported-as-invalid"],
+)
+async def test_a_person_committing_after_a_restore_was_accepted_still_wins(
+    marker: str, imported: bool
+) -> None:
+    async with publication_stack() as stack:
+        restored = await _restore_after_a_persons_delete(stack)
+        human = _person_commits(stack, marker)
+        if imported:
+            assert await stack.importer.run_once() == 1
+        assert await stack.outbox.run_once() == 1
+        assert await _state(stack, restored) is RevisionState.CONFLICTED
+        assert await stack.repository.head() == human
+        assert stack.trailer_count(restored) == 0
 
 
 async def test_a_restore_is_refused_when_another_package_went_live_while_it_built() -> None:

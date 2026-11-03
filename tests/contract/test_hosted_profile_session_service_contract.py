@@ -102,6 +102,9 @@ class FakeSessionRuntime:
     observe_started: asyncio.Event | None = None
     observe_release: asyncio.Event | None = None
     navigate_error: Exception | None = None
+    # The page loaded, but reading it for an agent failed.
+    read_error: Exception | None = None
+    observe_error: Exception | None = None
     # Device-handoff verification: what each load shows, keyed by whether the
     # runtime started with a session, and the failures a scenario injects.
     scenario: HandoffScenario | None = None
@@ -144,9 +147,24 @@ class FakeSessionRuntime:
         """Simulate the browser navigation result needed by this failure-path regression."""
         if self.navigate_error is not None:
             raise self.navigate_error
+        if self.read_error is not None:
+            raise self.read_error
         return BrowserObservation(url=url, revision="revision-1", text="safe observation")
 
+    async def open_for_sign_in(self, url: str) -> None:
+        del url
+        if self.navigate_error is not None:
+            raise self.navigate_error
+
+    async def page_url(self) -> str:
+        return (await self._current_page()).url
+
     async def observe(self) -> BrowserObservation:
+        if self.observe_error is not None:
+            raise self.observe_error
+        return await self._current_page()
+
+    async def _current_page(self) -> BrowserObservation:
         if self.observe_started is not None:
             self.observe_started.set()
         if self.observe_release is not None:
@@ -627,6 +645,23 @@ async def assert_authentication_ceremony_is_direct_single_use_and_runtime_decide
         assert runtimes[0].closed is True
 
 
+async def test_a_sign_in_finishes_on_a_page_too_busy_for_an_agent_to_read(
+    tmp_path: Path,
+) -> None:
+    """Finishing only needs where the owner landed, not a reading of the page."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    runtimes[0].authentication = BrowserAuthenticationStatus.READY
+    runtimes[0].observe_error = BrowserProviderError("tool.browser.page_changed", retryable=False)
+
+    result = await sessions.refresh_authentication(ceremony.id, principal())
+
+    assert result.status is BrowserAuthenticationStatus.READY
+
+
 @pytest.mark.parametrize(
     "runtime_status",
     [
@@ -810,6 +845,46 @@ async def test_authentication_launch_navigation_failure_is_stable_and_discards_r
     assert retried.launch_url is not None
     assert len(runtimes) == 2
     assert runtimes[1].closed is False
+
+
+async def test_a_sign_in_page_that_cannot_be_read_still_opens_for_the_owner(
+    tmp_path: Path,
+) -> None:
+    """Production, 2026-11-02: Chase's page kept moving, and reading it ended the sign-in."""
+
+    lifecycle, _unused, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    keyring = StaticProfileKeyring(
+        {"key-v1": hashlib.sha256(b"synthetic-session-key").digest()},
+        current_version="key-v1",
+    )
+
+    def moving_page(tenant_id: str) -> FakeSessionRuntime:
+        del tenant_id
+        runtime = FakeSessionRuntime(
+            read_error=BrowserProviderError("tool.browser.page_changed", retryable=False)
+        )
+        runtimes.append(runtime)
+        return runtime
+
+    sessions = HostedProfileSessionService(
+        FilesystemEncryptedProfileStore(tmp_path / "profiles", keyring),
+        runtime_factory=moving_page,
+        now=lambda: NOW,
+        process_secret=b"synthetic-process-secret-with-32-bytes",
+        ceremony_base_url="https://browser-login.example.test",
+    )
+
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+
+    assert ceremony.launch_url is not None
+    assert ceremony.status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    assert runtimes[-1].closed is False
 
 
 # --- ADR-0128: device sign-in handoff --------------------------------------

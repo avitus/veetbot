@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
@@ -28,6 +29,11 @@ from agent_core.ports.cockpit import (
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.jobs import JobScreen
 from agent_core.ports.persistence import UnitOfWorkFactory
+
+logger = logging.getLogger(__name__)
+
+_RETRY_SECONDS = 30
+_RETRY_MAX_SECONDS = 900
 
 
 def job_commit_message(slug: str, revision_id: UUID, *, archive: bool = False) -> str:
@@ -111,6 +117,8 @@ class JobPublication:
                 raise ConflictError(
                     "The job revision changed or publication is pending.", reason="job_changed"
                 )
+            if archive and saved.archived:
+                raise ConflictError("The job is already archived.", reason="job_archived")
             names = await screen_names(uow, principal, self.owner_names)
             values = list(await screen_settings_values(uow, principal))
             for job in await uow.jobs.list(principal):
@@ -195,41 +203,81 @@ class JobPublication:
             if entry.principal_id != principal.principal_id:
                 continue
             try:
-                await self._commit(principal, entry)
-            except PublicationPrivacyError:
-                async with self.uow_factory() as uow:
-                    current = await uow.jobs.get(principal, entry.slug)
-                    revision = current.revisions[str(entry.revision_id)]
-                    if revision.state == "pending_commit":
-                        await uow.jobs.put(
-                            current.model_copy(
-                                update={
-                                    "version": current.version + 1,
-                                    "revisions": {
-                                        **current.revisions,
-                                        str(revision.id): revision.model_copy(
-                                            update={"state": "rejected"}
-                                        ),
-                                    },
-                                }
-                            ),
-                            expected_version=current.version,
-                        )
-                    await uow.job_outbox.complete(principal, entry.revision_id)
+                completed += await self._attempt(principal, entry)
             except (WidgetRepositoryUnavailableError, BranchMovedError, ConflictError):
-                async with self.uow_factory() as uow:
-                    await uow.job_outbox.reschedule(
-                        principal,
-                        entry.revision_id,
-                        attempts=entry.attempts + 1,
-                        next_attempt_at=self.clock.now() + timedelta(seconds=30),
-                        last_error=(
-                            "Job publication is waiting for the repository or a concurrent edit."
-                        ),
-                    )
-            else:
-                completed += 1
+                await self._reschedule(
+                    principal,
+                    entry,
+                    delay_seconds=_RETRY_SECONDS,
+                    error="Job publication is waiting for the repository or a concurrent edit.",
+                )
+            except Exception as error:
+                # A refused path, an unavailable screen or a lost revision is this
+                # entry's problem: it backs off alone, and every other job still commits.
+                # The stored error and the log name only the type, since jobs carry private
+                # inputs and a database error's text can quote the values it was bound to.
+                logger.error(
+                    "job_publication_entry_failed",
+                    extra={
+                        "revision_id": str(entry.revision_id),
+                        "slug": entry.slug,
+                        "error_class": type(error).__name__,
+                    },
+                )
+                await self._reschedule(
+                    principal,
+                    entry,
+                    delay_seconds=min(
+                        _RETRY_MAX_SECONDS, _RETRY_SECONDS * 2 ** min(entry.attempts, 16)
+                    ),
+                    error=f"Job publication failed: {type(error).__name__}",
+                )
         return completed
+
+    async def _attempt(self, principal: Principal, entry: CommitOutboxEntry) -> int:
+        """Try one queued revision and count it unless the privacy screen rejected it."""
+        try:
+            await self._commit(principal, entry)
+        except PublicationPrivacyError:
+            async with self.uow_factory() as uow:
+                current = await uow.jobs.get(principal, entry.slug)
+                revision = current.revisions[str(entry.revision_id)]
+                if revision.state == "pending_commit":
+                    await uow.jobs.put(
+                        current.model_copy(
+                            update={
+                                "version": current.version + 1,
+                                "revisions": {
+                                    **current.revisions,
+                                    str(revision.id): revision.model_copy(
+                                        update={"state": "rejected"}
+                                    ),
+                                },
+                            }
+                        ),
+                        expected_version=current.version,
+                    )
+                await uow.job_outbox.complete(principal, entry.revision_id)
+            return 0
+        return 1
+
+    async def _reschedule(
+        self,
+        principal: Principal,
+        entry: CommitOutboxEntry,
+        *,
+        delay_seconds: int,
+        error: str,
+    ) -> None:
+        """Put one queued revision back to wait for its next attempt."""
+        async with self.uow_factory() as uow:
+            await uow.job_outbox.reschedule(
+                principal,
+                entry.revision_id,
+                attempts=entry.attempts + 1,
+                next_attempt_at=self.clock.now() + timedelta(seconds=delay_seconds),
+                last_error=error,
+            )
 
     async def _commit(self, principal: Principal, entry: CommitOutboxEntry) -> None:
         """Publish or reconcile one queued revision while preserving intervening human edits."""
@@ -278,12 +326,21 @@ class JobPublication:
                     at=entry.expected_parent_sha,
                 )
             )
-            if current_files != expected_files:
-                # A human's newer package is never overwritten by a queued edit.
+            # A human's newer package is never overwritten by a queued edit. An archive
+            # with no package at its parent or now has nothing to remove and no attempt
+            # could succeed, so it settles without a commit and leaves the live pointer.
+            settled = (
+                "conflicted"
+                if current_files != expected_files
+                else "superseded"
+                if archive and current_files is None
+                else None
+            )
+            if settled is not None:
                 async with self.uow_factory() as uow:
                     revisions = {
                         **saved.revisions,
-                        str(revision.id): revision.model_copy(update={"state": "conflicted"}),
+                        str(revision.id): revision.model_copy(update={"state": settled}),
                     }
                     await uow.jobs.put(
                         saved.model_copy(

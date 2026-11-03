@@ -20,6 +20,7 @@ from agent_core.domain.cockpit import (
     FeedSnapshot,
     ImportFailure,
     Layout,
+    OutboxOperation,
     RevisionState,
     Widget,
     WidgetRevision,
@@ -113,7 +114,8 @@ class WidgetCommitOutbox(Protocol):
 
     One entry per revision (`ConflictError` reason `commit_queued`). `due`
     returns the tenant's entries whose next attempt is at or before `now`,
-    oldest first. An optional principal filter is applied before the limit.
+    soonest attempt first, so a retry in backoff sorts after an entry accepted
+    later. An optional principal filter is applied before the limit.
     """
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry: ...
@@ -122,9 +124,28 @@ class WidgetCommitOutbox(Protocol):
         """The oldest outstanding operation for this owned widget, including backoff."""
         ...
 
+    async def newest_for_widget(
+        self, principal: Principal, slug: str, operation: OutboxOperation | None = None
+    ) -> CommitOutboxEntry | None:
+        """The newest outstanding operation for this owned widget, including backoff.
+
+        `operation` narrows it to that kind of operation.
+        """
+        ...
+
+    async def removal_queued(self, principal: Principal, slug: str) -> bool:
+        """Whether this owned widget has an outstanding removal, including backoff."""
+        ...
+
     async def due(
         self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]: ...
+
+    async def due_heads(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[CommitOutboxEntry]:
+        """This owner's due entries with no older outstanding entry for their widget."""
+        ...
 
     async def reschedule(
         self,
