@@ -2179,6 +2179,53 @@ async def test_a_sweep_kept_waiting_past_the_limit_starts_no_verification(tmp_pa
     assert view.status is BrowserAuthenticationStatus.EXPIRED
 
 
+async def test_a_sweep_kept_waiting_keeps_its_whole_budget(tmp_path: Path) -> None:
+    """The budget is for deciding, and starts at the first check, not in the queue before it."""
+    scenario, sessions, runtimes, _times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    sessions._verification_seconds = 0.4  # noqa: SLF001 - shorter than the queue plus the check
+    page = sessions._ceremonies[ceremony_id].runtime_lock  # noqa: SLF001 - the page is held
+    await page.acquire()
+    sweeping = asyncio.create_task(sessions.sweep())
+    await asyncio.sleep(0.3)
+    page.release()
+    await scenario.started.wait()
+    await asyncio.sleep(0.2)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+
+    assert view.status is BrowserAuthenticationStatus.READY
+    assert runtimes[0].closed is True
+
+
+async def test_a_sweep_waiting_on_a_stuck_page_does_not_hold_off_the_limit(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    _scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    sessions._verification_seconds = 0.01  # noqa: SLF001 - the budget the wait runs out of
+    page = sessions._ceremonies[ceremony_id].runtime_lock  # noqa: SLF001 - the page never frees
+    await page.acquire()
+
+    await asyncio.wait_for(sessions.sweep(), timeout=2)
+    times[0] += timedelta(seconds=6)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+    assert runtimes[0].closed is True
+    assert [
+        record.__dict__.get("failure_type")
+        for record in caplog.records
+        if record.getMessage() == "remote sign-in sweep failed"
+    ] == ["TimeoutError"]
+
+
 async def test_a_status_check_queued_past_the_limit_starts_no_verification(tmp_path: Path) -> None:
     """Only the verification already under way outlives the limit."""
     scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(

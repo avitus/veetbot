@@ -893,7 +893,8 @@ class HostedProfileSessionService:
     async def _sweep_ceremony(self, state: _CeremonyState) -> None:
         # From the first sample on: the limit closing the page between samples loses the sign-in.
         async with _verifying(state), asyncio.timeout(self._verification_seconds) as budget:
-            if await self._sample(state, first=True) is not BrowserAuthenticationStatus.READY:
+            first_sample = await self._sample(state, starts_budget=budget)
+            if first_sample is not BrowserAuthenticationStatus.READY:
                 return
             await asyncio.sleep(self._sweep_sample_seconds)
             if await self._sample(state) is not BrowserAuthenticationStatus.READY:
@@ -943,15 +944,19 @@ class HostedProfileSessionService:
                     await self._finish_ceremony_locked(state)
 
     async def _sample(
-        self, state: _CeremonyState, *, first: bool = False
+        self, state: _CeremonyState, *, starts_budget: asyncio.Timeout | None = None
     ) -> BrowserAuthenticationStatus | None:
         async with state.runtime_lock:
             runtime = state.runtime
             if runtime is None or self._ceremonies.get(state.id) is not state:
                 return None
-            # A sweep kept waiting past the limit starts nothing.
-            if first and state.expires_at <= self._now():
-                return None
+            if starts_budget is not None:
+                # A sweep kept waiting past the limit starts nothing; one in time decides in full.
+                if state.expires_at <= self._now():
+                    return None
+                starts_budget.reschedule(
+                    asyncio.get_running_loop().time() + self._verification_seconds
+                )
             return await runtime.authentication_status()
 
     async def accept_device_session(
