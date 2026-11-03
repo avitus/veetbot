@@ -1,0 +1,54 @@
+{
+  "title": "Weather-aware garden actions collector",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "location",
+      "latitude",
+      "longitude",
+      "timezone",
+      "hydrangeas",
+      "references"
+    ],
+    "properties": {
+      "fixture": {
+        "type": "object"
+      },
+      "latitude": {
+        "type": "number"
+      },
+      "location": {
+        "type": "string"
+      },
+      "timezone": {
+        "type": "string"
+      },
+      "longitude": {
+        "type": "number"
+      },
+      "hydrangeas": {
+        "type": "string"
+      },
+      "overseeded": {
+        "type": "string"
+      },
+      "references": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "fertilizer_at_sowing": {
+        "type": "boolean"
+      }
+    },
+    "additionalProperties": false
+  },
+  "calls": [
+    "feed.publish",
+    "http.request"
+  ],
+  "feeds": [
+    "agent.garden-next-actions"
+  ]
+}
