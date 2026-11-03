@@ -272,6 +272,14 @@ class CockpitPublication:
 
         if widget is None:
             return None
+        # The queue holds acceptance order; a revision's own time is a clock reading.
+        queued = await uow.cockpit_outbox.newest_for_widget(
+            principal, widget.slug, OutboxOperation.WRITE
+        )
+        if queued is not None:
+            revision = await uow.cockpit_widgets.get_revision(principal, queued.revision_id)
+            if revision.state is RevisionState.PENDING_COMMIT:
+                return revision.id
         waiting = await uow.cockpit_widgets.list_revisions(
             principal,
             widget.slug,
@@ -676,32 +684,29 @@ class CommitOutboxWorker:
         self._events = _Events(clock, ids)
 
     async def run_once(self) -> int:
-        """Attempt every due entry once; return how many reached an outcome."""
+        """Attempt each due widget's entries in order; return how many reached an outcome."""
 
         async with self._uow_factory() as uow:
-            queued = await uow.cockpit_outbox.due(
-                self._principal.tenant_id,
-                now=self._clock.now(),
-                limit=OUTBOX_BATCH_SIZE,
-                principal_id=self._principal.principal_id,
+            # Only heads, so entries waiting behind a retry cannot crowd it out of the batch.
+            heads = await uow.cockpit_outbox.due_heads(
+                self._principal, now=self._clock.now(), limit=OUTBOX_BATCH_SIZE
             )
-        blocked: set[str] = set()
         settled = 0
-        # Acceptance order, not attempt order: a retry in backoff still goes first for its widget.
-        for entry in sorted(queued, key=lambda item: (item.created_at, str(item.revision_id))):
-            if entry.slug in blocked:
-                continue
-            # The batch can hold this entry and not an older one still in backoff.
-            async with self._uow_factory() as uow:
-                first = await uow.cockpit_outbox.first_for_widget(self._principal, entry.slug)
-            if first is None or first.revision_id != entry.revision_id:
-                blocked.add(entry.slug)
-                continue
+        for head in heads:
+            settled += await self._drain(head)
+        return settled
+
+    async def _drain(self, head: CommitOutboxEntry) -> int:
+        """Attempt a widget's entries in acceptance order until one fails or is not due."""
+
+        settled = 0
+        entry: CommitOutboxEntry | None = head
+        while entry is not None and entry.next_attempt_at <= self._clock.now():
             try:
                 settled += await self._attempt(entry)
             except WidgetRepositoryUnavailableError as error:
                 await self._reschedule(entry, str(error))
-                blocked.add(entry.slug)
+                break
             except Exception as error:
                 # A refused path, a lost revision or an unexpected GitHub answer
                 # is this entry's problem: it retries with backoff behind the
@@ -711,7 +716,9 @@ class CommitOutboxWorker:
                     extra={"revision_id": str(entry.revision_id), "slug": entry.slug},
                 )
                 await self._reschedule(entry, f"{type(error).__name__}: {error}")
-                blocked.add(entry.slug)
+                break
+            async with self._uow_factory() as uow:
+                entry = await uow.cockpit_outbox.first_for_widget(self._principal, entry.slug)
         return settled
 
     async def _reschedule(self, entry: CommitOutboxEntry, error: str) -> None:

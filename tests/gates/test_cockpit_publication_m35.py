@@ -658,41 +658,46 @@ async def test_a_queued_delete_yields_to_a_person_imported_at_the_same_instant()
         assert stack.head_files("weather") == package("p")
 
 
-async def _fill_the_batch(stack: Stack, owner: Principal, *, count: int) -> list[UUID]:
-    """Older due entries on another widget, ahead of anything queued now."""
+async def _queue_entries(
+    stack: Stack, owner: Principal, slugs: list[str], *, accepted: timedelta
+) -> None:
+    """Entries with no revision behind them, due now and accepted `accepted` from now."""
 
-    earlier = stack.clock.now() - timedelta(hours=1)
-    filler = [uuid4() for _ in range(count)]
+    now = stack.clock.now()
     async with stack.uow_factory() as uow:
-        for revision_id in filler:
+        for slug in slugs:
             await uow.cockpit_outbox.enqueue(
                 CommitOutboxEntry(
                     tenant_id=owner.tenant_id,
                     principal_id=owner.principal_id,
-                    revision_id=revision_id,
-                    slug="other",
+                    revision_id=uuid4(),
+                    slug=slug,
                     operation=OutboxOperation.WRITE,
-                    next_attempt_at=earlier,
-                    created_at=earlier,
+                    next_attempt_at=now,
+                    created_at=now + accepted,
                 )
             )
-    return filler
 
 
 async def test_another_owners_queue_does_not_fill_this_workers_batch() -> None:
     async with publication_stack() as stack:
         someone_else = PRINCIPAL.model_copy(update={"principal_id": "someone-else"})
-        await _fill_the_batch(stack, someone_else, count=OUTBOX_BATCH_SIZE)
+        await _queue_entries(
+            stack,
+            someone_else,
+            [f"other-{index}" for index in range(OUTBOX_BATCH_SIZE)],
+            accepted=timedelta(hours=-1),
+        )
         mine = await stack.publication.write(
             PRINCIPAL, "weather", package("v1"), expected_revision=None
         )
+        stack.later(1)
 
         assert await stack.outbox.run_once() == 1
         assert await _live(stack) == mine.id
 
 
-async def test_a_newer_write_waits_behind_an_older_one_the_batch_left_out() -> None:
-    """A full batch can hold the newer write and not the older one still in backoff."""
+async def test_a_newer_write_waits_behind_an_older_one_in_backoff() -> None:
     async with publication_stack() as stack:
         first = await _create_live(stack, "v1")
         second = await stack.publication.write(
@@ -703,19 +708,68 @@ async def test_a_newer_write_waits_behind_an_older_one_the_batch_left_out() -> N
         third = await stack.publication.write(
             PRINCIPAL, "weather", package("v3"), expected_revision=second.id
         )
-        filler = await _fill_the_batch(stack, PRINCIPAL, count=OUTBOX_BATCH_SIZE - 1)
 
         assert await stack.outbox.run_once() == 0
         assert await _live(stack) == first
         assert stack.head_files("weather") == package("v1")
 
-        async with stack.uow_factory() as uow:
-            for revision_id in filler:
-                await uow.cockpit_outbox.complete(PRINCIPAL, revision_id)
         stack.later()
         assert await stack.outbox.run_once() == 2
         assert await _live(stack) == third.id
         assert stack.head_files("weather") == package("v3")
+
+
+async def test_entries_waiting_behind_a_retry_cannot_crowd_it_out_of_the_batch() -> None:
+    """A long outage leaves a full batch of waiting entries due before the retry they wait on."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        await _queue_entries(
+            stack, PRINCIPAL, ["weather"] * OUTBOX_BATCH_SIZE, accepted=timedelta(hours=1)
+        )
+
+        stack.later()
+        assert await stack.outbox.run_once() == 1
+        assert await _live(stack) == second.id
+        assert stack.head_files("weather") == package("v2")
+
+
+async def test_the_head_is_the_newest_accepted_write_when_the_clock_stepped_back() -> None:
+    """A delete or a write naming the older one would replace a version nobody saw."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.clock.advance(timedelta(seconds=-60))
+        third = await stack.publication.write(
+            PRINCIPAL, "weather", package("v3"), expected_revision=second.id
+        )
+
+        head = await stack.publication.head_revision(PRINCIPAL, "weather")
+        assert head is not None and head.id == third.id
+        with pytest.raises(ConflictError):
+            await stack.publication.delete(PRINCIPAL, "weather", expected_head=second.id)
+        with pytest.raises(ConflictError):
+            await stack.publication.write(
+                PRINCIPAL, "weather", package("v4"), expected_revision=second.id
+            )
+
+
+async def test_the_head_stays_the_write_a_queued_delete_showed() -> None:
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        shown = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        await stack.publication.delete(PRINCIPAL, "weather", expected_head=shown.id)
+
+        head = await stack.publication.head_revision(PRINCIPAL, "weather")
+        assert head is not None and head.id == shown.id
 
 
 def _person_commits(stack: Stack, marker: str | None) -> str:

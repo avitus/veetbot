@@ -127,6 +127,39 @@ async def the_newest_operation_is_found_through_backoff_for_its_owner_and_widget
 
 
 @scenario
+async def the_newest_write_is_found_behind_a_removal(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    removal = entry(owner, created_minutes=1, operation=OutboxOperation.REMOVE)
+    await outbox.enqueue(removal)
+    assert await outbox.newest_for_widget(owner, "weather", OutboxOperation.WRITE) is None
+    assert await outbox.newest_for_widget(owner, "weather", OutboxOperation.REMOVE) == removal
+    write = await outbox.enqueue(entry(owner))
+    assert await outbox.newest_for_widget(owner, "weather", OutboxOperation.WRITE) == write
+    assert await outbox.newest_for_widget(owner, "weather") == removal
+
+
+@scenario
+async def only_each_widgets_oldest_entry_is_due_and_the_limit_counts_only_those(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    """A waiting entry due before the one it waits on takes no place in the batch."""
+    retried = await outbox.enqueue(entry(owner, due_in_minutes=5, created_minutes=1))
+    for minutes in (2, 3):
+        await outbox.enqueue(entry(owner, created_minutes=minutes))
+    other = await outbox.enqueue(
+        entry(owner, created_minutes=4, due_in_minutes=1).model_copy(update={"slug": "markets"})
+    )
+    await outbox.enqueue(entry(foreign(owner), created_minutes=-1))
+
+    assert await outbox.due_heads(owner, now=NOW, limit=10) == []
+    assert await outbox.due_heads(owner, now=NOW + timedelta(minutes=1), limit=10) == [other]
+    later = NOW + timedelta(minutes=5)
+    assert await outbox.due_heads(owner, now=later, limit=10) == [other, retried]
+    assert await outbox.due_heads(owner, now=later, limit=1) == [other]
+
+
+@scenario
 async def a_removal_counts_as_queued_through_its_backoff_and_only_for_its_owner_and_widget(
     outbox: WidgetCommitOutbox, owner: Principal
 ) -> None:

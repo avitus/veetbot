@@ -20,6 +20,7 @@ from agent_core.domain.cockpit import (
     FeedSnapshot,
     ImportFailure,
     Layout,
+    OutboxOperation,
     RevisionState,
     Widget,
     WidgetRevision,
@@ -123,8 +124,13 @@ class WidgetCommitOutbox(Protocol):
         """The oldest outstanding operation for this owned widget, including backoff."""
         ...
 
-    async def newest_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
-        """The newest outstanding operation for this owned widget, including backoff."""
+    async def newest_for_widget(
+        self, principal: Principal, slug: str, operation: OutboxOperation | None = None
+    ) -> CommitOutboxEntry | None:
+        """The newest outstanding operation for this owned widget, including backoff.
+
+        `operation` narrows it to that kind of operation.
+        """
         ...
 
     async def removal_queued(self, principal: Principal, slug: str) -> bool:
@@ -134,6 +140,12 @@ class WidgetCommitOutbox(Protocol):
     async def due(
         self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]: ...
+
+    async def due_heads(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[CommitOutboxEntry]:
+        """This owner's due entries with no older outstanding entry for their widget."""
+        ...
 
     async def reschedule(
         self,

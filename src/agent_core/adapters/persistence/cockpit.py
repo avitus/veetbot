@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, delete, func, insert, select, update
+from sqlalchemy import ColumnElement, Select, delete, func, insert, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -323,14 +323,18 @@ class InMemoryWidgetCommitOutbox:
                 default=None,
             )
 
-    async def newest_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+    async def newest_for_widget(
+        self, principal: Principal, slug: str, operation: OutboxOperation | None = None
+    ) -> CommitOutboxEntry | None:
         owned = _owner(principal)
         async with self._lock:
             return max(
                 (
                     entry
                     for key, entry in self._entries.items()
-                    if key[:2] == owned and entry.slug == slug
+                    if key[:2] == owned
+                    and entry.slug == slug
+                    and (operation is None or entry.operation is operation)
                 ),
                 key=lambda e: (e.created_at, str(e.revision_id)),
                 default=None,
@@ -362,6 +366,26 @@ class InMemoryWidgetCommitOutbox:
                 key=lambda item: (item.next_attempt_at, item.created_at, str(item.revision_id))
             )
             return due[:limit]
+
+    async def due_heads(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[CommitOutboxEntry]:
+        owned = _owner(principal)
+        async with self._lock:
+            heads: dict[str, CommitOutboxEntry] = {}
+            for key, entry in self._entries.items():
+                if key[:2] != owned:
+                    continue
+                head = heads.get(entry.slug)
+                if head is None or (entry.created_at, str(entry.revision_id)) < (
+                    head.created_at,
+                    str(head.revision_id),
+                ):
+                    heads[entry.slug] = entry
+            return sorted(
+                (head for head in heads.values() if head.next_attempt_at <= now),
+                key=lambda item: (item.next_attempt_at, item.created_at, str(item.revision_id)),
+            )[:limit]
 
     async def reschedule(
         self,
@@ -1074,7 +1098,9 @@ class PostgresWidgetCommitOutbox:
         )
         return _entry_from_row(row) if row else None
 
-    async def newest_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+    async def newest_for_widget(
+        self, principal: Principal, slug: str, operation: OutboxOperation | None = None
+    ) -> CommitOutboxEntry | None:
         row = await self._session.scalar(
             select(CockpitCommitOutboxRow)
             .where(
@@ -1082,6 +1108,11 @@ class PostgresWidgetCommitOutbox:
                 CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
                 CockpitCommitOutboxRow.principal_id == principal.principal_id,
                 CockpitCommitOutboxRow.slug == slug,
+                *(
+                    ()
+                    if operation is None
+                    else (CockpitCommitOutboxRow.operation == operation.value,)
+                ),
             )
             .order_by(
                 CockpitCommitOutboxRow.created_at.desc(), CockpitCommitOutboxRow.revision_id.desc()
@@ -1122,6 +1153,41 @@ class PostgresWidgetCommitOutbox:
                     CockpitCommitOutboxRow.created_at,
                     CockpitCommitOutboxRow.revision_id,
                 ).limit(limit)
+            )
+        ).scalars()
+        return [_entry_from_row(row) for row in rows]
+
+    async def due_heads(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[CommitOutboxEntry]:
+        older = aliased(CockpitCommitOutboxRow)
+        rows = (
+            await self._session.execute(
+                select(CockpitCommitOutboxRow)
+                .where(
+                    CockpitCommitOutboxRow.package_kind == self._kind,
+                    CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                    CockpitCommitOutboxRow.principal_id == principal.principal_id,
+                    CockpitCommitOutboxRow.next_attempt_at <= now,
+                    ~select(older.revision_id)
+                    .where(
+                        older.package_kind == CockpitCommitOutboxRow.package_kind,
+                        older.tenant_id == CockpitCommitOutboxRow.tenant_id,
+                        older.principal_id == CockpitCommitOutboxRow.principal_id,
+                        older.slug == CockpitCommitOutboxRow.slug,
+                        tuple_(older.created_at, older.revision_id)
+                        < tuple_(
+                            CockpitCommitOutboxRow.created_at, CockpitCommitOutboxRow.revision_id
+                        ),
+                    )
+                    .exists(),
+                )
+                .order_by(
+                    CockpitCommitOutboxRow.next_attempt_at,
+                    CockpitCommitOutboxRow.created_at,
+                    CockpitCommitOutboxRow.revision_id,
+                )
+                .limit(limit)
             )
         ).scalars()
         return [_entry_from_row(row) for row in rows]
