@@ -1788,7 +1788,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1552` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2663` against
-    `model-gateway.md:2013` and `milestone-map.md:1986`. The map
+    `model-gateway.md:2013` and `milestone-map.md:1987`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1895,7 +1895,7 @@ under the conflict it settles.
 The owner approved the complete proposal, USD 20/day and USD 200/rolling
 thirty-day aggregate automatic-email budgets, and implementation as a new
 parallel milestone on 2026-09-11 under ADR-0092. The canonical
-[email-experience.md](email-experience.md) declares thirty-two blocking gates.
+[email-experience.md](email-experience.md) declares thirty-three blocking gates.
 Its readiness verdict is **Authorized and specified; implementation in progress**.
 No pending implementation or private quality evidence is marked complete, and the
 milestone does not move the verified sequential ceiling. It reuses the Gmail MCP boundary, shared

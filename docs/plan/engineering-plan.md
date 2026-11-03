@@ -4042,7 +4042,7 @@ run history remain outside this read-only extension.
 The owner approved the complete client modes and email proposal and explicitly
 requested a new milestone on 2026-09-11 (ADR-0092). Milestone 26 is an independent
 parallel workstream and does not move the verified gate ceiling. The canonical
-[email-experience.md](email-experience.md) defines its thirty-two blocking gates,
+[email-experience.md](email-experience.md) defines its thirty-three blocking gates,
 exact approved quality thresholds, source lifecycle and implementation contracts.
 
 Implement:
@@ -4084,7 +4084,7 @@ Implement:
 
 Acceptance criteria:
 
-- Every one of the thirty-two declared gates passes with real implementation
+- Every one of the thirty-three declared gates passes with real implementation
   checks; no pending or private quality requirement is counted as complete.
 - All functional and approved quality requirements in the detailed design pass,
   including frozen chronological importance holdouts, personalized style/reply
@@ -4096,7 +4096,7 @@ Acceptance criteria:
 - Existing milestones and security requirements are preserved. Completing this
   parallel workstream does not advance the sequential verified ceiling.
 
-Excluded: background monitoring, Gmail push/digests, automatic Gmail writes,
+Excluded: background monitoring beyond ADR-0286's arrival checks, Gmail push/digests, automatic Gmail writes,
 Gmail draft synchronization, standing send grants, another provider, public OAuth,
 attachments, calendar, permanent mailbox deletion, terminal UI work, autonomous
 sending, offline-authoritative edits, model routing and a general learned memory

@@ -1193,7 +1193,15 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Research and discovery"].exists)
         attachEmailScreenshot("Clean email reading view")
         // macOS carries a text's string in its value, iOS in its label.
-        let original = app.staticTexts.containing(
+        // The quoted chain below the message's own text waits to be asked for.
+        let chain = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "The earlier question", "The earlier question")).firstMatch
+        let earlier = app.buttons["email.reader.earlier"]
+        XCTAssertTrue(earlier.waitForExistence(timeout: 5))
+        XCTAssertFalse(chain.exists)
+        activate(earlier)
+        XCTAssertTrue(chain.waitForExistence(timeout: 5))
+        let original = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Unsubscribe", "Unsubscribe")).firstMatch
         activate(toggle)
         XCTAssertTrue(original.waitForExistence(timeout: 5))

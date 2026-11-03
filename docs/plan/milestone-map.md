@@ -332,9 +332,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 38 subject specifications declare 635 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 644
-declarations, 641 registry entries once the 3 aliases are subtracted.
+The 38 subject specifications declare 636 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 645
+declarations, 642 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1558,9 +1558,9 @@ record, and the scheduling record is what this document is. Gate 7 is
 Milestone 1 rather than Milestone 0 because the build-sequence table it
 reads is only meaningful once there are build steps to order.
 
-### Client modes and email experience, thirty-two gates
+### Client modes and email experience, thirty-three gates
 
-[email-experience.md](email-experience.md) declares thirty-two further gates in
+[email-experience.md](email-experience.md) declares thirty-three further gates in
 the existing `email` area, all at Milestone 26 under ADR-0092. They preserve
 Milestone 18 requirements and the verified sequential ceiling.
 
@@ -1598,6 +1598,7 @@ Milestone 18 requirements and the verified sequential ceiling.
 30  gate.email.experience_privacy                            case    26
 31  gate.email.experience_api_boundaries                     case    26
 32  gate.email.experience_release_evidence                   case    26
+33  gate.email.experience_background_arrival_check           case    26
 ```
 
 ### Bland calling
@@ -1897,20 +1898,20 @@ milestone  new gates  cumulative  the earliest of them
                                   handshake, string-id idempotency,
                                   the template window, the loopback
                                   bind, inherited surface guarantees
-26                32         477  shared client modes, active email sync,
+26                33         478  shared client modes, active email sync,
                                   feedback, style, drafts, approved sends,
                                   shared semantic memory and lifecycle
-27                14         491  Bland calling and public correspondence intake
-28                36         527  People identity, temporal relationships, history and governed recall
-29                17         544  chat thread folders, owner-resolved grouping proposals, grounded grouping,
+27                14         492  Bland calling and public correspondence intake
+28                36         528  People identity, temporal relationships, history and governed recall
+29                17         545  chat thread folders, owner-resolved grouping proposals, grounded grouping,
                                   the typed-judgment port and judgment folder matching
-30                 5         549  restrictive-only advisory approval through the judgment port
-31                23         572  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent,
+30                 5         550  restrictive-only advisory approval through the judgment port
+31                23         573  bulk-sender census, authenticated one-click unsubscribe, public-HTTPS egress, gesture consent,
                                   suspected-spam flag and thread Report spam
-32                24         596  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
-33                12         608  general recall: candidate relevance, semantic search, evidence use and comparative activation
-34                10         618  owner records: isolation, trust rows, replay, determinism, scans, erasure, formation and the catalog
-35                23         641  Cockpit: offline widget builds, the public data-free branch, commit-before-activate,
+32                24         597  memory reconsolidation: contracts, lineage, recovery, evaluation and owner controls
+33                12         609  general recall: candidate relevance, semantic search, evidence use and comparative activation
+34                10         619  owner records: isolation, trust rows, replay, determinism, scans, erasure, formation and the catalog
+35                23         642  Cockpit: offline widget builds, the public data-free branch, commit-before-activate,
                                   the network-less realm, feeds, the stream and the three-mode shell
 ```
 
@@ -1954,7 +1955,7 @@ adds thirty-one more to `gate.memory.*`, and Milestone 22's fourteen are
 `gate.persona.*` in an area of their own; Milestone 23 adds twelve more to
 `gate.schedule.*`, Milestone 24's twelve return to the existing
 `gate.device.*` area, and Milestone 25's twelve open a `gate.whatsapp.*`
-area of their own. Milestone 26 adds thirty-two `gate.email.experience_*`
+area of their own. Milestone 26 adds thirty-three `gate.email.experience_*`
 entries to the existing email area. Milestone 27 adds fourteen `gate.call.*` entries,
 and Milestone 28 adds thirty-six `gate.people.*` entries. Milestone 29 adds thirteen
 `gate.folder.*` entries and four `gate.judgment.*` entries, and Milestone 30

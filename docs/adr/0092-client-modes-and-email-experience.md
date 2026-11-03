@@ -1,6 +1,8 @@
 # ADR-0092: Client modes and a shared adaptive email experience
 
 - Status: Accepted — owner authorized Milestone 26 implementation on 2026-09-11
+- Amended by: ADR-0286 (2026-11-01), which adds a server check for new mail to
+  decision 3's foreground-request-driven refresh
 - Date: 2026-09-11
 - Related: ADR-0049, ADR-0071, ADR-0077, ADR-0079, ADR-0085, ADR-0090
 - Approval proposal: [Client modes and email experience](../email-mode-proposal.md)

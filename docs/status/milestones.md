@@ -206,7 +206,7 @@ forwarding are built with the owner capture ceremony documented
 ### Milestone 26 — Client modes and adaptive email experience
 
 The owner approved the complete email experience and aggregate automatic-email
-budgets on 2026-09-11 under ADR-0092. Twenty-seven of its thirty-two registered
+budgets on 2026-09-11 under ADR-0092. Twenty-eight of its thirty-three registered
 gates now bind implemented backend and native acceptance checks; four private
 quality gates and the integrated release gate remain pending. No private quality or owner-smoke
 evidence is claimed. The milestone stays in progress and does not move the
@@ -215,7 +215,7 @@ verified ceiling. Remaining:
 - [ ] Calibrate aggregate cost and performance with authorized representative mailbox work
 - [ ] Execute frozen private importance, reply relevance and writing-style evaluations with the owner
 - [ ] Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
-- [ ] Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
+- [ ] Pass all thirty-three Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
 - [ ] Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
 
 ### Milestone 27 — Bland calling and public reception

@@ -21,6 +21,13 @@ EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
 # Background learning stops here; new mail keeps the rest of each ceiling (ADR-0256).
 EMAIL_LEARNING_SHARE = Decimal("0.75")
+# A server check stops here, leaving the rest for when the owner is in Email (ADR-0286).
+EMAIL_ARRIVAL_DAILY_SHARE = Decimal("0.5")
+EMAIL_ARRIVAL_MONTHLY_SHARE = Decimal("0.9")
+EMAIL_ARRIVAL_DAYS = 7
+EMAIL_ARRIVAL_MAX_WAIT_SECONDS = 3600
+EMAIL_ARRIVAL_MAX_FAILURES_COUNTED = 5
+EMAIL_EMPTY_CHECK_RETENTION_DAYS = 7
 EMAIL_HISTORY_DAYS = 90
 EMAIL_BODY_RETENTION = timedelta(days=30)
 
@@ -32,6 +39,8 @@ class EmailBudgetLimits(EmailValue):
     monthly_cost: Decimal = Field(ge=Decimal("0.01"), allow_inf_nan=False)
     # How long an unsubscribed sender has to comply before it is shown as still sending.
     unsubscribe_grace_days: int = Field(default=10, ge=2, le=60)
+    # How often the server checks for new mail while Email is closed (ADR-0286).
+    check_interval_seconds: int = Field(default=300, ge=60, le=3600)
 
 
 class EmailImportBudget(EmailValue):
@@ -339,8 +348,11 @@ class EmailTask(EmailValue):
     # A budget estimate, never a claim of known provider usage (ADR-0173).
     budget_charge: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     budget_charge_reason: Literal["incomplete_usage", "missing_run"] | None = None
-    # A refresh admitted above the learning share reads only new mail (ADR-0256).
-    scope: Literal["full", "new_mail"] = "full"
+    # A refresh admitted above the learning share reads only new mail (ADR-0256);
+    # a server check handles only arrivals (ADR-0286).
+    scope: Literal["full", "new_mail", "arrivals"] = "full"
+    # A server check that found nothing to do; removed after a retention window.
+    empty_check: bool = False
     stage: str = "queued"
     state: dict[str, object] = Field(default_factory=dict)
 

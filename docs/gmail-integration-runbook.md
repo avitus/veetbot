@@ -738,6 +738,32 @@ above and needs no new Google permission.
 
 Set the flag back to `0` and restart the same services to turn it off.
 
+## Milestone 26 — Activate server email checks
+
+Server checks for new mail are off until `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED=1`.
+They need both existing email flags, no new Google permission and no credential.
+They read mail and prepare internal drafts while Email is closed, and they send and
+notify nothing. The contract is ADR-0286.
+
+1. Append the flag with `tee -a` so `/etc/veetbot/veetbot.env` keeps its
+   `0640 root:veetbot` mode:
+
+   ```bash
+   echo 'AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED=1' | sudo tee -a /etc/veetbot/veetbot.env >/dev/null
+   ```
+
+2. Restart `veetbot-maintenance`, and confirm it is active. Only this unit admits
+   checks; the async worker runs them. A later rollback of the application must
+   first set the flag to `0` and wait for no `arrivals` task to remain within thirty
+   days, because earlier releases cannot read that task scope.
+3. Keep the flag on after the first week only if the median wait from mail activity
+   to stored conversation is 10 minutes or less, check spending stayed within its
+   daily limit, no-change checks made no model calls, and scheduled-run queue time
+   did not rise materially. Report check spending, no-change duration, event count
+   and database growth to the owner.
+
+To stop checks, set the flag to `0` and restart `veetbot-maintenance`.
+
 ## Milestone 31 — Activate and smoke unsubscribe assistance
 
 Unsubscribe assistance is off until `AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1`. It

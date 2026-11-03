@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -28,6 +29,11 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalStatus
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
+    EMAIL_ARRIVAL_DAILY_SHARE,
+    EMAIL_ARRIVAL_MAX_FAILURES_COUNTED,
+    EMAIL_ARRIVAL_MAX_WAIT_SECONDS,
+    EMAIL_ARRIVAL_MONTHLY_SHARE,
+    EMAIL_EMPTY_CHECK_RETENTION_DAYS,
     EMAIL_HISTORY_DAYS,
     EMAIL_LEARNING_SHARE,
     EMAIL_POLICY_VERSION,
@@ -86,6 +92,8 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.email import EmailStore
 from agent_core.ports.persistence import CheckpointSeeder, RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
+
+logger = logging.getLogger(__name__)
 
 
 async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:
@@ -947,11 +955,14 @@ class EmailExperienceService:
         amount: Decimal,
         *,
         share: Decimal = Decimal("1"),
+        monthly_share: Decimal | None = None,
     ) -> None:
         """Count actual or conservative charges once, and retain live reservations."""
         now = self.clock.now().astimezone(UTC)
         daily_limit = self.budget_limits.daily_cost * share
-        monthly_limit = self.budget_limits.monthly_cost * share
+        monthly_limit = self.budget_limits.monthly_cost * (
+            share if monthly_share is None else monthly_share
+        )
         daily_spent = Decimal("0")
         monthly_spent = Decimal("0")
         reserved = Decimal("0")
@@ -1070,6 +1081,7 @@ class EmailExperienceService:
         spam: bool = False,
         source_revision: int | None = None,
         consented: bool = False,
+        arrival_check: bool = False,
     ) -> EmailOperation:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         # Typed owner gestures: no model, no catalog, no automatic-email dollars.
@@ -1281,8 +1293,17 @@ class EmailExperienceService:
                     self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION,
                 )
             )
-            admitted: Literal["full", "new_mail"] = "full"
-            if kind == "refresh":
+            admitted: Literal["full", "new_mail", "arrivals"] = "full"
+            if arrival_check:
+                await self._check_budget(
+                    uow.email,
+                    principal,
+                    reservation,
+                    share=EMAIL_ARRIVAL_DAILY_SHARE,
+                    monthly_share=EMAIL_ARRIVAL_MONTHLY_SHARE,
+                )
+                admitted = "arrivals"
+            elif kind == "refresh":
                 admitted = await self._refresh_scope(uow.email, principal, reservation)
             elif not gesture:
                 await self._check_budget(uow.email, principal, reservation)
@@ -1507,6 +1528,79 @@ class EmailExperienceService:
         async with self.uow_factory() as uow:
             final_run = await uow.runs.get(run.id, principal)
         return EmailOperation(operation_id=task.id, run_id=run.id, status=final_run.status.value)
+
+    async def admit_arrival_check(self, principal: Principal) -> EmailOperation | None:
+        """Admit one due server check for new mail; a refusal stays quiet (ADR-0286)."""
+        if not await self._arrival_check_due(principal):
+            return None
+        try:
+            return await self.submit_task(principal, kind="refresh", arrival_check=True)
+        except BudgetExceededError:
+            logger.info("email_arrival_check_refused")
+            return None
+
+    async def _arrival_check_due(self, principal: Principal) -> bool:
+        """Read the wait from durable tasks: any recent refresh defers, failures widen it."""
+        now = self.clock.now()
+        interval = self.budget_limits.check_interval_seconds
+        async with self.uow_factory() as uow:
+            recent = [
+                task
+                async for row in task_records(
+                    uow.email, principal, created_since=now - timedelta(days=1)
+                )
+                if (task := EmailTask.model_validate(row.payload)).kind == "refresh"
+            ]
+            recent.sort(key=lambda task: task.created_at, reverse=True)
+            failures = 0
+            for task in recent[:EMAIL_ARRIVAL_MAX_FAILURES_COUNTED]:
+                # A failed foreground refresh defers a check but is not a failed check.
+                failed = 1 if task.scope == "arrivals" else 0
+                try:
+                    run = await uow.runs.get(task.run_id, principal)
+                except NotFoundError:
+                    failures += failed
+                    continue
+                if run.status not in TERMINAL_RUN_STATUSES:
+                    return False
+                # A completed refresh resets the count, unless it is a check charged
+                # conservatively, which counts as a failure.
+                if run.status is RunStatus.COMPLETED and (
+                    task.scope != "arrivals" or task.budget_charge is None
+                ):
+                    break
+                failures += failed
+        if not recent:
+            return True
+        wait = min(interval * 2**failures, max(interval, EMAIL_ARRIVAL_MAX_WAIT_SECONDS))
+        return now - recent[0].created_at >= timedelta(seconds=wait)
+
+    async def prune_empty_checks(self, principal: Principal, *, limit: int = 100) -> int:
+        """Remove server checks that found nothing, so they neither pile up nor slow admission."""
+        now = self.clock.now()
+        cutoff = now - timedelta(days=EMAIL_EMPTY_CHECK_RETENTION_DAYS)
+        async with self.uow_factory() as uow:
+            expired = [
+                EmailTask.model_validate(row.payload)
+                for row in await uow.email.list_empty_checks(
+                    principal, created_before=cutoff, limit=limit
+                )
+            ]
+        removed = 0
+        for task in expired:
+            try:
+                async with self.uow_factory() as uow:
+                    await uow.session_deletions.delete(task.session_id, principal, now)
+            except NotFoundError:
+                pass
+            async with self.uow_factory() as uow, uow.email.lock(principal):
+                current = await uow.email.get(principal, "task", str(task.run_id))
+                if current is not None:
+                    await uow.email.delete(
+                        principal, "task", str(task.run_id), expected_revision=current.revision
+                    )
+                    removed += 1
+        return removed
 
     async def _replayed_in(
         self, uow: RepositoryUnitOfWork, principal: Principal, replay_key: str, digest: str

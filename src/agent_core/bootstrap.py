@@ -576,6 +576,7 @@ from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinit
 from agent_core.domain.sessions import (
     DEFAULT_PROJECT_SCOPE,
     SESSION_BROWSER_PROFILE_METADATA_KEY,
+    SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     Session,
     SessionStatus,
     project_scope,
@@ -5001,22 +5002,32 @@ async def _compose(
                         if run.status not in TERMINAL_RUN_STATUSES:
                             return
                         completed = run
-                        await uow.events.append(
-                            NewEvent(
-                                session_id=run.session_id,
-                                run_id=run.id,
-                                event_type="memory.formation.requested",
-                                actor_type="runtime",
-                                payload={
-                                    "trigger": "run_terminal",
-                                    "terminal_status": run.status.value,
-                                    "not_before": (
-                                        clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
-                                    ).isoformat(),
-                                },
-                                derivation_key=f"memory.formation.requested:{run.id}",
-                            )
+                        # A server check that found nothing has nothing to form (ADR-0286).
+                        session = await uow.sessions.get(run.session_id, principal)
+                        record = (
+                            await uow.email.get(principal, "task", str(run.id))
+                            if session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is True
+                            else None
                         )
+                        if record is not None and record.payload.get("empty_check") is True:
+                            completed = None
+                        else:
+                            await uow.events.append(
+                                NewEvent(
+                                    session_id=run.session_id,
+                                    run_id=run.id,
+                                    event_type="memory.formation.requested",
+                                    actor_type="runtime",
+                                    payload={
+                                        "trigger": "run_terminal",
+                                        "terminal_status": run.status.value,
+                                        "not_before": (
+                                            clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
+                                        ).isoformat(),
+                                    },
+                                    derivation_key=f"memory.formation.requested:{run.id}",
+                                )
+                            )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
             if completed is not None:
@@ -5889,6 +5900,14 @@ async def _compose(
                 unsubscribe_grace_days=email_budget_limits.unsubscribe_grace_days,
             ),
         )
+
+        async def sweep_email_cache() -> int:
+            removed = await public_services.email.expire_cache(principal)
+            return removed + await public_services.email.prune_empty_checks(principal)
+
+        async def sweep_email_check() -> int:
+            return int(await public_services.email.admit_arrival_check(principal) is not None)
+
         if people_service is not None:
             people_service.imports.account_servers = public_services.email.account_servers
         if settings.email_mode_enabled:
@@ -6006,7 +6025,10 @@ async def _compose(
                     sweep_approvals=approval_service.expire_due,
                     sweep_exports=trajectory_service.sweep_once,
                     sweep_artifacts=artifact_writers.sweep_expired,
-                    sweep_email_cache=lambda: public_services.email.expire_cache(principal),
+                    sweep_email_cache=sweep_email_cache,
+                    sweep_email_check=sweep_email_check
+                    if settings.email_background_checks_enabled
+                    else None,
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,

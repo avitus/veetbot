@@ -196,6 +196,8 @@ class Settings:
     email_junk_filter_mode: EmailJunkMode = EmailJunkMode.OFF
     email_junk_filter_evidence: Path | None = None
     email_unsubscribe_enabled: bool = False
+    # Server checks for new mail while Email is closed (ADR-0286).
+    email_background_checks_enabled: bool = False
     # The window in which a one-press send can still be undone (ADR-0279).
     email_send_undo_seconds: int = 10
     attachment_uploads_enabled: bool = False
@@ -2014,6 +2016,12 @@ def _load_settings(
             "AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1 requires AGENT_EMAIL_ENABLED=1 "
             "and AGENT_EMAIL_MODE_ENABLED=1"
         )
+    email_background_checks_enabled = _parse_flag(values, "AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED")
+    if email_background_checks_enabled and not (email_enabled and email_mode_enabled):
+        raise ConfigurationError(
+            "AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED=1 requires AGENT_EMAIL_ENABLED=1 "
+            "and AGENT_EMAIL_MODE_ENABLED=1"
+        )
     undo_text = values.get("AGENT_EMAIL_SEND_UNDO_SECONDS", "").strip()
     try:
         email_send_undo_seconds = int(undo_text) if undo_text else 10
@@ -2316,6 +2324,7 @@ def _load_settings(
         email_junk_filter_mode=email_junk_filter_mode,
         email_junk_filter_evidence=email_junk_filter_evidence,
         email_unsubscribe_enabled=email_unsubscribe_enabled,
+        email_background_checks_enabled=email_background_checks_enabled,
         email_send_undo_seconds=email_send_undo_seconds,
         attachment_uploads_enabled=attachment_uploads_enabled,
         email_semantic_evidence=email_semantic_evidence,

@@ -332,4 +332,7 @@ implementation without one.
 - [ADR-0283: Owner possessions reach recall from "do I" questions and corroborate across chats (Accepted)](0283-owner-possessions-reach-recall-and-corroborate.md)
 - [ADR-0284: Chat uploads back off between ingest attempts and report a failed ingestion (Accepted)](0284-chat-uploads-back-off-and-report-failed-ingestion.md)
 - [ADR-0285: Knowledge search ranks by coverage with folded terms, and PDF outlines become heading paths (Accepted)](0285-knowledge-search-ranks-by-coverage.md)
+- [ADR-0286: The server checks for new mail while Email is closed (Accepted)](0286-server-checks-for-new-mail.md)
+- [ADR-0287: The device sign-in window asks before a new website adds another address (Proposed)](0287-device-sign-in-allows-another-address.md)
+- [ADR-0288: A saved login can sign in again through the remote browser (Accepted)](0288-saved-login-signs-in-through-the-remote-browser.md)
 - [ADR-0289: The knowledge semantic arm is built, measured, and off by default (Proposed)](0289-knowledge-semantic-arm.md)
