@@ -56,7 +56,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "http-api-and-streaming.md": (10, 0),
     "sandbox-isolation.md": (13, 0),
     "skills.md": (16, 0),
-    "knowledge-documents.md": (12, 0),
+    "knowledge-documents.md": (13, 0),
     "web-access.md": (7, 0),
     "browser-automation.md": (10, 0),
     "scheduling.md": (46, 0),

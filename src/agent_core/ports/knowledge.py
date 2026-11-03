@@ -12,6 +12,7 @@ from agent_core.domain.knowledge import (
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
+    KnowledgeSemanticQuery,
     RetrievedPassage,
 )
 from agent_core.domain.trajectory import ArtifactRef
@@ -34,7 +35,9 @@ class Chunker(Protocol):
 class KnowledgeStore(Protocol):
     async def ingest(self, prepared: KnowledgeIngestPrepared) -> None: ...
 
-    async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]: ...
+    async def search(
+        self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
+    ) -> list[RetrievedPassage]: ...
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None: ...
 

@@ -56,6 +56,7 @@ from agent_core.domain.messages import MemoryRecallUsage, TextPart
 from agent_core.domain.recall_execution import recall_search
 from agent_core.domain.reconsolidation_merge import normalize_claim
 from agent_core.domain.reconsolidation_operations import StoredMerge
+from agent_core.domain.retrieval_fusion import blend_with_arm_score, reciprocal_rank_fusion
 from agent_core.domain.runs import Run
 from agent_core.domain.semantic_memory import SemanticHit, checked_vector, query_digest
 from agent_core.domain.tool_output import content_bytes
@@ -1973,20 +1974,31 @@ def _rrf_fuse(
                 for index, item in enumerate(members, 1)
             }
         )
-    ceiling = max(1, len(arms)) / (k + 1)
-    fused: list[RecalledBelief] = []
-    for item in candidates:
-        rrf = sum(1 / (k + arm_ranks[(arm, item.belief_id)]) for arm in item.arms)
-        fused.append(
-            item.model_copy(
-                update={
-                    "score": min(
-                        1.0, (1 - relevance_weight) * item.score + relevance_weight * rrf / ceiling
-                    )
-                }
-            )
+    # The arithmetic is the domain's shared fusion, so knowledge passage search
+    # fuses its arms with exactly this rule (knowledge-documents.md, "Indexing").
+    normalised = reciprocal_rank_fusion(
+        {
+            arm: [
+                belief_id
+                for (member_arm, belief_id), _ in sorted(
+                    arm_ranks.items(), key=lambda entry: entry[1]
+                )
+                if member_arm == arm
+            ]
+            for arm in arms
+        },
+        k=k,
+    )
+    return [
+        item.model_copy(
+            update={
+                "score": blend_with_arm_score(
+                    item.score, normalised[item.belief_id], weight=relevance_weight
+                )
+            }
         )
-    return fused
+        for item in candidates
+    ]
 
 
 def render_memory(
