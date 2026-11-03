@@ -22,6 +22,7 @@ from agent_core.domain.knowledge import (
     KnowledgeSemanticChannel,
     KnowledgeVisibility,
 )
+from agent_core.domain.messages import ProviderPin
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.domain.semantic_memory import EmbeddingSpace
@@ -95,6 +96,18 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
                     updated_at=now,
                 )
             )
+            # A run is pinned to the model it answers with; a question reaches
+            # only that provider (ADR-0290).
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=SPACE.provider,
+                    model=SPACE.model,
+                    registry_version="test",
+                    pinned_at=now,
+                ),
+            )
         store = FilesystemArtifactStore(settings.artifact_root)
         writer = ArtifactWriterFactory(
             app.uow_factory, store, app.clock, RandomIdFactory()
@@ -143,10 +156,10 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
             )
         assert stored == 3
 
-        dense = await service("dense").search(query, session_id=session_id)
+        dense = await service("dense").search(query, session_id=session_id, run_id=run_id)
         assert [item.heading_path[-1] for item in dense.passages] == ["Fans", "Rollback"]
         assert all(item.arms == ["semantic"] for item in dense.passages)
-        hybrid = await service("hybrid").search(query, session_id=session_id)
+        hybrid = await service("hybrid").search(query, session_id=session_id, run_id=run_id)
         arms = {item.heading_path[-1]: item.arms for item in hybrid.passages}
         assert arms["Fans"] == ["semantic"]
         assert arms["Rollback"] == ["lexical", "semantic"]
@@ -168,14 +181,16 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
             ),
             origin_trust=TrustLevel.USER,
         )
-        dense = await service("dense").search(query, session_id=session_id)
+        dense = await service("dense").search(query, session_id=session_id, run_id=run_id)
         by_document = {item.document_id: item.arms for item in dense.passages}
         assert by_document[older.document_id] == ["lexical"]
         assert by_document[document.document_id] == ["semantic"]
 
         # Another principal reads nothing through either arm.
         foreign = await service("dense").search(
-            _query("another-principal", app.principal.tenant_id), session_id=session_id
+            _query("another-principal", app.principal.tenant_id),
+            session_id=session_id,
+            run_id=run_id,
         )
         assert foreign.passages == []
 
@@ -189,7 +204,7 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
                 text("SELECT count(*) FROM knowledge_chunk_vectors")
             )
         assert remaining == 0
-        left = (await service("dense").search(query, session_id=session_id)).passages
+        left = (await service("dense").search(query, session_id=session_id, run_id=run_id)).passages
         assert {item.document_id for item in left} == {older.document_id}
 
 
@@ -214,6 +229,18 @@ async def test_ingest_without_an_embedder_stores_no_vectors(tmp_path: Path) -> N
                     created_at=now,
                     updated_at=now,
                 )
+            )
+            # A run is pinned to the model it answers with; a question reaches
+            # only that provider (ADR-0290).
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=SPACE.provider,
+                    model=SPACE.model,
+                    registry_version="test",
+                    pinned_at=now,
+                ),
             )
         store = FilesystemArtifactStore(settings.artifact_root)
         writer = ArtifactWriterFactory(
@@ -287,6 +314,18 @@ async def test_windows_are_stored_scored_by_their_best_and_backfilled(tmp_path: 
                     updated_at=now,
                 )
             )
+            # A run is pinned to the model it answers with; a question reaches
+            # only that provider (ADR-0290).
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=SPACE.provider,
+                    model=SPACE.model,
+                    registry_version="test",
+                    pinned_at=now,
+                ),
+            )
         store = FilesystemArtifactStore(settings.artifact_root)
         writer = ArtifactWriterFactory(
             app.uow_factory, store, app.clock, RandomIdFactory()
@@ -347,7 +386,7 @@ async def test_windows_are_stored_scored_by_their_best_and_backfilled(tmp_path: 
         assert chunks == 3 and windows > 3, "every section is wider than six words"
 
         query = _query(app.principal.principal_id, app.principal.tenant_id)
-        found = await service.search(query, session_id=session_id)
+        found = await service.search(query, session_id=session_id, run_id=run_id)
         by_document = {item.document_id: item for item in found.passages}
         assert by_document[guide.document_id].heading_path[-1] == "Fans"
         assert by_document[guide.document_id].arms == ["semantic"]
@@ -365,7 +404,7 @@ async def test_windows_are_stored_scored_by_their_best_and_backfilled(tmp_path: 
         assert await backfill.sweep_once() == 0
         ((windows_after, chunks_after),) = await vector_rows()
         assert chunks_after == 6 and windows_after == 2 * windows
-        found = await service.search(query, session_id=session_id)
+        found = await service.search(query, session_id=session_id, run_id=run_id)
         assert {item.document_id for item in found.passages} == {
             guide.document_id,
             older.document_id,
