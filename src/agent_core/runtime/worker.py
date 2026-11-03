@@ -274,6 +274,7 @@ class MaintenanceWorker:
         sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         sweep_folder_proposals: Callable[[], Awaitable[int]] | None = None,
         sweep_upload_ingests: Callable[[], Awaitable[int]] | None = None,
+        sweep_knowledge_vectors: Callable[[], Awaitable[int]] | None = None,
         sweep_people_duplicates: Callable[[], Awaitable[int]] | None = None,
         sweep_browser_task_grants: Callable[[], Awaitable[int]] | None = None,
         sweep_conversation_titles: Callable[[], Awaitable[int]] | None = None,
@@ -315,6 +316,7 @@ class MaintenanceWorker:
         self._sweep_terminal_schedules = sweep_terminal_schedules
         self._sweep_folder_proposals = sweep_folder_proposals
         self._sweep_upload_ingests = sweep_upload_ingests
+        self._sweep_knowledge_vectors = sweep_knowledge_vectors
         self._sweep_people_duplicates = sweep_people_duplicates
         self._sweep_browser_task_grants = sweep_browser_task_grants
         self._sweep_conversation_titles = sweep_conversation_titles
@@ -524,6 +526,12 @@ class MaintenanceWorker:
                 await self._sweep_upload_ingests()
             except Exception:
                 logger.exception("owner upload knowledge ingestion sweep failed")
+        # Documents the semantic arm never saw gain vectors a batch a round.
+        if self._sweep_knowledge_vectors is not None:
+            try:
+                await self._sweep_knowledge_vectors()
+            except Exception:
+                logger.exception("knowledge vector backfill sweep failed")
         # Titles follow a reply within seconds, so this pass runs every round (ADR-0155).
         if self._sweep_conversation_titles is not None:
             try:

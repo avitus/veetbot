@@ -23,7 +23,6 @@ from agent_core.domain.knowledge import (
     KnowledgeResult,
     KnowledgeSemanticQuery,
     RetrievedPassage,
-    knowledge_embedding_text,
 )
 from agent_core.domain.memory import (
     RecallMoment,
@@ -118,7 +117,7 @@ class KnowledgeService:
         document_id = request.document_id or self._ids.new_id()
         # Chunk texts do not depend on the row that will hold them, so the
         # provider call happens here, before any unit of work is open.
-        vectors = await self._embed_chunk_texts(
+        windows = await self._embed_chunk_texts(
             normalized, request.title, document_id, request.sensitivity
         )
         async with self._uow_factory() as uow:
@@ -167,18 +166,21 @@ class KnowledgeService:
             if retained.sha256 != source.sha256:
                 raise ArtifactIntegrityError("knowledge artifact metadata changed during ingest")
             embeddings: tuple[KnowledgeChunkEmbedding, ...] = ()
-            if vectors is not None:
+            if windows is not None:
                 assert self._embedder is not None
-                texts, values = vectors
-                if texts != [knowledge_embedding_text(c.heading_path, c.text) for c in chunks]:
+                embedder = self._embedder
+                if [[text for text, _ in chunk_windows] for chunk_windows in windows] != [
+                    embedder.window_texts(c.heading_path, c.text) for c in chunks
+                ]:
                     raise ArtifactIntegrityError(
                         "knowledge chunks changed between embedding and ingest"
                     )
                 embeddings = tuple(
                     KnowledgeChunkEmbedding(
-                        chunk_id=chunk.chunk_id, space=self._embedder.space, vector=vector
+                        chunk_id=chunk.chunk_id, space=embedder.space, window=index, vector=vector
                     )
-                    for chunk, vector in zip(chunks, values, strict=True)
+                    for chunk, chunk_windows in zip(chunks, windows, strict=True)
+                    for index, (_, vector) in enumerate(chunk_windows)
                 )
             await uow.knowledge.ingest(
                 KnowledgeIngestPrepared(document=document, chunks=chunks, embeddings=embeddings)
@@ -194,7 +196,9 @@ class KnowledgeService:
                         "document_id": str(document_id),
                         "version": version,
                         "chunks": len(chunks),
-                        "embedded": len(embeddings),
+                        # Chunks with a vector, and the windows those vectors embed.
+                        "embedded": len({embedding.chunk_id for embedding in embeddings}),
+                        "windows": len(embeddings),
                     },
                 )
             )
@@ -202,17 +206,19 @@ class KnowledgeService:
 
     async def _embed_chunk_texts(
         self, normalized: str, title: str, document_id: UUID, sensitivity: Sensitivity
-    ) -> tuple[list[str], list[tuple[float, ...]]] | None:
-        """Embed the chunk texts the deterministic chunker will produce.
+    ) -> list[list[tuple[str, tuple[float, ...]]]] | None:
+        """Embed the windows of the chunks the deterministic chunker will produce.
 
         The chunker binds ids to the row and version chosen inside the unit of
         work, but a chunk's heading path and text depend only on the bytes, so
-        the texts embedded here are the texts the stored chunks will carry;
-        ingestion checks that before writing. A document the provider may not
-        see, or an admission that has been withdrawn, leaves the document
-        lexical rather than refusing it. An embedding failure fails the
-        ingest, as every other step does: a document half of whose passages
-        the semantic arm can see is worse than one that is tried again.
+        the window texts embedded here are the texts the stored chunks will
+        carry; ingestion checks that before writing. The result lists, per
+        chunk, each window's text with its vector. A document the provider
+        may not see, or an admission that has been withdrawn, leaves the
+        document lexical rather than refusing it. An embedding failure fails
+        the ingest, as every other step does: a document half of whose
+        passages the semantic arm can see is worse than one that is tried
+        again.
         """
 
         if self._embedder is None:
@@ -231,10 +237,12 @@ class KnowledgeService:
         drafts = self._chunker.chunk(
             normalized, title, document_row_id=UUID(int=0), document_id=document_id, version=1
         )
-        texts = [knowledge_embedding_text(chunk.heading_path, chunk.text) for chunk in drafts]
+        windows = [self._embedder.window_texts(chunk.heading_path, chunk.text) for chunk in drafts]
+        texts = [text for chunk_windows in windows for text in chunk_windows]
         if not texts:
             return None
-        return texts, await self._embedder.embed_texts(texts)
+        vectors = iter(await self._embedder.embed_texts(texts))
+        return [[(text, next(vectors)) for text in chunk_windows] for chunk_windows in windows]
 
     async def _embed_question(self, text: str) -> KnowledgeSemanticQuery | None:
         """Embed the question, or answer with the lexical arm alone when the provider cannot."""

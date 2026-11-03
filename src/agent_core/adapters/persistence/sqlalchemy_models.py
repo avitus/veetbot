@@ -1426,6 +1426,9 @@ class KnowledgeChunkVectorRow(Base):
         Text, ForeignKey("knowledge_chunks.chunk_id", ondelete="CASCADE"), primary_key=True
     )
     space_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    # Which window of the chunk the vector embeds; a chunk the encoder admits
+    # whole has one, zero. A reserved word in SQL, quoted by the dialect.
+    window: Mapped[int] = mapped_column(Integer, primary_key=True, server_default=text("0"))
     space: Mapped[dict[str, Any]] = mapped_column(JSONB)
     text_version: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(VECTOR())

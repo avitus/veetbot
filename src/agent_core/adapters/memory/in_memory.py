@@ -17,6 +17,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledE
 from agent_core.domain.knowledge import (
     DocumentAuthority,
     KnowledgeChunk,
+    KnowledgeChunkEmbedding,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
@@ -965,9 +966,9 @@ class InMemoryKnowledgeStore:
         self._clock = clock
         self._documents: dict[UUID, KnowledgeDocument] = {}
         self._chunks: dict[str, KnowledgeChunk] = {}
-        # chunk id -> embedding space key -> unit vector; the PostgreSQL
-        # store's `knowledge_chunk_vectors` rows.
-        self._vectors: dict[str, dict[str, tuple[float, ...]]] = {}
+        # chunk id -> embedding space key -> window -> unit vector; the
+        # PostgreSQL store's `knowledge_chunk_vectors` rows.
+        self._vectors: dict[str, dict[str, dict[int, tuple[float, ...]]]] = {}
         self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
@@ -1007,9 +1008,9 @@ class InMemoryKnowledgeStore:
             for chunk in prepared.chunks:
                 self._chunks[chunk.chunk_id] = chunk.model_copy(deep=True)
             for embedding in prepared.embeddings:
-                self._vectors.setdefault(embedding.chunk_id, {})[embedding.space.key] = (
-                    checked_vector(embedding.vector, embedding.space)
-                )
+                self._vectors.setdefault(embedding.chunk_id, {}).setdefault(
+                    embedding.space.key, {}
+                )[embedding.window] = checked_vector(embedding.vector, embedding.space)
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None:
         async with self._lock:
@@ -1052,7 +1053,7 @@ class InMemoryKnowledgeStore:
                 ):
                     continue
                 eligible[chunk.chunk_id] = (chunk, document)
-                vector = (
+                windows = (
                     None
                     if semantic is None
                     else self._vectors.get(chunk.chunk_id, {}).get(semantic.space.key)
@@ -1060,12 +1061,17 @@ class InMemoryKnowledgeStore:
                 # Under the dense channel the lexical arm reaches only the
                 # chunks the space has not seen, so an older document stays
                 # reachable (ADR-0289).
-                if semantic is None or semantic.channel == "hybrid" or vector is None:
+                if semantic is None or semantic.channel == "hybrid" or not windows:
                     match = _coverage(forms, f"{' '.join(chunk.heading_path)} {chunk.text}")
                     if match > 0:
                         lexical.append((chunk.chunk_id, match))
-                if semantic is not None and vector is not None:
-                    similarity = sum(a * b for a, b in zip(semantic.vector, vector, strict=True))
+                if semantic is not None and windows:
+                    # A chunk scores by its best window, as the PostgreSQL
+                    # store takes the least distance over a chunk's rows.
+                    similarity = max(
+                        sum(a * b for a, b in zip(semantic.vector, vector, strict=True))
+                        for vector in windows.values()
+                    )
                     semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, similarity))))
         limit = max(query.max_passages * 8, 64)
         lexical.sort(key=lambda item: (-item[1], _passage_score(eligible, query, item), item[0]))
@@ -1118,6 +1124,45 @@ class InMemoryKnowledgeStore:
         async with self._lock:
             chunk = self._chunks.get(chunk_id)
             return None if chunk is None else chunk.model_copy(deep=True)
+
+    async def chunks_without_vectors(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        space_key: str,
+        *,
+        sensitivities: Sequence[Sensitivity],
+        limit: int,
+    ) -> list[KnowledgeChunk]:
+        allowed = set(sensitivities)
+        async with self._lock:
+            current = {
+                row.row_id
+                for row in self._documents.values()
+                if row.tenant_id == tenant_id
+                and row.ingested_by_principal_id == principal_id
+                and row.valid_to is None
+                and row.sensitivity in allowed
+            }
+            waiting = sorted(
+                (
+                    chunk
+                    for chunk in self._chunks.values()
+                    if chunk.document_row_id in current
+                    and not self._vectors.get(chunk.chunk_id, {}).get(space_key)
+                ),
+                key=lambda chunk: (chunk.document_row_id.int, chunk.ordinal),
+            )
+            return [chunk.model_copy(deep=True) for chunk in waiting[:limit]]
+
+    async def add_embeddings(self, embeddings: Sequence[KnowledgeChunkEmbedding]) -> None:
+        async with self._lock:
+            for embedding in embeddings:
+                if embedding.chunk_id not in self._chunks:
+                    raise NotFoundError("knowledge chunk not found")
+                self._vectors.setdefault(embedding.chunk_id, {}).setdefault(
+                    embedding.space.key, {}
+                ).setdefault(embedding.window, checked_vector(embedding.vector, embedding.space))
 
     async def delete(self, document_id: UUID, principal: Principal) -> list[ArtifactRef]:
         async with self._lock:

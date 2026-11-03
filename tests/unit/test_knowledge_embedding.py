@@ -25,10 +25,12 @@ from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.embeddings import EmbeddingError, EmbeddingRequest, EmbeddingResponse
 from agent_core.domain.knowledge import (
     KNOWLEDGE_EMBEDDING_TEXT_BYTES,
+    KnowledgeChunk,
     KnowledgeIngestRequest,
     KnowledgeQuery,
     KnowledgeVisibility,
     knowledge_embedding_text,
+    knowledge_embedding_windows,
 )
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
@@ -77,6 +79,48 @@ def test_embedding_text_carries_the_heading_path_and_stays_within_the_bound() ->
     long = knowledge_embedding_text(["Guide"], "é" * KNOWLEDGE_EMBEDDING_TEXT_BYTES)
     assert len(long.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES
     assert "�" not in long
+
+
+def _words(text: str) -> int:
+    return len(text.split())
+
+
+async def test_chunks_over_the_encoder_capacity_are_embedded_in_windows() -> None:
+    provider = Provider()
+    embedder = KnowledgeEmbedder(provider, SPACE, window_tokens=12, count_tokens=_words)
+    chunks = [
+        KnowledgeChunk(
+            chunk_id=f"kc_{index:016x}",
+            document_row_id=UUID(int=1),
+            document_id=UUID(int=2),
+            version=1,
+            ordinal=index,
+            heading_path=["Guide", "Fans"],
+            text=text,
+            tokens=10,
+            contains_instruction_like_text=False,
+            content_sha256="0" * 64,
+        )
+        for index, text in enumerate(
+            [
+                "The fan runs on. " * 12,
+                "Short.",
+            ]
+        )
+    ]
+    embeddings = await embedder.embed_chunks(chunks)
+    expected = [
+        knowledge_embedding_windows(c.heading_path, c.text, budget_tokens=12, count_tokens=_words)
+        for c in chunks
+    ]
+    assert [text for call in provider.calls for text in call.texts] == [
+        text for windows in expected for text in windows
+    ]
+    assert [(e.chunk_id, e.window) for e in embeddings] == [
+        (chunks[0].chunk_id, index) for index in range(len(expected[0]))
+    ] + [(chunks[1].chunk_id, 0)]
+    assert len(expected[0]) > 1 and len(expected[1]) == 1
+    assert all(_words(text) <= 12 for text in expected[0])
 
 
 async def test_query_embedding_carries_the_channel_and_is_bounded() -> None:
@@ -176,6 +220,41 @@ async def test_ingest_embeds_every_chunk_before_the_unit_of_work_opens(tmp_path:
         events = await uow.events.list_after(SESSION_ID, 0, principal())
     ingested = next(e for e in events if e.event_type == "knowledge.document.ingested")
     assert ingested.payload["embedded"] == 2
+
+
+async def test_ingest_stores_every_window_and_search_scores_a_chunk_by_its_best(
+    tmp_path: Path,
+) -> None:
+    class Windowed(Provider):
+        """Only the fan passage's window holding "fan" sits by the question; its others do not."""
+
+        async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+            response = await super().embed(request)
+            vectors = tuple(
+                (1.0, 0.0, 0.0)
+                if "fan" in text.split("\n", 1)[-1] or text == "sounds after parking"
+                else (0.0, 1.0, 0.0)
+                for text in request.texts
+            )
+            return response.model_copy(update={"vectors": vectors})
+
+    provider = Windowed()
+    service, writer, factory = await _service(
+        tmp_path,
+        KnowledgeEmbedder(provider, SPACE, channel="dense", window_tokens=4, count_tokens=_words),
+    )
+    await _ingest(service, writer, factory)
+    texts = [text for call in provider.calls for text in call.texts]
+    assert len(texts) > 2, "the fan passage needs more than one window at four words"
+    assert all(_words(text) <= 4 for text in texts)
+    async with factory() as uow:
+        events = await uow.events.list_after(SESSION_ID, 0, principal())
+    ingested = next(e for e in events if e.event_type == "knowledge.document.ingested")
+    assert ingested.payload["embedded"] == 2
+    assert ingested.payload["windows"] == len(texts)
+    result = await service.search(_query(), session_id=SESSION_ID)
+    assert [item.heading_path[-1] for item in result.passages] == ["Fans"]
+    assert result.passages[0].arms == ["semantic"]
 
 
 async def test_an_embedding_failure_fails_the_ingest_and_stores_nothing(tmp_path: Path) -> None:
