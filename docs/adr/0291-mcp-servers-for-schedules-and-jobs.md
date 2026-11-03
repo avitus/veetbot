@@ -90,9 +90,11 @@ widgets get MCP data through feed schedules and through saved jobs.
 
 ## Consequences
 
-Rolling back below this decision is refused while the schedule environment holds
-`AGENT_SVP_ENABLED=1` or a stored revision names a server, because the older code
-reads neither. A saved job that declares `mcp.read` fails on such a release.
+Rolling back below this decision is refused while a stored revision names a
+server, because the older code cannot read one. It also refuses to start with
+`AGENT_SVP_ENABLED=1` in the schedule environment, so the runbook removes that
+line with every unit stopped and restores it if the rollback fails. A saved job
+that declares `mcp.read` fails on such a release.
 
 A schedule can read a mailbox or a data service with the owner's knowledge at
 approval. A run that reads untrusted text holds only the servers it was given.

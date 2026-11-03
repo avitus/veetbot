@@ -194,6 +194,9 @@ write_stub systemctl '
     : >"$VEETBOT_TEST_SERVICES_STOPPED"
   elif [[ "${1:-}" == restart ]]; then
     rm -f -- "$VEETBOT_TEST_SERVICES_STOPPED"
+    printf "schedule flag at restart: %s\n" \
+      "$(grep -c "^AGENT_SVP_ENABLED=1" "$VEETBOT_SCHEDULE_ENV_FILE" || true)" \
+      >>"$VEETBOT_TEST_LOG"
   elif [[ "${1:-}" == show ]]; then
     printf "4242\n"
   fi
@@ -278,18 +281,36 @@ grep -Fq -- '--env PGOPTIONS=-c statement_timeout=5000' "$LOG_FILE"
 : >"$LOG_FILE"
 
 # ADR-0291: a target from before it refuses to start the schedule role with this
-# flag, so the runbook refuses first, while every service is still running.
+# flag. A refused rollback changes nothing, so the current release keeps the flag.
 if VEETBOT_TEST_TARGET_MCP_COMPATIBILITY=incompatible \
-  run_rollback >"$TEST_ROOT/schedule-flag.out" 2>&1; then
-  printf 'rollback to a target that refuses the schedule flag unexpectedly succeeded\n' >&2
+  VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY=compatible \
+  VEETBOT_TEST_INCOMPATIBLE_SCHEDULE_REVISIONS=1 \
+  run_rollback >"$TEST_ROOT/schedule-flag-kept.out" 2>&1; then
+  printf 'rollback across schedules that name servers unexpectedly succeeded\n' >&2
   exit 1
 fi
-grep -Fq 'Remove AGENT_SVP_ENABLED' "$TEST_ROOT/schedule-flag.out"
-if grep -Fq 'systemctl stop' "$LOG_FILE"; then
-  printf 'the schedule flag refusal stopped services\n' >&2
-  exit 1
-fi
+grep -Fxq 'AGENT_SVP_ENABLED=1' "$SCHEDULE_ENV_FILE"
+grep -Fxq 'schedule flag at restart: 1' "$LOG_FILE"
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
+: >"$LOG_FILE"
+
+# A failure after the flag was removed puts it back before the current release restarts.
+if VEETBOT_TEST_TARGET_MCP_COMPATIBILITY=incompatible \
+  VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY=compatible \
+  VEETBOT_TEST_FAIL_DOCS_SWITCH_ONCE=1 \
+  run_rollback >"$TEST_ROOT/schedule-flag-restored.out" 2>&1; then
+  printf 'rollback with a failed switch unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'tee '"$SCHEDULE_ENV_FILE" "$LOG_FILE"
+grep -Fxq 'AGENT_SVP_ENABLED=1' "$SCHEDULE_ENV_FILE"
+if grep -Fxq 'schedule flag at restart: 0' "$LOG_FILE"; then
+  printf 'the current release restarted without its schedule flag\n' >&2
+  exit 1
+fi
+[[ -z "$(find "$TEST_ROOT" -maxdepth 1 -name 'veetbot-schedule.env.rollback-*')" ]]
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
+/bin/rm -f -- "$FAIL_MARKER"
 : >"$LOG_FILE"
 
 # Nor can it read a stored schedule that names servers, which its model forbids.
@@ -433,5 +454,27 @@ if grep -Fq 'docker tag veetbot-cockpit-builder' "$LOG_FILE" \
   printf 'rollback to a release without a builder image retagged a builder\n' >&2
   exit 1
 fi
+
+# A rollback below ADR-0291 removes only the flag, before the target's units start.
+for pointer in "$DEPLOY_ROOT/current" "$DOCS_ROOT/current" "$WEBSITE_ROOT/current"; do
+  root="$(dirname "$pointer")"
+  [[ "$pointer" == "$DEPLOY_ROOT/current" ]] && root="$DEPLOY_ROOT"
+  /bin/rm -f -- "$pointer"
+  ln -s "$root/releases/$PREVIOUS_ID" "$pointer"
+done
+printf '%s\n' 'AGENT_SVP_ENABLED=1' 'AGENT_COCKPIT_ENABLED=1' >"$SCHEDULE_ENV_FILE"
+: >"$LOG_FILE"
+if ! VEETBOT_TEST_TARGET_MCP_COMPATIBILITY=incompatible \
+  VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY=compatible \
+  run_rollback >"$TEST_ROOT/schedule-flag-removed.out" 2>&1; then
+  tail -n 5 "$TEST_ROOT/schedule-flag-removed.out" >&2
+  printf 'rollback below ADR-0291 with the schedule flag failed\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$TARGET_ID" ]]
+[[ "$(cat "$SCHEDULE_ENV_FILE")" == 'AGENT_COCKPIT_ENABLED=1' ]]
+grep -Fxq 'schedule flag at restart: 0' "$LOG_FILE"
+grep -Fq 'Add AGENT_SVP_ENABLED=1 back' "$TEST_ROOT/schedule-flag-removed.out"
+[[ -z "$(find "$TEST_ROOT" -maxdepth 1 -name 'veetbot-schedule.env.rollback-*')" ]]
 
 printf 'manual rollback tests passed\n'

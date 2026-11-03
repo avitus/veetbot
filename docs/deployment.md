@@ -1289,11 +1289,13 @@ from before the first such revision and then roll the code back. Never run an
 automatic Alembic downgrade as part of rollback. The same rule covers a release
 from before ADR-0291: its schedule model forbids a revision that names MCP
 servers, and its schedule role refuses to start with `AGENT_SVP_ENABLED=1` and
-no credential. The runbook checks the flag before it stops anything; remove the
-line from the schedule environment and rerun if Scale VP can wait. Such a target
-also cannot read a saved job that declares `mcp.read`, and the runbook does not
-check for one, so that job fails until you roll forward. Run the complete block
-in one
+no credential. Once every unit is stopped and the stored revisions pass, the
+runbook removes that line from the schedule environment. It puts the line back
+before restarting the current release if the rollback then fails. After a
+successful rollback, add the line back before the next release, whose parity
+check otherwise refuses it. Such a target also cannot read a saved job that
+declares `mcp.read`, and the runbook does not check for one, so that job fails
+until you roll forward. Run the complete block in one
 shell so file descriptor 9 holds the same deployment lock from before writer
 quiescence through readiness verification. The block retags the target's
 Cockpit builder image as `production` when the target has one; a target from
@@ -1409,13 +1411,6 @@ case "$target_mcp_compatibility" in
     exit 1
     ;;
 esac
-if test "$target_mcp_compatibility" = incompatible \
-  && test -f "$schedule_environment_file" \
-  && test "$(awk -F= '$1 == "AGENT_SVP_ENABLED" { value = $2 } END { print value }' \
-    "$schedule_environment_file")" = 1; then
-  echo "Remove AGENT_SVP_ENABLED from $schedule_environment_file: this target refuses it" >&2
-  exit 1
-fi
 
 app_next="/opt/veetbot/.rollback-$target_id-$$"
 docs_next="/opt/veetbot/shared/docs/.rollback-$target_id-$$"
@@ -1424,6 +1419,7 @@ app_restore="/opt/veetbot/.rollback-restore-$$"
 docs_restore="/opt/veetbot/shared/docs/.rollback-restore-$$"
 website_restore="/opt/veetbot/shared/website/.rollback-restore-$$"
 health_headers=""
+schedule_environment_backup=""
 
 rollback_pending=0
 rollback_on_exit() {
@@ -1444,6 +1440,9 @@ rollback_on_exit() {
     fi
     if test -n "$previous_code_sandbox_image"; then
       docker tag "$previous_code_sandbox_image" veetbot-code-sandbox:production
+    fi
+    if test -n "$schedule_environment_backup"; then
+      sudo mv -f "$schedule_environment_backup" "$schedule_environment_file"
     fi
     sudo systemctl restart "${managed_units[@]}"
   fi
@@ -1499,6 +1498,16 @@ if test -n "$unreadable_schedule_revision"; then
     echo "Refusing this target: schedule revisions it cannot read exist" >&2
     exit 1
   fi
+fi
+# A release from before ADR-0291 refuses this flag without the credential.
+if test "$target_mcp_compatibility" = incompatible \
+  && test -f "$schedule_environment_file" \
+  && test "$(awk -F= '$1 == "AGENT_SVP_ENABLED" { value = $2 } END { print value }' \
+    "$schedule_environment_file")" = 1; then
+  sudo cp -p "$schedule_environment_file" "$schedule_environment_file.rollback-$$"
+  schedule_environment_backup="$schedule_environment_file.rollback-$$"
+  awk -F= '$1 != "AGENT_SVP_ENABLED"' "$schedule_environment_backup" \
+    | sudo tee "$schedule_environment_file" >/dev/null
 fi
 ln -s "$target" "$app_next"
 ln -s "$docs_target" "$docs_next"
@@ -1559,6 +1568,10 @@ for unit in "${managed_units[@]}"; do
 done
 rollback_pending=0
 trap - EXIT
+if test -n "$schedule_environment_backup"; then
+  sudo rm -f -- "$schedule_environment_backup"
+  echo "Add AGENT_SVP_ENABLED=1 back to $schedule_environment_file before the next release" >&2
+fi
 ```
 
 The returned `X-Veetbot-Release` and both public surfaces' `release.txt` files
