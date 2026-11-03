@@ -181,7 +181,11 @@ Specified below. Deterministic under a `chunker_version`.
 Postgres full-text search over the chunk text plus its heading path. A PDF's
 bookmarks are written into its text as Markdown headings on the pages they
 open, so a manual's sections become its chunks' heading paths
-([ADR-0285](../adr/0285-knowledge-search-ranks-by-coverage.md)).
+([ADR-0285](../adr/0285-knowledge-search-ranks-by-coverage.md)). When the
+semantic arm is on, each chunk is also embedded, heading path over text, before
+the transaction opens, and its vector is written beside it
+([ADR-0289](../adr/0289-knowledge-semantic-arm.md)); an embedding failure
+fails the ingest like any other step.
 
 ### 7. Commit
 
@@ -258,6 +262,30 @@ are more common against prose documents than against beliefs. The expectation is
 therefore that this arm turns on earlier here than it does for memory. It still has to
 earn it.
 
+The arm is built ([ADR-0289](../adr/0289-knowledge-semantic-arm.md)) and off by
+default. Ingestion embeds each chunk's heading path over its text under a named text
+version, `knowledge-text@1`, with the provider the memory semantic index admitted, and
+stores the vector in `knowledge_chunk_vectors`, one row per chunk and embedding space,
+cascading with the chunk; the in-memory store keeps the same rows. A remote provider
+receives only public and internal text, the memory index's egress rule, so a restricted
+document stays lexical, and the index's admission is read before every call. Search
+embeds the question before the unit of work opens; a question the provider cannot embed
+is answered by the lexical arm alone, and the trace's policy version names the space and
+channel that answered. A semantic hit below a similarity floor is no candidate, as a
+chunk holding no query term is none for the lexical arm. Fusion is the domain's shared
+`reciprocal_rank_fusion`, the rule belief recall's `_rrf_fuse` calls. Two channels
+exist, memory's `semantic_channel` by name: `hybrid` fuses the arms by reciprocal rank
+and blends the result with the better arm score; `dense` orders candidates by the
+semantic arm, with the lexical arm reaching only the chunks the space has not seen, so
+a document ingested before the arm was on stays reachable. Gate 13 measured both
+against the ADR-0285 lexical arm and found that hybrid fusion lifts nothing: the lexical
+arm counts function words as coverage, so a document's other sections rank first
+lexically and near the top semantically, and reciprocal rank fusion rewards exactly that
+consensus. The dense channel placed every corpus member within the top two, so
+`AGENT_KNOWLEDGE_SEMANTIC_CHANNEL` defaults to `dense`, and
+`AGENT_KNOWLEDGE_SEMANTIC_ENABLED` stays off until the gate is re-recorded with the
+production embedding space and the owner has accepted where chunk text goes.
+
 ## Scope and visibility
 
 This is the real divergence from memory, and it is the one a reader is most likely to
@@ -297,8 +325,9 @@ is every place it differs, because the differences are the design.
    recall delta, and no correction lines here — three mechanisms the memory spec needs
    that this one does not.
 2. **There is no structured arm.** A belief has a subject and a type to look up
-   directly. A passage has neither. Lexical is always on, semantic arrives on evidence,
-   and graph expansion is not applicable. The lexical arm ranks by **coverage**, the
+   directly. A passage has neither. Lexical is always on, semantic is built and arrives
+   on evidence ([ADR-0289](../adr/0289-knowledge-semantic-arm.md), the Indexing section
+   above), and graph expansion is not applicable. The lexical arm ranks by **coverage**, the
    number of distinct query terms a passage holds, before term density, and each term
    matches any spelling that folds to its stem, the folding relevance recall uses
    ([ADR-0285](../adr/0285-knowledge-search-ranks-by-coverage.md)); both stores score
@@ -479,6 +508,17 @@ class Chunker(Protocol):
         self, text: str, title: str
     ) -> list[KnowledgeChunk]: ...
 
+class KnowledgeChunkEmbedding(BaseModel):     # ADR-0289; one per chunk and space
+    chunk_id: str
+    space: EmbeddingSpace
+    text_version: str                  # "knowledge-text@1"
+    vector: tuple[float, ...]
+
+class KnowledgeSemanticQuery(BaseModel):      # the question, embedded
+    space: EmbeddingSpace
+    vector: tuple[float, ...]
+    channel: str                       # hybrid | dense
+
 class KnowledgeStore(Protocol):
     async def ingest(
         self,
@@ -488,7 +528,7 @@ class KnowledgeStore(Protocol):
         principal: Principal,
     ) -> KnowledgeDocument: ...
     async def search(
-        self, query: KnowledgeQuery
+        self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
     ) -> list[RetrievedPassage]: ...
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None: ...
     async def delete(
@@ -531,7 +571,7 @@ build time alongside the other builtin domains.
 
 ## Hard gates
 
-Twelve gates in a new fourteenth area, `knowledge`, all at Milestone 9.
+Thirteen gates in a new fourteenth area, `knowledge`, all at Milestone 9.
 
 1. **Ingestion trust** — an ingest attempted from a turn below `USER` origin trust is
    refused, and nothing is written. **M9.**
@@ -566,8 +606,13 @@ Twelve gates in a new fourteenth area, `knowledge`, all at Milestone 9.
    passages were rendered writes zero beliefs whose provenance is a document. **M9.**
 12. **Corpus retrieval** — a labelled corpus of questions and their answering passages,
    with a floor on passage recall@3 and a ceiling on noise ratio. A corpus gate. **M9.**
+13. **Paraphrase lift** — across a corpus of documents whose answering passage shares no
+   content word with its question, the semantic arm places that passage within the top
+   two passages `knowledge.search` returns, where lexical retrieval alone does not; the
+   gate replays vectors a real embedding model produced for the corpus. A corpus gate.
+   **M9.**
 
-That is eight case gates, three property gates, and one corpus gate.
+That is eight case gates, three property gates, and two corpus gates.
 
 ## Tracked metrics
 
@@ -602,7 +647,8 @@ That is eight case gates, three property gates, and one corpus gate.
 5. **Automatic pre-turn retrieval.** Knowledge retrieved without an explicit tool call,
    behind a relevance floor, enabled only if the corpus gate improves with it.
 6. **The semantic arm.** `pgvector` behind the existing RRF fusion, enabled on measured
-   lift.
+   lift. Built default-off under ADR-0289, with gate 13 as the measurement; activation
+   needs the gate re-recorded with the production embedding space.
 7. **Later extractors.** PDF, HTML, and DOCX as `Extractor` adapters, each re-running
    ingestion over already-stored sources rather than asking for re-upload.
 

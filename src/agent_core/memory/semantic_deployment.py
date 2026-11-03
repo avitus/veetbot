@@ -16,6 +16,7 @@ from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.embeddings import EmbeddingError
 from agent_core.domain.general_recall_release import RecallReleaseIdentity
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig, local_execution
+from agent_core.domain.semantic_memory import EmbeddingSpace
 from agent_core.domain.semantic_work import EmbeddingConfig
 from agent_core.memory.bounded_recall_admission import BoundedAdmission, bind_bounded_recall
 from agent_core.memory.general_recall_evidence import (
@@ -74,6 +75,10 @@ class IndexConfiguration(BaseModel):
 @dataclass(frozen=True)
 class SemanticServices:
     index: SemanticIndexingPass
+    # The admitted provider and its space, which the knowledge semantic arm
+    # shares (ADR-0289) rather than composing a second egress path.
+    provider: EmbeddingProvider
+    space: EmbeddingSpace
     queries: RunSemanticQueries | None = None
     local_provider: LocalEmbeddingProvider | None = None
     source_recovery: BoundedSourceRecovery | None = None
@@ -343,6 +348,8 @@ async def compose_indexing(
     # No provider object, model loading or credential resolution before admission.
     return SemanticServices(
         admitted=admitted,
+        provider=provider,
+        space=profile.embedding.space,
         index=SemanticIndexingPass(
             factory,
             clock,
