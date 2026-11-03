@@ -268,6 +268,7 @@ class EmailExperienceService:
         self.send_undo_seconds = send_undo_seconds
         self.archive_self_approval_enabled = archive_self_approval_enabled
         self.current_archive_principal = current_archive_principal
+        self._arrival_refused_at: datetime | None = None
         self.account_servers = {
             account_id: {
                 mode: f"gmail_{mode}" if index == 0 else f"gmail_{account_id}_{mode}"
@@ -1531,11 +1532,18 @@ class EmailExperienceService:
 
     async def admit_arrival_check(self, principal: Principal) -> EmailOperation | None:
         """Admit one due server check for new mail; a refusal stays quiet (ADR-0286)."""
+        now = self.clock.now()
+        # A refusal writes no task, so its wait lives here; a restart costs one more try.
+        if self._arrival_refused_at is not None and now - self._arrival_refused_at < timedelta(
+            seconds=self.budget_limits.check_interval_seconds
+        ):
+            return None
         if not await self._arrival_check_due(principal):
             return None
         try:
             return await self.submit_task(principal, kind="refresh", arrival_check=True)
         except BudgetExceededError:
+            self._arrival_refused_at = now
             logger.info("email_arrival_check_refused")
             return None
 
