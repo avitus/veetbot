@@ -59,8 +59,7 @@ COMMIT_EVENT = "cockpit.commit"
 IMPORT_EVENT = "cockpit.import"
 REQUEST_EVENT = "cockpit.request"
 _HOUR = timedelta(hours=1)
-# Every queued entry, so a later entry never overtakes an earlier one for its widget.
-_QUEUE_HORIZON = timedelta(days=3650)
+OUTBOX_BATCH_SIZE = 1000
 _PEOPLE_PAGE = 100
 
 logger = logging.getLogger(__name__)
@@ -383,10 +382,22 @@ class CockpitPublication:
                         operation=OutboxOperation.WRITE,
                         next_attempt_at=now,
                         expected_parent_sha=expected_parent_sha,
-                        created_at=now,
+                        created_at=await self._accepted_at(uow, principal, slug, now),
                     )
                 )
             return revision
+
+    async def _accepted_at(
+        self, uow: RepositoryUnitOfWork, principal: Principal, slug: str, now: datetime
+    ) -> datetime:
+        """A queue position after the widget's newest entry, taken under its row lock.
+
+        The clock alone cannot order the queue: it can repeat or step back, and
+        `now` may have been read before another change took the lock first.
+        """
+
+        newest = await uow.cockpit_outbox.newest_for_widget(principal, slug)
+        return now if newest is None else max(now, newest.created_at + timedelta(microseconds=1))
 
     async def _record_request(
         self,
@@ -639,7 +650,7 @@ class CockpitPublication:
                     operation=OutboxOperation.REMOVE,
                     next_attempt_at=now,
                     expected_parent_sha=await self._live_commit(uow, principal, widget),
-                    created_at=now,
+                    created_at=await self._accepted_at(uow, principal, slug, now),
                 )
             )
 
@@ -667,10 +678,9 @@ class CommitOutboxWorker:
     async def run_once(self) -> int:
         """Attempt every due entry once; return how many reached an outcome."""
 
-        now = self._clock.now()
         async with self._uow_factory() as uow:
             queued = await uow.cockpit_outbox.due(
-                self._principal.tenant_id, now=now + _QUEUE_HORIZON, limit=1000
+                self._principal.tenant_id, now=self._clock.now(), limit=OUTBOX_BATCH_SIZE
             )
         blocked: set[str] = set()
         settled = 0
@@ -678,7 +688,10 @@ class CommitOutboxWorker:
         for entry in sorted(queued, key=lambda item: (item.created_at, str(item.revision_id))):
             if entry.principal_id != self._principal.principal_id or entry.slug in blocked:
                 continue
-            if entry.next_attempt_at > now:
+            # The batch can hold this entry and not an older one still in backoff.
+            async with self._uow_factory() as uow:
+                first = await uow.cockpit_outbox.first_for_widget(self._principal, entry.slug)
+            if first is None or first.revision_id != entry.revision_id:
                 blocked.add(entry.slug)
                 continue
             try:

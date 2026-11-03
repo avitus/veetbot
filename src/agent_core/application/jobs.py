@@ -214,10 +214,15 @@ class JobPublication:
             except Exception as error:
                 # A refused path, an unavailable screen or a lost revision is this
                 # entry's problem: it backs off alone, and every other job still commits.
-                # The stored error names only the type, since jobs carry private inputs.
-                logger.exception(
+                # The stored error and the log name only the type, since jobs carry private
+                # inputs and a database error's text can quote the values it was bound to.
+                logger.error(
                     "job_publication_entry_failed",
-                    extra={"revision_id": str(entry.revision_id), "slug": entry.slug},
+                    extra={
+                        "revision_id": str(entry.revision_id),
+                        "slug": entry.slug,
+                        "error_class": type(error).__name__,
+                    },
                 )
                 await self._reschedule(
                     principal,

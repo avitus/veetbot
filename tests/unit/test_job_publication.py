@@ -558,7 +558,11 @@ async def test_one_jobs_unexpected_failure_leaves_the_other_jobs_publishing(
     assert entry.next_attempt_at == service.clock.now() + timedelta(seconds=30)
     kind = "JobBrokerError" if cause == "screen" else "RuntimeError"
     assert entry.last_error == f"Job publication failed: {kind}"
-    assert any(item.message == "job_publication_entry_failed" for item in caplog.records)
+    logged = next(item for item in caplog.records if item.message == "job_publication_entry_failed")
+    # A database error's text can carry the job record's private bound values.
+    assert logged.__dict__["error_class"] == kind
+    assert logged.exc_info is None
+    assert "Unexpected private detail" not in caplog.text
     screen.check, repository.write_widget = healthy_check, healthy_write  # type: ignore[method-assign]
     cast(FixedClock, service.clock).advance(timedelta(seconds=30))
     assert await service.flush(owner) == 1

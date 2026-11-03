@@ -323,6 +323,19 @@ class InMemoryWidgetCommitOutbox:
                 default=None,
             )
 
+    async def newest_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        owned = _owner(principal)
+        async with self._lock:
+            return max(
+                (
+                    entry
+                    for key, entry in self._entries.items()
+                    if key[:2] == owned and entry.slug == slug
+                ),
+                key=lambda e: (e.created_at, str(e.revision_id)),
+                default=None,
+            )
+
     async def removal_queued(self, principal: Principal, slug: str) -> bool:
         owned = _owner(principal)
         async with self._lock:
@@ -1057,6 +1070,22 @@ class PostgresWidgetCommitOutbox:
                 CockpitCommitOutboxRow.slug == slug,
             )
             .order_by(CockpitCommitOutboxRow.created_at, CockpitCommitOutboxRow.revision_id)
+            .limit(1)
+        )
+        return _entry_from_row(row) if row else None
+
+    async def newest_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        row = await self._session.scalar(
+            select(CockpitCommitOutboxRow)
+            .where(
+                CockpitCommitOutboxRow.package_kind == self._kind,
+                CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                CockpitCommitOutboxRow.principal_id == principal.principal_id,
+                CockpitCommitOutboxRow.slug == slug,
+            )
+            .order_by(
+                CockpitCommitOutboxRow.created_at.desc(), CockpitCommitOutboxRow.revision_id.desc()
+            )
             .limit(1)
         )
         return _entry_from_row(row) if row else None

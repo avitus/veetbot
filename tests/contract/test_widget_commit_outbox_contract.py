@@ -113,6 +113,20 @@ async def a_retry_is_rescheduled_and_completion_removes_it(
 
 
 @scenario
+async def the_newest_operation_is_found_through_backoff_for_its_owner_and_widget(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    assert await outbox.newest_for_widget(owner, "weather") is None
+    oldest = await outbox.enqueue(entry(owner, created_minutes=1))
+    newest = await outbox.enqueue(entry(owner, due_in_minutes=5, created_minutes=2))
+    assert await outbox.newest_for_widget(owner, "weather") == newest
+    assert await outbox.newest_for_widget(foreign(owner), "weather") is None
+    assert await outbox.newest_for_widget(owner, "markets") is None
+    await outbox.complete(owner, newest.revision_id)
+    assert await outbox.newest_for_widget(owner, "weather") == oldest
+
+
+@scenario
 async def a_removal_counts_as_queued_through_its_backoff_and_only_for_its_owner_and_widget(
     outbox: WidgetCommitOutbox, owner: Principal
 ) -> None:

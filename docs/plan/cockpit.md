@@ -438,7 +438,11 @@ ever touches a branch under `cockpit/`.
 ### Writing
 
 The outbox worker in the maintenance role takes each widget's entries in the
-order they were accepted, whenever their retries fall due. For each one it:
+order they were accepted, whenever their retries fall due. An entry's place is
+fixed under the widget's row lock, after everything already queued for that
+widget, so a clock that repeats or steps back cannot reorder them, and an entry
+waits while an older one for its widget is outstanding, whether or not that one
+is in the current batch. For each one it:
 
 1. reads the branch head;
 2. creates blobs, a tree based on the head's tree that changes only

@@ -8,16 +8,20 @@ the sandbox suite repeats the screen and rejection gates with the real one.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
+from agent_core.application.cockpit import OUTBOX_BATCH_SIZE
 from agent_core.application.cockpit_diagnostics import diagnostics
 from agent_core.domain.cockpit import (
     CockpitEventKind,
+    CommitOutboxEntry,
     DeviceClass,
     Layout,
+    OutboxOperation,
     Placement,
     RevisionSource,
     RevisionState,
@@ -575,6 +579,88 @@ async def test_a_newer_write_waits_behind_the_one_it_updates() -> None:
         assert await stack.outbox.run_once() == 2
         assert await _live(stack) == third.id
         assert await _state(stack, second.id) is RevisionState.SUPERSEDED
+        assert stack.head_files("weather") == package("v3")
+
+
+@pytest.mark.parametrize("step", [0, -60], ids=["same-instant", "clock-stepped-back"])
+async def test_a_newer_write_stays_behind_the_older_one_whatever_the_clock_says(step: int) -> None:
+    """The stored order is acceptance order, so the older package can never land last."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.clock.advance(timedelta(seconds=step))
+        third = await stack.publication.write(
+            PRINCIPAL, "weather", package("v3"), expected_revision=second.id
+        )
+        async with stack.uow_factory() as uow:
+            queued = await uow.cockpit_outbox.due(
+                PRINCIPAL.tenant_id, now=stack.clock.now() + timedelta(days=1), limit=10
+            )
+        accepted = {entry.revision_id: entry.created_at for entry in queued}
+        assert accepted[second.id] < accepted[third.id]
+
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert await _live(stack) == third.id
+        assert stack.head_files("weather") == package("v3")
+
+
+async def test_a_delete_stays_behind_the_write_it_showed_when_the_clock_steps_back() -> None:
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        shown = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.clock.advance(timedelta(seconds=-60))
+        await stack.publication.delete(PRINCIPAL, "weather", expected_head=shown.id)
+
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert stack.head_files("weather") == {}
+        assert stack.trailer_count(shown.id) == 1
+
+
+async def test_a_newer_write_waits_behind_an_older_one_the_batch_left_out() -> None:
+    """A full batch can hold the newer write and not the older one still in backoff."""
+    async with publication_stack() as stack:
+        first = await _create_live(stack, "v1")
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first
+        )
+        stack.remote.fail_next("PATCH", BRANCH_REF, "unavailable")
+        assert await stack.outbox.run_once() == 0
+        third = await stack.publication.write(
+            PRINCIPAL, "weather", package("v3"), expected_revision=second.id
+        )
+        someone_else = PRINCIPAL.model_copy(update={"principal_id": "someone-else"})
+        earlier = stack.clock.now() - timedelta(hours=1)
+        filler = [uuid4() for _ in range(OUTBOX_BATCH_SIZE - 1)]
+        async with stack.uow_factory() as uow:
+            for revision_id in filler:
+                await uow.cockpit_outbox.enqueue(
+                    CommitOutboxEntry(
+                        tenant_id=someone_else.tenant_id,
+                        principal_id=someone_else.principal_id,
+                        revision_id=revision_id,
+                        slug="other",
+                        operation=OutboxOperation.WRITE,
+                        next_attempt_at=earlier,
+                        created_at=earlier,
+                    )
+                )
+
+        assert await stack.outbox.run_once() == 0
+        assert await _live(stack) == first
+        assert stack.head_files("weather") == package("v1")
+
+        async with stack.uow_factory() as uow:
+            for revision_id in filler:
+                await uow.cockpit_outbox.complete(someone_else, revision_id)
+        stack.later()
+        assert await stack.outbox.run_once() == 2
+        assert await _live(stack) == third.id
         assert stack.head_files("weather") == package("v3")
 
 

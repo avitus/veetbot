@@ -123,6 +123,10 @@ class WidgetCommitOutbox(Protocol):
         """The oldest outstanding operation for this owned widget, including backoff."""
         ...
 
+    async def newest_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        """The newest outstanding operation for this owned widget, including backoff."""
+        ...
+
     async def removal_queued(self, principal: Principal, slug: str) -> bool:
         """Whether this owned widget has an outstanding removal, including backoff."""
         ...
