@@ -2155,6 +2155,30 @@ async def test_the_sweep_reads_a_status_check_that_finished_before_its_turn(
     assert "remote sign-in sweep failed" not in caplog.text
 
 
+async def test_a_sweep_kept_waiting_past_the_limit_starts_no_verification(tmp_path: Path) -> None:
+    """It was due in time, but its first sample only got its turn after the limit."""
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path, with_session=SIGNED_OUT
+    )
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await scenario.started.wait()
+    checks = runtimes[0].status_checks
+    sweeping = asyncio.create_task(sessions.sweep())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    times[0] += timedelta(seconds=6)
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    await asyncio.wait_for(checking, timeout=2)
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    assert runtimes[0].status_checks == checks
+    assert len(runtimes) == 3, "one page and the check's two verification browsers"
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+
+
 async def test_a_status_check_queued_past_the_limit_starts_no_verification(tmp_path: Path) -> None:
     """Only the verification already under way outlives the limit."""
     scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
