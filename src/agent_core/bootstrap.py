@@ -1707,10 +1707,14 @@ async def _knowledge_embedder(
                 "knowledge_semantic_unavailable_using_lexical", extra={"reason": "credential"}
             )
             return None
+        # The arm's egress follows the semantic index's admission when one is
+        # composed, so withdrawing the standing files stops it as well; with
+        # no index the flag alone turns it off.
         return KnowledgeEmbedder(
             OpenAIEmbeddingProvider(key),
             KNOWLEDGE_OPENAI_SPACE,
             channel=settings.knowledge_semantic_channel,
+            admitted=(lambda: True) if index is None else (index.admitted or (lambda: True)),
         )
     if index is None:
         logger.warning("knowledge_semantic_unavailable_using_lexical", extra={"reason": "index"})

@@ -72,3 +72,27 @@ async def test_index_provider_without_the_index_stays_lexical(
 async def test_the_arm_off_composes_nothing() -> None:
     settings = load_settings({**base_environment(), "AGENT_KNOWLEDGE_SEMANTIC_PROVIDER": "openai"})
     assert await _knowledge_embedder(settings, None, Resolver("sk-test")) is None
+
+
+class _Index:
+    """The composed semantic index as the knowledge arm sees it."""
+
+    def __init__(self, admitted: bool) -> None:
+        self._admitted = admitted
+        self.provider = None
+        self.space = KNOWLEDGE_OPENAI_SPACE
+        self.local_provider = None
+
+    def admitted(self) -> bool:
+        return self._admitted
+
+
+async def test_the_openai_arm_reads_the_index_admission_when_one_is_composed() -> None:
+    """Withdrawing the standing files stops the OpenAI knowledge arm too."""
+
+    settings = _settings(AGENT_KNOWLEDGE_SEMANTIC_PROVIDER="openai", VEETBOT_OPENAI_KEY="sk-test")
+    index = _Index(admitted=True)
+    embedder = await _knowledge_embedder(settings, index, Resolver("sk-test"))  # type: ignore[arg-type]
+    assert embedder is not None and embedder.admitted()
+    index._admitted = False
+    assert not embedder.admitted(), "a withdrawn index withdraws the knowledge arm's egress"
