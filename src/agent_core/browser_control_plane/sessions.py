@@ -899,6 +899,13 @@ class HostedProfileSessionService:
             if await self._sample(state) is not BrowserAuthenticationStatus.READY:
                 return
             async with state.runtime_lock:
+                async with self._lock:
+                    # A status check may have ended it while this call waited its turn.
+                    if (
+                        self._ceremonies.get(state.id) is not state
+                        or state.status in _TERMINAL_AUTH_STATUSES
+                    ):
+                        return
                 try:
                     sealed = await self._verify_remote_material(state)
                 except DeviceSessionRejected as rejected:

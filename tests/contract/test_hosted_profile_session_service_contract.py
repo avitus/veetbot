@@ -1876,26 +1876,38 @@ async def test_a_swept_ceremony_never_serves_two_callers_at_once(tmp_path: Path)
 
 async def verifying_past_the_limit(
     tmp_path: Path, **scenario_fields: Any
-) -> tuple[HandoffScenario, HostedProfileSessionService, list[FakeSessionRuntime], Any, UUID]:
+) -> tuple[HandoffScenario, HostedProfileSessionService, list[FakeSessionRuntime], Any, UUID, str]:
     """A remote sign-in whose status is ready, five seconds from its limit."""
 
     scenario = HandoffScenario(gate=asyncio.Event(), **scenario_fields)
     lifecycle, sessions, runtimes, times = services(tmp_path, scenario=scenario)
     await provision(lifecycle)
-    ceremony_id = await begin_remote(sessions)
+    view = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    assert view.launch_url is not None
     times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=5)
     sessions._sweep_sample_seconds = 0  # noqa: SLF001 - two samples, no wait between them
-    return scenario, sessions, runtimes, times, ceremony_id
+    return scenario, sessions, runtimes, times, view.id, view.launch_url.split("#capability=", 1)[1]
+
+
+async def surface_runs_into_the_limit(
+    sessions: HostedProfileSessionService, ceremony_id: UUID, capability: str, times: Any
+) -> None:
+    """The browser surface's once-a-second frame request is what runs into the limit."""
+    assert await sessions.authenticate_surface(ceremony_id, capability) is True
+    times[0] += timedelta(seconds=6)
+    assert await sessions.authenticate_surface(ceremony_id, capability) is False
 
 
 async def test_a_status_check_saves_a_sign_in_the_limit_overtakes(tmp_path: Path) -> None:
     """Production, 2026-11-03: Chase was signed in with seconds left, and expiry discarded it."""
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
     checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
     await scenario.started.wait()
-    times[0] += timedelta(seconds=6)
-    # The browser surface's once-a-second frame request is what runs into the limit.
-    assert await sessions.authenticate_surface(ceremony_id, "x" * 32) is False
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
     assert runtimes[0].closed is False
     assert scenario.gate is not None
     scenario.gate.set()
@@ -1907,11 +1919,12 @@ async def test_a_status_check_saves_a_sign_in_the_limit_overtakes(tmp_path: Path
 
 
 async def test_the_sweep_saves_a_sign_in_the_limit_overtakes(tmp_path: Path) -> None:
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
     sweeping = asyncio.create_task(sessions.sweep())
     await scenario.started.wait()
-    times[0] += timedelta(seconds=6)
-    assert (await sessions.authenticate_surface(ceremony_id, "x" * 32, operation="frame")) is False
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
     assert runtimes[0].closed is False
     assert scenario.gate is not None
     scenario.gate.set()
@@ -1925,7 +1938,9 @@ async def test_the_sweep_saves_a_sign_in_the_limit_overtakes(tmp_path: Path) -> 
 
 async def test_a_status_check_waiting_on_the_sweep_reads_its_outcome(tmp_path: Path) -> None:
     """The sweep closes the page when it saves; the waiting check must not touch it."""
-    scenario, sessions, runtimes, _times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    scenario, sessions, runtimes, _times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
     sweeping = asyncio.create_task(sessions.sweep())
     await scenario.started.wait()
     original = runtimes[0].authentication_status
@@ -1950,7 +1965,7 @@ async def test_a_refused_session_expires_when_its_late_verification_ends(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
         tmp_path, with_session=SIGNED_OUT
     )
     sweeping = asyncio.create_task(sessions.sweep())
@@ -1977,7 +1992,14 @@ async def test_a_sweep_that_fails_says_what_failed(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    _scenario, sessions, runtimes, _times, _ceremony_id = await verifying_past_the_limit(tmp_path)
+    (
+        _scenario,
+        sessions,
+        runtimes,
+        _times,
+        _ceremony_id,
+        _capability,
+    ) = await verifying_past_the_limit(tmp_path)
 
     async def unavailable() -> BrowserAuthenticationStatus:
         raise RuntimeError("private page detail")
@@ -2010,12 +2032,13 @@ async def sweep_between_samples(
 async def test_the_sweep_saves_a_sign_in_the_limit_overtakes_between_samples(
     tmp_path: Path,
 ) -> None:
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
     assert scenario.gate is not None
     scenario.gate.set()
     sweeping = await sweep_between_samples(sessions, runtimes[0])
-    times[0] += timedelta(seconds=6)
-    assert (await sessions.authenticate_surface(ceremony_id, "x" * 32, operation="frame")) is False
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
     assert runtimes[0].closed is False
     await asyncio.wait_for(sweeping, timeout=2)
 
@@ -2026,7 +2049,9 @@ async def test_the_sweep_saves_a_sign_in_the_limit_overtakes_between_samples(
 
 async def test_a_status_check_inside_the_sweeps_wait_keeps_the_limit_off(tmp_path: Path) -> None:
     """Both are deciding; the check finishing first must not end the sweep's protection."""
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
     assert scenario.gate is not None
     scenario.gate.set()
     runtimes[0].authentication_samples = [
@@ -2037,8 +2062,7 @@ async def test_a_status_check_inside_the_sweeps_wait_keeps_the_limit_off(tmp_pat
     sweeping = await sweep_between_samples(sessions, runtimes[0])
     checked = await sessions.refresh_authentication(ceremony_id, principal())
     assert checked.status is BrowserAuthenticationStatus.NEEDS_USER
-    times[0] += timedelta(seconds=6)
-    assert (await sessions.authenticate_surface(ceremony_id, "x" * 32, operation="frame")) is False
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
     assert runtimes[0].closed is False
     await asyncio.wait_for(sweeping, timeout=2)
 
@@ -2048,7 +2072,9 @@ async def test_a_status_check_inside_the_sweeps_wait_keeps_the_limit_off(tmp_pat
 
 
 async def test_a_status_check_past_the_limit_leaves_the_sweep_deciding(tmp_path: Path) -> None:
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
     assert scenario.gate is not None
     scenario.gate.set()
     sweeping = await sweep_between_samples(sessions, runtimes[0])
@@ -2069,7 +2095,9 @@ async def test_a_stuck_sample_does_not_hold_off_the_limit(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    _scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    _scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
     sessions._verification_seconds = 0.01  # noqa: SLF001 - the budget the sample runs out of
 
     async def stuck() -> BrowserAuthenticationStatus:
@@ -2091,9 +2119,45 @@ async def test_a_stuck_sample_does_not_hold_off_the_limit(
     ] == ["TimeoutError"]
 
 
+async def test_the_sweep_reads_a_status_check_that_finished_before_its_turn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Between its last sample and its verification, a queued check can save and close the page."""
+    caplog.set_level(logging.INFO)
+    scenario, sessions, runtimes, _times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    assert scenario.gate is not None
+    scenario.gate.set()
+    second_sample = asyncio.Event()
+    release = asyncio.Event()
+    original = runtimes[0].authentication_status
+
+    async def held_second_sample() -> BrowserAuthenticationStatus:
+        if runtimes[0].status_checks == 1:
+            second_sample.set()
+            await release.wait()
+        return await original()
+
+    runtimes[0].authentication_status = held_second_sample  # type: ignore[method-assign]
+    sweeping = asyncio.create_task(sessions.sweep())
+    await asyncio.wait_for(second_sample.wait(), timeout=2)
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    release.set()
+
+    view = await asyncio.wait_for(checking, timeout=2)
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    assert view.status is BrowserAuthenticationStatus.READY
+    assert len(runtimes) == 3, "one page and the check's two verification browsers"
+    assert "remote sign-in sweep failed" not in caplog.text
+
+
 async def test_a_status_check_queued_past_the_limit_starts_no_verification(tmp_path: Path) -> None:
     """Only the verification already under way outlives the limit."""
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
         tmp_path, with_session=SIGNED_OUT
     )
     first = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
@@ -2115,7 +2179,7 @@ async def test_a_status_check_queued_past_the_limit_starts_no_verification(tmp_p
 
 
 async def test_the_sweep_starts_nothing_on_a_ceremony_past_its_limit(tmp_path: Path) -> None:
-    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
         tmp_path, with_session=SIGNED_OUT
     )
     checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
