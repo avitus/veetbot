@@ -1127,13 +1127,20 @@ class _TaskIO:
         def waiting(thread: EmailThread) -> bool:
             return (thread.account_id, thread.provider_thread_id) in self.window_waiting
 
-        def arrival(thread: EmailThread, prior: EmailRecord | None) -> bool:
-            """A completed assessment of this exact source is the only thing that ends one."""
+        def arrival(thread: EmailThread, prior: EmailRecord | None, reading: bool) -> bool:
+            """One pass per source ranks a conversation; later passes wait for Email.
+
+            Each page read changes the fingerprint without new mail, so a read under way
+            waits for its end, when the newest message is there to rank. A full window a
+            change waits on keeps its passes: mail behind it stays unread.
+            """
+            if reading and not waiting(thread):
+                return False
             return (
                 prior is None
                 or prior.payload.get("source_fingerprint") != thread.source_fingerprint
-                or prior.payload.get("analysis_complete") is not True
                 or prior.payload.get("retry_pending") is True
+                or (waiting(thread) and prior.payload.get("analysis_complete") is not True)
             )
 
         async with c.uow_factory() as uow:
@@ -1146,7 +1153,18 @@ class _TaskIO:
             selected = [
                 summary
                 for summary in recent
-                if arrival(summary, await uow.email.get(c.principal, "assessment", str(summary.id)))
+                if arrival(
+                    summary,
+                    await uow.email.get(c.principal, "assessment", str(summary.id)),
+                    await uow.email.get(
+                        c.principal,
+                        "thread_progress",
+                        hashlib.sha256(
+                            f"{summary.account_id}:{summary.provider_thread_id}".encode()
+                        ).hexdigest(),
+                    )
+                    is not None,
+                )
             ]
         selected.sort(key=lambda thread: (not waiting(thread), -thread.updated_at.timestamp()))
         assessed: list[UUID] = []
