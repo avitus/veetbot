@@ -75,7 +75,8 @@ Every refresh also reads all 9,072 stored conversations and 6,173 assessments.
    value, `arrivals`, alongside `full` and `new_mail`. An arrival is an Inbox
    conversation with activity in the last seven days whose current source has not had
    a pass: it was never assessed, its source changed, or its one promised retry is
-   pending. A check:
+   pending. A conversation still being read is not an arrival until the read ends. A
+   check:
    - reads Gmail changes with the existing eight full-thread reads per account,
      most recently changed first;
    - lists and reads only the first page of an Inbox pass after a resynchronization,
@@ -200,6 +201,17 @@ still ranks within minutes, and foreground slices finish the rest. A long conver
 gets its automatic draft only after they do. The exception is a full retained window
 that a Gmail change is waiting on. It keeps its passes, because the mail behind it
 cannot be read until the window is analyzed.
+
+Review of that fix found the same fault one step earlier. A conversation of more than
+one page takes several checks to read, each read changes the stored source without any
+new mail, and a pass after each read would start again from the newest passage read so
+far. A conversation now waits until its read ends, and then gets its one pass, when the
+newest message is there to rank. The cost is delay: about one page of ten messages per
+check, so a conversation of 43 messages ranks after about five checks, or 25 minutes.
+Most conversations fit one page and are unaffected. A new conversation shows as pending
+until then, and one already ranked keeps its ranking. A label change on such a
+conversation re-reads it and still costs one pass at the end, because the source
+comparison cannot match a partial read to the full one it replaces.
 
 The same evening showed a refused check retrying at every 60-second sweep, 63 log
 lines by 8:56 PM, against decision 5. It now waits one interval. A refusal writes no

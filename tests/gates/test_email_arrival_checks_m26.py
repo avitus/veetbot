@@ -40,10 +40,19 @@ NOW = datetime(2026, 9, 11, 13, 0, tzinfo=UTC)
 FORMATION = "memory.formation.requested"
 
 
-async def _mailbox(changes: list[str], calls: list[tuple[str, str]]) -> Any:
-    """Report each change once, and record every provider call a check makes."""
+async def _mailbox(
+    changes: list[str],
+    calls: list[tuple[str, str]],
+    pages: dict[str | None, dict[str, Any]] | None = None,
+    *,
+    live: bool = False,
+) -> Any:
+    """Report each change once, and record every provider call a check makes.
+
+    With `live`, changes the test adds later are reported too.
+    """
     base = await _current_mail_factory()
-    pending = list(changes)
+    pending = changes if live else list(changes)
 
     def factory(
         config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
@@ -73,7 +82,11 @@ async def _mailbox(changes: list[str], calls: list[tuple[str, str]]) -> Any:
                 }
                 pending.clear()
             elif name == "get_thread_page":
-                value = _thread_page(arguments["thread_id"], NOW)
+                value = (
+                    _thread_page(arguments["thread_id"], NOW)
+                    if pages is None
+                    else pages[arguments.get("page_token")]
+                )
             else:
                 return await original(name, arguments)
             return MCPCallResult(content=(json.dumps(value),), structured=value)
@@ -101,6 +114,18 @@ def _long_page(thread_id: str, when: datetime) -> dict[str, Any]:
     page = _thread_page(thread_id, when)
     page["messages"][0]["body"] = "Please approve the board materials. " + "x" * 8192 * 3
     return page
+
+
+def _two_pages(thread_id: str, when: datetime) -> dict[str | None, dict[str, Any]]:
+    """A conversation Gmail returns over two pages, with its newest message on the second."""
+    first = _thread_page(thread_id, when - timedelta(hours=1))
+    first.update(next_page_token="next", complete=False)
+    last = _thread_page(thread_id, when)
+    last.update(next_page_token=None, complete=True)
+    last["messages"][0].update(
+        id=f"{thread_id}-m2", message_id_header=f"<{thread_id}-m2@example.test>"
+    )
+    return {None: first, "next": last}
 
 
 async def _caught_up(app: Composition, **account: Any) -> None:
@@ -556,6 +581,15 @@ async def _assert_a_completed_foreground_refresh_resets_the_wait() -> None:
         assert await service.admit_arrival_check(app.principal) is not None
 
 
+async def _stored_thread(app: Composition, provider_id: str) -> EmailThread:
+    async with app.uow_factory() as uow:
+        threads = [
+            EmailThread.model_validate(row.payload)
+            async for row in records(uow.email, app.principal, "thread")
+        ]
+    return next(thread for thread in threads if thread.provider_thread_id == provider_id)
+
+
 async def _assessment_of(app: Composition, thread: EmailThread) -> dict[str, Any]:
     async with app.uow_factory() as uow:
         row = await uow.email.get(app.principal, "assessment", str(thread.id))
@@ -635,6 +669,75 @@ async def _assert_a_changed_long_conversation_gets_a_new_pass() -> None:
         assert (after["analysis_cursor"], after["analysis_complete"]) == (1, False)
 
 
+async def _assert_a_conversation_still_being_read_waits_for_the_read() -> None:
+    """Reading further into the same mail is not new mail, so it spends one pass at the end."""
+    clock = FixedClock(NOW)
+    mailbox = await _mailbox(["paged"], [], _two_pages("paged", NOW))
+    async with _app(clock, mailbox, _assessment_turn()) as app:
+        await _caught_up(app)
+        service = app.services.email
+
+        partial = await service.admit_arrival_check(app.principal)
+
+        assert partial is not None
+        assert (await _run_of(app, partial.run_id)).model_call_count == 0
+        thread = await _stored_thread(app, "paged")
+        assert [message.id for message in thread.messages] == ["paged-m"]
+
+        clock.advance(timedelta(minutes=5))
+        finished = await service.admit_arrival_check(app.principal)
+
+        assert finished is not None
+        assert (await _run_of(app, finished.run_id)).model_call_count == 1
+        thread = await _stored_thread(app, "paged")
+        assert [message.id for message in thread.messages] == ["paged-m", "paged-m2"]
+        assessment = await _assessment_of(app, thread)
+        assert assessment["source_fingerprint"] == thread.source_fingerprint
+
+        clock.advance(timedelta(minutes=5))
+        quiet = await service.admit_arrival_check(app.principal)
+
+        assert quiet is not None
+        assert (await _run_of(app, quiet.run_id)).model_call_count == 0
+
+
+async def _assert_new_mail_in_a_conversation_waits_for_the_read() -> None:
+    """A conversation already ranked keeps that ranking until its new mail has been read."""
+    clock = FixedClock(NOW)
+    changes: list[str] = []
+    mailbox = await _mailbox(changes, [], _two_pages("paged", NOW), live=True)
+    async with _app(clock, mailbox, _assessment_turn(), _assessment_turn()) as app:
+        await _caught_up(app)
+        service = app.services.email
+        session = await app.sessions.create()
+        known = _thread_page("paged", NOW - timedelta(days=1))
+        known["messages"][0]["id"] = "paged-m0"
+        await service.import_thread(app.principal, "default", known, session)
+        settled = await service.admit_arrival_check(app.principal)
+        assert settled is not None
+        assert (await _run_of(app, settled.run_id)).model_call_count == 1
+        before = await _assessment_of(app, await _stored_thread(app, "paged"))
+
+        clock.advance(timedelta(minutes=5))
+        changes.append("paged")
+        partial = await service.admit_arrival_check(app.principal)
+
+        assert partial is not None
+        assert (await _run_of(app, partial.run_id)).model_call_count == 0
+        unchanged = await _assessment_of(app, await _stored_thread(app, "paged"))
+        assert unchanged["source_fingerprint"] == before["source_fingerprint"]
+
+        clock.advance(timedelta(minutes=5))
+        finished = await service.admit_arrival_check(app.principal)
+
+        assert finished is not None
+        assert (await _run_of(app, finished.run_id)).model_call_count == 1
+        thread = await _stored_thread(app, "paged")
+        assert (await _assessment_of(app, thread))[
+            "source_fingerprint"
+        ] == thread.source_fingerprint
+
+
 async def _assert_a_rejected_result_is_retried_once() -> None:
     """The one promised retry still happens, and then the conversation stops counting."""
     clock = FixedClock(NOW)
@@ -681,6 +784,8 @@ CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_drafts_only_what_it_assessed,
     _assert_a_long_conversation_gets_one_pass,
     _assert_a_changed_long_conversation_gets_a_new_pass,
+    _assert_a_conversation_still_being_read_waits_for_the_read,
+    _assert_new_mail_in_a_conversation_waits_for_the_read,
     _assert_a_rejected_result_is_retried_once,
     _assert_budget_limits,
     _assert_a_refused_check_waits_its_interval,

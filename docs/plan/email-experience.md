@@ -261,7 +261,9 @@ a request to any refresh already running.
 
 An arrival is an Inbox conversation with activity in the last seven days whose
 current source has not had a pass: never assessed, source changed, or its one
-promised retry pending. A check reads Gmail changes with the usual eight reads per
+promised retry pending. A conversation still being read waits until the read ends,
+because each page changes the stored source without new mail. A check reads Gmail
+changes with the usual eight reads per
 account, and a resynchronization's first Inbox page. It assesses at most four
 arrivals, newest first, after any retained window a change is waiting on. Each gets
 one pass, on its newest passage, which is enough to rank it; further passes of a long

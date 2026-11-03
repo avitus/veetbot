@@ -9,6 +9,8 @@ title: Changelog
 - A check now gives each conversation one pass, which is enough to rank it, and leaves
   the rest of a long thread until Email is open. Before, a few long threads took most
   checks and used up the daily limit by the first evening.
+- A conversation too long for one read now ranks when its read finishes, about 25 minutes
+  for 43 messages, and costs one pass instead of one per read.
 - A long thread's automatic draft now waits until Email has finished reading it.
 - A check refused by a spending limit waits five minutes before trying again.
 
