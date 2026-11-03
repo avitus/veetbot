@@ -41,14 +41,15 @@ SPACE = EmbeddingSpace(provider="fixture", model="semantic", revision="v1", dime
 class Provider:
     """Embeds the fan passage by the question and everything else away from it."""
 
-    def __init__(self, *, failing: bool = False) -> None:
+    def __init__(self, *, failing: bool = False, fail_after: int | None = None) -> None:
         self.calls: list[EmbeddingRequest] = []
         self.failing = failing
+        self.fail_after = fail_after
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         assert not _unit_of_work_is_open(), "backfill embeds before a unit of work opens"
         self.calls.append(request)
-        if self.failing:
+        if self.failing or (self.fail_after is not None and len(self.calls) > self.fail_after):
             raise EmbeddingError("local embedding capacity unavailable")
         vectors = tuple(
             (1.0, 0.0, 0.0) if "fan" in text.split("\n", 1)[-1] else (0.0, 1.0, 0.0)
@@ -81,7 +82,11 @@ async def _factory() -> tuple[MemoryUnitOfWorkFactory, InMemoryKnowledgeStore]:
 
 
 def _backfill(
-    factory: MemoryUnitOfWorkFactory, embedder: KnowledgeEmbedder, *, batch: int = 64
+    factory: MemoryUnitOfWorkFactory,
+    embedder: KnowledgeEmbedder,
+    *,
+    batch: int = 64,
+    group: int = 8,
 ) -> KnowledgeVectorBackfill:
     return KnowledgeVectorBackfill(
         uow_factory=factory,
@@ -89,7 +94,21 @@ def _backfill(
         principal=principal(),
         clock=FixedClock(NOW),
         batch_chunks=batch,
+        group_chunks=group,
     )
+
+
+async def test_each_group_is_written_before_the_next_is_embedded() -> None:
+    """A round that ends early keeps what it embedded: progress survives a deadline."""
+
+    factory, store = await _factory()
+    await store.ingest(_document(1, TEXT))
+    provider = Provider(fail_after=1)
+    sweep = _backfill(factory, KnowledgeEmbedder(provider, SPACE), group=1)
+    assert await sweep.sweep_once() == 1
+    provider.fail_after = None
+    assert await sweep.sweep_once() == 2
+    assert await sweep.sweep_once() == 0
 
 
 async def test_rounds_embed_waiting_chunks_in_windows_until_none_remain(

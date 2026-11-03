@@ -32,12 +32,17 @@ class KnowledgeVectorBackfill:
         principal: Principal,
         clock: Clock,
         batch_chunks: int = 64,
+        group_chunks: int = 8,
     ) -> None:
         self._uow_factory = uow_factory
         self._embedder = embedder
         self._principal = principal
         self._clock = clock
         self._batch_chunks = batch_chunks
+        # Chunks are embedded and written a group at a time, so a round that
+        # ends early, at a provider failure or the worker's deadline, keeps
+        # the groups it finished.
+        self._group_chunks = max(1, group_chunks)
 
     async def sweep_once(self) -> int:
         """Embed one batch of waiting chunks; return how many chunks gained vectors.
@@ -62,18 +67,21 @@ class KnowledgeVectorBackfill:
             )
         if not chunks:
             return 0
-        try:
-            embeddings = await self._embedder.embed_chunks(chunks)
-        except EmbeddingError as error:
-            # The message is content-free by contract; only the class is logged.
-            logger.warning(
-                "knowledge_vector_backfill_ended", extra={"error_class": type(error).__name__}
-            )
-            return 0
-        async with self._uow_factory() as uow:
-            await uow.knowledge.add_embeddings(embeddings)
-        logger.info(
-            "knowledge_vectors_backfilled",
-            extra={"chunks": len(chunks), "windows": len(embeddings)},
-        )
-        return len(chunks)
+        done = windows = 0
+        for start in range(0, len(chunks), self._group_chunks):
+            group = chunks[start : start + self._group_chunks]
+            try:
+                embeddings = await self._embedder.embed_chunks(group)
+            except EmbeddingError as error:
+                # The message is content-free by contract; only the class is logged.
+                logger.warning(
+                    "knowledge_vector_backfill_ended", extra={"error_class": type(error).__name__}
+                )
+                break
+            async with self._uow_factory() as uow:
+                await uow.knowledge.add_embeddings(embeddings)
+            done += len(group)
+            windows += len(embeddings)
+        if done:
+            logger.info("knowledge_vectors_backfilled", extra={"chunks": done, "windows": windows})
+        return done

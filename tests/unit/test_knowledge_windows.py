@@ -112,3 +112,26 @@ def test_a_heading_longer_than_the_budget_yields_to_the_text() -> None:
     bare = knowledge_embedding_windows(hopeless, PARAGRAPHS, budget_tokens=24, count_tokens=words)
     assert bare and all(words(window) <= 24 for window in bare)
     assert "".join(content(window) for window in bare) == content(PARAGRAPHS)
+
+
+def test_a_heading_and_body_over_the_byte_bound_are_still_windowed_whole() -> None:
+    """The byte bound truncates one text; windows never lose a character to it.
+
+    A heading near the bound is left out and the body is cut into windows
+    that each fit the bound; a heading that fits is kept and the body is cut
+    so the prefixed window still fits.
+    """
+
+    huge_heading = ["x" * 3000]
+    body = "yy " * 700
+    windows = knowledge_embedding_windows(huge_heading, body, budget_tokens=300, count_tokens=words)
+    assert all(len(window.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES for window in windows)
+    assert all(words(window) <= 300 for window in windows)
+    assert "".join(content(window) for window in windows) == content(body)
+    heading = ["h" * 1000]
+    long_body = "word " * 1000
+    kept = knowledge_embedding_windows(heading, long_body, budget_tokens=10_000, count_tokens=words)
+    assert len(kept) > 1
+    assert all(window.startswith("h" * 1000 + "\n") for window in kept)
+    assert all(len(window.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES for window in kept)
+    assert "".join(content(window.split("\n", 1)[1]) for window in kept) == content(long_body)

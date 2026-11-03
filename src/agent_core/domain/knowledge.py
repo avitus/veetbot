@@ -293,22 +293,38 @@ def knowledge_embedding_windows(
     if budget_tokens is None:
         return [whole]
     count = count_tokens or _token_estimate
-    if count(whole) <= budget_tokens:
+    unbounded = _heading_prefix(heading_path)
+    unbounded = f"{unbounded}\n{text}" if unbounded else text
+    # One window only when the byte bound cut nothing from it; otherwise the
+    # windows below each fit the bound, so no character is lost to it.
+    if len(unbounded.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES and (
+        count(whole) <= budget_tokens
+    ):
         return [whole]
     # A heading has no length limit. The prefix keeps its deepest levels and
-    # drops the outer ones until it leaves half the budget for text; a prefix
-    # no level of which fits is left out, so the windows still fit.
+    # drops the outer ones until it leaves half the budget, in tokens and in
+    # bytes, for text; a prefix no level of which fits is left out.
     path = list(heading_path)
-    while path and count(_heading_prefix(path)) > budget_tokens // 2:
+    while path and (
+        count(_heading_prefix(path)) > budget_tokens // 2
+        or len(_heading_prefix(path).encode("utf-8")) > KNOWLEDGE_EMBEDDING_TEXT_BYTES // 2
+    ):
         path = path[1:]
     prefix = _heading_prefix(path)
 
-    def window(body: str) -> str:
+    def raw(body: str) -> str:
         body = body.strip()
-        return _bounded_text(f"{prefix}\n{body}" if prefix else body)
+        return f"{prefix}\n{body}" if prefix else body
+
+    def window(body: str) -> str:
+        return _bounded_text(raw(body))
 
     def fits(body: str) -> bool:
-        return count(window(body)) <= budget_tokens
+        text = raw(body)
+        return (
+            len(text.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES
+            and count(text) <= budget_tokens
+        )
 
     def pack(run: str, level: int) -> list[str]:
         """Fill windows greedily from the run's pieces at this level; refine any that overflow."""
