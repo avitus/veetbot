@@ -808,7 +808,10 @@ The service sweeps every fifteen seconds and closes expired runtimes without
 waiting for a request. It checks each open remote ceremony once in its last
 twenty seconds and seals it only when two checks 2.5 seconds apart both find
 the evidence above, so a check made while a submission is in flight does not
-seal. The service keeps each terminal outcome for twenty-four hours, in memory,
+seal. A status check or sweep already deciding a ceremony when its five minutes
+end runs to its own thirty-second budget, so a sign-in finished in the last
+seconds is still saved; the browser surface closes at the limit either way. The
+service keeps each terminal outcome for twenty-four hours, in memory,
 so the public record can still learn it.
 
 ### Device sign-in ceremony

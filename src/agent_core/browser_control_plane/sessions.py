@@ -9,8 +9,8 @@ import hmac
 import json
 import logging
 import secrets
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Literal, Protocol
@@ -139,6 +139,8 @@ class _CeremonyState:
     consumed: bool = False
     # The sweep has sampled this remote ceremony near its expiry (ADR-0128 D16).
     swept: bool = False
+    # A status check or the sweep is deciding this remote ceremony's outcome.
+    verifying: bool = False
     # Serializes calls into the headed page: sweep, refresh, frame and events.
     runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -682,14 +684,22 @@ class HostedProfileSessionService:
             if state.status in _TERMINAL_AUTH_STATUSES or runtime is None:
                 # A device ceremony's status changes only through its handoff.
                 return _ceremony_view(state)
-        async with state.runtime_lock:
+        async with state.runtime_lock, _verifying(state):
+            async with self._lock:
+                # The sweep or the limit may have ended it while this call waited its turn.
+                if self._ceremonies.get(state.id) is not state:
+                    terminal = self._owned_terminal_ceremony(ceremony_id, principal)
+                    if terminal is not None:
+                        return _terminal_ceremony_view(terminal)
+                    raise CeremonyCapabilityRejected
             async with asyncio.timeout(self._verification_seconds):
                 status = await runtime.authentication_status()
                 sealed = None
                 if status is BrowserAuthenticationStatus.READY:
                     try:
                         sealed = await self._verify_remote_material(state)
-                    except DeviceSessionRejected:
+                    except DeviceSessionRejected as rejected:
+                        _log_unconfirmed(rejected)
                         status = BrowserAuthenticationStatus.NEEDS_USER
             async with self._lock:
                 if self._ceremonies.get(state.id) is not state:
@@ -867,8 +877,12 @@ class HostedProfileSessionService:
                 state.swept = True
         for state in due:
             # An unready or failed sample leaves the ceremony to expire.
-            with suppress(Exception):
+            try:
                 await self._sweep_ceremony(state)
+            except Exception as exc:
+                _LOGGER.warning(
+                    "remote sign-in sweep failed", extra={"failure_type": type(exc).__name__}
+                )
 
     async def _sweep_ceremony(self, state: _CeremonyState) -> None:
         if await self._sample(state) is not BrowserAuthenticationStatus.READY:
@@ -876,11 +890,12 @@ class HostedProfileSessionService:
         await asyncio.sleep(self._sweep_sample_seconds)
         if await self._sample(state) is not BrowserAuthenticationStatus.READY:
             return
-        async with state.runtime_lock:
+        async with state.runtime_lock, _verifying(state):
             try:
                 async with asyncio.timeout(self._verification_seconds):
                     sealed = await self._verify_remote_material(state)
-            except DeviceSessionRejected:
+            except DeviceSessionRejected as rejected:
+                _log_unconfirmed(rejected)
                 return
             async with self._lock:
                 runtime = state.runtime
@@ -1169,8 +1184,16 @@ class HostedProfileSessionService:
                     self._leases.pop(key)
                     expired_leases.append(lease_state)
             for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):
-                # A verifying handoff is ended by its own budget, never by time.
-                if ceremony_state.expires_at <= now and not ceremony_state.consumed:
+                # A verification is ended by its own budget, never by time.
+                if (
+                    ceremony_state.expires_at <= now
+                    and not ceremony_state.consumed
+                    and not ceremony_state.verifying
+                ):
+                    _LOGGER.info(
+                        "sign-in ceremony expired",
+                        extra={"failure_type": ceremony_state.status.value},
+                    )
                     ceremony_state.status = BrowserAuthenticationStatus.EXPIRED
                     await _close_ceremony_runtime(ceremony_state)
                     await self._finish_ceremony_locked(ceremony_state)
@@ -1305,6 +1328,20 @@ def _bounded_facts(facts: BrowserObservationFacts | None) -> BrowserObservationF
         kept[ref] = element
         used += size
     return BrowserObservationFacts(revision=facts.revision, elements=kept)
+
+
+@asynccontextmanager
+async def _verifying(state: _CeremonyState) -> AsyncIterator[None]:
+    """Hold off expiry, which would discard the session this call is about to save."""
+    state.verifying = True
+    try:
+        yield
+    finally:
+        state.verifying = False
+
+
+def _log_unconfirmed(rejected: DeviceSessionRejected) -> None:
+    _LOGGER.info("remote sign-in session not confirmed", extra={"failure_type": rejected.code})
 
 
 async def _page_evidence(
