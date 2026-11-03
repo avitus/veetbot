@@ -260,21 +260,26 @@ records. Foreground requests therefore defer checks, and existing coalescing joi
 a request to any refresh already running.
 
 An arrival is an Inbox conversation with activity in the last seven days whose
-current source has no completed assessment: never assessed, source changed,
-analysis unfinished, or its one promised retry pending. A check reads Gmail changes
-with the usual eight reads per account, and a resynchronization's first Inbox page.
-It assesses at most four arrivals, newest first, after any retained window a change
-is waiting on, and prepares eligible automatic drafts only for conversations it
-assessed. It does not re-assess a conversation only because a profile, model or
+current source has not had a pass: never assessed, source changed, or its one
+promised retry pending. A conversation still being read waits until the read ends,
+because each page changes the stored source without new mail. A check reads Gmail
+changes with the usual eight reads per
+account, and a resynchronization's first Inbox page. It assesses at most four
+arrivals, newest first, after any retained window a change is waiting on. Each gets
+one pass, on its newest passage, which is enough to rank it; further passes of a long
+conversation wait for foreground slices, except for a window the change is waiting on,
+whose unread mail cannot be reached until it is analyzed. A check prepares eligible automatic drafts
+only for conversations it assessed, and eligibility needs a finished analysis. It
+does not re-assess a conversation only because a profile, model or
 prompt revision changed, page further through the Inbox, advance the history pass,
 re-read expired bodies, verify unsubscribe evidence or write correspondence
 summaries. Foreground slices keep that work.
 
 A check is admitted only within 50% of the daily and 90% of the rolling thirty-day
-allowance. A refusal writes no client pause. Each consecutive failed, timed-out or
+allowance. A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
 conservatively charged check doubles the wait, to 10, 20, 40 and at most 60 minutes;
 a completed refresh resets it. When Gmail reports no change and no arrival is
-unfinished, the check loads no stored message content, makes no model call and
+waiting, the check loads no stored message content, makes no model call and
 requests no memory formation, and is marked empty. After seven days an empty check's
 session, events and task record are removed through session erasure. A check sends no
 notification; a failure surfaces through existing account status.
