@@ -1581,8 +1581,9 @@ service that is accidentally bound to a public interface.
 3. Set `AGENT_SVP_ENABLED=1` and
    `SVP_CREDENTIAL_FILE=/var/lib/veetbot/svp/credential.json` in
    `/etc/veetbot/veetbot.env`, set `AGENT_SVP_ENABLED=1` alone in the schedule
-   environment (ADR-0291), then restart the API and the three workers. Their
-   units allow writes to that directory when it exists.
+   environment (ADR-0291), then restart the API, the three workers and
+   `veetbot-schedule`. The API's and workers' units allow writes to that
+   directory when it exists; the schedule role never reads the credential.
 
 New chats are then offered `mcp.svp_read.list_operations`,
 `describe_operation` and `call_operation`; a scheduled run is offered them only

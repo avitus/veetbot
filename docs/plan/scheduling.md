@@ -1131,7 +1131,8 @@ An update replaces the set and removes the scopes of the servers it drops; `[]`
 clears it. Only an enabled owner-added, Gmail or Scale VP row may be named;
 anything else fails as `schedule.mcp_server_unavailable`, so calling keeps
 `place_call`. A job schedule names none and fails as `schedule.job_mcp_servers`,
-because its scopes derive from its grant. The materializer records the set in
+because its scopes derive from its grant; switching a feed schedule to a saved
+job drops the schedule's own set. The materializer records the set in
 the session as `schedule_mcp_servers`, and the context planner offers an
 owner-added server's tools in a scheduled session, or in a child of one, only if
 it is named. A write stays `REQUIRE_APPROVAL`, whichever server it is on.
@@ -1187,7 +1188,8 @@ cadence instant, and reads the step event to build the run.
 Each run's seed is the instruction followed by a platform note: the call's
 number in the plan and earlier results, the follow-up's opening, or the plan's
 outcome. The note gives times as hours and minutes and holds no phone-like
-digit run. The final step runs with no scopes and completes the schedule. A
+digit run. The final step runs with no scopes, is offered no MCP server the
+schedule names (ADR-0291), and completes the schedule. A
 missing step event records `CONFIGURATION_FAILED` with
 `schedule.call_plan_step_missing`. The accountant skips
 `schedule_run_finished` for a plan's completed calls, so the final step is the

@@ -70,6 +70,8 @@ async def pin_job(
             "requested_scopes": {"jobs.run"}
             | ({"cockpit.read", "cockpit.write"} if access.feeds else set())
             | server_scopes,
+            # A job reads what its grant names, so a feed schedule's own servers go.
+            "mcp_servers": frozenset(),
             "notify": ScheduleNotify.ATTENTION_ONLY if access.feeds else definition.notify,
             "browser_profile_id": None,
             "call_plan": None,

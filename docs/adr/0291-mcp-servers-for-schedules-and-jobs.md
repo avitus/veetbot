@@ -49,7 +49,9 @@ widgets get MCP data through feed schedules and through saved jobs.
 3. **Owner-added tools follow the same choice.** A scheduled session records
    its set as `schedule_mcp_servers`, and the planner offers an owner-added
    server's tools there only if it is named. A delegated child of a scheduled
-   run inherits the set. Chat is unchanged. An existing schedule therefore loses
+   run inherits the set; a call plan's report run records none, because it has
+   no scopes to withhold a server that needs none. Chat is unchanged. An
+   existing schedule therefore loses
    owner-added tools no one selected, which this ADR intends.
 
 4. **The schedule role vouches for Scale VP.** The role mirrors
@@ -75,7 +77,8 @@ widgets get MCP data through feed schedules and through saved jobs.
 
 6. **A job schedule derives its scopes.** `pin_job` and the schedule service add
    each granted server's `required_scopes` to the `{jobs.run}` set they already
-   derive, so a schedule that fires holds exactly what its grant reads.
+   derive, so a schedule that fires holds exactly what its grant reads. Switching
+   a feed schedule to a job clears the set the schedule named.
 
 7. **Widgets are unchanged.** Widget code stays a pure function of its declared
    feeds ("Feeds over fetching widgets"). MCP data reaches a widget only through

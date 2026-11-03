@@ -405,6 +405,33 @@ async def test_a_job_schedule_derives_each_granted_servers_scope(tmp_path: Path)
     assert definition.requested_scopes == {"jobs.run", "mcp.svp_read.use"}
 
 
+async def test_switching_to_a_job_drops_the_servers_the_schedule_named(tmp_path: Path) -> None:
+    _factory, context = await _production(
+        tmp_path,
+        [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)],
+        extra_environment=ENABLED,
+    )
+    async with context as app:
+        async with app.uow_factory() as uow:
+            await uow.jobs.put(_saved(JobAccess({}, {})), expected_version=None)
+        definition = await pin_job(
+            derived_definition(
+                *_pins(app),
+                title="Reader",
+                instruction="Read.",
+                cadence=_once(),
+                mcp_servers=frozenset({"svp_read"}),
+            ),
+            JobTask(slug="reader", revision_id=UUID(int=1), grant_id=UUID(int=2)),
+            app.principal,
+            app.uow_factory,
+        )
+
+    # A job reads what its grant names, and this grant names nothing.
+    assert definition.mcp_servers == frozenset()
+    assert definition.requested_scopes == {"jobs.run"}
+
+
 # --- The reader itself ---
 
 
@@ -670,3 +697,93 @@ async def test_a_feed_schedule_can_name_a_server_and_its_session_records_it() ->
     assert session.metadata[SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY] == ["svp"]
     assert view["mcp_servers"] == ["docs"]
     assert view["requested_scopes"] == ["cockpit.read", "cockpit.write"]
+
+
+async def test_a_call_plans_report_run_is_not_offered_the_named_servers() -> None:
+    """Owner-added servers need no scope, so the report's empty scopes do not withhold them."""
+    from agent_core.domain.call_plans import (
+        CALL_PLAN_STEP_EVENT,
+        CallPlanReportReason,
+        CallPlanStep,
+        CallPlanStepKind,
+        call_plan_step_key,
+    )
+    from agent_core.domain.events import ProcessEvent
+    from agent_core.domain.schedules import CallPlan, OnceCadence
+    from tests.gates.test_cockpit_feed_refresh_adr0254 import (
+        NOW,
+        OWNER,
+        _advance,
+        _composition,
+        _create,
+        _finish,
+        _id,
+        _latest,
+        _materializer,
+        _rows,
+    )
+
+    fire_at = NOW + timedelta(minutes=1)
+    report_at = fire_at + timedelta(minutes=30)
+    async with _composition() as (composition, _):
+        schedule, revision = _rows(
+            _id(1), cadence=OnceCadence(at=fire_at), scopes=frozenset({"session.read"})
+        )
+        await _create(
+            composition,
+            (
+                schedule,
+                revision.model_copy(
+                    update={
+                        "mcp_servers": frozenset({"docs"}),
+                        "call_plan": CallPlan(
+                            retry_every_minutes=2, retry_until=fire_at + timedelta(minutes=10)
+                        ),
+                    }
+                ),
+            ),
+        )
+        _advance(composition, timedelta(minutes=1))
+        await _materializer(composition).materialize(schedule.id)
+        finished = await _latest(composition, schedule.id)
+        assert finished.run_id is not None
+        await _finish(composition, finished.run_id, RunStatus.COMPLETED)
+        step = CallPlanStep(
+            attempt=2,
+            kind=CallPlanStepKind.REPORT,
+            fire_at=report_at,
+            reason=CallPlanReportReason.NOT_REACHED,
+        )
+        async with composition.uow_factory() as uow:
+            await uow.process_events.append(
+                ProcessEvent(
+                    id=uuid4(),
+                    event_type=CALL_PLAN_STEP_EVENT,
+                    actor_type="scheduler",
+                    actor_id=OWNER.principal_id,
+                    payload={
+                        "schedule_id": str(schedule.id),
+                        "schedule_revision": 1,
+                        "tenant_id": OWNER.tenant_id,
+                        "principal_id": OWNER.principal_id,
+                        "event_time": NOW.isoformat(),
+                        "step": step.model_dump(mode="json"),
+                    },
+                    derivation_key=call_plan_step_key(schedule.id, 2),
+                    created_at=NOW,
+                )
+            )
+            held = await uow.schedules.lock(schedule.id, OWNER)
+            await uow.schedules.advance(held, held.model_copy(update={"next_fire_at": report_at}))
+        _advance(composition, timedelta(minutes=30))
+        await _materializer(composition).materialize(schedule.id)
+        async with composition.uow_factory() as uow:
+            occurrences = await uow.schedule_occurrences.list(schedule.id, OWNER, limit=10)
+            first, report = sorted(occurrences, key=lambda row: row.nominal_fire_at)
+            assert first.session_id is not None and report.session_id is not None
+            calling = await uow.sessions.get(first.session_id, OWNER)
+            reporting = await uow.sessions.get(report.session_id, OWNER)
+
+    assert calling.metadata[SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY] == ["docs"]
+    assert SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY not in reporting.metadata
+    assert SESSION_SCHEDULE_ID_METADATA_KEY in reporting.metadata

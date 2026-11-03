@@ -764,10 +764,11 @@ registers `schedule.create` 1.6.0, whose `publish_cockpit_feed=true` asks for
 `cockpit.read` and `cockpit.write` for that schedule's runs and no others, and
 which offers the `INTERVAL` cadence to such a schedule (ADR-0254). It also
 registers `schedule.update` 1.1.0, which can move a feed schedule to an
-interval. Versions 1.5.0 and 1.4.0 stay registered for pinned runs, and a
-deployment without the flag offers 1.4.0 unchanged. ADR-0291's later versions
-add `use_mcp_servers` ([scheduling.md](scheduling.md)), so a feed's run can read
-the MCP servers its schedule names; widget code still only receives feeds.
+interval. Versions 1.5.0 and 1.4.0 stay registered for pinned runs. ADR-0291's
+later versions add `use_mcp_servers` ([scheduling.md](scheduling.md)), so a
+feed's run can read the MCP servers its schedule names; widget code still only
+receives feeds. A Cockpit deployment now offers `schedule.create` 1.9.0 and one
+without the flag offers 1.8.0, which has no feed publishing.
 Widget writes stay interactive only.
 
 **Feed checks.** A feed's schema must be self-contained JSON Schema (draft
