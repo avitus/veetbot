@@ -886,6 +886,12 @@ feed schedule passes those and fails every scheduled occurrence with
 `schedule.scope_revoked`. The release therefore refuses a schedule environment
 whose Cockpit flag differs from the application's.
 
+Scale VP follows it too (ADR-0291). The scheduler environment mirrors
+`AGENT_SVP_ENABLED`, and under it the snapshot holds `mcp.svp_read.use`. The
+role never holds `SVP_CREDENTIAL_FILE`: its loader does not require the path,
+and a supplied one is refused like any provider key. The release refuses a
+schedule environment whose flag differs from the application's.
+
 No in-memory scheduler queue is introduced. In-memory repositories exist only
 to run application and property tests; production startup refuses scheduling
 without PostgreSQL, a durable principal directory, and a non-development worker
@@ -1115,6 +1121,20 @@ schedule to `mcp.bland_call.use` alone. In a Cockpit deployment, version 1.5.0's
 run can publish a feed ([cockpit.md](cockpit.md#assistant-feeds)); without the
 Cockpit flag 1.5.0 is not registered. Version 1.6.0 (ADR-0254) replaces it
 there and offers `INTERVAL`. 1.5.0 stays registered unchanged for pinned runs.
+Versions 1.8.0, 1.9.0 and 1.10.0 (ADR-0291) replace 1.4.0, 1.6.0 and 1.7.0 as
+the newest for their deployments, and `schedule.update` 1.3.0, 1.4.0 and 1.5.0
+replace 1.0.1, 1.1.0 and 1.2.0; the earlier versions stay registered for pinned
+runs. Each adds `use_mcp_servers`, the server ids the run may use, which the
+approval view lists as `mcp_servers`. A definition stores them as `mcp_servers`,
+absent while empty, and each server's `required_scopes` join `requested_scopes`.
+An update replaces the set and removes the scopes of the servers it drops; `[]`
+clears it. Only an enabled owner-added, Gmail or Scale VP row may be named;
+anything else fails as `schedule.mcp_server_unavailable`, so calling keeps
+`place_call`. A job schedule names none and fails as `schedule.job_mcp_servers`,
+because its scopes derive from its grant. The materializer records the set in
+the session as `schedule_mcp_servers`, and the context planner offers an
+owner-added server's tools in a scheduled session, or in a child of one, only if
+it is named. A write stays `REQUIRE_APPROVAL`, whichever server it is on.
 A feed-keeping schedule that either version creates is
 `notify: attention_only`, because its widget is its report. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule

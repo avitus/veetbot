@@ -1,7 +1,6 @@
 """Reuse private job access through the existing standing-authorization seam."""
 
 from datetime import datetime
-from decimal import Decimal
 from uuid import UUID, uuid5
 
 from agent_core.domain.agents import Principal
@@ -12,6 +11,7 @@ from agent_core.domain.jobs import (
     JobManifest,
     JobRecord,
     JobRevision,
+    access_is_external,
     parse_job_access,
 )
 from agent_core.domain.policies import (
@@ -28,7 +28,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 
 def access_needs_approval(access: JobAccess, saved: JobRecord) -> bool:
     """Require approval for remote access, new feed authority, or expanded existing limits."""
-    if access.hosts or access.feeds or Decimal(access.model_cost) > 0:
+    if access_is_external(access):
         return True
     if not saved.grants:
         return bool(access.feeds)
@@ -48,10 +48,7 @@ def revision_grant_id(approval_id: UUID, revision_id: UUID) -> UUID:
 
 def grant_covers_revision(grant: JobGrant, revision: JobRevision) -> bool:
     """Reuse external access only for its approved immutable code revision."""
-    external = bool(
-        grant.access.hosts or grant.access.feeds or Decimal(grant.access.model_cost) > 0
-    )
-    return not external or (
+    return not access_is_external(grant.access) or (
         grant.approval_id is not None
         and grant.id == revision_grant_id(grant.approval_id, revision.id)
     )
@@ -116,10 +113,7 @@ class JobGrantAuthorizer:
                     ),
                     None,
                 )
-                external = bool(
-                    grant.access.hosts or grant.access.feeds or Decimal(grant.access.model_cost) > 0
-                )
-                if external and (
+                if access_is_external(grant.access) and (
                     revision is None
                     or revision.source != action.arguments.get("source")
                     or revision.manifest

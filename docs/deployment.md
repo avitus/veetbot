@@ -506,7 +506,9 @@ or disabled together" when they differ); `AGENT_NOTIFICATION_API_ENABLED` and
 dispatch flags must change together" and "schedule worker notification flags
 must match the application notification flags"); `AGENT_COCKPIT_ENABLED`
 ("schedule worker AGENT_COCKPIT_ENABLED must match the application
-environment"); `AGENT_EMAIL_ENABLED` with `GMAIL_ACCOUNTS_FILE` as above; and
+environment"); `AGENT_SVP_ENABLED` ("schedule worker AGENT_SVP_ENABLED must
+match the application environment", ADR-0291), never with
+`SVP_CREDENTIAL_FILE`; `AGENT_EMAIL_ENABLED` with `GMAIL_ACCOUNTS_FILE` as above; and
 `AGENT_CALL_ENABLED` with the non-secret `BLAND_CONFIGURATION_FILE` path,
 because the scheduler derives a schedule's calling scopes from
 `AGENT_CALL_ENABLED` (ADR-0213). The template
@@ -1578,11 +1580,13 @@ service that is accidentally bound to a public interface.
 
 3. Set `AGENT_SVP_ENABLED=1` and
    `SVP_CREDENTIAL_FILE=/var/lib/veetbot/svp/credential.json` in
-   `/etc/veetbot/veetbot.env` only, then restart the API and the three
-   workers. Their units allow writes to that directory when it exists.
+   `/etc/veetbot/veetbot.env`, set `AGENT_SVP_ENABLED=1` alone in the schedule
+   environment (ADR-0291), then restart the API and the three workers. Their
+   units allow writes to that directory when it exists.
 
 New chats are then offered `mcp.svp_read.list_operations`,
-`describe_operation` and `call_operation`; scheduled runs are not. On the
+`describe_operation` and `call_operation`; a scheduled run is offered them only
+when its schedule names `svp_read`. On the
 production roster the three are entries in the deferred tool index, reached
 with `tool.call`, and the production-roster gates include the flag
 (ADR-0124). A call that returns `svp.credential_rejected` after the grant

@@ -44,6 +44,7 @@ from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
     SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_SCHEDULE_ID_METADATA_KEY,
+    SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY,
     Session,
     SessionStatus,
 )
@@ -599,6 +600,11 @@ class ScheduleMaterializer:
                 **(
                     {"job_task": revision.task.model_dump(mode="json")}
                     if isinstance(revision.task, JobTask)
+                    else {}
+                ),
+                **(
+                    {SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY: sorted(revision.mcp_servers)}
+                    if revision.mcp_servers
                     else {}
                 ),
                 SESSION_SCHEDULE_ID_METADATA_KEY: str(schedule.id),

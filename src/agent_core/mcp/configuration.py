@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from urllib.parse import urlsplit
 
 from agent_core.domain.credentials import SecretValue
-from agent_core.domain.mcp import MCPAuthScheme, MCPServerConfig, MCPTransport
+from agent_core.domain.mcp import MCPAuthScheme, MCPServerConfig, MCPTransport, is_email_server_id
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.execution.environment import TIER_ZERO_NAMES, build_sandbox_environment
 from agent_core.policy.scopes import validate_required_scopes
@@ -34,13 +34,6 @@ _EMAIL_CLASSIFICATIONS = {
     ),
 }
 _EMAIL_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
-_EMAIL_SERVER_ID = re.compile(r"^gmail_(?:[a-z][a-z0-9_]{0,31}_)?(?:read|write|send)$")
-
-
-def is_email_server_id(server_id: str | None) -> bool:
-    """Return whether an id belongs to a first-party Gmail mode triplet."""
-
-    return server_id is not None and _EMAIL_SERVER_ID.fullmatch(server_id) is not None
 
 
 def is_mutating_email_server_id(server_id: str | None) -> bool:

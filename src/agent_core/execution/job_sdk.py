@@ -28,6 +28,15 @@ class _HTTP:
         return self._call("http.request", arguments)
 
 
+class _MCP:
+    def __init__(self, call: _Call) -> None:
+        self._call = call
+
+    def read(self, tool: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Call one read-only MCP tool the grant allows; returns {content, structured}."""
+        return self._call("mcp.read", {"tool": tool, "arguments": arguments or {}})
+
+
 class _Model:
     def __init__(self, call: _Call) -> None:
         self._call = call
@@ -76,6 +85,7 @@ class JobContext:
     def __init__(self) -> None:
         self._ordinal = 0
         self.http = _HTTP(self._call)
+        self.mcp = _MCP(self._call)
         self.model = _Model(self._call)
         self.feed = _Feed(self._call)
 

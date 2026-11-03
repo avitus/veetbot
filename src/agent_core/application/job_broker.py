@@ -21,6 +21,7 @@ class JobBroker:
         feed: Callable[..., Awaitable[dict[str, Any]]],
         log: Callable[..., Awaitable[None]],
         trial: bool = False,
+        mcp: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.access = access
         self.http = http
@@ -28,6 +29,7 @@ class JobBroker:
         self.feed = feed
         self.log = log
         self.trial = trial
+        self.mcp = mcp
         self._requests = 0
         self._cost = Decimal("0")
         self._limit_failure: str | None = None
@@ -85,6 +87,30 @@ class JobBroker:
                 url=url,
                 json=arguments.get("json"),
                 credential=self.access.hosts[host],
+                maximum_response_bytes=self.access.maximum_response_bytes,
+                call_id=call_id,
+            )
+        elif call == "mcp.read":
+            tool = arguments.get("tool")
+            values = arguments.get("arguments", {})
+            parts = tool.split(".", 2) if isinstance(tool, str) else []
+            if (
+                len(parts) != 3
+                or parts[0] != "mcp"
+                or not isinstance(values, dict)
+                or set(arguments) - {"tool", "arguments"}
+            ):
+                return self._refused("invalid_arguments")
+            if parts[1] not in self.access.mcp_servers:
+                return self._refused("mcp_refused")
+            if self.mcp is None:
+                return self._refused("mcp_unavailable")
+            if self._requests >= self.access.maximum_requests:
+                return self._refused("request_limit", limit=True)
+            self._requests += 1
+            result = await self.mcp(
+                tool=tool,
+                arguments=values,
                 maximum_response_bytes=self.access.maximum_response_bytes,
                 call_id=call_id,
             )
