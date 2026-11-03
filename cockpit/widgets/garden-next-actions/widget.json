@@ -1,0 +1,1 @@
+{"schema":1,"slug":"garden-next-actions","title":"Garden: next actions","purpose":"Weather-aware garden guidance with conditional task windows and explicit unknowns.","kit_api":1,"sizes":["tall","lg","wide"],"feeds":[{"id":"agent.garden-next-actions","history":0}],"settings":{"type":"object","properties":{},"additionalProperties":false}}
