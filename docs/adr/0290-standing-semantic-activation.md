@@ -73,7 +73,10 @@ section that repeats "click" or "tray" outranks the passage that answers.
    index's local encoder; `index` keeps ADR-0289's borrowing for a deployment
    whose encoder does lift. The arm then needs no semantic index and no
    admission of its own: a missing credential leaves search lexical and says
-   so once. The memory index's egress rule holds, so only public and internal
+   so once. When an index is composed the arm reads its admission before
+   every provider call, so withdrawing the standing files stops the arm's
+   OpenAI calls with memory recall; without an index the flag alone turns
+   the arm off. The memory index's egress rule holds, so only public and internal
    text reaches the provider and a restricted document stays lexical; the
    passages the arm returns already reach the same provider as prompt
    context, so this adds no new reader of the owner's documents. The channel
@@ -133,6 +136,11 @@ progress rather than protecting it.
   continues on the next round.
 - ADR-0289's "never composes an embedding egress of its own" no longer holds
   for the `openai` provider; the measurement above is why.
+- `knowledge-text@2` supersedes `knowledge-text@1`. The backfill fills chunks
+  with no vector in the space; a vector carrying the older text version is
+  not replaced by it. No deployment holds one, since the arm was off
+  everywhere before this change; a later text version needs the older
+  vectors dropped first.
 
 ## Verification
 
