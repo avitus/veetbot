@@ -509,7 +509,8 @@ removed.
   on. For a new widget or a restore it is the importer's cursor, after which
   every commit is unimported, so the imported delete a restore undoes is not a
   newer change. A person's version that the importer made live after the
-  change was queued also wins. A commit counts as the platform's only when its
+  change was queued also wins, judged by the revision's own clock reading
+  rather than its queue place. A commit counts as the platform's only when its
   trailer names one of the principal's own revisions or a commit the outbox
   recorded, so a forged trailer does not hide a person's change.
 - **Lost response.** If the ref update's response is lost, the worker reads

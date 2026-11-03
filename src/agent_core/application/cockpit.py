@@ -735,12 +735,17 @@ class CommitOutboxWorker:
                 attempts=attempts,
             )
 
-    async def _human_change(self, entry: CommitOutboxEntry) -> bool:
+    async def _human_change(
+        self, entry: CommitOutboxEntry, revision: WidgetRevision | None
+    ) -> bool:
         """Whether a person changed this widget after the change was based on it.
 
         A person's version may already be imported and live, or still only on
         the branch after the change's base: the live commit it changed, or for a
         new widget the importer's cursor, after which every commit is unimported.
+        Age is the revision's clock reading, as the entry's time is a queue place
+        that can run ahead of the clock. A removal's parent was the live commit
+        when it was accepted, so any other person's version is newer.
         """
 
         principal = self._principal
@@ -754,7 +759,7 @@ class CommitOutboxWorker:
                 if (
                     live.source is RevisionSource.OWNER_GIT
                     and live.commit_sha != entry.expected_parent_sha
-                    and live.created_at >= entry.created_at
+                    and (revision is None or live.created_at >= revision.created_at)
                 ):
                     return True
             baseline = entry.expected_parent_sha or await import_cursor(uow, principal)
@@ -786,7 +791,7 @@ class CommitOutboxWorker:
         )
         if landed is None:
             try:
-                if await self._human_change(entry):
+                if await self._human_change(entry, revision):
                     raise _PersonWonError
                 landed = await self._commit(entry, revision)
             except _PersonWonError:
@@ -815,7 +820,7 @@ class CommitOutboxWorker:
                     entry.slug, revision.files, parent_sha=head, message=message
                 )
             except BranchMovedError:
-                if await self._human_change(entry):
+                if await self._human_change(entry, revision):
                     raise _PersonWonError from None
                 continue
             except WidgetPathRefusedError:

@@ -622,6 +622,41 @@ async def test_a_delete_stays_behind_the_write_it_showed_when_the_clock_steps_ba
         assert stack.trailer_count(shown.id) == 1
 
 
+async def test_a_second_create_yields_to_a_person_imported_at_the_same_instant() -> None:
+    """A queue place can run ahead of the clock; the person's version still wins."""
+    async with publication_stack() as stack:
+        await stack.importer.run_once()
+        first = await stack.publication.write(
+            PRINCIPAL, "weather", package("v1"), expected_revision=None
+        )
+        second = await stack.publication.write(
+            PRINCIPAL, "weather", package("v2"), expected_revision=first.id
+        )
+        human = _person_commits(stack, "p")
+        assert await stack.importer.run_once() == 1
+
+        assert await stack.outbox.run_once() == 2
+        assert await _state(stack, first.id) is RevisionState.CONFLICTED
+        assert await _state(stack, second.id) is RevisionState.CONFLICTED
+        assert await stack.repository.head() == human
+
+
+async def test_a_queued_delete_yields_to_a_person_imported_at_the_same_instant() -> None:
+    async with publication_stack() as stack:
+        await stack.importer.run_once()
+        write = await stack.publication.write(
+            PRINCIPAL, "weather", package("v1"), expected_revision=None
+        )
+        await stack.publication.delete(PRINCIPAL, "weather", expected_head=write.id)
+        human = _person_commits(stack, "p")
+        assert await stack.importer.run_once() == 1
+
+        assert await stack.outbox.run_once() == 2
+        assert await _state(stack, write.id) is RevisionState.CONFLICTED
+        assert await stack.repository.head() == human
+        assert stack.head_files("weather") == package("p")
+
+
 async def test_a_newer_write_waits_behind_an_older_one_the_batch_left_out() -> None:
     """A full batch can hold the newer write and not the older one still in backoff."""
     async with publication_stack() as stack:
