@@ -243,6 +243,19 @@ def test_writer_produces_binding_files_and_never_overwrites(tmp_path: Path) -> N
             dependencies=DEPENDENCIES,
             activated_at=NOW,
         )
+    with pytest.raises(ValueError, match="decided after"):
+        write_standing_admission(
+            tmp_path / "late",
+            tenant_id=principal().tenant_id,
+            principal_id=principal().principal_id,
+            instruction=INSTRUCTION,
+            reference="synthetic-owner-message",
+            rollback_build_ref="b" * 40,
+            dependencies=DEPENDENCIES,
+            activated_at=NOW,
+            decided_at=NOW + timedelta(hours=1),
+        )
+    assert not (tmp_path / "late").exists()
 
 
 async def _standing_local_options(tmp_path: Path) -> tuple[dict[str, Any], Path, Path]:

@@ -93,3 +93,22 @@ def test_each_window_stays_within_the_byte_bound() -> None:
     )
     assert all(len(window.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES for window in windows)
     assert "�" not in "".join(windows)
+
+
+def test_a_heading_longer_than_the_budget_yields_to_the_text() -> None:
+    """A heading path has no length limit; the windows still fit the budget.
+
+    The prefix drops its outer levels, deepest heading last, until a window
+    has room for text; a prefix no level of which fits is left out. Every
+    character of the text still lands once.
+    """
+
+    path = ["Manual", " ".join(f"word{i}" for i in range(60)), "Fan noise"]
+    windows = knowledge_embedding_windows(path, PARAGRAPHS, budget_tokens=24, count_tokens=words)
+    assert windows and all(words(window) <= 24 for window in windows)
+    assert all(window.startswith("Fan noise\n") for window in windows)
+    assert "".join(content(window.split("\n", 1)[1]) for window in windows) == content(PARAGRAPHS)
+    hopeless = [" ".join(f"word{i}" for i in range(60))]
+    bare = knowledge_embedding_windows(hopeless, PARAGRAPHS, budget_tokens=24, count_tokens=words)
+    assert bare and all(words(window) <= 24 for window in bare)
+    assert "".join(content(window) for window in bare) == content(PARAGRAPHS)

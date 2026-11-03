@@ -179,6 +179,10 @@ def write_standing_admission(
         not evidence_path.exists() and not manifest_path.exists(),
         "standing admission files already exist; choose an empty directory",
     )
+    _require(
+        decided_at is None or decided_at <= activated_at,
+        "standing admission decided after activation; the binder would refuse it",
+    )
     facts = StandingRecallEvidence(
         version=STANDING_EVIDENCE_VERSION,
         tenant_id=tenant_id,

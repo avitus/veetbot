@@ -245,6 +245,10 @@ class DurableWorker:
                 await asyncio.gather(upkeep, return_exceptions=True)
 
 
+# The knowledge vector backfill's deadline per maintenance round (ADR-0290).
+KNOWLEDGE_VECTOR_SWEEP_SECONDS = 60.0
+
+
 class MaintenanceWorker:
     """Run the periodic sweeps that keep durable state bounded and queues moving."""
 
@@ -529,9 +533,12 @@ class MaintenanceWorker:
         # Documents the semantic arm never saw gain vectors a batch a round.
         if self._sweep_knowledge_vectors is not None:
             try:
-                await self._sweep_knowledge_vectors()
-            except Exception:
-                logger.exception("knowledge vector backfill sweep failed")
+                # One round is at most 64 chunks in provider batches of 32; a
+                # slow provider must not hold the sweeps that follow (ADR-0290).
+                async with asyncio.timeout(KNOWLEDGE_VECTOR_SWEEP_SECONDS):
+                    await self._sweep_knowledge_vectors()
+            except Exception as exc:
+                logger.warning("knowledge vector backfill sweep ended (%s)", type(exc).__name__)
         # Titles follow a reply within seconds, so this pass runs every round (ADR-0155).
         if self._sweep_conversation_titles is not None:
             try:

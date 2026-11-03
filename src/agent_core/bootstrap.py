@@ -1647,6 +1647,16 @@ async def prepare_standing_admission(
             "a standing admission needs memory.retrieval.semantic_enabled true "
             "in the effective configuration"
         )
+    # The same conditions composition refuses a bounded admission under,
+    # checked here so the operator learns before any file is written.
+    if profile.reader_sha256 is None:
+        raise ConfigurationError(
+            "a standing admission needs the reviewed reader in the semantic index configuration"
+        )
+    if settings.memory_reconsolidation_enabled:
+        raise ConfigurationError(
+            "a standing admission refuses unattended reconsolidation; disable it first"
+        )
     dependencies = inputs.dependencies(profile)
     owner = inputs.configuration["principal"]
     evidence_path, manifest_path = write_standing_admission(

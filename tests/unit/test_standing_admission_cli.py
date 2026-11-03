@@ -31,7 +31,7 @@ INSTRUCTION = (
 )
 
 
-def _overlay(tmp_path: Path, *, local: bool) -> tuple[Any, dict[str, Any]]:
+def _overlay(tmp_path: Path, *, local: bool, reader: bool = True) -> tuple[Any, dict[str, Any]]:
     overlay = tmp_path / "config" / "memory"
     overlay.mkdir(parents=True)
     if local:
@@ -39,8 +39,9 @@ def _overlay(tmp_path: Path, *, local: bool) -> tuple[Any, dict[str, Any]]:
             "embedding": CONFIG.model_dump(mode="json"),
             "local": LOCAL.model_dump(mode="json"),
             "model_directory": str(tmp_path / "model"),
-            "reader_sha256": "a" * 64,
         }
+        if reader:
+            configuration["reader_sha256"] = "a" * 64
     else:
         from tests.contract.semantic_indexing_cases import INDEX_CONFIG
 
@@ -168,11 +169,15 @@ def test_standing_admission_writes_binding_files_from_the_live_digests(
     assert again.exit_code == 1 and "already exist" in again.output
 
 
-@pytest.mark.parametrize("reason", ["remote", "query_disabled"])
+@pytest.mark.parametrize("reason", ["remote", "query_disabled", "no_reader", "reconsolidation"])
 def test_standing_admission_refuses_a_remote_or_query_disabled_index(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
 ) -> None:
-    settings, _ = _overlay(tmp_path, local=reason != "remote")
+    """Every condition composition would refuse is refused before a file is written."""
+
+    settings, _ = _overlay(tmp_path, local=reason != "remote", reader=reason != "no_reader")
+    if reason == "reconsolidation":
+        settings = replace(settings, memory_reconsolidation_enabled=True)
     monkeypatch.setattr("agent_core.bootstrap.load_settings", lambda: settings)
     _fake_build(monkeypatch, _inputs(semantic_enabled=reason != "query_disabled"))
     words = tmp_path / "owner.txt"
@@ -193,6 +198,11 @@ def test_standing_admission_refuses_a_remote_or_query_disabled_index(
         ],
     )
     assert result.exit_code == 1, result.output
-    expected = "local encoder" if reason == "remote" else "semantic_enabled"
+    expected = {
+        "remote": "local encoder",
+        "query_disabled": "semantic_enabled",
+        "no_reader": "reviewed reader",
+        "reconsolidation": "reconsolidation",
+    }[reason]
     assert expected in result.output
     assert not (tmp_path / "standing").exists()

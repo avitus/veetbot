@@ -295,7 +295,13 @@ def knowledge_embedding_windows(
     count = count_tokens or _token_estimate
     if count(whole) <= budget_tokens:
         return [whole]
-    prefix = _heading_prefix(heading_path)
+    # A heading has no length limit. The prefix keeps its deepest levels and
+    # drops the outer ones until it leaves half the budget for text; a prefix
+    # no level of which fits is left out, so the windows still fit.
+    path = list(heading_path)
+    while path and count(_heading_prefix(path)) > budget_tokens // 2:
+        path = path[1:]
+    prefix = _heading_prefix(path)
 
     def window(body: str) -> str:
         body = body.strip()
