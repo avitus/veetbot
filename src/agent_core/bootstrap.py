@@ -1687,6 +1687,8 @@ async def _knowledge_embedder(
     settings: Settings,
     index: SemanticServices | None,
     credentials: CredentialResolver,
+    *,
+    reader_provider: str | None = None,
 ) -> KnowledgeEmbedder | None:
     """The knowledge semantic arm's embedder, or None when search stays lexical.
 
@@ -1719,11 +1721,19 @@ async def _knowledge_embedder(
         # The arm's egress follows the semantic index's admission when one is
         # composed, so withdrawing the standing files stops it as well; with
         # no index the flag alone turns it off.
+        # A question is embedded remotely only by the provider that read the
+        # context it was written from; under another reader search is lexical.
+        question_egress = reader_provider == KNOWLEDGE_OPENAI_SPACE.provider
+        if not question_egress:
+            logger.warning(
+                "knowledge_semantic_questions_lexical", extra={"reader": reader_provider or ""}
+            )
         return KnowledgeEmbedder(
             OpenAIEmbeddingProvider(key),
             KNOWLEDGE_OPENAI_SPACE,
             channel=settings.knowledge_semantic_channel,
             admitted=(lambda: True) if index is None else (index.admitted or (lambda: True)),
+            question_egress=question_egress,
         )
     if index is None:
         logger.warning("knowledge_semantic_unavailable_using_lexical", extra={"reason": "index"})
@@ -1731,12 +1741,18 @@ async def _knowledge_embedder(
     # A local encoder admits fewer tokens than a chunk holds, so chunks are
     # embedded in windows its own tokenizer sizes.
     local_encoder = index.local_provider
+    question_egress = local_encoder is not None or reader_provider == index.space.provider
+    if not question_egress:
+        logger.warning(
+            "knowledge_semantic_questions_lexical", extra={"reader": reader_provider or ""}
+        )
     return KnowledgeEmbedder(
         index.provider,
         index.space,
         channel=settings.knowledge_semantic_channel,
         local=local_encoder is not None,
         admitted=index.admitted or (lambda: True),
+        question_egress=question_egress,
         window_tokens=None if local_encoder is None else local_encoder.maximum_tokens,
         count_tokens=None if local_encoder is None else local_encoder.count_tokens,
     )
@@ -4821,8 +4837,17 @@ async def _compose(
         )
         # ADR-0289 and ADR-0290: the knowledge semantic arm's provider, or
         # lexical search that says so once at startup.
+        # The reader's provider decides whether a question may be embedded
+        # remotely (ADR-0290): only the provider that read the context it
+        # was written from.
+        reader_provider: str | None = None
+        if agent.model_policy not in NON_ROUTED_MODEL_POLICIES:
+            with suppress(ConfigurationError):
+                reader_provider = (
+                    await model_router.resolve(agent.model_policy, tenant_id=principal.tenant_id)
+                ).provider
         knowledge_embedder = await _knowledge_embedder(
-            settings, semantic_index_pass, credential_resolver
+            settings, semantic_index_pass, credential_resolver, reader_provider=reader_provider
         )
         knowledge_service = KnowledgeService(
             uow_factory,

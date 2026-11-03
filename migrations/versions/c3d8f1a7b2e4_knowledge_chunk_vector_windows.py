@@ -32,9 +32,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Only derived vectors beyond the first window are discarded; the chunks
-    # and their first windows stay.
-    op.execute('DELETE FROM knowledge_chunk_vectors WHERE "window" > 0')
+    # Every vector is derived and goes: a chunk embedded in windows is not
+    # represented by its first window alone, and the backfill re-embeds
+    # under whichever text version the running release uses.
+    op.execute("DELETE FROM knowledge_chunk_vectors")
     op.drop_constraint("pk_knowledge_chunk_vectors", "knowledge_chunk_vectors", type_="primary")
     op.create_primary_key(
         "pk_knowledge_chunk_vectors", "knowledge_chunk_vectors", ["chunk_id", "space_key"]

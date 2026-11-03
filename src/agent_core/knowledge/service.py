@@ -257,7 +257,11 @@ class KnowledgeService:
     async def _embed_question(self, text: str) -> KnowledgeSemanticQuery | None:
         """Embed the question, or answer with the lexical arm alone when the provider cannot."""
 
-        if self._embedder is None or not self._embedder.admitted():
+        if (
+            self._embedder is None
+            or not self._embedder.admitted()
+            or not self._embedder.question_egress
+        ):
             return None
         try:
             return await self._embedder.embed_query(text)

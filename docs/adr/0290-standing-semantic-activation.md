@@ -77,7 +77,11 @@ section that repeats "click" or "tray" outranks the passage that answers.
    every provider call, so withdrawing the standing files stops the arm's
    OpenAI calls with memory recall, and a restart with the index enabled but
    not admitted leaves the arm lexical too; only with the index flag off
-   does the knowledge flag alone govern it. The memory index's egress rule holds, so only public and internal
+   does the knowledge flag alone govern it. A question is free text the reader wrote from
+   its context, so a remote provider embeds it only when it is the provider
+   that read that context: with the OpenAI reader nothing leaves the host
+   that OpenAI has not seen, and under another reader search answers from
+   the lexical arm while chunks are still embedded. The memory index's egress rule holds, so only public and internal
    text reaches the provider and a restricted document stays lexical; the
    passages the arm returns already reach the same provider as prompt
    context, so this adds no new reader of the owner's documents. The channel

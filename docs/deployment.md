@@ -1284,7 +1284,9 @@ valid code-only rollback target. The runbook below detects the target's cadence
 support and checks the stored values while all schedule writers are stopped.
 If it refuses the target, roll forward instead, or restore a database snapshot
 from before the first such revision and then roll the code back. Never run an
-automatic Alembic downgrade as part of rollback. Run the complete block in one
+automatic Alembic downgrade as part of rollback. The block also refuses a
+target whose expected schema revision is not the database's, before any unit
+stops, since such a target's startup check would reject the database. Run the complete block in one
 shell so file descriptor 9 holds the same deployment lock from before writer
 quiescence through readiness verification. The block retags the target's
 Cockpit builder image as `production` when the target has one; a target from
@@ -1422,6 +1424,48 @@ rollback_on_exit() {
   exit "$status"
 }
 trap rollback_on_exit EXIT
+
+# A target that expects an older schema revision cannot read the database
+# (its startup check refuses it), so refuse here, before any unit stops.
+target_schema_compatibility="$({
+  set -a
+  # shellcheck disable=SC1090
+  . "$environment_file"
+  set +a
+  cd "$target"
+  "$target/.venv/bin/python" - <<'PY'
+import asyncio
+import os
+
+from sqlalchemy import text
+
+from agent_core.adapters.persistence.database import create_engine
+from agent_core.adapters.persistence.revision import EXPECTED_REVISION
+
+
+async def main() -> None:
+    engine = create_engine(os.environ["DATABASE_URL"])
+    async with engine.connect() as connection:
+        stored = (await connection.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
+    await engine.dispose()
+    print("compatible" if stored == EXPECTED_REVISION else f"incompatible {stored} {EXPECTED_REVISION}")
+
+
+asyncio.run(main())
+PY
+})"
+case "$target_schema_compatibility" in
+  compatible) ;;
+  incompatible*)
+    echo "The database schema is not the target's expected revision ($target_schema_compatibility);" >&2
+    echo "a code-only rollback cannot read it. Roll forward, or restore a snapshot first." >&2
+    exit 1
+    ;;
+  *)
+    echo "Could not determine the target's schema compatibility" >&2
+    exit 1
+    ;;
+esac
 
 rollback_pending=1
 sudo systemctl stop "${managed_units[@]}"

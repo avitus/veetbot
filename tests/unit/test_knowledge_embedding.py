@@ -422,3 +422,22 @@ async def test_a_withdrawal_during_ingest_leaves_the_document_lexical(
     assert isinstance(store, InMemoryKnowledgeStore)
     assert store._vectors == {}, "no partial vectors survive a withdrawal"
     assert len(provider.calls) == 1
+
+
+async def test_without_question_egress_search_stays_lexical_while_ingest_embeds(
+    tmp_path: Path,
+) -> None:
+    """A remote provider that did not write the question never receives it."""
+
+    provider = Provider()
+    service, writer, factory = await _service(
+        tmp_path, KnowledgeEmbedder(provider, SPACE, question_egress=False)
+    )
+    await _ingest(service, writer, factory)
+    assert provider.calls, "chunks are still embedded"
+    calls = len(provider.calls)
+    result = await service.search(
+        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID
+    )
+    assert len(provider.calls) == calls
+    assert result.passages and all(item.arms == ["lexical"] for item in result.passages)

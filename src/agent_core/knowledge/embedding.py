@@ -60,6 +60,7 @@ class KnowledgeEmbedder:
         channel: KnowledgeSemanticChannel = "dense",
         local: bool = False,
         admitted: Callable[[], bool] = lambda: True,
+        question_egress: bool = True,
         window_tokens: int | None = None,
         count_tokens: Callable[[str], int] | None = None,
     ) -> None:
@@ -68,6 +69,10 @@ class KnowledgeEmbedder:
         self._channel = channel
         self._local = local
         self._admitted = admitted
+        # A question is free text the reader wrote from its context; a remote
+        # provider may embed it only when it is the provider that read that
+        # context, so nothing leaves the host that the provider has not seen.
+        self._question_egress = question_egress
         self._window_tokens = window_tokens
         self._count_tokens = count_tokens
 
@@ -78,6 +83,12 @@ class KnowledgeEmbedder:
         """Whether text of this sensitivity may reach the provider."""
 
         return self._local or sensitivity in PROVIDER_EGRESS_SENSITIVITIES
+
+    @property
+    def question_egress(self) -> bool:
+        """Whether the question may reach the provider; otherwise search is lexical."""
+
+        return self._question_egress
 
     @property
     def space(self) -> EmbeddingSpace:
