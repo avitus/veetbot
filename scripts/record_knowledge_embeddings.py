@@ -70,6 +70,8 @@ def corpus_texts() -> list[str]:
         )
         texts.extend(knowledge_embedding_text(chunk.heading_path, chunk.text) for chunk in chunks)
         texts.append(member["question"].strip())
+        # A question none of the documents answers, for the negative case.
+        texts.append(member["unrelated_question"].strip())
     return list(dict.fromkeys(texts))
 
 

@@ -9,6 +9,8 @@ reaches the caller as `EmbeddingError` with no provider payload attached.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agent_core.domain.embeddings import EmbeddingRequest
 from agent_core.domain.knowledge import (
     KNOWLEDGE_EMBEDDING_TEXT_BYTES,
@@ -18,6 +20,7 @@ from agent_core.domain.knowledge import (
     KnowledgeSemanticQuery,
     knowledge_embedding_text,
 )
+from agent_core.domain.memory import PROVIDER_EGRESS_SENSITIVITIES, Sensitivity
 from agent_core.domain.semantic_memory import EmbeddingSpace
 from agent_core.ports.embeddings import EmbeddingProvider
 
@@ -26,16 +29,38 @@ EMBEDDING_BATCH = 32
 
 
 class KnowledgeEmbedder:
+    """The knowledge arm's one route to an embedding provider.
+
+    `admitted` is the semantic index's own admission check, read before every
+    provider call, so a withdrawn admission stops knowledge egress with the
+    rest. `local` says the provider runs on this host: a remote provider
+    receives only public and internal text, the sensitivities the memory
+    index may send out (`PROVIDER_EGRESS_SENSITIVITIES`), and a document
+    above that stays lexical.
+    """
+
     def __init__(
         self,
         provider: EmbeddingProvider,
         space: EmbeddingSpace,
         *,
         channel: KnowledgeSemanticChannel = "dense",
+        local: bool = False,
+        admitted: Callable[[], bool] = lambda: True,
     ) -> None:
         self._provider = provider
         self._space = space
         self._channel = channel
+        self._local = local
+        self._admitted = admitted
+
+    def admitted(self) -> bool:
+        return bool(self._admitted())
+
+    def allows(self, sensitivity: Sensitivity) -> bool:
+        """Whether text of this sensitivity may reach the provider."""
+
+        return self._local or sensitivity in PROVIDER_EGRESS_SENSITIVITIES
 
     @property
     def space(self) -> EmbeddingSpace:

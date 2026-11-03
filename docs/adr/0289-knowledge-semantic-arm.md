@@ -39,19 +39,33 @@ retrieval on a corpus gate; build step 6 deferred it on that condition.
    cascades with its chunk. The in-memory store keeps the same rows. An
    embedding failure fails the ingest, as every other step does: a document
    half of whose passages the arm can see is worse than one tried again, and
-   the chat-upload path already backs off and retries (ADR-0284).
+   the chat-upload path already backs off and retries (ADR-0284). Egress
+   follows the memory index's rules: a remote provider receives only public
+   and internal text (`PROVIDER_EGRESS_SENSITIVITIES`), so a restricted
+   document stays lexical; a local provider embeds every sensitivity; and the
+   index's admission check is read before every provider call, so a
+   withdrawn admission stops knowledge egress with the rest.
 2. **Search embeds the question, then fuses.** The question is embedded before
-   the unit of work opens; a question the provider cannot embed is answered by
-   the lexical arm alone, logged once, and the trace's retrieval policy version
-   names the space and channel that answered. Fusion is the domain's shared
+   the unit of work opens; a question the provider cannot embed, or whose
+   response fails validation, is answered by the lexical arm alone, logged
+   once with the error class, and the trace's retrieval policy version names
+   the space and channel that answered. A semantic hit below
+   `KNOWLEDGE_SEMANTIC_MIN_SIMILARITY` (0.3) is no candidate, as a chunk
+   holding none of the query's terms is none for the lexical arm; on the
+   recorded fixture answering passages score 0.348 and above and passages of
+   the other documents 0.333 and below, and a question none of the documents
+   answers returns nothing. Fusion is the domain's shared
    `reciprocal_rank_fusion`, which belief recall's `_rrf_fuse` now calls, so
    the two paths cannot drift.
 3. **Two channels, memory's by name.** `hybrid` fuses the lexical and semantic
    arms by reciprocal rank and blends the result with the better arm score at
    memory's fusion weight. `dense` orders candidates by the semantic arm alone,
-   as memory's dense channel skips its sparse query. The ADR-0285 lexical
-   ranking is the lexical arm in `hybrid` and the whole of search when the arm
-   is off; it is not changed.
+   as memory's dense channel skips its sparse query, except that the lexical
+   arm still reaches the chunks the space has not seen, so a document
+   ingested before the arm was turned on stays reachable rather than
+   disappearing until it is ingested again. The ADR-0285 lexical ranking is
+   the lexical arm in `hybrid` and the whole of search when the arm is off;
+   it is not changed.
 4. **Off by default, and the gate decides the channel.** The arm sits behind
    `AGENT_KNOWLEDGE_SEMANTIC_ENABLED`, default off, and shares the semantic
    index's admitted provider (`AGENT_MEMORY_SEMANTIC_INDEX_*`), so it never
@@ -63,7 +77,11 @@ retrieval on a corpus gate; build step 6 deferred it on that condition.
    `gate.knowledge.paraphrase_lift` is re-recorded with the embedding space the
    semantic index will run (`scripts/record_knowledge_embeddings.py`, then the
    gate) and still passes, and the owner has accepted where chunk text goes:
-   nowhere with a local provider, to the provider with a remote one.
+   nowhere with a local provider, to the provider with a remote one. The
+   recorder as written records one space, `text-embedding-3-small` at 1536
+   dimensions through the OpenAI adapter; recording a local or other
+   provider's space means extending the script first, and a passing replay
+   of the OpenAI fixture is evidence for that space only.
 
 ## Evidence
 
@@ -105,8 +123,9 @@ at any `k`. The dense channel places every member within the top two.
   the embedding model rather than on term matching. The hybrid channel keeps
   both arms for the day the lexical arm stops counting function words, when
   its lift should be re-measured.
-- Documents ingested before the flag was turned on have no vectors and stay
-  lexical until ingested again; a re-ingest of the same bytes is a new version.
+- Documents ingested before the flag was turned on have no vectors; under
+  either channel the lexical arm still reaches them, and they gain vectors
+  only when ingested again, which makes a new version of the document.
 - Knowledge embedding spend is not metered by the memory semantic ledger; a
   403-chunk manual is about 225,000 tokens once. The local provider admits one
   request at a time, so a chunk batch running while recall embeds a question
@@ -117,10 +136,12 @@ at any `k`. The dense channel places every member within the top two.
 - `tests/gates/test_knowledge_semantic.py`: `test_paraphrase_lift` (gate 13)
   passes under the dense channel; `test_lexical_alone_misses_the_paraphrase`
   and `test_hybrid_fusion_does_not_reach_the_top_two` record the baselines
-  the lift is measured against.
+  the lift is measured against; `test_an_unrelated_question_returns_no_passage`
+  is the floor's negative case.
 - `tests/contract/test_knowledge_semantic_contract.py`: the lexical ranking is
   unchanged without a semantic query, both channels name their arms, a chunk
-  without a vector in the space is lexical only, visibility and the
+  without a vector in the space stays reachable through the lexical arm under
+  either channel, a hit below the floor is no candidate, visibility and the
   per-document cap hold for semantic hits, deletion removes vectors, and a
   prepared ingest refuses stray or repeated vectors.
 - `tests/integration/test_knowledge_semantic_postgres.py`: vectors are stored
@@ -129,5 +150,8 @@ at any `k`. The dense channel places every member within the top two.
 - `tests/unit/test_retrieval_fusion.py` and `tests/unit/test_memory_retrieval.py`:
   the shared fusion reproduces belief recall's numbers.
 - `tests/unit/test_knowledge_embedding.py`: batching, the text bound, the
-  provider call before any unit of work, the failed ingest, the lexical
-  fallback and policy version at search, and the settings.
+  provider call before any unit of work, the failed ingest, a restricted
+  document withheld from a remote provider and embedded by a local one, a
+  withdrawn admission stopping both paths, the lexical fallback on a
+  provider failure or an invalid response, the policy version at search,
+  and the settings.

@@ -22,6 +22,7 @@ from sqlalchemy import (
     bindparam,
     case,
     delete,
+    exists,
     false,
     func,
     literal,
@@ -1816,7 +1817,7 @@ class PostgresKnowledgeStore:
         )
         candidates: dict[str, tuple[KnowledgeChunkRow, KnowledgeDocumentRow]] = {}
         lexical: list[tuple[str, float]] = []
-        if forms and (semantic is None or semantic.channel == "hybrid"):
+        if forms:
             vector = func.to_tsvector(
                 "simple",
                 func.concat(KnowledgeChunkRow.heading_path.cast(Text), " ", KnowledgeChunkRow.text),
@@ -1852,6 +1853,19 @@ class PostgresKnowledgeStore:
                 literal(0),
             )
             rank = func.ts_rank_cd(vector, any_term)
+            # Under the dense channel the lexical arm reaches only the chunks
+            # the space has not seen, so an older document stays reachable
+            # (ADR-0289).
+            unseen = (
+                ()
+                if semantic is None or semantic.channel == "hybrid"
+                else (
+                    ~exists().where(
+                        KnowledgeChunkVectorRow.chunk_id == KnowledgeChunkRow.chunk_id,
+                        KnowledgeChunkVectorRow.space_key == semantic.space.key,
+                    ),
+                )
+            )
             rows = (
                 await self._session.execute(
                     select(KnowledgeChunkRow, KnowledgeDocumentRow, coverage.label("coverage"))
@@ -1859,7 +1873,7 @@ class PostgresKnowledgeStore:
                         KnowledgeDocumentRow,
                         KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
                     )
-                    .where(*eligible, vector.op("@@")(any_term))
+                    .where(*eligible, *unseen, vector.op("@@")(any_term))
                     .order_by(coverage.desc(), rank.desc(), KnowledgeChunkRow.chunk_id)
                     .limit(limit)
                 )

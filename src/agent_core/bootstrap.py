@@ -4676,6 +4676,8 @@ async def _compose(
                     semantic_index_pass.provider,
                     semantic_index_pass.space,
                     channel=settings.knowledge_semantic_channel,
+                    local=semantic_index_pass.local_provider is not None,
+                    admitted=semantic_index_pass.admitted or (lambda: True),
                 )
         knowledge_service = KnowledgeService(
             uow_factory,

@@ -30,6 +30,7 @@ from agent_core.domain.knowledge import (
     KnowledgeVisibility,
     knowledge_embedding_text,
 )
+from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.semantic_memory import EmbeddingSpace
 from agent_core.knowledge.embedding import EMBEDDING_BATCH, KnowledgeEmbedder
@@ -116,7 +117,11 @@ async def _service(
 
 
 async def _ingest(
-    service: KnowledgeService, writer: ArtifactWriterFactory, factory: MemoryUnitOfWorkFactory
+    service: KnowledgeService,
+    writer: ArtifactWriterFactory,
+    factory: MemoryUnitOfWorkFactory,
+    *,
+    sensitivity: Sensitivity = Sensitivity.INTERNAL,
 ) -> UUID:
     owner = principal()
     bound = writer.for_run(
@@ -136,7 +141,10 @@ async def _ingest(
         source = await uow.artifacts.get(stored.artifact_id, owner)
     document = await service.ingest(
         KnowledgeIngestRequest(
-            source=source, title="Guide", visibility=KnowledgeVisibility.PRINCIPAL
+            source=source,
+            title="Guide",
+            visibility=KnowledgeVisibility.PRINCIPAL,
+            sensitivity=sensitivity,
         ),
         origin_trust=TrustLevel.USER,
     )
@@ -210,6 +218,63 @@ async def test_a_question_the_provider_cannot_embed_falls_back_to_lexical(
     async with factory() as uow:
         trace = await uow.traces.get(result.trace_id, principal())
     assert trace.retrieval_policy_version == KNOWLEDGE_POLICY_VERSION
+
+
+async def test_a_restricted_document_stays_lexical_with_a_remote_provider(
+    tmp_path: Path,
+) -> None:
+    provider = Provider()
+    service, writer, factory = await _service(
+        tmp_path, KnowledgeEmbedder(provider, SPACE, channel="dense", local=False)
+    )
+    await _ingest(service, writer, factory, sensitivity=Sensitivity.RESTRICTED)
+    assert provider.calls == []
+    async with factory() as uow:
+        found = await uow.knowledge.search(_query().model_copy(update={"text": "fan runs"}))
+    assert found and all(item.arms == ["lexical"] for item in found)
+
+
+async def test_a_local_provider_embeds_every_sensitivity(tmp_path: Path) -> None:
+    provider = Provider()
+    service, writer, factory = await _service(
+        tmp_path, KnowledgeEmbedder(provider, SPACE, channel="dense", local=True)
+    )
+    await _ingest(service, writer, factory, sensitivity=Sensitivity.RESTRICTED)
+    assert len(provider.calls) == 1
+
+
+async def test_a_withdrawn_admission_stops_both_embedding_paths(tmp_path: Path) -> None:
+    provider = Provider()
+    admitted = {"value": True}
+    service, writer, factory = await _service(
+        tmp_path, KnowledgeEmbedder(provider, SPACE, admitted=lambda: admitted["value"])
+    )
+    admitted["value"] = False
+    await _ingest(service, writer, factory)
+    result = await service.search(
+        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID
+    )
+    assert provider.calls == []
+    assert result.passages and all(item.arms == ["lexical"] for item in result.passages)
+
+
+async def test_a_provider_response_that_fails_validation_falls_back_to_lexical(
+    tmp_path: Path,
+) -> None:
+    class Mismatched(Provider):
+        async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+            response = await super().embed(request)
+            if len(self.calls) > 1:
+                return response.model_copy(update={"request_digest": "0" * 64})
+            return response
+
+    provider = Mismatched()
+    service, writer, factory = await _service(tmp_path, KnowledgeEmbedder(provider, SPACE))
+    await _ingest(service, writer, factory)
+    result = await service.search(
+        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID
+    )
+    assert result.passages and all(item.arms == ["lexical"] for item in result.passages)
 
 
 def test_settings_parse_the_knowledge_semantic_flag_and_channel() -> None:

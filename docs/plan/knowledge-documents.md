@@ -266,13 +266,18 @@ The arm is built ([ADR-0289](../adr/0289-knowledge-semantic-arm.md)) and off by
 default. Ingestion embeds each chunk's heading path over its text under a named text
 version, `knowledge-text@1`, with the provider the memory semantic index admitted, and
 stores the vector in `knowledge_chunk_vectors`, one row per chunk and embedding space,
-cascading with the chunk; the in-memory store keeps the same rows. Search embeds the
-question before the unit of work opens; a question the provider cannot embed is answered
-by the lexical arm alone, and the trace's policy version names the space and channel
-that answered. Fusion is the domain's shared `reciprocal_rank_fusion`, the rule belief
-recall's `_rrf_fuse` calls. Two channels exist, memory's `semantic_channel` by name:
-`hybrid` fuses the arms by reciprocal rank and blends the result with the better arm
-score; `dense` orders candidates by the semantic arm alone. Gate 13 measured both
+cascading with the chunk; the in-memory store keeps the same rows. A remote provider
+receives only public and internal text, the memory index's egress rule, so a restricted
+document stays lexical, and the index's admission is read before every call. Search
+embeds the question before the unit of work opens; a question the provider cannot embed
+is answered by the lexical arm alone, and the trace's policy version names the space and
+channel that answered. A semantic hit below a similarity floor is no candidate, as a
+chunk holding no query term is none for the lexical arm. Fusion is the domain's shared
+`reciprocal_rank_fusion`, the rule belief recall's `_rrf_fuse` calls. Two channels
+exist, memory's `semantic_channel` by name: `hybrid` fuses the arms by reciprocal rank
+and blends the result with the better arm score; `dense` orders candidates by the
+semantic arm, with the lexical arm reaching only the chunks the space has not seen, so
+a document ingested before the arm was on stays reachable. Gate 13 measured both
 against the ADR-0285 lexical arm and found that hybrid fusion lifts nothing: the lexical
 arm counts function words as coverage, so a document's other sections rank first
 lexically and near the top semantically, and reciprocal rank fusion rewards exactly that

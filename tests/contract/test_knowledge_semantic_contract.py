@@ -39,7 +39,9 @@ def _prepared(number: int = 1, *, with_vectors: bool = True) -> KnowledgeIngestP
     prepared = _document(number, TEXT)
     if not with_vectors:
         return prepared
-    vectors = {"Rollback": (0.0, 1.0, 0.0), "Fans": (1.0, 0.0, 0.0), "Notes": (0.0, 0.0, 1.0)}
+    # Against the question's vector (1, 0, 0): Fans at similarity 1, Rollback
+    # at 0.6, Notes at 0, below the semantic floor.
+    vectors = {"Rollback": (0.6, 0.8, 0.0), "Fans": (1.0, 0.0, 0.0), "Notes": (0.0, 0.0, 1.0)}
     embeddings = tuple(
         KnowledgeChunkEmbedding(
             chunk_id=chunk.chunk_id, space=SPACE, vector=vectors[chunk.heading_path[-1]]
@@ -82,7 +84,8 @@ async def test_hybrid_channel_fuses_both_arms_and_names_them() -> None:
     by_heading = {item.heading_path[-1]: item for item in passages}
     assert by_heading["Fans"].arms == ["semantic"]
     assert by_heading["Rollback"].arms == ["lexical", "semantic"]
-    assert by_heading["Notes"].arms == ["lexical", "semantic"]
+    # Below the semantic floor, a chunk is the lexical arm's alone.
+    assert by_heading["Notes"].arms == ["lexical"]
     # Rank fusion lifts the passage both arms returned above one only lexical
     # coverage returned, while the semantic-only hit still enters the result.
     assert _headings(passages)[0] in {"Notes", "Rollback"}
@@ -92,20 +95,41 @@ async def test_hybrid_channel_fuses_both_arms_and_names_them() -> None:
 async def test_dense_channel_orders_by_similarity_alone() -> None:
     store = await _store(_prepared())
     passages = await store.search(_query(text="rollback procedure"), semantic=_semantic("dense"))
-    assert _headings(passages)[0] == "Fans"
+    # Notes holds the query's words but sits below the semantic floor, and
+    # the space has seen it, so the dense channel leaves it out.
+    assert _headings(passages) == ["Fans", "Rollback"]
     assert all(item.arms == ["semantic"] for item in passages)
     # Three quarters similarity, the supplied document's authority, and the
     # scope affinity of a document with no project scope queried from none.
     assert passages[0].score == pytest.approx(0.75 * 1.0 + 0.15 * 0.7 + 0.1 * 1.0)
 
 
-async def test_a_chunk_without_a_vector_in_the_space_is_lexical_only() -> None:
+async def test_a_chunk_without_a_vector_in_the_space_stays_reachable_lexically() -> None:
     store = await _store(_prepared(with_vectors=False))
     hybrid = await store.search(_query(text="rollback procedure"), semantic=_semantic("hybrid"))
     assert _headings(hybrid) == ["Notes", "Rollback"]
     assert all(item.arms == ["lexical"] for item in hybrid)
+    # The dense channel, too: a document the space has not seen is ranked by
+    # the lexical arm rather than hidden (ADR-0289).
     other_space = _semantic("dense").model_copy(update={"space": OTHER_SPACE})
-    assert await store.search(_query(text="rollback procedure"), semantic=other_space) == []
+    dense = await store.search(_query(text="rollback procedure"), semantic=other_space)
+    assert _headings(dense) == ["Notes", "Rollback"]
+    assert all(item.arms == ["lexical"] for item in dense)
+
+
+async def test_a_semantic_hit_below_the_floor_is_no_candidate() -> None:
+    store = await _store(_prepared())
+    # Nothing lexical matches "lunch menu" but Notes; semantically every chunk
+    # sits far from this question, so the dense channel answers with nothing
+    # the space has seen.
+    far = KnowledgeSemanticQuery(space=SPACE, vector=(0.0, 0.0, 1.0), channel="dense")
+    passages = await store.search(_query(text="lunch menu"), semantic=far)
+    assert _headings(passages) == ["Notes"]
+    assert passages[0].arms == ["semantic"]
+    unrelated = KnowledgeSemanticQuery(space=SPACE, vector=(0.2, 0.0, 0.98), channel="dense")
+    assert passages[0].score > 0
+    nothing = await store.search(_query(text="zzz"), semantic=unrelated)
+    assert [item.heading_path[-1] for item in nothing] == ["Notes"]
 
 
 async def test_semantic_hits_respect_visibility_and_the_per_document_cap() -> None:

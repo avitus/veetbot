@@ -30,6 +30,7 @@ from agent_core.domain.memory import (
     RecallProfile,
     RecallQuery,
     RecallTrace,
+    Sensitivity,
     TracedPassage,
 )
 from agent_core.domain.policies import TrustLevel
@@ -117,7 +118,9 @@ class KnowledgeService:
         document_id = request.document_id or self._ids.new_id()
         # Chunk texts do not depend on the row that will hold them, so the
         # provider call happens here, before any unit of work is open.
-        vectors = await self._embed_chunk_texts(normalized, request.title, document_id)
+        vectors = await self._embed_chunk_texts(
+            normalized, request.title, document_id, request.sensitivity
+        )
         async with self._uow_factory() as uow:
             latest = await uow.knowledge.latest(source.tenant_id, document_id)
             if (
@@ -198,19 +201,32 @@ class KnowledgeService:
         return document
 
     async def _embed_chunk_texts(
-        self, normalized: str, title: str, document_id: UUID
+        self, normalized: str, title: str, document_id: UUID, sensitivity: Sensitivity
     ) -> tuple[list[str], list[tuple[float, ...]]] | None:
         """Embed the chunk texts the deterministic chunker will produce.
 
         The chunker binds ids to the row and version chosen inside the unit of
         work, but a chunk's heading path and text depend only on the bytes, so
         the texts embedded here are the texts the stored chunks will carry;
-        ingestion checks that before writing. An embedding failure fails the
+        ingestion checks that before writing. A document the provider may not
+        see, or an admission that has been withdrawn, leaves the document
+        lexical rather than refusing it. An embedding failure fails the
         ingest, as every other step does: a document half of whose passages
         the semantic arm can see is worse than one that is tried again.
         """
 
         if self._embedder is None:
+            return None
+        if not self._embedder.allows(sensitivity) or not self._embedder.admitted():
+            logger.info(
+                "knowledge_embedding_withheld",
+                extra={
+                    "document_id": str(document_id),
+                    "reason": "sensitivity"
+                    if not self._embedder.allows(sensitivity)
+                    else "admission",
+                },
+            )
             return None
         drafts = self._chunker.chunk(
             normalized, title, document_row_id=UUID(int=0), document_id=document_id, version=1
@@ -223,13 +239,20 @@ class KnowledgeService:
     async def _embed_question(self, text: str) -> KnowledgeSemanticQuery | None:
         """Embed the question, or answer with the lexical arm alone when the provider cannot."""
 
-        if self._embedder is None:
+        if self._embedder is None or not self._embedder.admitted():
             return None
         try:
             return await self._embedder.embed_query(text)
         except EmbeddingError as error:
             # The message is content-free by contract; the question itself stays out.
             logger.warning("knowledge_semantic_query_unavailable", extra={"reason": str(error)})
+            return None
+        except ValueError as error:
+            # A validation message can echo the question; only the class is logged.
+            logger.warning(
+                "knowledge_semantic_query_unavailable",
+                extra={"reason": type(error).__name__},
+            )
             return None
 
     async def search(

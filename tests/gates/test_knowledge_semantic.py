@@ -181,3 +181,23 @@ async def test_hybrid_fusion_does_not_reach_the_top_two(tmp_path: Path) -> None:
 
     ranks = await _ranks(tmp_path, "hybrid")
     assert all(rank is None or rank > 2 for rank in ranks.values()), ranks
+
+
+async def test_an_unrelated_question_returns_no_passage(tmp_path: Path) -> None:
+    """The semantic floor: a question none of the documents answers finds nothing.
+
+    The lexical arm returns only chunks holding a query term; the semantic arm
+    returns only chunks above `KNOWLEDGE_SEMANTIC_MIN_SIMILARITY`, so the
+    dense channel does not answer a question about tax returns with the
+    nearest page of a car manual.
+    """
+
+    provider = RecordedEmbeddingProvider()
+    embedder = KnowledgeEmbedder(provider, provider.space, channel="dense")
+    service, writer, factory = await _service(tmp_path, embedder)
+    members = _members()
+    for member in members:
+        await _ingest(service, writer, factory, member)
+    for member in members:
+        result = await service.search(_query(member["unrelated_question"]), session_id=SESSION_ID)
+        assert result.passages == [], (member["unrelated_question"], result.passages)

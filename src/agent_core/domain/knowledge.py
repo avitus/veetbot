@@ -25,6 +25,13 @@ KNOWLEDGE_EMBEDDING_TEXT_VERSION = "knowledge-text@1"
 KNOWLEDGE_EMBEDDING_TEXT_BYTES = 4096
 # The semantic arm's share of a passage's match, memory's `semantic_fusion_weight`.
 KNOWLEDGE_SEMANTIC_FUSION_WEIGHT = 0.2
+# A semantic hit below this cosine similarity is no candidate: the lexical arm
+# returns only chunks holding a query term, and the semantic arm must likewise
+# return only chunks near the question, or an unrelated question would be
+# answered with the nearest unrelated passage. Calibrated on the recorded
+# paraphrase fixture (ADR-0289): answering passages score 0.348 and above,
+# passages of the other documents 0.333 and below.
+KNOWLEDGE_SEMANTIC_MIN_SIMILARITY = 0.3
 
 
 class KnowledgeVisibility(StrEnum):
@@ -222,21 +229,32 @@ def fuse_passage_arms(
     """Fuse the lexical and semantic arms the way belief recall fuses its arms.
 
     Each arm lists its chunks best first with the arm's own 0..1 score: the
-    lexical arm's coverage share, the semantic arm's cosine similarity. Under
-    the `hybrid` channel a chunk's match is its best arm score blended with
-    its reciprocal-rank fusion across both arms, the blend
+    lexical arm's coverage share, the semantic arm's cosine similarity. A
+    semantic hit below `KNOWLEDGE_SEMANTIC_MIN_SIMILARITY` is dropped first.
+    Under the `hybrid` channel a chunk's match is its best arm score blended
+    with its reciprocal-rank fusion across both arms, the blend
     `HybridMemoryRetriever` applies after `_rrf_fuse`. Under `dense` the
-    semantic arm's similarity is the match and the lexical arm is not
-    consulted, as memory's dense channel skips its sparse query. The result
-    maps a chunk id to its match and the arms that returned it; both stores
-    order candidates by it.
+    semantic arm's similarity is the match, as memory's dense channel skips
+    its sparse query, and the lexical arm covers only the chunks the space
+    has not seen. The result maps a chunk id to its match and the arms that
+    returned it; both stores order candidates by it.
     """
 
+    semantic = [
+        (chunk_id, similarity)
+        for chunk_id, similarity in semantic
+        if similarity >= KNOWLEDGE_SEMANTIC_MIN_SIMILARITY
+    ]
     if channel == "dense":
-        return {
+        # The lexical arm reaches only chunks the space has not seen (both
+        # stores restrict it so), ranked by coverage beside the semantic hits:
+        # a document ingested before the arm was on stays reachable.
+        matches = {
             chunk_id: (max(0.0, min(1.0, similarity)), ["semantic"])
             for chunk_id, similarity in semantic
         }
+        matches.update({chunk_id: (coverage, ["lexical"]) for chunk_id, coverage in lexical})
+        return matches
     fused = reciprocal_rank_fusion(
         {
             "lexical": [chunk_id for chunk_id, _ in lexical],

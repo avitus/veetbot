@@ -1052,17 +1052,21 @@ class InMemoryKnowledgeStore:
                 ):
                     continue
                 eligible[chunk.chunk_id] = (chunk, document)
-                if semantic is None or semantic.channel == "hybrid":
+                vector = (
+                    None
+                    if semantic is None
+                    else self._vectors.get(chunk.chunk_id, {}).get(semantic.space.key)
+                )
+                # Under the dense channel the lexical arm reaches only the
+                # chunks the space has not seen, so an older document stays
+                # reachable (ADR-0289).
+                if semantic is None or semantic.channel == "hybrid" or vector is None:
                     match = _coverage(forms, f"{' '.join(chunk.heading_path)} {chunk.text}")
                     if match > 0:
                         lexical.append((chunk.chunk_id, match))
-                if semantic is not None:
-                    vector = self._vectors.get(chunk.chunk_id, {}).get(semantic.space.key)
-                    if vector is not None:
-                        similarity = sum(
-                            a * b for a, b in zip(semantic.vector, vector, strict=True)
-                        )
-                        semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, similarity))))
+                if semantic is not None and vector is not None:
+                    similarity = sum(a * b for a, b in zip(semantic.vector, vector, strict=True))
+                    semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, similarity))))
         limit = max(query.max_passages * 8, 64)
         lexical.sort(key=lambda item: (-item[1], _passage_score(eligible, query, item), item[0]))
         semantic_arm.sort(key=lambda item: (-round(item[1], 7), item[0]))

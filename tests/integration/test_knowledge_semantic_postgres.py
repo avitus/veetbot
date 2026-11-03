@@ -35,7 +35,9 @@ DOCUMENT = (
     "## Fans\n\nThe cooling fan may run for several minutes after shutdown.\n\n"
     "## Notes\n\nNothing about the rollback procedure here, only the procedure for lunch."
 )
-VECTORS = {"Rollback": (0.0, 1.0, 0.0), "Fans": (1.0, 0.0, 0.0), "Notes": (0.0, 0.0, 1.0)}
+# Against the question's vector (1, 0, 0): Fans at 1, Rollback at 0.6, Notes
+# at 0, below the semantic floor.
+VECTORS = {"Rollback": (0.6, 0.8, 0.0), "Fans": (1.0, 0.0, 0.0), "Notes": (0.0, 0.0, 1.0)}
 
 
 class Provider:
@@ -141,13 +143,34 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
         assert stored == 3
 
         dense = await service("dense").search(query, session_id=session_id)
-        assert dense.passages[0].heading_path[-1] == "Fans"
+        assert [item.heading_path[-1] for item in dense.passages] == ["Fans", "Rollback"]
         assert all(item.arms == ["semantic"] for item in dense.passages)
         hybrid = await service("hybrid").search(query, session_id=session_id)
         arms = {item.heading_path[-1]: item.arms for item in hybrid.passages}
         assert arms["Fans"] == ["semantic"]
         assert arms["Rollback"] == ["lexical", "semantic"]
-        assert arms["Notes"] == ["lexical", "semantic"]
+        assert arms["Notes"] == ["lexical"]
+
+        # A document ingested without the arm has no vectors; the dense
+        # channel still reaches it through the lexical arm (ADR-0289).
+        older_ref = await writer.create(
+            _bytes(b"# Older\n\n## Rollback\n\nThe older rollback procedure."),
+            "older.md",
+            "text/markdown",
+            TrustLevel.USER,
+        )
+        async with app.uow_factory() as uow:
+            older_source = await uow.artifacts.get(older_ref.artifact_id, app.principal)
+        older = await app.knowledge.ingest(
+            KnowledgeIngestRequest(
+                source=older_source, title="Older", visibility=KnowledgeVisibility.PRINCIPAL
+            ),
+            origin_trust=TrustLevel.USER,
+        )
+        dense = await service("dense").search(query, session_id=session_id)
+        by_document = {item.document_id: item.arms for item in dense.passages}
+        assert by_document[older.document_id] == ["lexical"]
+        assert by_document[document.document_id] == ["semantic"]
 
         # Another principal reads nothing through either arm.
         foreign = await service("dense").search(
@@ -165,7 +188,8 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
                 text("SELECT count(*) FROM knowledge_chunk_vectors")
             )
         assert remaining == 0
-        assert (await service("dense").search(query, session_id=session_id)).passages == []
+        left = (await service("dense").search(query, session_id=session_id)).passages
+        assert {item.document_id for item in left} == {older.document_id}
 
 
 async def test_ingest_without_an_embedder_stores_no_vectors(tmp_path: Path) -> None:
