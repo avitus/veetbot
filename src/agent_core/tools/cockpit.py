@@ -90,6 +90,7 @@ REASON_CODES = (
     "cockpit.expected_revision_required",
     "cockpit.widget_deleted",
     "cockpit.widget_not_deleted",
+    "cockpit.removal_queued",
     "cockpit.layout_changed",
     "cockpit.conflict",
     "cockpit.write_interactive_only",
@@ -121,6 +122,7 @@ _CONFLICT_CODES = {
     "widget_exists": "cockpit.revision_changed",
     "widget_deleted": "cockpit.widget_deleted",
     "widget_not_deleted": "cockpit.widget_not_deleted",
+    "removal_queued": "cockpit.removal_queued",
     "layout_changed": "cockpit.layout_changed",
 }
 # Every tool answer reaches the model inline up to 4 KiB (tools/limits.yaml), so the

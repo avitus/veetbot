@@ -437,8 +437,14 @@ ever touches a branch under `cockpit/`.
 
 ### Writing
 
-The outbox worker in the maintenance role takes entries in order per widget.
-For each one it:
+The outbox worker in the maintenance role takes each widget's entries in the
+order they were accepted, whenever their retries fall due. An entry's place is
+fixed under the widget's row lock, after everything already queued for that
+widget, so a clock that repeats or steps back cannot reorder them, and that place
+also decides which pending write is a widget's head. An entry waits while an
+older one for its widget is outstanding, and a batch counts only each widget's
+oldest entry, so entries waiting behind a retry cannot crowd it out. For each
+one it:
 
 1. reads the branch head;
 2. creates blobs, a tree based on the head's tree that changes only
@@ -489,7 +495,10 @@ read them.
 the entry retries with backoff and the previous live revision keeps rendering
 from PostgreSQL. Any other failure of one entry is handled the same way: the
 entry is logged and rescheduled with backoff, later entries for its widget wait
-behind it, and the other widgets' entries in the same pass still commit.
+behind it, and the other widgets' entries in the same pass still commit. So a
+later change never lands first and is then replaced or removed by the entry it
+came after, and an earlier write never brings back a widget a later delete
+removed.
 
 ### Ambiguity and conflict
 
@@ -499,9 +508,11 @@ behind it, and the other widgets' entries in the same pass still commit.
   parent touched the same widget directory, the person's commit wins. The
   revision becomes `conflicted` and the importer takes the person's version.
   The expected parent is the commit of the live revision the change was based
-  on. For a new widget it is the importer's cursor, after which every commit
-  is unimported. A person's version that the importer made live after the
-  change was queued also wins. A commit counts as the platform's only when its
+  on. For a new widget or a restore it is the importer's cursor, after which
+  every commit is unimported, so the imported delete a restore undoes is not a
+  newer change. A person's version that the importer made live after the
+  change was queued also wins, judged by the revision's own clock reading
+  rather than its queue place. A commit counts as the platform's only when its
   trailer names one of the principal's own revisions or a commit the outbox
   recorded, so a forged trailer does not hide a person's change.
 - **Lost response.** If the ref update's response is lost, the worker reads
@@ -536,7 +547,14 @@ which is theirs and already public.
 
 - **Delete.** Commits the directory's removal, then removes the widget from
   every layout and marks it `deleted`. Private settings remain until the purge
-  window (knob) passes.
+  window (knob) passes. While a removal is queued, including through its
+  backoff, any write, revert or restore of that widget is refused with
+  `removal_queued`, under the same row lock. The delete's approval card showed
+  an earlier revision, so a newer one must not be accepted and then removed
+  unseen. The refusal also covers a removal whose response was lost, which may
+  already be on the branch. Once the widget is deleted, the change can be made
+  again. A person's commit that wins over the removal also clears it from the
+  queue, as in Ambiguity and conflict.
 - **Restore.** Commits the last live package again, as a new commit, and
   reactivates it.
 - **Revert.** Selecting an earlier revision creates a new `revert` revision
@@ -1429,6 +1447,12 @@ grants. A revision records its public manifest and source, publication state,
 commit and creation time. Keeping the source locally makes pinned execution
 independent of GitHub availability. Archive hides the job from new runs without
 erasing its history; restore or revert publishes the selected source again.
+Archiving an archived job is refused when it is requested and queues nothing,
+since its package is already off the branch and a single pending revision blocks
+every later change to the job. A queued archive that finds no package at its
+parent or at the branch head settles as superseded without a commit, leaving the
+job archived and its current revision in place, so an entry queued before this
+refusal drains on its next flush with no repository or database repair.
 
 Publication follows the widget outbox protocol on the separate `cockpit/jobs`
 branch. The Git adapter shares its fast-forward and path checks, parameterized
@@ -1438,6 +1462,13 @@ in the builder sandbox over both files and the fixed commit message. Inputs,
 exact host permissions, credential references, feed permissions and limits
 remain in private grants. The grant is immutable and names its job; an expanded
 request creates a new approval rather than editing an existing grant.
+
+A publication failure belongs to its entry and never stops the flush, so every
+other job's due entry still commits. A repository outage, a moved branch or a
+version conflict retries after thirty seconds. Any other error, such as an
+unavailable privacy screen or a refused path, is logged and retries after a delay
+that doubles from thirty seconds to fifteen minutes. The stored error names only
+the exception's type.
 
 The per-execution broker admits each operation against that grant. HTTP reads
 resolve a permitted public hostname once and dial the checked address with the

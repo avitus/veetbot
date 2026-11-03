@@ -59,8 +59,7 @@ COMMIT_EVENT = "cockpit.commit"
 IMPORT_EVENT = "cockpit.import"
 REQUEST_EVENT = "cockpit.request"
 _HOUR = timedelta(hours=1)
-# Every queued entry, so a later entry never overtakes an earlier one for its widget.
-_QUEUE_HORIZON = timedelta(days=3650)
+OUTBOX_BATCH_SIZE = 1000
 _PEOPLE_PAGE = 100
 
 logger = logging.getLogger(__name__)
@@ -273,6 +272,14 @@ class CockpitPublication:
 
         if widget is None:
             return None
+        # The queue holds acceptance order; a revision's own time is a clock reading.
+        queued = await uow.cockpit_outbox.newest_for_widget(
+            principal, widget.slug, OutboxOperation.WRITE
+        )
+        if queued is not None:
+            revision = await uow.cockpit_widgets.get_revision(principal, queued.revision_id)
+            if revision.state is RevisionState.PENDING_COMMIT:
+                return revision.id
         waiting = await uow.cockpit_widgets.list_revisions(
             principal,
             widget.slug,
@@ -347,6 +354,11 @@ class CockpitPublication:
                         updated_at=now,
                     )
                 )
+            elif await uow.cockpit_outbox.removal_queued(principal, slug):
+                # The removal's card showed an earlier revision, and it would take this one too.
+                raise ConflictError(
+                    f"{slug}'s removal is waiting for its commit", reason="removal_queued"
+                )
             elif await self._head(uow, principal, widget) != expected_head or (
                 expected_live is not None and widget.live_revision_id != expected_live
             ):
@@ -378,10 +390,22 @@ class CockpitPublication:
                         operation=OutboxOperation.WRITE,
                         next_attempt_at=now,
                         expected_parent_sha=expected_parent_sha,
-                        created_at=now,
+                        created_at=await self._accepted_at(uow, principal, slug, now),
                     )
                 )
             return revision
+
+    async def _accepted_at(
+        self, uow: RepositoryUnitOfWork, principal: Principal, slug: str, now: datetime
+    ) -> datetime:
+        """A queue position after the widget's newest entry, taken under its row lock.
+
+        The clock alone cannot order the queue: it can repeat or step back, and
+        `now` may have been read before another change took the lock first.
+        """
+
+        newest = await uow.cockpit_outbox.newest_for_widget(principal, slug)
+        return now if newest is None else max(now, newest.created_at + timedelta(microseconds=1))
 
     async def _record_request(
         self,
@@ -544,6 +568,10 @@ class CockpitPublication:
                 raise NotFoundError(f"widget revision {revision_id} not found")
             await self._check_rate(uow, principal, slug)
             parent = await self._live_commit(uow, principal, widget)
+            if widget.state is WidgetState.DELETED:
+                # A restore undoes a delete newer than the live commit, so it is based
+                # on the importer's cursor: every person's commit after it is unseen.
+                parent = await import_cursor(uow, principal) or parent
             head = await self._head(uow, principal, widget)
         return await self._accept(
             principal,
@@ -630,7 +658,7 @@ class CockpitPublication:
                     operation=OutboxOperation.REMOVE,
                     next_attempt_at=now,
                     expected_parent_sha=await self._live_commit(uow, principal, widget),
-                    created_at=now,
+                    created_at=await self._accepted_at(uow, principal, slug, now),
                 )
             )
 
@@ -656,26 +684,29 @@ class CommitOutboxWorker:
         self._events = _Events(clock, ids)
 
     async def run_once(self) -> int:
-        """Attempt every due entry once; return how many reached an outcome."""
+        """Attempt each due widget's entries in order; return how many reached an outcome."""
 
-        now = self._clock.now()
         async with self._uow_factory() as uow:
-            queued = await uow.cockpit_outbox.due(
-                self._principal.tenant_id, now=now + _QUEUE_HORIZON, limit=1000
+            # Only heads, so entries waiting behind a retry cannot crowd it out of the batch.
+            heads = await uow.cockpit_outbox.due_heads(
+                self._principal, now=self._clock.now(), limit=OUTBOX_BATCH_SIZE
             )
-        blocked: set[str] = set()
         settled = 0
-        for entry in queued:
-            if entry.principal_id != self._principal.principal_id or entry.slug in blocked:
-                continue
-            if entry.next_attempt_at > now:
-                blocked.add(entry.slug)
-                continue
+        for head in heads:
+            settled += await self._drain(head)
+        return settled
+
+    async def _drain(self, head: CommitOutboxEntry) -> int:
+        """Attempt a widget's entries in acceptance order until one fails or is not due."""
+
+        settled = 0
+        entry: CommitOutboxEntry | None = head
+        while entry is not None and entry.next_attempt_at <= self._clock.now():
             try:
                 settled += await self._attempt(entry)
             except WidgetRepositoryUnavailableError as error:
                 await self._reschedule(entry, str(error))
-                blocked.add(entry.slug)
+                break
             except Exception as error:
                 # A refused path, a lost revision or an unexpected GitHub answer
                 # is this entry's problem: it retries with backoff behind the
@@ -685,7 +716,9 @@ class CommitOutboxWorker:
                     extra={"revision_id": str(entry.revision_id), "slug": entry.slug},
                 )
                 await self._reschedule(entry, f"{type(error).__name__}: {error}")
-                blocked.add(entry.slug)
+                break
+            async with self._uow_factory() as uow:
+                entry = await uow.cockpit_outbox.first_for_widget(self._principal, entry.slug)
         return settled
 
     async def _reschedule(self, entry: CommitOutboxEntry, error: str) -> None:
@@ -712,12 +745,17 @@ class CommitOutboxWorker:
                 attempts=attempts,
             )
 
-    async def _human_change(self, entry: CommitOutboxEntry) -> bool:
+    async def _human_change(
+        self, entry: CommitOutboxEntry, revision: WidgetRevision | None
+    ) -> bool:
         """Whether a person changed this widget after the change was based on it.
 
         A person's version may already be imported and live, or still only on
         the branch after the change's base: the live commit it changed, or for a
         new widget the importer's cursor, after which every commit is unimported.
+        Age is the revision's clock reading, as the entry's time is a queue place
+        that can run ahead of the clock. A removal's parent was the live commit
+        when it was accepted, so any other person's version is newer.
         """
 
         principal = self._principal
@@ -731,7 +769,7 @@ class CommitOutboxWorker:
                 if (
                     live.source is RevisionSource.OWNER_GIT
                     and live.commit_sha != entry.expected_parent_sha
-                    and live.created_at >= entry.created_at
+                    and (revision is None or live.created_at >= revision.created_at)
                 ):
                     return True
             baseline = entry.expected_parent_sha or await import_cursor(uow, principal)
@@ -763,7 +801,7 @@ class CommitOutboxWorker:
         )
         if landed is None:
             try:
-                if await self._human_change(entry):
+                if await self._human_change(entry, revision):
                     raise _PersonWonError
                 landed = await self._commit(entry, revision)
             except _PersonWonError:
@@ -792,7 +830,7 @@ class CommitOutboxWorker:
                     entry.slug, revision.files, parent_sha=head, message=message
                 )
             except BranchMovedError:
-                if await self._human_change(entry):
+                if await self._human_change(entry, revision):
                     raise _PersonWonError from None
                 continue
             except WidgetPathRefusedError:
