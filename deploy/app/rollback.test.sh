@@ -19,6 +19,8 @@ FAIL_MARKER="$TEST_ROOT/docs-switch-failed"
 WEBSITE_FAIL_MARKER="$TEST_ROOT/website-switch-failed"
 SERVICES_STOPPED="$TEST_ROOT/services-stopped"
 ENV_FILE="$TEST_ROOT/veetbot.env"
+SCHEDULE_ENV_FILE="$TEST_ROOT/veetbot-schedule.env"
+PLAIN_SCHEDULE_ENV_FILE="$TEST_ROOT/plain-veetbot-schedule.env"
 RAW_RUNBOOK="$TEST_ROOT/manual-rollback.raw.sh"
 RUNBOOK="$TEST_ROOT/manual-rollback.sh"
 PREVIOUS_ID=20260810-152200-1111111
@@ -43,6 +45,9 @@ printf '%s\n' \
   'POSTGRES_USER=agent' \
   'POSTGRES_DB=agent' \
   'COMPOSE_PROJECT_NAME=veetbot' >"$ENV_FILE"
+# A target that knows ADR-0291 accepts the flag, so every other case keeps it.
+printf '%s\n' 'AGENT_SVP_ENABLED=1' >"$SCHEDULE_ENV_FILE"
+printf '%s\n' 'AGENT_SVP_ENABLED=0' >"$PLAIN_SCHEDULE_ENV_FILE"
 printf '%s\n' "$PREVIOUS_ID" >"$DOCS_ROOT/releases/$PREVIOUS_ID/release.txt"
 printf '%s\n' "$TARGET_ID" >"$DOCS_ROOT/releases/$TARGET_ID/release.txt"
 printf '%s\n' "$PREVIOUS_ID" >"$WEBSITE_ROOT/releases/$PREVIOUS_ID/release.txt"
@@ -213,8 +218,15 @@ write_stub curl '
   printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
     "$VEETBOT_TEST_READY_RELEASE" >"$headers"
 '
-printf '#!/usr/bin/env bash\nset -Eeuo pipefail\nprintf "%%s\\n" "${VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY:-incompatible}"\n' \
-  >"$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python"
+cat >"$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python" <<'PY'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "$(cat)" == *mcp_servers* ]]; then
+  printf '%s\n' "${VEETBOT_TEST_TARGET_MCP_COMPATIBILITY:-compatible}"
+else
+  printf '%s\n' "${VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY:-incompatible}"
+fi
+PY
 chmod +x "$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python"
 
 awk '
@@ -245,6 +257,7 @@ run_rollback() {
   VEETBOT_TEST_WEBSITE_CURRENT="$WEBSITE_ROOT/current" \
   VEETBOT_TEST_WEBSITE_FAIL_MARKER="$WEBSITE_FAIL_MARKER" \
   VEETBOT_ENV_FILE="$ENV_FILE" \
+  VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$SCHEDULE_ENV_FILE}" \
     "$RUNBOOK"
 }
 
@@ -262,6 +275,39 @@ grep -Fq 'systemctl stop veetbot-execution' "$LOG_FILE"
 grep -Fq 'timeout --signal=TERM --kill-after=5s 20s docker compose' "$LOG_FILE"
 grep -Fq -- '--env PGCONNECT_TIMEOUT=5' "$LOG_FILE"
 grep -Fq -- '--env PGOPTIONS=-c statement_timeout=5000' "$LOG_FILE"
+: >"$LOG_FILE"
+
+# ADR-0291: a target from before it refuses to start the schedule role with this
+# flag, so the runbook refuses first, while every service is still running.
+if VEETBOT_TEST_TARGET_MCP_COMPATIBILITY=incompatible \
+  run_rollback >"$TEST_ROOT/schedule-flag.out" 2>&1; then
+  printf 'rollback to a target that refuses the schedule flag unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'Remove AGENT_SVP_ENABLED' "$TEST_ROOT/schedule-flag.out"
+if grep -Fq 'systemctl stop' "$LOG_FILE"; then
+  printf 'the schedule flag refusal stopped services\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
+: >"$LOG_FILE"
+
+# Nor can it read a stored schedule that names servers, which its model forbids.
+if VEETBOT_TEST_TARGET_MCP_COMPATIBILITY=incompatible \
+  VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY=compatible \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$PLAIN_SCHEDULE_ENV_FILE" \
+  VEETBOT_TEST_INCOMPATIBLE_SCHEDULE_REVISIONS=1 \
+  VEETBOT_TEST_REQUIRE_QUIESCED_QUERY=1 \
+  run_rollback >"$TEST_ROOT/named-servers.out" 2>&1; then
+  printf 'rollback across schedules that name servers unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq "definition -> 'mcp_servers' IS NOT NULL" "$LOG_FILE"
+if grep -Fq 'MONTHLY' "$LOG_FILE"; then
+  printf 'a calendar-compatible target was checked for calendar revisions\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
 : >"$LOG_FILE"
 
 if VEETBOT_TEST_FAIL_DOCS_SWITCH_ONCE=1 run_rollback \

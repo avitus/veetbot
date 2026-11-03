@@ -555,10 +555,12 @@ class ScheduleDefinitionPatch(BaseModel):
 
     @field_serializer("mcp_servers")
     def sorted_mcp_servers(self, servers: frozenset[str] | None) -> list[str] | None:
+        """Keep the patch's stored form stable; None means the set is unchanged."""
         return None if servers is None else sorted(servers)
 
     @model_validator(mode="after")
     def at_least_one_field_changes(self) -> ScheduleDefinitionPatch:
+        """Refuse an empty patch; an empty server set is a change, because it clears them."""
         if (
             self.title is None
             and self.instruction is None

@@ -46,6 +46,7 @@ def _refused() -> JobBrokerError:
 def _plainly_reads(
     side_effect: SideEffectClass, risk: RiskLevel, idempotency: IdempotencyClass
 ) -> bool:
+    """Whether a classification needs no approval, so a job may run it unattended."""
     return (
         side_effect in _READS
         and risk is RiskLevel.LOW

@@ -470,6 +470,7 @@ class _Answering:
 
 
 def _reader(app: Composition, policy: Any = None) -> JobMCPReads:
+    """The composed reader, optionally with a policy that answers as a test needs."""
     pipeline = app.tool_pipeline
     assert app.mcp is not None
     return JobMCPReads(

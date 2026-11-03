@@ -1286,7 +1286,14 @@ valid code-only rollback target. The runbook below detects the target's cadence
 support and checks the stored values while all schedule writers are stopped.
 If it refuses the target, roll forward instead, or restore a database snapshot
 from before the first such revision and then roll the code back. Never run an
-automatic Alembic downgrade as part of rollback. Run the complete block in one
+automatic Alembic downgrade as part of rollback. The same rule covers a release
+from before ADR-0291: its schedule model forbids a revision that names MCP
+servers, and its schedule role refuses to start with `AGENT_SVP_ENABLED=1` and
+no credential. The runbook checks the flag before it stops anything; remove the
+line from the schedule environment and rerun if Scale VP can wait. Such a target
+also cannot read a saved job that declares `mcp.read`, and the runbook does not
+check for one, so that job fails until you roll forward. Run the complete block
+in one
 shell so file descriptor 9 holds the same deployment lock from before writer
 quiescence through readiness verification. The block retags the target's
 Cockpit builder image as `production` when the target has one; a target from
@@ -1296,6 +1303,7 @@ code sandbox image (ADR-0281) follows the same rule.
 ```bash
 set -euo pipefail
 environment_file="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
+schedule_environment_file="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
 exec 9>/opt/veetbot/shared/deploy.lock
 if ! flock -w 900 9; then
   echo "Could not acquire /opt/veetbot/shared/deploy.lock" >&2
@@ -1386,6 +1394,29 @@ case "$target_calendar_compatibility" in
     ;;
 esac
 
+target_mcp_compatibility="$({
+  cd "$target"
+  "$target/.venv/bin/python" - <<'PY'
+from agent_core.domain.schedules import ScheduleDefinition
+
+print("compatible" if "mcp_servers" in ScheduleDefinition.model_fields else "incompatible")
+PY
+})"
+case "$target_mcp_compatibility" in
+  compatible | incompatible) ;;
+  *)
+    echo "Could not determine the target's schedule MCP server compatibility" >&2
+    exit 1
+    ;;
+esac
+if test "$target_mcp_compatibility" = incompatible \
+  && test -f "$schedule_environment_file" \
+  && test "$(awk -F= '$1 == "AGENT_SVP_ENABLED" { value = $2 } END { print value }' \
+    "$schedule_environment_file")" = 1; then
+  echo "Remove AGENT_SVP_ENABLED from $schedule_environment_file: this target refuses it" >&2
+  exit 1
+fi
+
 app_next="/opt/veetbot/.rollback-$target_id-$$"
 docs_next="/opt/veetbot/shared/docs/.rollback-$target_id-$$"
 website_next="/opt/veetbot/shared/website/.rollback-$target_id-$$"
@@ -1427,7 +1458,14 @@ trap rollback_on_exit EXIT
 
 rollback_pending=1
 sudo systemctl stop "${managed_units[@]}"
+unreadable_schedule_revision=""
 if test "$target_calendar_compatibility" = incompatible; then
+  unreadable_schedule_revision="definition #>> '{cadence,kind}' IN ('MONTHLY','YEARLY')"
+fi
+if test "$target_mcp_compatibility" = incompatible; then
+  unreadable_schedule_revision="${unreadable_schedule_revision:+$unreadable_schedule_revision OR }definition -> 'mcp_servers' IS NOT NULL"
+fi
+if test -n "$unreadable_schedule_revision"; then
   incompatible_schedule_revisions="$({
     set -a
     # shellcheck disable=SC1090
@@ -1448,17 +1486,17 @@ if test "$target_calendar_compatibility" = incompatible; then
         postgres psql \
         --no-psqlrc --tuples-only --no-align \
         --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-        --command "SELECT count(*) FROM schedule_revisions WHERE definition #>> '{cadence,kind}' IN ('MONTHLY','YEARLY');" \
+        --command "SELECT count(*) FROM schedule_revisions WHERE $unreadable_schedule_revision;" \
       | tr -d '[:space:]'
   })"
   case "$incompatible_schedule_revisions" in
     '' | *[!0-9]*)
-      echo "Could not validate stored schedule cadence values" >&2
+      echo "Could not validate stored schedule revisions" >&2
       exit 1
       ;;
   esac
   if test "$incompatible_schedule_revisions" -ne 0; then
-    echo "Refusing a pre-Milestone-20 target: incompatible schedule revisions exist" >&2
+    echo "Refusing this target: schedule revisions it cannot read exist" >&2
     exit 1
   fi
 fi

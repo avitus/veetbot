@@ -106,6 +106,7 @@ class ScheduleMaterializer:
         self._notification_producer = notification_producer
 
     async def materialize(self, schedule_id: UUID) -> ScheduleOccurrence | None:
+        """Fire a due schedule and return its occurrence, or None when nothing is due."""
         now = self._clock.now()
         async with self._uow_factory() as uow:
             schedule = await uow.schedules.lock_due(schedule_id, now)

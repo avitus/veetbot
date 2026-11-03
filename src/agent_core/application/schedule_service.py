@@ -278,6 +278,7 @@ class ScheduleService:
         key: str,
         request_hash: str,
     ) -> tuple[ScheduleRecord, bool]:
+        """Store the patched revision in one transaction, or replay this key's earlier one."""
         async with self._uow_factory() as uow:
             existing = await uow.schedule_idempotency.get(
                 principal.tenant_id, principal.principal_id, key

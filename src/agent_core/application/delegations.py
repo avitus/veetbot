@@ -154,6 +154,7 @@ def _child_agent(parent: AgentSpec, brief: DelegationBrief, limits: RunLimits) -
 
 
 def _inherited_servers(parent: Session) -> dict[str, object]:
+    """A child of scheduled work keeps its parent's named servers (ADR-0291)."""
     metadata = parent.metadata
     if (
         SESSION_SCHEDULE_ID_METADATA_KEY not in metadata
