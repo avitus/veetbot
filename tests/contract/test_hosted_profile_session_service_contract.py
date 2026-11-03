@@ -1995,6 +1995,144 @@ async def test_a_sweep_that_fails_says_what_failed(
     assert "private page detail" not in caplog.text
 
 
+async def sweep_between_samples(
+    sessions: HostedProfileSessionService, runtime: FakeSessionRuntime
+) -> asyncio.Task[None]:
+    """A sweep that has taken its first sample and is waiting to take the second."""
+    sessions._sweep_sample_seconds = 0.25  # noqa: SLF001 - long enough to act inside the wait
+    checks = runtime.status_checks
+    sweeping = asyncio.create_task(sessions.sweep())
+    while runtime.status_checks == checks:
+        await asyncio.sleep(0)
+    return sweeping
+
+
+async def test_the_sweep_saves_a_sign_in_the_limit_overtakes_between_samples(
+    tmp_path: Path,
+) -> None:
+    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    sweeping = await sweep_between_samples(sessions, runtimes[0])
+    times[0] += timedelta(seconds=6)
+    assert (await sessions.authenticate_surface(ceremony_id, "x" * 32, operation="frame")) is False
+    assert runtimes[0].closed is False
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+
+    assert view.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_status_check_inside_the_sweeps_wait_keeps_the_limit_off(tmp_path: Path) -> None:
+    """Both are deciding; the check finishing first must not end the sweep's protection."""
+    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    runtimes[0].authentication_samples = [
+        BrowserAuthenticationStatus.READY,
+        BrowserAuthenticationStatus.NEEDS_USER,
+        BrowserAuthenticationStatus.READY,
+    ]
+    sweeping = await sweep_between_samples(sessions, runtimes[0])
+    checked = await sessions.refresh_authentication(ceremony_id, principal())
+    assert checked.status is BrowserAuthenticationStatus.NEEDS_USER
+    times[0] += timedelta(seconds=6)
+    assert (await sessions.authenticate_surface(ceremony_id, "x" * 32, operation="frame")) is False
+    assert runtimes[0].closed is False
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+
+    assert view.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_status_check_past_the_limit_leaves_the_sweep_deciding(tmp_path: Path) -> None:
+    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    sweeping = await sweep_between_samples(sessions, runtimes[0])
+    checks = runtimes[0].status_checks
+    times[0] += timedelta(seconds=6)
+
+    checked = await sessions.refresh_authentication(ceremony_id, principal())
+
+    assert checked.status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    assert runtimes[0].status_checks == checks
+    assert runtimes[0].closed is False
+    await asyncio.wait_for(sweeping, timeout=2)
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_stuck_sample_does_not_hold_off_the_limit(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    _scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(tmp_path)
+    sessions._verification_seconds = 0.01  # noqa: SLF001 - the budget the sample runs out of
+
+    async def stuck() -> BrowserAuthenticationStatus:
+        await asyncio.Event().wait()
+        raise AssertionError("never answers")
+
+    runtimes[0].authentication_status = stuck  # type: ignore[method-assign]
+
+    await asyncio.wait_for(sessions.sweep(), timeout=2)
+    times[0] += timedelta(seconds=6)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+    assert runtimes[0].closed is True
+    assert [
+        record.__dict__.get("failure_type")
+        for record in caplog.records
+        if record.getMessage() == "remote sign-in sweep failed"
+    ] == ["TimeoutError"]
+
+
+async def test_a_status_check_queued_past_the_limit_starts_no_verification(tmp_path: Path) -> None:
+    """Only the verification already under way outlives the limit."""
+    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(
+        tmp_path, with_session=SIGNED_OUT
+    )
+    first = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await scenario.started.wait()
+    queued = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    times[0] += timedelta(seconds=6)
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    unconfirmed = await asyncio.wait_for(first, timeout=2)
+    view = await asyncio.wait_for(queued, timeout=2)
+
+    assert unconfirmed.status is BrowserAuthenticationStatus.NEEDS_USER
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+    assert runtimes[0].closed is True
+    assert len(runtimes) == 3, "one page and the first check's two verification browsers"
+
+
+async def test_the_sweep_starts_nothing_on_a_ceremony_past_its_limit(tmp_path: Path) -> None:
+    scenario, sessions, runtimes, times, ceremony_id = await verifying_past_the_limit(
+        tmp_path, with_session=SIGNED_OUT
+    )
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await scenario.started.wait()
+    times[0] += timedelta(seconds=6)
+    sweeping = asyncio.create_task(sessions.sweep())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    await asyncio.wait_for(checking, timeout=2)
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    assert len(runtimes) == 3, "one page and the check's two verification browsers"
+
+
 # --- ADR-0129: element facts beside the observation --------------------------
 
 
