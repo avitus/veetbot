@@ -1888,6 +1888,61 @@ needed, use the compatible retained release without downgrading the database.
 Verify readiness and public identities after either action, retain the incident,
 and record the rollout outcome before any separately authorized extension.
 
+### Standing owner activation of semantic retrieval (ADR-0290)
+
+Production semantic recall and the knowledge semantic arm run on the owner's
+standing decision, not a trial: the admission has no expiry, no check-ins and
+no release census, and it is hard-bound only to the local encoder tuple. The
+bounded routes above remain available for a future trial.
+
+**Prepare the files** on the host as `veetbot`, from the current release with
+the environment sourced, with the owner's exact instruction in a file:
+
+```sh
+.venv/bin/agent memory standing-admission --instruction-file /tmp/standing/instruction.txt \
+  --reference <reference to the owner's message> \
+  --rollback-build-ref <full commit of the retained previous release> \
+  --out /tmp/standing
+```
+
+The command composes the live configuration exactly as startup does, refuses a
+remote profile or a profile without query preparation, writes
+`standing-evidence.json` and `standing-admission.json`, and prints their
+digests and the embedding space key. It never prints the instruction back.
+
+**Install as root.** Move both files to `/etc/veetbot/recall/standing/`
+(directory `root:veetbot 0750`, files `0640`), then in `/etc/veetbot/veetbot.env`
+set:
+
+```dotenv
+AGENT_MEMORY_SEMANTIC_INDEX_ENABLED=1
+AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE=/etc/veetbot/recall/standing/standing-evidence.json
+AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST=/etc/veetbot/recall/standing/standing-admission.json
+AGENT_KNOWLEDGE_SEMANTIC_ENABLED=1
+AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai
+```
+
+The knowledge arm embeds with OpenAI's `text-embedding-3-small` on the existing
+`VEETBOT_OPENAI_KEY` (public and internal text only); the memory index's local
+encoder measured no paraphrase lift. Restart the API, the interactive and
+asynchronous run workers and maintenance.
+
+**Verify.** After the restart the API journal shows neither
+`semantic_recall_unavailable_using_sparse` nor
+`knowledge_semantic_unavailable_using_lexical`; a new private chat's
+`memory.recalled` event carries the admission's binding digest; the
+maintenance journal logs `knowledge_vectors_backfilled` rounds until the
+owner's current documents are covered (64 chunks a round; a 403-chunk manual
+takes seven rounds); and `knowledge.search` in a fresh chat
+returns a passage that paraphrases the question. Readiness alone still proves
+nothing about semantic activation.
+
+**Withdraw.** Set `AGENT_MEMORY_SEMANTIC_INDEX_ENABLED=0` and
+`AGENT_KNOWLEDGE_SEMANTIC_ENABLED=0` and restart, or change or remove the
+installed files; sparse recall and lexical search continue. A different
+encoder withdraws the admission by itself; prepare and install the files again
+once the owner decides.
+
 ### Application reliability diagnostics and optional alerts (ADR-0205)
 
 After deploying the reliability changes, use the existing protected owner

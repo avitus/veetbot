@@ -426,4 +426,5 @@ nav:
       - "ADR-0287: The device sign-in window asks before adding an address": adr/0287-device-sign-in-allows-another-address.md
       - "ADR-0288: A saved login can sign in again through the remote browser": adr/0288-saved-login-signs-in-through-the-remote-browser.md
       - "ADR-0289: Knowledge semantic arm": adr/0289-knowledge-semantic-arm.md
+      - "ADR-0290: Standing semantic activation": adr/0290-standing-semantic-activation.md
   - Changelog: changelog.md
