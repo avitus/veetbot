@@ -37,6 +37,7 @@ from agent_core.domain.knowledge import (
 )
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.runs import RunStatus
 from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.knowledge.service import KnowledgeService
 from tests.contract.knowledge_embedding_fixture import (
@@ -95,7 +96,7 @@ async def _service(
         # A production run is pinned to the model it answers with; the
         # question reaches only that provider (ADR-0290).
         async with factory() as uow:
-            await uow.runs.create(run())
+            await uow.runs.create(run(status=RunStatus.COMPLETED))
             await uow.runs.set_provider_pin(
                 RUN_ID,
                 ProviderPin(
@@ -169,7 +170,9 @@ async def _ranks(
         await _ingest(service, writer, factory, member)
     ranks: dict[str, int | None] = {}
     for member in members:
-        result = await service.search(_query(member["question"]), session_id=SESSION_ID)
+        result = await service.search(
+            _query(member["question"]), session_id=SESSION_ID, run_id=RUN_ID
+        )
         ranks[member["title"]] = _rank(result.passages, member["answer"])
     return ranks
 
@@ -240,5 +243,7 @@ async def test_an_unrelated_question_returns_no_passage(tmp_path: Path, fixture:
     for member in members:
         await _ingest(service, writer, factory, member)
     for member in members:
-        result = await service.search(_query(member["unrelated_question"]), session_id=SESSION_ID)
+        result = await service.search(
+            _query(member["unrelated_question"]), session_id=SESSION_ID, run_id=RUN_ID
+        )
         assert result.passages == [], (member["unrelated_question"], result.passages)

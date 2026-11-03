@@ -36,6 +36,7 @@ from agent_core.domain.knowledge import (
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.runs import RunStatus
 from agent_core.domain.semantic_memory import EmbeddingSpace
 from agent_core.knowledge import embedding as embedding_module
 from agent_core.knowledge.embedding import (
@@ -177,7 +178,10 @@ async def _pin(
     """A run of this id, pinned to the provider when one is given."""
 
     async with factory() as uow:
-        await uow.runs.create(support_run().model_copy(update={"id": run_id}))
+        # A finished run of this id, so a second one in the session is no conflict.
+        await uow.runs.create(
+            support_run(status=RunStatus.COMPLETED).model_copy(update={"id": run_id})
+        )
         if provider is not None:
             await uow.runs.set_provider_pin(
                 run_id,
@@ -283,7 +287,7 @@ async def test_ingest_stores_every_window_and_search_scores_a_chunk_by_its_best(
     ingested = next(e for e in events if e.event_type == "knowledge.document.ingested")
     assert ingested.payload["embedded"] == 2
     assert ingested.payload["windows"] == len(texts)
-    result = await service.search(_query(), session_id=SESSION_ID)
+    result = await service.search(_query(), session_id=SESSION_ID, run_id=RUN_ID)
     assert [item.heading_path[-1] for item in result.passages] == ["Fans"]
     assert result.passages[0].arms == ["semantic"]
 
@@ -305,7 +309,7 @@ async def test_search_embeds_the_question_and_names_the_channel_in_the_policy(
         tmp_path, KnowledgeEmbedder(provider, SPACE, channel="dense")
     )
     await _ingest(service, writer, factory)
-    result = await service.search(_query(), session_id=SESSION_ID)
+    result = await service.search(_query(), session_id=SESSION_ID, run_id=RUN_ID)
     assert provider.calls[-1].texts == ("sounds after parking",)
     assert result.passages and all(item.arms == ["semantic"] for item in result.passages)
     async with factory() as uow:
@@ -322,7 +326,7 @@ async def test_a_question_the_provider_cannot_embed_falls_back_to_lexical(
     service, writer, factory = await _service(tmp_path, KnowledgeEmbedder(provider, SPACE))
     await _ingest(service, writer, factory)
     result = await service.search(
-        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID
+        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID, run_id=RUN_ID
     )
     assert result.passages and all(item.arms == ["lexical"] for item in result.passages)
     async with factory() as uow:
@@ -362,7 +366,7 @@ async def test_a_withdrawn_admission_stops_both_embedding_paths(tmp_path: Path) 
     admitted["value"] = False
     await _ingest(service, writer, factory)
     result = await service.search(
-        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID
+        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID, run_id=RUN_ID
     )
     assert provider.calls == []
     assert result.passages and all(item.arms == ["lexical"] for item in result.passages)
@@ -382,7 +386,7 @@ async def test_a_provider_response_that_fails_validation_falls_back_to_lexical(
     service, writer, factory = await _service(tmp_path, KnowledgeEmbedder(provider, SPACE))
     await _ingest(service, writer, factory)
     result = await service.search(
-        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID
+        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID, run_id=RUN_ID
     )
     assert result.passages and all(item.arms == ["lexical"] for item in result.passages)
 
