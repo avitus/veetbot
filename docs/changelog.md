@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-03 — Server checks for new mail spend on new mail (ADR-0286)
+
+- A check now gives each conversation one pass, which is enough to rank it, and leaves
+  the rest of a long thread until Email is open. Before, a few long threads took most
+  checks and used up the daily limit by the first evening.
+- A long thread's automatic draft now waits until Email has finished reading it.
+- A check refused by a spending limit waits five minutes before trying again.
+
 ## 2026-11-01 — Website Access: logins for websites like Chase
 
 - A website that keeps its sign-in form in a frame, as Chase does, can now be

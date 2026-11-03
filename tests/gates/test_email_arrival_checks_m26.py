@@ -24,6 +24,7 @@ from agent_core.domain.email import (
     EmailBudgetLimits,
     EmailSyncState,
     EmailTask,
+    EmailThread,
 )
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
@@ -92,6 +93,13 @@ def _thread_page(thread_id: str, when: datetime) -> dict[str, Any]:
         internal_date=int(when.timestamp() * 1000),
         label_ids=["INBOX"],
     )
+    return page
+
+
+def _long_page(thread_id: str, when: datetime) -> dict[str, Any]:
+    """A conversation that takes several passes to assess in full."""
+    page = _thread_page(thread_id, when)
+    page["messages"][0]["body"] = "Please approve the board materials. " + "x" * 8192 * 3
     return page
 
 
@@ -548,12 +556,134 @@ async def _assert_a_completed_foreground_refresh_resets_the_wait() -> None:
         assert await service.admit_arrival_check(app.principal) is not None
 
 
+async def _assessment_of(app: Composition, thread: EmailThread) -> dict[str, Any]:
+    async with app.uow_factory() as uow:
+        row = await uow.email.get(app.principal, "assessment", str(thread.id))
+    assert row is not None
+    return dict(row.payload)
+
+
+async def _assert_a_long_conversation_gets_one_pass() -> None:
+    """Later passes wait for Email, so four long threads cannot take every check."""
+    clock = FixedClock(NOW)
+    turns = [_assessment_turn() for _ in range(3)]
+    async with _app(clock, await _mailbox([], []), *turns) as app:
+        await _caught_up(app)
+        service = app.services.email
+        session = await app.sessions.create()
+        thread = await service.import_thread(
+            app.principal, "default", _long_page("long", NOW), session
+        )
+
+        first = await service.admit_arrival_check(app.principal)
+
+        assert first is not None
+        assert (await _run_of(app, first.run_id)).model_call_count == 1
+        assessment = await _assessment_of(app, thread)
+        assert (assessment["analysis_cursor"], assessment["analysis_complete"]) == (1, False)
+        # One pass is enough for the conversation to rank in Email.
+        async with app.uow_factory() as uow:
+            ranked = await read_value(
+                uow.email, app.principal, "thread", str(thread.id), EmailThread
+            )
+        assert ranked is not None and ranked.summary == "Board request"
+
+        clock.advance(timedelta(minutes=5))
+        second = await service.admit_arrival_check(app.principal)
+
+        assert second is not None
+        assert (await _run_of(app, second.run_id)).model_call_count == 0
+        recorded = await service.get_task(app.principal, second.run_id)
+        assert recorded is not None and recorded.empty_check is True
+        assert (await _assessment_of(app, thread))["analysis_cursor"] == 1
+
+        # A foreground slice keeps working through the rest.
+        clock.advance(timedelta(minutes=5))
+        foreground = await service.submit_task(app.principal, kind="refresh")
+        assert (await _run_of(app, foreground.run_id)).model_call_count == 1
+        assert (await _assessment_of(app, thread))["analysis_cursor"] == 2
+
+
+async def _assert_a_changed_long_conversation_gets_a_new_pass() -> None:
+    """New mail in a conversation is a new arrival, and starts from its newest message."""
+    clock = FixedClock(NOW)
+    turns = [_assessment_turn() for _ in range(2)]
+    async with _app(clock, await _mailbox([], []), *turns) as app:
+        await _caught_up(app)
+        service = app.services.email
+        session = await app.sessions.create()
+        page = _long_page("long", NOW - timedelta(hours=1))
+        thread = await service.import_thread(app.principal, "default", page, session)
+        assert await service.admit_arrival_check(app.principal) is not None
+        before = await _assessment_of(app, thread)
+
+        clock.advance(timedelta(minutes=5))
+        page["messages"].append(
+            {
+                **_thread_page("long", NOW)["messages"][0],
+                "id": "long-m2",
+                "message_id_header": "<long-m2@example.test>",
+            }
+        )
+        await service.import_thread(app.principal, "default", page, session)
+        check = await service.admit_arrival_check(app.principal)
+
+        assert check is not None
+        assert (await _run_of(app, check.run_id)).model_call_count == 1
+        after = await _assessment_of(app, thread)
+        assert after["source_fingerprint"] != before["source_fingerprint"]
+        assert (after["analysis_cursor"], after["analysis_complete"]) == (1, False)
+
+
+async def _assert_a_rejected_result_is_retried_once() -> None:
+    """The one promised retry still happens, and then the conversation stops counting."""
+    clock = FixedClock(NOW)
+    turns = [ScriptedTurn(text="not json"), _assessment_turn()]
+    async with _app(clock, await _mailbox([], []), *turns) as app:
+        await _caught_up(app)
+        service = app.services.email
+        session = await app.sessions.create()
+        thread = await service.import_thread(
+            app.principal, "default", _thread_page("short", NOW), session
+        )
+        for expected_calls, retry_pending in [(1, True), (1, False), (0, False)]:
+            check = await service.admit_arrival_check(app.principal)
+            assert check is not None
+            assert (await _run_of(app, check.run_id)).model_call_count == expected_calls
+            assert (await _assessment_of(app, thread))["retry_pending"] is retry_pending
+            clock.advance(timedelta(minutes=5))
+
+
+async def _assert_a_refused_check_waits_its_interval() -> None:
+    """A refusal is not retried at every sweep, and writes nothing to wait on."""
+    clock = FixedClock(NOW)
+    async with _app(clock, await _mailbox([], [])) as app:
+        await _caught_up(app)
+        _limit(app)
+        service = app.services.email
+        await _seed_spend(app, "19.5", NOW - timedelta(minutes=30))
+        assert await service.admit_arrival_check(app.principal) is None
+
+        # Room appears at once, but the refused check still waits its turn.
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("100"), monthly_cost=Decimal("600")
+        )
+        clock.advance(timedelta(seconds=299))
+        assert await service.admit_arrival_check(app.principal) is None
+        clock.advance(timedelta(seconds=1))
+        assert await service.admit_arrival_check(app.principal) is not None
+
+
 CHECKS: list[Callable[[], Awaitable[None]]] = [
     _assert_a_check_is_admitted_only_when_due,
     _assert_a_check_handles_only_arrivals,
     _assert_a_check_assesses_at_most_four_and_skips_foreground_work,
     _assert_a_check_drafts_only_what_it_assessed,
+    _assert_a_long_conversation_gets_one_pass,
+    _assert_a_changed_long_conversation_gets_a_new_pass,
+    _assert_a_rejected_result_is_retried_once,
     _assert_budget_limits,
+    _assert_a_refused_check_waits_its_interval,
     _assert_failures_widen_the_interval,
     _assert_a_failed_check_reaches_nobody,
     _assert_a_failed_foreground_refresh_is_not_a_failed_check,

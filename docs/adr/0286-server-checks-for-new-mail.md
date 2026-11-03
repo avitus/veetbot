@@ -1,7 +1,8 @@
 # ADR-0286: The server checks for new mail while Email is closed
 
 - Status: Accepted — the owner accepted this decision, including both spending
-  limits, and authorized its implementation on 2026-11-01.
+  limits, and authorized its implementation on 2026-11-01. Amended 2026-11-03: see
+  the amendment below.
 - Date: 2026-11-01
 - Related: ADR-0092, ADR-0096, ADR-0103, ADR-0104, ADR-0173, ADR-0244, ADR-0256
 - Amends: ADR-0092 decision 3 (refresh is foreground-request-driven)
@@ -72,17 +73,21 @@ Every refresh also reads all 9,072 stored conversations and 6,173 assessments.
    through existing coalescing; the next request admits an ordinary slice.
 3. **A check handles only arrivals.** Each refresh task's `scope` gains a third
    value, `arrivals`, alongside `full` and `new_mail`. An arrival is an Inbox
-   conversation with activity in the last seven days whose current source has no
-   completed assessment: it was never assessed, its source changed, its analysis is
-   unfinished, or its one promised retry is pending. A check:
+   conversation with activity in the last seven days whose current source has not had
+   a pass: it was never assessed, its source changed, or its one promised retry is
+   pending. A check:
    - reads Gmail changes with the existing eight full-thread reads per account,
      most recently changed first;
    - lists and reads only the first page of an Inbox pass after a resynchronization,
      the ADR-0256 rule that recovers new mail;
    - assesses at most four arrivals, newest first, after any retained window that a
-     change is waiting on, with the junk first pass as usual;
+     change is waiting on, with the junk first pass as usual. Each gets one pass, on
+     its newest passage, which is enough to rank it. Further passes of a long
+     conversation wait for foreground slices;
    - prepares automatic drafts only for arrivals, under the existing eligibility
-     rules and limit of three. It sends nothing and writes nothing to Gmail.
+     rules and limit of three. Those rules need a finished analysis, so a long
+     conversation gets its draft once foreground slices finish it. A check sends
+     nothing and writes nothing to Gmail.
 
    A check does not re-assess a conversation only because the profile, model or
    prompt revision changed. It does not page further through the Inbox, advance the
@@ -104,7 +109,7 @@ Every refresh also reads all 9,072 stored conversations and 6,173 assessments.
    60 minutes. Any completed refresh resets it. The count comes from durable task and
    run records. The daily limit in decision 4 still bounds what failures can charge.
 7. **A check with nothing to do stays cheap.** When Gmail reports no change and no
-   arrival is unfinished, the check ends without loading stored message content,
+   arrival is waiting, the check ends without loading stored message content,
    makes no model call and requests no memory formation. After seven days the session,
    events and task record of such a check are removed through the existing session
    erasure path, so they neither build up nor slow budget admission. Erasure's small
@@ -178,6 +183,34 @@ processes at most four conversations per slice; that needs its own investigation
 
 Gmail push, digests, alerts and scheduled-run interval scheduling stay excluded.
 
+## Amendment — 2026-11-03
+
+The first evening in production showed that counting unfinished analysis as an
+arrival was wrong. Analysis moves one passage per pass, and a check takes the newest
+conversations first, so a long thread came back every five minutes. On 2026-11-02,
+27 checks between 5:09 PM and 7:26 PM PST cost USD 8.25 and none was empty. Four
+conversations of 20 to 43 messages took about 90 of the 109 model calls. With USD
+10.81 of foreground spending on the same UTC day, the daily limit then refused checks
+until the next UTC day, which begins at 4 PM PST. Overnight mail would have waited
+for the owner again.
+
+The owner approved the fix on 2026-11-03. A conversation now gets one pass per source
+from a check. A first pass already saves the conversation's ranking, so new mail
+still ranks within minutes, and foreground slices finish the rest. A long conversation
+gets its automatic draft only after they do. The exception is a full retained window
+that a Gmail change is waiting on. It keeps its passes, because the mail behind it
+cannot be read until the window is analyzed.
+
+The same evening showed a refused check retrying at every 60-second sweep, 63 log
+lines by 8:56 PM, against decision 5. It now waits one interval. A refusal writes no
+task, so that wait is held in memory, and a restart costs one more attempt.
+
+Estimates, not yet measured: the conversations touched in the last seven days held at
+most 388 that were never assessed or had changed, which is about USD 29 once at USD
+0.074 a pass, and less because that count includes mail no longer in the Inbox. The
+estimate of USD 6 to 12 a day to keep up then applies. Decision 9's first week is
+measured from this fix reaching production.
+
 ## Alternatives considered
 
 - **Run the existing refresh on a timer:** rejected on the measured cost above. Its
@@ -195,3 +228,5 @@ Gmail push, digests, alerts and scheduled-run interval scheduling stay excluded.
   the owner opens Email.
 - **Limit rolling spending to 50%:** rejected. Checks would be refused from the first
   day, since counted spending is already above USD 300.
+- **Raise the daily limit instead of the 2026-11-03 fix:** rejected. It would spend more
+  on the same long threads without reaching new mail any sooner.

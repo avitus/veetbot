@@ -1128,12 +1128,15 @@ class _TaskIO:
             return (thread.account_id, thread.provider_thread_id) in self.window_waiting
 
         def arrival(thread: EmailThread, prior: EmailRecord | None) -> bool:
-            """A completed assessment of this exact source is the only thing that ends one."""
+            """One pass per source ranks a conversation; later passes wait for Email.
+
+            A full window a change waits on keeps its passes: mail behind it stays unread.
+            """
             return (
                 prior is None
                 or prior.payload.get("source_fingerprint") != thread.source_fingerprint
-                or prior.payload.get("analysis_complete") is not True
                 or prior.payload.get("retry_pending") is True
+                or (waiting(thread) and prior.payload.get("analysis_complete") is not True)
             )
 
         async with c.uow_factory() as uow:
