@@ -102,6 +102,8 @@ class FakeSessionRuntime:
     observe_started: asyncio.Event | None = None
     observe_release: asyncio.Event | None = None
     navigate_error: Exception | None = None
+    # The page loaded, but reading it for an agent failed.
+    read_error: Exception | None = None
     # Device-handoff verification: what each load shows, keyed by whether the
     # runtime started with a session, and the failures a scenario injects.
     scenario: HandoffScenario | None = None
@@ -144,7 +146,14 @@ class FakeSessionRuntime:
         """Simulate the browser navigation result needed by this failure-path regression."""
         if self.navigate_error is not None:
             raise self.navigate_error
+        if self.read_error is not None:
+            raise self.read_error
         return BrowserObservation(url=url, revision="revision-1", text="safe observation")
+
+    async def open_for_sign_in(self, url: str) -> None:
+        del url
+        if self.navigate_error is not None:
+            raise self.navigate_error
 
     async def observe(self) -> BrowserObservation:
         if self.observe_started is not None:
@@ -810,6 +819,46 @@ async def test_authentication_launch_navigation_failure_is_stable_and_discards_r
     assert retried.launch_url is not None
     assert len(runtimes) == 2
     assert runtimes[1].closed is False
+
+
+async def test_a_sign_in_page_that_cannot_be_read_still_opens_for_the_owner(
+    tmp_path: Path,
+) -> None:
+    """Production, 2026-11-02: Chase's page kept moving, and reading it ended the sign-in."""
+
+    lifecycle, _unused, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    keyring = StaticProfileKeyring(
+        {"key-v1": hashlib.sha256(b"synthetic-session-key").digest()},
+        current_version="key-v1",
+    )
+
+    def moving_page(tenant_id: str) -> FakeSessionRuntime:
+        del tenant_id
+        runtime = FakeSessionRuntime(
+            read_error=BrowserProviderError("tool.browser.page_changed", retryable=False)
+        )
+        runtimes.append(runtime)
+        return runtime
+
+    sessions = HostedProfileSessionService(
+        FilesystemEncryptedProfileStore(tmp_path / "profiles", keyring),
+        runtime_factory=moving_page,
+        now=lambda: NOW,
+        process_secret=b"synthetic-process-secret-with-32-bytes",
+        ceremony_base_url="https://browser-login.example.test",
+    )
+
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+
+    assert ceremony.launch_url is not None
+    assert ceremony.status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    assert runtimes[-1].closed is False
 
 
 # --- ADR-0128: device sign-in handoff --------------------------------------

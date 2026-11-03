@@ -736,6 +736,19 @@ class PythonPlaywrightRuntime:
     @browser_phase_call("navigation")
     async def navigate(self, url: str) -> BrowserObservation:
         """Navigate within the bound origin policy and preserve stable failure codes."""
+        page, readiness = await self._load(url)
+        observation = await self._observation(page)
+        return observation.model_copy(update={"readiness": readiness})
+
+    async def open_for_sign_in(self, url: str) -> None:
+        """Open a page for the owner, under ``navigate``'s origin policy and failure codes.
+
+        Reading a page for an agent fails while the page is still moving, which
+        says nothing about whether the owner can sign in on it.
+        """
+        await self._load(url)
+
+    async def _load(self, url: str) -> tuple[Page, Literal["dom_quiet", "bound_expired"]]:
         page = self._current_page()
         self._disallowed_navigation = False
         self._dismissed_beforeunload = False
@@ -766,8 +779,7 @@ class PythonPlaywrightRuntime:
         readiness = await self._settle(page, after_document=True)
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
-        observation = await self._observation(page)
-        return observation.model_copy(update={"readiness": readiness})
+        return page, readiness
 
     async def _settle(
         self,

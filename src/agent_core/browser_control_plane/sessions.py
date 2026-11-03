@@ -181,6 +181,8 @@ class BrowserSessionRuntime(Protocol):
 
     async def navigate(self, url: str) -> BrowserObservation: ...
 
+    async def open_for_sign_in(self, url: str) -> None: ...
+
     async def observe(self) -> BrowserObservation: ...
 
     async def act(self, action: BrowserAction) -> BrowserObservation: ...
@@ -616,7 +618,7 @@ class HostedProfileSessionService:
                     metadata.allowed_origins,
                     headed=True,
                 )
-                await runtime.navigate(login_url)
+                await runtime.open_for_sign_in(login_url)
             except BrowserProviderError:
                 with suppress(Exception):
                     await runtime.close()

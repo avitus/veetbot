@@ -50,6 +50,8 @@ class StatefulBrowserRuntime(Protocol):
 
     async def navigate(self, url: str) -> BrowserObservation: ...
 
+    async def open_for_sign_in(self, url: str) -> None: ...
+
     async def observe(self) -> BrowserObservation: ...
 
     async def act(
@@ -157,6 +159,18 @@ class HostedPlaywrightSessionRuntime:
             observation = await self._runtime.navigate(url)
             await self._check_automation()
             return observation
+        except BrowserProviderError:
+            raise
+        except Exception as exc:
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
+
+    async def open_for_sign_in(self, url: str) -> None:
+        """Open a page for the owner, preserving stable failure codes."""
+        try:
+            await self._runtime.open_for_sign_in(url)
         except BrowserProviderError:
             raise
         except Exception as exc:
