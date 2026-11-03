@@ -1,0 +1,1 @@
+{"schema":1,"slug":"emerging-market-radar","title":"Emerging-market radar","purpose":"Sourced seed rounds and bottom-up market clusters with event dates and coverage limits.","kit_api":1,"sizes":["tall","lg","wide"],"feeds":[{"id":"agent.emerging-market-radar","history":0}],"settings":{"type":"object","properties":{},"additionalProperties":false}}
