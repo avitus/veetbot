@@ -278,8 +278,9 @@ semantic index's admitted provider and reads its admission before every call; `o
 is the arm's own `text-embedding-3-small` on the `openai` credential, the model gate 13
 measured lift with, needing no index. A remote provider
 receives only public and internal text, the memory index's egress rule, so a restricted
-document stays lexical, and it embeds a question only when it is the provider that read
-the context the question was written from; under another reader search is lexical. Search
+document stays lexical, and it embeds a question only from a run pinned to that same
+provider, the one that read the context the question was written from; a run on another
+provider, or a search outside a run, is lexical. Search
 embeds the question before the unit of work opens; a question the provider cannot embed
 is answered by the lexical arm alone, and the trace's policy version names the space and
 channel that answered. A semantic hit below a similarity floor is no candidate, as a

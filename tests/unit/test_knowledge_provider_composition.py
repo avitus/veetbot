@@ -111,19 +111,3 @@ async def test_the_openai_arm_stays_lexical_when_the_enabled_index_was_not_admit
     with caplog.at_level(logging.WARNING):
         assert await _knowledge_embedder(settings, None, Resolver("sk-test")) is None
     assert "knowledge_semantic_unavailable_using_lexical" in caplog.text
-
-
-@pytest.mark.parametrize(
-    ("reader", "egress"), [("openai", True), ("anthropic", False), (None, False)]
-)
-async def test_a_question_goes_only_to_the_provider_that_wrote_it(
-    reader: str | None, egress: bool
-) -> None:
-    """The arm's OpenAI provider embeds questions only when the reader is OpenAI too."""
-
-    settings = _settings(AGENT_KNOWLEDGE_SEMANTIC_PROVIDER="openai", VEETBOT_OPENAI_KEY="sk-test")
-    embedder = await _knowledge_embedder(
-        settings, None, Resolver("sk-test"), reader_provider=reader
-    )
-    assert embedder is not None
-    assert embedder.question_egress is egress

@@ -34,6 +34,7 @@ from agent_core.domain.knowledge import (
     knowledge_embedding_windows,
 )
 from agent_core.domain.memory import Sensitivity
+from agent_core.domain.messages import ProviderPin
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.semantic_memory import EmbeddingSpace
 from agent_core.knowledge import embedding as embedding_module
@@ -43,7 +44,8 @@ from agent_core.knowledge.embedding import (
     KnowledgeEmbedder,
 )
 from agent_core.knowledge.service import KNOWLEDGE_POLICY_VERSION, KnowledgeService
-from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal
+from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal
+from tests.contract.support import run as support_run
 from tests.unit.test_config import base_environment
 
 SPACE = EmbeddingSpace(provider="fixture", model="semantic", revision="v1", dimensions=3)
@@ -163,7 +165,30 @@ async def _service(
         principal(),
         embedder=embedder,
     )
+    # The run is pinned to the embedder's provider, as a production run is
+    # to the model it answers with; a question reaches only that provider.
+    await _pin(factory, embedder.space.provider)
     return service, writer, factory
+
+
+async def _pin(
+    factory: MemoryUnitOfWorkFactory, provider: str | None, *, run_id: UUID = RUN_ID
+) -> None:
+    """A run of this id, pinned to the provider when one is given."""
+
+    async with factory() as uow:
+        await uow.runs.create(support_run().model_copy(update={"id": run_id}))
+        if provider is not None:
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=provider,
+                    model="m",
+                    registry_version="v",
+                    pinned_at=NOW,
+                ),
+            )
 
 
 async def _ingest(
@@ -424,20 +449,31 @@ async def test_a_withdrawal_during_ingest_leaves_the_document_lexical(
     assert len(provider.calls) == 1
 
 
-async def test_without_question_egress_search_stays_lexical_while_ingest_embeds(
-    tmp_path: Path,
+def test_a_question_may_reach_only_the_provider_that_read_it() -> None:
+    remote = KnowledgeEmbedder(Provider(), SPACE)
+    assert remote.may_embed_question(SPACE.provider)
+    assert not remote.may_embed_question("other")
+    assert not remote.may_embed_question(None)
+    local = KnowledgeEmbedder(Provider(), SPACE, local=True)
+    assert local.may_embed_question(None) and local.may_embed_question("other")
+
+
+@pytest.mark.parametrize("pinned", ["other", None])
+async def test_a_run_on_another_provider_searches_lexically(
+    tmp_path: Path, pinned: str | None
 ) -> None:
-    """A remote provider that did not write the question never receives it."""
+    """The question is free text the reader wrote; only the run's own provider sees it."""
 
     provider = Provider()
-    service, writer, factory = await _service(
-        tmp_path, KnowledgeEmbedder(provider, SPACE, question_egress=False)
-    )
+    service, writer, factory = await _service(tmp_path, KnowledgeEmbedder(provider, SPACE))
     await _ingest(service, writer, factory)
-    assert provider.calls, "chunks are still embedded"
     calls = len(provider.calls)
+    other_run = UUID(int=0x31)
+    await _pin(factory, pinned, run_id=other_run)
     result = await service.search(
-        _query().model_copy(update={"text": "revert the tag"}), session_id=SESSION_ID
+        _query().model_copy(update={"text": "revert the tag"}),
+        session_id=SESSION_ID,
+        run_id=other_run,
     )
-    assert len(provider.calls) == calls
+    assert len(provider.calls) == calls, "the question never reached the provider"
     assert result.passages and all(item.arms == ["lexical"] for item in result.passages)

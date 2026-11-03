@@ -35,6 +35,7 @@ from agent_core.domain.knowledge import (
     KnowledgeVisibility,
     RetrievedPassage,
 )
+from agent_core.domain.messages import ProviderPin
 from agent_core.domain.policies import TrustLevel
 from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.knowledge.service import KnowledgeService
@@ -43,7 +44,7 @@ from tests.contract.knowledge_embedding_fixture import (
     LOCAL_FIXTURE,
     RecordedEmbeddingProvider,
 )
-from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal
+from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "evals/corpora/knowledge_paraphrase"
@@ -90,6 +91,21 @@ async def _service(
         principal(),
         embedder=embedder,
     )
+    if embedder is not None:
+        # A production run is pinned to the model it answers with; the
+        # question reaches only that provider (ADR-0290).
+        async with factory() as uow:
+            await uow.runs.create(run())
+            await uow.runs.set_provider_pin(
+                RUN_ID,
+                ProviderPin(
+                    run_id=RUN_ID,
+                    provider=embedder.space.provider,
+                    model=embedder.space.model,
+                    registry_version="gate",
+                    pinned_at=NOW,
+                ),
+            )
     return service, writer, factory
 
 

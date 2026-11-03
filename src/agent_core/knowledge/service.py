@@ -254,13 +254,31 @@ class KnowledgeService:
         vectors = iter(embedded)
         return [[(text, next(vectors)) for text in chunk_windows] for chunk_windows in windows]
 
-    async def _embed_question(self, text: str) -> KnowledgeSemanticQuery | None:
-        """Embed the question, or answer with the lexical arm alone when the provider cannot."""
+    async def _run_provider(self, run_id: UUID | None) -> str | None:
+        """The provider the run is pinned to; None outside a run or before its first model call."""
+
+        if run_id is None or self._embedder is None or self._embedder.local:
+            return None
+        async with self._uow_factory() as uow:
+            try:
+                run = await uow.runs.get(run_id, self._principal)
+            except NotFoundError:
+                return None
+        return None if run.provider_pin is None else run.provider_pin.provider
+
+    async def _embed_question(
+        self, text: str, reader_provider: str | None
+    ) -> KnowledgeSemanticQuery | None:
+        """Embed the question, or answer with the lexical arm alone when the provider cannot.
+
+        A remote provider receives the question only when it is the run's
+        own provider (`KnowledgeEmbedder.may_embed_question`).
+        """
 
         if (
             self._embedder is None
             or not self._embedder.admitted()
-            or not self._embedder.question_egress
+            or not self._embedder.may_embed_question(reader_provider)
         ):
             return None
         try:
@@ -291,7 +309,11 @@ class KnowledgeService:
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
         )
-        semantic = await self._embed_question(query.text) if authorized else None
+        semantic = (
+            await self._embed_question(query.text, await self._run_provider(run_id))
+            if authorized
+            else None
+        )
         policy_version = KNOWLEDGE_POLICY_VERSION
         if semantic is not None:
             policy_version += f"+semantic@1:{semantic.space.key}:{semantic.channel}"
