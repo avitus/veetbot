@@ -69,6 +69,10 @@ class KnowledgeVectorBackfill:
             return 0
         done = windows = 0
         for start in range(0, len(chunks), self._group_chunks):
+            # Admission is read before every provider call, as ingestion
+            # reads it: a withdrawal mid-round stops the next group's egress.
+            if not self._embedder.admitted():
+                break
             group = chunks[start : start + self._group_chunks]
             try:
                 embeddings = await self._embedder.embed_chunks(group)

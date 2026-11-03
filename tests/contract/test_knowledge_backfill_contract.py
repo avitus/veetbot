@@ -174,3 +174,23 @@ async def test_a_withdrawn_admission_embeds_nothing() -> None:
     sweep = _backfill(factory, KnowledgeEmbedder(provider, SPACE, admitted=lambda: False))
     assert await sweep.sweep_once() == 0
     assert provider.calls == []
+
+
+async def test_admission_withdrawn_mid_round_stops_before_the_next_group() -> None:
+    """Admission is read before every provider call, not once a round."""
+
+    factory, store = await _factory()
+    await store.ingest(_document(1, TEXT))
+    provider = Provider()
+    admitted = [True]
+    embedder = KnowledgeEmbedder(provider, SPACE, admitted=lambda: admitted[0])
+    original = provider.embed
+
+    async def embed_then_withdraw(request: EmbeddingRequest) -> EmbeddingResponse:
+        response = await original(request)
+        admitted[0] = False
+        return response
+
+    provider.embed = embed_then_withdraw  # type: ignore[method-assign]
+    assert await _backfill(factory, embedder, group=1).sweep_once() == 1
+    assert len(provider.calls) == 1
