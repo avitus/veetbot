@@ -1277,7 +1277,9 @@ instant.
 }
 ```
 
-At least one of `title`, `instruction`, `at`, or `cadence` is required. `at`
+At least one of `title`, `instruction`, `at`, or `cadence` is required; from
+versions 1.3.0 and 1.4.0 (ADR-0291), `use_mcp_servers` alone also suffices, and
+`[]` clears the set. `at`
 and `cadence` are mutually exclusive and use the same closed values as
 `schedule.create`. In a Cockpit deployment, version 1.1.0 (ADR-0254) also
 accepts `INTERVAL` for a feed-keeping schedule; omitted patch fields retain their current values. The
