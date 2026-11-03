@@ -183,6 +183,8 @@ class BrowserSessionRuntime(Protocol):
 
     async def open_for_sign_in(self, url: str) -> None: ...
 
+    async def page_url(self) -> str: ...
+
     async def observe(self) -> BrowserObservation: ...
 
     async def act(self, action: BrowserAction) -> BrowserObservation: ...
@@ -724,11 +726,12 @@ class HostedProfileSessionService:
         runtime = state.runtime
         if runtime is None:
             raise DeviceSessionRejected("session_unconfirmed")
-        observation = await runtime.observe()
-        if browser_origin(observation.url) not in state.identity.allowed_origins:
+        # Reading the page for an agent fails while it is still moving, and only its address counts.
+        page = await runtime.page_url()
+        if browser_origin(page) not in state.identity.allowed_origins:
             raise DeviceSessionRejected("session_signed_out")
         material = await runtime.storage_state()
-        return await self._verified_material(state, material, observation.url)
+        return await self._verified_material(state, material, page)
 
     async def _verified_material(self, state: _CeremonyState, material: bytes, page: str) -> bytes:
         async with self._lock:

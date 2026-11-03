@@ -52,6 +52,8 @@ class StatefulBrowserRuntime(Protocol):
 
     async def open_for_sign_in(self, url: str) -> None: ...
 
+    async def page_url(self) -> str: ...
+
     async def observe(self) -> BrowserObservation: ...
 
     async def act(
@@ -178,6 +180,9 @@ class HostedPlaywrightSessionRuntime:
                 "tool.browser.provider_unavailable",
                 retryable=True,
             ) from exc
+
+    async def page_url(self) -> str:
+        return await self._runtime.page_url()
 
     async def observe(self) -> BrowserObservation:
         observation = await self._runtime.observe()

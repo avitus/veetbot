@@ -1022,7 +1022,8 @@ request, reports the launch as `tool.browser.url_disallowed`, and discards the
 browser; any other launch navigation failure is
 `tool.browser.provider_unavailable`. Neither carries raw browser text. The launch
 only opens the page: it does not read it for an agent, so a page that keeps
-moving as it loads still reaches the owner. The application turns the disallowed
+moving as it loads still reaches the owner. Finishing the sign-in likewise reads
+only the page's address. The application turns the disallowed
 redirect into the same `400 malformed_request`
 with a fixed message that names the bare-versus-`www` case and asks for the
 website's final address, creates no ceremony record, and leaves the profile

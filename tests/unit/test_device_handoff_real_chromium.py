@@ -46,6 +46,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAuthenticationMode,
     BrowserAuthenticationStatus,
+    BrowserInteractiveEvent,
     BrowserProviderError,
 )
 from agent_core.domain.credentials import SecretValue
@@ -257,14 +258,27 @@ class RestlessSignInSite:
                 Route("/routing", self.routing),
                 Route("/replacing", self.replacing),
                 Route("/settled", self.settled),
+                Route("/account", self.account),
             ]
         )
 
+    ROUTING = "<script>let n=0;setInterval(()=>{location.hash=String(++n)},2)</script>"
+
     async def routing(self, request: Request) -> Response:
         del request
-        return HTMLResponse(
-            f"{self.FORM}<script>let n=0;setInterval(()=>{{location.hash=String(++n)}},2)</script>"
+        return HTMLResponse(self.FORM + self.ROUTING)
+
+    async def account(self, request: Request) -> Response:
+        """Signed in, the form gives way to a page that keeps routing."""
+        if "session" in request.cookies:
+            return HTMLResponse("<h1>Accounts</h1>" + self.ROUTING)
+        response = HTMLResponse(
+            "<form><input autofocus name='email'><input type='password' name='secret'></form>"
+            "<script>document.querySelector('input').addEventListener("
+            "'input',()=>location.assign('/account'))</script>"
         )
+        response.set_cookie("session", "synthetic", secure=True)
+        return response
 
     async def replacing(self, request: Request) -> Response:
         del request
@@ -292,6 +306,32 @@ async def test_a_remote_sign_in_opens_a_page_that_keeps_moving(tmp_path: Path, p
         await service.sessions.cancel_authentication(ceremony.id, OWNER)
 
     assert frame.startswith(b"\x89PNG")
+
+
+async def test_a_remote_sign_in_finishes_on_a_page_that_keeps_moving(tmp_path: Path) -> None:
+    require_real_browser()
+    async with (
+        local_https_site(RestlessSignInSite().app) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        ceremony = await service.sessions.begin_authentication(
+            PROFILE_ID, OWNER, PROVIDER_REF, login_url=site.url("/account")
+        )
+        assert ceremony.launch_url is not None
+        capability = parse_qs(urlsplit(ceremony.launch_url).fragment)["capability"][0]
+        await service.sessions.authentication_event(
+            ceremony.id, capability, BrowserInteractiveEvent(kind="text", text="s")
+        )
+
+        status = BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+        for _ in range(100):
+            refreshed = await service.sessions.refresh_authentication(ceremony.id, OWNER)
+            status = refreshed.status
+            if status is BrowserAuthenticationStatus.READY:
+                break
+            await asyncio.sleep(0.1)
+
+    assert status is BrowserAuthenticationStatus.READY
 
 
 async def test_a_remote_sign_in_still_refuses_a_page_outside_the_profile(tmp_path: Path) -> None:

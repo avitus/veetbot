@@ -104,6 +104,7 @@ class FakeSessionRuntime:
     navigate_error: Exception | None = None
     # The page loaded, but reading it for an agent failed.
     read_error: Exception | None = None
+    observe_error: Exception | None = None
     # Device-handoff verification: what each load shows, keyed by whether the
     # runtime started with a session, and the failures a scenario injects.
     scenario: HandoffScenario | None = None
@@ -155,7 +156,15 @@ class FakeSessionRuntime:
         if self.navigate_error is not None:
             raise self.navigate_error
 
+    async def page_url(self) -> str:
+        return (await self._current_page()).url
+
     async def observe(self) -> BrowserObservation:
+        if self.observe_error is not None:
+            raise self.observe_error
+        return await self._current_page()
+
+    async def _current_page(self) -> BrowserObservation:
         if self.observe_started is not None:
             self.observe_started.set()
         if self.observe_release is not None:
@@ -634,6 +643,23 @@ async def assert_authentication_ceremony_is_direct_single_use_and_runtime_decide
     assert "capability" not in result.model_dump_json()
     if runtime_status is BrowserAuthenticationStatus.READY:
         assert runtimes[0].closed is True
+
+
+async def test_a_sign_in_finishes_on_a_page_too_busy_for_an_agent_to_read(
+    tmp_path: Path,
+) -> None:
+    """Finishing only needs where the owner landed, not a reading of the page."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    runtimes[0].authentication = BrowserAuthenticationStatus.READY
+    runtimes[0].observe_error = BrowserProviderError("tool.browser.page_changed", retryable=False)
+
+    result = await sessions.refresh_authentication(ceremony.id, principal())
+
+    assert result.status is BrowserAuthenticationStatus.READY
 
 
 @pytest.mark.parametrize(

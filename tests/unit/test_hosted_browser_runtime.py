@@ -66,6 +66,9 @@ class FakeStatefulRuntime:
     async def open_for_sign_in(self, url: str) -> None:
         del url
 
+    async def page_url(self) -> str:
+        return "https://example.org"
+
     async def observe(self) -> BrowserObservation:
         return BrowserObservation(url="https://example.org", revision="r1")
 

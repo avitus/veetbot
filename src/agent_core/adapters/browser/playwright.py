@@ -927,6 +927,11 @@ class PythonPlaywrightRuntime:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         return page
 
+    async def page_url(self) -> str:
+        """Where the current allowed page is, under ``observe``'s checks but without reading it."""
+
+        return self._readable_page().url
+
     async def observe(self) -> BrowserObservation:
         """Read the current allowed page, or report that it needs navigation."""
 
