@@ -680,13 +680,16 @@ class CommitOutboxWorker:
 
         async with self._uow_factory() as uow:
             queued = await uow.cockpit_outbox.due(
-                self._principal.tenant_id, now=self._clock.now(), limit=OUTBOX_BATCH_SIZE
+                self._principal.tenant_id,
+                now=self._clock.now(),
+                limit=OUTBOX_BATCH_SIZE,
+                principal_id=self._principal.principal_id,
             )
         blocked: set[str] = set()
         settled = 0
         # Acceptance order, not attempt order: a retry in backoff still goes first for its widget.
         for entry in sorted(queued, key=lambda item: (item.created_at, str(item.revision_id))):
-            if entry.principal_id != self._principal.principal_id or entry.slug in blocked:
+            if entry.slug in blocked:
                 continue
             # The batch can hold this entry and not an older one still in backoff.
             async with self._uow_factory() as uow:

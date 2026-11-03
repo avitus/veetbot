@@ -16,6 +16,7 @@ import pytest
 
 from agent_core.application.cockpit import OUTBOX_BATCH_SIZE
 from agent_core.application.cockpit_diagnostics import diagnostics
+from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import (
     CockpitEventKind,
     CommitOutboxEntry,
@@ -657,6 +658,39 @@ async def test_a_queued_delete_yields_to_a_person_imported_at_the_same_instant()
         assert stack.head_files("weather") == package("p")
 
 
+async def _fill_the_batch(stack: Stack, owner: Principal, *, count: int) -> list[UUID]:
+    """Older due entries on another widget, ahead of anything queued now."""
+
+    earlier = stack.clock.now() - timedelta(hours=1)
+    filler = [uuid4() for _ in range(count)]
+    async with stack.uow_factory() as uow:
+        for revision_id in filler:
+            await uow.cockpit_outbox.enqueue(
+                CommitOutboxEntry(
+                    tenant_id=owner.tenant_id,
+                    principal_id=owner.principal_id,
+                    revision_id=revision_id,
+                    slug="other",
+                    operation=OutboxOperation.WRITE,
+                    next_attempt_at=earlier,
+                    created_at=earlier,
+                )
+            )
+    return filler
+
+
+async def test_another_owners_queue_does_not_fill_this_workers_batch() -> None:
+    async with publication_stack() as stack:
+        someone_else = PRINCIPAL.model_copy(update={"principal_id": "someone-else"})
+        await _fill_the_batch(stack, someone_else, count=OUTBOX_BATCH_SIZE)
+        mine = await stack.publication.write(
+            PRINCIPAL, "weather", package("v1"), expected_revision=None
+        )
+
+        assert await stack.outbox.run_once() == 1
+        assert await _live(stack) == mine.id
+
+
 async def test_a_newer_write_waits_behind_an_older_one_the_batch_left_out() -> None:
     """A full batch can hold the newer write and not the older one still in backoff."""
     async with publication_stack() as stack:
@@ -669,22 +703,7 @@ async def test_a_newer_write_waits_behind_an_older_one_the_batch_left_out() -> N
         third = await stack.publication.write(
             PRINCIPAL, "weather", package("v3"), expected_revision=second.id
         )
-        someone_else = PRINCIPAL.model_copy(update={"principal_id": "someone-else"})
-        earlier = stack.clock.now() - timedelta(hours=1)
-        filler = [uuid4() for _ in range(OUTBOX_BATCH_SIZE - 1)]
-        async with stack.uow_factory() as uow:
-            for revision_id in filler:
-                await uow.cockpit_outbox.enqueue(
-                    CommitOutboxEntry(
-                        tenant_id=someone_else.tenant_id,
-                        principal_id=someone_else.principal_id,
-                        revision_id=revision_id,
-                        slug="other",
-                        operation=OutboxOperation.WRITE,
-                        next_attempt_at=earlier,
-                        created_at=earlier,
-                    )
-                )
+        filler = await _fill_the_batch(stack, PRINCIPAL, count=OUTBOX_BATCH_SIZE - 1)
 
         assert await stack.outbox.run_once() == 0
         assert await _live(stack) == first
@@ -692,7 +711,7 @@ async def test_a_newer_write_waits_behind_an_older_one_the_batch_left_out() -> N
 
         async with stack.uow_factory() as uow:
             for revision_id in filler:
-                await uow.cockpit_outbox.complete(someone_else, revision_id)
+                await uow.cockpit_outbox.complete(PRINCIPAL, revision_id)
         stack.later()
         assert await stack.outbox.run_once() == 2
         assert await _live(stack) == third.id
