@@ -28,6 +28,15 @@ from agent_core.ports.embeddings import EmbeddingProvider
 EMBEDDING_BATCH = 32
 
 
+class KnowledgeAdmissionWithdrawnError(Exception):
+    """The semantic index's admission was withdrawn between provider requests.
+
+    Distinct from `EmbeddingError`, the provider's own failure: ingestion
+    answers it by leaving the document lexical, search by the lexical arm,
+    and the backfill by writing nothing for the interrupted group.
+    """
+
+
 class KnowledgeEmbedder:
     """The knowledge arm's one route to an embedding provider.
 
@@ -83,6 +92,11 @@ class KnowledgeEmbedder:
 
         vectors: list[tuple[float, ...]] = []
         for start in range(0, len(texts), EMBEDDING_BATCH):
+            # Admission is read before every request, not once a call: a
+            # withdrawal between batches stops the next one, and the vectors
+            # already made are not returned.
+            if not self.admitted():
+                raise KnowledgeAdmissionWithdrawnError
             batch = tuple(texts[start : start + EMBEDDING_BATCH])
             request = EmbeddingRequest(space=self._space, texts=batch)
             response = await self._provider.embed(request)

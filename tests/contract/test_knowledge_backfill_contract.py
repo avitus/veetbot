@@ -29,6 +29,7 @@ from agent_core.domain.embeddings import EmbeddingError, EmbeddingRequest, Embed
 from agent_core.domain.knowledge import KnowledgeSemanticQuery
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.semantic_memory import EmbeddingSpace
+from agent_core.knowledge import embedding as embedding_module
 from agent_core.knowledge.backfill import KnowledgeVectorBackfill
 from agent_core.knowledge.embedding import KnowledgeEmbedder
 from tests.contract.support import NOW, memory_stack, principal
@@ -193,4 +194,28 @@ async def test_admission_withdrawn_mid_round_stops_before_the_next_group() -> No
 
     provider.embed = embed_then_withdraw  # type: ignore[method-assign]
     assert await _backfill(factory, embedder, group=1).sweep_once() == 1
+    assert len(provider.calls) == 1
+
+
+async def test_a_withdrawal_inside_a_group_writes_nothing_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A group interrupted by a withdrawal is not written half-embedded."""
+
+    monkeypatch.setattr(embedding_module, "EMBEDDING_BATCH", 1)
+    factory, store = await _factory()
+    await store.ingest(_document(1, TEXT))
+    provider = Provider()
+    admitted = [True]
+    original = provider.embed
+
+    async def embed_then_withdraw(request: EmbeddingRequest) -> EmbeddingResponse:
+        response = await original(request)
+        admitted[0] = False
+        return response
+
+    provider.embed = embed_then_withdraw  # type: ignore[method-assign]
+    embedder = KnowledgeEmbedder(provider, SPACE, admitted=lambda: admitted[0])
+    assert await _backfill(factory, embedder, group=8).sweep_once() == 0
+    assert store._vectors == {}
     assert len(provider.calls) == 1

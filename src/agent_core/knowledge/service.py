@@ -40,7 +40,7 @@ from agent_core.knowledge.chunking import (
     normalize_text,
     token_estimate,
 )
-from agent_core.knowledge.embedding import KnowledgeEmbedder
+from agent_core.knowledge.embedding import KnowledgeAdmissionWithdrawnError, KnowledgeEmbedder
 from agent_core.memory.profiles import DEFAULT_TRACE_PROFILE, TraceProfile
 from agent_core.ports.artifacts import ArtifactStore
 from agent_core.ports.determinism import Clock, IdFactory
@@ -241,7 +241,17 @@ class KnowledgeService:
         texts = [text for chunk_windows in windows for text in chunk_windows]
         if not texts:
             return None
-        vectors = iter(await self._embedder.embed_texts(texts))
+        try:
+            embedded = await self._embedder.embed_texts(texts)
+        except KnowledgeAdmissionWithdrawnError:
+            # Withdrawn between batches: the document stays lexical, as it
+            # would had the withdrawal come a moment earlier.
+            logger.info(
+                "knowledge_embedding_withheld",
+                extra={"document_id": str(document_id), "reason": "admission"},
+            )
+            return None
+        vectors = iter(embedded)
         return [[(text, next(vectors)) for text in chunk_windows] for chunk_windows in windows]
 
     async def _embed_question(self, text: str) -> KnowledgeSemanticQuery | None:
@@ -251,6 +261,8 @@ class KnowledgeService:
             return None
         try:
             return await self._embedder.embed_query(text)
+        except KnowledgeAdmissionWithdrawnError:
+            return None
         except EmbeddingError as error:
             # The message is content-free by contract; the question itself stays out.
             logger.warning("knowledge_semantic_query_unavailable", extra={"reason": str(error)})

@@ -16,7 +16,7 @@ import logging
 from agent_core.domain.agents import Principal
 from agent_core.domain.embeddings import EmbeddingError
 from agent_core.domain.memory import Sensitivity
-from agent_core.knowledge.embedding import KnowledgeEmbedder
+from agent_core.knowledge.embedding import KnowledgeAdmissionWithdrawnError, KnowledgeEmbedder
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
 
@@ -76,6 +76,9 @@ class KnowledgeVectorBackfill:
             group = chunks[start : start + self._group_chunks]
             try:
                 embeddings = await self._embedder.embed_chunks(group)
+            except KnowledgeAdmissionWithdrawnError:
+                # Nothing of the interrupted group is written.
+                break
             except EmbeddingError as error:
                 # The message is content-free by contract; only the class is logged.
                 logger.warning(

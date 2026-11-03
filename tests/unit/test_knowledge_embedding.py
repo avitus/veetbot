@@ -10,6 +10,7 @@ import pytest
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.determinism import SequenceIdFactory
+from agent_core.adapters.memory.in_memory import InMemoryKnowledgeStore
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryToolInvocationRepository,
@@ -35,7 +36,12 @@ from agent_core.domain.knowledge import (
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.semantic_memory import EmbeddingSpace
-from agent_core.knowledge.embedding import EMBEDDING_BATCH, KnowledgeEmbedder
+from agent_core.knowledge import embedding as embedding_module
+from agent_core.knowledge.embedding import (
+    EMBEDDING_BATCH,
+    KnowledgeAdmissionWithdrawnError,
+    KnowledgeEmbedder,
+)
 from agent_core.knowledge.service import KNOWLEDGE_POLICY_VERSION, KnowledgeService
 from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal
 from tests.unit.test_config import base_environment
@@ -371,3 +377,48 @@ def test_settings_parse_the_knowledge_semantic_flag_and_channel() -> None:
     assert hybrid.knowledge_semantic_channel == "hybrid"
     with pytest.raises(ConfigurationError, match="CHANNEL"):
         load_settings({**base_environment(), "AGENT_KNOWLEDGE_SEMANTIC_CHANNEL": "sparse"})
+
+
+async def test_admission_is_read_before_every_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A withdrawal between batches stops the next request and yields no partial vectors."""
+
+    monkeypatch.setattr(embedding_module, "EMBEDDING_BATCH", 1)
+    provider = Provider()
+    admitted = {"value": True}
+    original = provider.embed
+
+    async def embed_then_withdraw(request: EmbeddingRequest) -> EmbeddingResponse:
+        response = await original(request)
+        admitted["value"] = False
+        return response
+
+    provider.embed = embed_then_withdraw  # type: ignore[method-assign]
+    embedder = KnowledgeEmbedder(provider, SPACE, admitted=lambda: admitted["value"])
+    with pytest.raises(KnowledgeAdmissionWithdrawnError):
+        await embedder.embed_texts(["one", "two", "three"])
+    assert len(provider.calls) == 1
+
+
+async def test_a_withdrawal_during_ingest_leaves_the_document_lexical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(embedding_module, "EMBEDDING_BATCH", 1)
+    provider = Provider()
+    admitted = {"value": True}
+    original = provider.embed
+
+    async def embed_then_withdraw(request: EmbeddingRequest) -> EmbeddingResponse:
+        response = await original(request)
+        admitted["value"] = False
+        return response
+
+    provider.embed = embed_then_withdraw  # type: ignore[method-assign]
+    service, writer, factory = await _service(
+        tmp_path, KnowledgeEmbedder(provider, SPACE, admitted=lambda: admitted["value"])
+    )
+    await _ingest(service, writer, factory)
+    async with factory() as uow:
+        store = uow.knowledge
+    assert isinstance(store, InMemoryKnowledgeStore)
+    assert store._vectors == {}, "no partial vectors survive a withdrawal"
+    assert len(provider.calls) == 1
