@@ -56,9 +56,10 @@ faults stopped it before the download could run.
    browsers can load at different speeds. A pair that would pass keeps looking at the
    signed-in copy until then, and a form or a move away there ends `session_signed_out`.
    If the check's limit, less two seconds to read the session, leaves too little time, the
-   sign-in ends `session_unconfirmed` and nothing is saved. A site definition reads the
-   page's own content and needs no second look. All of this shares one limit, which starts
-   with the check's first step.
+   sign-in ends `session_unconfirmed` and nothing is saved. All of this shares one limit,
+   which starts with the check's first step. A configured site definition reads the page's
+   own content and keeps its earlier check, with neither the wait nor the second look: a
+   form found by waiting would excuse a control showing the same account markers.
 5. **A remote rejection logs what each load saw.** Whether each load showed a challenge
    and stayed on the path, in yes or no, never an address. The device path keeps its
    rule that a verdict logs nothing (ADR-0128, amendment of 2026-10-06).

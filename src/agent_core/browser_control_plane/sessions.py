@@ -796,7 +796,7 @@ class HostedProfileSessionService:
                     origins,
                     page,
                     _VerificationLoad("without_session"),
-                    challenge_deadline=limit - SIGNED_OUT_CONTROL_RESERVE_SECONDS,
+                    challenge_deadline=_control_deadline(definition, limit),
                 )
             ),
         ]
@@ -1050,7 +1050,7 @@ class HostedProfileSessionService:
                     origins,
                     page,
                     progress[1],
-                    challenge_deadline=limit - SIGNED_OUT_CONTROL_RESERVE_SECONDS,
+                    challenge_deadline=_control_deadline(definition, limit),
                 )
             ),
         ]
@@ -1451,6 +1451,15 @@ def _log_unfinished_verification(
         named or f"with_session={BrowserVerificationStage.CAPTURE.value}",
         elapsed_seconds,
     )
+
+
+def _control_deadline(definition: BrowserSiteVerification | None, limit: float) -> float | None:
+    """How long the signed-out control may wait for a form; a configured site never does.
+
+    A site definition rejects a control showing the same account markers unless it shows
+    a challenge, so a form found by waiting would excuse the markers (ADR-0296).
+    """
+    return None if definition is not None else limit - SIGNED_OUT_CONTROL_RESERVE_SECONDS
 
 
 def _limit_of(budget: asyncio.Timeout) -> float:

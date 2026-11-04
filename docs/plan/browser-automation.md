@@ -974,7 +974,8 @@ until it leaves the confirmed path, because a site such as Chase draws its frame
 form after its requests go quiet. A pair then passes only if the signed-in page has been
 watched for at least three seconds longer than the control's page, each from its own load:
 it keeps looking until then, a form or a move away there ends `session_signed_out`, and too
-little time left ends `session_unconfirmed` (ADR-0296). A fetch or XHR event stream with HTTP 200 and media
+little time left ends `session_unconfirmed`. A configured site definition neither waits
+nor looks again (ADR-0296). A fetch or XHR event stream with HTTP 200 and media
 type `text/event-stream` instead counts as established when its response
 headers arrive (ADR-0147); its continuing body does not hold the wait open.
 The media type is case-insensitive and may have parameters. An unanswered
