@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.persistence import call_erasure
 from agent_core.adapters.persistence.sqlalchemy_models import (
+    ApprovalRow,
     ArtifactRow,
     CheckpointRow,
     EventRow,
@@ -32,6 +33,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY
+from agent_core.mcp.configuration import is_email_attachment_tool
 
 _ERASED = "[email source erased]"
 _IDENTITY_FIELDS = frozenset({"id", "message_id", "thread_id", "history_id", "internal_date"})
@@ -237,8 +239,48 @@ def read_server(metadata: dict[str, Any], account_id: str) -> str | None:
     return binding.get("read") if isinstance(binding, dict) else None
 
 
+def _saves_attachment(name: object) -> bool:
+    """A saved file's receipt carries its source's ids, in any session (ADR-0294).
+
+    A chat with no Gmail metadata can save too, so this cannot wait for the
+    session's account binding. Gmail ids do not repeat across a principal's
+    mailboxes, and a collision would erase more, never less.
+    """
+
+    if not isinstance(name, str):
+        return False
+    prefix, _, remote = name.rpartition(".")
+    return prefix.startswith("mcp.") and is_email_attachment_tool(prefix[4:], remote)
+
+
+def erase_attachment_names(value: Any, message_ids: frozenset[str]) -> Any:
+    """Remove a sender's file name wherever a call recorded it, keeping the call."""
+
+    if isinstance(value, str):
+        if "filename" not in value:
+            return value
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            return value
+        if not isinstance(decoded, (dict, list)):
+            return value
+        erased = erase_attachment_names(decoded, message_ids)
+        return json.dumps(erased, ensure_ascii=False) if erased != decoded else value
+    if isinstance(value, list):
+        return [erase_attachment_names(item, message_ids) for item in value]
+    if not isinstance(value, dict):
+        return value
+    source = value.get("message_id")
+    named = "filename" in value and isinstance(source, str) and source in message_ids
+    return {
+        key: _ERASED if named and key == "filename" else erase_attachment_names(item, message_ids)
+        for key, item in value.items()
+    }
+
+
 def source_tool(name: object, server: str | None) -> bool:
-    if name == "email.context":
+    if name == "email.context" or _saves_attachment(name):
         return True
     return (
         server is not None
@@ -252,8 +294,6 @@ def source_tool(name: object, server: str | None) -> bool:
                 "get_message_body",
                 "search_threads",
                 "get_unsubscribe",
-                "fetch_attachment",
-                "save_attachment",
             )
         }
     )
@@ -495,6 +535,10 @@ async def erase_postgres_source(
             payload = derived_payload(
                 row.payload, row.event_type, "[call source erased]" if calling else _ERASED
             )
+        if row.actor_type != "principal":
+            payload = erase_attachment_names(
+                row.payload if payload is None else payload, message_ids
+            )
         if payload is not None and payload != row.payload:
             row.payload = payload
     invocations = list(
@@ -522,16 +566,28 @@ async def erase_postgres_source(
                 )
             counts["invocations"] += 1
             continue
-        if not source_tool(invocation.tool_name, servers.get(invocation.session_id)):
-            continue
         changed = False
-        for field in ("result_item", "structured_result", "outcome"):
+        for field in ("raw_arguments", "arguments"):
             value = getattr(invocation, field)
-            erased = erase_result(value, thread_id, message_ids, account_id=account_id)
+            erased = erase_attachment_names(value, message_ids)
             if value != erased:
                 setattr(invocation, field, erased)
                 changed = True
+        if source_tool(invocation.tool_name, servers.get(invocation.session_id)):
+            for field in ("result_item", "structured_result", "outcome"):
+                value = getattr(invocation, field)
+                erased = erase_result(value, thread_id, message_ids, account_id=account_id)
+                if value != erased:
+                    setattr(invocation, field, erased)
+                    changed = True
         counts["invocations"] += int(changed)
+    # The owner's decision stands; only the name its card showed is source content.
+    for approval in (
+        await session.scalars(
+            select(ApprovalRow).where(ApprovalRow.session_id.in_(affected_sessions))
+        )
+    ).all():
+        approval.request = erase_attachment_names(approval.request, message_ids)
     checkpoint_ids = list(
         (
             await session.scalars(
@@ -575,6 +631,8 @@ async def erase_postgres_source(
                 and source_event.event_type == "assistant.message.completed"
             ):
                 history.item = {**history.item, "content": [{"type": "text", "text": _ERASED}]}
+            if source_event.run_id in affected_runs:
+                history.item = erase_attachment_names(history.item, message_ids)
         episodes = list(
             (
                 await session.scalars(
@@ -751,6 +809,10 @@ def erase_memory_source_locked(
                 payload = derived_payload(
                     event.payload, event.event_type, "[call source erased]" if calling else _ERASED
                 )
+            if event.actor_type != "principal":
+                payload = erase_attachment_names(
+                    event.payload if payload is None else payload, message_ids
+                )
             replacement = (
                 event.model_copy(update={"payload": payload}, deep=True)
                 if payload is not None
@@ -774,19 +836,26 @@ def erase_memory_source_locked(
             repository._invocations._invocations[key] = type(invocation).model_validate(value)
             counts["invocations"] += 1
             continue
-        if invocation.session_id not in servers or not source_tool(
-            invocation.tool_name, servers.get(invocation.session_id)
-        ):
+        if invocation.session_id not in servers:
             continue
         value = invocation.model_dump(mode="json")
         erased = dict(value)
-        for field in ("result_item", "structured_result", "outcome"):
-            erased[field] = erase_result(
-                value.get(field), thread_id, message_ids, account_id=account_id
-            )
+        for field in ("raw_arguments", "normalized_arguments"):
+            erased[field] = erase_attachment_names(value.get(field), message_ids)
+        if source_tool(invocation.tool_name, servers.get(invocation.session_id)):
+            for field in ("result_item", "structured_result", "outcome"):
+                erased[field] = erase_result(
+                    value.get(field), thread_id, message_ids, account_id=account_id
+                )
         if erased != value:
             repository._invocations._invocations[key] = type(invocation).model_validate(erased)
             counts["invocations"] += 1
+    # The owner's decision stands; only the name its card showed is source content.
+    for key, approval in list(repository._approvals._approvals.items()):
+        if approval.session_id in affected_sessions:
+            repository._approvals._approvals[key] = type(approval).model_validate(
+                erase_attachment_names(approval.model_dump(mode="json"), message_ids)
+            )
     for rid in affected_runs:
         checkpoints = repository._checkpoints._checkpoints.pop(rid, [])
         counts["checkpoints"] += len(checkpoints)

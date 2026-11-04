@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -19,6 +20,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.memory_fixtures import memory, recalled, trace
 from tests.contract.semantic_memory_cases import SPACE
 from tests.contract.support import NOW, principal, run, session
+from tests.contract.test_approval_repository_contract import request as approval_request
 from tests.integration.m2_support import memory_settings
 
 
@@ -362,6 +364,122 @@ async def assert_email_source_erasure(factory: UnitOfWorkFactory) -> None:
                 principal(), "work", "t1", frozenset({"m1"}), NOW
             )
         )["pending_artifacts"] == 0
+
+
+async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
+    """A plain chat has no Gmail metadata, and the file name is in its calls (ADR-0294)."""
+    sid, rid, iid, aid = uuid4(), uuid4(), uuid4(), uuid4()
+    other_iid = uuid4()
+    name = "mcp.gmail_read.save_attachment"
+    arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}
+    other = {"message_id": "m2", "attachment_index": 0, "filename": "keep.pdf"}
+    receipt = {"thread_id": "t1", **arguments, "artifact_id": str(aid)}
+    item = ToolResultItem(
+        call_id="c1",
+        content=[TextPart(text=json.dumps(receipt))],
+        trust=TrustLevel.EXTERNAL_UNTRUSTED,
+    )
+    wrapped = {"name": name, "arguments": arguments}
+
+    def invocation(identifier: Any, raw: dict[str, Any], **extra: Any) -> ToolInvocation:
+        return ToolInvocation(
+            id=identifier,
+            run_id=rid,
+            session_id=sid,
+            step_number=1,
+            call_id=str(identifier),
+            tool_name=name,
+            tool_version="1",
+            side_effect=SideEffectClass.NETWORK_READ,
+            risk=RiskLevel.LOW,
+            status=ToolInvocationStatus.SUCCEEDED,
+            raw_arguments=json.dumps(raw),
+            idempotency_key=str(identifier),
+            created_at=NOW,
+            updated_at=NOW,
+            **extra,
+        )
+
+    async with factory() as uow:
+        await uow.sessions.create(session().model_copy(update={"id": sid}))
+        await uow.runs.create(
+            run(status=RunStatus.COMPLETED).model_copy(update={"id": rid, "session_id": sid})
+        )
+        for event_type, payload in (
+            ("model.response.completed", {"tool_calls": [{"name": "tool.call", **wrapped}]}),
+            ("tool.call.proposed", {"name": "tool.call", "arguments": wrapped}),
+            ("tool.call.completed", {"name": name, "result_item": item.model_dump(mode="json")}),
+        ):
+            await uow.events.append(
+                NewEvent(
+                    session_id=sid,
+                    run_id=rid,
+                    event_type=event_type,
+                    actor_type="runtime",
+                    payload=payload,
+                )
+            )
+        await uow.invocations.create(
+            invocation(iid, arguments, result_item=item, structured_result=receipt)
+        )
+        await uow.invocations.create(invocation(other_iid, other))
+        await uow.artifacts.create(
+            ArtifactRef(
+                id=aid,
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                session_id=sid,
+                run_id=rid,
+                name="invoice.pdf",
+                media_type="application/pdf",
+                storage_uri=f"memory://{aid}",
+                sha256="a" * 64,
+                size_bytes=1,
+                origin="email_attachment",
+                trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                expires_at=None,
+                created_at=NOW,
+            )
+        )
+        await uow.approvals.create(
+            approval_request().model_copy(
+                update={
+                    "session_id": sid,
+                    "run_id": rid,
+                    "action_id": iid,
+                    "tool_invocation_id": iid,
+                    "tool_name": name,
+                    "arguments": arguments,
+                }
+            )
+        )
+    async with factory() as uow:
+        counts = await uow.session_deletions.erase_email_source(
+            principal(), "work", "t1", frozenset({"m1"}), NOW
+        )
+    assert counts["pending_artifacts"] == 1
+    async with factory() as uow:
+        events = await uow.events.list_after(sid, 0, principal())
+        recorded = {item.id: item for item in await uow.invocations.list_for_run(rid, principal())}
+        expired = await uow.artifacts.list_expired(NOW, limit=100)
+        approval = await uow.approvals.get_by_action(iid)
+    assert approval is not None and "invoice.pdf" not in approval.model_dump_json()
+    assert len(events) == 3
+    for event in events:
+        assert "invoice.pdf" not in json.dumps(event.payload)
+    # The call is still identifiable; only the sender's name is gone.
+    assert "save_attachment" in json.dumps(events[0].payload)
+    assert '"m1"' in json.dumps(events[0].payload)
+    assert "invoice.pdf" not in recorded[iid].model_dump_json()
+    assert json.loads(recorded[other_iid].raw_arguments)["filename"] == "keep.pdf"
+    assert aid in {artifact.id for artifact in expired}
+
+
+async def test_memory_saved_attachment_erasure_contract() -> None:
+    async with build(
+        settings=memory_settings(), storage="memory", principal=principal()
+    ) as composition:
+        await assert_saved_attachment_erased(composition.uow_factory)
 
 
 async def test_memory_source_erasure_contract() -> None:

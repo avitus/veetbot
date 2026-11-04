@@ -302,6 +302,31 @@ async def test_a_provider_refusal_fails_the_run_and_stores_nothing() -> None:
     assert artifacts == []
 
 
+async def test_a_key_that_joins_a_pending_save_replays_after_it_finishes() -> None:
+    async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
+        thread = await _seed_thread(app)
+        principal = _granted(app.principal, "artifact.write")
+        real = app.services.email.dispatch
+
+        async def parked(_run_id: UUID) -> None:
+            return None
+
+        vars(app.services.email)["dispatch"] = parked
+        first = await _press(app, thread.id)
+        joined = await app.services.email.save_attachment(
+            principal, thread.id, **SELECTION, idempotency_key="press-2"
+        )
+        assert joined.run_id == first.run_id and joined.replayed
+        vars(app.services.email)["dispatch"] = real
+        await real(first.run_id)
+        await app.runs.wait_terminal(first.run_id)
+        retried = await app.services.email.save_attachment(
+            principal, thread.id, **SELECTION, idempotency_key="press-2"
+        )
+    assert retried.run_id == first.run_id
+    assert retried.replayed
+
+
 async def test_a_busy_chat_is_a_conflict_not_a_second_run() -> None:
     async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
         thread = await _seed_thread(app)
@@ -432,6 +457,85 @@ async def test_source_erasure_expires_the_file_and_its_receipt_but_cache_expiry_
     completed = [e for e in events if e.event_type == "tool.call.completed"]
     assert completed
     assert not any("invoice.pdf" in json.dumps(e.payload, default=str) for e in completed)
+
+
+async def _assert_no_file_name_survives(app: Composition, run_id: UUID) -> None:
+    """A sender's file name is source content, wherever the run recorded it."""
+    run = await app.runs.get(run_id)
+    async with app.uow_factory() as uow:
+        counts = await uow.session_deletions.erase_email_source(
+            app.principal, "default", "thread-1", frozenset({"m1"}), app.clock.now()
+        )
+    assert counts["pending_artifacts"] >= 1
+    async with app.uow_factory() as uow:
+        expired = await uow.artifacts.list_expired(app.clock.now(), limit=100)
+        assert run.id in {artifact.run_id for artifact in expired}
+        events = await uow.events.list_after(run.session_id, 0, app.principal)
+        invocations = await uow.invocations.list_for_run(run_id, app.principal)
+        finished = await uow.runs.get(run_id, app.principal)
+    survivors = [
+        event.event_type
+        for event in events
+        if event.actor_type != "principal"
+        and "invoice.pdf" in json.dumps(event.payload, default=str)
+    ]
+    assert survivors == []
+    for invocation in invocations:
+        assert "invoice.pdf" not in invocation.model_dump_json()
+    assert "invoice.pdf" not in json.dumps(finished.final_message, default=str)
+
+
+async def test_erasure_leaves_no_file_name_from_a_press() -> None:
+    async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
+        thread = await _seed_thread(app)
+        operation = await _press(app, thread.id)
+        await _assert_no_file_name_survives(app, operation.run_id)
+        await app.services.email.exclude_source(app.principal, thread.id, thread.revision)
+        async with app.uow_factory() as uow:
+            task = await uow.email.get(app.principal, "task", str(operation.run_id))
+        assert task is not None
+        assert "invoice.pdf" not in json.dumps(task.payload, default=str)
+
+
+async def test_erasure_leaves_no_file_name_from_a_chat_save() -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="tool.call",
+                        arguments={
+                            "name": "mcp.gmail_read.save_attachment",
+                            "arguments": SELECTION,
+                        },
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="I saved it.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with build(
+        settings=_settings(), script=script, mcp_client_factory=await _factory()
+    ) as app:
+        await _seed_thread(app)
+        session_id = await app.sessions.create()
+        run_id = await app.runs.submit("Save the invoice from that email.", session_id)
+        [approval] = await app.approvals.list_pending(run_id=run_id)
+        await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        run = await app.runs.wait_terminal(run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        await _assert_no_file_name_survives(app, run_id)
+        async with app.uow_factory() as uow:
+            approval_row = await uow.approvals.get_by_action(
+                next(
+                    item.id
+                    for item in await uow.invocations.list_for_run(run_id, app.principal)
+                    if item.tool_name.endswith("save_attachment")
+                )
+            )
+        assert approval_row is not None
+        assert "invoice.pdf" not in approval_row.model_dump_json()
 
 
 async def test_a_job_cannot_read_a_file_through_its_mcp_grant() -> None:

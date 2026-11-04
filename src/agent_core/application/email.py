@@ -1264,7 +1264,7 @@ class EmailExperienceService:
                     )
                 ):
                     raise ConflictError("wait for the current Inbox operation to finish")
-                if kind == "archive" and replay_key is not None:
+                if kind in {"archive", "attachment"} and replay_key is not None:
                     await self._archive_replay_in(
                         uow.email, principal, replay_key, digest, old.run_id, now
                     )
@@ -3607,6 +3607,18 @@ class EmailExperienceService:
                         await uow.email.delete(
                             principal, kind, row.key, expected_revision=row.revision
                         )
+            # A saved file's selection names it; the task's record outlives its run.
+            for row in [row async for row in records(uow.email, principal, "task")]:
+                if row.payload.get("thread_id") == str(thread_id) and row.payload.get("attachment"):
+                    task = EmailTask.model_validate(row.payload)
+                    await save_value(
+                        uow.email,
+                        principal,
+                        "task",
+                        row.key,
+                        task.model_copy(update={"attachment": None}),
+                        now,
+                    )
             for row in [row async for row in records(uow.email, principal, "draft_edit_replay")]:
                 if str(row.payload.get("revision_key", "")).split(":")[0] in draft_ids:
                     await uow.email.delete(

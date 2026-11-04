@@ -76,7 +76,9 @@ either be truncated or written into append-only history.
    provider thread and message ids, so owner-authorized source erasure finds the run
    and expires the file and its knowledge document. Gmail deleting the message and
    the email body cache expiring leave the saved copy alone, because keeping a copy
-   is what the owner asked for.
+   is what the owner asked for. The file name is source content, so erasure also removes
+   it from the call's recorded arguments, its events, its approval and the task record,
+   in any chat that saved the file, while keeping the call and the owner's decision.
 
 9. **`save_attachment` is an unindexed deferral.** It has one name per mailbox, and
    as a read it would have taken a definition slot from a tool used on a request's

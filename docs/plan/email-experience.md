@@ -1315,7 +1315,8 @@ maintenance sweep therefore cannot expose or renew an expired body.
 The owner-authorized email-source erasure operation is a narrow content-erasure
 exception to append-only event payloads. It preserves event identity, sequence,
 actor, time, tool/action identity, approval decisions, and argument hashes; it
-replaces only the selected source's content with an explicit erasure marker and
+replaces only the selected source's content, including a saved attachment's file name
+wherever its call recorded it (ADR-0294), with an explicit erasure marker and
 appends an `email.source.erased` audit event. It does not rewrite user messages
 or reinterpret an earlier action. The original Gmail account-to-server binding is
 server-owned session metadata and must never be refreshed from a later manifest.

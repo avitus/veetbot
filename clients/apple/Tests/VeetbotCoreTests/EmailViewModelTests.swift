@@ -3360,6 +3360,53 @@ import SwiftUI
         #expect(server.bodies.count == 2, "A saved file needs no second copy")
     }
 
+    @Test func testARetryAfterALostAnswerRepeatsTheSameRequest() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                // The transport retries a lost request, so the whole press must lose it.
+                if !server.recovered { throw URLError(.networkConnectionLost) }
+                return (200, self.saveOperationJSON("COMPLETED"))
+            }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed = model.attachmentSave(key) else {
+            Issue.record("A lost answer must offer Retry")
+            return
+        }
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count >= 2)
+        #expect(Set(server.bodies.compactMap { $0["idempotency_key"] as? String }).count == 1)
+    }
+
+    @Test func testARetryAfterALostStatusFollowsTheAdmittedOperation() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            // The transport retries reads, so every read in the first press fails.
+            if server.bodies.count == 1, !server.recovered { throw URLError(.networkConnectionLost) }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed = model.attachmentSave(key) else {
+            Issue.record("A lost status must offer Retry")
+            return
+        }
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count == 1, "The admitted operation needs no second request")
+    }
+
     @Test func testAConnectionResetForgetsSaveState() async throws {
         let model = try makeModel(pollNanoseconds: 1_000) { _ in (200, self.saveOperationJSON("COMPLETED")) }
         let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
@@ -3570,6 +3617,9 @@ private final class AttachmentSaveServer: @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [[String: Any]] = []
     private var readCount = 0
+    private var isRecovered = false
+    var recovered: Bool { lock.withLock { isRecovered } }
+    func recover() { lock.withLock { isRecovered = true } }
     var bodies: [[String: Any]] { lock.withLock { recorded } }
     var reads: Int { lock.withLock { readCount } }
     func posted(_ body: [String: Any]) { lock.withLock { recorded.append(body) } }
