@@ -13,7 +13,7 @@ import hashlib
 import logging
 import secrets
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,6 +22,7 @@ from uuid import UUID
 
 import httpx
 import pytest
+from playwright.async_api import Error as PlaywrightError
 from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.requests import Request
@@ -289,6 +290,15 @@ class RestlessSignInSite:
         return HTMLResponse(self.FORM)
 
 
+async def first_frame(service: ProfileService, ceremony_id: UUID, capability: str) -> bytes:
+    """Fetch a frame as the owner's page does, which retries one Chromium fails to capture."""
+    for _ in range(100):
+        with suppress(PlaywrightError):
+            return await service.sessions.authentication_frame(ceremony_id, capability)
+        await asyncio.sleep(0.1)
+    return await service.sessions.authentication_frame(ceremony_id, capability)
+
+
 @pytest.mark.parametrize("path", ["/routing", "/replacing"])
 async def test_a_remote_sign_in_opens_a_page_that_keeps_moving(tmp_path: Path, path: str) -> None:
     """The owner reads the page, so a page too busy for an agent to read still opens."""
@@ -302,7 +312,7 @@ async def test_a_remote_sign_in_opens_a_page_that_keeps_moving(tmp_path: Path, p
         )
         assert ceremony.launch_url is not None
         capability = parse_qs(urlsplit(ceremony.launch_url).fragment)["capability"][0]
-        frame = await service.sessions.authentication_frame(ceremony.id, capability)
+        frame = await first_frame(service, ceremony.id, capability)
         await service.sessions.cancel_authentication(ceremony.id, OWNER)
 
     assert frame.startswith(b"\x89PNG")
@@ -319,9 +329,6 @@ async def test_a_remote_sign_in_finishes_on_a_page_that_keeps_moving(tmp_path: P
         )
         assert ceremony.launch_url is not None
         capability = parse_qs(urlsplit(ceremony.launch_url).fragment)["capability"][0]
-        await service.sessions.authentication_event(
-            ceremony.id, capability, BrowserInteractiveEvent(kind="text", text="s")
-        )
 
         status = BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
         for _ in range(100):
@@ -329,6 +336,12 @@ async def test_a_remote_sign_in_finishes_on_a_page_that_keeps_moving(tmp_path: P
             status = refreshed.status
             if status is BrowserAuthenticationStatus.READY:
                 break
+            # A person types at the form and again if nothing happened. Chromium
+            # focuses an autofocus field only when it draws, and a key sent sooner is lost.
+            if status is BrowserAuthenticationStatus.NEEDS_USER:
+                await service.sessions.authentication_event(
+                    ceremony.id, capability, BrowserInteractiveEvent(kind="text", text="s")
+                )
             await asyncio.sleep(0.1)
 
     assert status is BrowserAuthenticationStatus.READY
