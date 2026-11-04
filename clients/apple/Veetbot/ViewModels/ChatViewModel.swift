@@ -297,6 +297,23 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         if sessionsAwaitingApproval != sessions { sessionsAwaitingApproval = sessions }
+        if let selectedSessionID, sessions.contains(selectedSessionID), runState.needsApprovalIDs.isEmpty {
+            await recoverApprovalTheStreamMissed(in: selectedSessionID)
+        }
+    }
+
+    /// The server says the open conversation waits on the owner and its stream never
+    /// said so. A background read, so a failure is left for the next one.
+    private func recoverApprovalTheStreamMissed(in sessionID: UUID) async {
+        guard let api, let runID = runState.activeRunID else { return }
+        let generation = connectionGeneration
+        guard let run = try? await api.getRun(runID),
+            generation == connectionGeneration, sessionID == selectedSessionID,
+            runID == runState.activeRunID, run.sessionID == sessionID,
+            !(runState.runStatus?.isTerminal ?? false)
+        else { return }
+        runState.seed(run: run)
+        await refreshPendingApprovals(presentingFailure: false)
     }
 
     var visibleNotificationSessionID: UUID? {
@@ -1119,6 +1136,12 @@ public final class ChatViewModel: ObservableObject {
                 // reach the terminal event before acknowledging a loaded result.
                 if run.status.isTerminal { observedTerminalNotificationRunID = run.id }
                 watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive, historical: run.status.isTerminal)
+                // The stream is a fast path. A run waiting on the owner has to show
+                // its approval even when the stream cannot connect; if this read
+                // fails too, the stream reports it.
+                if run.status == .waitingForApproval {
+                    await refreshPendingApprovals(presentingFailure: false)
+                }
             }
             loadedNotificationSessionID = session.id
             Task { await synchronizeNotifications() }
@@ -1964,7 +1987,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public func refreshPendingApprovals() async {
+    public func refreshPendingApprovals(presentingFailure: Bool = true) async {
         guard let api, let sessionID = selectedSessionID else { return }
         let generation = connectionGeneration
         let runID = runState.activeRunID
@@ -1999,7 +2022,7 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             guard generation == connectionGeneration, sessionID == selectedSessionID,
                 runID == runState.activeRunID else { return }
-            present(error)
+            if presentingFailure { present(error) }
         }
     }
 

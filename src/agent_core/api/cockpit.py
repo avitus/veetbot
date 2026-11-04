@@ -8,15 +8,15 @@ buffering.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import suppress
 from typing import Annotated, Protocol, cast
 
 from fastapi import APIRouter, Depends, Header, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from agent_core.api.boundary import MalformedRequestError
-from agent_core.api.sse import encode_sse, heartbeat
+from agent_core.api.sse import EventStreamResponse, encode_sse, heartbeat
 from agent_core.application.services import CockpitService
 from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import DeviceClass
@@ -79,7 +79,7 @@ def cockpit_router(
     async def stream(
         authenticated: Annotated[Principal, secured("cockpit.read")],
         last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
-    ) -> StreamingResponse:
+    ) -> EventStreamResponse:
         """Validate the resume point before sending any event bytes."""
         try:
             after = None if last_event_id is None else int(last_event_id)
@@ -88,7 +88,7 @@ def cockpit_router(
         if after is not None and after < 0:
             raise MalformedRequestError("Last-Event-ID must not be negative")
 
-        async def frames() -> AsyncIterator[bytes]:
+        async def frames() -> AsyncGenerator[bytes, None]:
             iterator = cast(
                 AsyncGenerator[StreamFrame, None],
                 service.stream(authenticated, after).__aiter__(),
@@ -119,11 +119,7 @@ def cockpit_router(
                         await pending
                 await iterator.aclose()
 
-        return StreamingResponse(
-            frames(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": PRIVATE_NO_STORE, "X-Accel-Buffering": "no"},
-        )
+        return EventStreamResponse(frames(), headers={"Cache-Control": PRIVATE_NO_STORE})
 
     @router.get("/v1/cockpit/assets/{sha256}", openapi_extra={"required_scope": "cockpit.read"})
     async def asset(

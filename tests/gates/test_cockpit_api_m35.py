@@ -579,6 +579,68 @@ async def test_the_stream_resumes_resets_heartbeats_and_closes_at_its_lifetime(
     await _heartbeats_while_idle(tmp_path / "heartbeat", monkeypatch)
 
 
+async def test_a_client_that_drops_ends_its_stream_and_subscription(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dropped client must not leave the stream's subscription, which is a dedicated
+    PostgreSQL connection in production, waiting for garbage collection."""
+
+    monkeypatch.setattr("agent_core.api.cockpit.HEARTBEAT_SECONDS", 0.01)
+    async with cockpit_api(config_dir=_overlay(tmp_path, max_seconds=30)) as (composition, client):
+        board = composition.services.cockpit
+        assert board is not None
+        live_events = board._live_events
+        subscriptions = 0
+
+        class Counted:
+            @asynccontextmanager
+            async def listen(self, channel: str) -> AsyncIterator[Any]:
+                nonlocal subscriptions
+                subscriptions += 1
+                try:
+                    async with live_events.listen(channel) as subscription:
+                        yield subscription
+                finally:
+                    subscriptions -= 1
+
+        monkeypatch.setattr(board, "_live_events", Counted())
+        client_left = asyncio.Event()
+        request_sent = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal request_sent
+            if not request_sent:
+                request_sent = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await client_left.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: Any) -> None:
+            if message["type"] == "http.response.body":
+                assert subscriptions == 1
+                client_left.set()
+                await asyncio.sleep(1)
+
+        transport = client._transport
+        assert isinstance(transport, httpx.ASGITransport)
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/v1/cockpit/stream",
+            "raw_path": b"/v1/cockpit/stream",
+            "query_string": b"",
+            "headers": [(b"host", b"localhost")],
+            "client": ("127.0.0.1", 1234),
+            "server": ("localhost", 80),
+        }
+        await asyncio.wait_for(transport.app(scope, receive, send), timeout=5)
+        assert client_left.is_set()
+        assert subscriptions == 0
+
+
 async def test_a_malformed_resume_point_is_refused_before_the_stream_opens() -> None:
     async with cockpit_api() as (_composition, client):
         for header in ("soon", "-1"):

@@ -6,7 +6,6 @@ public enum SSEReaderError: Error, LocalizedError, Sendable {
     case missingEvent
     case invalidData
     case frameTooLarge
-    case clientBufferOverflow(lastPersistedID: Int?)
 
     public var errorDescription: String? {
         switch self {
@@ -15,7 +14,6 @@ public enum SSEReaderError: Error, LocalizedError, Sendable {
         case .missingEvent: return "The event stream returned a frame without an event name."
         case .invalidData: return "The event stream returned invalid JSON data."
         case .frameTooLarge: return "The event stream returned a frame larger than 1 MiB."
-        case .clientBufferOverflow: return "The local event buffer overflowed."
         }
     }
 }
@@ -30,83 +28,46 @@ public struct SSEReader: Sendable {
     }
 
     public func frames(path: String, lastEventID: Int?) -> AsyncThrowingStream<SSEFrame, Error> {
-        AsyncThrowingStream(bufferingPolicy: .bufferingOldest(256)) { continuation in
-            let producer = Task {
-                do {
-                    let request = try await transport.makeSSERequest(
-                        path: path,
-                        lastEventID: lastEventID
-                    )
-                    let session = await transport.streamingSession()
-                    let (bytes, response) = try await session.bytes(for: request)
-                    guard let http = response as? HTTPURLResponse else {
-                        throw SSEReaderError.invalidHTTPResponse
-                    }
-                    guard (200 ... 299).contains(http.statusCode) else {
-                        var errorBody = Data()
-                        for try await byte in bytes {
-                            if errorBody.count >= maximumFrameBytes { break }
-                            errorBody.append(byte)
-                        }
-                        try await transport.decodeStreamingError(data: errorBody, response: http)
-                    }
+        let transport = transport
+        let maximumFrameBytes = maximumFrameBytes
+        return BoundedFrameStream.make { channel in
+            let request = try await transport.makeSSERequest(
+                path: path,
+                lastEventID: lastEventID
+            )
+            let session = await transport.streamingSession()
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw SSEReaderError.invalidHTTPResponse
+            }
+            guard (200 ... 299).contains(http.statusCode) else {
+                var errorBody = Data()
+                for try await byte in bytes {
+                    if errorBody.count >= maximumFrameBytes { break }
+                    errorBody.append(byte)
+                }
+                try await transport.decodeStreamingError(data: errorBody, response: http)
+                return
+            }
 
-                    var parser = SSEFrameParser(maximumFrameBytes: maximumFrameBytes)
-                    var lineDecoder = SSEByteLineDecoder(maximumLineBytes: maximumFrameBytes)
-                    var lastPersisted = lastEventID
-                    for try await byte in bytes {
-                        try Task.checkCancellation()
-                        guard let line = try lineDecoder.consume(byte: byte) else { continue }
-                        if let frame = try parser.consume(line: line),
-                           try !enqueue(frame, on: continuation, lastPersisted: &lastPersisted)
-                        {
-                            return
-                        }
-                    }
-                    if let line = try lineDecoder.finishAtEOF(),
-                       let frame = try parser.consume(line: line),
-                       try !enqueue(frame, on: continuation, lastPersisted: &lastPersisted)
-                    {
-                        return
-                    }
-                    if let frame = try parser.finishAtEOF() {
-                        if try !enqueue(
-                            frame,
-                            on: continuation,
-                            lastPersisted: &lastPersisted
-                        ) {
-                            return
-                        }
-                    }
-                    continuation.finish()
-                } catch is CancellationError {
-                    continuation.finish(throwing: CancellationError())
-                } catch {
-                    continuation.finish(throwing: error)
+            var parser = SSEFrameParser(maximumFrameBytes: maximumFrameBytes)
+            var lineDecoder = SSEByteLineDecoder(maximumLineBytes: maximumFrameBytes)
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                guard let line = try lineDecoder.consume(byte: byte) else { continue }
+                if let frame = try parser.consume(line: line), await !channel.send(frame) {
+                    return
                 }
             }
-            continuation.onTermination = { @Sendable _ in
-                // Cancelling this task cancels URLSession.bytes(for:)'s underlying data task.
-                producer.cancel()
+            if let line = try lineDecoder.finishAtEOF(),
+                let frame = try parser.consume(line: line),
+                await !channel.send(frame)
+            {
+                return
             }
-        }
-    }
-
-    private func enqueue(
-        _ frame: SSEFrame,
-        on continuation: AsyncThrowingStream<SSEFrame, Error>.Continuation,
-        lastPersisted: inout Int?
-    ) throws -> Bool {
-        switch continuation.yield(frame) {
-        case .enqueued:
-            if let id = frame.id { lastPersisted = id }
-            return true
-        case .dropped:
-            throw SSEReaderError.clientBufferOverflow(lastPersistedID: lastPersisted)
-        case .terminated:
-            return false
-        @unknown default:
-            return false
+            if let frame = try parser.finishAtEOF() {
+                _ = await channel.send(frame)
+            }
         }
     }
 }

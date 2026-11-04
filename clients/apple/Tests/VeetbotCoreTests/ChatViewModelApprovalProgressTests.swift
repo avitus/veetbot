@@ -9,8 +9,78 @@ import Testing
 @Suite(.serialized) @MainActor struct ChatViewModelApprovalProgressTests {
     nonisolated private static let sessionID = UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-000000000001")!
     nonisolated private static let approvalID = UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-0000000000a1")!
+    nonisolated private static let runID = "6A1C3F0E-2B4D-4C8E-9F10-000000000002"
     nonisolated private static let resolveRoute =
         "POST veetbot.test /v1/approvals/\(approvalID.uuidString)/resolve"
+
+    /// The 2026-11-03 outage: with no stream the card never loaded, and a run waiting on
+    /// the owner read as "Working…" until its approval expired.
+    @Test
+    func aWaitingRunShowsItsApprovalWhenTheStreamIsDown() async throws {
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request, runStatus: "WAITING_FOR_APPROVAL") ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (200, try Self.pendingApprovals())
+                default:
+                    return nil
+                }
+            }()
+        }
+
+        let model = try await openedModel(server)
+
+        #expect(model.awaitingOwnerApproval)
+        #expect(
+            ConversationStatus.label(
+                runStatus: model.runState.runStatus, awaitingApproval: model.awaitingOwnerApproval
+            ) == "Needs your approval"
+        )
+        #expect(
+            RunActivity.label(
+                isSending: false, runStatus: model.runState.runStatus,
+                awaitingApproval: model.awaitingOwnerApproval,
+                reasoningActive: false, reasoningTitle: nil
+            ) == nil
+        )
+    }
+
+    /// An approval raised after the stream died reaches the open conversation through
+    /// the background read, with the run's own status, instead of clearing its marker.
+    @Test
+    func anOpenConversationPicksUpAnApprovalItsStreamMissed() async throws {
+        let waiting = LockedFlag()
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(
+                request, runStatus: waiting.value ? "WAITING_FOR_APPROVAL" : "RUNNING"
+            ) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (
+                        200,
+                        waiting.value
+                            ? try Self.pendingApprovals() : #"{"items":[],"next_cursor":null}"#
+                    )
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        #expect(!model.awaitingOwnerApproval)
+        #expect(model.runState.runStatus == .running)
+
+        waiting.value = true
+        await model.refreshSessionsAwaitingApproval()
+
+        #expect(model.awaitingOwnerApproval)
+        #expect(model.runState.runStatus == .waitingForApproval)
+        #expect(model.sessionsNeedingApproval.contains(Self.sessionID))
+    }
 
     @Test
     func aLateApprovalRefreshDoesNotLoadCardsIntoANewConversation() async throws {
@@ -181,18 +251,35 @@ import Testing
         "\(request.httpMethod ?? "") \(request.url?.host ?? "") \(request.url?.path ?? "")"
     }
 
-    /// The conversation the tests open: no run, no messages.
-    nonisolated private static func conversationRoutes(_ request: URLRequest) throws -> (Int, String)? {
+    /// The conversation the tests open: no run, no messages, unless a run status is named.
+    nonisolated private static func conversationRoutes(
+        _ request: URLRequest, runStatus: String? = nil
+    ) throws -> (Int, String)? {
+        let activeRun = runStatus.map { _ in #""\#(runID)""# } ?? "null"
         switch route(request) {
         case "GET veetbot.test /v1/sessions/\(sessionID.uuidString)":
-            return (200, #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Lesson","metadata":{},"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:00:00Z","active_run_id":null,"last_run_id":null}"#)
+            return (200, #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Lesson","metadata":{},"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:00:00Z","active_run_id":\#(activeRun),"last_run_id":\#(activeRun)}"#)
         case "GET veetbot.test /v1/sessions/\(sessionID.uuidString)/messages":
             return (200, #"{"items":[],"next_cursor":null}"#)
-        case "GET veetbot.test /v1/runs/6A1C3F0E-2B4D-4C8E-9F10-000000000002":
-            return (200, #"{"id":"6a1c3f0e-2b4d-4c8e-9f10-000000000002","session_id":"\#(sessionID.uuidString)","parent_run_id":null,"status":"RUNNING","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:01:00Z"}"#)
+        case "GET veetbot.test /v1/runs/\(runID)":
+            let status = runStatus ?? "RUNNING"
+            return (200, #"{"id":"\#(runID)","session_id":"\#(sessionID.uuidString)","parent_run_id":null,"status":"\#(status)","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:01:00Z"}"#)
         default:
             return nil
         }
+    }
+
+    /// The offered contract approval, pending, belonging to the open conversation.
+    nonisolated private static func pendingApprovals() throws -> String {
+        var approval = try WireModelsTests.contractExample(
+            "approval_views", "offered", key: "approval"
+        )
+        approval["session_id"] = sessionID.uuidString.lowercased()
+        approval["run_id"] = runID
+        let body = try JSONSerialization.data(
+            withJSONObject: ["items": [approval], "next_cursor": NSNull()]
+        )
+        return String(decoding: body, as: UTF8.self)
     }
 
     /// The offered contract approval as the server returns it once resolved.
@@ -203,5 +290,15 @@ import Testing
         object["resolved_at"] = "2026-09-25T18:00:30Z"
         object["resolved_by"] = "owner"
         return String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = false
+
+    var value: Bool {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }

@@ -1,0 +1,142 @@
+import Foundation
+
+/// Hands frames from one producer to one consumer, with the producer waiting while
+/// the consumer is behind. A paused read slows the socket; it never drops a frame or
+/// reconnects, which is what makes a long run's replay safe on a busy main actor.
+actor BoundedFrameChannel {
+    private let capacity: Int
+    private var frames: [SSEFrame] = []
+    private var nextIndex = 0
+    private var waitingProducer: CheckedContinuation<Void, Never>?
+    private var waitingConsumer: CheckedContinuation<SSEFrame?, Error>?
+    private var finished = false
+    private var cancelled = false
+    private var failure: Error?
+
+    init(capacity: Int) {
+        self.capacity = max(1, capacity)
+    }
+
+    private var queued: Int { frames.count - nextIndex }
+
+    /// Waits for room, then queues the frame. False means the consumer has gone away.
+    func send(_ frame: SSEFrame) async -> Bool {
+        while !cancelled, queued >= capacity {
+            await withCheckedContinuation { waitingProducer = $0 }
+        }
+        guard !cancelled else { return false }
+        if let consumer = waitingConsumer {
+            waitingConsumer = nil
+            consumer.resume(returning: frame)
+        } else {
+            frames.append(frame)
+        }
+        return true
+    }
+
+    /// The next frame, nil once the producer has finished and the queue is empty.
+    func next() async throws -> SSEFrame? {
+        if cancelled { throw CancellationError() }
+        if queued > 0 {
+            let frame = frames[nextIndex]
+            nextIndex += 1
+            if nextIndex == frames.count {
+                frames.removeAll(keepingCapacity: true)
+                nextIndex = 0
+            }
+            resumeProducer()
+            return frame
+        }
+        if finished {
+            if let failure {
+                self.failure = nil
+                throw failure
+            }
+            return nil
+        }
+        return try await withCheckedThrowingContinuation { waitingConsumer = $0 }
+    }
+
+    /// Ends production; frames already queued are still delivered first.
+    func finish(throwing error: Error? = nil) {
+        guard !finished else { return }
+        finished = true
+        failure = error
+        guard let consumer = waitingConsumer else { return }
+        waitingConsumer = nil
+        if let error {
+            failure = nil
+            consumer.resume(throwing: error)
+        } else {
+            consumer.resume(returning: nil)
+        }
+    }
+
+    /// The consumer has gone away: release whichever side is waiting.
+    func cancel() {
+        cancelled = true
+        frames.removeAll()
+        nextIndex = 0
+        resumeProducer()
+        waitingConsumer?.resume(throwing: CancellationError())
+        waitingConsumer = nil
+    }
+
+    private func resumeProducer() {
+        waitingProducer?.resume()
+        waitingProducer = nil
+    }
+}
+
+/// Ties a producing task to the stream that reads it, so the read stops when the
+/// consumer is cancelled or simply stops iterating and lets the stream go.
+private final class BoundedFrameProducer: Sendable {
+    private let channel: BoundedFrameChannel
+    private let task: Task<Void, Never>
+
+    init(channel: BoundedFrameChannel, task: Task<Void, Never>) {
+        self.channel = channel
+        self.task = task
+    }
+
+    deinit {
+        cancel()
+    }
+
+    func next() async throws -> SSEFrame? {
+        try await channel.next()
+    }
+
+    func cancel() {
+        task.cancel()
+        let channel = channel
+        Task { await channel.cancel() }
+    }
+}
+
+enum BoundedFrameStream {
+    static let defaultCapacity = 256
+
+    static func make(
+        capacity: Int = defaultCapacity,
+        produce: @escaping @Sendable (BoundedFrameChannel) async throws -> Void
+    ) -> AsyncThrowingStream<SSEFrame, Error> {
+        let channel = BoundedFrameChannel(capacity: capacity)
+        let task = Task {
+            do {
+                try await produce(channel)
+                await channel.finish()
+            } catch {
+                await channel.finish(throwing: error)
+            }
+        }
+        let producer = BoundedFrameProducer(channel: channel, task: task)
+        return AsyncThrowingStream(unfolding: {
+            try await withTaskCancellationHandler {
+                try await producer.next()
+            } onCancel: {
+                producer.cancel()
+            }
+        })
+    }
+}
