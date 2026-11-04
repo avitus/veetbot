@@ -150,6 +150,7 @@ class ToolExecutionContext(BaseModel):
     idempotency_key: str
     deadline_at: datetime        # already min'd with the run deadline
     timeout_seconds: float       # effective, not the declared value
+    monotonic_deadline: float | None  # the event-loop time the pipeline stops the call
     maximum_output_bytes: int
     target: ExecutionTarget
     workspace: WorkspaceHandle | None
@@ -172,7 +173,9 @@ Four fields need their justification.
 `timeout_seconds` is the *effective* timeout, already reduced to fit inside the
 run deadline. A tool never sees `ToolSpec.timeout_seconds` and never computes
 its own budget; the executor does that once, in one place, where it can also
-refuse to start a call that cannot finish.
+refuse to start a call that cannot finish. `monotonic_deadline` is the same limit
+as the instant the pipeline enforces, for a tool that must return before it, since
+`timeout_seconds` was measured before the call's pre-effect work.
 Standing authorization, pre-effect checks, watermark persistence, and execution
 share one absolute deadline. Unavailable standing authority falls back to
 interactive approval; a timeout after a non-idempotent effect watermark is `UNCERTAIN`, returning non-retryable `tool.outcome_unknown` (media retains its charge warning); otherwise it returns `tool.timeout`.

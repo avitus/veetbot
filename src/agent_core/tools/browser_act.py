@@ -223,9 +223,10 @@ class BrowserActTool:
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         """Dispatch one action, check its postcondition, and report any file it saved."""
 
-        store_deadline = (
-            asyncio.get_running_loop().time() + context.timeout_seconds - _RESULT_RESERVE_SECONDS
-        )
+        call_deadline = context.monotonic_deadline
+        if call_deadline is None:
+            call_deadline = asyncio.get_running_loop().time() + context.timeout_seconds
+        store_deadline = call_deadline - _RESULT_RESERVE_SECONDS
         try:
             if set(arguments) - set(self.spec.input_schema["properties"]):
                 raise ValueError("unknown action fields")

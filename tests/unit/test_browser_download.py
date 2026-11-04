@@ -407,6 +407,21 @@ async def test_a_store_that_hangs_gives_up_while_the_tool_can_still_report_the_c
     assert result.structured["saved_file"] == {"status": "refused", "reason": "failed"}
 
 
+async def test_storing_a_file_gives_up_by_the_call_deadline_not_a_clock_of_its_own() -> None:
+    """The call's clock starts before the tool does, so the tool cannot restart it."""
+    provider = _DownloadingProvider(BrowserDownload.from_bytes("a.csv", CSV.encode()))
+    context = replace(
+        _context(_HangingWriter()),
+        timeout_seconds=30.0,
+        monotonic_deadline=asyncio.get_running_loop().time() + 1.2,
+    )
+
+    result = await asyncio.wait_for(BrowserActTool(provider).execute(ARGUMENTS, context), 1.0)
+
+    assert result.ok and result.structured is not None
+    assert result.structured["saved_file"] == {"status": "refused", "reason": "failed"}
+
+
 def test_the_file_wait_leaves_the_tool_time_for_its_slowest_later_steps() -> None:
     """After the wait come the observation, a postcondition of up to 5 s, and the store."""
     assert BrowserActTool.spec.timeout_seconds >= DOWNLOAD_ACT_BUDGET_SECONDS + 5 + 5

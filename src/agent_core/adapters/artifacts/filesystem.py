@@ -25,12 +25,25 @@ def artifact_storage_key(tenant_id: str, artifact_id: UUID) -> Path:
     return Path("objects") / tenant_segment / artifact_segment[:2] / artifact_segment
 
 
+async def _remove_once_replaced(replacing: asyncio.Future[None], destination: Path) -> None:
+    """Remove what a rename put in place; a failed rename put nothing there."""
+
+    try:
+        await replacing
+    except Exception:
+        return
+    # A file that cannot be removed now is an orphan that reconciliation removes later.
+    with suppress(OSError):
+        await asyncio.to_thread(destination.unlink, missing_ok=True)
+
+
 class FilesystemArtifactStore:
     _CHUNK_BYTES = 64 * 1024
 
     def __init__(self, root: Path, *, maximum_bytes: int = 512 * 1024 * 1024) -> None:
         self._root = root.resolve()
         self._maximum_bytes = maximum_bytes
+        self._rollbacks: set[asyncio.Future[None]] = set()
 
     def _path(self, tenant_id: str, artifact_id: UUID) -> Path:
         destination = (self._root / artifact_storage_key(tenant_id, artifact_id)).resolve()
@@ -62,7 +75,7 @@ class FilesystemArtifactStore:
                 await asyncio.to_thread(os.fsync, target.fileno())
             if size != metadata.size_bytes or digest.hexdigest() != metadata.sha256:
                 raise ArtifactIntegrityError("artifact stream does not match declared metadata")
-            await asyncio.to_thread(os.replace, temporary_name, destination)
+            await self._replace(temporary_name, destination)
         except BaseException:
             await asyncio.to_thread(Path(temporary_name).unlink, missing_ok=True)
             raise
@@ -72,6 +85,24 @@ class FilesystemArtifactStore:
             size_bytes=metadata.size_bytes,
             media_type=metadata.media_type,
         )
+
+    async def _replace(self, source: str, destination: Path) -> None:
+        """Rename a finished file into place, or leave nothing if the caller is cancelled.
+
+        A cancelled caller holds no reference to the file, so it could not delete it.
+        The rename keeps running in its thread after a cancel and may still finish,
+        so the rollback waits for it, and carries on through a second cancel.
+        """
+
+        replacing = asyncio.ensure_future(asyncio.to_thread(os.replace, source, destination))
+        try:
+            await asyncio.shield(replacing)
+        except asyncio.CancelledError:
+            rollback = asyncio.ensure_future(_remove_once_replaced(replacing, destination))
+            self._rollbacks.add(rollback)
+            rollback.add_done_callback(self._rollbacks.discard)
+            await asyncio.shield(rollback)
+            raise
 
     async def _open_verified(self, ref: StoredArtifactRef, tenant_id: str) -> BinaryIO:
         path = self._path(tenant_id, ref.artifact_id)
