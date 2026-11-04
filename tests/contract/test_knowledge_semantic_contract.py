@@ -273,3 +273,48 @@ def test_prepared_ingest_rejects_vectors_for_unknown_chunks() -> None:
         )
         == 2
     )
+
+
+async def test_semantic_reservation_reaches_past_a_verbose_document() -> None:
+    """A later document's first passage is reserved however many chunks rank above it (ADR-0293).
+
+    Neither arm is cut to a candidate limit before the per-document
+    reservation: a document of seventy chunks nearer the question than
+    another document's only passage does not hide that passage.
+    """
+
+    filler = " ".join(f"word{index}" for index in range(120))
+    verbose = _document(
+        1,
+        "\n\n".join(
+            f"# Step {index}\n\nStep {index} of the procedure. {filler}" for index in range(70)
+        ),
+    )
+    verbose = verbose.model_copy(
+        update={
+            "embeddings": tuple(
+                KnowledgeChunkEmbedding(
+                    chunk_id=chunk.chunk_id, space=SPACE, vector=(1.0, 0.0, 0.0)
+                )
+                for chunk in verbose.chunks
+            )
+        }
+    )
+    other = _document(2, "# Other\n\nThe other way, once.")
+    other = other.model_copy(
+        update={
+            "embeddings": tuple(
+                KnowledgeChunkEmbedding(
+                    chunk_id=chunk.chunk_id, space=SPACE, vector=(0.9, 0.436, 0.0)
+                )
+                for chunk in other.chunks
+            )
+        }
+    )
+    assert len(verbose.chunks) == 70
+    store = await _store(verbose, other)
+    passages = await store.search(
+        _query(text="procedure", max_passages=8, max_per_document=3), semantic=_semantic("dense")
+    )
+    assert "Other" in _headings(passages)[:4]
+    assert len(passages) == 8
