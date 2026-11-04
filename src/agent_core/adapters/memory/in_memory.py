@@ -1155,6 +1155,26 @@ class InMemoryKnowledgeStore:
             )
             return [chunk.model_copy(deep=True) for chunk in waiting[:limit]]
 
+    async def remove_embeddings_outside(
+        self, tenant_id: str, principal_id: str, space_key: str
+    ) -> int:
+        async with self._lock:
+            owned = {
+                row.row_id
+                for row in self._documents.values()
+                if row.tenant_id == tenant_id and row.ingested_by_principal_id == principal_id
+            }
+            removed = 0
+            for chunk_id, spaces in list(self._vectors.items()):
+                chunk = self._chunks.get(chunk_id)
+                if chunk is None or chunk.document_row_id not in owned:
+                    continue
+                for key in [key for key in spaces if key != space_key]:
+                    removed += len(spaces.pop(key))
+                if not spaces:
+                    del self._vectors[chunk_id]
+            return removed
+
     async def add_embeddings(self, embeddings: Sequence[KnowledgeChunkEmbedding]) -> None:
         async with self._lock:
             for embedding in embeddings:

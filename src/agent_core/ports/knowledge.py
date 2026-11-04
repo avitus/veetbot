@@ -62,6 +62,16 @@ class KnowledgeStore(Protocol):
         """
         ...
 
+    async def remove_embeddings_outside(
+        self, tenant_id: str, principal_id: str, space_key: str
+    ) -> int:
+        """Drop the principal's chunk vectors in any space but this one; return how many.
+
+        Vectors are derived data: a new encoder or window budget is a new
+        space, and the backfill fills it while the old space's rows go.
+        """
+        ...
+
     async def add_embeddings(self, embeddings: Sequence[KnowledgeChunkEmbedding]) -> None:
         """Store vectors for chunks already ingested; a vector already present is kept."""
         ...

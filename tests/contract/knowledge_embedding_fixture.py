@@ -40,6 +40,7 @@ class RecordedEmbeddingProvider:
         # count the windowing asked for, so replay cuts the same windows
         # without the tokenizer (ADR-0290).
         self.window_tokens: int | None = document.get("window_tokens")
+        self.whole_tokens: int | None = document.get("whole_tokens")
         self._counts: dict[str, int] = {
             key: int(value) for key, value in document.get("token_counts", {}).items()
         }
@@ -56,12 +57,15 @@ class RecordedEmbeddingProvider:
 
         if self.window_tokens is None:
             return KnowledgeEmbedder(self, self.space, channel=channel)
+        # A local recording replays its tokenizer's counts; an OpenAI recording
+        # was windowed by the chunker's estimate, which needs no counts.
         return KnowledgeEmbedder(
             self,
             self.space,
             channel=channel,
             window_tokens=self.window_tokens,
-            count_tokens=self.count_tokens,
+            count_tokens=self.count_tokens if self._counts else None,
+            whole_tokens=self.whole_tokens,
         )
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:

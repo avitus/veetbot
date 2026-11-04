@@ -219,3 +219,22 @@ async def test_a_withdrawal_inside_a_group_writes_nothing_for_it(
     assert await _backfill(factory, embedder, group=8).sweep_once() == 0
     assert store._vectors == {}
     assert len(provider.calls) == 1
+
+
+async def test_vectors_outside_the_active_space_are_pruned(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A new space, from a new encoder or budget, replaces the old vectors rather than piling up."""
+
+    factory, store = await _factory()
+    await store.ingest(_document(1, TEXT))
+    old = EmbeddingSpace(provider="fixture", model="semantic", revision="v0", dimensions=3)
+    old_embedder = KnowledgeEmbedder(Provider(), old)
+    assert await _backfill(factory, old_embedder).sweep_once() == 3
+    sweep = _backfill(factory, KnowledgeEmbedder(Provider(), SPACE))
+    with caplog.at_level(logging.INFO, logger="agent_core.knowledge.backfill"):
+        assert await sweep.sweep_once() == 3
+    assert all(old.key not in spaces for spaces in store._vectors.values())
+    assert all(SPACE.key in spaces for spaces in store._vectors.values())
+    pruned = [r for r in caplog.records if r.msg == "knowledge_vectors_pruned"]
+    assert [r.vectors for r in pruned] == [3]  # type: ignore[attr-defined]

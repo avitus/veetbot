@@ -135,3 +135,29 @@ def test_a_heading_and_body_over_the_byte_bound_are_still_windowed_whole() -> No
     assert all(window.startswith("h" * 1000 + "\n") for window in kept)
     assert all(len(window.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES for window in kept)
     assert "".join(content(window.split("\n", 1)[1]) for window in kept) == content(long_body)
+
+
+def test_a_chunk_under_the_whole_bound_stays_one_window() -> None:
+    """Windows rescue long mixed chunks; a short topical chunk keeps its whole embedding.
+
+    Cutting a short section sharpens its distracting sentences into fragments
+    (ADR-0290 measured the thermostat guide's schedule section overtaking its
+    answer once cut), so a chunk under `whole_tokens` is one window even when
+    it is over the budget; a chunk at or over it is cut under the budget.
+    """
+
+    short = " ".join(f"word{i}" for i in range(40))  # 40 words, over a 24-word budget
+    whole = knowledge_embedding_windows(
+        ["Guide"], short, budget_tokens=24, count_tokens=words, whole_tokens=48
+    )
+    assert whole == [knowledge_embedding_text(["Guide"], short)]
+    long = " ".join(f"word{i}" for i in range(60))  # at and over the whole bound
+    cut = knowledge_embedding_windows(
+        ["Guide"], long, budget_tokens=24, count_tokens=words, whole_tokens=48
+    )
+    assert len(cut) > 1 and all(words(window) <= 24 for window in cut)
+    # Without a whole bound the budget alone decides, as the local encoder's capacity must.
+    budget_only = knowledge_embedding_windows(
+        ["Guide"], short, budget_tokens=24, count_tokens=words
+    )
+    assert len(budget_only) > 1

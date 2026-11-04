@@ -2019,6 +2019,28 @@ class PostgresKnowledgeStore:
         ).all()
         return [_chunk(row) for row in rows]
 
+    async def remove_embeddings_outside(
+        self, tenant_id: str, principal_id: str, space_key: str
+    ) -> int:
+        owned = (
+            select(KnowledgeChunkRow.chunk_id)
+            .join(
+                KnowledgeDocumentRow,
+                KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+            )
+            .where(
+                KnowledgeDocumentRow.tenant_id == tenant_id,
+                KnowledgeDocumentRow.ingested_by_principal_id == principal_id,
+            )
+        )
+        result = await self._session.execute(
+            delete(KnowledgeChunkVectorRow).where(
+                KnowledgeChunkVectorRow.space_key != space_key,
+                KnowledgeChunkVectorRow.chunk_id.in_(owned),
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def add_embeddings(self, embeddings: Sequence[KnowledgeChunkEmbedding]) -> None:
         if not embeddings:
             return

@@ -532,7 +532,11 @@ from agent_core.domain.execution import (
     ResourceLimits,
 )
 from agent_core.domain.failures import log_failure
-from agent_core.domain.knowledge import KNOWLEDGE_OPENAI_SPACE
+from agent_core.domain.knowledge import (
+    KNOWLEDGE_OPENAI_SPACE,
+    KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+    KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+)
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig
 from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
 from agent_core.domain.memory import Sensitivity
@@ -1721,11 +1725,15 @@ async def _knowledge_embedder(
         # no index the flag alone turns it off.
         # A question reaches the provider only from a run pinned to it; the
         # service reads the run's pin at search (ADR-0290).
+        # Whole chunks average their one answering sentence away; windows
+        # under the measured budget keep it reachable (ADR-0290).
         return KnowledgeEmbedder(
             OpenAIEmbeddingProvider(key),
             KNOWLEDGE_OPENAI_SPACE,
             channel=settings.knowledge_semantic_channel,
             admitted=(lambda: True) if index is None else (index.admitted or (lambda: True)),
+            window_tokens=KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+            whole_tokens=KNOWLEDGE_OPENAI_WHOLE_TOKENS,
         )
     if index is None:
         logger.warning("knowledge_semantic_unavailable_using_lexical", extra={"reason": "index"})

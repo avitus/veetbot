@@ -33,9 +33,16 @@ KNOWLEDGE_EMBEDDING_TEXT_BYTES = 4096
 KNOWLEDGE_OPENAI_SPACE = EmbeddingSpace(
     provider="openai",
     model="text-embedding-3-small",
-    revision="knowledge-openai@1",
+    revision="knowledge-openai@2",
     dimensions=1536,
 )
+# The OpenAI route's window budget in the chunker's estimated tokens (ADR-0290):
+# measured on the owner's manual, where whole 600-token chunks ranked the
+# answering section 78th to 136th and 96-token windows first to seventh.
+KNOWLEDGE_OPENAI_WINDOW_TOKENS = 128
+# A chunk under this many estimated tokens stays one window: cutting a short
+# topical section only sharpens its distracting sentences (ADR-0290).
+KNOWLEDGE_OPENAI_WHOLE_TOKENS = 256
 # The semantic arm's share of a passage's match, memory's `semantic_fusion_weight`.
 KNOWLEDGE_SEMANTIC_FUSION_WEIGHT = 0.2
 # A semantic hit below this cosine similarity is no candidate: the lexical arm
@@ -277,8 +284,15 @@ def knowledge_embedding_windows(
     *,
     budget_tokens: int | None = None,
     count_tokens: Callable[[str], int] | None = None,
+    whole_tokens: int | None = None,
 ) -> list[str]:
     """The texts a chunk is embedded as under `KNOWLEDGE_EMBEDDING_TEXT_VERSION`.
+
+    `whole_tokens`, when given, is the length under which a chunk stays one
+    window although it is over the budget: windows rescue a long section
+    that mixes topics, and cutting a short topical one only sharpens its
+    distracting sentences. The local encoder gives none, since its budget is
+    a capacity the provider refuses to exceed.
 
     Without a budget the chunk is one window, the text `knowledge_embedding_text`
     gives. With one, the encoder's capacity, the chunk's text is cut into runs
@@ -298,7 +312,7 @@ def knowledge_embedding_windows(
     # One window only when the byte bound cut nothing from it; otherwise the
     # windows below each fit the bound, so no character is lost to it.
     if len(unbounded.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES and (
-        count(whole) <= budget_tokens
+        count(whole) <= budget_tokens or (whole_tokens is not None and count(whole) < whole_tokens)
     ):
         return [whole]
     # A heading has no length limit. The prefix keeps its deepest levels and

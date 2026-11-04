@@ -62,6 +62,7 @@ class KnowledgeEmbedder:
         admitted: Callable[[], bool] = lambda: True,
         window_tokens: int | None = None,
         count_tokens: Callable[[str], int] | None = None,
+        whole_tokens: int | None = None,
     ) -> None:
         self._provider = provider
         self._space = space
@@ -69,6 +70,7 @@ class KnowledgeEmbedder:
         self._local = local
         self._admitted = admitted
         self._window_tokens = window_tokens
+        self._whole_tokens = whole_tokens
         self._count_tokens = count_tokens
 
     def admitted(self) -> bool:
@@ -82,6 +84,14 @@ class KnowledgeEmbedder:
     @property
     def local(self) -> bool:
         return self._local
+
+    @property
+    def window_tokens(self) -> int | None:
+        return self._window_tokens
+
+    @property
+    def whole_tokens(self) -> int | None:
+        return self._whole_tokens
 
     def may_embed_question(self, reader_provider: str | None) -> bool:
         """Whether a question may reach the provider: on the host, or the run's own provider.
@@ -128,6 +138,7 @@ class KnowledgeEmbedder:
             text,
             budget_tokens=self._window_tokens,
             count_tokens=self._count_tokens,
+            whole_tokens=self._whole_tokens,
         )
 
     async def embed_chunks(

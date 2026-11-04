@@ -404,10 +404,43 @@ async def test_windows_are_stored_scored_by_their_best_and_backfilled(tmp_path: 
         assert await backfill.sweep_once() == 0
         ((windows_after, chunks_after),) = await vector_rows()
         assert chunks_after == 6 and windows_after == 2 * windows
+
         found = await service.search(query, session_id=session_id, run_id=run_id)
         assert {item.document_id for item in found.passages} == {
             guide.document_id,
             older.document_id,
         }
         assert all(item.arms == ["semantic"] for item in found.passages)
+
+        # A new space, a new encoder or window budget, replaces the old
+        # vectors: the backfill prunes every other space as it fills this one.
+        successor = SPACE.model_copy(update={"revision": "v2"})
+        again = KnowledgeVectorBackfill(
+            uow_factory=app.uow_factory,
+            embedder=KnowledgeEmbedder(
+                Provider(),
+                successor,
+                window_tokens=embedder.window_tokens,
+                count_tokens=_words,
+            ),
+            principal=app.principal,
+            clock=app.clock,
+            batch_chunks=64,
+        )
+        assert await again.sweep_once() == 6
+        async with create_engine(settings.database_url).begin() as connection:
+            await connection.execute(
+                text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
+                {"tenant": app.principal.tenant_id},
+            )
+            spaces = (
+                (
+                    await connection.execute(
+                        text("SELECT DISTINCT space_key FROM knowledge_chunk_vectors")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert spaces == [successor.key]
         assert {item.heading_path[-1] for item in found.passages} == {"Fans"}

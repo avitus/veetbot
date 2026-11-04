@@ -113,6 +113,48 @@ recording at the full window is kept as
 `evals/fixtures/embeddings/knowledge_paraphrase.onnx.json`, and the gate
 records the miss beside the lift so a change of local encoder is measured.
 
+### The first live measurement: whole chunks dilute, windows lift
+
+Activated on 2026-11-03 with whole-chunk OpenAI vectors, a fresh chat about
+the valve-like sounds embedded its questions (the traces read
+`knowledge@1+semantic@1:…:dense`) and still missed: the answering chunk is a
+2,800-character "General driving notes" section whose one relevant sentence
+is averaged with the tailgate and the particulate filter. Ranked against the
+manual's 401 chunks by best window, with OpenAI's model, for the owner's
+question, the model's two search queries and a plain phrasing:
+
+| Embedding unit | Owner's words | Model query 1 | Model query 2 | Plain phrasing |
+| --- | --- | --- | --- | --- |
+| Whole chunk | 78 | 136 | 106 | 11 |
+| 160-token windows | 41 | 46 | 26 | 6 |
+| 128-token windows | 6 | 7 | 1 | 2 |
+| 96-token windows | 7 | 6 | 1 | 1 |
+| 64-token windows | 4 | 7 | 2 | 1 |
+| 48-token windows | 6 | 7 | 2 | 1 |
+
+Windows cut both ways. Gate 13's members are short, single-topic sections,
+and cutting them sharpens their distracting sentences: at 96 and 128 tokens
+the thermostat guide's "confirmed with a short click" sentence, a diluted
+part of a whole section before, became a window that overtook the answer,
+and the gate failed, while 160 tokens passed the gate and left the manual at
+ranks 41 to 6. Overlapping windows did not change either side. So the OpenAI
+route cuts a chunk into windows only when the chunk is long enough to need
+it: a chunk under `KNOWLEDGE_OPENAI_WHOLE_TOKENS` (256 estimated tokens)
+stays one window, and a longer one is cut under
+`KNOWLEDGE_OPENAI_WINDOW_TOKENS` (128), by the chunker's estimate, under
+space revision `knowledge-openai@2`. Every gate member stays whole and
+passes as before (2, 1, 2); every chunk of the manual is cut, and its
+answering section ranks sixth for the owner's words, seventh and first for
+the model's two queries, and second for the plain phrasing. The local route
+keeps its tokenizer and capacity, which a chunk may not exceed. The backfill
+prunes vectors of any other space as it fills the active one, so a new
+encoder or budget replaces rather than piles up; the manual is about 2,300
+windows and 244,000 tokens once. Model query 1 stays at rank 6 or 7 under
+every budget because it names the document, which pulls the front-matter
+chunk; that is the query, not the ranking. The owner's own words rank behind
+the parking sections, which is why `knowledge.search` runs with the model's
+refined query rather than the question verbatim.
+
 ## Deviation from the plan
 
 The plan admits semantic recall on passing release evidence (95% required-
