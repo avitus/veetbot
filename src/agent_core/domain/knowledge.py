@@ -7,7 +7,7 @@ import unicodedata
 from collections.abc import Callable, Iterable
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
@@ -128,6 +128,58 @@ class KnowledgeQuery(BaseModel):
     max_per_document: PositiveInt = 2
     min_score: float = Field(ge=0, le=1)
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
+
+
+class KnowledgeReader(Protocol):
+    """What the stores need to decide which documents a reader may see.
+
+    Both the passage query and the catalog query carry these four fields;
+    visibility, tenancy and the sensitivity ceiling are the same predicate
+    for a search and for the catalog (ADR-0294).
+    """
+
+    @property
+    def tenant_id(self) -> str: ...
+
+    @property
+    def principal_id(self) -> str: ...
+
+    @property
+    def current_scope(self) -> str | None: ...
+
+    @property
+    def sensitivity_ceiling(self) -> Sensitivity: ...
+
+
+class KnowledgeCatalogQuery(BaseModel):
+    """The documents on file for a reader at an instant, capped by count."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tenant_id: str
+    principal_id: str
+    current_scope: str | None
+    as_of: datetime
+    sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
+    max_documents: int = Field(ge=0)
+
+
+class KnowledgeCatalogLine(BaseModel):
+    """One current document: its title, its dates and how many passages it holds."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    title: str = Field(min_length=1, max_length=1024)
+    doc_date: date | None
+    ingested_at: datetime
+    passages: int = Field(ge=0)
+
+
+class KnowledgeCatalog(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lines: tuple[KnowledgeCatalogLine, ...]
+    omitted: int = Field(ge=0)
 
 
 class RetrievedPassage(BaseModel):

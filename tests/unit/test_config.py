@@ -1174,13 +1174,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_224_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_226_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 224
+    assert len(qualified_paths) == 226
     # ADR-0261 adds the capture reader's step and run read limits.
     assert {
         "tools/limits.yaml:capture.step_maximum_reads",
@@ -1207,6 +1207,11 @@ def test_all_224_versioned_knobs_are_present_and_non_null() -> None:
     assert {
         "context/plan.yaml:classes.records_catalog.max_items",
         "context/plan.yaml:classes.records_catalog.max_tokens",
+    } <= qualified_paths
+    # ADR-0294 adds the knowledge catalog's two class caps.
+    assert {
+        "context/plan.yaml:classes.knowledge_catalog.max_items",
+        "context/plan.yaml:classes.knowledge_catalog.max_tokens",
     } <= qualified_paths
     # ADR-0155 adds the title pass's five knobs.
     assert {

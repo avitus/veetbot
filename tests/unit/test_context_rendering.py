@@ -32,6 +32,14 @@ def test_platform_framing_tells_the_model_to_cite_recollections() -> None:
     assert _CITED_BELIEF.search(PLATFORM_FRAMING) is None
 
 
+def test_platform_framing_names_the_knowledge_catalog_and_the_tool_that_reads_it() -> None:
+    """ADR-0294: the model is told what the catalog holds and to search a listed document."""
+
+    assert "knowledge catalog" in PLATFORM_FRAMING
+    assert "knowledge.search" in PLATFORM_FRAMING
+    assert "never passages" in PLATFORM_FRAMING
+
+
 def test_platform_framing_is_row_zero_of_the_prefix_within_the_platform_cap() -> None:
     prefix = build_prefix(agent(), [])
     row = prefix[0]
@@ -48,4 +56,4 @@ def test_platform_framing_is_row_zero_of_the_prefix_within_the_platform_cap() ->
 def test_builder_version_includes_framing_and_retired_tool_contracts() -> None:
     """Framing and retired contracts require every existing live plan to re-plan once."""
 
-    assert planner_module.BUILDER_VERSION == "context-builder@15"
+    assert planner_module.BUILDER_VERSION == "context-builder@16"

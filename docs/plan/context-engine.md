@@ -111,6 +111,7 @@ Assembly order is fixed and total:
 | 12 | B | Working-state block | per entry |
 | 13 | B | In-turn recall and correction lines | `MEMORY` |
 | 13a | B | Records catalog, if any | `INTERNAL_TOOL` |
+| 13b | B | Knowledge catalog, if any | `INTERNAL_TOOL` |
 | 14 | B | Runtime metadata: current date, principal scope, surface; the origins `browser.navigate` accepts when the plan offers it | `PLATFORM` |
 | 15 | B | A new trailing user input, if present | `USER` |
 
@@ -141,8 +142,14 @@ through an injected `RecordsCatalogSource` as in-turn recall is read through
 its retriever, and absent, with no bytes, when the flag is off, the principal
 lacks `records.read`, or the owner has no series. Row 2's framing gains one
 fixed sentence for it, the same in every session whether or not the catalog
-is present. They are listed here because assembly
-order is fixed and total, and a table that omits five of its rows is neither.
+is present. Row 13b is added by
+[ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md) and owned by
+[knowledge-documents.md](knowledge-documents.md#the-document-catalog-in-context):
+the documents on file, a `UserMessage` with `trust=INTERNAL_TOOL` and
+`source="knowledge.catalog"`, read through an injected `KnowledgeCatalogSource`,
+absent with no bytes when the roster lacks `knowledge.search` or the run may read
+no document, and with one fixed sentence of its own in row 2. They are listed here because assembly
+order is fixed and total, and a table that omits six of its rows is neither.
 
 Platform policy comes first because it is the only content that must be read before
 anything that might try to override it. The current user message comes last because
@@ -371,6 +378,7 @@ ceiling.
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
 | B | Working state | 1,000 | No | Never |
 | B | Records catalog | 16 series / 600 tokens | No | First |
+| B | Knowledge catalog | 12 documents / 400 tokens | No | Second, whole |
 | B | Knowledge passages | 3 passages / 3,000 tokens | No | First |
 | B | In-turn recall | 2,000 | No | Second |
 | B | Tool results | 25% of body | Partly | Third |
@@ -669,6 +677,11 @@ the cheapest and most recoverable loss first:
    cap. The builder has no knowledge-passage yield step today, so
    `records_catalog` is the first entry a pressure event records, before in-turn
    recall trims ([owner-records.md](owner-records.md#the-records-catalog-in-context)).
+   The knowledge catalog follows it, also whole and for the same reason: a
+   catalog that names some documents misstates the corpus, and one
+   `knowledge.search` reaches what it named; `knowledge_catalog` is the
+   second entry a pressure event records
+   ([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)).
 1. **Knowledge passages drop, lowest-ranked first.** They are dropped whole and
    never truncated, because a passage shortened to fit is a misquotation of a
    document the model is about to cite. They go first because the corpus is still
@@ -874,7 +887,11 @@ Three properties matter:
   last entries, holds names and dates and never values, may mention a due series
   once per session and never while the owner is mid-task, and is not a request to
   log ([owner-records.md](owner-records.md#the-records-catalog-in-context) gives
-  the text).
+  the text). Since [ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)
+  it carries one more on the knowledge catalog: it lists the documents on file
+  by title with their dates and passage counts, holds titles and never
+  passages, and a question that falls within a listed document is searched
+  with `knowledge.search` before it is answered from general knowledge.
 - **Content cannot close its own envelope.** The closing marker carries a
   per-item nonce, and any occurrence of the delimiter syntax inside content is
   escaped at render time. Without this, "ignore the above and " preceded by a
@@ -1052,6 +1069,7 @@ class ContextBudget(BaseModel):
     tool_result_tokens: int
     knowledge_tokens: int           # knowledge spec: Region B, passages
     records_catalog_tokens: int = 0 # owner-records spec: Region B, row 13a
+    knowledge_catalog_tokens: int = 0 # knowledge spec: Region B, row 13b
     safety_margin_ratio: float = 0.05
 ```
 
@@ -1259,10 +1277,11 @@ legitimate body changes and cache availability affect it.
   would duplicate in-turn recall and leave a missing turn ambiguous between a
   selection defect and a ranking miss; a live projection read would let two seeds
   of one run disagree.
-- **Yield order is the records catalog, knowledge passages, then in-turn
-  recall, then tool-result truncation, then compaction** — cheapest and most
-  recoverable first. The catalog drops whole and one `records.list` recovers
-  it; knowledge passages follow because the corpus is still there and one
+- **Yield order is the records catalog, the knowledge catalog, knowledge
+  passages, then in-turn recall, then tool-result truncation, then
+  compaction** — cheapest and most
+  recoverable first. The catalogs drop whole, and one `records.list` or one
+  `knowledge.search` recovers what each named; knowledge passages follow because the corpus is still there and one
   `knowledge.search` re-reaches it; compaction is last because it alone costs a model call and
   loses information irreversibly within the run. This is the same order stated
   where the ladder is specified, and the two must not drift apart.
@@ -1365,3 +1384,14 @@ Beside each `model.request.started`, the run loop appends `memory.delivered`
 naming the recall traces whose blocks are in that request's body. That is the
 delivered set the usage hook charges for non-use; a block dropped under
 pressure and the prefix snapshot are not in it.
+
+## Knowledge catalog framing
+
+Context builder identity advances to `context-builder@16` when row 2's
+framing gains the knowledge catalog sentence of
+[knowledge-documents.md](knowledge-documents.md#the-document-catalog-in-context)
+([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)). The
+sentence is in every session's prefix whether or not a catalog renders, so
+every `context-builder@15` plan fails its stored prefix-hash recheck and
+re-plans once through the ordinary logged epoch rotation. The fifty-turn
+stability script holds one prefix under its existing 1,640 bytes of padding.

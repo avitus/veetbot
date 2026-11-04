@@ -8,6 +8,8 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.knowledge import (
+    KnowledgeCatalog,
+    KnowledgeCatalogQuery,
     KnowledgeChunk,
     KnowledgeChunkEmbedding,
     KnowledgeDocument,
@@ -44,6 +46,14 @@ class KnowledgeStore(Protocol):
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None: ...
 
     async def visible_titles(self, query: KnowledgeQuery) -> list[str]: ...
+
+    async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog:
+        """The reader's current documents in title order, capped, with the rest counted.
+
+        The same visibility, tenancy, validity and sensitivity predicate as a
+        search; one line per document, its current version only (ADR-0294).
+        """
+        ...
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None: ...
 

@@ -340,3 +340,4 @@ implementation without one.
 - [ADR-0291: A schedule names its MCP servers, and a saved job may read them (Accepted)](0291-mcp-servers-for-schedules-and-jobs.md)
 - [ADR-0292: The OpenAI knowledge route windows long chunks, and a superseded space is pruned once the active one is full (Accepted)](0292-knowledge-windows-and-prune.md)
 - [ADR-0293: A knowledge search asks the corpus, not the catalogue (Accepted)](0293-knowledge-search-asks-the-corpus.md)
+- [ADR-0294: The context names the documents on file (Accepted)](0294-the-context-names-the-documents-on-file.md)

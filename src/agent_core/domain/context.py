@@ -39,6 +39,8 @@ class ContextClass(StrEnum):
     KNOWLEDGE = "knowledge"
     RECALL = "recall"
     RECORDS_CATALOG = "records_catalog"
+    # ADR-0294: the documents on file, row 13b.
+    KNOWLEDGE_CATALOG = "knowledge_catalog"
     RUNTIME_METADATA = "runtime_metadata"
     CURRENT_USER = "current_user"
 
@@ -60,6 +62,7 @@ REGION_ASSIGNMENTS: dict[ContextClass, ContextRegion] = {
     ContextClass.KNOWLEDGE: ContextRegion.BODY,
     ContextClass.RECALL: ContextRegion.BODY,
     ContextClass.RECORDS_CATALOG: ContextRegion.BODY,
+    ContextClass.KNOWLEDGE_CATALOG: ContextRegion.BODY,
     ContextClass.RUNTIME_METADATA: ContextRegion.BODY,
     ContextClass.CURRENT_USER: ContextRegion.BODY,
 }
@@ -82,6 +85,7 @@ class ContextBudget(BaseModel):
     tool_result_tokens: int = Field(ge=0)
     knowledge_tokens: int = Field(ge=0)
     records_catalog_tokens: int = Field(default=0, ge=0)
+    knowledge_catalog_tokens: int = Field(default=0, ge=0)
     safety_margin_ratio: float = Field(default=0.05, ge=0, lt=1)
 
     @model_validator(mode="after")

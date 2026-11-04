@@ -491,7 +491,7 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
-from agent_core.context.budget import records_catalog_caps
+from agent_core.context.budget import knowledge_catalog_caps, records_catalog_caps
 from agent_core.context.builder import BudgetedContextBuilder
 from agent_core.context.compactor import StructuredCompactor
 from agent_core.context.estimator import ConservativeTokenEstimator
@@ -613,6 +613,7 @@ from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
 from agent_core.knowledge.backfill import KnowledgeVectorBackfill
+from agent_core.knowledge.catalog import KnowledgeCatalogReader
 from agent_core.knowledge.chunking import (
     MAX_KNOWLEDGE_SOURCE_BYTES,
     PlainTextExtractor,
@@ -4882,6 +4883,9 @@ async def _compose(
             inline_output_bytes=inline_output_bytes,
             catalog_source=records_service,
             catalog_max_series=records_catalog_max_series,
+            # ADR-0294: the documents on file, read through the store's own rule.
+            knowledge_catalog_source=KnowledgeCatalogReader(uow_factory, clock),
+            knowledge_catalog_max_documents=knowledge_catalog_caps(context_classes)[0],
         )
         compactor = StructuredCompactor(
             estimator,

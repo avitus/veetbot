@@ -16,6 +16,7 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.memory.in_memory import InMemoryKnowledgeStore
 from agent_core.domain.knowledge import (
     DocumentAuthority,
+    KnowledgeCatalogQuery,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
@@ -291,3 +292,124 @@ async def test_coverage_outranks_density() -> None:
 
     assert _ids(ranked) == [UUID(int=2_002), UUID(int=2_001)]
     assert ranked[0].score > ranked[1].score
+
+
+def _catalog_query(**changes: object) -> KnowledgeCatalogQuery:
+    values: dict[str, object] = {
+        "tenant_id": TENANT,
+        "principal_id": PRINCIPAL_ID,
+        "current_scope": None,
+        "as_of": NOW,
+        "max_documents": 12,
+    }
+    return KnowledgeCatalogQuery.model_validate(values | changes)
+
+
+async def test_catalog_lists_current_visible_documents_with_their_passage_counts() -> None:
+    """ADR-0294: the catalog follows the search visibility rule and counts passages."""
+
+    store = await _store(
+        _document(1, "# Mine\n\nA rollback procedure.\n\n## Second\n\nAnother passage."),
+        _document(
+            2, "# Theirs\n\nA shared rollback procedure.", visibility=KnowledgeVisibility.TENANT
+        ),
+        _document(
+            3,
+            "# Atlas\n\nThe rollback procedure for Atlas.",
+            visibility=KnowledgeVisibility.PROJECT,
+            project_scope="atlas",
+        ),
+        _document(4, "# Secret\n\nA restricted procedure.", sensitivity=Sensitivity.RESTRICTED),
+    )
+    prepared = _document(5, "# Hidden\n\nSomeone else's procedure.")
+    await store.ingest(
+        prepared.model_copy(
+            update={
+                "document": prepared.document.model_copy(
+                    update={"ingested_by_principal_id": "someone-else"}
+                )
+            }
+        )
+    )
+
+    catalog = await store.catalog(_catalog_query())
+    assert [(line.title, line.passages) for line in catalog.lines] == [
+        ("Document 1", 2),
+        ("Document 2", 1),
+        ("Document 4", 1),
+    ]
+    assert catalog.omitted == 0
+    assert all(line.ingested_at == NOW and line.doc_date is None for line in catalog.lines)
+
+    in_atlas = await store.catalog(_catalog_query(current_scope="atlas"))
+    assert [line.title for line in in_atlas.lines] == [
+        "Document 1",
+        "Document 2",
+        "Document 3",
+        "Document 4",
+    ]
+    internal = await store.catalog(_catalog_query(sensitivity_ceiling=Sensitivity.INTERNAL))
+    assert [line.title for line in internal.lines] == ["Document 1", "Document 2"]
+    colleague = await store.catalog(_catalog_query(principal_id=OTHER_PRINCIPAL))
+    assert [line.title for line in colleague.lines] == ["Document 2"]
+    assert (await store.catalog(_catalog_query(tenant_id="tenant-b"))).lines == ()
+
+
+async def test_catalog_caps_by_title_order_and_counts_the_rest() -> None:
+    store = await _store(
+        _document(3, "# C\n\nThird."),
+        _document(1, "# A\n\nFirst."),
+        _document(2, "# B\n\nSecond."),
+    )
+
+    catalog = await store.catalog(_catalog_query(max_documents=2))
+
+    assert [line.title for line in catalog.lines] == ["Document 1", "Document 2"]
+    assert catalog.omitted == 1
+
+
+async def test_catalog_shows_a_superseded_document_once_as_its_current_version() -> None:
+    first = _document(1, "# One\n\nThe first version.")
+    store = await _store(first)
+    newer = _document(1, "# One\n\nThe second version.\n\n## More\n\nIt grew.")
+    await store.ingest(
+        KnowledgeIngestPrepared(
+            document=newer.document.model_copy(
+                update={"row_id": UUID(int=1_901), "version": 2, "valid_from": NOW}
+            ),
+            chunks=[
+                chunk.model_copy(update={"document_row_id": UUID(int=1_901), "version": 2})
+                for chunk in newer.chunks
+            ],
+        )
+    )
+
+    catalog = await store.catalog(_catalog_query())
+
+    assert [(line.title, line.passages) for line in catalog.lines] == [("Document 1", 2)]
+    earlier = await store.catalog(_catalog_query(as_of=NOW - timedelta(seconds=1)))
+    assert earlier.lines == ()
+
+
+async def test_catalog_honours_the_people_erasure_fence() -> None:
+    store = await _store(_document(1, "# Mine\n\nA rollback procedure."))
+    prepared = _document(2, "# Theirs\n\nAnother rollback procedure.")
+    await store.ingest(
+        prepared.model_copy(
+            update={
+                "document": prepared.document.model_copy(
+                    update={
+                        "source_ref": prepared.document.source_ref.model_copy(
+                            update={"origin": "model_output", "run_id": UUID(int=72)}
+                        )
+                    }
+                )
+            }
+        )
+    )
+    assert [line.title for line in (await store.catalog(_catalog_query())).lines] == [
+        "Document 1",
+        "Document 2",
+    ]
+    store._people_erased_runs[UUID(int=72)] = NOW
+    assert [line.title for line in (await store.catalog(_catalog_query())).lines] == ["Document 1"]

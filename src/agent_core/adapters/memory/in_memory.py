@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import MutableMapping, Sequence
 from datetime import UTC, datetime
 from uuid import UUID
@@ -16,11 +16,15 @@ from agent_core.domain.erasure import erased_rejection, memory_erasure_tombstone
 from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.knowledge import (
     DocumentAuthority,
+    KnowledgeCatalog,
+    KnowledgeCatalogLine,
+    KnowledgeCatalogQuery,
     KnowledgeChunk,
     KnowledgeChunkEmbedding,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
+    KnowledgeReader,
     KnowledgeSemanticQuery,
     RetrievedPassage,
     fuse_passage_arms,
@@ -1121,21 +1125,51 @@ class InMemoryKnowledgeStore:
         ]
         return _reserve_per_document(ranked, query, per_document)
 
+    def _readable(
+        self, document: KnowledgeDocument, query: KnowledgeReader, as_of: datetime
+    ) -> bool:
+        """The search eligibility rule: tenancy, validity, visibility, the fence, the ceiling."""
+
+        return (
+            document.tenant_id == query.tenant_id
+            and document.valid_from <= as_of
+            and (document.valid_to is None or document.valid_to > as_of)
+            and _visible(document, query)
+            and not self._source_erased(document)
+            and SENSITIVITY_ORDER[document.sensitivity]
+            <= SENSITIVITY_ORDER[query.sensitivity_ceiling]
+        )
+
     async def visible_titles(self, query: KnowledgeQuery) -> list[str]:
         as_of = query.as_of or self._clock.now()
         async with self._lock:
             titles = {
                 document.title
                 for document in self._documents.values()
-                if document.tenant_id == query.tenant_id
-                and document.valid_from <= as_of
-                and (document.valid_to is None or document.valid_to > as_of)
-                and _visible(document, query)
-                and not self._source_erased(document)
-                and SENSITIVITY_ORDER[document.sensitivity]
-                <= SENSITIVITY_ORDER[query.sensitivity_ceiling]
+                if self._readable(document, query, as_of)
             }
         return sorted(titles)
+
+    async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog:
+        async with self._lock:
+            counts = Counter(chunk.document_row_id for chunk in self._chunks.values())
+            lines = sorted(
+                (
+                    (document.title, document.document_id),
+                    KnowledgeCatalogLine(
+                        title=document.title,
+                        doc_date=document.doc_date,
+                        ingested_at=document.ingested_at,
+                        passages=counts.get(document.row_id, 0),
+                    ),
+                )
+                for document in self._documents.values()
+                if self._readable(document, query, query.as_of)
+            )
+        return KnowledgeCatalog(
+            lines=tuple(line for _key, line in lines[: query.max_documents]),
+            omitted=max(0, len(lines) - query.max_documents),
+        )
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
         async with self._lock:
@@ -1290,7 +1324,7 @@ def _reserve_per_document(
     return (within + beyond)[: query.max_passages]
 
 
-def _visible(document: KnowledgeDocument, query: KnowledgeQuery) -> bool:
+def _visible(document: KnowledgeDocument, query: KnowledgeReader) -> bool:
     if document.visibility.value == "tenant":
         return True
     if document.visibility.value == "principal":

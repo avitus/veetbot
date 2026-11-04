@@ -373,7 +373,10 @@ is every place it differs, because the differences are the design.
 5. **The tool is the path.** `knowledge.search` is how a run reaches the corpus in the
    first build step. Automatic pre-turn retrieval — the analogue of in-turn recall —
    is a later step, gated by evals, because retrieving into every turn against a corpus
-   that may be irrelevant to the whole session is the expensive default.
+   that may be irrelevant to the whole session is the expensive default. The context
+   tells the model what the path reaches: the knowledge catalog row names the documents
+   on file, so taking the path never depends on a belief surviving recall
+   ([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)).
 6. **Passages are quoted, never paraphrased**, and they are always cited. The rendered
    block carries the document title, the heading path, the chunk id, and the document's
    date.
@@ -546,6 +549,24 @@ class KnowledgeSemanticQuery(BaseModel):      # the question, embedded
     vector: tuple[float, ...]
     channel: str                       # hybrid | dense
 
+class KnowledgeCatalogQuery(BaseModel):       # the documents on file, ADR-0294
+    tenant_id: str
+    principal_id: str
+    current_scope: str | None
+    as_of: datetime
+    sensitivity_ceiling: Sensitivity
+    max_documents: int
+
+class KnowledgeCatalogLine(BaseModel):
+    title: str
+    doc_date: date | None
+    ingested_at: datetime
+    passages: int
+
+class KnowledgeCatalog(BaseModel):
+    lines: tuple[KnowledgeCatalogLine, ...]
+    omitted: int
+
 class KnowledgeStore(Protocol):
     async def ingest(
         self,
@@ -557,6 +578,8 @@ class KnowledgeStore(Protocol):
     async def search(
         self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
     ) -> list[RetrievedPassage]: ...
+    async def visible_titles(self, query: KnowledgeQuery) -> list[str]: ...
+    async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog: ...
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None: ...
     async def delete(
         self, document_id: UUID, principal: Principal
@@ -579,6 +602,83 @@ One tool, returning `TrustLevel.KNOWLEDGE` data, plus the ingestion tool:
 fourteen to fifteen. Both tools live in a new `knowledge` tool domain, registered at
 build time alongside the other builtin domains.
 
+## The document catalog in context
+
+The tool is the path to the corpus, and a model that does not know the corpus
+exists never takes it. The first fresh chat after ADR-0293 never called
+`knowledge.search`: nothing in its context said a manual was on file, and the
+only cue, a provisional belief that the owner had provided one, fell below
+in-turn recall's twenty-item cut behind the question's own echoes. The context
+therefore names the documents on file, as it names the owner's numeric series
+([owner-records.md](owner-records.md#the-records-catalog-in-context)), and the
+catalog is one platform-rendered body item
+([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)).
+
+**Content.** One line per current document the run may read, ordered by title
+then document id, each starting with the title:
+
+```text
+BMW Owner Manual.pdf: 401 passages, added 2026-11-02
+Deployment Guide: 12 passages, dated 2026-05-02, added 2026-07-28
+Garden note: 1 passage, added 2026-10-01
+```
+
+Never a passage. `dated` is the document's own date when it has one; `added`
+is the UTC day of ingestion. A single passage renders `1 passage`. A superseded
+document appears once, as its current version. When more than twelve documents
+exist the twelve earliest by title render and a last line says
+`N more documents; knowledge.search still reaches them`. A run that may read
+no document renders no bytes at all, so a session without documents is
+byte-identical to one built before the decision.
+
+**Which documents.** `KnowledgeStore.catalog(KnowledgeCatalogQuery)` on both
+stores applies the search's own predicate — tenant, validity at the query's
+instant, visibility against the session's project scope, the people-erasure
+fence and the sensitivity ceiling — and counts each document's chunks, so the
+catalog names exactly what a search could return. The query carries the four
+reader fields the passage query carries (`KnowledgeReader`), and the two
+stores share the rule through them.
+
+**Region, trust and envelope.** `ContextClass.KNOWLEDGE_CATALOG` maps to
+`ContextRegion.BODY`; the item enters the fixed assembly order of
+[context-engine.md](context-engine.md) as row 13b, after the records catalog
+and before the runtime metadata. It is a `UserMessage` labelled
+`trust=INTERNAL_TOOL` with `source="knowledge.catalog"`, rendered inside the
+ordinary envelope as a tool result would be; titles are the owner's own and
+were scanned at ingestion, and the row lowers neither the request's origin
+trust nor the executor's turn label.
+
+**Reading the catalog.** The builder reads it inside assembly through an
+injected `KnowledgeCatalogSource` (`context/knowledge_catalog.py`), with the
+run's `Principal`, the session's project scope, the constant `restricted`
+ceiling and the class's document limit; `KnowledgeCatalogReader`
+(`knowledge/catalog.py`) is that source, over the unit of work. The catalog is
+absent, and no store is read, when the session's roster lacks
+`knowledge.search`, when no source is injected, or when the class is absent
+(zero caps); a failed read logs `context_knowledge_catalog_failed` and
+assembles without it.
+
+**Budget and yield.** The cap is the `knowledge_catalog` class in
+`context/plan.yaml`, `max_items: 12` and `max_tokens: 400`, absolute caps with
+no scaling by the window; `ContextBudget` gains `knowledge_catalog_tokens`,
+and composition passes `max_items` to the builder as the document limit. A
+catalog over its token cap drops whole. Under pressure it yields whole and
+second, after the records catalog and before knowledge passages and in-turn
+recall, because a catalog that names some documents misstates the corpus and
+one `knowledge.search` reaches what it named.
+
+**The framing sentence.** Row 2 of the assembly order gains one fixed
+sentence of platform text:
+
+> A knowledge catalog, when present, lists the documents on file by title
+> with their dates and passage counts; it holds titles, never passages. When
+> a question falls within a listed document, search it with knowledge.search
+> before answering from general knowledge.
+
+The sentence is in every session's prefix whether or not a catalog renders,
+so it rotated the builder version to `context-builder@16`, and every earlier
+plan re-plans once through the ordinary logged epoch rotation.
+
 ## Failure modes and defenses
 
 | Failure | Defense |
@@ -590,6 +690,7 @@ build time alongside the other builtin domains.
 | A passage is quoted with words the source does not contain | verbatim after a closed normalization list; `content_sha256` on every chunk |
 | One document fills the retrieval budget | per-document cap of two passages reserving every other document's first two, plus the relevance floor |
 | Knowledge starves the belief budget | its own budget class, which yields before in-turn recall |
+| The model never searches because nothing says a document exists | the knowledge catalog row names every current document the run may read, in every session whose roster carries `knowledge.search` (ADR-0294) |
 | A truncated passage becomes a misquotation | passages drop whole; never truncated to fit |
 | Cross-tenant or cross-project leak | `tenant_id` and `visibility` are SQL predicates, never rank features |
 | Documents silently mined into beliefs | formation reads episodes only; asserted by a gate |
