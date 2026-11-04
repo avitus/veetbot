@@ -1,0 +1,82 @@
+# ADR-0296: A saved login signs in again the way it last began
+
+- Status: Accepted by the owner on 2026-11-04
+- Date: 2026-11-04
+- Amends: ADR-0128 (the device window opens first), ADR-0280 (the sign-in card),
+  ADR-0288 (the remote browser only from inside that window)
+- Related: ADR-0251, ADR-0287, ADR-0294
+- Scope: one nullable column on browser profiles and its public field, the Apple
+  client's choice of sign-in, the signed-out control's wait, and one runtime guard.
+  No policy, scope, gate or milestone change.
+- Detailed design: `docs/plan/browser-automation.md`
+
+## Context
+
+On 2026-11-04 the owner tried the Chase download of ADR-0294 in a new chat. Three
+faults stopped it before the download could run.
+
+1. **The wrong sign-in.** Chase had signed the saved login out, so Chat asked the
+   owner to sign in. The card opens the device window, which Chase redirects to an
+   unsupported-browser page (ADR-0287), although that login was saved through the
+   remote browser. Nothing recorded how a login was signed in, and the remote browser
+   was reachable only from inside the window.
+2. **The crash.** The owner deleted that login and added it again. Deleting leaves
+   each chat's binding in place, and the browser workflow step read the bound login
+   without handling its absence, so every later message in the chat failed in half a
+   second with `NotFoundError`.
+3. **The sign-in that did not save.** The new login's checks ended
+   `session_unconfirmed` twice: the copy with the session passed, and the copy without
+   it showed no sign-in field on the same path. The check looks once after the page's
+   requests go quiet. Chase draws its form in a frame, and on 2026-11-02 and 2026-11-03
+   the same check passed, so a form drawn after that look is the suspected cause. The
+   service recorded only the code, so this is inferred, not observed.
+
+## Decision
+
+1. **A profile remembers how its latest sign-in began.** `begin_authentication` writes
+   `last_sign_in_mode`, in the unit of work that records the ceremony, so a failed begin
+   records nothing. It is the latest begun rather than the latest to succeed, so a
+   choice the owner just made holds while that sign-in is still failing. It moves neither
+   the generation grants pin nor the update time. It is secret-free and public on the
+   profile view, so every device of the owner agrees.
+2. **The app reopens that way.** Sign in again, the chat's sign-in card and the
+   website offer open the remote browser for a profile whose mode is `remote`, and the
+   device window otherwise, as before. From a chat, Website Access opens with the launch
+   link (ADR-0288 decision 4).
+3. **The device window stays within reach.** A profile last signed in through the
+   remote browser shows **Use this device** on its row, because a site can refuse a
+   datacenter browser while accepting the owner's device. Choosing it records `device`.
+4. **The signed-out control may wait for a sign-in form.** Only the load without a
+   session, only while it still reads as signed in, and only until five seconds before
+   the check's thirty-second limit, or until it leaves the confirmed path. A hash change
+   keeps the path. This adds evidence and never loosens the verdict: the same page still
+   ends `session_unconfirmed` if no form appears, and the signed-in load never waits.
+5. **A remote rejection logs what each load saw.** Whether each load showed a challenge
+   and stayed on the path, in yes or no, never an address. The device path keeps its
+   rule that a verdict logs nothing (ADR-0128, amendment of 2026-10-06).
+6. **A chat bound to a deleted login has no website.** The workflow step treats it as
+   unbound, as every other reader of that binding already does. A workflow already in
+   progress still ends with its existing conflict.
+
+## Validation
+
+Tests cover the deleted binding through a full run, the recorded mode through the
+public API and the shared repository contract, the card, the row and the offer in the
+Apple client, and the wait in real Chromium on a page that moves its hash and draws a
+framed password field three seconds after going quiet. Chase has not been exercised.
+
+The owner's production check is the one ADR-0294 names: in a new chat, ask for
+recurring charges, sign in when asked, approve the Download clicks.
+
+## Limits
+
+- A login that existed before this has no mode, so its next sign-in opens the device
+  window once. Choosing the remote browser there records it.
+- If Chase's signed-out page shows no form at all within the wait, the save still fails.
+  The new log line will then say so, and the next step is a site definition, not a
+  longer wait.
+- A check that ends without a sign-in form now takes about twenty-five seconds rather
+  than failing as soon as the page goes quiet.
+- Chase may sign a saved login out within hours, which this does not change.
+- Deleting a login still leaves the chat's binding in place, so the chat shows no website
+  until one is connected.

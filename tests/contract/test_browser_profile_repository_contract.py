@@ -10,6 +10,7 @@ import pytest
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileRepository
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    BrowserAuthenticationMode,
     BrowserProfile,
     BrowserProfileProvisioning,
     BrowserProfileStatus,
@@ -292,6 +293,24 @@ async def assert_profile_repository_advances_generation_without_changing_status(
         status=BrowserProfileStatus.READY,
         updated_at=NOW + timedelta(seconds=1),
     )
+
+    assert ready.last_sign_in_mode is None
+    remembered = await repository.record_sign_in_mode(
+        profile_id, owner, BrowserAuthenticationMode.REMOTE
+    )
+    assert remembered.last_sign_in_mode is BrowserAuthenticationMode.REMOTE
+    # A fact about the sign-in, which moves neither what grants pin nor the update time.
+    assert remembered.model_copy(update={"last_sign_in_mode": None}) == ready
+    assert await repository.get(profile_id, owner) == remembered
+    with pytest.raises(NotFoundError):
+        await repository.record_sign_in_mode(
+            profile_id,
+            Principal(
+                tenant_id=owner.tenant_id, principal_id="principal-b", roles={"user"}, scopes=set()
+            ),
+            BrowserAuthenticationMode.DEVICE,
+        )
+    ready = remembered
 
     advanced = await repository.advance_generation(
         profile_id,

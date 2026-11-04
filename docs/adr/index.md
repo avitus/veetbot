@@ -341,3 +341,4 @@ implementation without one.
 - [ADR-0292: The OpenAI knowledge route windows long chunks, and a superseded space is pruned once the active one is full (Accepted)](0292-knowledge-windows-and-prune.md)
 - [ADR-0293: A knowledge search asks the corpus, not the catalogue (Accepted)](0293-knowledge-search-asks-the-corpus.md)
 - [ADR-0294: An approved click can save a text file into the chat (Proposed)](0294-approved-browser-file-download.md)
+- [ADR-0296: A saved login signs in again the way it last began (Accepted)](0296-sign-in-reopens-the-way-it-last-began.md)

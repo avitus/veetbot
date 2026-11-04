@@ -14,6 +14,7 @@ from weakref import WeakValueDictionary
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
+    BrowserAuthenticationMode,
     BrowserProfile,
     BrowserProfileProvisioning,
     BrowserProfileStatus,
@@ -166,6 +167,14 @@ class InMemoryBrowserProfileRepository:
             },
             deep=True,
         )
+        self._profiles[profile_id] = updated
+        return _copy(updated)
+
+    async def record_sign_in_mode(
+        self, profile_id: UUID, principal: Principal, mode: BrowserAuthenticationMode
+    ) -> BrowserProfile:
+        profile = await self.get(profile_id, principal)
+        updated = profile.model_copy(update={"last_sign_in_mode": mode}, deep=True)
         self._profiles[profile_id] = updated
         return _copy(updated)
 

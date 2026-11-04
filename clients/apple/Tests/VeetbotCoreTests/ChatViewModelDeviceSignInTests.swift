@@ -1423,6 +1423,96 @@ import Testing
         #expect(model.deviceSignInRequest(for: .chat) == nil)
     }
 
+    // MARK: - A saved login signs in again the way it last did (ADR-0296)
+
+    /// Serves one login whose latest sign-in began as `lastSignIn`, and one remote ceremony.
+    private func rememberedLoginServer(
+        profileID: UUID, ceremonyID: UUID, lastSignIn: String?
+    ) -> DeviceFlowServer {
+        DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true, remote: true))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([Self.profile(
+                    profileID, origins: ["https://secure.example.org", "https://example.org"],
+                    status: "needs_user", lastSignIn: lastSignIn
+                )]))
+            default:
+                return nil
+            }
+        }
+    }
+
+    @Test
+    func aSignInCardOpensTheRemoteBrowserForALoginLastSignedInThatWay() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = rememberedLoginServer(profileID: profileID, ceremonyID: ceremonyID, lastSignIn: "remote")
+        let model = try await configuredModel(server)
+        let prompt = try #require(
+            Self.waitForSignIn(model, profileID: profileID, origin: "https://example.org")
+        )
+
+        await model.signInToContinue(prompt)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(model.isWebsiteAccessPresented)
+        let launch = try #require(model.websiteAuthenticationLaunchURL)
+        #expect(launch.absoluteString.hasPrefix("https://browser.example/authentication/\(ceremonyID.uuidString)"))
+        let begin = try #require(
+            server.json(of: "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies")
+        )
+        #expect(begin["mode"] == nil)
+        #expect(begin["login_url"] as? String == "https://example.org/")
+    }
+
+    @Test(arguments: [nil, "device"] as [String?])
+    func aSignInCardOpensTheDeviceWindowOtherwise(lastSignIn: String?) async throws {
+        let profileID = UUID()
+        let server = rememberedLoginServer(profileID: profileID, ceremonyID: UUID(), lastSignIn: lastSignIn)
+        let model = try await configuredModel(server)
+        let prompt = try #require(
+            Self.waitForSignIn(model, profileID: profileID, origin: "https://example.org")
+        )
+
+        await model.signInToContinue(prompt)
+
+        #expect(model.deviceSignInRequest(for: .chat)?.profileID == profileID)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+    }
+
+    @Test
+    func signInAgainInWebsiteAccessUsesTheRememberedWay() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = rememberedLoginServer(profileID: profileID, ceremonyID: ceremonyID, lastSignIn: "remote")
+        let model = try await configuredModel(server)
+        let profile = try JSONDecoder.server.decode(
+            BrowserProfileView.self,
+            from: Data(Self.profile(
+                profileID, origins: ["https://example.org"], status: "needs_user", lastSignIn: "remote"
+            ).utf8)
+        )
+
+        await model.beginSignIn(profile: profile)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(model.websiteAuthenticationLaunchURL != nil)
+        #expect(!model.isWebsiteAccessPresented, "the launch link is already on this screen")
+        #expect(WebsiteAccessActions.offersDeviceSignIn(profile))
+    }
+
+    @Test
+    func aLoginWithNoRememberedWayNeedsNoSecondButton() throws {
+        let profile = try JSONDecoder.server.decode(
+            BrowserProfileView.self,
+            from: Data(Self.profile(UUID(), origins: ["https://example.org"], status: "needs_user").utf8)
+        )
+        #expect(profile.lastSignInMode == nil)
+        #expect(!WebsiteAccessActions.offersDeviceSignIn(profile), "Sign in again already opens it")
+    }
+
     /// A card the run no longer waits on opens nothing: the owner may have
     /// moved on, or the run resumed or ended, while the saved logins loaded.
     @Test(arguments: ["another run", "resumed", "ended"])
@@ -1680,9 +1770,12 @@ import Testing
         )
     }
 
-    nonisolated private static func profile(_ id: UUID, origins: [String], status: String) -> String {
+    nonisolated private static func profile(
+        _ id: UUID, origins: [String], status: String, lastSignIn: String? = nil
+    ) -> String {
         let list = origins.map { "\"\($0)\"" }.joined(separator: ",")
-        return #"{"id":"\#(id.uuidString)","allowed_origins":[\#(list)],"status":"\#(status)","generation":3,"created_at":"2026-09-25T12:00:00Z","updated_at":"2026-09-25T12:00:00Z","last_used_at":null}"#
+        let mode = lastSignIn.map { "\"\($0)\"" } ?? "null"
+        return #"{"id":"\#(id.uuidString)","allowed_origins":[\#(list)],"status":"\#(status)","generation":3,"created_at":"2026-09-25T12:00:00Z","updated_at":"2026-09-25T12:00:00Z","last_used_at":null,"last_sign_in_mode":\#(mode)}"#
     }
 
     nonisolated private static func profileView(_ id: UUID) throws -> BrowserProfileView {

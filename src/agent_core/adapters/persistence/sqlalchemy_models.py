@@ -421,6 +421,10 @@ class BrowserProfileRow(Base):
             "AND encryption_key_version IS NOT NULL)",
             name="binding_consistent",
         ),
+        CheckConstraint(
+            "last_sign_in_mode IS NULL OR last_sign_in_mode IN ('remote','device')",
+            name="last_sign_in_mode_closed",
+        ),
         Index(
             "ix_browser_profiles_tenant_principal_created",
             "tenant_id",
@@ -448,6 +452,7 @@ class BrowserProfileRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sign_in_mode: Mapped[str | None] = mapped_column(Text)
 
 
 class BrowserGrantRow(Base):

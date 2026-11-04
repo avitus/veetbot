@@ -268,6 +268,8 @@ class BrowserProfile(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime | None = None
+    # How its latest sign-in began; None when it has never begun one (ADR-0296).
+    last_sign_in_mode: BrowserAuthenticationMode | None = None
 
     @field_validator("allowed_origins")
     @classmethod
@@ -318,6 +320,7 @@ class BrowserProfileView(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime | None = None
+    last_sign_in_mode: BrowserAuthenticationMode | None = None
 
 
 # The hosted service caps each lease request at fifteen minutes and a lease's

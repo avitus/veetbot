@@ -986,11 +986,19 @@ public struct ConnectionSettingsView: View {
             Spacer(minLength: 8)
             if WebsiteAccessActions.offersSignInAgain(profile.status) {
                 Button("Sign in again") {
-                    model.beginDeviceSignIn(profile: profile)
+                    Task { await model.beginSignIn(profile: profile) }
                 }
                 .buttonStyle(SecondaryCapsuleButtonStyle())
                 .disabled(model.isManagingWebsiteAccess)
                 .accessibilityIdentifier("website-access.sign-in-again.\(profile.id.uuidString)")
+            }
+            if WebsiteAccessActions.offersDeviceSignIn(profile) {
+                Button("Use this device") {
+                    model.beginDeviceSignIn(profile: profile)
+                }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                .disabled(model.isManagingWebsiteAccess)
+                .accessibilityIdentifier("website-access.sign-in-device.\(profile.id.uuidString)")
             }
             if profile.status == .ready {
                 if model.selectedBrowserProfileID == profile.id {
