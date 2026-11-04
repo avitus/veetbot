@@ -157,6 +157,7 @@ DOM_QUIET_MILLISECONDS = 300
 # How long Playwright waits for an element to become actionable, such as for
 # its click point to reach the element itself, before an act fails.
 ACTION_TIMEOUT_MILLISECONDS = 30_000
+_CHALLENGE_POLL_SECONDS = 0.25
 # Leave the outer tool budget for validation, settling, and observation.
 CLICK_TIMEOUT_MILLISECONDS = 5_000
 # Headed Chromium lacks headless shell's new-window switch. A response policy
@@ -993,6 +994,7 @@ class PythonPlaywrightRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """Load one page and report where it landed and whether it asks to sign in.
 
@@ -1048,6 +1050,10 @@ class PythonPlaywrightRuntime:
                     await wait_for_application()
                     on_stage(BrowserVerificationStage.REINSPECT)
                     challenge_visible = await self._sign_in_challenge_visible(page)
+                    if not challenge_visible and challenge_deadline is not None:
+                        challenge_visible = await self._challenge_by(
+                            page, confirmed_path=confirmed_path, deadline=challenge_deadline
+                        )
             except (PlaywrightError, TimeoutError) as exc:
                 raise BrowserProviderError(
                     "tool.browser.provider_unavailable",
@@ -1058,6 +1064,26 @@ class PythonPlaywrightRuntime:
                 path=(urlsplit(page.url).path or "/")[:4096],
                 challenge_visible=challenge_visible,
             )
+
+    async def _challenge_by(self, page: Page, *, confirmed_path: str, deadline: float) -> bool:
+        """Whether a signed-out page asks to sign in by ``deadline`` (ADR-0296).
+
+        Chase draws its framed form after its requests go quiet. Only the signed-out
+        control waits, so this adds no time to a page that does ask, and a page that
+        moves has already told the session apart.
+        """
+        loop = asyncio.get_running_loop()
+        # A hash route keeps the path, and Chase moves its hash while it draws.
+        while (
+            loop.time() < deadline
+            and ((urlsplit(page.url).path or "/").removesuffix("/") or "/") == confirmed_path
+        ):
+            await asyncio.sleep(_CHALLENGE_POLL_SECONDS)
+            # A page redrawing between polls is not an answer, so ask again.
+            with suppress(PlaywrightError):
+                if await self._sign_in_challenge_visible(page):
+                    return True
+        return False
 
     def _readable_page(self) -> Page:
         """Require navigation for a blank page while preserving origin checks."""

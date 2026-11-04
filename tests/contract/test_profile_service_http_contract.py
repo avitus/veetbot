@@ -125,6 +125,7 @@ class FakeRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """A public home page, and members' pages that send a visitor to sign in."""
         on_stage(BrowserVerificationStage.NAVIGATE)

@@ -69,6 +69,7 @@ class StatefulBrowserRuntime(Protocol):
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None],
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
@@ -232,10 +233,13 @@ class HostedPlaywrightSessionRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """Load one confirmed page and report what it showed (ADR-0128)."""
         try:
-            return await self._runtime.load_page_evidence(url, on_stage=on_stage)
+            return await self._runtime.load_page_evidence(
+                url, on_stage=on_stage, challenge_deadline=challenge_deadline
+            )
         except BrowserProviderError:
             raise
         except Exception as exc:

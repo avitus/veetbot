@@ -525,6 +525,33 @@ async def test_verification_sees_a_sign_in_form_in_a_frame() -> None:
     assert evidence.challenge_visible
 
 
+async def test_a_signed_out_page_that_draws_its_form_late_still_reads_as_signed_out() -> None:
+    """Chase draws its framed form after its requests go quiet; the control must see it."""
+
+    async def late(request: Request) -> Response:
+        del request
+        return html(
+            "<p>Loading</p>",
+            script="""
+            setTimeout(() => { location.hash = '#/logon'; }, 1000);
+            setTimeout(() => {
+                const frame = document.createElement('iframe');
+                frame.srcdoc = '<input type="password">';
+                document.body.appendChild(frame);
+            }, 3000);
+            """,
+        )
+
+    async with browsing([Route("/late", late)]) as (site, runtime):
+        without_waiting = await runtime.load_page_evidence(site.url("/late"))
+        waiting = await runtime.load_page_evidence(
+            site.url("/late"), challenge_deadline=asyncio.get_running_loop().time() + 10
+        )
+
+    assert not without_waiting.challenge_visible
+    assert waiting.challenge_visible
+
+
 async def test_a_lease_stops_at_a_sign_in_form_in_a_frame() -> None:
     """A signed-out lease must pause for the owner instead of reading the sign-in page."""
 

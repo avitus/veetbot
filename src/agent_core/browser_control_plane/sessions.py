@@ -65,6 +65,9 @@ MAXIMUM_LEASE_LIFETIME_SECONDS = MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS
 AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 # A device handoff's two verification loads end within this budget (ADR-0128).
 DEVICE_VERIFICATION_SECONDS = 30.0
+# The signed-out control stops looking for a sign-in form this long before the
+# check's limit, which leaves the time to read the session it is checking (ADR-0296).
+SIGNED_OUT_CONTROL_RESERVE_SECONDS = 5.0
 # Headed browsers alive at once, each budgeted a third of the container (ADR-0145).
 MAXIMUM_LIVE_BROWSERS = 3
 # Element facts beside one observation are cut to this many serialized bytes.
@@ -204,6 +207,7 @@ class BrowserSessionRuntime(Protocol):
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None],
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
@@ -781,15 +785,20 @@ class HostedProfileSessionService:
                     origins,
                     page,
                     _VerificationLoad("without_session"),
+                    challenge_deadline=self._control_deadline(),
                 )
             ),
         ]
         try:
             async with asyncio.timeout(self._verification_seconds):
                 with_session, without_session = await asyncio.gather(*loads)
-                await self._verify_page_pair(
-                    definition, signed_in, signed_out, with_session, without_session, page
-                )
+                try:
+                    await self._verify_page_pair(
+                        definition, signed_in, signed_out, with_session, without_session, page
+                    )
+                except DeviceSessionRejected as rejected:
+                    _log_rejected_evidence(rejected.code, with_session, without_session, page)
+                    raise
                 return await signed_in.storage_state()
         finally:
             for load in loads:
@@ -798,6 +807,11 @@ class HostedProfileSessionService:
             for candidate in (signed_in, signed_out):
                 with suppress(Exception):
                     await candidate.close()
+
+    def _control_deadline(self) -> float:
+        """The last moment the signed-out control may wait for a sign-in form."""
+        remaining = self._verification_seconds - SIGNED_OUT_CONTROL_RESERVE_SECONDS
+        return asyncio.get_running_loop().time() + max(0.0, remaining)
 
     def _site_definition(self, state: _CeremonyState) -> BrowserSiteVerification | None:
         definition = next(
@@ -1020,7 +1034,14 @@ class HostedProfileSessionService:
         loads = [
             asyncio.create_task(_page_evidence(signed_in, material, origins, page, progress[0])),
             asyncio.create_task(
-                _page_evidence(signed_out, _NO_SESSION_MATERIAL, origins, page, progress[1])
+                _page_evidence(
+                    signed_out,
+                    _NO_SESSION_MATERIAL,
+                    origins,
+                    page,
+                    progress[1],
+                    challenge_deadline=self._control_deadline(),
+                )
             ),
         ]
         try:
@@ -1380,12 +1401,16 @@ async def _page_evidence(
     origins: tuple[str, ...],
     url: str,
     progress: _VerificationLoad,
+    *,
+    challenge_deadline: float | None = None,
 ) -> BrowserPageEvidence:
     try:
         # Both loads use the browser a lease will use, so the control is fair (ADR-0145).
         runtime.set_interactive_authentication()
         await runtime.start(material, origins, headed=True)
-        evidence = await runtime.load_page_evidence(url, on_stage=progress.enter)
+        evidence = await runtime.load_page_evidence(
+            url, on_stage=progress.enter, challenge_deadline=challenge_deadline
+        )
     except Exception:
         # The deadline arrives as a cancellation, which is not a failure of this load.
         progress.failed = True
@@ -1412,6 +1437,25 @@ def _log_unfinished_verification(
         # Both pages loaded: what remained was reading the verifying browser's state.
         named or f"with_session={BrowserVerificationStage.CAPTURE.value}",
         elapsed_seconds,
+    )
+
+
+def _log_rejected_evidence(
+    code: str,
+    with_session: BrowserPageEvidence,
+    without_session: BrowserPageEvidence,
+    page: str,
+) -> None:
+    """Say what a remote sign-in's two loads saw, in yes or no, and never a page's address."""
+    confirmed = _normalized_path(urlsplit(page).path)
+    _LOGGER.info(
+        "session check rejected (%s): with_session challenge=%s stayed=%s; "
+        "without_session challenge=%s stayed=%s",
+        code,
+        with_session.challenge_visible,
+        _stays(with_session, confirmed),
+        without_session.challenge_visible,
+        _stays(without_session, confirmed),
     )
 
 

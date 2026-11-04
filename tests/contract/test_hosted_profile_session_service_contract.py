@@ -109,6 +109,7 @@ class FakeSessionRuntime:
     # runtime started with a session, and the failures a scenario injects.
     scenario: HandoffScenario | None = None
     evidence_urls: list[str] = field(default_factory=list)
+    challenge_deadlines: list[float | None] = field(default_factory=list)
     # Successive answers to authentication_status, then ``authentication``.
     authentication_samples: list[BrowserAuthenticationStatus] = field(default_factory=list)
     status_checks: int = 0
@@ -211,8 +212,10 @@ class FakeSessionRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         self.evidence_urls.append(url)
+        self.challenge_deadlines.append(challenge_deadline)
         scenario = self.scenario or HandoffScenario()
         if scenario.gate is not None:
             scenario.started.set()
@@ -1278,6 +1281,43 @@ async def test_a_session_the_site_does_not_confirm_is_cancelled_and_never_sealed
     assert writes == []
     assert await sealed_material(sessions) == before
     assert len(runtimes) == 2 and all(runtime.closed for runtime in runtimes)
+
+
+async def test_only_the_signed_out_control_waits_for_a_sign_in_form(tmp_path: Path) -> None:
+    """A slow form must not read as "same without a session", and a signed-in page never waits."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=HandoffScenario())
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    signed_in, signed_out = runtimes
+    assert signed_in.challenge_deadlines == [None]
+    deadline = signed_out.challenge_deadlines[0]
+    assert deadline is not None
+    assert 0 < deadline - asyncio.get_running_loop().time() <= 30.0 - 5.0
+
+
+async def test_a_rejected_remote_check_logs_what_each_load_saw_without_an_address(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path, scenario=HandoffScenario(with_session=None, without_session=None)
+    )
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/account"
+    )
+
+    with caplog.at_level(logging.INFO):
+        await sessions.refresh_authentication(ceremony.id, principal())
+
+    assert (
+        "session check rejected (session_unconfirmed): with_session challenge=False stayed=True; "
+        "without_session challenge=False stayed=True"
+    ) in caplog.text
+    assert "/account" not in caplog.text
+    assert runtimes[-1].challenge_deadlines[0] is not None
 
 
 async def test_a_handoff_with_nothing_in_scope_is_empty(tmp_path: Path) -> None:
