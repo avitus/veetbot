@@ -136,6 +136,66 @@ def self_test():
     assert classify_reviews(entries,detail)['review'] == 'commented'
     return 10
 
+# A reply over the broker's response limit ends the whole run, even if caught, so
+# each query's largest possible reply must fit: at most about 32 KB for a full list
+# page and about 46 KB for one pull request (measured with the longest values).
+LIST_QUERY = '''
+query OpenPullRequests($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: OPEN, first: 10, after: $after, orderBy: {field: CREATED_AT, direction: DESC}) {
+      totalCount
+      pageInfo { hasNextPage endCursor }
+      nodes { number title isDraft author { login } }
+    }
+  }
+}
+'''
+DETAIL_QUERY = '''
+query PullRequestStatus($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number state title isDraft mergeable mergeStateStatus headRefOid
+      reviewRequests(first: 1) { totalCount }
+      reviews(first: 100) {
+        pageInfo { hasNextPage }
+        nodes { databaseId state commit { oid } author { login } }
+      }
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            statusCheckRollup {
+              contexts(first: 50) {
+                pageInfo { hasNextPage }
+                nodes {
+                  __typename
+                  ... on CheckRun { databaseId name status conclusion checkSuite { app { databaseId slug } } }
+                  ... on StatusContext { context state }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+'''
+
+def rest_review(node):
+    """Give a GraphQL review the shape classify_reviews reads."""
+    return {'id':node.get('databaseId') or 0,'user':node.get('author'),'state':node.get('state'),'commit_id':(node.get('commit') or {}).get('oid')}
+
+def rest_run(node):
+    """Give a GraphQL check run the shape classify_checks reads."""
+    app=(node.get('checkSuite') or {}).get('app') or {}
+    return {'id':node.get('databaseId') or 0,'name':node.get('name'),'app':{'id':app.get('databaseId'),'slug':app.get('slug')},'status':str(node.get('status') or '').lower(),'conclusion':str(node.get('conclusion') or '').lower() or None}
+
+def rest_status(node):
+    """Give a GraphQL commit status the shape classify_checks reads."""
+    state=str(node.get('state') or '').lower()
+    return {'context':node.get('context',''),'state':'pending' if state == 'expected' else state}
+
 def main(inputs, job):
     self_test()
     repos = inputs['repositories']
@@ -146,80 +206,91 @@ def main(inputs, job):
         if not re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9_.-]+',repo) or repo.split('/')[1] in ('.','..'):
             raise ValueError('Invalid repository')
     used = [0]
-    def get(url):
+    def graphql(query, variables):
         if used[0] >= 45:
             raise RuntimeError('Request budget exhausted')
         used[0] += 1
-        response = job.http.request('GET',url)
+        response = job.http.request('POST','https://api.github.com/graphql',json={'query':query,'variables':variables})
         if response.get('status') != 200:
             raise RuntimeError('GitHub HTTP ' + str(response.get('status')))
-        return response.get('json')
-    def listing(url, key=None):
+        body = response.get('json')
+        if not isinstance(body,dict):
+            raise RuntimeError('Unexpected GraphQL response')
+        if body.get('errors'):
+            kinds = sorted({str(error.get('type') or 'error')[:40] for error in body['errors'] if isinstance(error,dict)})
+            raise RuntimeError('GitHub GraphQL ' + ','.join(kinds))
+        repository = (body.get('data') or {}).get('repository')
+        if not isinstance(repository,dict):
+            raise RuntimeError('Repository unavailable')
+        return repository
+    def open_pulls(owner, name):
         items=[]
-        for page in range(1,31):
-            body=get(url+('&' if '?' in url else '?')+'per_page=10&page='+str(page))
-            rows=body.get(key) if key and isinstance(body,dict) else body
-            if not isinstance(rows,list):
+        cursors=set()
+        after=None
+        for _ in range(30):
+            connection=graphql(LIST_QUERY,{'owner':owner,'name':name,'after':after}).get('pullRequests')
+            if not isinstance(connection,dict) or not isinstance(connection.get('nodes'),list):
                 raise RuntimeError('Unexpected list response')
-            items.extend(rows)
-            if key and isinstance(body.get('total_count'),int) and len(items) >= body['total_count']:
-                return items
-            if len(rows) < 10:
-                if key and body.get('total_count',len(items)) > len(items):
+            items.extend(connection['nodes'])
+            info=connection.get('pageInfo') or {}
+            if not info.get('hasNextPage'):
+                if connection.get('totalCount',len(items)) > len(items):
                     raise RuntimeError('Incomplete list')
                 return items
+            after=info.get('endCursor')
+            if not after or after in cursors:
+                raise RuntimeError('Invalid list cursor')
+            cursors.add(after)
         raise RuntimeError('Pagination limit reached')
     output=[]
     for repo in repos:
-        base='https://api.github.com/repos/'+repo
+        owner,name=repo.split('/')
         item={'name':repo,'status':'unavailable','message':'','totalOpen':None,'pullRequests':[]}
         problems=set()
         try:
-            pulls=listing(base+'/pulls?state=open&sort=created&direction=desc')
+            pulls=open_pulls(owner,name)
             seen=set()
             for pull in pulls:
-                number=pull.get('number')
-                if not isinstance(number,int) or pull.get('state') != 'open':
+                number=pull.get('number') if isinstance(pull,dict) else None
+                if not isinstance(number,int):
                     raise RuntimeError('Invalid open PR list')
                 if number in seen:
                     continue
                 seen.add(number)
-                pr={'number':number,'title':str(pull.get('title') or '')[:500],'author':str((pull.get('user') or {}).get('login') or '')[:100],'draft':pull.get('draft') if isinstance(pull.get('draft'),bool) else None,'review':'unknown','checks':'unknown','merge':'unknown','automatedReview':'unknown','automatedReviewNames':'','security':'unknown','mergeState':'unknown','reviewOnOlderCommit':False,'classificationVersion':2}
+                pr={'number':number,'title':str(pull.get('title') or '')[:500],'author':str((pull.get('author') or {}).get('login') or '')[:100],'draft':pull.get('isDraft') if isinstance(pull.get('isDraft'),bool) else None,'review':'unknown','checks':'unknown','merge':'unknown','automatedReview':'unknown','automatedReviewNames':'','security':'unknown','mergeState':'unknown','reviewOnOlderCommit':False,'classificationVersion':2}
                 detail=None
                 try:
-                    detail=get(base+'/pulls/'+str(number))
-                    if not isinstance(detail,dict) or detail.get('number') != number or detail.get('state') not in ('open','closed'):
+                    detail=graphql(DETAIL_QUERY,{'owner':owner,'name':name,'number':number}).get('pullRequest')
+                    if not isinstance(detail,dict) or detail.get('number') != number or detail.get('state') not in ('OPEN','CLOSED','MERGED'):
                         raise RuntimeError('Invalid PR detail')
-                    if detail['state'] == 'closed':
+                    if detail['state'] != 'OPEN':
                         continue
                     pr['title']=str(detail.get('title') or pr['title'])[:500]
-                    pr['draft']=detail.get('draft') if isinstance(detail.get('draft'),bool) else None
-                    pr['merge']='mergeable' if detail.get('mergeable') is True else 'conflicting' if detail.get('mergeable') is False else 'unknown'
-                    merge_state=detail.get('mergeable_state')
+                    pr['draft']=detail.get('isDraft') if isinstance(detail.get('isDraft'),bool) else None
+                    pr['merge']={'MERGEABLE':'mergeable','CONFLICTING':'conflicting'}.get(detail.get('mergeable'),'unknown')
+                    merge_state=str(detail.get('mergeStateStatus') or '').lower()
                     pr['mergeState']=merge_state if merge_state in PR_PROPERTIES['mergeState']['enum'] else 'unknown'
                 except Exception as exc:
                     detail=None
                     problems.add('PR detail: '+str(exc))
                 if detail:
-                    try:
-                        pr.update(classify_reviews(listing(base+'/pulls/'+str(number)+'/reviews'),detail))
-                    except Exception as exc:
-                        problems.add('Reviews: '+str(exc))
-                    sha=(detail.get('head') or {}).get('sha')
-                    runs=[]
-                    statuses=[]
-                    complete=True
-                    if isinstance(sha,str) and re.fullmatch(r'[a-fA-F0-9]{40,64}',sha):
-                        try:
-                            runs=listing(base+'/commits/'+sha+'/check-runs?filter=latest','check_runs')
-                        except Exception as exc:
-                            complete=False
-                            problems.add('Check runs: '+str(exc))
-                        try:
-                            statuses=listing(base+'/commits/'+sha+'/statuses')
-                        except Exception as exc:
-                            complete=False
-                            problems.add('Commit statuses: '+str(exc))
+                    sha=detail.get('headRefOid')
+                    reviews=detail.get('reviews') or {}
+                    if isinstance(reviews.get('nodes'),list) and not (reviews.get('pageInfo') or {}).get('hasNextPage'):
+                        requests=(detail.get('reviewRequests') or {}).get('totalCount')
+                        pr.update(classify_reviews([rest_review(node) for node in reviews['nodes']],{'head':{'sha':sha},'requested_reviewers':requests}))
+                    else:
+                        problems.add('Reviews: more than 100')
+                    commits=(detail.get('commits') or {}).get('nodes') or []
+                    commit=(commits[-1] or {}).get('commit') or {} if commits else {}
+                    if isinstance(sha,str) and commit.get('oid') == sha:
+                        contexts=(commit.get('statusCheckRollup') or {}).get('contexts') or {}
+                        nodes=contexts.get('nodes') or []
+                        complete=not (contexts.get('pageInfo') or {}).get('hasNextPage')
+                        if not complete:
+                            problems.add('Check runs: more than 50')
+                        runs=[rest_run(node) for node in nodes if node.get('__typename') == 'CheckRun']
+                        statuses=[rest_status(node) for node in nodes if node.get('__typename') == 'StatusContext']
                         pr.update(classify_checks(runs,statuses,complete))
                     else:
                         problems.add('Head commit unavailable')
