@@ -334,6 +334,37 @@ async def test_a_key_that_joins_a_pending_save_replays_after_it_finishes() -> No
     assert retried.replayed
 
 
+async def test_a_retried_press_replays_after_the_thread_stops_listing_the_file() -> None:
+    """A lost answer is retried with its key, and a sync may have changed the thread."""
+    async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
+        thread = await _seed_thread(app)
+        principal = _granted(app.principal, "artifact.write")
+        first = await _press(app, thread.id)
+        service = app.services.email
+        real = service._thread
+
+        async def synced(*args: Any) -> Any:
+            found = await real(*args)
+            return found.model_copy(
+                update={
+                    "messages": [
+                        message.model_copy(update={"attachments": []}) for message in found.messages
+                    ]
+                }
+            )
+
+        vars(service)["_thread"] = synced
+        retried = await service.save_attachment(
+            principal, thread.id, **SELECTION, idempotency_key="press-1"
+        )
+        with pytest.raises(NotFoundError):
+            await service.save_attachment(
+                principal, thread.id, **SELECTION, idempotency_key="a-new-press"
+            )
+    assert retried.run_id == first.run_id
+    assert retried.replayed
+
+
 async def test_a_busy_chat_is_a_conflict_not_a_second_run() -> None:
     async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
         thread = await _seed_thread(app)
@@ -568,6 +599,46 @@ async def test_an_erasure_during_an_intake_is_not_undone(monkeypatch: pytest.Mon
             recorded = await uow.artifacts.get(read_by_intake.id, app.principal)
     assert recorded.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
     assert recorded.expires_at == erased_at
+
+
+async def test_a_reply_that_keeps_a_file_during_a_sweep_does_not_refuse_it() -> None:
+    """The intake compares against what it last read, not what the batch first listed."""
+    from agent_core.knowledge.uploads import UploadAutoIngest
+
+    async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
+        thread = await _seed_thread(app)
+        operation = await _press(app, thread.id, "knowledge.write")
+        async with app.uow_factory() as uow:
+            [first] = await uow.artifacts.list_for_run(operation.run_id, app.principal)
+            second = await uow.artifacts.create(
+                first.model_copy(
+                    update={
+                        "id": uuid4(),
+                        "name": "later.pdf",
+                        "created_at": first.created_at + timedelta(seconds=1),
+                        "expires_at": app.clock.now() + timedelta(days=30),
+                    },
+                    deep=True,
+                )
+            )
+        sources: dict[UUID, Any] = {}
+
+        class Knowledge:
+            async def ingest(self, request: Any, *, origin_trust: TrustLevel) -> None:
+                sources[request.source.id] = request.source
+                async with app.uow_factory() as uow:
+                    await uow.artifacts.retain_for_reply(
+                        [second.id], app.principal, run_id=operation.run_id
+                    )
+
+        sweep = UploadAutoIngest(
+            uow_factory=app.uow_factory,
+            knowledge=cast(Any, Knowledge()),
+            principal=app.principal,
+            clock=app.clock,
+        )
+        assert await sweep.sweep_once() == 2
+    assert sources[second.id].expires_at is None
 
 
 async def test_a_file_deleted_during_a_sweep_is_never_read_into_knowledge() -> None:

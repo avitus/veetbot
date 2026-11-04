@@ -1979,8 +1979,14 @@ class EmailExperienceService:
         )
         async with self.uow_factory() as uow:
             thread = await self._thread(uow.email, principal, thread_id)
+            # A retry returns what its key admitted, whatever a sync has since changed.
+            replay = await uow.email.get(
+                principal, "task_replay", hashlib.sha256(idempotency_key.encode()).hexdigest()
+            )
         listed = next((m.attachments for m in thread.messages if m.id == message_id), [])
-        if attachment_index >= len(listed) or listed[attachment_index].filename != filename:
+        if replay is None and (
+            attachment_index >= len(listed) or listed[attachment_index].filename != filename
+        ):
             raise NotFoundError("email attachment not found")
         return await self.submit_task(
             principal,

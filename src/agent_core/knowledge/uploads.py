@@ -129,7 +129,8 @@ class UploadAutoIngest:
                 await self._record(artifact, AUTO_INGEST_REFUSED, "run_not_completed", attempts)
                 continue
             request = KnowledgeIngestRequest(
-                source=artifact,
+                # The current read: a reply may have kept the file since the batch listed it.
+                source=current,
                 title=artifact.name,
                 visibility=KnowledgeVisibility.PRINCIPAL,
                 document_id=upload_document_id(artifact),
