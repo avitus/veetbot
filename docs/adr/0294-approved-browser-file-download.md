@@ -124,7 +124,8 @@ This ADR stays Proposed until that check passes.
 - Chat reads the file itself. It has no sandbox import for computing over the rows,
   so a long file's totals rest on what the model reads.
 - If the act's postcondition read fails, the act reports an uncertain outcome and
-  the file is not kept, so it takes another approved click.
+  the file is not kept. The uncertain-write rule still holds: the model does not
+  repeat the click unless the owner confirms that repeating it is safe.
 - The saved file does not attach to the reply as an owner download.
 - The approval card names the click, not the file.
 - No acceptance criterion or grant exclusion is weakened; this supplies the
