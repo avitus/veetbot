@@ -339,3 +339,4 @@ implementation without one.
 - [ADR-0290: Semantic retrieval activates on the owner's standing decision (Accepted)](0290-standing-semantic-activation.md)
 - [ADR-0291: A schedule names its MCP servers, and a saved job may read them (Accepted)](0291-mcp-servers-for-schedules-and-jobs.md)
 - [ADR-0292: The OpenAI knowledge route windows long chunks, and a superseded space is pruned once the active one is full (Accepted)](0292-knowledge-windows-and-prune.md)
+- [ADR-0294: Save an email attachment into the email's chat (Accepted)](0294-save-email-attachments-to-the-chat.md)

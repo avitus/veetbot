@@ -44,6 +44,22 @@ async def _call(
     )
 
 
+async def _call_attachment(
+    client: GmailClient, message_id: str, attachment_index: int, filename: str
+) -> CallToolResult:
+    """Return the file in structured content only: as text it would be sent twice."""
+
+    try:
+        result = await client.fetch_attachment(message_id, attachment_index, filename)
+    except GmailError as exc:
+        return CallToolResult(
+            content=[TextContent(type="text", text=exc.code)],
+            structured_content={"effect_status": "not_applied"},
+            is_error=True,
+        )
+    return CallToolResult(content=[], structured_content=result, is_error=False)
+
+
 def create_server(mode: str, client: GmailClient) -> MCPServer:
     """Create exactly one of the three honest server-level rosters."""
 
@@ -139,6 +155,37 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
             """Read one message's closed unsubscribe evidence without dialing any sender."""
 
             return await _call(client.get_unsubscribe, message_id)
+
+        @server.tool(meta={"veetbot/application-only": True})
+        async def fetch_attachment(
+            message_id: str,
+            attachment_index: Annotated[int, Field(ge=0, le=1000)],
+            filename: str,
+        ) -> CallToolResult:
+            """Fetch one listed attachment for the owner's Save button."""
+
+            return await _call_attachment(client, message_id, attachment_index, filename)
+
+        @server.tool()
+        async def save_attachment(
+            message_id: str,
+            attachment_index: Annotated[
+                int,
+                Field(
+                    ge=0,
+                    le=1000,
+                    description="Zero-based position in the message's attachments list.",
+                ),
+            ],
+            filename: str,
+        ) -> CallToolResult:
+            """Save one email attachment to this chat as a file, up to 32 MiB; asks the owner.
+
+            get_thread lists each message's attachments. A saved text, Markdown, or PDF
+            file also becomes searchable through knowledge shortly afterwards.
+            """
+
+            return await _call_attachment(client, message_id, attachment_index, filename)
 
     elif mode == "write":
 

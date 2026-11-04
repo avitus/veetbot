@@ -27,7 +27,7 @@ type Header = tuple[str, str]
 
 GOOGLE_HOSTS = {"gmail.googleapis.com", "oauth2.googleapis.com"}
 APPLICATION_ONLY = "veetbot/application-only"
-MODEL_VISIBLE_READ_TOOLS = {"search_threads", "get_thread", "list_labels"}
+MODEL_VISIBLE_READ_TOOLS = {"search_threads", "get_thread", "list_labels", "save_attachment"}
 SEARCH_HEADERS = [
     "From",
     "Subject",
@@ -387,6 +387,7 @@ async def test_unsubscribe_read_contract_is_closed_and_google_only(
         "get_thread_page",
         "get_message_body",
         "get_unsubscribe",
+        "fetch_attachment",
     }
     assert ROSTERS["write"] == ("create_draft", "modify_labels", "trash_thread", "untrash_thread")
     assert ROSTERS["send"] == ("send_message",)

@@ -87,6 +87,7 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"   # new
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0294
 ```
 
 Ingestion writes `expires_at = None`, so the thirty-day sweeper does not collect it and
@@ -219,6 +220,11 @@ above still applies, the secret scan included. A refusal records `refused` and a
 reason code on the artifact, a transient failure is retried at most three times,
 and neither reaches the conversation. Deleting the conversation deletes the
 document through the existing cascade on its source artifact.
+
+A readable text, Markdown, or PDF email attachment the owner saves takes the same path
+([ADR-0294](../adr/0294-save-email-attachments-to-the-chat.md)). Pressing Save or approving
+Chat's request is the human admission, and it needs the same `knowledge.write`. Source
+erasure removes the file and its document; email cache expiry does not.
 
 ## Chunking
 

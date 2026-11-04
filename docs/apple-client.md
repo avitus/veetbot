@@ -916,7 +916,7 @@ date, and one line per message counts its attachments and opens their list.
 Context leads with any spam flag, then Veetbot's summary (a thread not yet
 assessed says "Assessment pending" once), why the thread is in the priority
 list (its level and reason), the sender, Teach Veetbot, the attachments
-(listed, never opened), the draft's state with a way to ask for one, and a
+(listed, each with Save), the draft's state with a way to ask for one, and a
 Thread card with the account, the Gmail state and one Show original switch
 for the whole thread; its
 **Activity** tab replays the draft run's events and shows the calls that made
@@ -982,6 +982,9 @@ list and the reading column, teal for the gist rule and draft states, amber
 for attention, and filled capsules that keep contrasting text.
 
 Thread detail renders text and attachment metadata without remote content.
+Save on an attachment keeps a copy in the email's chat (ADR-0294), where it arrives on
+a reply and appears in Artifacts. The control then reads "Saved to chat" until the
+connection resets; a file over 32 MB says so instead, and a failure offers Retry.
 Feedback distinguishes people, topics, thread importance and reply need, reports
 the applied scope and judgment, and supports Undo. Changing the target clears
 the previous person or topic value; person feedback requires an explicit choice.

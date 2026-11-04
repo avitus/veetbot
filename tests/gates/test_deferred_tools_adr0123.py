@@ -25,10 +25,10 @@ from agent_core.bootstrap import Composition, build
 from agent_core.config import load_settings
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.rendering import (
-    UNINDEXED_DEFERRED_TOOLS,
     build_prefix,
     deferred_index_items,
     envelope_items,
+    is_unindexed_deferred,
     prefix_bytes,
 )
 from agent_core.domain.approvals import ApprovalResolutionType
@@ -239,7 +239,7 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     discovered = [spec for spec in plan.pinned_tool_specs if spec.name.startswith("mcp.")]
     # Nothing is dropped: every candidate has a definition or an index entry.
     assert plan.skipped_tool_names == ()
-    assert len(discovered) == 22
+    assert len(discovered) == 24  # Two more on the Gmail read server (ADR-0294).
     assert len(plan.tool_names) == 30
     assert "tool.call" in defined
     # The six management tools are deferred by the default agent's configuration.
@@ -257,6 +257,12 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     }
     assert START_CALL in writes
     assert writes <= deferred
+    # The instructions advertise it, so it spends no definition or index entry (ADR-0294).
+    assert "mcp.gmail_read.save_attachment" in deferred
+    assert "mcp.gmail_read.save_attachment" not in defined
+    assert "save_attachment" not in json.dumps(
+        [item.model_dump(mode="json") for item in deferred_index_items(plan.deferred_tool_specs)]
+    )
 
 
 async def test_the_cockpit_tools_are_index_entries_and_leave_the_definitions_alone(
@@ -317,7 +323,7 @@ async def test_a_website_bound_chat_plans_with_every_production_flag_on(tmp_path
     index_tokens = ConservativeTokenEstimator().estimate(
         envelope_items(deferred_index_items(plan.deferred_tool_specs)), plan.model_id
     )
-    indexed_count = sum(name not in UNINDEXED_DEFERRED_TOOLS for name in plan.deferred_tool_names)
+    indexed_count = sum(not is_unindexed_deferred(spec) for spec in plan.deferred_tool_specs)
     assert int(index["max_items"]) - indexed_count >= INDEX_ENTRY_HEADROOM
     assert int(index["max_tokens"]) - index_tokens >= INDEX_TOKEN_HEADROOM
 
@@ -368,7 +374,7 @@ async def test_an_agent_without_tool_call_records_what_it_cannot_offer(tmp_path:
     assert "tool.call" not in plan.tool_names
     offered = {*plan.tool_names, *plan.skipped_tool_names}
     assert {spec.name for spec in default.pinned_tool_specs} - {"tool.call"} <= offered
-    assert len(plan.skipped_tool_names) == len(legacy_tools) + 22 - 30
+    assert len(plan.skipped_tool_names) == len(legacy_tools) + 24 - 30
 
 
 @pytest.mark.parametrize("owner_requests", [True, False])

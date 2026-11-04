@@ -48,7 +48,7 @@ from agent_core.domain.tools import (
     ToolSource,
     ToolSpec,
 )
-from agent_core.mcp.configuration import build_stdio_environment
+from agent_core.mcp.configuration import build_stdio_environment, is_email_attachment_tool
 from agent_core.mcp.mapping import MCPMappingReport, map_discovered_tools
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
@@ -64,6 +64,15 @@ type CallInterceptor = Callable[
         ToolExecutionContext,
         str,
         str,
+        dict[str, Any],
+        Callable[[dict[str, Any]], Awaitable[MCPCallResult]],
+    ],
+    Awaitable[MCPCallResult],
+]
+# ADR-0294: stores the file a call returns and hands back a receipt.
+type EmailAttachmentSaver = Callable[
+    [
+        ToolExecutionContext,
         dict[str, Any],
         Callable[[dict[str, Any]], Awaitable[MCPCallResult]],
     ],
@@ -196,6 +205,7 @@ class MCPRuntime:
         warmup_retry_seconds: float = 60,
         warmup_attempts: int = 5,
         call_interceptor: CallInterceptor | None = None,
+        email_attachment_saver: EmailAttachmentSaver | None = None,
         access_tokens: MCPAccessTokens | None = None,
         owner_servers_enabled: bool = False,
     ) -> None:
@@ -236,6 +246,7 @@ class MCPRuntime:
         self._preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_PREPARATIONS)
         self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
         self._call_interceptor = call_interceptor
+        self._email_attachment_saver = email_attachment_saver
         # ADR-0255: owner-added rows, and the sealed sign-ins their tokens come from.
         self._access_tokens = access_tokens
         self._owner_servers_enabled = owner_servers_enabled
@@ -822,6 +833,21 @@ class MCPRuntime:
                     context,
                     spec.server_id,
                     remote_name,
+                    arguments,
+                    lambda values: self._connected_client(connection).call_tool(
+                        remote_name, values
+                    ),
+                )
+            if is_email_attachment_tool(spec.server_id, remote_name):
+                # The file's bytes stop here: nothing past this point may record them.
+                if self._email_attachment_saver is None:
+                    return MCPCallResult(
+                        content=("gmail.attachment_saver_unavailable",),
+                        is_error=True,
+                        structured={"effect_status": "not_applied"},
+                    )
+                return await self._email_attachment_saver(
+                    context,
                     arguments,
                     lambda values: self._connected_client(connection).call_tool(
                         remote_name, values

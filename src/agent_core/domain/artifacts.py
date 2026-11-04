@@ -20,6 +20,8 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "upload"
     TRAJECTORY_EXPORT = "trajectory_export"
     KNOWLEDGE_SOURCE = "knowledge_source"
+    # ADR-0294: a file saved from an email; the owner's press or approval admits it.
+    EMAIL_ATTACHMENT = "email_attachment"
 
 
 # ADR-0277: deletes files Chat generated in a chat; an unindexed deferral that
@@ -27,9 +29,14 @@ class ArtifactOrigin(StrEnum):
 ARTIFACT_DELETE_TOOL_NAME = "artifact.delete"
 
 # ADR-0122: every file a run exports rides on its final reply. Tool-output
-# captures and the owner's own uploads are never re-attached.
+# captures and the owner's own uploads are never re-attached. ADR-0294: so does
+# an email attachment the run saved.
 REPLY_ATTACHMENT_ORIGINS = frozenset(
-    {ArtifactOrigin.SANDBOX_EXPORT.value, ArtifactOrigin.MODEL_OUTPUT.value}
+    {
+        ArtifactOrigin.SANDBOX_EXPORT.value,
+        ArtifactOrigin.MODEL_OUTPUT.value,
+        ArtifactOrigin.EMAIL_ATTACHMENT.value,
+    }
 )
 
 
@@ -123,15 +130,22 @@ def claimed_upload(artifact: ArtifactRef, *, run_id: UUID, auto_ingest: bool) ->
     return artifact.model_copy(update=update, deep=True)
 
 
+# The origins a principal's press or approval admits to knowledge (ADRs 0120, 0293).
+AUTO_INGEST_ORIGINS = frozenset(
+    {ArtifactOrigin.UPLOAD.value, ArtifactOrigin.EMAIL_ATTACHMENT.value}
+)
+
+
 def retry_refusal(artifact: ArtifactRef) -> str | None:
     """Why `knowledge retry` must not reopen this artifact, or None when it may.
 
-    Only a chat upload whose automatic ingestion failed or was refused goes
-    back to pending; anything else would send a non-upload to the knowledge
-    service or re-extract a document already in knowledge (ADR-0284).
+    Only a chat upload or saved email attachment whose automatic ingestion failed
+    or was refused goes back to pending; anything else would send another kind of
+    file to the knowledge service or re-extract a document already in knowledge
+    (ADR-0284).
     """
 
-    if artifact.origin != ArtifactOrigin.UPLOAD.value:
+    if artifact.origin not in AUTO_INGEST_ORIGINS:
         return "only a chat upload can be retried"
     state = artifact.metadata.get(AUTO_INGEST_KEY)
     if state in {AUTO_INGEST_FAILED, AUTO_INGEST_REFUSED}:

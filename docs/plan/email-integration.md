@@ -32,7 +32,7 @@ Proactive monitoring is a documented recipe over existing schedules and
 notifications, not new runtime.
 
 Out of scope: calendar; permanent deletion (`users.messages.delete` appears in
-no roster); attachment download or upload; Gmail push and Pub/Sub; interval or
+no roster); attachment upload; Gmail push and Pub/Sub; interval or
 cron recurrence (roadmap B5); the email inbound Surface (B3) and the email
 notification transport (B4); a second mail provider; public self-service OAuth
 and per-principal mailbox lifecycle; and any auto-approval or standing-grant
@@ -84,7 +84,15 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
   offer. No unsubscribe address appears in a search result.
 - `get_thread(thread_id)` — every message in one thread: headers, plain-text
   body, label ids. HTML bodies are reduced to text; attachments are named
-  with filename, type, and size but never fetched.
+  with filename, type, and size but never fetched by this call.
+- `save_attachment(message_id, attachment_index, filename)`
+  ([ADR-0294](../adr/0294-save-email-attachments-to-the-chat.md)) — stores one listed
+  attachment in the run's chat, up to 32 MiB, after the owner approves. The application-only
+  `fetch_attachment` takes the same arguments for the Save button. The position is the
+  attachment's place in `get_thread`'s list, because Gmail issues a new attachment id on
+  every read, and a name that does not match is `gmail.attachment_not_found`. Both return
+  the file in structured content only, and the MCP runtime stores it and returns a receipt,
+  so its bytes reach no event, invocation, or checkpoint.
 - `list_labels()` — system and user label ids and names.
 
 `gmail_write`:
@@ -347,7 +355,8 @@ one bounded result always returns. The server maps upstream failures to a
 closed set of stable, content-free codes: credential rejection, rate limit,
 temporary provider unavailability, permanent provider rejection, invalid
 provider output, and — the sixth, and the one the two write servers need —
-an outcome the server cannot determine. Google's raw error text, diagnostic
+an outcome the server cannot determine. Fetching a file adds a missing and an
+oversized attachment (ADR-0294). Google's raw error text, diagnostic
 headers, and `WWW-Authenticate` values never cross the pipe — normalized
 mailbox content is the tool result, and it is the only upstream content that
 does. Connect-time auth failure is

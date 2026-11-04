@@ -128,6 +128,7 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var learning: EmailLearningState?
     @Published public private(set) var revisions: [EmailDraftView] = []
     @Published public private(set) var archiveErrors: [UUID: String] = [:]
+    @Published private var attachmentSaves: [EmailAttachmentKey: EmailAttachmentSaveState] = [:]
     @Published private var archiveSubmitting: Set<UUID> = []
     @Published private var archiveUnsupportedAccounts: Set<String> = []
     @Published private var archiveUnavailableThreads: Set<UUID> = []
@@ -371,6 +372,7 @@ public final class EmailViewModel: ObservableObject {
         archiveTasks = [:]
         archiveRequests = [:]
         archiveErrors = [:]
+        attachmentSaves = [:]
         archiveSubmitting = []
         archiveHiddenThreads = []
         archiveUnsupportedAccounts = []
@@ -1088,6 +1090,45 @@ public final class EmailViewModel: ObservableObject {
             await loadReview(activation: nil)
         } catch { if generation == connection { report(error, draft: true) } }
     }
+
+    public func attachmentSave(_ key: EmailAttachmentKey) -> EmailAttachmentSaveState? {
+        attachmentSaves[key]
+    }
+
+    /// One press on Save. The file lands on the email's chat, so a saved one needs no
+    /// second copy, and a press after a failure is a new request rather than a replay.
+    public func saveAttachment(_ key: EmailAttachmentKey, filename: String) async {
+        guard let api = makeAPIClient() else { return }
+        switch attachmentSaves[key] {
+        case .saving, .saved: return
+        case .failed, nil: break
+        }
+        let connection = generation
+        attachmentSaves[key] = .saving
+        do {
+            let operation = try await api.saveEmailAttachment(
+                key, filename: filename, idempotencyKey: UUID().uuidString)
+            // A slice lasts two minutes; past this the file may yet arrive in the chat.
+            var status = operation.status
+            for _ in 0..<150 where !status.isTerminal {
+                try await Task.sleep(nanoseconds: pollNanoseconds)
+                guard generation == connection else { return }
+                status = try await api.emailOperation(operation.operationID).status
+            }
+            guard generation == connection else { return }
+            attachmentSaves[key] = status == .completed
+                ? .saved
+                : .failed(status.isTerminal ? Self.attachmentNotSavedMessage : Self.attachmentStillSavingMessage)
+        } catch {
+            guard generation == connection, !(error is CancellationError) else { return }
+            attachmentSaves[key] = .failed(error.localizedDescription)
+            if case HTTPTransportError.reauthenticationRequired = error { report(error) }
+        }
+    }
+
+    private static let attachmentNotSavedMessage = "This attachment could not be saved. Try again."
+    private static let attachmentStillSavingMessage =
+        "This is taking a while. Check the email's chat before trying again."
 
     /// Follows a draft or send run the owner is waiting on. A send that completes without
     /// sending is reported; one that outlasts the local wait is marked for a later read to open.

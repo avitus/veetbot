@@ -35,6 +35,8 @@ from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KE
 
 _ERASED = "[email source erased]"
 _IDENTITY_FIELDS = frozenset({"id", "message_id", "thread_id", "history_id", "internal_date"})
+# What makes a value a copy of a message; a saved file's receipt names it (ADR-0294).
+_SOURCE_CONTENT_KEYS = ("body", "from", "snippet", "filename")
 _UNFINISHED_INVOCATIONS = ("PROPOSED", "AUTHORIZED", "WAITING_FOR_APPROVAL", "RUNNING")
 
 
@@ -104,7 +106,7 @@ def erase_result(
         (source_thread == thread_id or (source_thread is None and "message_id" in value))
         and isinstance(message_id, str)
         and message_id in message_ids
-        and any(key in value for key in ("body", "from", "snippet"))
+        and any(key in value for key in _SOURCE_CONTENT_KEYS)
     )
     preview = source_thread == thread_id and message_id is None and "snippet" in value
     if target or preview:
@@ -114,7 +116,7 @@ def erase_result(
             "body_complete": False,
             "headers_complete": False,
         }
-    if isinstance(message_id, str) and any(key in value for key in ("body", "from", "snippet")):
+    if isinstance(message_id, str) and any(key in value for key in _SOURCE_CONTENT_KEYS):
         return value
     return {
         key: erase_result(item, thread_id, message_ids, source_thread, account_id=account_id)
@@ -157,7 +159,7 @@ def source_present(
         and message_id in message_ids
     ):
         return True
-    if isinstance(message_id, str) and any(key in value for key in ("body", "from", "snippet")):
+    if isinstance(message_id, str) and any(key in value for key in _SOURCE_CONTENT_KEYS):
         return False
     return any(
         source_present(item, thread_id, message_ids, current, account_id=account_id)
@@ -250,6 +252,8 @@ def source_tool(name: object, server: str | None) -> bool:
                 "get_message_body",
                 "search_threads",
                 "get_unsubscribe",
+                "fetch_attachment",
+                "save_attachment",
             )
         }
     )

@@ -3281,6 +3281,100 @@ import SwiftUI
         }.joined(separator: ",")
     }
 
+    // MARK: - Saving an attachment (ADR-0294)
+
+    private func saveOperationJSON(_ status: String) -> String {
+        "{\"operation_id\":\"\(threadID)\",\"run_id\":\"\(runID)\",\"status\":\"\(status)\",\"replayed\":false}"
+    }
+
+    @Test func testSavingAnAttachmentNamesItsPositionAndFollowsTheOperationToSaved() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            return (200, self.saveOperationJSON(server.read() == 1 ? "RUNNING" : "COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 2)
+        #expect(model.attachmentSave(key) == nil)
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+
+        #expect(model.attachmentSave(key) == .saved)
+        let bodies = server.bodies
+        #expect(bodies.count == 1)
+        let body = try #require(bodies.first)
+        #expect(body["message_id"] as? String == "m1")
+        #expect(body["attachment_index"] as? Int == 2)
+        #expect(body["filename"] as? String == "invoice.pdf")
+        #expect((body["idempotency_key"] as? String)?.isEmpty == false)
+        #expect(server.reads == 2)
+    }
+
+    @Test func testAFailedSaveSaysSoAndAPressAfterItIsANewRequest() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            return (200, self.saveOperationJSON(server.bodies.count == 1 ? "FAILED" : "COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed(let message) = model.attachmentSave(key) else {
+            Issue.record("A failed run must read as failed")
+            return
+        }
+        #expect(message.contains("could not be saved"))
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(Set(server.bodies.compactMap { $0["idempotency_key"] as? String }).count == 2)
+    }
+
+    @Test func testARefusedSaveShowsTheServersReasonAndASavedFileIsNotSavedAgain() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                if server.bodies.count == 1 {
+                    return (409, "{\"error\":{\"code\":\"conflict\",\"message\":\"Veetbot is still working on this thread. Try again in a moment.\",\"details\":{}}}")
+                }
+            }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed(let message) = model.attachmentSave(key) else {
+            Issue.record("A refusal must read as failed")
+            return
+        }
+        #expect(message.contains("still working"))
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(server.bodies.count == 2, "A saved file needs no second copy")
+    }
+
+    @Test func testAConnectionResetForgetsSaveState() async throws {
+        let model = try makeModel(pollNanoseconds: 1_000) { _ in (200, self.saveOperationJSON("COMPLETED")) }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        model.resetConnection()
+        #expect(model.attachmentSave(key) == nil)
+    }
+
+    @Test func testAFileOverTheLimitCannotBeSaved() {
+        #expect(EmailAttachmentView.canSave(size: nil))
+        #expect(EmailAttachmentView.canSave(size: 32 * 1024 * 1024))
+        #expect(!EmailAttachmentView.canSave(size: 32 * 1024 * 1024 + 1))
+    }
+
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
         pollNanoseconds: UInt64 = 1_000_000_000,
@@ -3469,6 +3563,17 @@ private final class StatusBackoffRecorder: @unchecked Sendable {
     private var values: [UInt64] = []
     func append(_ value: UInt64) { lock.withLock { values.append(value) } }
     var snapshot: [UInt64] { lock.withLock { values } }
+}
+
+/// What the attachment tests' fake server saw; URL loading runs off the main actor.
+private final class AttachmentSaveServer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [[String: Any]] = []
+    private var readCount = 0
+    var bodies: [[String: Any]] { lock.withLock { recorded } }
+    var reads: Int { lock.withLock { readCount } }
+    func posted(_ body: [String: Any]) { lock.withLock { recorded.append(body) } }
+    func read() -> Int { lock.withLock { readCount += 1; return readCount } }
 }
 
 private final class EmailTestURLProtocol: URLProtocol {

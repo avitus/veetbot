@@ -1105,6 +1105,7 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"
 
 
 @dataclass(frozen=True)
@@ -1122,9 +1123,10 @@ random identifier and three facts about bytes. `ArtifactMetadata` is
 what the store holds and what `GET /v1/artifacts/{id}` reads after
 authorization, which ADR-0028 already specifies.
 
-`origin` exists because the six sources have different review
+`origin` exists because the seven sources have different review
 properties and an operator asking "what did this run produce" wants
-them separated. `TOOL_OUTPUT` is the truncation path
+them separated. `EMAIL_ATTACHMENT` is a file saved from an email (ADR-0294),
+which rides on the run's reply as an export does. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
 `artifact.export` of a workspace path; `MODEL_OUTPUT` is
 `artifact.export` of text the model wrote, produced since ADR-0122, and

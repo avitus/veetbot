@@ -25,8 +25,8 @@ from agent_core.domain.approvals import (
     approval_status_for,
 )
 from agent_core.domain.artifacts import (
+    AUTO_INGEST_ORIGINS,
     REPLY_ATTACHMENT_ORIGINS,
-    ArtifactOrigin,
     auto_ingest_due,
     auto_ingest_metadata,
     claimed_upload,
@@ -1751,7 +1751,7 @@ class InMemoryArtifactRepository:
                 for artifact in self._rows.values()
                 if artifact.tenant_id == principal.tenant_id
                 and artifact.principal_id == principal.principal_id
-                and artifact.origin == ArtifactOrigin.UPLOAD.value
+                and artifact.origin in AUTO_INGEST_ORIGINS
                 and artifact.metadata.get("auto_ingest") == "pending"
                 and auto_ingest_due(artifact.metadata, now)
             ]

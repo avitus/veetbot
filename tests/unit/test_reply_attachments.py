@@ -252,9 +252,11 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
         [first, written, repeat, renamed, upload, captured], now=datetime(2026, 9, 23, tzinfo=UTC)
     )
 
-    assert {ArtifactOrigin.SANDBOX_EXPORT.value, ArtifactOrigin.MODEL_OUTPUT.value} == set(
-        REPLY_ATTACHMENT_ORIGINS
-    )
+    assert {
+        ArtifactOrigin.SANDBOX_EXPORT.value,
+        ArtifactOrigin.MODEL_OUTPUT.value,
+        ArtifactOrigin.EMAIL_ATTACHMENT.value,  # ADR-0294.
+    } == set(REPLY_ATTACHMENT_ORIGINS)
     assert [artifact.id for artifact in chosen] == [written.id, first.id, renamed.id]
     assert reply_file_reference(written) == FileReferencePart(
         artifact_id=written.id,

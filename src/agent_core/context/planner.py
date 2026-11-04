@@ -13,10 +13,10 @@ from weakref import WeakValueDictionary
 from agent_core.context.budget import ContextBudgetAllocator
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.rendering import (
-    UNINDEXED_DEFERRED_TOOLS,
     build_prefix,
     deferred_index_items,
     envelope_items,
+    is_unindexed_deferred,
     prefix_bytes,
 )
 from agent_core.domain.agents import DEFERRED_TOOLS_METADATA_KEY, AgentSpec, Principal
@@ -536,7 +536,7 @@ class EventContextPlanner:
             owner_tools = _named_owner_tools(session, owner_tools)
         # ADR-0261: an unindexed deferral never competes for a definition or an
         # index entry; it is pinned behind tool.call or recorded as skipped.
-        unindexed = [tool for tool in tools if tool.name in UNINDEXED_DEFERRED_TOOLS]
+        unindexed = [tool for tool in tools if is_unindexed_deferred(tool)]
         if unindexed:
             tools = [tool for tool in tools if tool not in unindexed]
         if (

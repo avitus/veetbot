@@ -356,6 +356,7 @@ from agent_core.application.device_management import (
     NotificationInboxService,
 )
 from agent_core.application.email import EmailExperienceService
+from agent_core.application.email_attachments import EmailAttachmentSaver
 from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.application.job_execution import JobExecution
@@ -1237,7 +1238,11 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "your reply automatically. Never say a file is attached unless its export or "
     "generation tool succeeded. To delete files you generated in this chat when the owner "
     "asks, call artifact.delete through tool.call with their artifact ids; it never deletes "
-    "the owner's uploads. When a schedule, job or widget fails, find the cause before answering, "
+    "the owner's uploads. To keep an email attachment as a file when the owner asks, call "
+    "mcp.gmail_read.save_attachment through tool.call (each account's read server has one) "
+    "with the message id, its zero-based attachment_index and filename from get_thread; it "
+    "asks the owner first, and your reply carries the file. "
+    "When a schedule, job or widget fails, find the cause before answering, "
     "never asking the owner for errors you can read: call run.inspect through tool.call, and "
     "cockpit.read's diagnostics for a widget. A tile showing Paused is the device's watchdog, "
     "not a paused schedule. Where enabled, code.read, code.draft, code.test and code.propose "
@@ -4775,6 +4780,7 @@ async def _compose(
             warmup_retry_seconds=float(warmup_limits["warmup_retry_seconds"]),
             warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
+            email_attachment_saver=EmailAttachmentSaver(SignatureAttachmentInspector()),
             access_tokens=owner_mcp_servers,
             owner_servers_enabled=settings.mcp_servers_enabled,
         )

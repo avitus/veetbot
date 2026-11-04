@@ -87,7 +87,13 @@ from agent_core.runtime.email_correspondence import (
 from agent_core.runtime.email_junk import EmailJunkFilter
 from agent_core.runtime.email_state import read_value, records, save_value, thread_summaries
 from agent_core.runtime.email_subscription_tasks import run_subscription, subscription_modes
-from agent_core.runtime.loop import RunContext, _invoke_model, checkpoint, select_final_message
+from agent_core.runtime.loop import (
+    RunContext,
+    _invoke_model,
+    checkpoint,
+    complete_reply,
+    select_final_message,
+)
 
 EMAIL_MESSAGE_WINDOW = 100
 EMAIL_BODY_WINDOW_BYTES = 512 * 1024
@@ -106,6 +112,7 @@ EMAIL_TASK_SERVER_MODES: dict[str, tuple[str, ...]] = {
     "draft": (),
     # A consented batch starts only what its mechanisms call; see ``subscription_modes``.
     "subscription": (),
+    "attachment": ("read",),
 }
 
 type ServerPreparation = Callable[[UUID, Principal, frozenset[str]], Awaitable[None]]
@@ -218,6 +225,8 @@ class EmailTaskRunner:
             await io.recover_reads()
             if task.kind == "archive":
                 return await io.archive()
+            if task.kind == "attachment":
+                return await io.save_attachment()
             if task.kind == "subscription":
                 return await run_subscription(io)
             if task.kind == "refresh":
@@ -2150,6 +2159,24 @@ class _TaskIO:
             instruction=instruction,
             run=c.run,
             lease=c.lease,
+        )
+
+    async def save_attachment(self) -> RunOutcome:
+        """Store one attachment and put it on the thread chat's reply (ADR-0294)."""
+        selection = self.task.attachment
+        if selection is None:
+            raise ConflictError("attachment task has no selection")
+        await self.call(
+            self.task.account_ids[0],
+            "fetch_attachment",
+            selection.model_dump(mode="json"),
+            operation="attachment",
+        )
+        # The sender's file name stays out of this text; the file chip shows it.
+        message = AssistantMessage(content=[TextPart(text="Saved this attachment from the email.")])
+        return RunOutcome(
+            kind=OutcomeKind.COMPLETED,
+            final_message=await complete_reply(self.context, message),
         )
 
     async def archive(self) -> RunOutcome:

@@ -89,8 +89,8 @@ from agent_core.domain.approvals import (
 )
 from agent_core.domain.artifacts import (
     AUTO_INGEST_NOT_BEFORE_KEY,
+    AUTO_INGEST_ORIGINS,
     REPLY_ATTACHMENT_ORIGINS,
-    ArtifactOrigin,
     auto_ingest_metadata,
     claimed_upload,
 )
@@ -3323,7 +3323,7 @@ class PostgresArtifactRepository:
                 select(ArtifactRow)
                 .where(
                     ArtifactRow.metadata_json["auto_ingest"].astext == "pending",
-                    ArtifactRow.origin == ArtifactOrigin.UPLOAD.value,
+                    ArtifactRow.origin.in_(sorted(AUTO_INGEST_ORIGINS)),
                     ArtifactRow.tenant_id == principal.tenant_id,
                     ArtifactRow.principal_id == principal.principal_id,
                     # A deferred upload leaves the batch, so it never blocks a due one.

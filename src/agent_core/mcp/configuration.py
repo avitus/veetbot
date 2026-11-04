@@ -36,6 +36,32 @@ _EMAIL_CLASSIFICATIONS = {
 _EMAIL_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
+# ADR-0294: both read a file's bytes, so the runtime stores them instead of
+# returning them. The second is the model's and always asks the owner.
+EMAIL_FETCH_ATTACHMENT_TOOL = "fetch_attachment"
+EMAIL_SAVE_ATTACHMENT_TOOL = "save_attachment"
+
+
+def is_email_attachment_tool(server_id: str | None, remote_name: str) -> bool:
+    """Whether this call on a named account's read server returns a file."""
+
+    return (
+        is_email_server_id(server_id)
+        and server_id is not None
+        and server_id.endswith("_read")
+        and remote_name in {EMAIL_FETCH_ATTACHMENT_TOOL, EMAIL_SAVE_ATTACHMENT_TOOL}
+    )
+
+
+def is_model_email_attachment_action(server_id: str | None, action_name: str) -> bool:
+    """Whether a proposed action is the model's request to save a file."""
+
+    return (
+        is_email_attachment_tool(server_id, EMAIL_SAVE_ATTACHMENT_TOOL)
+        and action_name == f"mcp.{server_id}.{EMAIL_SAVE_ATTACHMENT_TOOL}"
+    )
+
+
 def is_mutating_email_server_id(server_id: str | None) -> bool:
     """Keep ADR-0071's approval floor for every named Gmail account."""
 
