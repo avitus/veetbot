@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+import unicodedata
+from collections.abc import Callable, Iterable
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
@@ -276,6 +277,111 @@ def _pieces(run: str, level: int) -> list[str]:
         half = max(1, len(run) // 2)
         pieces = [run[:half], run[half:]] if len(run) > 1 else [run]
     return pieces
+
+
+# A question's words, in any script, with a possessive "'s" (straight or
+# curly, either case, at the end of the word) kept with its word; a title's
+# file extension, which the model may quote with the name; and the quotes
+# and sentence punctuation that may sit against a name without being part
+# of it.
+_QUESTION_WORD = re.compile(r"[^\W_]+(?:['\u2019][sS](?!\w))?")
+_FILE_EXTENSION = re.compile(r"\.[0-9A-Za-z]+$")
+_POSSESSIVE = re.compile(r"'s(?!\w)")
+_NAME_QUOTES = "\"'\u201c\u201d\u2018\u2019"
+_NAME_EDGE = _NAME_QUOTES + "()[]{}<>.,;:!?"
+
+
+def _name_key(text: str) -> str:
+    """A name, or a run of question text, as it is compared.
+
+    Case folds (Unicode case folding, so "Straße" is "STRASSE"), a possessive
+    folds off, spacing collapses, and the quotes and sentence punctuation at
+    either end are not part of the name; punctuation inside it is.
+    """
+
+    folded = text.casefold().replace("\u2019", "'")
+    return " ".join(_POSSESSIVE.sub("", folded).split()).strip(_NAME_EDGE)
+
+
+def _name_extent(text: str, first: int, last: int) -> tuple[int, int]:
+    """The run of question text a run of words stands in: out to whitespace, less its edges.
+
+    One rule serves comparison and removal: a word run grows over the
+    characters joined to it ("C" in "C#" becomes "C#", "C++" is whole), then
+    gives back the quotes and sentence punctuation at its ends, which the
+    name does not own.
+    """
+
+    while first > 0 and not text[first - 1].isspace():
+        first -= 1
+    while last < len(text) and not text[last].isspace():
+        last += 1
+    while first < last and text[first] in _NAME_EDGE:
+        first += 1
+    while last > first and text[last - 1] in _NAME_EDGE:
+        last -= 1
+    return first, last
+
+
+def knowledge_question_without_document_names(text: str, titles: Iterable[str]) -> str:
+    """The question with the name of any visible document taken out (ADR-0293).
+
+    A search asks the corpus, not the catalogue: a question that names a
+    document by its title or file name, as a model does to aim at it, matches
+    the document's cover page ahead of the passage it wants. Each name is
+    matched as written, as a contiguous run of the question in any case and
+    script, with or without its file extension and a possessive, and the
+    quotes around it go with it; punctuation inside a name counts, so "C#"
+    is not "C++", while the sentence punctuation after one stays. The words
+    of a name that appear apart stay, as does a question that is nothing but
+    a name.
+    """
+
+    asked = text
+    # Composed and decomposed spellings of one letter are one word.
+    text = unicodedata.normalize("NFC", text)
+    names: dict[tuple[str, ...], set[str]] = {}
+    for title in titles:
+        title = unicodedata.normalize("NFC", title)
+        for phrase in (title, _FILE_EXTENSION.sub("", title)):
+            words = tuple(_name_key(match.group(0)) for match in _QUESTION_WORD.finditer(phrase))
+            if words and all(words):
+                names.setdefault(words, set()).add(_name_key(phrase))
+    matches = list(_QUESTION_WORD.finditer(text))
+    keys = [_name_key(match.group(0)) for match in matches]
+    dropped = [False] * len(matches)
+    for words, written in sorted(names.items(), key=lambda item: -len(item[0])):
+        size = len(words)
+        for start in range(len(keys) - size + 1):
+            if tuple(keys[start : start + size]) != words:
+                continue
+            first, last = _name_extent(
+                text, matches[start].start(), matches[start + size - 1].end()
+            )
+            if _name_key(text[first:last]) in written:
+                dropped[start : start + size] = [True] * size
+    if not any(dropped) or all(dropped):
+        return asked
+    kept: list[str] = []
+    cursor = 0
+    index = 0
+    while index < len(matches):
+        if not dropped[index]:
+            index += 1
+            continue
+        end = index
+        while end + 1 < len(matches) and dropped[end + 1]:
+            end += 1
+        first, last = _name_extent(text, matches[index].start(), matches[end].end())
+        while first > cursor and text[first - 1] in _NAME_QUOTES:
+            first -= 1
+        while last < len(text) and text[last] in _NAME_QUOTES:
+            last += 1
+        kept.append(text[cursor:first])
+        cursor = last
+        index = end + 1
+    kept.append(text[cursor:])
+    return " ".join("".join(kept).split())
 
 
 def knowledge_embedding_windows(
