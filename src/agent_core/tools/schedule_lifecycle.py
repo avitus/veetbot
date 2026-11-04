@@ -492,9 +492,14 @@ class ScheduleUpdateTool:
         del tenant_id
         schedule_id = str(arguments.get("schedule_id", "<invalid>"))
         expected_revision = arguments.get("expected_revision", "<invalid>")
+        view = arguments
+        if self.offers_mcp_servers and "use_mcp_servers" in arguments:
+            # ADR-0291: an approval names the servers, and [] shows they are being cleared.
+            view = {key: value for key, value in arguments.items() if key != "use_mcp_servers"}
+            view["mcp_servers"] = sorted(arguments["use_mcp_servers"])
         return (
             f"Update schedule {schedule_id} at revision {expected_revision}",
-            arguments,
+            view,
         )
 
     async def execute(

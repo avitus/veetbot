@@ -225,6 +225,25 @@ async def test_an_update_replaces_the_servers_and_their_scopes(tmp_path: Path) -
     assert patched.revision.requested_scopes == {"mcp.svp_read.use"}
 
 
+@pytest.mark.parametrize(
+    ("named", "listed"), [(["svp_read", "docs"], ["docs", "svp_read"]), ([], [])]
+)
+async def test_an_update_approval_lists_the_servers_it_sets(
+    named: list[str], listed: list[str]
+) -> None:
+    from agent_core.tools.schedule_lifecycle import (
+        CockpitMCPScheduleUpdateTool,
+        MCPScheduleUpdateTool,
+    )
+
+    arguments = {"schedule_id": "id", "expected_revision": 2, "use_mcp_servers": named}
+    for tool in (MCPScheduleUpdateTool, CockpitMCPScheduleUpdateTool):
+        _summary, view = await tool(cast(Any, None)).approval_view(arguments, tenant_id="t")
+
+        assert view == {"schedule_id": "id", "expected_revision": 2, "mcp_servers": listed}
+    assert arguments["use_mcp_servers"] == named
+
+
 def _patch(**values: Any) -> Any:
     from agent_core.domain.schedules import ScheduleDefinitionPatch
 
