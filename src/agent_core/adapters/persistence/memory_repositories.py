@@ -1885,8 +1885,10 @@ class PostgresKnowledgeStore:
                         KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
                     )
                     .where(*eligible, *unseen, vector.op("@@")(any_term))
+                    # Every matching chunk, as the in-memory store ranks them: a
+                    # limit here would drop a later document's first passages
+                    # before the per-document reservation sees them (ADR-0293).
                     .order_by(coverage.desc(), rank.desc(), KnowledgeChunkRow.chunk_id)
-                    .limit(limit)
                 )
             ).all()
             for chunk, document, raw_coverage in rows:

@@ -285,7 +285,7 @@ def _pieces(run: str, level: int) -> list[str]:
 # and sentence punctuation that may sit against a name without being part
 # of it.
 _QUESTION_WORD = re.compile(r"[^\W_]+(?:['\u2019][sS](?!\w))?")
-_FILE_EXTENSION = re.compile(r"\.[0-9A-Za-z]{1,5}$")
+_FILE_EXTENSION = re.compile(r"\.[0-9A-Za-z]+$")
 _POSSESSIVE = re.compile(r"'s(?!\w)")
 _NAME_QUOTES = "\"'\u201c\u201d\u2018\u2019"
 _NAME_EDGE = _NAME_QUOTES + "()[]{}<>.,;:!?"

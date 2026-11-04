@@ -90,3 +90,10 @@ def test_a_decomposed_title_matches_a_composed_question() -> None:
     assert knowledge_question_without_document_names("Cafe\u0301 opening hours", ["Caf\u00e9"]) == (
         "opening hours"
     )
+
+
+def test_an_extension_of_any_length_drops_with_the_title() -> None:
+    asked = "document installation steps"
+    assert knowledge_question_without_document_names(asked, ["document.longext"]) == (
+        "installation steps"
+    )

@@ -972,13 +972,18 @@ class InMemoryKnowledgeStore:
         self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
 
+    def _source_erased(self, document: KnowledgeDocument) -> bool:
+        """The PostgreSQL store's source fence: a non-upload source of a people-erased run."""
+
+        return (
+            document.source_ref.origin != "upload"
+            and document.source_ref.run_id in self._people_erased_runs
+        )
+
     async def ingest(self, prepared: KnowledgeIngestPrepared) -> None:
         async with self._lock:
             document = prepared.document
-            if (
-                document.source_ref.origin != "upload"
-                and document.source_ref.run_id in self._people_erased_runs
-            ):
+            if self._source_erased(document):
                 raise RunCancelledError("People erasure fenced knowledge ingestion")
             if document.row_id in self._documents:
                 raise ConflictError("knowledge document row already exists")
@@ -1045,7 +1050,7 @@ class InMemoryKnowledgeStore:
                     document.valid_to is not None and document.valid_to <= as_of
                 ):
                     continue
-                if not _visible(document, query):
+                if not _visible(document, query) or self._source_erased(document):
                     continue
                 if (
                     SENSITIVITY_ORDER[document.sensitivity]
@@ -1126,6 +1131,7 @@ class InMemoryKnowledgeStore:
                 and document.valid_from <= as_of
                 and (document.valid_to is None or document.valid_to > as_of)
                 and _visible(document, query)
+                and not self._source_erased(document)
                 and SENSITIVITY_ORDER[document.sensitivity]
                 <= SENSITIVITY_ORDER[query.sensitivity_ceiling]
             }

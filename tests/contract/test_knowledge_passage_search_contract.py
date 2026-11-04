@@ -185,6 +185,29 @@ async def test_visible_titles_follow_the_visibility_rule() -> None:
     assert sorted(await store.visible_titles(_query())) == ["Document 1", "Document 2"]
 
 
+async def test_visible_titles_honour_the_people_erasure_fence() -> None:
+    """A non-upload document of an erased run is invisible to search, so its title is too."""
+
+    store = await _store(_document(1, "# Mine\n\nA rollback procedure."))
+    prepared = _document(2, "# Theirs\n\nAnother rollback procedure.")
+    fenced = prepared.model_copy(
+        update={
+            "document": prepared.document.model_copy(
+                update={
+                    "source_ref": prepared.document.source_ref.model_copy(
+                        update={"origin": "model_output", "run_id": UUID(int=72)}
+                    )
+                }
+            )
+        }
+    )
+    await store.ingest(fenced)
+    assert sorted(await store.visible_titles(_query())) == ["Document 1", "Document 2"]
+    store._people_erased_runs[UUID(int=72)] = NOW
+    assert await store.visible_titles(_query()) == ["Document 1"]
+    assert [p.document_id for p in await store.search(_query())] == [UUID(int=2_001)]
+
+
 async def test_sensitivity_ceiling_and_validity_window_are_hard_filters() -> None:
     store = await _store(
         _document(1, "Rollback procedure, restricted.", sensitivity=Sensitivity.RESTRICTED),
