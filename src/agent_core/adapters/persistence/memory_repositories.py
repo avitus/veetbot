@@ -78,6 +78,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledE
 from agent_core.domain.knowledge import (
     DocumentAuthority,
     KnowledgeChunk,
+    KnowledgeChunkEmbedding,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
@@ -1715,6 +1716,20 @@ def _chunk(row: KnowledgeChunkRow) -> KnowledgeChunk:
     )
 
 
+def _vector_rows(embeddings: Sequence[KnowledgeChunkEmbedding]) -> list[dict[str, Any]]:
+    return [
+        {
+            "chunk_id": embedding.chunk_id,
+            "space_key": embedding.space.key,
+            "window": embedding.window,
+            "space": embedding.space.model_dump(mode="json"),
+            "text_version": embedding.text_version,
+            "embedding": list(checked_vector(embedding.vector, embedding.space)),
+        }
+        for embedding in embeddings
+    ]
+
+
 _DOCUMENT_AUTHORITY_WEIGHT = {
     DocumentAuthority.PRINCIPAL_AUTHORED: 1.0,
     DocumentAuthority.PRINCIPAL_SUPPLIED: 0.7,
@@ -1755,17 +1770,7 @@ class PostgresKnowledgeStore:
         )
         if prepared.embeddings:
             await self._session.execute(
-                pg_insert(KnowledgeChunkVectorRow),
-                [
-                    {
-                        "chunk_id": embedding.chunk_id,
-                        "space_key": embedding.space.key,
-                        "space": embedding.space.model_dump(mode="json"),
-                        "text_version": embedding.text_version,
-                        "embedding": list(checked_vector(embedding.vector, embedding.space)),
-                    }
-                    for embedding in prepared.embeddings
-                ],
+                pg_insert(KnowledgeChunkVectorRow), _vector_rows(prepared.embeddings)
             )
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None:
@@ -1885,23 +1890,31 @@ class PostgresKnowledgeStore:
         if semantic is not None:
             # The semantic arm (knowledge-documents.md, "Indexing"): exact
             # cosine distance over every eligible chunk vector in the query's
-            # space; PostgreSQL evaluates eligibility before the limit.
-            distance = KnowledgeChunkVectorRow.embedding.cosine_distance(
-                list(checked_vector(semantic.vector, semantic.space))
+            # space, a chunk scored by its nearest window; PostgreSQL
+            # evaluates eligibility before the limit.
+            distance = func.min(
+                KnowledgeChunkVectorRow.embedding.cosine_distance(
+                    list(checked_vector(semantic.vector, semantic.space))
+                )
+            )
+            best = (
+                select(KnowledgeChunkVectorRow.chunk_id, distance.label("distance"))
+                .where(KnowledgeChunkVectorRow.space_key == semantic.space.key)
+                .group_by(KnowledgeChunkVectorRow.chunk_id)
+                .subquery()
             )
             rows = (
                 await self._session.execute(
-                    select(KnowledgeChunkRow, KnowledgeDocumentRow, distance.label("distance"))
-                    .join(
-                        KnowledgeChunkVectorRow,
-                        KnowledgeChunkVectorRow.chunk_id == KnowledgeChunkRow.chunk_id,
-                    )
+                    select(KnowledgeChunkRow, KnowledgeDocumentRow, best.c.distance)
+                    .join(best, best.c.chunk_id == KnowledgeChunkRow.chunk_id)
                     .join(
                         KnowledgeDocumentRow,
                         KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
                     )
-                    .where(*eligible, KnowledgeChunkVectorRow.space_key == semantic.space.key)
-                    .order_by(func.round(distance.cast(Numeric), 7), KnowledgeChunkRow.chunk_id)
+                    .where(*eligible)
+                    .order_by(
+                        func.round(best.c.distance.cast(Numeric), 7), KnowledgeChunkRow.chunk_id
+                    )
                     .limit(limit)
                 )
             ).all()
@@ -1967,6 +1980,53 @@ class PostgresKnowledgeStore:
             .where(KnowledgeChunkRow.chunk_id == chunk_id, _knowledge_source_visible())
         )
         return None if row is None else _chunk(row)
+
+    async def chunks_without_vectors(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        space_key: str,
+        *,
+        sensitivities: Sequence[Sensitivity],
+        limit: int,
+    ) -> list[KnowledgeChunk]:
+        seen = (
+            select(KnowledgeChunkVectorRow.chunk_id)
+            .where(
+                KnowledgeChunkVectorRow.chunk_id == KnowledgeChunkRow.chunk_id,
+                KnowledgeChunkVectorRow.space_key == space_key,
+            )
+            .exists()
+        )
+        rows = (
+            await self._session.scalars(
+                select(KnowledgeChunkRow)
+                .join(
+                    KnowledgeDocumentRow,
+                    KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+                )
+                .where(
+                    KnowledgeDocumentRow.tenant_id == tenant_id,
+                    KnowledgeDocumentRow.ingested_by_principal_id == principal_id,
+                    KnowledgeDocumentRow.valid_to.is_(None),
+                    KnowledgeDocumentRow.sensitivity.in_([item.value for item in sensitivities]),
+                    _knowledge_source_visible(),
+                    ~seen,
+                )
+                .order_by(KnowledgeChunkRow.document_row_id, KnowledgeChunkRow.ordinal)
+                .limit(limit)
+            )
+        ).all()
+        return [_chunk(row) for row in rows]
+
+    async def add_embeddings(self, embeddings: Sequence[KnowledgeChunkEmbedding]) -> None:
+        if not embeddings:
+            return
+        await self._session.execute(
+            pg_insert(KnowledgeChunkVectorRow)
+            .values(_vector_rows(embeddings))
+            .on_conflict_do_nothing(constraint="pk_knowledge_chunk_vectors")
+        )
 
     async def delete(self, document_id: UUID, principal: Principal) -> list[ArtifactRef]:
         rows = list(

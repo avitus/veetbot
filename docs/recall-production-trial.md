@@ -3,7 +3,11 @@
 The owner has requested a limited production trial with daily review of actual
 use. This replaces filling in the synthetic case packet for this trial.
 The activation change still needs its own authorized release and production
-checks; this guide does not mean the trial is running.
+checks; this guide does not mean the trial is running. Since
+[ADR-0290](adr/0290-standing-semantic-activation.md) (2026-11-03) production
+semantic recall runs on the owner's standing admission, which has no expiry
+and no check-in; this guide describes a bounded trial, not the current
+deployment.
 
 ## What you will do
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
@@ -19,10 +21,21 @@ from agent_core.domain.semantic_memory import EmbeddingSpace, checked_vector
 from agent_core.domain.trajectory import ArtifactRef
 
 # The text a chunk is embedded as: its heading path over its passage, cut to
-# the embedding request's per-item bound at a character boundary. A new
-# version here re-embeds every chunk; a vector carries the version it used.
-KNOWLEDGE_EMBEDDING_TEXT_VERSION = "knowledge-text@1"
+# the embedding request's per-item bound at a character boundary, and, for an
+# encoder with a token capacity, windowed into runs of the passage that each
+# fit it (`knowledge_embedding_windows`). A new version here re-embeds every
+# chunk; a vector carries the version it used.
+KNOWLEDGE_EMBEDDING_TEXT_VERSION = "knowledge-text@2"
 KNOWLEDGE_EMBEDDING_TEXT_BYTES = 4096
+# The space the arm embeds in with its own OpenAI provider (ADR-0290): the
+# model gate 13 measured lift with, at its native width. A new revision here
+# is a new space, and the backfill re-embeds every chunk into it.
+KNOWLEDGE_OPENAI_SPACE = EmbeddingSpace(
+    provider="openai",
+    model="text-embedding-3-small",
+    revision="knowledge-openai@1",
+    dimensions=1536,
+)
 # The semantic arm's share of a passage's match, memory's `semantic_fusion_weight`.
 KNOWLEDGE_SEMANTIC_FUSION_WEIGHT = 0.2
 # A semantic hit below this cosine similarity is no candidate: the lexical arm
@@ -156,6 +169,9 @@ class KnowledgeChunkEmbedding(BaseModel):
     chunk_id: str = Field(pattern=r"^kc_[0-9a-f]{16}$")
     space: EmbeddingSpace
     text_version: str = KNOWLEDGE_EMBEDDING_TEXT_VERSION
+    # Which window of the chunk this vector embeds; a chunk the encoder admits
+    # whole has one window, zero.
+    window: int = Field(default=0, ge=0)
     vector: tuple[float, ...] = Field(min_length=1, max_length=3072, repr=False)
 
     @model_validator(mode="after")
@@ -196,13 +212,13 @@ class KnowledgeIngestPrepared(BaseModel):
     @model_validator(mode="after")
     def embeddings_belong_to_chunks(self) -> KnowledgeIngestPrepared:
         chunk_ids = {chunk.chunk_id for chunk in self.chunks}
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, int]] = set()
         for embedding in self.embeddings:
             if embedding.chunk_id not in chunk_ids:
                 raise ValueError("knowledge embedding names a chunk outside the ingest")
-            key = (embedding.chunk_id, embedding.space.key)
+            key = (embedding.chunk_id, embedding.space.key, embedding.window)
             if key in seen:
-                raise ValueError("knowledge embedding repeats a chunk in one space")
+                raise ValueError("knowledge embedding repeats a chunk window in one space")
             seen.add(key)
         return self
 
@@ -216,6 +232,125 @@ def knowledge_embedding_text(heading_path: list[str], text: str) -> str:
     if len(encoded) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES:
         return combined
     return encoded[:KNOWLEDGE_EMBEDDING_TEXT_BYTES].decode("utf-8", errors="ignore").rstrip()
+
+
+def _heading_prefix(heading_path: list[str]) -> str:
+    return " > ".join(part.strip() for part in heading_path if part.strip())
+
+
+def _bounded_text(text: str) -> str:
+    encoded = text.encode("utf-8")
+    if len(encoded) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES:
+        return text
+    return encoded[:KNOWLEDGE_EMBEDDING_TEXT_BYTES].decode("utf-8", errors="ignore").rstrip()
+
+
+def _token_estimate(text: str) -> int:
+    """The chunker's estimate, four bytes a token, for an encoder without a tokenizer."""
+
+    return max(1, (len(text.encode("utf-8")) + 3) // 4)
+
+
+# How a run of text splits when it does not fit the budget, finest last: at a
+# paragraph break, after a sentence, between words, and, for a single word no
+# encoder could admit, between characters. Each split keeps every character,
+# so joining the pieces gives the run back.
+_SPLITS = (
+    re.compile(r"(?<=\n\n)"),
+    re.compile(r"(?<=[.!?:;])(?=\s)"),
+    re.compile(r"(?<=\s)(?=\S)"),
+)
+
+
+def _pieces(run: str, level: int) -> list[str]:
+    if level < len(_SPLITS):
+        pieces = [piece for piece in _SPLITS[level].split(run) if piece]
+    else:
+        half = max(1, len(run) // 2)
+        pieces = [run[:half], run[half:]] if len(run) > 1 else [run]
+    return pieces
+
+
+def knowledge_embedding_windows(
+    heading_path: list[str],
+    text: str,
+    *,
+    budget_tokens: int | None = None,
+    count_tokens: Callable[[str], int] | None = None,
+) -> list[str]:
+    """The texts a chunk is embedded as under `KNOWLEDGE_EMBEDDING_TEXT_VERSION`.
+
+    Without a budget the chunk is one window, the text `knowledge_embedding_text`
+    gives. With one, the encoder's capacity, the chunk's text is cut into runs
+    at paragraph, then sentence, then word boundaries, and each window is the
+    heading path over a run that counts under the budget by `count_tokens`,
+    the encoder's own tokenizer, or the chunker's estimate when none is
+    given. Windows are ordered, non-empty, and together hold every character
+    of the text once, so a passage is reachable from any of its sentences.
+    """
+
+    whole = knowledge_embedding_text(heading_path, text)
+    if budget_tokens is None:
+        return [whole]
+    count = count_tokens or _token_estimate
+    unbounded = _heading_prefix(heading_path)
+    unbounded = f"{unbounded}\n{text}" if unbounded else text
+    # One window only when the byte bound cut nothing from it; otherwise the
+    # windows below each fit the bound, so no character is lost to it.
+    if len(unbounded.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES and (
+        count(whole) <= budget_tokens
+    ):
+        return [whole]
+    # A heading has no length limit. The prefix keeps its deepest levels and
+    # drops the outer ones until it leaves half the budget, in tokens and in
+    # bytes, for text; a prefix no level of which fits is left out.
+    path = list(heading_path)
+    while path and (
+        count(_heading_prefix(path)) > budget_tokens // 2
+        or len(_heading_prefix(path).encode("utf-8")) > KNOWLEDGE_EMBEDDING_TEXT_BYTES // 2
+    ):
+        path = path[1:]
+    prefix = _heading_prefix(path)
+
+    def raw(body: str) -> str:
+        body = body.strip()
+        return f"{prefix}\n{body}" if prefix else body
+
+    def window(body: str) -> str:
+        return _bounded_text(raw(body))
+
+    def fits(body: str) -> bool:
+        text = raw(body)
+        return (
+            len(text.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES
+            and count(text) <= budget_tokens
+        )
+
+    def pack(run: str, level: int) -> list[str]:
+        """Fill windows greedily from the run's pieces at this level; refine any that overflow."""
+
+        bodies: list[str] = []
+        current = ""
+        for piece in _pieces(run, level):
+            if fits(current + piece):
+                current += piece
+                continue
+            if current.strip():
+                bodies.append(current)
+            current = ""
+            if fits(piece):
+                current = piece
+            elif len(piece.strip()) > 1 or level < len(_SPLITS):
+                bodies.extend(pack(piece, level + 1))
+            else:
+                # One character the encoder cannot admit on its own; it still
+                # has to land somewhere, and the request bound still holds.
+                bodies.append(piece)
+        if current.strip():
+            bodies.append(current)
+        return bodies
+
+    return [window(body) for body in pack(text, 0) if body.strip()]
 
 
 def fuse_passage_arms(

@@ -213,8 +213,19 @@ write_stub curl '
   printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
     "$VEETBOT_TEST_READY_RELEASE" >"$headers"
 '
-printf '#!/usr/bin/env bash\nset -Eeuo pipefail\nprintf "%%s\\n" "${VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY:-incompatible}"\n' \
-  >"$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python"
+# The target's interpreter answers the runbook's two preflight programs: the
+# schema revision check (it reads EXPECTED_REVISION) and the schedule cadence
+# check. A schema answer other than "compatible" must refuse before any unit stops.
+cat >"$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python" <<'STUB'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+program="$(cat)"
+if [[ "$program" == *EXPECTED_REVISION* ]]; then
+  printf '%s\n' "${VEETBOT_TEST_TARGET_SCHEMA_COMPATIBILITY:-compatible}"
+else
+  printf '%s\n' "${VEETBOT_TEST_TARGET_CALENDAR_COMPATIBILITY:-incompatible}"
+fi
+STUB
 chmod +x "$DEPLOY_ROOT/releases/$TARGET_ID/.venv/bin/python"
 
 awk '
@@ -247,6 +258,26 @@ run_rollback() {
   VEETBOT_ENV_FILE="$ENV_FILE" \
     "$RUNBOOK"
 }
+
+# A target whose expected schema revision is not the database's is refused
+# before any unit stops, and nothing is restored because nothing changed.
+: >"$LOG_FILE"
+if VEETBOT_TEST_TARGET_SCHEMA_COMPATIBILITY="incompatible b7e1c4a9d2f3 e8a280c10301" \
+  run_rollback >"$TEST_ROOT/incompatible-schema.out" 2>&1; then
+  printf 'rollback to a target expecting another schema revision unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'not the target'"'"'s expected revision' "$TEST_ROOT/incompatible-schema.out"
+if grep -Fq 'systemctl stop' "$LOG_FILE"; then
+  printf 'rollback stopped units before refusing an incompatible schema\n' >&2
+  exit 1
+fi
+if grep -Fq 'systemctl restart' "$LOG_FILE"; then
+  printf 'rollback restarted units after refusing an incompatible schema\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
+: >"$LOG_FILE"
 
 if VEETBOT_TEST_INCOMPATIBLE_SCHEDULE_REVISIONS=1 \
   VEETBOT_TEST_REQUIRE_QUIESCED_QUERY=1 \

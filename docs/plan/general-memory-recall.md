@@ -769,6 +769,20 @@ another lapse. Operator verification of the retained receipts, final release
 gates and a separate actual owner decision remain required before installation.
 Preparation alone grants no activation, and legacy formats retain their rules.
 
+[ADR-0290](../adr/0290-standing-semantic-activation.md) records the owner's
+2026-11-03 standing decision that semantic retrieval be activated and stay on.
+`recall-standing-evidence@1` carries the owner's instruction, its reference and
+statement digest, one tenant and owner, and the composition digests observed
+at preparation; `recall-standing-admission@1` binds the evidence digest, the
+owner, an activation time and the embedding configuration key, with no expiry,
+no deployment reference and no release census, so the admission survives
+releases and configuration edits and is withdrawn by file mutation, by the
+flag, or by a different encoder. Composition keeps the local encoder,
+interactive private owner queries, no unattended reconsolidation and the
+request and USD 2 daily indexing ceilings. This is a recorded deviation from
+the activation evidence above; it completes no M33 gate and leaves the trial
+routes available.
+
 ## Hard gates
 
 1. **M33.** **Corpus independence** — at least 400 independent scenarios span eight families,

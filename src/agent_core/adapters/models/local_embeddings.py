@@ -72,6 +72,17 @@ class LocalEmbeddingProvider:
             raise EmbeddingError("local embedding output schema mismatch")
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-embedding")
 
+    @property
+    def maximum_tokens(self) -> int:
+        """The input capacity one text may use; longer inputs are refused, not cut."""
+
+        return self._config.maximum_tokens
+
+    def count_tokens(self, text: str) -> int:
+        """How many tokens a text costs, the count inference checks against the capacity."""
+
+        return len(self._tokenizer.encode(text).ids)
+
     def _encode(self, request: EmbeddingRequest) -> EmbeddingResponse:
         try:
             # Tokenize on this same single worker rather than starting the

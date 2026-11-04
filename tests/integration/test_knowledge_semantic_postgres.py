@@ -22,9 +22,11 @@ from agent_core.domain.knowledge import (
     KnowledgeSemanticChannel,
     KnowledgeVisibility,
 )
+from agent_core.domain.messages import ProviderPin
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.domain.semantic_memory import EmbeddingSpace
+from agent_core.knowledge.backfill import KnowledgeVectorBackfill
 from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.knowledge.service import KnowledgeService
 from tests.integration.m2_support import database_settings
@@ -94,6 +96,18 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
                     updated_at=now,
                 )
             )
+            # A run is pinned to the model it answers with; a question reaches
+            # only that provider (ADR-0290).
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=SPACE.provider,
+                    model=SPACE.model,
+                    registry_version="test",
+                    pinned_at=now,
+                ),
+            )
         store = FilesystemArtifactStore(settings.artifact_root)
         writer = ArtifactWriterFactory(
             app.uow_factory, store, app.clock, RandomIdFactory()
@@ -142,10 +156,10 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
             )
         assert stored == 3
 
-        dense = await service("dense").search(query, session_id=session_id)
+        dense = await service("dense").search(query, session_id=session_id, run_id=run_id)
         assert [item.heading_path[-1] for item in dense.passages] == ["Fans", "Rollback"]
         assert all(item.arms == ["semantic"] for item in dense.passages)
-        hybrid = await service("hybrid").search(query, session_id=session_id)
+        hybrid = await service("hybrid").search(query, session_id=session_id, run_id=run_id)
         arms = {item.heading_path[-1]: item.arms for item in hybrid.passages}
         assert arms["Fans"] == ["semantic"]
         assert arms["Rollback"] == ["lexical", "semantic"]
@@ -167,14 +181,16 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
             ),
             origin_trust=TrustLevel.USER,
         )
-        dense = await service("dense").search(query, session_id=session_id)
+        dense = await service("dense").search(query, session_id=session_id, run_id=run_id)
         by_document = {item.document_id: item.arms for item in dense.passages}
         assert by_document[older.document_id] == ["lexical"]
         assert by_document[document.document_id] == ["semantic"]
 
         # Another principal reads nothing through either arm.
         foreign = await service("dense").search(
-            _query("another-principal", app.principal.tenant_id), session_id=session_id
+            _query("another-principal", app.principal.tenant_id),
+            session_id=session_id,
+            run_id=run_id,
         )
         assert foreign.passages == []
 
@@ -188,7 +204,7 @@ async def test_vectors_are_stored_searched_by_channel_and_cascade(tmp_path: Path
                 text("SELECT count(*) FROM knowledge_chunk_vectors")
             )
         assert remaining == 0
-        left = (await service("dense").search(query, session_id=session_id)).passages
+        left = (await service("dense").search(query, session_id=session_id, run_id=run_id)).passages
         assert {item.document_id for item in left} == {older.document_id}
 
 
@@ -213,6 +229,18 @@ async def test_ingest_without_an_embedder_stores_no_vectors(tmp_path: Path) -> N
                     created_at=now,
                     updated_at=now,
                 )
+            )
+            # A run is pinned to the model it answers with; a question reaches
+            # only that provider (ADR-0290).
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=SPACE.provider,
+                    model=SPACE.model,
+                    registry_version="test",
+                    pinned_at=now,
+                ),
             )
         store = FilesystemArtifactStore(settings.artifact_root)
         writer = ArtifactWriterFactory(
@@ -243,3 +271,143 @@ async def test_ingest_without_an_embedder_stores_no_vectors(tmp_path: Path) -> N
             )
             stored = await connection.scalar(text("SELECT count(*) FROM knowledge_chunk_vectors"))
         assert stored == 0
+
+
+def _words(text: str) -> int:
+    return len(text.split())
+
+
+class Windowed(Provider):
+    """Only the window holding "fan" sits by the question; a chunk's other windows do not."""
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        vectors = tuple(
+            (1.0, 0.0, 0.0)
+            if "fan" in item.split("\n", 1)[-1] or item == "rollback procedure"
+            else (0.0, 1.0, 0.0)
+            for item in request.texts
+        )
+        return EmbeddingResponse(
+            request_digest=request.digest, vectors=vectors, input_tokens=len(vectors)
+        )
+
+
+async def test_windows_are_stored_scored_by_their_best_and_backfilled(tmp_path: Path) -> None:
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    async with build(settings=settings, storage="postgres") as app:
+        session_id = await app.sessions.create()
+        run_id = uuid4()
+        now = app.clock.now()
+        async with app.uow_factory() as uow:
+            await uow.runs.create(
+                Run(
+                    id=run_id,
+                    session_id=session_id,
+                    tenant_id=app.principal.tenant_id,
+                    principal_scopes=set(app.principal.scopes),
+                    agent_id=DEFAULT_AGENT_ID,
+                    agent_version="1.0.0",
+                    status=RunStatus.COMPLETED,
+                    limits=RunLimits(),
+                    scheduled_for=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            # A run is pinned to the model it answers with; a question reaches
+            # only that provider (ADR-0290).
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=SPACE.provider,
+                    model=SPACE.model,
+                    registry_version="test",
+                    pinned_at=now,
+                ),
+            )
+        store = FilesystemArtifactStore(settings.artifact_root)
+        writer = ArtifactWriterFactory(
+            app.uow_factory, store, app.clock, RandomIdFactory()
+        ).for_run(
+            tenant_id=app.principal.tenant_id,
+            principal_id=app.principal.principal_id,
+            session_id=session_id,
+            run_id=run_id,
+            origin=ArtifactOrigin.UPLOAD,
+        )
+        # The older document is ingested without the arm, as every document
+        # was before activation; the guide is ingested with it, in windows.
+        older_ref = await writer.create(
+            _bytes(DOCUMENT.encode()), "older.md", "text/markdown", TrustLevel.USER
+        )
+        async with app.uow_factory() as uow:
+            older_source = await uow.artifacts.get(older_ref.artifact_id, app.principal)
+        older = await app.knowledge.ingest(
+            KnowledgeIngestRequest(
+                source=older_source, title="Older", visibility=KnowledgeVisibility.PRINCIPAL
+            ),
+            origin_trust=TrustLevel.USER,
+        )
+        embedder = KnowledgeEmbedder(
+            Windowed(), SPACE, channel="dense", window_tokens=6, count_tokens=_words
+        )
+        service = KnowledgeService(
+            app.uow_factory, store, app.clock, RandomIdFactory(), app.principal, embedder=embedder
+        )
+        ref = await writer.create(
+            _bytes(DOCUMENT.encode()), "guide.md", "text/markdown", TrustLevel.USER
+        )
+        async with app.uow_factory() as uow:
+            source = await uow.artifacts.get(ref.artifact_id, app.principal)
+        guide = await service.ingest(
+            KnowledgeIngestRequest(
+                source=source, title="Guide", visibility=KnowledgeVisibility.PRINCIPAL
+            ),
+            origin_trust=TrustLevel.USER,
+        )
+
+        async def vector_rows() -> list[tuple[int, int]]:
+            async with create_engine(settings.database_url).begin() as connection:
+                await connection.execute(
+                    text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
+                    {"tenant": app.principal.tenant_id},
+                )
+                rows = await connection.execute(
+                    text(
+                        "SELECT count(*), count(DISTINCT chunk_id) FROM knowledge_chunk_vectors "
+                        "WHERE space_key = :key"
+                    ),
+                    {"key": SPACE.key},
+                )
+                return [tuple(row) for row in rows]
+
+        ((windows, chunks),) = await vector_rows()
+        assert chunks == 3 and windows > 3, "every section is wider than six words"
+
+        query = _query(app.principal.principal_id, app.principal.tenant_id)
+        found = await service.search(query, session_id=session_id, run_id=run_id)
+        by_document = {item.document_id: item for item in found.passages}
+        assert by_document[guide.document_id].heading_path[-1] == "Fans"
+        assert by_document[guide.document_id].arms == ["semantic"]
+        assert by_document[older.document_id].arms == ["lexical"]
+
+        backfill = KnowledgeVectorBackfill(
+            uow_factory=app.uow_factory,
+            embedder=embedder,
+            principal=app.principal,
+            clock=app.clock,
+            batch_chunks=2,
+        )
+        assert await backfill.sweep_once() == 2
+        assert await backfill.sweep_once() == 1
+        assert await backfill.sweep_once() == 0
+        ((windows_after, chunks_after),) = await vector_rows()
+        assert chunks_after == 6 and windows_after == 2 * windows
+        found = await service.search(query, session_id=session_id, run_id=run_id)
+        assert {item.document_id for item in found.passages} == {
+            guide.document_id,
+            older.document_id,
+        }
+        assert all(item.arms == ["semantic"] for item in found.passages)
+        assert {item.heading_path[-1] for item in found.passages} == {"Fans"}

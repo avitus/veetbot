@@ -263,12 +263,24 @@ therefore that this arm turns on earlier here than it does for memory. It still 
 earn it.
 
 The arm is built ([ADR-0289](../adr/0289-knowledge-semantic-arm.md)) and off by
-default. Ingestion embeds each chunk's heading path over its text under a named text
-version, `knowledge-text@1`, with the provider the memory semantic index admitted, and
-stores the vector in `knowledge_chunk_vectors`, one row per chunk and embedding space,
-cascading with the chunk; the in-memory store keeps the same rows. A remote provider
+default in a fresh deployment. Ingestion embeds each chunk under a named text version,
+`knowledge-text@2`: one or more windows, each the heading path over a slice of the
+chunk text, packed under the provider's token capacity with the provider's own
+tokenizer count, and one window identical to the whole text under an unbounded
+provider. The vectors come from the provider the memory semantic index admitted and
+go to `knowledge_chunk_vectors`, one row per chunk, embedding space and window,
+cascading with the chunk; the in-memory store keeps the same rows, and a chunk's
+semantic score is its best window. A maintenance sweep embeds the chunks of the
+owner's current documents that lack a vector in the active space, so a document
+ingested before activation, or under a previous encoder, gains vectors without a new
+version. The provider is `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER`: `index` borrows the memory
+semantic index's admitted provider and reads its admission before every call; `openai`
+is the arm's own `text-embedding-3-small` on the `openai` credential, the model gate 13
+measured lift with, needing no index. A remote provider
 receives only public and internal text, the memory index's egress rule, so a restricted
-document stays lexical, and the index's admission is read before every call. Search
+document stays lexical, and it embeds a question only from a run pinned to that same
+provider, the one that read the context the question was written from; a run on another
+provider, or a search outside a run, is lexical. Search
 embeds the question before the unit of work opens; a question the provider cannot embed
 is answered by the lexical arm alone, and the trace's policy version names the space and
 channel that answered. A semantic hit below a similarity floor is no candidate, as a
@@ -282,9 +294,12 @@ against the ADR-0285 lexical arm and found that hybrid fusion lifts nothing: the
 arm counts function words as coverage, so a document's other sections rank first
 lexically and near the top semantically, and reciprocal rank fusion rewards exactly that
 consensus. The dense channel placed every corpus member within the top two, so
-`AGENT_KNOWLEDGE_SEMANTIC_CHANNEL` defaults to `dense`, and
-`AGENT_KNOWLEDGE_SEMANTIC_ENABLED` stays off until the gate is re-recorded with the
-production embedding space and the owner has accepted where chunk text goes.
+`AGENT_KNOWLEDGE_SEMANTIC_CHANNEL` defaults to `dense`. Re-recorded in the memory
+index's local space (ADR-0188's MiniLM tuple), the gate found no lift at any window
+budget: that encoder scores by shared words, so the arm runs in production on its own
+OpenAI provider under the owner's standing decision
+([ADR-0290](../adr/0290-standing-semantic-activation.md)), and the local miss stays
+recorded beside the lift.
 
 ## Scope and visibility
 
@@ -647,8 +662,9 @@ That is eight case gates, three property gates, and two corpus gates.
 5. **Automatic pre-turn retrieval.** Knowledge retrieved without an explicit tool call,
    behind a relevance floor, enabled only if the corpus gate improves with it.
 6. **The semantic arm.** `pgvector` behind the existing RRF fusion, enabled on measured
-   lift. Built default-off under ADR-0289, with gate 13 as the measurement; activation
-   needs the gate re-recorded with the production embedding space.
+   lift. Built under ADR-0289 with gate 13 as the measurement; activated under
+   ADR-0290 on the arm's own OpenAI provider after the local encoder measured no
+   lift; off by default in a fresh deployment.
 7. **Later extractors.** PDF, HTML, and DOCX as `Extractor` adapters, each re-running
    ingestion over already-stored sources rather than asking for re-upload.
 

@@ -101,6 +101,21 @@ async def test_unverified_model_files_are_refused(
     assert state["calls"] == 0
 
 
+async def test_token_counts_match_what_inference_checks_against_capacity(
+    local_model: tuple[Any, ...],
+) -> None:
+    root, config, _ = local_model
+    provider = LocalEmbeddingProvider(root, config)
+    assert provider.maximum_tokens == config.maximum_tokens == 8
+    assert provider.count_tokens("breakfast early breakfast") == 3
+    text = "breakfast " * provider.maximum_tokens
+    assert provider.count_tokens(text) == 8
+    await provider.embed(EmbeddingRequest(space=config.space, texts=(text,)))
+    with pytest.raises(EmbeddingError):
+        await provider.embed(EmbeddingRequest(space=config.space, texts=(text + "early",)))
+    await provider.close()
+
+
 async def test_overlong_inputs_are_rejected_without_truncation(
     local_model: tuple[Any, ...],
 ) -> None:
