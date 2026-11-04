@@ -58,14 +58,14 @@ section that repeats "click" or "tray" outranks the passage that answers.
    introduced.
 3. **Knowledge chunks are embedded in windows.** `knowledge-text@2` embeds a
    chunk as one or more windows, each the heading path over a slice of the
-   chunk text, packed under the provider's token capacity with the local
-   tokenizer's own count; an unbounded provider gets one window identical to
-   `knowledge-text@1`. A chunk's semantic score is its best window.
-   `knowledge_chunk_vectors` keys on chunk, space and window. A maintenance
-   sweep embeds the chunks of the owner's current documents that have no
-   vector in the active space, so documents ingested before activation gain
-   vectors without a new version, and a new encoder re-embeds every document
-   without an operator step.
+   chunk text: the local route packs them under the provider's capacity by
+   its tokenizer's count; the OpenAI route cuts a chunk whose text the
+   chunker estimates at 256 tokens or more into 128-token windows and keeps
+   a shorter one whole (the measurement below). A chunk's semantic score is
+   its best window; `knowledge_chunk_vectors` keys on chunk, space and
+   window. A maintenance sweep embeds the owner's current chunks that lack a
+   vector in the active space and prunes every other space's vectors, so an
+   earlier document gains vectors and a new encoder replaces the old ones.
 4. **The knowledge arm turns on with its own provider.**
    `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai` gives the arm OpenAI's
    `text-embedding-3-small` at 1536 dimensions on the existing `openai`
