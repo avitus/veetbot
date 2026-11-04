@@ -1,4 +1,4 @@
-"""An email attachment reaches the email's chat without entering history (ADR-0295)."""
+"""An email attachment reaches the email's chat without entering history (ADR-0296)."""
 
 from __future__ import annotations
 

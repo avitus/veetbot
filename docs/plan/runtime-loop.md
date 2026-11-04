@@ -224,7 +224,10 @@ means the sweep that fails overdue runs would be a full scan. The
 indexing. It is computed once at run creation and never recomputed; a run
 that pauses for a human approval for six hours is still bound by the
 deadline set when it was submitted, which is the behaviour the state machine
-already implies by listing deadline as a cause of `FAILED`.
+already implies by listing deadline as a cause of `FAILED`. One exception
+(ADR-0295): a run with `RunLimits.execution_seconds` has `deadline_at` set once
+more at its first claim, to the sooner of the claim plus that window and the
+creation deadline, so time spent queued does not spend the window.
 
 **`failure` gets a type.** `runs.failure JSONB` exists in Section 15 with no
 domain counterpart, and `failure.reason = "max_attempts_exceeded"` is

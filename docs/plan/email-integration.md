@@ -86,7 +86,7 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
   body, label ids. HTML bodies are reduced to text; attachments are named
   with filename, type, and size but never fetched by this call.
 - `save_attachment(message_id, attachment_index, filename)`
-  ([ADR-0295](../adr/0295-save-email-attachments-to-the-chat.md)) — stores one listed
+  ([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)) — stores one listed
   attachment in the run's chat, up to 32 MiB, after the owner approves. The application-only
   `fetch_attachment` takes the same arguments for the Save button. The position is the
   attachment's place in `get_thread`'s list, because Gmail issues a new attachment id on
@@ -356,7 +356,7 @@ closed set of stable, content-free codes: credential rejection, rate limit,
 temporary provider unavailability, permanent provider rejection, invalid
 provider output, and — the sixth, and the one the two write servers need —
 an outcome the server cannot determine. Fetching a file adds a missing and an
-oversized attachment (ADR-0295). Google's raw error text, diagnostic
+oversized attachment (ADR-0296). Google's raw error text, diagnostic
 headers, and `WWW-Authenticate` values never cross the pipe — normalized
 mailbox content is the tool result, and it is the only upstream content that
 does. Connect-time auth failure is

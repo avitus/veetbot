@@ -1004,7 +1004,9 @@ Scheduling is default-off through `AGENT_SCHEDULE_API_ENABLED=0` and
 
 The API, interactive worker, async worker, and schedule worker are separate
 roles in production. Interactive and async workers claim disjoint configured
-priority classes, preserving at least one slot for each workload. Multiple
+priority classes, preserving at least one slot for each workload. The async role
+runs one process per `worker.reserved_async_slots`, shipped as two so one long
+run does not hold up the rest (ADR-0295). Multiple
 schedule workers are safe. The schedule worker has database access and no API
 bearer token, model-provider, tool, sandbox, or object-store credential because
 it executes none of those capabilities. Release validation connects through

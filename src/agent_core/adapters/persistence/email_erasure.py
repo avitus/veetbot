@@ -38,7 +38,7 @@ from agent_core.mcp.configuration import is_email_attachment_tool
 
 _ERASED = "[email source erased]"
 _IDENTITY_FIELDS = frozenset({"id", "message_id", "thread_id", "history_id", "internal_date"})
-# What makes a value a copy of a message; a saved file's receipt names it (ADR-0295).
+# What makes a value a copy of a message; a saved file's receipt names it (ADR-0296).
 _SOURCE_CONTENT_KEYS = ("body", "from", "snippet", "filename")
 _UNFINISHED_INVOCATIONS = ("PROPOSED", "AUTHORIZED", "WAITING_FOR_APPROVAL", "RUNNING")
 
@@ -241,7 +241,7 @@ def read_server(metadata: dict[str, Any], account_id: str) -> str | None:
 
 
 def _saves_attachment(name: object) -> bool:
-    """A saved file's receipt carries its source's ids, in any session (ADR-0295).
+    """A saved file's receipt carries its source's ids, in any session (ADR-0296).
 
     A chat with no Gmail metadata can save too, so this cannot wait for the
     session's account binding. Gmail ids do not repeat across a principal's
@@ -301,7 +301,7 @@ def source_tool(name: object, server: str | None) -> bool:
 
 
 def _erased_reply(content: Any, marker: str, kept_files: frozenset[str]) -> list[dict[str, Any]]:
-    """The reply's text goes; a file that outlives this erasure keeps its link (ADR-0295)."""
+    """The reply's text goes; a file that outlives this erasure keeps its link (ADR-0296)."""
 
     parts = content if isinstance(content, list) else []
     return [

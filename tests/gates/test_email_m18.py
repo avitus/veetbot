@@ -1274,7 +1274,7 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
         "schedule.resume",
         "schedule.cancel",
         "run.inspect",
-        "mcp.gmail_read.save_attachment",  # ADR-0295: the instructions advertise it.
+        "mcp.gmail_read.save_attachment",  # ADR-0296: the instructions advertise it.
     }
     assert {
         "mcp.gmail_read.search_threads",

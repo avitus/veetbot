@@ -8,7 +8,16 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PositiveInt, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
 from agent_core.domain.policies import TrustLevel
@@ -64,6 +73,18 @@ class RunLimits(BaseModel):
     synthesis_reserve_model_calls: int = Field(default=0, ge=0)
     synthesis_reserve_tool_calls: int = Field(default=0, ge=0)
     synthesis_reserve_cost: Decimal = Field(default=Decimal("0"), ge=0)
+    # Seconds of work counted from the first claim, inside deadline_at. The claim
+    # turns this into the deadline and clears it, so a reclaim keeps that deadline
+    # (ADR-0295).
+    execution_seconds: int | None = Field(default=None, gt=0, le=86_400)
+
+    @model_serializer(mode="wrap")
+    def omit_unset_execution_window(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Keep the serialized form, and every digest over it, as it was without a window."""
+        data: dict[str, Any] = handler(self)
+        if self.execution_seconds is None:
+            data.pop("execution_seconds", None)
+        return data
 
     @model_validator(mode="after")
     def synthesis_reserve_fits(self) -> RunLimits:

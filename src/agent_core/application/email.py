@@ -37,6 +37,7 @@ from agent_core.domain.email import (
     EMAIL_HISTORY_DAYS,
     EMAIL_LEARNING_SHARE,
     EMAIL_POLICY_VERSION,
+    EMAIL_QUEUE_ALLOWANCE_SECONDS,
     EMAIL_SLICE_RESERVATION,
     EmailAccount,
     EmailArchiveConsent,
@@ -1089,7 +1090,7 @@ class EmailExperienceService:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         # Typed owner gestures: no model, no catalog, no automatic-email dollars.
         gesture = kind in {"archive", "subscription"}
-        # ADR-0295: also a typed gesture, but its file belongs in the thread's own chat.
+        # ADR-0296: also a typed gesture, but its file belongs in the thread's own chat.
         thread_gesture = kind == "attachment"
         for scope in ("email.write", "run.write", "session.write"):
             require_scope(principal, scope)
@@ -1324,16 +1325,23 @@ class EmailExperienceService:
                 )
             # A batch may send mail and page a sender's Inbox after its one-click request.
             slice_seconds = timedelta(seconds=300 if kind == "subscription" else 120)
+            # A refresh or draft's own time starts at its first claim, with this bound on
+            # the wait too. A gesture's consent lapses too soon for it to wait (ADR-0295).
+            windowed = kind in {"refresh", "draft"}
+            latest = now + slice_seconds
+            if windowed:
+                latest += timedelta(seconds=EMAIL_QUEUE_ALLOWANCE_SECONDS)
             deadline = (
                 self.agent.limits.deadline_at
                 if kind == "send"
-                else min(now + slice_seconds, self.agent.limits.deadline_at or now + slice_seconds)
+                else min(latest, self.agent.limits.deadline_at or latest)
             )
             limits = self.agent.limits.model_copy(
                 deep=True,
                 update={
                     "max_cost": reservation if reservation else self.agent.limits.max_cost,
                     "deadline_at": deadline,
+                    "execution_seconds": (int(slice_seconds.total_seconds()) if windowed else None),
                 },
             )
             # A consented send is parked for the undo window first (ADR-0279).
@@ -1970,7 +1978,7 @@ class EmailExperienceService:
         filename: str,
         idempotency_key: str,
     ) -> EmailOperation:
-        """Admit one press on Save for an attachment this thread lists (ADR-0295)."""
+        """Admit one press on Save for an attachment this thread lists (ADR-0296)."""
         require_scope(principal, "artifact.write")
         if not idempotency_key or len(idempotency_key) > 200:
             raise ValueError("invalid save request")

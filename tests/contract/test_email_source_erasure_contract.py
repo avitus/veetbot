@@ -372,7 +372,7 @@ async def assert_email_source_erasure(factory: UnitOfWorkFactory) -> None:
 
 
 async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
-    """A plain chat has no Gmail metadata, and the file name is in its calls (ADR-0295)."""
+    """A plain chat has no Gmail metadata, and the file name is in its calls (ADR-0296)."""
     sid, rid, iid, aid = uuid4(), uuid4(), uuid4(), uuid4()
     other_iid, kept_aid, unreceipted_rid, unreceipted_aid, unknown_aid = (
         uuid4(),
@@ -588,7 +588,7 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
 
 
 async def assert_denied_save_erased(factory: UnitOfWorkFactory) -> None:
-    """A denied save leaves no receipt, only the calls that named the file (ADR-0295)."""
+    """A denied save leaves no receipt, only the calls that named the file (ADR-0296)."""
     sid, rid, iid = uuid4(), uuid4(), uuid4()
     name = "mcp.gmail_read.save_attachment"
     arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}

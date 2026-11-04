@@ -87,7 +87,7 @@ async def test_create_streams_bytes_and_persists_checksummed_metadata(tmp_path: 
 
 
 async def test_the_same_file_saved_from_two_emails_is_stored_for_each(tmp_path: Path) -> None:
-    """A saved file follows its own email, so a second source needs its own copy (ADR-0295)."""
+    """A saved file follows its own email, so a second source needs its own copy (ADR-0296)."""
     first_id, second_id = UUID(int=8811), UUID(int=8812)
     writer, _, _ = await _writer_stack(tmp_path, ids=SequenceIdFactory([first_id, second_id]))
 

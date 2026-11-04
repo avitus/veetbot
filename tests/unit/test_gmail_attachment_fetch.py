@@ -1,4 +1,4 @@
-"""The Gmail read server fetches one named attachment within its bound (ADR-0295)."""
+"""The Gmail read server fetches one named attachment within its bound (ADR-0296)."""
 
 from __future__ import annotations
 

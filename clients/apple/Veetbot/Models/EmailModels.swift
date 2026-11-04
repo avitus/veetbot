@@ -79,7 +79,7 @@ public struct EmailAttachmentView: Codable, Equatable, Sendable {
         case mimeType = "mime_type"
     }
 
-    /// The server's limit (ADR-0295). An unknown size is left for the server to judge.
+    /// The server's limit (ADR-0296). An unknown size is left for the server to judge.
     public static let saveLimitBytes = 32 * 1024 * 1024
     public static func canSave(size: Int?) -> Bool { (size ?? 0) <= saveLimitBytes }
 }

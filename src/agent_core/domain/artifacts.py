@@ -21,7 +21,7 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "upload"
     TRAJECTORY_EXPORT = "trajectory_export"
     KNOWLEDGE_SOURCE = "knowledge_source"
-    # ADR-0295: a file saved from an email; the owner's press or approval admits it.
+    # ADR-0296: a file saved from an email; the owner's press or approval admits it.
     EMAIL_ATTACHMENT = "email_attachment"
 
 
@@ -30,7 +30,7 @@ class ArtifactOrigin(StrEnum):
 ARTIFACT_DELETE_TOOL_NAME = "artifact.delete"
 
 # ADR-0122: every file a run exports rides on its final reply. Tool-output
-# captures and the owner's own uploads are never re-attached. ADR-0295: so does
+# captures and the owner's own uploads are never re-attached. ADR-0296: so does
 # an email attachment the run saved.
 REPLY_ATTACHMENT_ORIGINS = frozenset(
     {
@@ -45,7 +45,7 @@ def reply_attachments(artifacts: list[ArtifactRef], *, now: datetime) -> list[Ar
     """Choose a run's exported files in creation order, once per name and content.
 
     Copies saved from different emails stay separate, because each follows its own
-    email through erasure (ADR-0295).
+    email through erasure (ADR-0296).
 
     A file already expired, such as one `artifact.delete` removed earlier in the
     run (ADR-0277), is left off: attaching it would clear the expiry.
@@ -237,7 +237,7 @@ def saved_from(metadata: Mapping[str, Any]) -> str | None:
 
 
 def outlives_source_erasure(metadata: Mapping[str, Any], message_ids: frozenset[str]) -> bool:
-    """A saved file copies its own email, whatever else its run read (ADR-0295).
+    """A saved file copies its own email, whatever else its run read (ADR-0296).
 
     Its bytes come from Gmail, so erasing a different source in the same run
     leaves it alone, before or after knowledge takes it over. A source nobody

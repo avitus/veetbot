@@ -4,10 +4,10 @@ title: Current Milestone
 
 # Current milestone
 
-- **Save an email attachment — ADR-0295:** On 2026-11-03 the owner asked to add email
+- **Save an email attachment — ADR-0296:** On 2026-11-03 the owner asked to add email
   attachments to Veetbot's file storage and chose the email's chat as the place, a Save
   button plus an approval-gated Chat tool as the ways in, and knowledge on every save.
-  [The decision](../adr/0295-save-email-attachments-to-the-chat.md) adds no schema,
+  [The decision](../adr/0296-save-email-attachments-to-the-chat.md) adds no schema,
   setting, or scope. Implemented, not yet tried on a real mailbox; no milestone or gate
   moves.
 

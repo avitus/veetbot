@@ -255,7 +255,7 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
     assert {
         ArtifactOrigin.SANDBOX_EXPORT.value,
         ArtifactOrigin.MODEL_OUTPUT.value,
-        ArtifactOrigin.EMAIL_ATTACHMENT.value,  # ADR-0295.
+        ArtifactOrigin.EMAIL_ATTACHMENT.value,  # ADR-0296.
     } == set(REPLY_ATTACHMENT_ORIGINS)
     assert [artifact.id for artifact in chosen] == [written.id, first.id, renamed.id]
     assert reply_file_reference(written) == FileReferencePart(
@@ -267,7 +267,7 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
 
 
 def test_the_same_file_saved_from_two_emails_is_attached_for_each() -> None:
-    """Each saved copy follows its own email, so each needs its own link (ADR-0295)."""
+    """Each saved copy follows its own email, so each needs its own link (ADR-0296)."""
 
     def saved(message_id: str, second: int) -> ArtifactRef:
         return _ref(

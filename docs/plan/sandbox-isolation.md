@@ -1128,7 +1128,7 @@ authorization, which ADR-0028 already specifies.
 
 `origin` exists because the seven sources have different review
 properties and an operator asking "what did this run produce" wants
-them separated. `EMAIL_ATTACHMENT` is a file saved from an email (ADR-0295),
+them separated. `EMAIL_ATTACHMENT` is a file saved from an email (ADR-0296),
 which rides on the run's reply as an export does. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
 `artifact.export` of a workspace path; `MODEL_OUTPUT` is

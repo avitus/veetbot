@@ -239,7 +239,7 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     discovered = [spec for spec in plan.pinned_tool_specs if spec.name.startswith("mcp.")]
     # Nothing is dropped: every candidate has a definition or an index entry.
     assert plan.skipped_tool_names == ()
-    assert len(discovered) == 24  # Two more on the Gmail read server (ADR-0295).
+    assert len(discovered) == 24  # Two more on the Gmail read server (ADR-0296).
     assert len(plan.tool_names) == 30
     assert "tool.call" in defined
     # The six management tools are deferred by the default agent's configuration.
@@ -257,7 +257,7 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     }
     assert START_CALL in writes
     assert writes <= deferred
-    # The instructions advertise it, so it spends no definition or index entry (ADR-0295).
+    # The instructions advertise it, so it spends no definition or index entry (ADR-0296).
     assert "mcp.gmail_read.save_attachment" in deferred
     assert "mcp.gmail_read.save_attachment" not in defined
     assert "save_attachment" not in json.dumps(

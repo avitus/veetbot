@@ -142,7 +142,7 @@ is the same "zero rows updated means stop, not retry" discipline that
 An append that carries no state change has no guarded `UPDATE` to inspect and is
 not subject to the check. The diagnostic `run.fenced` is the case in point: a
 fenced worker performs no transition, no lease release, and no checkpoint write,
-and appends exactly one event, which must commit (`runtime-loop.md:918-927`).
+and appends exactly one event, which must commit (`runtime-loop.md:921-930`).
 
 ### Gaps are normal; missing writes are not
 
@@ -414,7 +414,7 @@ captured and labeled distinctly — true by construction rather than by
 convention, and `failure` carries the classification without carrying the
 error text, which is the field most likely to have a path, a host, or a
 query string in it. Its three values are `RunStatus`'s terminal subset
-(`runtime-loop.md:276`) and not a vocabulary of the export's own, so a
+(`runtime-loop.md:279`) and not a vocabulary of the export's own, so a
 consumer filtering exported runs and a reader querying `runs.status` ask the
 same question in the same words.
 

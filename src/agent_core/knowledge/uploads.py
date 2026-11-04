@@ -41,7 +41,7 @@ MAX_INGEST_ATTEMPTS = 3
 # A failed attempt waits before the next one: a transient cause gets time to
 # clear instead of three tries in thirty seconds (ADR-0284).
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=15))
-# How soon a saved file whose run is still working gets another look (ADR-0295).
+# How soon a saved file whose run is still working gets another look (ADR-0296).
 RUN_WAIT = timedelta(minutes=1)
 _REFUSAL_CODES = (
     ("secret scan", "secret_scan"),

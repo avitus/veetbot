@@ -15,7 +15,7 @@ _FORBIDDEN_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
 def stored_email_attachment_name(name: str) -> str:
-    """A sender's file name made safe to store; it is repaired, never refused (ADR-0295)."""
+    """A sender's file name made safe to store; it is repaired, never refused (ADR-0296)."""
 
     cleaned = "".join(
         "_"

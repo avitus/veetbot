@@ -81,7 +81,7 @@ class BoundArtifactWriter:
         `ArtifactRef` rather than a second one; the rule holds for every
         run-bound writer, so a repeated capture is stored once as well. A file saved
         from a different email is not a repeat: each copy follows its own email
-        through erasure (ADR-0295).
+        through erasure (ADR-0296).
         """
 
         owner = Principal(tenant_id=self._tenant_id, principal_id=self._principal_id)

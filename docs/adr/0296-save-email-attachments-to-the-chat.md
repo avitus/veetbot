@@ -1,4 +1,4 @@
-# ADR-0295: Save an email attachment into the email's chat
+# ADR-0296: Save an email attachment into the email's chat
 
 - Status: Accepted (authorized by the repository owner, 2026-11-03)
 - Date: 2026-11-03

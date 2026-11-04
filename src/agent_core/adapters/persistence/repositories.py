@@ -3338,7 +3338,7 @@ class PostgresArtifactRepository:
                 .where(
                     ArtifactRow.metadata_json["auto_ingest"].astext == "pending",
                     ArtifactRow.origin.in_(sorted(AUTO_INGEST_ORIGINS)),
-                    # A file deleted or erased while pending never reaches knowledge (ADR-0295).
+                    # A file deleted or erased while pending never reaches knowledge (ADR-0296).
                     or_(ArtifactRow.expires_at.is_(None), ArtifactRow.expires_at > now),
                     ArtifactRow.tenant_id == principal.tenant_id,
                     ArtifactRow.principal_id == principal.principal_id,

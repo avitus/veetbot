@@ -3281,7 +3281,7 @@ import SwiftUI
         }.joined(separator: ",")
     }
 
-    // MARK: - Saving an attachment (ADR-0295)
+    // MARK: - Saving an attachment (ADR-0296)
 
     private func saveOperationJSON(_ status: String) -> String {
         "{\"operation_id\":\"\(threadID)\",\"run_id\":\"\(runID)\",\"status\":\"\(status)\",\"replayed\":false}"

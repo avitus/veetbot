@@ -394,7 +394,7 @@ class ArtifactRepository(Protocol):
         """Keep a source for its document; with `now`, an expired one is not found.
 
         With `unchanged_from`, one whose expiry has changed since that read is not
-        found either, so an erasure during an intake cannot be undone (ADR-0295).
+        found either, so an erasure during an intake cannot be undone (ADR-0296).
         """
         ...
 
