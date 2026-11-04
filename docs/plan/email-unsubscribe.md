@@ -120,7 +120,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:949-952).
+  (email-experience.md:950-953).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -282,7 +282,7 @@ without any of them carrying it.
 ### How records form
 
 The refresh task already pages thread summaries for each account, up to 100
-per slice (email-experience.md:378-385). The census reads the `bulk` block on
+per slice (email-experience.md:378-386). The census reads the `bulk` block on
 the summaries refresh was already reading. It issues no query of its own and
 adds no page. A summary whose block says anything but `none`, or that carries
 a `List-Id`, creates or updates its subscription; owner-sent mail, Spam, and
@@ -579,7 +579,7 @@ Gmail's own filter already holds back most spam, and Spam is excluded from
 refresh, so the target is junk that reached the Inbox anyway.
 
 **The verdict.** The importance assessment
-(email-experience.md:498-521) gains one boolean, `spam`, beside `bulk`. Spam
+(email-experience.md:499-522) gains one boolean, `spam`, beside `bulk`. Spam
 is unsolicited mail that is deceptive or unwanted and comes from a party with
 no relationship to the owner: phishing, scams, fake invoices and account
 notices, and mass cold marketing. Mail the owner signed up for is `bulk`, not
@@ -627,7 +627,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:947-967): the owner names one thread and the
+delta (email-experience.md:948-968): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.

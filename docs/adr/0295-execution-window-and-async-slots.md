@@ -46,7 +46,9 @@ failed the same way that morning.
    task claimed within the allowance gets its whole slice. A later claim gets what
    remains of the creation deadline, because slices are bounded and checkpointed,
    so a shorter one still makes progress. A task claimed after that deadline fails.
-   A send keeps its agent deadline.
+   A deadline set on the agent still caps the creation deadline, so an earlier one
+   can shorten or end a slice claimed within the allowance. A send keeps its agent
+   deadline.
 4. **`worker.reserved_async_slots` becomes 2 and takes effect.** The value was
    validated and read by nothing. `agent worker --role async` now starts one
    `--single-slot` process per slot and supervises them: a signal stops them all
