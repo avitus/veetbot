@@ -523,6 +523,7 @@ class PythonPlaywrightRuntime:
         self._known_draft: tuple[JSHandle, str, int] | None = None
         self._readiness_requests = _ReadinessRequests()
         self._disallowed_navigation = False
+        self._evidence_loaded_at: float | None = None
         self._dismissed_beforeunload = False
         self._document_session: CDPSession | None = None
         self._main_frame_id: str | None = None
@@ -1026,6 +1027,7 @@ class PythonPlaywrightRuntime:
                     "tool.browser.provider_unavailable",
                     retryable=True,
                 ) from exc
+            self._evidence_loaded_at = asyncio.get_running_loop().time()
             on_stage(BrowserVerificationStage.IDLE)
             with suppress(PlaywrightError):
                 await page.wait_for_load_state("networkidle", timeout=5_000)
@@ -1051,28 +1053,38 @@ class PythonPlaywrightRuntime:
                     "tool.browser.provider_unavailable",
                     retryable=True,
                 ) from exc
-            return BrowserPageEvidence(
-                on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
-                path=(urlsplit(page.url).path or "/")[:4096],
-                challenge_visible=challenge_visible,
-            )
+            return self._page_evidence_now(page, challenge_visible)
 
-    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence:
-        """Report what the page already loaded for ``url`` shows by ``deadline`` (ADR-0296)."""
+    def _page_evidence_now(self, page: Page, challenge_visible: bool) -> BrowserPageEvidence:
+        loaded_at = self._evidence_loaded_at
+        now = asyncio.get_running_loop().time()
+        return BrowserPageEvidence(
+            on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
+            path=(urlsplit(page.url).path or "/")[:4096],
+            challenge_visible=challenge_visible,
+            observed_seconds=0.0 if loaded_at is None else max(0.0, now - loaded_at),
+        )
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        """Report what the loaded page shows once it is ``observed_seconds`` old (ADR-0296).
+
+        Sooner if a form appears or the page leaves ``url``, and at ``deadline`` at the
+        latest, when the evidence says how long the page was really watched.
+        """
         page = self._current_page()
         confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
         challenge_visible = False
         with suppress(PlaywrightError):
             challenge_visible = await self._sign_in_challenge_visible(page)
         if not challenge_visible:
+            loaded_at = self._evidence_loaded_at
+            old_enough = math.inf if loaded_at is None else loaded_at + observed_seconds
             challenge_visible = await self._challenge_by(
-                page, confirmed_path=confirmed_path, deadline=deadline
+                page, confirmed_path=confirmed_path, deadline=min(old_enough, deadline)
             )
-        return BrowserPageEvidence(
-            on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
-            path=(urlsplit(page.url).path or "/")[:4096],
-            challenge_visible=challenge_visible,
-        )
+        return self._page_evidence_now(page, challenge_visible)
 
     def _on_confirmed_page(self, page: Page, confirmed_path: str) -> bool:
         """Whether the page is still on an allowed origin at or below the confirmed path."""

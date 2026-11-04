@@ -174,6 +174,8 @@ class BrowserPageEvidence(BaseModel):
     on_allowed_origin: bool
     path: str = Field(max_length=4096, repr=False)
     challenge_visible: bool
+    # How long the page had been loaded when this was read (ADR-0296).
+    observed_seconds: float = Field(default=0.0, ge=0.0)
 
 
 class BrowserVerificationStage(StrEnum):

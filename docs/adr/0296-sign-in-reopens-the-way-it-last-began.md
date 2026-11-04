@@ -51,11 +51,14 @@ faults stopped it before the download could run.
    the check's thirty-second limit, or until it leaves the confirmed path. A hash change
    keeps the path. The same page still ends `session_unconfirmed` if no form appears.
    The wait alone could make two identical signed-out pages look different, so a pair
-   that would pass looks at the signed-in copy for five seconds more, stopping two
-   seconds before the limit, and a form or a move away there ends `session_signed_out`. Both loads began
-   together and that look starts after both ended, so the signed-in copy has been watched
-   for longer than the control was. A site definition reads the page's own content and
-   needs no second look.
+   passes only if the signed-in page has been watched for at least three seconds longer
+   than the control's page was, each measured from its own load, because the two
+   browsers can load at different speeds. A pair that would pass keeps looking at the
+   signed-in copy until then, and a form or a move away there ends `session_signed_out`.
+   If the check's limit, less two seconds to read the session, leaves too little time, the
+   sign-in ends `session_unconfirmed` and nothing is saved. A site definition reads the
+   page's own content and needs no second look. All of this shares one limit, which starts
+   with the check's first step.
 5. **A remote rejection logs what each load saw.** Whether each load showed a challenge
    and stayed on the path, in yes or no, never an address. The device path keeps its
    rule that a verdict logs nothing (ADR-0128, amendment of 2026-10-06).
@@ -83,10 +86,13 @@ recurring charges, sign in when asked, approve the Download clicks.
   The new log line will then say so, and the next step is a site definition, not a
   longer wait.
 - A check that ends without a sign-in form now takes about twenty-five seconds rather
-  than failing as soon as the page goes quiet, and a sign-in that passes takes five
-  seconds longer.
-- If the check is already near its limit, the second look is cut short, down to a single
-  look at the signed-in copy.
+  than failing as soon as the page goes quiet, and a sign-in that passes takes about
+  three seconds longer.
+- A page so slow that the signed-in copy cannot be watched for long enough is refused,
+  even if the session was good. The owner can check again.
+- A signed-in page that asks for a sign-in more than three seconds later than the
+  signed-out page did can still pass. Before this work, a form the signed-in load
+  finished too early to see could pass as well.
 - Chase may sign a saved login out within hours, which this does not change.
 - Deleting a login still leaves the chat's binding in place, so the chat shows no website
   until one is connected.

@@ -601,17 +601,22 @@ async def test_a_second_look_sees_a_form_the_load_finished_too_early_for() -> No
     async with browsing([Route("/late", late), Route("/members", members)]) as (site, runtime):
         loaded = await runtime.load_page_evidence(site.url("/late"))
         appeared = await runtime.look_again_by(
-            site.url("/late"), deadline=asyncio.get_running_loop().time() + 10
+            site.url("/late"),
+            observed_seconds=20,
+            deadline=asyncio.get_running_loop().time() + 10,
         )
         await runtime.load_page_evidence(site.url("/members"))
         stayed_signed_in = await runtime.look_again_by(
-            site.url("/members"), deadline=asyncio.get_running_loop().time() + 1
+            site.url("/members"),
+            observed_seconds=2,
+            deadline=asyncio.get_running_loop().time() + 10,
         )
 
     assert not loaded.challenge_visible
     assert appeared.challenge_visible
     assert not stayed_signed_in.challenge_visible
     assert stayed_signed_in.path == "/members"
+    assert 2 <= stayed_signed_in.observed_seconds < 6
 
 
 async def test_a_lease_stops_at_a_sign_in_form_in_a_frame() -> None:

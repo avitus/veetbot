@@ -74,7 +74,9 @@ class StatefulBrowserRuntime(Protocol):
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
-    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence: ...
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence: ...
 
     async def storage_state(self) -> dict[str, object]: ...
 
@@ -250,10 +252,14 @@ class HostedPlaywrightSessionRuntime:
                 retryable=True,
             ) from exc
 
-    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence:
-        """Report what the page already loaded shows by ``deadline`` (ADR-0296)."""
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        """Report what the page already loaded shows once old enough (ADR-0296)."""
         try:
-            return await self._runtime.look_again_by(url, deadline=deadline)
+            return await self._runtime.look_again_by(
+                url, observed_seconds=observed_seconds, deadline=deadline
+            )
         except BrowserProviderError:
             raise
         except Exception as exc:

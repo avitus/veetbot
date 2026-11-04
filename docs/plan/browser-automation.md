@@ -971,9 +971,10 @@ must finish and remain idle for 500 ms before the path and challenge evidence
 below can be positive. A signed-out control whose page still reads as signed in
 then keeps looking for a sign-in field until five seconds before that limit, or
 until it leaves the confirmed path, because a site such as Chase draws its framed
-form after its requests go quiet. A pair that would then pass looks at the signed-in
-copy for five seconds more, and a form or a move away there ends `session_signed_out`, so the control's
-wait can never make two identical signed-out pages look different (ADR-0296). A fetch or XHR event stream with HTTP 200 and media
+form after its requests go quiet. A pair then passes only if the signed-in page has been
+watched for at least three seconds longer than the control's page, each from its own load:
+it keeps looking until then, a form or a move away there ends `session_signed_out`, and too
+little time left ends `session_unconfirmed` (ADR-0296). A fetch or XHR event stream with HTTP 200 and media
 type `text/event-stream` instead counts as established when its response
 headers arrive (ADR-0147); its continuing body does not hold the wait open.
 The media type is case-insensitive and may have parameters. An unanswered
