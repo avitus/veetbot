@@ -781,6 +781,12 @@ class PythonPlaywrightRuntime:
                 window.refusal = "origin_not_allowed"
                 await _discard_download(download)
                 return
+            if asyncio.get_running_loop().time() >= window.deadline:
+                # A key press can outlast the time the act keeps for a file.
+                window.refusal = "timed_out"
+                window.started.set()
+                await _discard_download(download)
+                return
             window.download = download
             window.reading = asyncio.create_task(self._read_download(download, window.deadline))
             window.started.set()

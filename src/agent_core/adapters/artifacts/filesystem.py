@@ -91,7 +91,9 @@ class FilesystemArtifactStore:
 
         A cancelled caller holds no reference to the file, so it could not delete it.
         The rename keeps running in its thread after a cancel and may still finish,
-        so the rollback waits for it, and carries on through a second cancel.
+        so the rollback waits for it, and carries on through a second cancel. It removes
+        whatever holds the path, which relies on every writer allocating a fresh artifact
+        ID: two puts racing on one ID would need a rollback that names its own file.
         """
 
         replacing = asyncio.ensure_future(asyncio.to_thread(os.replace, source, destination))

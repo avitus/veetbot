@@ -297,6 +297,22 @@ async def test_a_file_still_arriving_when_the_act_runs_out_of_time_is_timed_out(
     assert download.cancelled.is_set() and download.deleted
 
 
+async def test_a_file_that_starts_once_the_act_is_out_of_time_is_not_admitted() -> None:
+    """A key press can run for 30 s, past the 20 s the act keeps for a file."""
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://site.test",)
+    window = _DownloadWindow(approved=True, deadline=asyncio.get_running_loop().time())
+    runtime._download_window = window
+    download = _UnfinishedDownload()
+
+    await runtime._handle_download(cast(Download, download))
+
+    assert window.reading is None
+    assert download.cancelled.is_set() and download.deleted
+    finished = await asyncio.wait_for(runtime._finish_download(window, names_a_file=True), 2)
+    assert finished == BrowserDownload.refused("timed_out")
+
+
 async def test_a_file_during_an_approved_click_is_admitted_whatever_started_it() -> None:
     """The window is temporal: ADR-0294's Limits record why it cannot name a file's cause."""
 

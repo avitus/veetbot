@@ -278,7 +278,7 @@ After the page settles, an act on a control whose accessible name contains
 `download`, `export` or `csv`, or on a link with a `download` attribute, waits up to
 10 seconds for the file to start. Any started file then has up to 8 seconds to
 finish. The wait ends 20 seconds after the act's window opened, however slow the click
-was, so the tool's 30 seconds still hold the observation, a postcondition of up to 5
+was, and a file that starts after that is refused as `timed_out`, so the tool's 30 seconds still hold the observation, a postcondition of up to 5
 seconds and storing the file, which gives up 1 second before the limit. The name decides only whether to wait,
 never whether to admit. A later file is cancelled and unreported.
 
