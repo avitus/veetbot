@@ -63,9 +63,11 @@ further constraints shape the contract.
 3. **The wait is bounded and starts only where it helps.** After the page settles,
    an act on a control whose accessible name contains `download`, `export` or
    `csv`, or a link with a `download` attribute, waits up to 10 seconds for the file
-   to start; any started file then has up to 8 seconds to finish. The wait ends 24
+   to start; any started file then has up to 8 seconds to finish. The wait ends 20
    seconds after the act's window opened, however slow the click was, so
-   `browser.act`'s 30 seconds can still report the click. The name decides only whether to wait, never
+   `browser.act`'s 30 seconds still hold the observation, a postcondition of up to
+   5 seconds and storing the file, which gives up 1 second before the limit and
+   reports `failed`. The name decides only whether to wait, never
    whether to admit. The window closes when the act returns, so a later file is
    cancelled.
 4. **The bytes cross once, in the act's response.** `BrowserObservation` gains an

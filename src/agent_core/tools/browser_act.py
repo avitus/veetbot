@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -73,6 +74,8 @@ _CONDITION_SCHEMA = browser_condition_schema()
 _CONDITION_DEFINITIONS = _CONDITION_SCHEMA.pop("$defs")
 # Room in a result for the saved-file note, whatever the page's size.
 _SAVED_FILE_NOTE_BYTES = 1024
+# Storing a file gives up this long before the tool's limit, to report the click.
+_RESULT_RESERVE_SECONDS = 1.0
 
 INPUT_SCHEMA: dict[str, Any] = {
     "$defs": _CONDITION_DEFINITIONS,
@@ -220,6 +223,9 @@ class BrowserActTool:
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         """Dispatch one action, check its postcondition, and report any file it saved."""
 
+        store_deadline = (
+            asyncio.get_running_loop().time() + context.timeout_seconds - _RESULT_RESERVE_SECONDS
+        )
         try:
             if set(arguments) - set(self.spec.input_schema["properties"]):
                 raise ValueError("unknown action fields")
@@ -297,7 +303,7 @@ class BrowserActTool:
         )
         if download is None or not result.ok or result.structured is None:
             return result
-        saved_file = await self._saved_file(download, context)
+        saved_file = await self._saved_file(download, context, store_deadline)
         structured = {**result.structured, "saved_file": saved_file}
         return result.model_copy(
             update={
@@ -307,7 +313,7 @@ class BrowserActTool:
         )
 
     async def _saved_file(
-        self, download: BrowserDownload, context: ToolExecutionContext
+        self, download: BrowserDownload, context: ToolExecutionContext, deadline: float
     ) -> dict[str, Any]:
         """Store an admitted file as a capture of this chat and describe it to the model."""
 
@@ -321,19 +327,20 @@ class BrowserActTool:
         media_type = str(download.media_type)
         writer = cast(ArtifactWriter, context.artifacts)
         try:
-            ref = await writer.create(
-                _single(data),
-                download.filename,
-                media_type,
-                TrustLevel.EXTERNAL_UNTRUSTED,
-                metadata={
-                    CAPTURE_METADATA_KEY: {
-                        "tool": self.spec.name,
-                        "required_scopes": sorted(self.spec.required_scopes),
-                        CAPTURE_LITERAL_KEY: True,
-                    }
-                },
-            )
+            async with asyncio.timeout_at(deadline):
+                ref = await writer.create(
+                    _single(data),
+                    download.filename,
+                    media_type,
+                    TrustLevel.EXTERNAL_UNTRUSTED,
+                    metadata={
+                        CAPTURE_METADATA_KEY: {
+                            "tool": self.spec.name,
+                            "required_scopes": sorted(self.spec.required_scopes),
+                            CAPTURE_LITERAL_KEY: True,
+                        }
+                    },
+                )
         except Exception:
             # The click already ran, so a lost file must not cost it its result.
             logger.exception("browser_download_capture_failed", extra={"size_bytes": len(data)})

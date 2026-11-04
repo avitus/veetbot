@@ -277,8 +277,9 @@ letters, digits, `.`, `_` and `-`, and the media type comes from the name's suff
 After the page settles, an act on a control whose accessible name contains
 `download`, `export` or `csv`, or on a link with a `download` attribute, waits up to
 10 seconds for the file to start. Any started file then has up to 8 seconds to
-finish. The wait ends 24 seconds after the act's window opened, however slow the click
-was, so the tool's 30 seconds can still report the click. The name decides only whether to wait,
+finish. The wait ends 20 seconds after the act's window opened, however slow the click
+was, so the tool's 30 seconds still hold the observation, a postcondition of up to 5
+seconds and storing the file, which gives up 1 second before the limit. The name decides only whether to wait,
 never whether to admit. A later file is cancelled and unreported.
 
 The bytes cross the service boundary once, in base64, on the act's own observation
@@ -294,7 +295,7 @@ the chat. The mark's `literal` flag has the reader take the file as its own text
 never as serialized tool output. The structured result gains `saved_file`, kept by the context projection:
 the artifact ID, name, media type, size, section count and the exact `tool.call`
 that reads it, or `status: refused` with a reason. A plan that cannot reach the
-reader gets `reader_unavailable`, and nothing is stored. A file that cannot be stored
+reader gets `reader_unavailable`, and nothing is stored. A file that cannot be stored in time
 reports `failed`, and the click keeps its result, because it already ran. Input schema and description
 are unchanged, so the tool's definition costs no more; `browser.act@1.7.0` stays
 registered for chats pinned to it and reports no file. ADR-0294 records this

@@ -146,8 +146,9 @@ SETTLE_SECONDS = 2.0
 DOWNLOAD_START_SECONDS = 10.0
 DOWNLOAD_READ_SECONDS = 8.0
 # The file wait ends this long after the act's window opened, however slow the click
-# was, leaving browser.act's 30 seconds room to report the click.
-DOWNLOAD_ACT_BUDGET_SECONDS = 24.0
+# was. browser.act's 30 seconds then still hold the observation, a postcondition of
+# up to 5 seconds, and storing the file.
+DOWNLOAD_ACT_BUDGET_SECONDS = 20.0
 _DOWNLOAD_POLL_SECONDS = 0.1
 _DOWNLOAD_CONTROL = re.compile(r"download|export|csv", re.IGNORECASE)
 _FILE_ACTION_KINDS = frozenset({BrowserActionKind.CLICK, BrowserActionKind.PRESS})
