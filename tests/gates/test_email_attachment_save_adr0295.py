@@ -452,6 +452,7 @@ async def test_knowledge_waits_for_the_run_whose_reply_lists_the_file() -> None:
                         "run_id": active.id,
                         "storage_uri": f"memory://{uuid4()}",
                         "origin": ArtifactOrigin.EMAIL_ATTACHMENT.value,
+                        "created_at": finished.created_at - timedelta(seconds=1),
                     }
                 )
             )
@@ -461,19 +462,27 @@ async def test_knowledge_waits_for_the_run_whose_reply_lists_the_file() -> None:
             async def ingest(self, request: Any, *, origin_trust: TrustLevel) -> None:
                 ingested.append(request.source.id)
 
+        # One file at a time, so a waiting file that kept its place would block the next.
         sweep = UploadAutoIngest(
             uow_factory=app.uow_factory,
             knowledge=cast(Any, Knowledge()),
             principal=app.principal,
             clock=app.clock,
+            batch_size=1,
         )
+        assert await sweep.sweep_once() == 0
         assert await sweep.sweep_once() == 1
         assert ingested == [finished.id]
         async with app.uow_factory() as uow:
             waiting = await uow.artifacts.get(mid_run.id, app.principal)
+            soon = await uow.artifacts.pending_auto_ingest(
+                app.principal, now=app.clock.now() + timedelta(minutes=1), limit=9
+            )
         assert waiting.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
         assert waiting.metadata["auto_ingest"] == "pending"
+        # Waiting is not a failure, and the file comes back for another look.
         assert "auto_ingest_attempts" not in waiting.metadata
+        assert [item.id for item in soon] == [mid_run.id]
 
 
 @pytest.mark.parametrize("status", [RunStatus.FAILED, RunStatus.CANCELLED])

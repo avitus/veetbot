@@ -41,6 +41,8 @@ MAX_INGEST_ATTEMPTS = 3
 # A failed attempt waits before the next one: a transient cause gets time to
 # clear instead of three tries in thirty seconds (ADR-0284).
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=15))
+# How soon a saved file whose run is still working gets another look (ADR-0295).
+RUN_WAIT = timedelta(minutes=1)
 _REFUSAL_CODES = (
     ("secret scan", "secret_scan"),
     ("encrypted", "encrypted"),
@@ -110,6 +112,14 @@ class UploadAutoIngest:
             # A reply attaches a saved file by its origin, which this would change,
             # and a terminal status is recorded after the reply.
             if source_run is not None and source_run.status not in TERMINAL_RUN_STATUSES:
+                # Deferred, it leaves the batch and cannot block a file that is due.
+                await self._record(
+                    artifact,
+                    AUTO_INGEST_PENDING,
+                    None,
+                    attempts - 1,
+                    not_before=(self._clock.now() + RUN_WAIT).isoformat(),
+                )
                 continue
             if current.expires_at is not None and current.expires_at <= self._clock.now():
                 await self._record(artifact, AUTO_INGEST_REFUSED, "not_found", attempts)
