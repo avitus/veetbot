@@ -226,6 +226,8 @@ def browser_context_projection(
             "reason": "inline_budget_too_small",
             "elements": [],
         }
+        if isinstance(structured.get("saved_file"), dict):
+            payload["saved_file"] = structured["saved_file"]
         return content() if fits() else None
 
     if "extraction" in payload and observation.extraction is not None:

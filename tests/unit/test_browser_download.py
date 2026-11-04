@@ -428,6 +428,31 @@ def test_the_context_projection_keeps_the_saved_file_note() -> None:
     assert '"saved_file":{"status":"saved"' in projected[0].text
 
 
+def test_a_budget_too_small_for_the_page_still_keeps_the_saved_file_note() -> None:
+    """The note is the only route to the file, so the omission fallback keeps it."""
+
+    saved = {"status": "saved", "read_with": "tool.call {}"}
+    projected = browser_context_projection(
+        {
+            "provider": "fake",
+            "url": "https://example.org/a",
+            "title": None,
+            "revision": "r" * 128,
+            "text": "",
+            "elements": [],
+            "saved_file": saved,
+        },
+        budget=512,
+        reference=FileReferencePart(
+            artifact_id=UUID(int=1), media_type="application/json", filename="o.json"
+        ),
+    )
+    assert projected is not None
+    assert isinstance(projected[0], TextPart)
+    assert '"observation_omitted":true' in projected[0].text
+    assert '"saved_file":{"status":"saved"' in projected[0].text
+
+
 def test_act_gains_the_report_and_a_pinned_chat_keeps_its_exact_spec() -> None:
     current, pinned = BrowserActTool.spec, PinnedBrowserActTool.spec
     assert current.version == "1.8.0"

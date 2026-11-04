@@ -123,6 +123,8 @@ This ADR stays Proposed until that check passes.
   a full read stops at about 256 KiB; `find` still searches the whole file.
 - Chat reads the file itself. It has no sandbox import for computing over the rows,
   so a long file's totals rest on what the model reads.
+- If the act's postcondition read fails, the act reports an uncertain outcome and
+  the file is not kept, so it takes another approved click.
 - The saved file does not attach to the reply as an owner download.
 - The approval card names the click, not the file.
 - No acceptance criterion or grant exclusion is weakened; this supplies the
