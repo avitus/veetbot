@@ -20,6 +20,7 @@ CAPTURE_READER_TOOL_NAME = "artifact.read_capture"
 # Admission marks a capture's artifact row with the producing tool and the
 # scopes it required; only a marked capture opens for the reader.
 CAPTURE_METADATA_KEY = "capture"
+CAPTURE_LITERAL_KEY = "literal"
 CAPTURE_SECTION_BYTES = 16_384
 MAXIMUM_CAPTURE_SECTIONS = 65_536
 FIND_MATCH_LIMIT = 20
@@ -42,17 +43,20 @@ def reader_call(artifact_id: UUID) -> str:
     )
 
 
-def capture_text(raw: bytes) -> str:
+def capture_text(raw: bytes, *, literal: bool = False) -> str:
     """The text of a capture's text parts, joined by a blank line.
 
     A partial capture was cut at the hard ceiling and is not valid JSON, so it
-    reads as UTF-8 with invalid sequences replaced.
+    reads as UTF-8 with invalid sequences replaced. A ``literal`` capture holds a
+    file rather than tool output, and is never read as parts (ADR-0294).
     """
 
-    try:
-        parts = json.loads(raw)
-    except ValueError:
-        parts = None
+    parts = None
+    if not literal:
+        try:
+            parts = json.loads(raw)
+        except ValueError:
+            parts = None
     if isinstance(parts, list):
         texts = [
             part["text"]

@@ -2,6 +2,12 @@
 # both repairs: an email slice's 120 seconds start at its first claim rather than
 # at admission, and the async role runs two processes. Accepted; no milestone or
 # gate moves.
+# ADR-0294: On 2026-11-03 the owner asked that Chat be able to download the CSV
+# Chase offered, which the browser cancelled. An individually approved click may
+# now save one bounded text file as a capture of the chat, read through
+# artifact.read_capture; every other file is still cancelled. browser.act moves
+# to 1.8.0 with 1.7.0 kept for pinned chats. Proposed until the owner's production
+# check on Chase passes. No milestone or gate moves.
 # ADR-0291: On 2026-11-03 the owner asked for MCP tools in scheduled runs and
 # Cockpit widgets, and chose per-schedule servers plus read-only MCP calls from
 # saved jobs. Each schedule names its servers, the approval lists them, and a

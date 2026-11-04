@@ -7,6 +7,7 @@ from uuid import UUID
 
 from agent_core.domain.artifacts import StoredArtifactRef
 from agent_core.domain.captures import (
+    CAPTURE_LITERAL_KEY,
     CAPTURE_METADATA_KEY,
     CAPTURE_READER_TOOL_NAME,
     CAPTURE_SECTION_BYTES,
@@ -147,7 +148,10 @@ class ArtifactReadCaptureTool:
             raw = b"".join([chunk async for chunk in chunks])
         except (OSError, ArtifactIntegrityError):
             return _failure(ToolFailureKind.NOT_FOUND, "tool.capture.not_found")
-        sections = CaptureSections(capture_text(raw), artifact_id=artifact.id, tool=tool)
+        literal = artifact.metadata[CAPTURE_METADATA_KEY].get(CAPTURE_LITERAL_KEY) is True
+        sections = CaptureSections(
+            capture_text(raw, literal=literal), artifact_id=artifact.id, tool=tool
+        )
         if section > sections.count:
             return _failure(ToolFailureKind.INVALID_ARGUMENTS, "tool.capture.section_out_of_range")
         structured: dict[str, Any] = {

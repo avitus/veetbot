@@ -33,13 +33,15 @@ from agent_core.domain.browser import (
     require_service_origin,
 )
 from agent_core.domain.browser_diagnostics import admit_browser_diagnostics, browser_phase_call
+from agent_core.domain.browser_download import MAX_BROWSER_DOWNLOAD_BYTES
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile, BrowserImagePayload
 from agent_core.domain.credentials import CredentialRef
 from agent_core.ports.credentials import CredentialResolver
 
 # ADR-0129: 640 KiB of observation plus at most 64 KiB of element facts.
-MAXIMUM_SESSION_RESPONSE_BYTES = 720 * 1024
+# ADR-0294: a whole observation plus one saved file in its base64 envelope.
+MAXIMUM_SESSION_RESPONSE_BYTES = 720 * 1024 + 4 * ((MAX_BROWSER_DOWNLOAD_BYTES + 2) // 3) + 1024
 CREDENTIAL_NAME = "browser_profile_control_plane"
 
 

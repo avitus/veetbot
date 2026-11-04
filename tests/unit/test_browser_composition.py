@@ -71,7 +71,7 @@ from agent_core.domain.tools import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.browser import browser_lease_upkeep
-from agent_core.tools.browser_act import BrowserActTool
+from agent_core.tools.browser_act import BrowserActTool, PinnedBrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
     BrowserObserveTool,
@@ -179,6 +179,12 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         navigate = cast(RegisteredTool, registry.get("browser.navigate"))
         observe = cast(RegisteredTool, registry.get("browser.observe"))
         act = cast(RegisteredTool, registry.get("browser.act"))
+        # ADR-0294: new chats take the latest; a chat pinned to the earlier spec keeps it.
+        assert act.spec.version == BrowserActTool.spec.version
+        pinned = cast(
+            RegisteredTool, registry.get("browser.act", PinnedBrowserActTool.spec.version)
+        )
+        assert isinstance(pinned.implementation, PinnedBrowserActTool)
         assert isinstance(navigate.implementation, BrowserNavigateTool)
         assert isinstance(observe.implementation, BrowserObserveTool)
         assert observe.spec.version == "1.8.0"
