@@ -88,7 +88,9 @@ either be truncated or written into append-only history.
    erased with the run, and so is every file of a run that call erasure reaches.
    Knowledge waits for the save's run to complete, because a reply attaches a saved file
    by its origin and knowledge changes that origin. A file from a run that fails or is
-   cancelled stays out of knowledge and keeps its 30-day expiry, as decision 5 says.
+   cancelled stays out of knowledge and keeps its 30-day expiry, as decision 5 says. The
+   same bytes saved from two emails in one run are two files with two links, because each
+   follows its own email; a retry of one email's save still finds its own copy.
 
 9. **`save_attachment` is an unindexed deferral.** It has one name per mailbox, and
    as a read it would have taken a definition slot from a tool used on a request's

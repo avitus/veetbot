@@ -12,7 +12,12 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.artifacts import ArtifactMetadata, ArtifactOrigin, StoredArtifactRef
+from agent_core.domain.artifacts import (
+    ArtifactMetadata,
+    ArtifactOrigin,
+    StoredArtifactRef,
+    saved_from,
+)
 from agent_core.domain.errors import ArtifactIntegrityError
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
@@ -63,13 +68,20 @@ class BoundArtifactWriter:
         self._maximum_bytes = maximum_bytes
 
     async def _same_in_run(
-        self, filename: str, media_type: str, sha256: str, now: datetime
+        self,
+        filename: str,
+        media_type: str,
+        sha256: str,
+        now: datetime,
+        source: str | None = None,
     ) -> StoredArtifactRef | None:
         """The run's live artifact with this origin, name, type, and content, if any.
 
         builtin-tools.md requires the same export within a run to return the same
         `ArtifactRef` rather than a second one; the rule holds for every
-        run-bound writer, so a repeated capture is stored once as well.
+        run-bound writer, so a repeated capture is stored once as well. A file saved
+        from a different email is not a repeat: each copy follows its own email
+        through erasure (ADR-0295).
         """
 
         owner = Principal(tenant_id=self._tenant_id, principal_id=self._principal_id)
@@ -81,6 +93,7 @@ class BoundArtifactWriter:
                 and artifact.name == filename
                 and artifact.media_type == media_type
                 and artifact.sha256 == sha256
+                and saved_from(artifact.metadata) == source
                 and (artifact.expires_at is None or artifact.expires_at > now)
             ):
                 return StoredArtifactRef(
@@ -111,7 +124,9 @@ class BoundArtifactWriter:
                 await asyncio.to_thread(spool.write, chunk)
             await asyncio.to_thread(spool.seek, 0)
             now = self._clock.now()
-            existing = await self._same_in_run(filename, media_type, digest.hexdigest(), now)
+            existing = await self._same_in_run(
+                filename, media_type, digest.hexdigest(), now, saved_from(metadata or {})
+            )
             if existing is not None:
                 return existing
             artifact_id = self._ids.new_id()

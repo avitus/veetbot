@@ -375,7 +375,8 @@ public final class EmailViewModel: ObservableObject {
         archiveRequests = [:]
         archiveErrors = [:]
         attachmentSaves = [:]
-        attachmentRequests = [:]
+        // Kept: signing in again resets this for the same account, and a save the server
+        // admitted must not become a second copy. A finished save removes its own entry.
         archiveSubmitting = []
         archiveHiddenThreads = []
         archiveUnsupportedAccounts = []

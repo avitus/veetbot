@@ -266,6 +266,19 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
     )
 
 
+def test_the_same_file_saved_from_two_emails_is_attached_for_each() -> None:
+    """Each saved copy follows its own email, so each needs its own link (ADR-0295)."""
+
+    def saved(message_id: str, second: int) -> ArtifactRef:
+        return _ref(
+            ArtifactOrigin.EMAIL_ATTACHMENT, name="a.pdf", sha="a", second=second
+        ).model_copy(update={"metadata": {"email_source": {"message_id": message_id}}})
+
+    first, second, repeat = saved("m1", 1), saved("m2", 2), saved("m1", 3)
+    now = datetime(2026, 9, 23, 13, tzinfo=UTC)
+    assert reply_attachments([first, second, repeat], now=now) == [first, second]
+
+
 def test_a_file_deleted_before_the_reply_is_not_attached() -> None:
     # ADR-0277: deletion is an expiry; attaching would clear it and undo the delete.
     kept = _ref(ArtifactOrigin.MODEL_OUTPUT, name="final.png", sha="a", second=1)

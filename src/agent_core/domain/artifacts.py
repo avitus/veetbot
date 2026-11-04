@@ -44,14 +44,17 @@ REPLY_ATTACHMENT_ORIGINS = frozenset(
 def reply_attachments(artifacts: list[ArtifactRef], *, now: datetime) -> list[ArtifactRef]:
     """Choose a run's exported files in creation order, once per name and content.
 
+    Copies saved from different emails stay separate, because each follows its own
+    email through erasure (ADR-0295).
+
     A file already expired, such as one `artifact.delete` removed earlier in the
     run (ADR-0277), is left off: attaching it would clear the expiry.
     """
 
     chosen: list[ArtifactRef] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str | None]] = set()
     for artifact in sorted(artifacts, key=lambda item: (item.created_at, item.id)):
-        key = (artifact.name, artifact.sha256)
+        key = (artifact.name, artifact.sha256, saved_from(artifact.metadata))
         expired = artifact.expires_at is not None and artifact.expires_at <= now
         if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen or expired:
             continue
@@ -225,6 +228,14 @@ class AttachmentContent:
     truncated: bool = False
 
 
+def saved_from(metadata: Mapping[str, Any]) -> str | None:
+    """The message a saved file was copied from, when its record can say."""
+
+    source = metadata.get(EMAIL_SOURCE_METADATA_KEY)
+    message_id = source.get("message_id") if isinstance(source, Mapping) else None
+    return message_id if isinstance(message_id, str) and message_id else None
+
+
 def outlives_source_erasure(metadata: Mapping[str, Any], message_ids: frozenset[str]) -> bool:
     """A saved file copies its own email, whatever else its run read (ADR-0295).
 
@@ -233,6 +244,5 @@ def outlives_source_erasure(metadata: Mapping[str, Any], message_ids: frozenset[
     can read is treated as the one being erased.
     """
 
-    source = metadata.get(EMAIL_SOURCE_METADATA_KEY)
-    message_id = source.get("message_id") if isinstance(source, Mapping) else None
-    return isinstance(message_id, str) and bool(message_id) and message_id not in message_ids
+    message_id = saved_from(metadata)
+    return message_id is not None and message_id not in message_ids

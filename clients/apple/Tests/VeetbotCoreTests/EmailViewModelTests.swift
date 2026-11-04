@@ -3431,6 +3431,27 @@ import SwiftUI
         #expect(server.bodies.count == 1, "A retained operation is never admitted again")
     }
 
+    @Test func testAConnectionResetKeepsFollowingAnAdmittedSave() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            if !server.recovered { throw URLError(.networkConnectionLost) }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        // Signing in again resets the connection, for the same account and the same file.
+        model.resetConnection()
+        #expect(model.attachmentSave(key) == nil)
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count == 1, "A second press must not save a second copy")
+    }
+
     @Test func testAConnectionResetForgetsSaveState() async throws {
         let model = try makeModel(pollNanoseconds: 1_000) { _ in (200, self.saveOperationJSON("COMPLETED")) }
         let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
