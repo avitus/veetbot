@@ -140,7 +140,7 @@ SETTLE_SECONDS = 2.0
 # the page to start it, and any started file this long to finish. Together with
 # the settle they fit browser.act's 30 seconds.
 DOWNLOAD_START_SECONDS = 10.0
-DOWNLOAD_READ_SECONDS = 12.0
+DOWNLOAD_READ_SECONDS = 8.0
 _DOWNLOAD_POLL_SECONDS = 0.1
 _DOWNLOAD_CONTROL = re.compile(r"download|export|csv", re.IGNORECASE)
 _FILE_ACTION_KINDS = frozenset({BrowserActionKind.CLICK, BrowserActionKind.PRESS})
@@ -314,6 +314,15 @@ def _directory_bytes(path: str) -> int:
     with suppress(OSError):
         return sum(entry.stat().st_size for entry in os.scandir(path))
     return 0
+
+
+async def _discard_download(download: Download) -> None:
+    """Stop a transfer, then remove its file; delete alone would wait for it to finish."""
+
+    with suppress(PlaywrightError):
+        await download.cancel()
+    with suppress(PlaywrightError):
+        await download.delete()
 
 
 def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
@@ -746,7 +755,7 @@ class PythonPlaywrightRuntime:
             return
         if window is not None and not window.approved:
             window.refused = True
-        await download.cancel()
+        await _discard_download(download)
 
     async def _read_download(self, download: Download) -> BrowserDownload:
         """Wait for the file within its time and size limits, then remove it from disk."""
@@ -761,7 +770,6 @@ class PythonPlaywrightRuntime:
                 elif loop.time() >= deadline:
                     refusal = "timed_out"
                 if refusal is not None:
-                    await download.cancel()
                     return BrowserDownload.refused(refusal)
                 await asyncio.wait({finished}, timeout=_DOWNLOAD_POLL_SECONDS)
             path = finished.result()
@@ -774,8 +782,7 @@ class PythonPlaywrightRuntime:
         finally:
             finished.cancel()
             await asyncio.gather(finished, return_exceptions=True)
-            with suppress(PlaywrightError):
-                await download.delete()
+            await _discard_download(download)
 
     def _control_names_a_file(self, ref: str) -> bool:
         """Whether a click may take a moment to start a file; it never authorizes one."""
@@ -1432,14 +1439,16 @@ class PythonPlaywrightRuntime:
                 download = await self._finish_download(window, names_a_file=names_a_file)
         finally:
             self._download_window = None
-            if window is not None and window.reading is not None:
-                window.reading.cancel()
             if draft_binding is not None:
                 with suppress(PlaywrightError):
                     await draft_binding.dispose()
             self._document_fence = None
             refused_page = self._fence_refused_page
             self._fence_refused_page = False
+            # An act that ends early stops its file; a finished read is untouched.
+            if window is not None and window.reading is not None:
+                window.reading.cancel()
+                await asyncio.gather(window.reading, return_exceptions=True)
         if refused_page:
             # The action sent the page toward a document outside the grant,
             # which never loaded; the page now shows the browser's error page.
@@ -1851,6 +1860,9 @@ class PythonPlaywrightRuntime:
             self._readiness_requests.reset()
             self._document_fence = None
             self._fence_refused_page = False
+            self._download_window = None
+            self._downloads_path = ""
+            self._file_controls = frozenset()
 
 
 @contextmanager

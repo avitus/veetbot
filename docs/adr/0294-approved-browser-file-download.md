@@ -56,15 +56,16 @@ further constraints shape the contract.
 3. **The wait is bounded and starts only where it helps.** After the page settles,
    an act on a control whose accessible name contains `download`, `export` or
    `csv`, or a link with a `download` attribute, waits up to 10 seconds for the file
-   to start; any started file then has up to 12 seconds to finish. Both fit
+   to start; any started file then has up to 8 seconds to finish. Both fit
    `browser.act`'s 30 seconds. The name decides only whether to wait, never
    whether to admit. The window closes when the act returns, so a later file is
    cancelled.
 4. **The bytes cross once, in the act's response.** `BrowserObservation` gains an
    optional `download`. The hosted service sends the file in base64 with the
    observation, and the worker's response limit grows by that envelope.
-   Observation results list their fields explicitly, so the bytes never reach a
-   tool result, an event or a log.
+   The worker repeats the admission checks on what it parses, since the service
+   handles hostile pages. Observation results list their fields explicitly, so
+   the bytes never reach a tool result, an event or a log.
 5. **The tool saves the file as a capture of the chat.** `browser.act@1.8.0`
    writes it through the run's artifact writer with origin `tool_output`, trust
    `EXTERNAL_UNTRUSTED` and the capture mark, so `artifact.read_capture` opens it

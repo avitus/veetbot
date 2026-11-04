@@ -269,13 +269,14 @@ letters, digits, `.`, `_` and `-`, and the media type comes from the name's suff
 
 After the page settles, an act on a control whose accessible name contains
 `download`, `export` or `csv`, or on a link with a `download` attribute, waits up to
-10 seconds for the file to start. Any started file then has up to 12 seconds to
+10 seconds for the file to start. Any started file then has up to 8 seconds to
 finish. Both fit the tool's 30 seconds. The name decides only whether to wait,
 never whether to admit. A later file is cancelled and unreported.
 
 The bytes cross the service boundary once, in base64, on the act's own observation
 (`BrowserObservation.download`); the worker's session response limit allows for
-this envelope. Observation results list their fields, so no tool result, event or
+this envelope, and the worker repeats the admission checks on what it parses.
+Observation results list their fields, so no tool result, event or
 log carries the bytes.
 
 `browser.act@1.8.0` stores the file through the run's artifact writer as an

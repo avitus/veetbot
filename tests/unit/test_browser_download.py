@@ -1,12 +1,15 @@
 """A downloaded file is bounded text, saved in this chat and read as a capture (ADR-0294)."""
 
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
+from playwright.async_api import Download
+from playwright.async_api import Error as PlaywrightError
 from pydantic import ValidationError
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
@@ -14,6 +17,7 @@ from agent_core.adapters.browser.hosted_sessions import (
     MAXIMUM_SESSION_RESPONSE_BYTES,
     BrowserSessionObservation,
 )
+from agent_core.adapters.browser.playwright import PythonPlaywrightRuntime
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.browser_control_plane.api import _snapshot_response
@@ -137,6 +141,22 @@ def test_a_refusal_carries_no_bytes_and_a_save_carries_no_reason() -> None:
         BrowserDownload(status="saved", reason="failed", filename="a", media_type="text/plain")
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"filename": "../secret.csv", "media_type": "text/csv", "data_base64": "YQ=="},
+        {"filename": "a.csv", "media_type": "text/html", "data_base64": "YQ=="},
+        {"filename": "a.csv", "media_type": "text/csv", "data_base64": "not base64!"},
+        {"filename": "a.csv", "media_type": "text/csv", "data_base64": ""},
+        {"filename": "a.csv", "media_type": "text/csv", "data_base64": "/w=="},
+        {"filename": "a.csv", "media_type": "text/csv", "data_base64": "YQA="},
+    ],
+)
+def test_the_worker_rechecks_a_saved_file_from_the_service(fields: dict[str, str]) -> None:
+    with pytest.raises(ValidationError):
+        BrowserDownload.model_validate({"status": "saved", **fields})
+
+
 def test_bytes_never_appear_in_a_repr() -> None:
     assert "STREAMING" not in repr(BrowserDownload.from_bytes("a.csv", CSV.encode()))
 
@@ -156,6 +176,49 @@ def test_the_file_crosses_the_hosted_boundary_with_the_observation() -> None:
     wire = _snapshot_response(BrowserSnapshot(observation=observation))
     page = BrowserSessionObservation.model_validate(wire)
     assert page.snapshot().observation.download == observation.download
+
+
+class _UnfinishedDownload:
+    """A transfer that ends only when cancelled; delete waits for it, as Playwright's does."""
+
+    suggested_filename = "a.csv"
+
+    def __init__(self) -> None:
+        self.cancelled = asyncio.Event()
+        self.deleted = False
+
+    async def path(self) -> Path:
+        await self.cancelled.wait()
+        raise PlaywrightError("download canceled")
+
+    async def cancel(self) -> None:
+        self.cancelled.set()
+
+    async def delete(self) -> None:
+        await self.cancelled.wait()
+        self.deleted = True
+
+
+async def test_an_interrupted_read_stops_the_transfer_instead_of_waiting_for_it() -> None:
+    download = _UnfinishedDownload()
+    reading = asyncio.create_task(
+        PythonPlaywrightRuntime()._read_download(cast(Download, download))
+    )
+    await asyncio.sleep(0)
+    reading.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(reading, 2)
+
+    assert download.cancelled.is_set() and download.deleted
+
+
+async def test_a_cancelled_file_leaves_nothing_to_count_against_the_next() -> None:
+    download = _UnfinishedDownload()
+
+    await PythonPlaywrightRuntime()._handle_download(cast(Download, download))
+
+    assert download.cancelled.is_set() and download.deleted
 
 
 async def test_an_approved_download_is_saved_as_a_capture_the_reader_opens() -> None:

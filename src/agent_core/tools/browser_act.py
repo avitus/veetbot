@@ -215,6 +215,8 @@ class BrowserActTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Dispatch one action, check its postcondition, and report any file it saved."""
+
         try:
             if set(arguments) - set(self.spec.input_schema["properties"]):
                 raise ValueError("unknown action fields")

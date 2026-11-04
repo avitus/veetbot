@@ -32,8 +32,14 @@ def _clean_name(suggested: str) -> str:
     """A website's suggested name, reduced to a bare name of safe characters."""
 
     bare = PurePosixPath(suggested.replace("\\", "/")).name
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", bare).lstrip("._")
-    return cleaned[-MAX_BROWSER_DOWNLOAD_NAME_CHARACTERS:] or _DEFAULT_NAME
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", bare)
+    return cleaned[-MAX_BROWSER_DOWNLOAD_NAME_CHARACTERS:].lstrip("._") or _DEFAULT_NAME
+
+
+def _media_type(name: str) -> str:
+    """The type a clean name implies; a website's own claim is never read."""
+
+    return _MEDIA_TYPES.get(PurePosixPath(name).suffix.lower(), _DEFAULT_MEDIA_TYPE)
 
 
 def _text(data: bytes) -> str | None:
@@ -69,9 +75,23 @@ class BrowserDownload(BaseModel):
 
     @model_validator(mode="after")
     def carries_a_file_or_a_reason(self) -> Self:
-        saved = self.filename is not None and self.media_type and self.data_base64 is not None
-        if self.status == "saved" and (self.reason is not None or not saved):
-            raise ValueError("a saved download names its file and no refusal")
+        """Hold every saved file to the admission rules, wherever it was parsed.
+
+        The worker parses what the browser service sent, so it repeats the
+        service's checks rather than trusting a process that handles hostile pages.
+        """
+
+        if self.status == "saved":
+            if self.reason is not None or self.filename is None or self.data_base64 is None:
+                raise ValueError("a saved download names its file and no refusal")
+            if self.filename != _clean_name(self.filename) or self.media_type != _media_type(
+                self.filename
+            ):
+                raise ValueError("a saved download has a platform name and media type")
+            data = base64.b64decode(self.data_base64, validate=True)
+            data.decode("utf-8")
+            if not data or len(data) > MAX_BROWSER_DOWNLOAD_BYTES or b"\0" in data:
+                raise ValueError("a saved download is bounded text")
         if self.status == "refused" and (
             self.reason is None
             or self.filename is not None
@@ -83,6 +103,8 @@ class BrowserDownload(BaseModel):
 
     @classmethod
     def refused(cls, reason: BrowserDownloadRefusal) -> BrowserDownload:
+        """A named refusal, which carries no file."""
+
         return cls(status="refused", reason=reason)
 
     @classmethod
@@ -103,7 +125,7 @@ class BrowserDownload(BaseModel):
         return cls(
             status="saved",
             filename=name,
-            media_type=_MEDIA_TYPES.get(PurePosixPath(name).suffix.lower(), _DEFAULT_MEDIA_TYPE),
+            media_type=_media_type(name),
             data_base64=base64.b64encode(encoded).decode("ascii"),
         )
 
@@ -115,4 +137,6 @@ class BrowserDownload(BaseModel):
         return base64.b64decode(self.data_base64, validate=True)
 
     def text(self) -> str:
+        """The file as text; a refusal has none."""
+
         return self.data().decode("utf-8")

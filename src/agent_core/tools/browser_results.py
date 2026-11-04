@@ -157,10 +157,14 @@ def _bounded_utf8(value: str, maximum_bytes: int) -> str:
 
 
 def serialized_observation(structured: dict[str, Any]) -> str:
+    """The canonical text of a result's structured fields."""
+
     return json.dumps(structured, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 def _observation_bytes(structured: dict[str, Any]) -> int:
+    """How many bytes a result's structured fields take as model content."""
+
     return len(content_bytes([TextPart(text=serialized_observation(structured))]))
 
 
@@ -169,6 +173,8 @@ def bounded_observation_payload(
     observation: BrowserObservation,
     maximum_bytes: int,
 ) -> tuple[dict[str, Any], str]:
+    """An observation's listed fields within a byte limit; a saved file's bytes are not listed."""
+
     elements = [element.model_dump(mode="json") for element in observation.elements[:256]]
     base: dict[str, Any] = {
         "provider": _bounded_utf8(provider.name, MAX_PROVIDER_BYTES),
@@ -271,6 +277,8 @@ def observation_result(
     observation: BrowserObservation,
     maximum_bytes: int,
 ) -> ToolResult:
+    """A bounded result for a page this provider may show, otherwise a refusal."""
+
     if not provider.allows(observation.url):
         return browser_failure(
             ToolFailureKind.OUTPUT_INVALID,
