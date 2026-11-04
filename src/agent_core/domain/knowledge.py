@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
-from agent_core.domain.memory import Sensitivity, fold_word
+from agent_core.domain.memory import Sensitivity
 from agent_core.domain.retrieval_fusion import (
     RECIPROCAL_RANK_FUSION_K,
     blend_with_arm_score,
@@ -278,16 +278,19 @@ def _pieces(run: str, level: int) -> list[str]:
     return pieces
 
 
-# A question's words, a possessive "'s" (straight or curly) kept with its
-# word, and a title's file extension, which the model may quote with the name.
-_QUESTION_WORD = re.compile(r"[0-9A-Za-z]+(?:['\u2019]s)?")
+# A question's words, a possessive "'s" (straight or curly, either case, at
+# the end of the word) kept with its word, and a title's file extension,
+# which the model may quote with the name.
+_QUESTION_WORD = re.compile(r"[0-9A-Za-z]+(?:['\u2019][sS](?![0-9A-Za-z]))?")
 _FILE_EXTENSION = re.compile(r"\.[0-9A-Za-z]{1,5}$")
 _NAME_QUOTES = "\"'\u201c\u201d\u2018\u2019"
 
 
 def _question_key(word: str) -> str:
+    # Case and a possessive fold away; a plural does not, since a name is
+    # matched as written ("glasses" is not the title "Glass").
     lowered = word.lower()
-    return fold_word(lowered[:-2] if lowered.endswith(("'s", "\u2019s")) else lowered)
+    return lowered[:-2] if lowered.endswith(("'s", "\u2019s")) else lowered
 
 
 def knowledge_question_without_document_names(text: str, titles: Iterable[str]) -> str:

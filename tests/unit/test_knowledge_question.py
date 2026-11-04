@@ -39,3 +39,19 @@ def test_no_titles_leave_the_question_as_asked() -> None:
 def test_a_curly_apostrophe_possessive_is_the_same_word() -> None:
     asked = "BMW Owner\u2019s Manual parked vehicle noises"
     assert knowledge_question_without_document_names(asked, TITLES) == "parked vehicle noises"
+
+
+def test_an_uppercase_possessive_is_the_same_word() -> None:
+    asked = "BMW OWNER\u2019S MANUAL parked vehicle noises"
+    assert knowledge_question_without_document_names(asked, TITLES) == "parked vehicle noises"
+
+
+def test_an_apostrophe_inside_a_name_is_not_a_possessive() -> None:
+    titles = ["O\u2019Shea Guide.pdf"]
+    asked = "o\u2019shea guide installation steps"
+    assert knowledge_question_without_document_names(asked, titles) == "installation steps"
+
+
+def test_a_plural_is_not_a_title_word() -> None:
+    asked = "How do glasses break?"
+    assert knowledge_question_without_document_names(asked, ["Glass"]) == asked
