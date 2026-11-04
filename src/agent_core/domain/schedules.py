@@ -10,7 +10,14 @@ from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.runs import RunLimits
@@ -431,6 +438,12 @@ class ScheduleRevision(BaseModel):
     created_by_principal_id: str = Field(min_length=1)
     created_at: datetime
     call_plan: CallPlan | None = None
+    # ADR-0291: the MCP servers this schedule's runs may use; absent while empty.
+    mcp_servers: frozenset[str] = Field(default=frozenset(), exclude_if=lambda servers: not servers)
+
+    @field_serializer("mcp_servers")
+    def sorted_mcp_servers(self, servers: frozenset[str]) -> list[str]:
+        return sorted(servers)
 
     @field_validator("created_at")
     @classmethod
@@ -444,6 +457,8 @@ class ScheduleRevision(BaseModel):
         job = isinstance(self.task, JobTask)
         if job and (self.call_plan is not None or self.browser_profile_id is not None):
             raise ValueError("A job task has no browser binding or call plan.")
+        if job and self.mcp_servers:
+            raise ValueError("A job task reads the MCP servers its grant names.")
         if (
             limits.max_steps <= 0
             or limits.max_model_calls < (0 if job else 1)
@@ -489,6 +504,12 @@ class ScheduleDefinition(BaseModel):
     max_consecutive_failures: int = Field(gt=0)
     call_plan: CallPlan | None = None
     notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT
+    # ADR-0291: the MCP servers this schedule's runs may use; absent while empty.
+    mcp_servers: frozenset[str] = Field(default=frozenset(), exclude_if=lambda servers: not servers)
+
+    @field_serializer("mcp_servers")
+    def sorted_mcp_servers(self, servers: frozenset[str]) -> list[str]:
+        return sorted(servers)
 
     @model_validator(mode="after")
     def execution_is_finite(self) -> ScheduleDefinition:
@@ -497,6 +518,8 @@ class ScheduleDefinition(BaseModel):
         job = isinstance(self.task, JobTask)
         if job and (self.call_plan is not None or self.browser_profile_id is not None):
             raise ValueError("A job task has no browser binding or call plan.")
+        if job and self.mcp_servers:
+            raise ValueError("A job task reads the MCP servers its grant names.")
         if (
             limits.max_steps <= 0
             or limits.max_model_calls < (0 if job else 1)
@@ -527,10 +550,23 @@ class ScheduleDefinitionPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=1024)
     instruction: str | None = Field(default=None, min_length=1, max_length=65_536)
     cadence: Cadence | None = None
+    # ADR-0291: replaces the schedule's servers; an empty set clears them.
+    mcp_servers: frozenset[str] | None = None
+
+    @field_serializer("mcp_servers")
+    def sorted_mcp_servers(self, servers: frozenset[str] | None) -> list[str] | None:
+        """Keep the patch's stored form stable; None means the set is unchanged."""
+        return None if servers is None else sorted(servers)
 
     @model_validator(mode="after")
     def at_least_one_field_changes(self) -> ScheduleDefinitionPatch:
-        if self.title is None and self.instruction is None and self.cadence is None:
+        """Refuse an empty patch; an empty server set is a change, because it clears them."""
+        if (
+            self.title is None
+            and self.instruction is None
+            and self.cadence is None
+            and self.mcp_servers is None
+        ):
             raise ValueError("schedule update requires at least one changed field")
         return self
 

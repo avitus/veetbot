@@ -1,5 +1,6 @@
 # ADR-0268: Jobs the agent writes, run once or on a schedule
 
+- Amended by: ADR-0291, which adds a read-only `mcp.read` broker call
 - Status: Accepted for MVP implementation on 2026-10-29. The owner set the
   direction on 2026-10-27 and clarified the MVP on 2026-10-29:
   - the platform owns scheduling;

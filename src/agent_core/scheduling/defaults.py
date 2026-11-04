@@ -66,6 +66,7 @@ def derived_definition(
     browser_profile_id: UUID | None = None,
     call_plan: CallPlan | None = None,
     notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT,
+    mcp_servers: frozenset[str] = frozenset(),
 ) -> ScheduleDefinition:
     """A complete definition whose pins and limits the server chose."""
 
@@ -84,6 +85,7 @@ def derived_definition(
         max_consecutive_failures=DEFAULT_MAX_CONSECUTIVE_FAILURES,
         call_plan=call_plan,
         notify=notify,
+        mcp_servers=mcp_servers,
     )
 
 

@@ -316,7 +316,7 @@ async def test_cockpit_create_offers_an_interval_to_a_feed_and_keeps_1_5_0_pinne
         completed = await composition.runs.wait_terminal(run_id)
         page = await composition.schedules.list(composition.principal, 10, None)
 
-    assert current.version == "1.6.0"
+    assert current.version == "1.9.0"
     assert "INTERVAL" in json.dumps(current.input_schema)
     assert "INTERVAL" not in json.dumps(pinned.input_schema)
     assert cast(dict[str, object], approval.arguments["cadence"])["kind"] == "INTERVAL"
@@ -333,13 +333,16 @@ async def test_cockpit_create_offers_an_interval_to_a_feed_and_keeps_1_5_0_pinne
 async def test_the_interval_tool_versions_are_offered_only_where_the_cockpit_is() -> None:
     async with _composition(cockpit=False) as (composition, _):
         registry = composition.tool_pipeline._registry
-        assert registry.get("schedule.create").spec.version == "1.4.0"
-        assert registry.get("schedule.update").spec.version == "1.0.1"
+        assert registry.get("schedule.create").spec.version == "1.8.0"
+        assert registry.get("schedule.create", "1.4.0").spec.version == "1.4.0"
+        assert registry.get("schedule.update").spec.version == "1.3.0"
+        assert registry.get("schedule.update", "1.0.1").spec.version == "1.0.1"
         assert registry.get("schedule.list").spec.version == "1.1.0"
         assert registry.get("schedule.list", "1.0.2").spec.version == "1.0.2"
     async with _composition() as (composition, _):
         registry = composition.tool_pipeline._registry
-        assert registry.get("schedule.update").spec.version == "1.1.0"
+        assert registry.get("schedule.update").spec.version == "1.4.0"
+        assert registry.get("schedule.update", "1.1.0").spec.version == "1.1.0"
         assert "INTERVAL" in json.dumps(registry.get("schedule.update").spec.input_schema)
         assert "INTERVAL" not in json.dumps(
             registry.get("schedule.update", "1.0.1").spec.input_schema
