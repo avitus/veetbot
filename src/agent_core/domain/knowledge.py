@@ -278,16 +278,16 @@ def _pieces(run: str, level: int) -> list[str]:
     return pieces
 
 
-# A question's words, a possessive "'s" kept with its word, and a title's
-# file extension, which the model may quote with the name.
-_QUESTION_WORD = re.compile(r"[0-9A-Za-z]+(?:'s)?")
+# A question's words, a possessive "'s" (straight or curly) kept with its
+# word, and a title's file extension, which the model may quote with the name.
+_QUESTION_WORD = re.compile(r"[0-9A-Za-z]+(?:['\u2019]s)?")
 _FILE_EXTENSION = re.compile(r"\.[0-9A-Za-z]{1,5}$")
 _NAME_QUOTES = "\"'\u201c\u201d\u2018\u2019"
 
 
 def _question_key(word: str) -> str:
     lowered = word.lower()
-    return fold_word(lowered[:-2] if lowered.endswith("'s") else lowered)
+    return fold_word(lowered[:-2] if lowered.endswith(("'s", "\u2019s")) else lowered)
 
 
 def knowledge_question_without_document_names(text: str, titles: Iterable[str]) -> str:

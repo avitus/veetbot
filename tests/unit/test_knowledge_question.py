@@ -34,3 +34,8 @@ def test_a_question_that_is_only_a_document_name_stays_whole() -> None:
 def test_no_titles_leave_the_question_as_asked() -> None:
     asked = "What are the valve-like sounds after I park?"
     assert knowledge_question_without_document_names(asked, []) == asked
+
+
+def test_a_curly_apostrophe_possessive_is_the_same_word() -> None:
+    asked = "BMW Owner\u2019s Manual parked vehicle noises"
+    assert knowledge_question_without_document_names(asked, TITLES) == "parked vehicle noises"
