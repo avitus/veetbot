@@ -81,6 +81,27 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+# ADR-0294: browser.act alone reports a file its click saved or refused.
+SAVED_FILE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string", "enum": ["saved", "refused"]},
+        "reason": {"type": "string"},
+        "artifact": {"type": "string"},
+        "filename": {"type": "string"},
+        "media_type": {"type": "string"},
+        "size_bytes": {"type": "integer"},
+        "sections": {"type": "integer"},
+        "read_with": {"type": "string"},
+    },
+    "required": ["status"],
+    "additionalProperties": False,
+}
+ACT_OUTPUT_SCHEMA: dict[str, Any] = {
+    **OUTPUT_SCHEMA,
+    "properties": {**OUTPUT_SCHEMA["properties"], "saved_file": SAVED_FILE_SCHEMA},
+}
+
 _FAILURE_KINDS = {
     "tool.browser.profile_unavailable": ToolFailureKind.PERMISSION,
     "tool.browser.authentication_required": ToolFailureKind.PERMISSION,
@@ -135,12 +156,12 @@ def _bounded_utf8(value: str, maximum_bytes: int) -> str:
     return encoded[:maximum_bytes].decode("utf-8", errors="ignore")
 
 
-def _serialized_observation(structured: dict[str, Any]) -> str:
+def serialized_observation(structured: dict[str, Any]) -> str:
     return json.dumps(structured, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 def _observation_bytes(structured: dict[str, Any]) -> int:
-    return len(content_bytes([TextPart(text=_serialized_observation(structured))]))
+    return len(content_bytes([TextPart(text=serialized_observation(structured))]))
 
 
 def bounded_observation_payload(
@@ -242,7 +263,7 @@ def bounded_observation_payload(
         else:
             high = candidate_bytes - 1
     admit_text(max(0, high))
-    return base, _serialized_observation(base)
+    return base, serialized_observation(base)
 
 
 def observation_result(

@@ -45,6 +45,9 @@ def browser_context_projection(
         payload["coverage"]["scope"] = "focused_region"
         payload["coverage"]["omitted_fields"].append("focus")
 
+    # ADR-0294: the note is how the model reaches a saved file, so it is never omitted.
+    if isinstance(structured.get("saved_file"), dict):
+        payload["saved_file"] = structured["saved_file"]
     if observation.interruption is not None:
         payload["interruption"] = observation.interruption
     if observation.readiness is not None:

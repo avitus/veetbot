@@ -29,7 +29,8 @@ this tranche. Browser automation remains disabled and absent from the registry
 until a provider is explicitly bound.
 
 ADR-0148 adds individually approved rich-text typing and the separately
-classified image-upload contract below. Other file transfers remain unavailable.
+classified image-upload contract below. ADR-0294 adds the separately classified
+text-file download below. Other file transfers remain unavailable.
 
 The following are not goals:
 
@@ -183,8 +184,8 @@ waiting source run's question in that run, through
 offer on that device. Website Access opened from a chat offers "Use in this
 chat" separately from the device default for new chats.
 
-Downloads, uploads other than the image contract below, clipboard access,
-notifications, geolocation, camera, microphone, password-manager access, and
+Downloads other than the text-file contract below, uploads other than the image
+contract below, clipboard access, notifications, geolocation, camera, microphone, password-manager access, and
 new windows are denied until each has
 its own classified contract. Cross-origin popups are closed and reported.
 The ephemeral provider also refuses typing into password fields or controls
@@ -243,8 +244,50 @@ upload or chooser click is uncertain on failure and is never blindly retried.
 Providers advertise upload only when they implement the optional image-upload
 port. Bound hosted chats keep it defined with the other browser tools. Existing
 frozen chats retain their roster; start a new profile-bound chat to use upload.
-Downloads, arbitrary files and videos remain unavailable. ADR-0148 records this
+Arbitrary files and videos remain unavailable for upload. ADR-0148 records this
 owner-requested extension and its verification requirements.
+
+### Individually approved text-file download
+
+A click or key press through `browser.act` that carries no grant or research
+constraint holds a one-file window for as long as the act runs. A file started
+inside the window is saved; every other file is cancelled, whether a page starts
+it on its own, a navigation or read meets it, or a sign-in ceremony does. A grant-
+or research-authorized act that meets a file cancels it and reports
+`needs_approval`. Neither kind of grant covers a download: a control named with
+`download` or `export`, or a link with a `download` attribute, already reads as a
+file-transfer consequence, and a plain control that turns out to save a file is
+refused live.
+
+The runtime admits at most 2 MiB of text: UTF-8 or Windows-1252, with no NUL byte,
+normalized to UTF-8. Size is checked while the file downloads, in a private
+directory under the session's temporary home, and the file is removed from there
+once read. Everything else is a named refusal: `unsupported_type`, `too_large`,
+`timed_out` or `failed`. The website's suggested name is reduced to a bare name of
+letters, digits, `.`, `_` and `-`, and the media type comes from the name's suffix:
+`text/csv`, `text/tab-separated-values`, otherwise `text/plain`.
+
+After the page settles, an act on a control whose accessible name contains
+`download`, `export` or `csv`, or on a link with a `download` attribute, waits up to
+10 seconds for the file to start. Any started file then has up to 12 seconds to
+finish. Both fit the tool's 30 seconds. The name decides only whether to wait,
+never whether to admit. A later file is cancelled and unreported.
+
+The bytes cross the service boundary once, in base64, on the act's own observation
+(`BrowserObservation.download`); the worker's session response limit allows for
+this envelope. Observation results list their fields, so no tool result, event or
+log carries the bytes.
+
+`browser.act@1.8.0` stores the file through the run's artifact writer as an
+`EXTERNAL_UNTRUSTED` capture of this chat, with the capture mark, so
+`artifact.read_capture` opens it under its existing rules and it is deleted with
+the chat. The structured result gains `saved_file`, kept by the context projection:
+the artifact ID, name, media type, size, section count and the exact `tool.call`
+that reads it, or `status: refused` with a reason. A plan that cannot reach the
+reader gets `reader_unavailable`, and nothing is stored. Input schema and description
+are unchanged, so the tool's definition costs no more; `browser.act@1.7.0` stays
+registered for chats pinned to it and reports no file. ADR-0294 records this
+owner-requested extension, its limits and its verification requirements.
 
 ## Profiles and authentication
 
@@ -1468,7 +1511,8 @@ retains its existing lease-operation serialization.
   deletable, encrypted at rest, and inaccessible through model-authored ids.
 - Every redirect and action remains within the provider-bound origin policy;
   private-network, non-HTTPS, popup, download, upload, clipboard, and device
-  access fail closed unless a later explicit contract authorizes them.
+  access fail closed unless a later explicit contract authorizes them (image
+  upload, ADR-0148; text-file download, ADR-0294).
 - Mutating actions require explicit bounded-gesture permission (ADR-0168), a
   constrained ordinary-interaction permission (ADR-0209), an approval, a matching
   unexpired standing grant, or an unexpired, unexhausted task grant inside an owner-configured

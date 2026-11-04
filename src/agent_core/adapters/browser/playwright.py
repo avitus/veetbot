@@ -9,6 +9,7 @@ import secrets
 import tempfile
 from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, NoReturn, Protocol, cast
 from urllib.parse import urlsplit
@@ -75,6 +76,7 @@ from agent_core.domain.browser_classification import (
     path_is_within_prefix,
 )
 from agent_core.domain.browser_diagnostics import browser_phase, browser_phase_call
+from agent_core.domain.browser_download import MAX_BROWSER_DOWNLOAD_BYTES, BrowserDownload
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
@@ -134,6 +136,14 @@ _CONTROL_SELECTOR = """(() => {
 })()"""
 # A page settles for at most this long after navigation or an action (ADR-0130).
 SETTLE_SECONDS = 2.0
+# ADR-0294: an approved click on a control that names a file waits this long for
+# the page to start it, and any started file this long to finish. Together with
+# the settle they fit browser.act's 30 seconds.
+DOWNLOAD_START_SECONDS = 10.0
+DOWNLOAD_READ_SECONDS = 12.0
+_DOWNLOAD_POLL_SECONDS = 0.1
+_DOWNLOAD_CONTROL = re.compile(r"download|export|csv", re.IGNORECASE)
+_FILE_ACTION_KINDS = frozenset({BrowserActionKind.CLICK, BrowserActionKind.PRESS})
 # The DOM counts as quiet after this long without a mutation.
 DOM_QUIET_MILLISECONDS = 300
 # How long Playwright waits for an element to become actionable, such as for
@@ -283,6 +293,27 @@ class VirtualDisplay(Protocol):
 
 
 VirtualDisplayFactory = Callable[[], VirtualDisplay | None]
+
+
+@dataclass(slots=True)
+class _DownloadWindow:
+    """One act's chance to save one file; it closes when the act returns (ADR-0294).
+
+    Only an act no grant authorized is ``approved``. Any other file is cancelled.
+    """
+
+    approved: bool
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+    reading: asyncio.Task[BrowserDownload] | None = None
+    refused: bool = False
+
+
+def _directory_bytes(path: str) -> int:
+    """What the browser has written so far, including a file still downloading."""
+
+    with suppress(OSError):
+        return sum(entry.stat().st_size for entry in os.scandir(path))
+    return 0
 
 
 def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
@@ -468,6 +499,10 @@ class PythonPlaywrightRuntime:
         # refused the page's own document (ADR-0129).
         self._document_fence: tuple[str, str] | None = None
         self._fence_refused_page = False
+        self._download_window: _DownloadWindow | None = None
+        self._downloads_path = ""
+        # A reference names its revision, so a stale entry can never match.
+        self._file_controls: frozenset[str] = frozenset()
 
     @browser_phase_call("launch")
     async def start(
@@ -485,6 +520,8 @@ class PythonPlaywrightRuntime:
         self._headed_popup_policy = headed
         self._temporary_home = tempfile.TemporaryDirectory(prefix="veetbot-browser-")
         temporary_home = self._temporary_home.name
+        self._downloads_path = os.path.join(temporary_home, "downloads")
+        os.mkdir(self._downloads_path)
         environment: dict[str, str | float | bool] = {
             "HOME": temporary_home,
             "PATH": os.defpath,
@@ -504,6 +541,7 @@ class PythonPlaywrightRuntime:
         self._browser = await self._playwright.chromium.launch(
             headless=not headed,
             proxy={"server": proxy_url},
+            downloads_path=self._downloads_path,
             args=[
                 "--proxy-bypass-list=<-loopback>",
                 "--disable-quic",
@@ -536,7 +574,9 @@ class PythonPlaywrightRuntime:
         """The arguments of the one browser context; a test subclass may extend them."""
 
         return {
-            "accept_downloads": False,
+            # A file begins only to be cancelled unless an act's window admits it
+            # (ADR-0294); refusing here would refuse the approved one too.
+            "accept_downloads": True,
             "service_workers": "block",
             "storage_state": (None if storage_state is None else cast(StorageState, storage_state)),
         }
@@ -592,7 +632,7 @@ class PythonPlaywrightRuntime:
     def _attach_page(self, page: Page) -> None:
         """Install request tracking and page guards before navigation begins."""
         page.on("dialog", self._dismiss_dialog)
-        page.on("download", self._cancel_download)
+        page.on("download", self._handle_download)
         # Record refused navigation for failure classification; the CDP document
         # guard enforces redirect hops before dispatch.
         page.on("request", self._track_navigation)
@@ -697,8 +737,61 @@ class PythonPlaywrightRuntime:
             self._dismissed_beforeunload = True
         await dialog.dismiss()
 
-    async def _cancel_download(self, download: Download) -> None:
+    async def _handle_download(self, download: Download) -> None:
+        """Admit one file to an approved act's window and cancel every other (ADR-0294)."""
+        window = self._download_window
+        if window is not None and window.approved and window.reading is None:
+            window.reading = asyncio.create_task(self._read_download(download))
+            window.started.set()
+            return
+        if window is not None and not window.approved:
+            window.refused = True
         await download.cancel()
+
+    async def _read_download(self, download: Download) -> BrowserDownload:
+        """Wait for the file within its time and size limits, then remove it from disk."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + DOWNLOAD_READ_SECONDS
+        finished = asyncio.ensure_future(download.path())
+        try:
+            while not finished.done():
+                refusal: Literal["too_large", "timed_out"] | None = None
+                if _directory_bytes(self._downloads_path) > MAX_BROWSER_DOWNLOAD_BYTES:
+                    refusal = "too_large"
+                elif loop.time() >= deadline:
+                    refusal = "timed_out"
+                if refusal is not None:
+                    await download.cancel()
+                    return BrowserDownload.refused(refusal)
+                await asyncio.wait({finished}, timeout=_DOWNLOAD_POLL_SECONDS)
+            path = finished.result()
+            if os.path.getsize(path) > MAX_BROWSER_DOWNLOAD_BYTES:
+                return BrowserDownload.refused("too_large")
+            data = await asyncio.to_thread(path.read_bytes)
+            return BrowserDownload.from_bytes(download.suggested_filename, data)
+        except (PlaywrightError, OSError):
+            return BrowserDownload.refused("failed")
+        finally:
+            finished.cancel()
+            await asyncio.gather(finished, return_exceptions=True)
+            with suppress(PlaywrightError):
+                await download.delete()
+
+    def _control_names_a_file(self, ref: str) -> bool:
+        """Whether a click may take a moment to start a file; it never authorizes one."""
+        facts = None if self._facts is None else self._facts.elements.get(ref)
+        return ref in self._file_controls or (facts is not None and facts.download)
+
+    async def _finish_download(
+        self, window: _DownloadWindow, *, names_a_file: bool
+    ) -> BrowserDownload | None:
+        """What this act's window saved or refused; None when the page offered no file."""
+        if window.approved and names_a_file and window.reading is None:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(window.started.wait(), DOWNLOAD_START_SECONDS)
+        if window.reading is not None:
+            return await window.reading
+        return BrowserDownload.refused("needs_approval") if window.refused else None
 
     async def _close_popup(self, page: Page) -> None:
         """Destroy a popup with interception intact, or end its browser session."""
@@ -1168,6 +1261,11 @@ class PythonPlaywrightRuntime:
         self._text_cursor = observation.focus.text_cursor if observation.focus is not None else None
         self._elements = handles
         self._facts = observation_facts
+        self._file_controls = frozenset(
+            element.ref
+            for element in observation.elements
+            if _DOWNLOAD_CONTROL.search(element.name)
+        )
         self._element_offsets = {
             element.ref: candidate_index
             for (candidate_index, _), observed in zip(selected, captured, strict=True)
@@ -1292,6 +1390,14 @@ class PythonPlaywrightRuntime:
                     raise
 
         documents_before = self._main_frame_navigations
+        names_a_file = self._control_names_a_file(action.ref)
+        window = (
+            _DownloadWindow(approved=constraint is None)
+            if action.kind in _FILE_ACTION_KINDS
+            else None
+        )
+        download: BrowserDownload | None = None
+        self._download_window = window
         # A refusal belongs to the act whose fence made it: every act starts
         # without one, and one that ends early, by an error or cancellation,
         # takes its refusal with it.
@@ -1322,7 +1428,12 @@ class PythonPlaywrightRuntime:
             readiness = await self._settle(
                 page, after_document=self._main_frame_navigations != documents_before
             )
+            if window is not None:
+                download = await self._finish_download(window, names_a_file=names_a_file)
         finally:
+            self._download_window = None
+            if window is not None and window.reading is not None:
+                window.reading.cancel()
             if draft_binding is not None:
                 with suppress(PlaywrightError):
                     await draft_binding.dispose()
@@ -1335,7 +1446,7 @@ class PythonPlaywrightRuntime:
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
         observation = await self._observation(page)
-        return observation.model_copy(update={"readiness": readiness})
+        return observation.model_copy(update={"readiness": readiness, "download": download})
 
     async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
         """Select approved bytes in one main-document file control (ADR-0148)."""
