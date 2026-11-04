@@ -476,6 +476,52 @@ async def test_knowledge_waits_for_the_run_whose_reply_lists_the_file() -> None:
         assert "auto_ingest_attempts" not in waiting.metadata
 
 
+@pytest.mark.parametrize("status", [RunStatus.FAILED, RunStatus.CANCELLED])
+async def test_a_file_from_a_run_that_did_not_complete_keeps_its_expiry(status: RunStatus) -> None:
+    """ADR-0122: only a reply ends the 30 days, and knowledge would end them too."""
+    from agent_core.knowledge.uploads import UploadAutoIngest
+
+    async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
+        thread = await _seed_thread(app)
+        operation = await _press(app, thread.id, "knowledge.write")
+        expiry = app.clock.now() + timedelta(days=30)
+        async with app.uow_factory() as uow:
+            [finished] = await uow.artifacts.list_for_run(operation.run_id, app.principal)
+            run = await uow.runs.get(operation.run_id, app.principal)
+            stopped = run.model_copy(update={"id": uuid4(), "status": status})
+            await uow.runs.create(stopped)
+            left = await uow.artifacts.create(
+                finished.model_copy(
+                    update={"id": uuid4(), "run_id": stopped.id, "expires_at": expiry}, deep=True
+                )
+            )
+        ingested: list[UUID] = []
+
+        class Knowledge:
+            async def ingest(self, request: Any, *, origin_trust: TrustLevel) -> None:
+                ingested.append(request.source.id)
+
+        sweep = UploadAutoIngest(
+            uow_factory=app.uow_factory,
+            knowledge=cast(Any, Knowledge()),
+            principal=app.principal,
+            clock=app.clock,
+        )
+        await sweep.sweep_once()
+        async with app.uow_factory() as uow:
+            recorded = await uow.artifacts.get(left.id, app.principal)
+            still_pending = await uow.artifacts.pending_auto_ingest(
+                app.principal, now=app.clock.now(), limit=9
+            )
+    assert left.id not in ingested
+    assert recorded.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
+    assert recorded.expires_at == expiry
+    assert recorded.metadata["auto_ingest"] == AUTO_INGEST_REFUSED
+    assert recorded.metadata["auto_ingest_reason"] == "run_not_completed"
+    # It never holds up the batch, however long it has left.
+    assert still_pending == []
+
+
 async def test_a_file_deleted_during_a_sweep_is_never_read_into_knowledge() -> None:
     from agent_core.knowledge.uploads import UploadAutoIngest
 

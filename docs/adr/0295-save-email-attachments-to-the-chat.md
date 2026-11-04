@@ -86,8 +86,9 @@ either be truncated or written into append-only history.
    from two emails, so erasing one leaves the other's file and its link in the reply, and
    a save whose receipt a crash lost is still found. A file whose source cannot be read is
    erased with the run, and so is every file of a run that call erasure reaches.
-   Knowledge waits for the save's run to end, because a reply attaches a saved file by
-   its origin and knowledge changes that origin.
+   Knowledge waits for the save's run to complete, because a reply attaches a saved file
+   by its origin and knowledge changes that origin. A file from a run that fails or is
+   cancelled stays out of knowledge and keeps its 30-day expiry, as decision 5 says.
 
 9. **`save_attachment` is an unindexed deferral.** It has one name per mailbox, and
    as a read it would have taken a definition slot from a tool used on a request's
