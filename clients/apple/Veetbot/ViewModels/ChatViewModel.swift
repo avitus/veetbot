@@ -283,37 +283,56 @@ public final class ChatViewModel: ObservableObject {
     func refreshSessionsAwaitingApproval() async {
         guard let api, isConfigured, !isReconfiguring else { return }
         let generation = connectionGeneration
-        var sessions: Set<UUID> = []
+        var pending: [ApprovalView] = []
         var cursor: String?
         var seenCursors: Set<String> = []
         do {
             repeat {
                 let page = try await api.listPendingApprovals(cursor: cursor)
                 guard generation == connectionGeneration else { return }
-                sessions.formUnion(page.items.filter { $0.status.isPending }.map(\.sessionID))
+                pending.append(contentsOf: page.items.filter { $0.status.isPending })
                 cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             } while cursor != nil
         } catch {
             return
         }
+        let sessions = Set(pending.map(\.sessionID))
         if sessionsAwaitingApproval != sessions { sessionsAwaitingApproval = sessions }
-        if let selectedSessionID, sessions.contains(selectedSessionID), runState.needsApprovalIDs.isEmpty {
-            await recoverApprovalTheStreamMissed(in: selectedSessionID)
+        if let selectedSessionID {
+            await recoverApprovalsTheStreamMissed(
+                pending.filter { $0.sessionID == selectedSessionID }, in: selectedSessionID
+            )
         }
     }
 
-    /// The server says the open conversation waits on the owner and its stream never
-    /// said so. A background read, so a failure is left for the next one.
-    private func recoverApprovalTheStreamMissed(in sessionID: UUID) async {
-        guard let api, let runID = runState.activeRunID else { return }
-        let generation = connectionGeneration
-        guard let run = try? await api.getRun(runID),
-            generation == connectionGeneration, sessionID == selectedSessionID,
-            runID == runState.activeRunID, run.sessionID == sessionID,
-            !(runState.runStatus?.isTerminal ?? false)
+    /// The server says the open conversation waits on the owner and no card shows it.
+    /// The stream may be down, the details may have failed to load, or another device may
+    /// have started the run, so the run comes from the approval. A background read, so a
+    /// failure is left for the next one.
+    private func recoverApprovalsTheStreamMissed(_ approvals: [ApprovalView], in sessionID: UUID) async {
+        let loaded = Set(runState.approvals.filter { $0.status.isPending }.map(\.id))
+        guard let api,
+            let newest = approvals.filter({ !loaded.contains($0.id) && approvalsInFlight[$0.id] == nil })
+                .max(by: { $0.createdAt < $1.createdAt })
         else { return }
-        runState.seed(run: run)
-        await refreshPendingApprovals(presentingFailure: false)
+        let generation = connectionGeneration
+        let knownRunID = runState.activeRunID
+        guard let run = try? await api.getRun(newest.runID),
+            generation == connectionGeneration, sessionID == selectedSessionID,
+            knownRunID == runState.activeRunID, run.sessionID == sessionID, run.status.isActive
+        else { return }
+        if knownRunID == run.id {
+            // A terminal stream event outranks a slower read of the same run.
+            guard !(runState.runStatus?.isTerminal ?? false) else { return }
+            runState.seed(run: run)
+        } else {
+            runState.seed(run: run)
+            watch(runID: run.id)
+        }
+        for approval in approvals where approval.runID == run.id {
+            loadedApprovalIDs.insert(approval.id)
+            runState.mergeApproval(approval)
+        }
     }
 
     var visibleNotificationSessionID: UUID? {

@@ -69,6 +69,20 @@ import Testing
         #expect(received == [1, 2, 3, 4, 5])
     }
 
+    /// The case this channel exists for: a producer that keeps the queue full while a
+    /// slow consumer reads a long replay must not keep every frame it already delivered.
+    @Test
+    func aQueueThatStaysFullDoesNotKeepConsumedFrames() async throws {
+        let channel = BoundedFrameChannel(capacity: 2)
+        #expect(await channel.send(Self.frame(0)))
+        #expect(await channel.send(Self.frame(1)))
+        for sequence in 2..<50 {
+            #expect(try await channel.next()?.id == sequence - 2)
+            #expect(await channel.send(Self.frame(sequence)))
+            #expect(await channel.retainedFrameCount <= 2)
+        }
+    }
+
     @Test
     func aConsumerThatLeavesReleasesAWaitingProducer() async {
         let channel = BoundedFrameChannel(capacity: 1)

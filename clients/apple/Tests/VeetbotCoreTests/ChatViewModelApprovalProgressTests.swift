@@ -10,6 +10,7 @@ import Testing
     nonisolated private static let sessionID = UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-000000000001")!
     nonisolated private static let approvalID = UUID(uuidString: "6a1c3f0e-2b4d-4c8e-9f10-0000000000a1")!
     nonisolated private static let runID = "6A1C3F0E-2B4D-4C8E-9F10-000000000002"
+    nonisolated private static let otherRunID = "6A1C3F0E-2B4D-4C8E-9F10-000000000009"
     nonisolated private static let resolveRoute =
         "POST veetbot.test /v1/approvals/\(approvalID.uuidString)/resolve"
 
@@ -80,6 +81,103 @@ import Testing
         #expect(model.awaitingOwnerApproval)
         #expect(model.runState.runStatus == .waitingForApproval)
         #expect(model.sessionsNeedingApproval.contains(Self.sessionID))
+    }
+
+    /// The stream named the approval but neither read of its details worked, so the ID
+    /// alone must not stop the background read from loading the card.
+    @Test
+    func anApprovalWhoseDetailsFailedToLoadIsRecovered() async throws {
+        let listing = LockedFlag()
+        let exampleID = try #require(
+            try WireModelsTests.contractExample("approval_views", "offered", key: "approval")["id"]
+                as? String
+        )
+        let frame = "event: approval.requested\ndata: {\"approval_id\":\"\(exampleID)\"}\n\n"
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request, runStatus: "RUNNING") ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (200, frame)
+                case "GET veetbot.test /v1/approvals":
+                    return listing.value ? (200, try Self.pendingApprovals()) : (503, "")
+                default:
+                    return (503, "")
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        for _ in 0..<200 where model.runState.needsApprovalIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(!model.runState.needsApprovalIDs.isEmpty)
+        #expect(!model.runState.docksAttention)
+
+        listing.value = true
+        await model.refreshSessionsAwaitingApproval()
+
+        #expect(model.runState.docksAttention)
+    }
+
+    /// A conversation with no run of its own yet, or an older one, takes the run from the
+    /// approval: another device may have started it while this stream was down.
+    @Test(arguments: [false, true])
+    func anApprovalOnARunThisDeviceNeverSawIsRecovered(hasOlderRun: Bool) async throws {
+        let waiting = LockedFlag()
+        let server = DeviceFlowServer { request in
+            if Self.route(request) == "GET veetbot.test /v1/runs/\(Self.otherRunID)" {
+                return (200, Self.runBody(id: Self.otherRunID, status: "WAITING_FOR_APPROVAL"))
+            }
+            return try Self.conversationRoutes(request, runStatus: hasOlderRun ? "RUNNING" : nil) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events",
+                    "GET veetbot.test /v1/runs/\(Self.otherRunID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (
+                        200,
+                        waiting.value
+                            ? try Self.pendingApprovals(runID: Self.otherRunID)
+                            : #"{"items":[],"next_cursor":null}"#
+                    )
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+
+        waiting.value = true
+        await model.refreshSessionsAwaitingApproval()
+
+        #expect(model.runState.activeRunID == UUID(uuidString: Self.otherRunID))
+        #expect(model.runState.runStatus == .waitingForApproval)
+        #expect(model.awaitingOwnerApproval)
+    }
+
+    /// A listing that lags behind its run, or names another conversation's run, changes nothing.
+    @Test(arguments: [("COMPLETED", false), ("WAITING_FOR_APPROVAL", true)])
+    func aStaleOrForeignApprovalIsNotRecovered(status: String, foreignRun: Bool) async throws {
+        let server = DeviceFlowServer { request in
+            if Self.route(request) == "GET veetbot.test /v1/runs/\(Self.otherRunID)" {
+                return (
+                    200,
+                    Self.runBody(
+                        id: Self.otherRunID, status: status,
+                        sessionID: foreignRun ? "6a1c3f0e-2b4d-4c8e-9f10-0000000000ff" : nil
+                    )
+                )
+            }
+            return try Self.conversationRoutes(request) ?? {
+                guard Self.route(request) == "GET veetbot.test /v1/approvals" else { return nil }
+                return (200, try Self.pendingApprovals(runID: Self.otherRunID))
+            }()
+        }
+        let model = try await openedModel(server)
+
+        await model.refreshSessionsAwaitingApproval()
+
+        #expect(model.runState.activeRunID == nil)
+        #expect(!model.awaitingOwnerApproval)
     }
 
     @Test
@@ -262,20 +360,23 @@ import Testing
         case "GET veetbot.test /v1/sessions/\(sessionID.uuidString)/messages":
             return (200, #"{"items":[],"next_cursor":null}"#)
         case "GET veetbot.test /v1/runs/\(runID)":
-            let status = runStatus ?? "RUNNING"
-            return (200, #"{"id":"\#(runID)","session_id":"\#(sessionID.uuidString)","parent_run_id":null,"status":"\#(status)","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:01:00Z"}"#)
+            return (200, runBody(id: runID, status: runStatus ?? "RUNNING"))
         default:
             return nil
         }
     }
 
+    nonisolated private static func runBody(id: String, status: String, sessionID owner: String? = nil) -> String {
+        #"{"id":"\#(id)","session_id":"\#(owner ?? sessionID.uuidString)","parent_run_id":null,"status":"\#(status)","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:01:00Z"}"#
+    }
+
     /// The offered contract approval, pending, belonging to the open conversation.
-    nonisolated private static func pendingApprovals() throws -> String {
+    nonisolated private static func pendingApprovals(runID approvalRun: String = runID) throws -> String {
         var approval = try WireModelsTests.contractExample(
             "approval_views", "offered", key: "approval"
         )
         approval["session_id"] = sessionID.uuidString.lowercased()
-        approval["run_id"] = runID
+        approval["run_id"] = approvalRun
         let body = try JSONSerialization.data(
             withJSONObject: ["items": [approval], "next_cursor": NSNull()]
         )

@@ -6,7 +6,6 @@ import Foundation
 actor BoundedFrameChannel {
     private let capacity: Int
     private var frames: [SSEFrame] = []
-    private var nextIndex = 0
     private var waitingProducer: CheckedContinuation<Void, Never>?
     private var waitingConsumer: CheckedContinuation<SSEFrame?, Error>?
     private var finished = false
@@ -17,11 +16,12 @@ actor BoundedFrameChannel {
         self.capacity = max(1, capacity)
     }
 
-    private var queued: Int { frames.count - nextIndex }
+    /// Frames held in memory, which capacity bounds even while the queue stays full.
+    var retainedFrameCount: Int { frames.count }
 
     /// Waits for room, then queues the frame. False means the consumer has gone away.
     func send(_ frame: SSEFrame) async -> Bool {
-        while !cancelled, queued >= capacity {
+        while !cancelled, frames.count >= capacity {
             await withCheckedContinuation { waitingProducer = $0 }
         }
         guard !cancelled else { return false }
@@ -37,13 +37,8 @@ actor BoundedFrameChannel {
     /// The next frame, nil once the producer has finished and the queue is empty.
     func next() async throws -> SSEFrame? {
         if cancelled { throw CancellationError() }
-        if queued > 0 {
-            let frame = frames[nextIndex]
-            nextIndex += 1
-            if nextIndex == frames.count {
-                frames.removeAll(keepingCapacity: true)
-                nextIndex = 0
-            }
+        if !frames.isEmpty {
+            let frame = frames.removeFirst()
             resumeProducer()
             return frame
         }
@@ -76,7 +71,6 @@ actor BoundedFrameChannel {
     func cancel() {
         cancelled = true
         frames.removeAll()
-        nextIndex = 0
         resumeProducer()
         waitingConsumer?.resume(throwing: CancellationError())
         waitingConsumer = nil
