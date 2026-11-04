@@ -1664,6 +1664,33 @@ class PostgresTraceStore:
                 row.trace = updated.model_dump(mode="json")
 
 
+def _knowledge_eligible(query: KnowledgeQuery, as_of: datetime) -> tuple[ColumnElement[bool], ...]:
+    """The documents a knowledge query may read: tenant, validity, sensitivity, visibility."""
+
+    visibility = or_(
+        KnowledgeDocumentRow.visibility == KnowledgeVisibility.TENANT.value,
+        (
+            (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PRINCIPAL.value)
+            & (KnowledgeDocumentRow.ingested_by_principal_id == query.principal_id)
+        ),
+        (
+            (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PROJECT.value)
+            & (KnowledgeDocumentRow.project_scope == query.current_scope)
+        ),
+    )
+    return (
+        KnowledgeDocumentRow.tenant_id == query.tenant_id,
+        _knowledge_source_visible(),
+        KnowledgeDocumentRow.valid_from <= as_of,
+        or_(
+            KnowledgeDocumentRow.valid_to.is_(None),
+            KnowledgeDocumentRow.valid_to > as_of,
+        ),
+        KnowledgeDocumentRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
+        visibility,
+    )
+
+
 def _knowledge_source_visible() -> ColumnElement[bool]:
     return (
         ~select(ArtifactRow.id)
@@ -1798,28 +1825,7 @@ class PostgresKnowledgeStore:
         if not forms and semantic is None:
             return []
         limit = max(query.max_passages * 8, 64)
-        visibility = or_(
-            KnowledgeDocumentRow.visibility == KnowledgeVisibility.TENANT.value,
-            (
-                (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PRINCIPAL.value)
-                & (KnowledgeDocumentRow.ingested_by_principal_id == query.principal_id)
-            ),
-            (
-                (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PROJECT.value)
-                & (KnowledgeDocumentRow.project_scope == query.current_scope)
-            ),
-        )
-        eligible = (
-            KnowledgeDocumentRow.tenant_id == query.tenant_id,
-            _knowledge_source_visible(),
-            KnowledgeDocumentRow.valid_from <= as_of,
-            or_(
-                KnowledgeDocumentRow.valid_to.is_(None),
-                KnowledgeDocumentRow.valid_to > as_of,
-            ),
-            KnowledgeDocumentRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
-            visibility,
-        )
+        eligible = _knowledge_eligible(query, as_of)
         candidates: dict[str, tuple[KnowledgeChunkRow, KnowledgeDocumentRow]] = {}
         lexical: list[tuple[str, float]] = []
         if forms:
@@ -1934,12 +1940,11 @@ class PostgresKnowledgeStore:
             else sorted(matches, key=lambda chunk_id: (-matches[chunk_id][0], chunk_id))
         )
         per_document: defaultdict[UUID, int] = defaultdict(int)
-        passages: list[RetrievedPassage] = []
+        within: list[RetrievedPassage] = []
+        beyond: list[RetrievedPassage] = []
         for chunk_id in ordered:
             chunk, document = candidates[chunk_id]
             match, arms = matches[chunk_id]
-            if per_document[document.document_id] >= query.max_per_document:
-                continue
             # The same formula the in-memory store answers with: the match
             # first, then the document's authority and its affinity with the scope.
             score = min(
@@ -1950,25 +1955,27 @@ class PostgresKnowledgeStore:
             )
             if score < query.min_score:
                 continue
-            per_document[document.document_id] += 1
-            passages.append(
-                RetrievedPassage(
-                    chunk_id=chunk.chunk_id,
-                    document_id=document.document_id,
-                    title=document.title,
-                    heading_path=list(chunk.heading_path),
-                    text=chunk.text,
-                    doc_date=document.doc_date,
-                    authority=DocumentAuthority(document.authority),
-                    sensitivity=Sensitivity(document.sensitivity),
-                    score=score,
-                    arms=arms,
-                    instruction_like=chunk.contains_instruction_like_text,
-                )
+            passage = RetrievedPassage(
+                chunk_id=chunk.chunk_id,
+                document_id=document.document_id,
+                title=document.title,
+                heading_path=list(chunk.heading_path),
+                text=chunk.text,
+                doc_date=document.doc_date,
+                authority=DocumentAuthority(document.authority),
+                sensitivity=Sensitivity(document.sensitivity),
+                score=score,
+                arms=arms,
+                instruction_like=chunk.contains_instruction_like_text,
             )
-            if len(passages) >= query.max_passages:
-                break
-        return passages
+            # The per-document cap reserves every document's first passages
+            # and the rest fill by rank, as the in-memory store (ADR-0293).
+            if per_document[document.document_id] < query.max_per_document:
+                per_document[document.document_id] += 1
+                within.append(passage)
+            else:
+                beyond.append(passage)
+        return (within + beyond)[: query.max_passages]
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
         row = await self._session.scalar(
@@ -1980,6 +1987,18 @@ class PostgresKnowledgeStore:
             .where(KnowledgeChunkRow.chunk_id == chunk_id, _knowledge_source_visible())
         )
         return None if row is None else _chunk(row)
+
+    async def visible_titles(self, query: KnowledgeQuery) -> list[str]:
+        as_of = query.as_of or self._clock.now()
+        titles = (
+            await self._session.scalars(
+                select(KnowledgeDocumentRow.title)
+                .where(*_knowledge_eligible(query, as_of))
+                .distinct()
+                .order_by(KnowledgeDocumentRow.title)
+            )
+        ).all()
+        return [str(title) for title in titles]
 
     async def chunks_without_vectors(
         self,

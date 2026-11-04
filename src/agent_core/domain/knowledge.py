@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
-from agent_core.domain.memory import Sensitivity
+from agent_core.domain.memory import Sensitivity, fold_word
 from agent_core.domain.retrieval_fusion import (
     RECIPROCAL_RANK_FUSION_K,
     blend_with_arm_score,
@@ -276,6 +276,70 @@ def _pieces(run: str, level: int) -> list[str]:
         half = max(1, len(run) // 2)
         pieces = [run[:half], run[half:]] if len(run) > 1 else [run]
     return pieces
+
+
+# A question's words, a possessive "'s" kept with its word, and a title's
+# file extension, which the model may quote with the name.
+_QUESTION_WORD = re.compile(r"[0-9A-Za-z]+(?:'s)?")
+_FILE_EXTENSION = re.compile(r"\.[0-9A-Za-z]{1,5}$")
+_NAME_QUOTES = "\"'\u201c\u201d\u2018\u2019"
+
+
+def _question_key(word: str) -> str:
+    lowered = word.lower()
+    return fold_word(lowered[:-2] if lowered.endswith("'s") else lowered)
+
+
+def knowledge_question_without_document_names(text: str, titles: Iterable[str]) -> str:
+    """The question with the name of any visible document taken out (ADR-0293).
+
+    A search asks the corpus, not the catalogue: a question that names a
+    document by its title or file name, as a model does to aim at it, matches
+    the document's cover page ahead of the passage it wants. Each name is
+    matched as a contiguous phrase, in any case, with or without its file
+    extension and a possessive, and the quotes around it go with it. The
+    words of a name that appear apart stay, as does a question that is
+    nothing but a name.
+    """
+
+    names: set[tuple[str, ...]] = set()
+    for title in titles:
+        for phrase in (title, _FILE_EXTENSION.sub("", title)):
+            words = tuple(
+                _question_key(match.group(0)) for match in _QUESTION_WORD.finditer(phrase)
+            )
+            if words:
+                names.add(words)
+    matches = list(_QUESTION_WORD.finditer(text))
+    keys = [_question_key(match.group(0)) for match in matches]
+    dropped = [False] * len(matches)
+    for name in sorted(names, key=len, reverse=True):
+        size = len(name)
+        for start in range(len(keys) - size + 1):
+            if tuple(keys[start : start + size]) == name:
+                dropped[start : start + size] = [True] * size
+    if not any(dropped) or all(dropped):
+        return text
+    kept: list[str] = []
+    cursor = 0
+    index = 0
+    while index < len(matches):
+        if not dropped[index]:
+            index += 1
+            continue
+        end = index
+        while end + 1 < len(matches) and dropped[end + 1]:
+            end += 1
+        first, last = matches[index].start(), matches[end].end()
+        while first > cursor and text[first - 1] in _NAME_QUOTES:
+            first -= 1
+        while last < len(text) and text[last] in _NAME_QUOTES:
+            last += 1
+        kept.append(text[cursor:first])
+        cursor = last
+        index = end + 1
+    kept.append(text[cursor:])
+    return " ".join("".join(kept).split())
 
 
 def knowledge_embedding_windows(

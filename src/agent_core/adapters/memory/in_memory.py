@@ -1108,17 +1108,28 @@ class InMemoryKnowledgeStore:
                     ),
                 )
             )
-        result: list[RetrievedPassage] = []
-        for _match, passage in sorted(
-            scored, key=lambda item: (-item[0], -item[1].score, item[1].chunk_id)
-        ):
-            if per_document[passage.document_id] >= query.max_per_document:
-                continue
-            per_document[passage.document_id] += 1
-            result.append(passage)
-            if len(result) >= query.max_passages:
-                break
-        return result
+        ranked = [
+            passage
+            for _match, passage in sorted(
+                scored, key=lambda item: (-item[0], -item[1].score, item[1].chunk_id)
+            )
+        ]
+        return _reserve_per_document(ranked, query, per_document)
+
+    async def visible_titles(self, query: KnowledgeQuery) -> list[str]:
+        as_of = query.as_of or self._clock.now()
+        async with self._lock:
+            titles = {
+                document.title
+                for document in self._documents.values()
+                if document.tenant_id == query.tenant_id
+                and document.valid_from <= as_of
+                and (document.valid_to is None or document.valid_to > as_of)
+                and _visible(document, query)
+                and SENSITIVITY_ORDER[document.sensitivity]
+                <= SENSITIVITY_ORDER[query.sensitivity_ceiling]
+            }
+        return sorted(titles)
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
         async with self._lock:
@@ -1250,6 +1261,27 @@ def _coverage(forms: list[tuple[str, ...]], text: str) -> float:
                 matched += 1
                 break
     return matched / len(forms)
+
+
+def _reserve_per_document(
+    ranked: list[RetrievedPassage], query: KnowledgeQuery, per_document: defaultdict[UUID, int]
+) -> list[RetrievedPassage]:
+    """Every document's first `max_per_document` passages, then the rest by rank (ADR-0293).
+
+    The cap reserves room for each document rather than capping the result:
+    a verbose document cannot crowd another's first passages out, and a
+    corpus of one document still fills the budget.
+    """
+
+    within: list[RetrievedPassage] = []
+    beyond: list[RetrievedPassage] = []
+    for passage in ranked:
+        if per_document[passage.document_id] < query.max_per_document:
+            per_document[passage.document_id] += 1
+            within.append(passage)
+        else:
+            beyond.append(passage)
+    return (within + beyond)[: query.max_passages]
 
 
 def _visible(document: KnowledgeDocument, query: KnowledgeQuery) -> bool:

@@ -275,3 +275,37 @@ async def test_postgres_and_memory_knowledge_stores_agree_on_any_term_matching(
 
     assert found["memory"], found
     assert found["postgres"] == found["memory"]
+
+
+async def test_postgres_and_memory_knowledge_stores_reserve_rather_than_cap(
+    tmp_path: Path,
+) -> None:
+    """Both stores give a lone document its third passage and list its title (ADR-0293)."""
+
+    sections = (
+        "# Garden\n\n## Morning\n\nWater the tomatoes at dawn.\n\n"
+        "## Evening\n\nWater the tomatoes at dusk.\n\n"
+        "## Never\n\nNever water the tomatoes at noon."
+    )
+    stores: tuple[tuple[Literal["memory", "postgres"], Settings], ...] = (
+        ("memory", replace(memory_settings(), artifact_root=tmp_path / "memory")),
+        ("postgres", replace(database_settings(), artifact_root=tmp_path / "postgres")),
+    )
+    for storage, settings in stores:
+        async with build(settings=settings, storage=storage) as composition:
+            await _ingested(composition, sections)
+            query = KnowledgeQuery(
+                tenant_id=composition.principal.tenant_id,
+                principal_id=composition.principal.principal_id,
+                current_scope=None,
+                text='"garden.md" when to water the tomatoes',
+                budget_tokens=2_000,
+                max_passages=3,
+                min_score=0.1,
+            )
+            result = await composition.knowledge.search(
+                query, session_id=await composition.sessions.create()
+            )
+            assert len(result.passages) == 3, storage
+            async with composition.uow_factory() as uow:
+                assert await uow.knowledge.visible_titles(query) == ["garden.md"], storage

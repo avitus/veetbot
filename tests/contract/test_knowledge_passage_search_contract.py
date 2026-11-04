@@ -133,7 +133,14 @@ async def test_scope_affinity_ranks_a_project_document_above_an_equal_tenant_one
     assert ranked[0].score > ranked[1].score
 
 
-async def test_one_document_contributes_at_most_two_passages() -> None:
+async def test_a_document_yields_its_third_passage_after_every_other_document_has_two() -> None:
+    """The per-document cap reserves room; it does not cap the result (ADR-0293).
+
+    Every document's first two passages come before any document's third, so
+    a verbose document cannot crowd another out; after that the rest of the
+    budget fills by rank, so a corpus of one document is not starved.
+    """
+
     sections = "\n\n".join(
         f"# Step {index}\n\nThe rollback procedure step {index} reverts one service."
         for index in range(5)
@@ -145,14 +152,37 @@ async def test_one_document_contributes_at_most_two_passages() -> None:
 
     passages = await store.search(_query())
 
-    assert _ids(passages).count(UUID(int=2_001)) == 2
-    assert UUID(int=2_002) in _ids(passages)
-    assert len(passages) == 3
-    assert [passage.score for passage in passages] == sorted(
-        (passage.score for passage in passages), reverse=True
+    assert _ids(passages)[:3].count(UUID(int=2_001)) == 2
+    assert UUID(int=2_002) in _ids(passages)[:3]
+    assert _ids(passages)[3:] == [UUID(int=2_001)] * 3
+    assert [passage.score for passage in passages[:3]] == sorted(
+        (passage.score for passage in passages[:3]), reverse=True
     )
-    assert len(await store.search(_query(max_per_document=1, max_passages=10))) == 2
+    assert len(await store.search(_query(max_passages=3))) == 3
+    assert len(await store.search(_query(max_per_document=1, max_passages=10))) == 6
     assert len(await store.search(_query(max_passages=1))) == 1
+    alone = await _store(_document(1, sections))
+    assert len(await alone.search(_query())) == 5
+
+
+async def test_visible_titles_follow_the_visibility_rule() -> None:
+    store = await _store(
+        _document(1, "# Mine\n\nA rollback procedure."),
+        _document(
+            2, "# Theirs\n\nAnother rollback procedure.", visibility=KnowledgeVisibility.TENANT
+        ),
+    )
+    prepared = _document(3, "# Hidden\n\nA third rollback procedure.")
+    hidden = prepared.model_copy(
+        update={
+            "document": prepared.document.model_copy(
+                update={"ingested_by_principal_id": "someone-else"}
+            )
+        }
+    )
+    await store.ingest(hidden)
+
+    assert sorted(await store.visible_titles(_query())) == ["Document 1", "Document 2"]
 
 
 async def test_sensitivity_ceiling_and_validity_window_are_hard_filters() -> None:
