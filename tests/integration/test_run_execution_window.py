@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from uuid import UUID
 
+import pytest
 from sqlalchemy import update
 
 from agent_core.adapters.determinism import FixedClock
@@ -77,10 +78,17 @@ async def test_a_reclaimed_run_keeps_the_window_of_its_first_claim() -> None:
         assert again.run.deadline_at == started + WINDOW
 
 
-async def test_the_window_never_extends_past_the_outer_deadline() -> None:
+@pytest.mark.parametrize(
+    "waited",
+    [
+        pytest.param(350, id="a late claim gets what remains"),
+        pytest.param(421, id="a claim past the outer deadline stays past it"),
+    ],
+)
+async def test_the_window_never_extends_past_the_outer_deadline(waited: int) -> None:
     clock = FixedClock(NOW)
     async with windowed_run(clock) as (composition, _run_id):
-        clock.advance(timedelta(seconds=350))
+        clock.advance(timedelta(seconds=waited))
         async with composition.uow_factory() as uow:
             assert uow.queue is not None
             claimed = await uow.queue.claim("worker", [0])

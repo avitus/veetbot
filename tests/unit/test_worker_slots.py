@@ -17,21 +17,23 @@ from tests.integration.m2_support import memory_settings
 
 RUN_UNTIL_TERMINATED = """
 import pathlib, signal, sys, time
-pathlib.Path(sys.argv[1]).write_text("started")
 def stop(*_):
     pathlib.Path(sys.argv[1]).write_text("stopped")
     sys.exit(0)
 signal.signal(signal.SIGTERM, stop)
+pathlib.Path(sys.argv[1]).write_text("started")
 while True:
     time.sleep(0.01)
 """
 
 
 def _sleeper(path: Path) -> list[str]:
+    """Build a child that marks its path when it can take SIGTERM, and when it has."""
     return [sys.executable, "-c", RUN_UNTIL_TERMINATED, str(path)]
 
 
 async def _until(path: Path, content: str) -> None:
+    """Wait for a child's marker, failing the test if it never appears."""
     async with asyncio.timeout(10):
         while not path.exists() or path.read_text() != content:
             await asyncio.sleep(0.01)

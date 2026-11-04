@@ -55,6 +55,7 @@ class PostgresRunQueue:
             raise ConflictError("run already exists")
 
     async def claim(self, worker_id: str, eligible_classes: Sequence[int]) -> ClaimedRun | None:
+        """Lease the oldest ready run of these classes and start its execution window."""
         classes = list(eligible_classes)
         if not classes:
             return None

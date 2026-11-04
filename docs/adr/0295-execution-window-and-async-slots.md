@@ -42,8 +42,11 @@ failed the same way that morning.
    no stored run changes shape. Earlier releases ignore the field.
 3. **Every email task but a send uses a window** of its slice, 120 seconds or
    300 for a subscription batch. Its creation deadline is the slice plus
-   `EMAIL_QUEUE_ALLOWANCE_SECONDS` (300, one scheduled run's usual deadline), so
-   a task still fails if no worker reaches it. A send keeps its agent deadline.
+   `EMAIL_QUEUE_ALLOWANCE_SECONDS` (300, one scheduled run's usual deadline). A
+   task claimed within the allowance gets its whole slice. A later claim gets what
+   remains of the creation deadline, because slices are bounded and checkpointed,
+   so a shorter one still makes progress. A task claimed after that deadline fails.
+   A send keeps its agent deadline.
 4. **`worker.reserved_async_slots` becomes 2 and takes effect.** The value was
    validated and read by nothing. `agent worker --role async` now starts one
    `--single-slot` process per slot and supervises them: a signal stops them all
@@ -63,7 +66,8 @@ change.
 ## Consequences
 
 - A refresh behind a long run shows as still updating instead of failing, and is
-  rarer with two slots. It fails only if both slots stay busy past 300 seconds.
+  rarer with two slots. For a 120-second refresh, a wait over 300 seconds shortens
+  the slice, and a wait over 420 seconds fails it.
 - Two long runs can still fill both slots. Foreground refresh stays in the async
   class, because the interactive worker has one slot and a 120-second refresh
   there would hold up Chat.
