@@ -82,3 +82,11 @@ def test_sentence_punctuation_after_a_name_is_kept() -> None:
 def test_case_folds_beyond_ascii() -> None:
     asked = "STRASSE speed limits"
     assert knowledge_question_without_document_names(asked, ["Stra\u00dfe.pdf"]) == "speed limits"
+
+
+def test_a_decomposed_title_matches_a_composed_question() -> None:
+    asked = "Caf\u00e9 opening hours"
+    assert knowledge_question_without_document_names(asked, ["Cafe\u0301.pdf"]) == "opening hours"
+    assert knowledge_question_without_document_names("Cafe\u0301 opening hours", ["Caf\u00e9"]) == (
+        "opening hours"
+    )

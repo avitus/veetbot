@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Iterable
 from datetime import date, datetime
 from enum import StrEnum
@@ -336,8 +337,12 @@ def knowledge_question_without_document_names(text: str, titles: Iterable[str]) 
     a name.
     """
 
+    asked = text
+    # Composed and decomposed spellings of one letter are one word.
+    text = unicodedata.normalize("NFC", text)
     names: dict[tuple[str, ...], set[str]] = {}
     for title in titles:
+        title = unicodedata.normalize("NFC", title)
         for phrase in (title, _FILE_EXTENSION.sub("", title)):
             words = tuple(_name_key(match.group(0)) for match in _QUESTION_WORD.finditer(phrase))
             if words and all(words):
@@ -356,7 +361,7 @@ def knowledge_question_without_document_names(text: str, titles: Iterable[str]) 
             if _name_key(text[first:last]) in written:
                 dropped[start : start + size] = [True] * size
     if not any(dropped) or all(dropped):
-        return text
+        return asked
     kept: list[str] = []
     cursor = 0
     index = 0
