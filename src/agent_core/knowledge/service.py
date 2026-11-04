@@ -164,7 +164,7 @@ class KnowledgeService:
             if not chunks:
                 raise ToolValidationError("knowledge source produced no chunks")
             retained = await uow.artifacts.retain_for_knowledge(
-                source.id, self._principal, now=self._clock.now()
+                source.id, self._principal, now=self._clock.now(), unchanged_from=source
             )
             if retained.sha256 != source.sha256:
                 raise ArtifactIntegrityError("knowledge artifact metadata changed during ingest")

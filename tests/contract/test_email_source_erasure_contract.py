@@ -1,7 +1,7 @@
 """The same selective erasure contract runs against memory and PostgreSQL."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -529,10 +529,10 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
     async with factory() as uow:
         await uow.history.catch_up(sid)
     async with factory() as uow:
-        assert {
-            item.id
-            for item in await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
-        } == {aid, kept_aid}
+        pending = await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
+    assert {item.id for item in pending} == {aid, kept_aid}
+    # What an intake already under way read before this erasure.
+    read_before_erasure = next(item for item in pending if item.id == aid)
     async with factory() as uow:
         counts = await uow.session_deletions.erase_email_source(
             principal(), "work", "t1", frozenset({"m1"}), NOW
@@ -547,6 +547,15 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
     with pytest.raises(NotFoundError):
         async with factory() as uow:
             await uow.artifacts.retain_for_knowledge(aid, principal(), now=NOW)
+    # A cutoff sampled just before the erasure must not bring the file back.
+    with pytest.raises(NotFoundError):
+        async with factory() as uow:
+            await uow.artifacts.retain_for_knowledge(
+                aid,
+                principal(),
+                now=NOW - timedelta(seconds=1),
+                unchanged_from=read_before_erasure,
+            )
     async with factory() as uow:
         events = await uow.events.list_after(sid, 0, principal())
         recorded = {item.id: item for item in await uow.invocations.list_for_run(rid, principal())}

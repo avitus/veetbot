@@ -90,7 +90,9 @@ either be truncated or written into append-only history.
    by its origin and knowledge changes that origin. A file from a run that fails or is
    cancelled stays out of knowledge and keeps its 30-day expiry, as decision 5 says. The
    same bytes saved from two emails in one run are two files with two links, because each
-   follows its own email; a retry of one email's save still finds its own copy.
+   follows its own email; a retry of one email's save still finds its own copy. An intake
+   refuses a file whose expiry changed since it read the file, and the row lock it then
+   holds keeps an erasure waiting until its document commits, so the erasure removes it.
 
 9. **`save_attachment` is an unindexed deferral.** It has one name per mailbox, and
    as a read it would have taken a definition slot from a tool used on a request's

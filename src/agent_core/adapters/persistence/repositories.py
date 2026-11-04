@@ -3171,7 +3171,12 @@ class PostgresArtifactRepository:
         return artifact_to_domain(row)
 
     async def retain_for_knowledge(
-        self, artifact_id: UUID, principal: Principal, *, now: datetime | None = None
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
     ) -> ArtifactRef:
         artifact = await self.get(artifact_id, principal)
         if (
@@ -3190,6 +3195,10 @@ class PostgresArtifactRepository:
                     true()
                     if now is None
                     else or_(ArtifactRow.expires_at.is_(None), ArtifactRow.expires_at > now),
+                    # The row lock taken here holds any erasure until this document commits.
+                    true()
+                    if unchanged_from is None
+                    else ArtifactRow.expires_at.is_not_distinct_from(unchanged_from.expires_at),
                 )
                 .values(origin="knowledge_source", expires_at=None)
                 .returning(ArtifactRow)

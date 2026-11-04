@@ -1636,7 +1636,12 @@ class InMemoryArtifactRepository:
         return [artifact.model_copy(deep=True) for artifact in artifacts]
 
     async def retain_for_knowledge(
-        self, artifact_id: UUID, principal: Principal, *, now: datetime | None = None
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
     ) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)
@@ -1648,6 +1653,7 @@ class InMemoryArtifactRepository:
                     and artifact.expires_at is not None
                     and artifact.expires_at <= now
                 )
+                or (unchanged_from is not None and artifact.expires_at != unchanged_from.expires_at)
             ):
                 raise NotFoundError("artifact not found")
             if artifact.origin != "upload" and artifact.run_id in self._people_erased_runs:

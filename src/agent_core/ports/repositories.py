@@ -384,9 +384,18 @@ class ArtifactRepository(Protocol):
     async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ArtifactRef]: ...
 
     async def retain_for_knowledge(
-        self, artifact_id: UUID, principal: Principal, *, now: datetime | None = None
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
     ) -> ArtifactRef:
-        """Keep a source for its document; with `now`, an expired one is not found."""
+        """Keep a source for its document; with `now`, an expired one is not found.
+
+        With `unchanged_from`, one whose expiry has changed since that read is not
+        found either, so an erasure during an intake cannot be undone (ADR-0295).
+        """
         ...
 
     async def retain_for_reply(

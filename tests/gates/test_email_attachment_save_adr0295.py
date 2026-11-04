@@ -23,7 +23,13 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.artifacts import AUTO_INGEST_REFUSED, ArtifactOrigin
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.knowledge import (
+    DocumentAuthority,
+    KnowledgeIngestRequest,
+    KnowledgeVisibility,
+)
 from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
+from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunStatus
@@ -529,6 +535,39 @@ async def test_a_file_from_a_run_that_did_not_complete_keeps_its_expiry(status: 
     assert recorded.metadata["auto_ingest_reason"] == "run_not_completed"
     # It never holds up the batch, however long it has left.
     assert still_pending == []
+
+
+async def test_an_erasure_during_an_intake_is_not_undone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cutoff is sampled late, so an erasure can look like a future expiry."""
+
+    async def text_of_the_file(*_: Any) -> str:
+        return "Saved notes the search would find."
+
+    async with build(
+        settings=_settings(), mcp_client_factory=await _factory(content=_pdf())
+    ) as app:
+        monkeypatch.setattr(app.knowledge._extractor, "extract", text_of_the_file)
+        thread = await _seed_thread(app)
+        operation = await _press(app, thread.id, "knowledge.write")
+        async with app.uow_factory() as uow:
+            [read_by_intake] = await uow.artifacts.list_for_run(operation.run_id, app.principal)
+            erased_at = app.clock.now() + timedelta(hours=1)
+            await uow.artifacts.expire(read_by_intake.id, app.principal, erased_at)
+        with pytest.raises(NotFoundError):
+            await app.knowledge.ingest(
+                KnowledgeIngestRequest(
+                    source=read_by_intake,
+                    title=read_by_intake.name,
+                    visibility=KnowledgeVisibility.PRINCIPAL,
+                    authority=DocumentAuthority.PRINCIPAL_SUPPLIED,
+                    sensitivity=Sensitivity.INTERNAL,
+                ),
+                origin_trust=TrustLevel.USER,
+            )
+        async with app.uow_factory() as uow:
+            recorded = await uow.artifacts.get(read_by_intake.id, app.principal)
+    assert recorded.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
+    assert recorded.expires_at == erased_at
 
 
 async def test_a_file_deleted_during_a_sweep_is_never_read_into_knowledge() -> None:
