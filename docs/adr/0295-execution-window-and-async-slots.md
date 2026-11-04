@@ -53,7 +53,10 @@ failed the same way that morning.
    validated and read by nothing. `agent worker --role async` now starts one
    `--single-slot` process per slot and supervises them: a signal stops them all
    and exits cleanly; a slot that exits takes the rest down with a failure status
-   so the unit's `Restart=on-failure` brings back the set.
+   so the unit's `Restart=on-failure` brings back the set. A worker finishes its
+   current run before stopping, so a slot still running after 55 seconds, inside
+   the unit's 60-second `TimeoutStopSec`, is killed and its run returns when its
+   lease expires.
 
 ## Why processes under one unit
 
@@ -73,6 +76,10 @@ change.
 - Two long runs can still fill both slots. Foreground refresh stays in the async
   class, because the interactive worker has one slot and a 120-second refresh
   there would hold up Chat.
+- Two async email tasks can now overlap, such as a draft and a refresh. An archive
+  and a refresh already could. Refreshes still coalesce, so only one writes the
+  sync state, and each write takes the owner's lock. No test drives this overlap
+  directly, so watch for new email task conflicts after the release.
 - An in-process composition (`storage="memory"`) has no queue and no claim, so
   its email tasks run to the creation deadline. Production always claims.
 - The async unit uses about one more GB of memory (954 MB per process, with 6.3 GB

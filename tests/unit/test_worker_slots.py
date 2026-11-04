@@ -1,7 +1,9 @@
 """The async role runs one process per configured slot (ADR-0295)."""
 
 import asyncio
+import inspect
 import os
+import re
 import signal
 import sys
 from collections.abc import Sequence
@@ -59,6 +61,58 @@ async def test_a_slot_that_exits_stops_the_rest_so_the_unit_restarts(
     status = await asyncio.wait_for(supervise_worker_slots([exits, _sleeper(survivor)]), 10)
     assert status == expected, "systemd restarts this unit only on a failure status"
     assert not survivor.exists() or survivor.read_text() == "stopped"
+
+
+IGNORES_TERMINATION = """
+import os, pathlib, signal, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))
+while True:
+    time.sleep(0.01)
+"""
+
+EXITS_ONCE_ANOTHER_RUNS = """
+import pathlib, sys, time
+while not pathlib.Path(sys.argv[1]).exists():
+    time.sleep(0.01)
+time.sleep(0.05)
+sys.exit(7)
+"""
+
+
+def _assert_gone(marker: Path) -> None:
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(marker.read_text()), 0)
+
+
+async def test_a_stalled_slot_cannot_stop_the_unit_restarting(tmp_path: Path) -> None:
+    stalled = tmp_path / "stalled"
+    commands = [
+        [sys.executable, "-c", EXITS_ONCE_ANOTHER_RUNS, str(stalled)],
+        [sys.executable, "-c", IGNORES_TERMINATION, str(stalled)],
+    ]
+    status = await asyncio.wait_for(supervise_worker_slots(commands, grace_seconds=0.2), 5)
+    assert status == 7
+    _assert_gone(stalled)
+
+
+async def test_a_stalled_slot_cannot_outlast_a_requested_stop(tmp_path: Path) -> None:
+    stalled = tmp_path / "stalled"
+    commands = [[sys.executable, "-c", IGNORES_TERMINATION, str(stalled)]]
+    supervision = asyncio.create_task(supervise_worker_slots(commands, grace_seconds=0.2))
+    async with asyncio.timeout(10):
+        while not stalled.exists() or not stalled.read_text():
+            await asyncio.sleep(0.01)
+    os.kill(os.getpid(), signal.SIGTERM)
+    assert await asyncio.wait_for(supervision, 5) == 0
+    _assert_gone(stalled)
+
+
+def test_the_grace_ends_before_systemd_would_kill_the_unit() -> None:
+    unit = Path("deploy/systemd/veetbot-async-worker.service").read_text(encoding="utf-8")
+    stop_timeout = int(re.search(r"^TimeoutStopSec=(\d+)s$", unit, re.M).group(1))  # type: ignore[union-attr]
+    grace = inspect.signature(supervise_worker_slots).parameters["grace_seconds"].default
+    assert grace < stop_timeout
 
 
 def _record_cli(

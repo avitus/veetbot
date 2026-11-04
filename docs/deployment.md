@@ -198,7 +198,7 @@ are never downgraded automatically.
 `veetbot-async-worker` runs one process per `worker.reserved_async_slots` in
 `runtime/limits.yaml`, shipped as two (ADR-0295). The unit's `MainPID` is a small
 supervisor: stopping the unit stops every slot, and a slot that exits restarts the
-set. `systemctl status veetbot-async-worker` lists them, and each slot's runs carry its own
+set after up to 55 seconds for the others to finish their runs. `systemctl status veetbot-async-worker` lists them, and each slot's runs carry its own
 process ID in `lease_owner`. Lowering the value to 1 in a reviewed overlay under
 `AGENT_CONFIG_DIR` and restarting the unit returns to one process, which frees
 about 1 GB of memory, but a long scheduled run then holds up email refreshes.
