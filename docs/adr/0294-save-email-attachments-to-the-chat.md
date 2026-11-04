@@ -38,8 +38,8 @@ either be truncated or written into append-only history.
    match the indexed part is `gmail.attachment_not_found`, which also lets the
    approver read the file's real name in the call.
 2. **32 MiB, the upload limit.** A declared or decoded size above it is
-   `gmail.attachment_too_large`. The larger upstream bound applies to this one
-   request; every other Gmail read keeps 8 MiB.
+   `gmail.attachment_too_large`. The larger upstream bound applies to this tool's
+   two requests; every other Gmail read keeps 8 MiB.
 3. **The bytes stop at the runtime.** Both tools return the file only in
    structured content, never duplicated as text. The MCP runtime hands those two
    calls to an `EmailAttachmentSaver`, which stores the bytes and returns a small

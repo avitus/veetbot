@@ -134,6 +134,18 @@ async def test_a_message_gmail_no_longer_has_is_not_found() -> None:
     assert refused.value.code == "gmail.attachment_not_found"
 
 
+async def test_a_large_attachment_inside_the_message_is_within_the_limit() -> None:
+    content = b"x" * (7 * 1024 * 1024)
+    message = _message()
+    payload = message["payload"]
+    assert isinstance(payload, dict)
+    payload["parts"][1]["parts"][0]["body"] = {"size": len(content), "data": _encoded(content)}
+
+    fetched = await _client(_mailbox(message)).fetch_attachment("m1", 0, "logo.png")
+
+    assert base64.b64decode(str(fetched["data_base64"])) == content
+
+
 async def test_a_declared_size_over_the_limit_never_downloads_the_file() -> None:
     message = _message()
     payload = message["payload"]

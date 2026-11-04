@@ -357,7 +357,13 @@ class GmailClient:
         self._required_text(filename, "filename", maximum=1024)
         path = f"/messages/{quote(message_id, safe='')}"
         try:
-            message = await self._request("GET", path, params={"format": "full"})
+            # A small file's bytes can sit inside the message, so it gets the same bound.
+            message = await self._request(
+                "GET",
+                path,
+                params={"format": "full"},
+                maximum_bytes=ATTACHMENT_UPSTREAM_MAXIMUM_BYTES,
+            )
         except GmailResourceNotFoundError as exc:
             raise GmailError("gmail.attachment_not_found") from exc
         parts = self._attachment_parts(message.get("payload"))
