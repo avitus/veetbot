@@ -11,7 +11,6 @@ has nothing to await while it cleans up.
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,6 +33,7 @@ from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import TextContentBlock
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from tests.integration.disposable_database import disposable_database_url
 
 pytestmark = pytest.mark.integration
 
@@ -43,19 +43,10 @@ REPLAY_EVENT_BYTES = 2_000
 
 
 @pytest.fixture
-def database_url() -> str:
-    """The integration database this module counts connections on."""
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        pytest.skip("DATABASE_URL is not set")
-    return url
-
-
-@pytest.fixture
-def named_url(database_url: str) -> str:
+def named_url() -> str:
     """A database URL whose connections can be counted by their own application name."""
     return (
-        make_url(database_url)
+        make_url(disposable_database_url())
         .update_query_dict({"application_name": f"stream-release-{uuid4().hex[:12]}"})
         .render_as_string(hide_password=False)
     )
