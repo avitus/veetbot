@@ -44,9 +44,13 @@ had to rank first or second to be returned at all.
 2. **The per-document cap reserves room; it does not cap the result.** Both
    stores take every document's first `max_per_document` passages in rank
    order, then the rest of the ranking up to `max_passages`; the service's
-   token budget bounds what is rendered, as before. A verbose document still
-   cannot crowd another document's first passages out, and a corpus of one
-   document fills its budget.
+   token budget bounds what is rendered, as before. Neither arm is cut to a
+   candidate limit before the reservation, so a document of any size cannot
+   hide another's first passages; the PostgreSQL store ranks and reserves by
+   scalar columns and fetches rows only for the chosen passages, so a common
+   term does not pull every matching chunk's text into memory. A verbose
+   document still cannot crowd another document's first passages out, and a
+   corpus of one document fills its budget.
 3. **The tool's description is unchanged.** Telling the model what to put in
    `text` would change the pinned `knowledge.search@1.0.0` spec, which every
    open chat compares at restore, and add tokens to rosters that sit under

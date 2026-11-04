@@ -1824,9 +1824,12 @@ class PostgresKnowledgeStore:
         forms = lexical_query_forms(query.text)
         if not forms and semantic is None:
             return []
-        limit = max(query.max_passages * 8, 64)
         eligible = _knowledge_eligible(query, as_of)
-        candidates: dict[str, tuple[KnowledgeChunkRow, KnowledgeDocumentRow]] = {}
+        # Each arm ranks every eligible chunk by scalar columns alone, and the
+        # rows a passage needs are fetched once the reservation has chosen it,
+        # so a common term does not pull every matching chunk's text into
+        # memory (ADR-0293). chunk id -> (document id, authority, project scope).
+        meta: dict[str, tuple[UUID, str, str | None]] = {}
         lexical: list[tuple[str, float]] = []
         if forms:
             vector = func.to_tsvector(
@@ -1879,7 +1882,13 @@ class PostgresKnowledgeStore:
             )
             rows = (
                 await self._session.execute(
-                    select(KnowledgeChunkRow, KnowledgeDocumentRow, coverage.label("coverage"))
+                    select(
+                        KnowledgeChunkRow.chunk_id,
+                        KnowledgeDocumentRow.document_id,
+                        KnowledgeDocumentRow.authority,
+                        KnowledgeDocumentRow.project_scope,
+                        coverage.label("coverage"),
+                    )
                     .join(
                         KnowledgeDocumentRow,
                         KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
@@ -1891,15 +1900,14 @@ class PostgresKnowledgeStore:
                     .order_by(coverage.desc(), rank.desc(), KnowledgeChunkRow.chunk_id)
                 )
             ).all()
-            for chunk, document, raw_coverage in rows:
-                candidates[chunk.chunk_id] = (chunk, document)
-                lexical.append((chunk.chunk_id, int(raw_coverage) / len(forms)))
+            for chunk_id, document_id, authority, project_scope, raw_coverage in rows:
+                meta[chunk_id] = (document_id, authority, project_scope)
+                lexical.append((chunk_id, int(raw_coverage) / len(forms)))
         semantic_arm: list[tuple[str, float]] = []
         if semantic is not None:
             # The semantic arm (knowledge-documents.md, "Indexing"): exact
             # cosine distance over every eligible chunk vector in the query's
-            # space, a chunk scored by its nearest window; PostgreSQL
-            # evaluates eligibility before the limit.
+            # space, a chunk scored by its nearest window, every chunk ranked.
             distance = func.min(
                 KnowledgeChunkVectorRow.embedding.cosine_distance(
                     list(checked_vector(semantic.vector, semantic.space))
@@ -1913,7 +1921,13 @@ class PostgresKnowledgeStore:
             )
             rows = (
                 await self._session.execute(
-                    select(KnowledgeChunkRow, KnowledgeDocumentRow, best.c.distance)
+                    select(
+                        KnowledgeChunkRow.chunk_id,
+                        KnowledgeDocumentRow.document_id,
+                        KnowledgeDocumentRow.authority,
+                        KnowledgeDocumentRow.project_scope,
+                        best.c.distance,
+                    )
                     .join(best, best.c.chunk_id == KnowledgeChunkRow.chunk_id)
                     .join(
                         KnowledgeDocumentRow,
@@ -1923,12 +1937,11 @@ class PostgresKnowledgeStore:
                     .order_by(
                         func.round(best.c.distance.cast(Numeric), 7), KnowledgeChunkRow.chunk_id
                     )
-                    .limit(limit)
                 )
             ).all()
-            for chunk, document, raw_distance in rows:
-                candidates[chunk.chunk_id] = (chunk, document)
-                semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, 1 - float(raw_distance)))))
+            for chunk_id, document_id, authority, project_scope, raw_distance in rows:
+                meta[chunk_id] = (document_id, authority, project_scope)
+                semantic_arm.append((chunk_id, max(-1.0, min(1.0, 1 - float(raw_distance)))))
         if semantic is None:
             matches = {chunk_id: (match, ["lexical"]) for chunk_id, match in lexical}
         else:
@@ -1942,42 +1955,61 @@ class PostgresKnowledgeStore:
             else sorted(matches, key=lambda chunk_id: (-matches[chunk_id][0], chunk_id))
         )
         per_document: defaultdict[UUID, int] = defaultdict(int)
-        within: list[RetrievedPassage] = []
-        beyond: list[RetrievedPassage] = []
+        within: list[tuple[str, float, list[str]]] = []
+        beyond: list[tuple[str, float, list[str]]] = []
         for chunk_id in ordered:
-            chunk, document = candidates[chunk_id]
+            document_id, authority, project_scope = meta[chunk_id]
             match, arms = matches[chunk_id]
             # The same formula the in-memory store answers with: the match
             # first, then the document's authority and its affinity with the scope.
             score = min(
                 1.0,
                 0.75 * match
-                + 0.15 * _DOCUMENT_AUTHORITY_WEIGHT[DocumentAuthority(document.authority)]
-                + 0.1 * (1.0 if document.project_scope == query.current_scope else 0.5),
+                + 0.15 * _DOCUMENT_AUTHORITY_WEIGHT[DocumentAuthority(authority)]
+                + 0.1 * (1.0 if project_scope == query.current_scope else 0.5),
             )
             if score < query.min_score:
                 continue
-            passage = RetrievedPassage(
-                chunk_id=chunk.chunk_id,
-                document_id=document.document_id,
-                title=document.title,
-                heading_path=list(chunk.heading_path),
-                text=chunk.text,
-                doc_date=document.doc_date,
-                authority=DocumentAuthority(document.authority),
-                sensitivity=Sensitivity(document.sensitivity),
-                score=score,
-                arms=arms,
-                instruction_like=chunk.contains_instruction_like_text,
-            )
             # The per-document cap reserves every document's first passages
             # and the rest fill by rank, as the in-memory store (ADR-0293).
-            if per_document[document.document_id] < query.max_per_document:
-                per_document[document.document_id] += 1
-                within.append(passage)
+            if per_document[document_id] < query.max_per_document:
+                per_document[document_id] += 1
+                within.append((chunk_id, score, arms))
             else:
-                beyond.append(passage)
-        return (within + beyond)[: query.max_passages]
+                beyond.append((chunk_id, score, arms))
+        chosen = (within + beyond)[: query.max_passages]
+        if not chosen:
+            return []
+        rows = (
+            await self._session.execute(
+                select(KnowledgeChunkRow, KnowledgeDocumentRow)
+                .join(
+                    KnowledgeDocumentRow,
+                    KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+                )
+                .where(KnowledgeChunkRow.chunk_id.in_([chunk_id for chunk_id, _, _ in chosen]))
+            )
+        ).all()
+        found = {chunk.chunk_id: (chunk, document) for chunk, document in rows}
+        passages: list[RetrievedPassage] = []
+        for chunk_id, score, arms in chosen:
+            chunk, document = found[chunk_id]
+            passages.append(
+                RetrievedPassage(
+                    chunk_id=chunk.chunk_id,
+                    document_id=document.document_id,
+                    title=document.title,
+                    heading_path=list(chunk.heading_path),
+                    text=chunk.text,
+                    doc_date=document.doc_date,
+                    authority=DocumentAuthority(document.authority),
+                    sensitivity=Sensitivity(document.sensitivity),
+                    score=score,
+                    arms=arms,
+                    instruction_like=chunk.contains_instruction_like_text,
+                )
+            )
+        return passages
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
         row = await self._session.scalar(

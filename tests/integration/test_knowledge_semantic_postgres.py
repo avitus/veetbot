@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import text
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
@@ -446,3 +447,80 @@ async def test_windows_are_stored_scored_by_their_best_and_backfilled(tmp_path: 
             )
         assert spaces == [successor.key]
         assert {item.heading_path[-1] for item in found.passages} == {"Fans"}
+
+
+async def test_semantic_reservation_reaches_past_a_verbose_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The semantic arm is not cut to a candidate limit before the reservation (ADR-0293)."""
+
+    monkeypatch.setitem(VECTORS, "Other", (0.9, 0.436, 0.0))
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    async with build(settings=settings, storage="postgres") as app:
+        session_id = await app.sessions.create()
+        run_id = uuid4()
+        now = app.clock.now()
+        async with app.uow_factory() as uow:
+            await uow.runs.create(
+                Run(
+                    id=run_id,
+                    session_id=session_id,
+                    tenant_id=app.principal.tenant_id,
+                    principal_scopes=set(app.principal.scopes),
+                    agent_id=DEFAULT_AGENT_ID,
+                    agent_version="1.0.0",
+                    status=RunStatus.COMPLETED,
+                    limits=RunLimits(),
+                    scheduled_for=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await uow.runs.set_provider_pin(
+                run_id,
+                ProviderPin(
+                    run_id=run_id,
+                    provider=SPACE.provider,
+                    model=SPACE.model,
+                    registry_version="test",
+                    pinned_at=now,
+                ),
+            )
+        store = FilesystemArtifactStore(settings.artifact_root)
+        writer = ArtifactWriterFactory(
+            app.uow_factory, store, app.clock, RandomIdFactory()
+        ).for_run(
+            tenant_id=app.principal.tenant_id,
+            principal_id=app.principal.principal_id,
+            session_id=session_id,
+            run_id=run_id,
+            origin=ArtifactOrigin.UPLOAD,
+        )
+        service = KnowledgeService(
+            app.uow_factory,
+            store,
+            app.clock,
+            RandomIdFactory(),
+            app.principal,
+            embedder=KnowledgeEmbedder(Provider(), SPACE, channel="dense"),
+        )
+        filler = " ".join(f"word{index}" for index in range(120))
+        verbose = "\n\n".join(
+            f"# Step {index}\n\nStep {index} of the procedure. {filler}" for index in range(70)
+        )
+        for name, body in (("steps.md", verbose), ("other.md", "# Other\n\nThe other way, once.")):
+            ref = await writer.create(_bytes(body.encode()), name, "text/markdown", TrustLevel.USER)
+            async with app.uow_factory() as uow:
+                source = await uow.artifacts.get(ref.artifact_id, app.principal)
+            await service.ingest(
+                KnowledgeIngestRequest(
+                    source=source, title=name, visibility=KnowledgeVisibility.PRINCIPAL
+                ),
+                origin_trust=TrustLevel.USER,
+            )
+        query = _query(app.principal.principal_id, app.principal.tenant_id, "procedure")
+        query = query.model_copy(update={"max_passages": 8, "max_per_document": 3})
+        found = await service.search(query, session_id=session_id, run_id=run_id)
+        headings = [item.heading_path[-1] for item in found.passages]
+        assert "Other" in headings[:4], headings
+        assert len(found.passages) == 8

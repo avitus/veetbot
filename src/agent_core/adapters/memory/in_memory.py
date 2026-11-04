@@ -1078,10 +1078,10 @@ class InMemoryKnowledgeStore:
                         for vector in windows.values()
                     )
                     semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, similarity))))
-        limit = max(query.max_passages * 8, 64)
+        # Neither arm is cut before the per-document reservation sees every
+        # document's first passages (ADR-0293); `max_passages` bounds the result.
         lexical.sort(key=lambda item: (-item[1], _passage_score(eligible, query, item), item[0]))
         semantic_arm.sort(key=lambda item: (-round(item[1], 7), item[0]))
-        semantic_arm = semantic_arm[:limit]
         if semantic is None:
             matches = {chunk_id: (match, ["lexical"]) for chunk_id, match in lexical}
         else:
