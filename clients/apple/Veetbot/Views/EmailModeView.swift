@@ -1493,9 +1493,18 @@ private struct EmailThreadScreen: View {
             .help("Show the attachments in the panel")
             .accessibilityIdentifier("email.message.attachments")
         } else {
-            ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
-                Label("\(attachment.filename) · attachment not read", systemImage: "paperclip")
-                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            ForEach(Array(attachments.enumerated()), id: \.offset) { index, attachment in
+                HStack(spacing: VeetSpace.s2) {
+                    Label("\(attachment.filename) · attachment not read", systemImage: "paperclip")
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                    Spacer(minLength: 0)
+                    if let threadID = model.thread?.id {
+                        EmailAttachmentSaveControl(
+                            model: model,
+                            key: EmailAttachmentKey(threadID: threadID, messageID: message.id, index: index),
+                            attachment: attachment)
+                    }
+                }
             }
         }
     }
@@ -2502,5 +2511,54 @@ struct EmailSendReview: View {
             }
         }.sheetFrame(minWidth: 300, macMinWidth: 520, idealWidth: 600, minHeight: 400, idealHeight: 660)
             .background(AppTheme.paper)
+    }
+}
+
+
+/// Save for one attachment, on the Mac panel and the iPhone and iPad message rows
+/// (ADR-0296). What it says is the only record of the press until the chat is opened.
+struct EmailAttachmentSaveControl: View {
+    @ObservedObject var model: EmailViewModel
+    let key: EmailAttachmentKey
+    let attachment: EmailAttachmentView
+
+    var body: some View {
+        switch model.attachmentSave(key) {
+        case .saving:
+            ProgressView().controlSize(.small)
+                .accessibilityLabel("Saving \(attachment.filename)")
+                .accessibilityIdentifier("email.attachment.saving")
+        case .saved:
+            Label("Saved to chat", systemImage: "checkmark")
+                .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                .fixedSize()
+                .accessibilityIdentifier("email.attachment.saved")
+        case .failed(let message):
+            VStack(alignment: .trailing, spacing: 2) {
+                saveButton(title: "Retry")
+                Text(message).veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case nil:
+            if EmailAttachmentView.canSave(size: attachment.size) {
+                saveButton(title: "Save")
+            } else {
+                Text("Over 32 MB").veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    .fixedSize()
+                    .help("Too large to save. It stays in Gmail.")
+            }
+        }
+    }
+
+    private func saveButton(title: String) -> some View {
+        Button(title) {
+            Task { await model.saveAttachment(key, filename: attachment.filename) }
+        }
+        .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+        .fixedSize()
+        .help("Keep a copy in this email's chat. A PDF or text file also becomes searchable.")
+        .accessibilityLabel("\(title) \(attachment.filename)")
+        .accessibilityIdentifier("email.attachment.save")
     }
 }

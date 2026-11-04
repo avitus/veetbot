@@ -411,6 +411,7 @@ is not an authorization input.
 | `POST /v1/approvals/{id}/resolve` | `approval.resolve` |
 | `GET /v1/artifacts/{id}` | `artifact.read` |
 | `GET /v1/artifacts/{id}/content` | `artifact.read` |
+| `POST /v1/email/threads/{id}/attachments/save` | `email.write`, and `artifact.write` in the service (ADR-0296) |
 | `POST /v1/browser-profiles` | `browser.profile.write` |
 | `GET /v1/browser-profiles` | `browser.profile.read` |
 | `GET /v1/browser-profiles/{id}` | `browser.profile.read` |

@@ -151,7 +151,7 @@ async def _append_event(
         )
 
 
-async def _complete_reply(context: RunContext, message: AssistantMessage) -> AssistantMessage:
+async def complete_reply(context: RunContext, message: AssistantMessage) -> AssistantMessage:
     """Record the final reply with every file the run exported (ADR-0122).
 
     One unit of work chooses the files, keeps them for the life of the
@@ -1529,7 +1529,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
                     step,
                 )
             assert message is not None
-            message = await _complete_reply(context, message)
+            message = await complete_reply(context, message)
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
 
         guarded = guard_tool_turn(context, turn.tool_calls, step, loop_synthesis=loop_synthesis)

@@ -43,6 +43,7 @@ from agent_core.domain.email import (
     EmailArchiveConsent,
     EmailArchiveOperation,
     EmailAttachment,
+    EmailAttachmentSelection,
     EmailBudgetLimits,
     EmailDraft,
     EmailDraftEdit,
@@ -1072,7 +1073,7 @@ class EmailExperienceService:
         self,
         principal: Principal,
         *,
-        kind: Literal["refresh", "draft", "send", "archive", "subscription"],
+        kind: Literal["refresh", "draft", "send", "archive", "subscription", "attachment"],
         thread_id: UUID | None = None,
         draft_id: UUID | None = None,
         expected_revision: int | None = None,
@@ -1084,10 +1085,13 @@ class EmailExperienceService:
         source_revision: int | None = None,
         consented: bool = False,
         arrival_check: bool = False,
+        attachment: EmailAttachmentSelection | None = None,
     ) -> EmailOperation:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         # Typed owner gestures: no model, no catalog, no automatic-email dollars.
         gesture = kind in {"archive", "subscription"}
+        # ADR-0296: also a typed gesture, but its file belongs in the thread's own chat.
+        thread_gesture = kind == "attachment"
         for scope in ("email.write", "run.write", "session.write"):
             require_scope(principal, scope)
         now = self.clock.now()
@@ -1153,6 +1157,10 @@ class EmailExperienceService:
                     intent.append("spam")
             if subscription is not None:
                 intent.append(subscription.digest)
+            if attachment is not None:
+                intent.extend(
+                    [attachment.message_id, attachment.attachment_index, attachment.filename]
+                )
             digest = hashlib.sha256(json.dumps(intent).encode()).hexdigest()
             replay_key = (
                 None
@@ -1224,6 +1232,7 @@ class EmailExperienceService:
                         kind != "refresh"
                         and (old.thread_id != thread_id or old.draft_id != draft_id)
                     )
+                    or old.attachment != attachment
                 ):
                     continue
                 if kind == "send" and old.expected_revision != expected_revision:
@@ -1256,7 +1265,7 @@ class EmailExperienceService:
                     )
                 ):
                     raise ConflictError("wait for the current Inbox operation to finish")
-                if kind == "archive" and replay_key is not None:
+                if kind in {"archive", "attachment"} and replay_key is not None:
                     await self._archive_replay_in(
                         uow.email, principal, replay_key, digest, old.run_id, now
                     )
@@ -1289,7 +1298,7 @@ class EmailExperienceService:
                     raise ConflictError("This reply was already sent or discarded.")
             reservation = (
                 Decimal("0")
-                if kind == "send" or gesture
+                if kind == "send" or gesture or thread_gesture
                 else min(
                     EMAIL_SLICE_RESERVATION,
                     self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION,
@@ -1307,7 +1316,7 @@ class EmailExperienceService:
                 admitted = "arrivals"
             elif kind == "refresh":
                 admitted = await self._refresh_scope(uow.email, principal, reservation)
-            elif not gesture:
+            elif not gesture and not thread_gesture:
                 await self._check_budget(uow.email, principal, reservation)
             session = await self._session_in(uow, principal, None if gesture else thread, prepared)
             if await uow.runs.active_for_session(session.id, principal) is not None:
@@ -1348,7 +1357,7 @@ class EmailExperienceService:
                 limits=limits,
                 # The owner waits on a gesture or a send; neither may queue
                 # behind minutes-long refreshes in the asynchronous lane.
-                priority=0 if gesture or kind == "send" else 10,
+                priority=0 if gesture or thread_gesture or kind == "send" else 10,
                 scheduled_for=scheduled_for,
                 deadline_at=deadline,
                 created_at=now,
@@ -1368,6 +1377,7 @@ class EmailExperienceService:
                 draft_id=draft_id,
                 expected_revision=expected_revision,
                 instruction=instruction,
+                attachment=attachment,
                 created_at=now,
                 reservation=reservation,
                 scope=admitted,
@@ -1480,6 +1490,19 @@ class EmailExperienceService:
                 )
             )
             await uow.runs.set_seed_event_sequence(run.id, event.sequence)
+            if thread_gesture:
+                # The saved file is on this chat's reply, so the chat must show in Chat.
+                await uow.events.append(
+                    NewEvent(
+                        session_id=session.id,
+                        run_id=None,
+                        event_type="email.discussion.opened",
+                        actor_type="principal",
+                        actor_id=principal.principal_id,
+                        payload={},
+                        derivation_key=f"email-discussion:{session.id}",
+                    )
+                )
             if task.archive_consent is not None:
                 await uow.events.append(
                     NewEvent(
@@ -1945,6 +1968,42 @@ class EmailExperienceService:
             idempotency_key=idempotency_key,
         )
 
+    async def save_attachment(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        *,
+        message_id: str,
+        attachment_index: int,
+        filename: str,
+        idempotency_key: str,
+    ) -> EmailOperation:
+        """Admit one press on Save for an attachment this thread lists (ADR-0296)."""
+        require_scope(principal, "artifact.write")
+        if not idempotency_key or len(idempotency_key) > 200:
+            raise ValueError("invalid save request")
+        selection = EmailAttachmentSelection(
+            message_id=message_id, attachment_index=attachment_index, filename=filename
+        )
+        async with self.uow_factory() as uow:
+            thread = await self._thread(uow.email, principal, thread_id)
+            # A retry returns what its key admitted, whatever a sync has since changed.
+            replay = await uow.email.get(
+                principal, "task_replay", hashlib.sha256(idempotency_key.encode()).hexdigest()
+            )
+        listed = next((m.attachments for m in thread.messages if m.id == message_id), [])
+        if replay is None and (
+            attachment_index >= len(listed) or listed[attachment_index].filename != filename
+        ):
+            raise NotFoundError("email attachment not found")
+        return await self.submit_task(
+            principal,
+            kind="attachment",
+            thread_id=thread_id,
+            attachment=selection,
+            idempotency_key=idempotency_key,
+        )
+
     async def report_thread_spam(
         self,
         principal: Principal,
@@ -2264,7 +2323,7 @@ class EmailExperienceService:
     async def settle(self, principal: Principal, run_id: UUID) -> None:
         """Release ended resources; distinguish actual usage from budget estimates."""
         task = await self.get_task(principal, run_id)
-        if task is not None and task.kind in {"refresh", "archive", "subscription"}:
+        if task is not None and task.kind in {"refresh", "archive", "subscription", "attachment"}:
             async with self.uow_factory() as uow:
                 try:
                     run: Run | None = await uow.runs.get(run_id, principal)
@@ -3562,6 +3621,18 @@ class EmailExperienceService:
                         await uow.email.delete(
                             principal, kind, row.key, expected_revision=row.revision
                         )
+            # A saved file's selection names it; the task's record outlives its run.
+            for row in [row async for row in records(uow.email, principal, "task")]:
+                if row.payload.get("thread_id") == str(thread_id) and row.payload.get("attachment"):
+                    task = EmailTask.model_validate(row.payload)
+                    await save_value(
+                        uow.email,
+                        principal,
+                        "task",
+                        row.key,
+                        task.model_copy(update={"attachment": None}),
+                        now,
+                    )
             for row in [row async for row in records(uow.email, principal, "draft_edit_replay")]:
                 if str(row.payload.get("revision_key", "")).split(":")[0] in draft_ids:
                     await uow.email.delete(

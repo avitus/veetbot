@@ -25,8 +25,8 @@ from agent_core.domain.approvals import (
     approval_status_for,
 )
 from agent_core.domain.artifacts import (
+    AUTO_INGEST_ORIGINS,
     REPLY_ATTACHMENT_ORIGINS,
-    ArtifactOrigin,
     auto_ingest_due,
     auto_ingest_metadata,
     claimed_upload,
@@ -1635,12 +1635,25 @@ class InMemoryArtifactRepository:
         artifacts.sort(key=lambda artifact: (artifact.created_at, artifact.id))
         return [artifact.model_copy(deep=True) for artifact in artifacts]
 
-    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+    async def retain_for_knowledge(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
+    ) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)
             if artifact is None or (
                 artifact.tenant_id != principal.tenant_id
                 or artifact.principal_id != principal.principal_id
+                or (
+                    now is not None
+                    and artifact.expires_at is not None
+                    and artifact.expires_at <= now
+                )
+                or (unchanged_from is not None and artifact.expires_at != unchanged_from.expires_at)
             ):
                 raise NotFoundError("artifact not found")
             if artifact.origin != "upload" and artifact.run_id in self._people_erased_runs:
@@ -1751,8 +1764,10 @@ class InMemoryArtifactRepository:
                 for artifact in self._rows.values()
                 if artifact.tenant_id == principal.tenant_id
                 and artifact.principal_id == principal.principal_id
-                and artifact.origin == ArtifactOrigin.UPLOAD.value
+                and artifact.origin in AUTO_INGEST_ORIGINS
                 and artifact.metadata.get("auto_ingest") == "pending"
+                # A file deleted or erased while pending never reaches knowledge (ADR-0296).
+                and (artifact.expires_at is None or artifact.expires_at > now)
                 and auto_ingest_due(artifact.metadata, now)
             ]
         pending.sort(key=lambda artifact: (artifact.created_at, artifact.id))
