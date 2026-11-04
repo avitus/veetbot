@@ -11,6 +11,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserDispatchConstraint,
     BrowserObservation,
+    BrowserProfileStatus,
     BrowserProviderError,
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
@@ -392,3 +393,44 @@ async def test_later_untrusted_input_cannot_reactivate_an_older_owner_recipe(
         )
         await app.runs.submit("Read my saved report.", session.id)
         assert provider.navigations == []
+
+
+async def test_a_chat_whose_website_login_was_deleted_still_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deleting a login leaves its chats bound to it; a message must not end their runs."""
+
+    def load(settings: Any, relative: str) -> dict[str, Any]:
+        return (
+            CATALOG
+            if relative == "runtime/browser-workflows.yaml"
+            else load_config_document(settings, relative)
+        )
+
+    monkeypatch.setattr(bootstrap, "load_config_document", load)
+    async with bootstrap.build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[ScriptedTurn(text="Which website?")]),
+        enabled_tools=["browser.navigate", "browser.observe", "browser.act"],
+        browser_provider_override=FakeBrowserProvider(),
+    ) as app:
+        await seed_browser_authority(app)
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        async with app.uow_factory() as uow:
+            profile = await uow.browser_profiles.get(PROFILE_ID, app.principal)
+            revoked = await uow.browser_profiles.transition(
+                PROFILE_ID,
+                app.principal,
+                expected_generation=profile.generation,
+                status=BrowserProfileStatus.REVOKED,
+                updated_at=app.clock.now(),
+            )
+            await uow.browser_profiles.delete(
+                PROFILE_ID, app.principal, expected_generation=revoked.generation
+            )
+
+        run_id = await app.runs.submit("I am signed in now.", session.id)
+
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
