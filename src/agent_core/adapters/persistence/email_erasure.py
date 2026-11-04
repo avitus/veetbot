@@ -589,12 +589,14 @@ async def erase_postgres_source(
                     changed = True
         counts["invocations"] += int(changed)
     # The owner's decision stands; only the name its card showed is source content.
-    for approval in (
-        await session.scalars(
-            select(ApprovalRow).where(ApprovalRow.session_id.in_(affected_sessions))
-        )
-    ).all():
-        approval.request = erase_attachment_names(approval.request, message_ids)
+    # A call has no saved files, and the call worker's role may not read approvals.
+    if not calling:
+        for approval in (
+            await session.scalars(
+                select(ApprovalRow).where(ApprovalRow.session_id.in_(affected_sessions))
+            )
+        ).all():
+            approval.request = erase_attachment_names(approval.request, message_ids)
     checkpoint_ids = list(
         (
             await session.scalars(
@@ -865,8 +867,9 @@ def erase_memory_source_locked(
             repository._invocations._invocations[key] = type(invocation).model_validate(erased)
             counts["invocations"] += 1
     # The owner's decision stands; only the name its card showed is source content.
+    # A call has no saved files, and the call worker's role may not read approvals.
     for key, approval in list(repository._approvals._approvals.items()):
-        if approval.session_id in affected_sessions:
+        if not calling and approval.session_id in affected_sessions:
             repository._approvals._approvals[key] = type(approval).model_validate(
                 erase_attachment_names(approval.model_dump(mode="json"), message_ids)
             )

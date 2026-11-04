@@ -80,7 +80,8 @@ either be truncated or written into append-only history.
    it from the call's recorded arguments, its events, its approval and the task record,
    in any chat that saved or tried to save the file, while keeping the call and the
    owner's decision. A file deleted or erased while its knowledge intake is pending never
-   reaches knowledge.
+   reaches knowledge. Only email erasure reads approvals: call erasure shares this code
+   and has no saved files, and the call worker's role keeps its grants unchanged.
 
 9. **`save_attachment` is an unindexed deferral.** It has one name per mailbox, and
    as a read it would have taken a definition slot from a tool used on a request's
