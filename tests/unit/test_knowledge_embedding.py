@@ -319,6 +319,22 @@ async def test_search_embeds_the_question_and_names_the_channel_in_the_policy(
     )
 
 
+async def test_a_question_naming_the_document_is_asked_without_its_name(tmp_path: Path) -> None:
+    """The name of a visible document drops out before either arm runs (ADR-0293)."""
+
+    provider = Provider()
+    service, writer, factory = await _service(
+        tmp_path, KnowledgeEmbedder(provider, SPACE, channel="dense")
+    )
+    await _ingest(service, writer, factory)
+    asked = _query().model_copy(update={"text": "the 'Guide' says the fan runs on"})
+    result = await service.search(asked, session_id=SESSION_ID, run_id=RUN_ID)
+    assert provider.calls[-1].texts == ("the says the fan runs on",)
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    assert trace.query.text == asked.text
+
+
 async def test_a_question_the_provider_cannot_embed_falls_back_to_lexical(
     tmp_path: Path,
 ) -> None:
