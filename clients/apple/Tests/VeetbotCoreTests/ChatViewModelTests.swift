@@ -1944,7 +1944,7 @@ import UserNotifications
         var offered = true
         /// Whether accepting continues the source run parked on a question.
         var continuesSourceRun = false
-        /// How the offered login's latest sign-in began (ADR-0296).
+        /// How the offered login's latest sign-in began (ADR-0297).
         var lastSignIn: String?
 
         final class Log: @unchecked Sendable {

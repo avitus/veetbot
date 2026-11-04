@@ -2308,7 +2308,7 @@ public final class ChatViewModel: ObservableObject {
         return request
     }
 
-    /// Signs a saved login in again the way its latest sign-in began (ADR-0296): a
+    /// Signs a saved login in again the way its latest sign-in began (ADR-0297): a
     /// site such as Chase refuses the device window, so a login saved through the
     /// remote browser goes back there. Returns whether a sign-in opened.
     @discardableResult
@@ -2466,7 +2466,7 @@ public final class ChatViewModel: ObservableObject {
         case .success(let begun):
             ceremony = begun
             openCeremonyID = begun.id
-            // Beginning recorded this on the server; a failure below reloads nothing (ADR-0296).
+            // Beginning recorded this on the server; a failure below reloads nothing (ADR-0297).
             rememberDeviceSignIn(for: profileID)
         case .failure(let error):
             return await settle(failure(error.message))

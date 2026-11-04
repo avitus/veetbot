@@ -66,10 +66,10 @@ AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 # A device handoff's two verification loads end within this budget (ADR-0128).
 DEVICE_VERIFICATION_SECONDS = 30.0
 # The signed-out control stops looking for a sign-in form this long before the
-# check's limit, which leaves the time to read the session it is checking (ADR-0296).
+# check's limit, which leaves the time to read the session it is checking (ADR-0297).
 SIGNED_OUT_CONTROL_RESERVE_SECONDS = 5.0
 # A pair passes only if the signed-in page has been watched for this much longer
-# than the control's page was, each measured from its own load (ADR-0296).
+# than the control's page was, each measured from its own load (ADR-0297).
 SIGNED_IN_EXTRA_OBSERVATION_SECONDS = 3.0
 # Reading the session being saved still has to fit inside the check's limit.
 SIGNED_IN_SECOND_LOOK_RESERVE_SECONDS = 2.0
@@ -1457,7 +1457,7 @@ def _control_deadline(definition: BrowserSiteVerification | None, limit: float) 
     """How long the signed-out control may wait for a form; a configured site never does.
 
     A site definition rejects a control showing the same account markers unless it shows
-    a challenge, so a form found by waiting would excuse the markers (ADR-0296).
+    a challenge, so a form found by waiting would excuse the markers (ADR-0297).
     """
     return None if definition is not None else limit - SIGNED_OUT_CONTROL_RESERVE_SECONDS
 
@@ -1478,7 +1478,7 @@ async def _after_second_look(
     page: str,
     limit: float,
 ) -> BrowserPageEvidence:
-    """Look again at a signed-in copy the control's late answer alone would prove (ADR-0296).
+    """Look again at a signed-in copy the control's late answer alone would prove (ADR-0297).
 
     The control may wait for a form or a move that the signed-in load finished too
     early to see, and the two browsers may load at different speeds, so ``_decide``
@@ -1535,7 +1535,7 @@ def _decide(
     *,
     confirmed_path: str,
 ) -> None:
-    """Ready only when the site tells the session apart, on comparable evidence (ADR-0296)."""
+    """Ready only when the site tells the session apart, on comparable evidence (ADR-0297)."""
     _tells_the_session_apart(with_session, without_session, confirmed_path)
     required = without_session.observed_seconds + SIGNED_IN_EXTRA_OBSERVATION_SECONDS
     if with_session.observed_seconds < required:

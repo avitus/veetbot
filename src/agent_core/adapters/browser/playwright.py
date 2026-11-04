@@ -1068,7 +1068,7 @@ class PythonPlaywrightRuntime:
     async def look_again_by(
         self, url: str, *, observed_seconds: float, deadline: float
     ) -> BrowserPageEvidence:
-        """Report what the loaded page shows once it is ``observed_seconds`` old (ADR-0296).
+        """Report what the loaded page shows once it is ``observed_seconds`` old (ADR-0297).
 
         Sooner if a form appears or the page leaves ``url``, and at ``deadline`` at the
         latest, when the evidence says how long the page was really watched.
@@ -1094,7 +1094,7 @@ class PythonPlaywrightRuntime:
         )
 
     async def _challenge_by(self, page: Page, *, confirmed_path: str, deadline: float) -> bool:
-        """Whether a signed-out page asks to sign in by ``deadline`` (ADR-0296).
+        """Whether a signed-out page asks to sign in by ``deadline`` (ADR-0297).
 
         Chase draws its framed form after its requests go quiet. Only the signed-out
         control waits, so this adds no time to a page that does ask, and a page that

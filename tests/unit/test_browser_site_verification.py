@@ -376,7 +376,7 @@ async def test_curated_verification_requires_unique_complete_account_and_protect
 
 @pytest.mark.parametrize("mode", ["device", "remote"])
 async def test_a_configured_site_never_waits_for_a_late_form(tmp_path: Path, mode: str) -> None:
-    """ADR-0296: a late form on the control must not excuse markers it also shows."""
+    """ADR-0297: a late form on the control must not excuse markers it also shows."""
     catalog = BrowserVerificationCatalog.model_validate(
         {
             "sites": [

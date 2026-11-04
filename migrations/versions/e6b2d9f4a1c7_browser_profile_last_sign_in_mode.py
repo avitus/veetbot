@@ -1,4 +1,4 @@
-"""Remember how a website login's latest sign-in began (ADR-0296).
+"""Remember how a website login's latest sign-in began (ADR-0297).
 
 The app reopens that way, because a site such as Chase refuses the device window
 while a login saved through the remote browser still needs signing in again. A

@@ -1423,7 +1423,7 @@ import Testing
         #expect(model.deviceSignInRequest(for: .chat) == nil)
     }
 
-    // MARK: - A saved login signs in again the way it last did (ADR-0296)
+    // MARK: - A saved login signs in again the way it last did (ADR-0297)
 
     /// Serves one login whose latest sign-in began as `lastSignIn`, and one remote ceremony.
     private func rememberedLoginServer(

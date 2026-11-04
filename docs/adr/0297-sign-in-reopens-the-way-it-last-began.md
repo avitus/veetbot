@@ -1,4 +1,4 @@
-# ADR-0296: A saved login signs in again the way it last began
+# ADR-0297: A saved login signs in again the way it last began
 
 - Status: Accepted by the owner on 2026-11-04
 - Date: 2026-11-04

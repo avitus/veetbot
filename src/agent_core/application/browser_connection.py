@@ -90,7 +90,7 @@ async def prepare_follow_request(
         try:
             profile = await uow.browser_profiles.get(UUID(str(selected)), principal)
         except NotFoundError:
-            # Its login was deleted (ADR-0296); following needs the owner to connect one.
+            # Its login was deleted (ADR-0297); following needs the owner to connect one.
             return session, None
         if "https://x.com" in profile.allowed_origins:
             return session, handle

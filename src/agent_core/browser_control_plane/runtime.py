@@ -255,7 +255,7 @@ class HostedPlaywrightSessionRuntime:
     async def look_again_by(
         self, url: str, *, observed_seconds: float, deadline: float
     ) -> BrowserPageEvidence:
-        """Report what the page already loaded shows once old enough (ADR-0296)."""
+        """Report what the page already loaded shows once old enough (ADR-0297)."""
         try:
             return await self._runtime.look_again_by(
                 url, observed_seconds=observed_seconds, deadline=deadline

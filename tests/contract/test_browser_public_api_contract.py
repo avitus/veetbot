@@ -855,7 +855,7 @@ async def test_device_begin_after_a_rejected_handoff_is_409_until_cancelled() ->
 
 
 async def test_a_login_reports_the_way_it_last_began_signing_in() -> None:
-    """ADR-0296: the app reopens the way the owner last chose, on any of their devices."""
+    """ADR-0297: the app reopens the way the owner last chose, on any of their devices."""
 
     service = DeviceCeremonyService()
     provider, client = await _device_begin_client(service)

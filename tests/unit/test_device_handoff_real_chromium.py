@@ -433,7 +433,7 @@ async def test_a_session_the_site_refuses_is_signed_out(tmp_path: Path) -> None:
 
 
 async def test_a_form_both_copies_draw_late_does_not_confirm_a_sign_in(tmp_path: Path) -> None:
-    """ADR-0296: the control's wait must not turn one page into proof of a session."""
+    """ADR-0297: the control's wait must not turn one page into proof of a session."""
     require_real_browser()
     members = MembersSite()
     async with (

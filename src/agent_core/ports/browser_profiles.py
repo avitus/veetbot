@@ -87,7 +87,7 @@ class BrowserProfileRepository(Protocol):
     async def record_sign_in_mode(
         self, profile_id: UUID, principal: Principal, mode: BrowserAuthenticationMode
     ) -> BrowserProfile:
-        """Remember how the latest sign-in began (ADR-0296).
+        """Remember how the latest sign-in began (ADR-0297).
 
         A fact for the app, so it moves neither the generation grants pin nor the
         update time. ``NotFoundError`` for a missing or foreign row.

@@ -174,7 +174,7 @@ class BrowserPageEvidence(BaseModel):
     on_allowed_origin: bool
     path: str = Field(max_length=4096, repr=False)
     challenge_visible: bool
-    # How long the page had been loaded when this was read (ADR-0296).
+    # How long the page had been loaded when this was read (ADR-0297).
     observed_seconds: float = Field(default=0.0, ge=0.0)
 
 
@@ -270,7 +270,7 @@ class BrowserProfile(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime | None = None
-    # How its latest sign-in began; None when it has never begun one (ADR-0296).
+    # How its latest sign-in began; None when it has never begun one (ADR-0297).
     last_sign_in_mode: BrowserAuthenticationMode | None = None
 
     @field_validator("allowed_origins")

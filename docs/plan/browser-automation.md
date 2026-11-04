@@ -975,7 +975,7 @@ form after its requests go quiet. A pair then passes only if the signed-in page 
 watched for at least three seconds longer than the control's page, each from its own load:
 it keeps looking until then, a form or a move away there ends `session_signed_out`, and too
 little time left ends `session_unconfirmed`. A configured site definition neither waits
-nor looks again (ADR-0296). A fetch or XHR event stream with HTTP 200 and media
+nor looks again (ADR-0297). A fetch or XHR event stream with HTTP 200 and media
 type `text/event-stream` instead counts as established when its response
 headers arrive (ADR-0147); its continuing body does not hold the wait open.
 The media type is case-insensitive and may have parameters. An unanswered
@@ -1104,7 +1104,7 @@ in again on the device or, from that window, through the remote browser, where
 backing out keeps the profile (ADR-0288). A profile remembers how its latest
 sign-in began (`last_sign_in_mode`), and Sign in again, the chat's sign-in card
 and the website offer reopen that way; a profile last signed in through the
-remote browser keeps **Use this device** on its row (ADR-0296). Website scripts, stylesheets, images, fonts,
+remote browser keeps **Use this device** on its row (ADR-0297). Website scripts, stylesheets, images, fonts,
 cross-origin APIs, and embedded verification frames load automatically without
 CDN configuration. This resource permission also applies when an existing
 profile is reused. A resource origin cannot authorize top-level navigation or an
