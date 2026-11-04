@@ -144,6 +144,10 @@ class MCPTool:
         self.spec = spec
         self._remote_name = remote_name
 
+    @property
+    def remote_name(self) -> str:
+        return self._remote_name
+
     async def execute(
         self,
         arguments: dict[str, Any],
@@ -831,6 +835,27 @@ class MCPRuntime:
             operation,
             remote_name=remote_name,
         )
+
+    async def read_for_job(
+        self,
+        session_id: UUID,
+        tenant_id: str,
+        tool: MCPTool,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        """ADR-0291: one read a job's broker checked, on the run session's connection."""
+        spec = tool.spec
+        if spec.server_id is None:
+            raise ConflictError("MCP tool has no server id")
+        connection = self._connection(session_id, spec.server_id)
+        if connection.config.tenant_id != tenant_id:
+            raise MCPUnavailableError("tool.server_unreachable")
+        remote_name = tool.remote_name
+
+        async def operation() -> MCPCallResult:
+            return await self._connected_client(connection).call_tool(remote_name, arguments)
+
+        return await self._invoke(connection, spec, operation, remote_name=remote_name)
 
     async def read_resource(
         self,

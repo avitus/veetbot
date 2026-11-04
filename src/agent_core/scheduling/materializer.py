@@ -44,6 +44,7 @@ from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
     SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_SCHEDULE_ID_METADATA_KEY,
+    SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY,
     Session,
     SessionStatus,
 )
@@ -105,6 +106,7 @@ class ScheduleMaterializer:
         self._notification_producer = notification_producer
 
     async def materialize(self, schedule_id: UUID) -> ScheduleOccurrence | None:
+        """Fire a due schedule and return its occurrence, or None when nothing is due."""
         now = self._clock.now()
         async with self._uow_factory() as uow:
             schedule = await uow.schedules.lock_due(schedule_id, now)
@@ -293,6 +295,7 @@ class ScheduleMaterializer:
                 now,
                 instruction=instruction,
                 scopes=run_scopes,
+                reporting=reporting,
                 metadata=(
                     {
                         CALL_PLAN_SESSION_METADATA_KEY: {
@@ -555,11 +558,13 @@ class ScheduleMaterializer:
         instruction: str | None = None,
         scopes: frozenset[str] | None = None,
         metadata: Mapping[str, object] | None = None,
+        reporting: bool = False,
     ) -> ScheduleOccurrence:
         """Record a materialized occurrence and start its run, session and seed.
 
         A call plan's step (ADR-0221) supplies its own instruction note, scopes
-        and session metadata; every other run uses the revision's.
+        and session metadata; every other run uses the revision's. Its report run
+        is offered no named server: an owner-added one needs no scope to withhold.
         """
         run_scopes = revision.requested_scopes if scopes is None else scopes
         seed = revision.instruction if instruction is None else instruction
@@ -599,6 +604,11 @@ class ScheduleMaterializer:
                 **(
                     {"job_task": revision.task.model_dump(mode="json")}
                     if isinstance(revision.task, JobTask)
+                    else {}
+                ),
+                **(
+                    {SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY: sorted(revision.mcp_servers)}
+                    if revision.mcp_servers and not reporting
                     else {}
                 ),
                 SESSION_SCHEDULE_ID_METADATA_KEY: str(schedule.id),

@@ -2370,7 +2370,8 @@ Nothing in the adapter, the runtime or the policy profile changes.
 whose command is `python -m svp_mcp --mode read`, classified `NETWORK_READ`,
 `LOW`, `READ_ONLY`, requiring `mcp.svp_read.use`, which composition adds to
 the owner's principal. A supplied row with that id is refused. The schedule
-role composes no such scope, so a scheduled run is not offered the tools.
+role vouches for that scope only (ADR-0291), and a scheduled run is offered the
+tools only when its schedule names `svp_read`.
 
 **The credential is a path.** The row uses the `env` scheme with `auth_name`
 `SVP_MCP_CREDENTIAL_FILE`, and the credential resolver maps `svp_read` to the

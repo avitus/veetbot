@@ -1765,6 +1765,8 @@ def load_schedule_worker_settings(
         load_email_credentials=False,
         load_provider_credentials=True,
         load_surface_credentials=False,
+        # ADR-0291: this role mirrors the flag to vouch for the scope, never the grant.
+        requires_svp_credential=False,
     )
 
 
@@ -1806,6 +1808,7 @@ def _load_settings(
     require_execution_environment: bool,
     load_email_credentials: bool,
     load_provider_credentials: bool,
+    requires_svp_credential: bool = True,
     load_surface_credentials: bool,
     load_call_credentials: bool | None = None,
     load_call_webhook_secret: bool = False,
@@ -1999,7 +2002,11 @@ def _load_settings(
         raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
     svp_enabled = _parse_flag(values, "AGENT_SVP_ENABLED")
     raw_svp_credential_file = values.get("SVP_CREDENTIAL_FILE", "").strip()
-    if svp_enabled and load_provider_credentials:
+    if (
+        svp_enabled
+        and load_provider_credentials
+        and (requires_svp_credential or raw_svp_credential_file)
+    ):
         # The platform holds the grant's path; only the bridge reads or rewrites
         # the rotating grant itself (ADR-0153).
         if "svp_read" in credentials:

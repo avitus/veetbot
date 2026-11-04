@@ -371,6 +371,10 @@ if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
   [[ "$(environment_flag "$SCHEDULE_ENV_FILE" AGENT_COCKPIT_ENABLED)" == \
     "${AGENT_COCKPIT_ENABLED:-0}" ]] || fail \
     "schedule worker AGENT_COCKPIT_ENABLED must match the application environment"
+  # Likewise a schedule that names Scale VP keeps its scope only under this flag.
+  [[ "$(environment_flag "$SCHEDULE_ENV_FILE" AGENT_SVP_ENABLED)" == \
+    "${AGENT_SVP_ENABLED:-0}" ]] || fail \
+    "schedule worker AGENT_SVP_ENABLED must match the application environment"
 fi
 if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
   [[ "$NOTIFY_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \

@@ -337,3 +337,4 @@ implementation without one.
 - [ADR-0288: A saved login can sign in again through the remote browser (Accepted)](0288-saved-login-signs-in-through-the-remote-browser.md)
 - [ADR-0289: The knowledge semantic arm is built, measured, and off by default (Proposed)](0289-knowledge-semantic-arm.md)
 - [ADR-0290: Semantic retrieval activates on the owner's standing decision (Accepted)](0290-standing-semantic-activation.md)
+- [ADR-0291: A schedule names its MCP servers, and a saved job may read them (Accepted)](0291-mcp-servers-for-schedules-and-jobs.md)

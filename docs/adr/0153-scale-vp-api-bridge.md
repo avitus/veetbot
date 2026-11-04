@@ -3,6 +3,7 @@
 - Status: Proposed (drafted at the repository owner's request, 2026-10-05)
 - Date: 2026-10-05
 - Related: ADR-0021, ADR-0071, ADR-0097, ADR-0131
+- Amended by: ADR-0291, under which a schedule may name this server
 - Detailed design: `docs/plan/tool-system.md`
 
 ## Context

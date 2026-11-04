@@ -35,6 +35,104 @@ class Services:
         )
 
 
+async def test_an_mcp_read_needs_its_server_in_the_grant() -> None:
+    reads: list[dict[str, Any]] = []
+
+    async def mcp(**kwargs: Any) -> dict[str, Any]:
+        reads.append(kwargs)
+        return {"content": ["3"], "structured": None}
+
+    services = Services()
+    broker = JobBroker(
+        JobAccess({}, {}, mcp_servers=frozenset({"svp_read"})),
+        http=services.http,
+        model=services.model,
+        feed=services.feed,
+        log=services.log,
+        mcp=mcp,
+    )
+
+    refused = await broker.dispatch(
+        "mcp.read", {"tool": "mcp.gmail_read.search_threads", "arguments": {}}, "other"
+    )
+    allowed = await broker.dispatch(
+        "mcp.read", {"tool": "mcp.svp_read.search", "arguments": {"q": "x"}}, "read"
+    )
+
+    assert refused == {"status": "denied", "reason_code": "job.mcp_refused", "retryable": False}
+    assert allowed == {"status": "succeeded", "result": {"content": ["3"], "structured": None}}
+    assert reads == [
+        {
+            "tool": "mcp.svp_read.search",
+            "arguments": {"q": "x"},
+            "maximum_response_bytes": 48 * 1024,
+            "call_id": "read",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"tool": 3},
+        {"tool": "not-an-mcp-tool"},
+        {"tool": "mcp.svp_read"},
+        {"tool": "mcp.svp_read.search", "arguments": "x"},
+        {"tool": "mcp.svp_read.search", "other": 1},
+    ],
+)
+async def test_a_malformed_mcp_read_is_refused(arguments: dict[str, Any]) -> None:
+    async def mcp(**kwargs: Any) -> dict[str, Any]:
+        pytest.fail("A malformed read reaches no server.")
+
+    services = Services()
+    broker = JobBroker(
+        JobAccess({}, {}, mcp_servers=frozenset({"svp_read"})),
+        http=services.http,
+        model=services.model,
+        feed=services.feed,
+        log=services.log,
+        mcp=mcp,
+    )
+
+    reply = await broker.dispatch("mcp.read", arguments, "bad")
+
+    assert reply["status"] == "denied"
+
+
+async def test_mcp_reads_share_the_grant_request_limit() -> None:
+    async def mcp(**kwargs: Any) -> dict[str, Any]:
+        return {"content": [], "structured": None}
+
+    services = Services()
+    broker = JobBroker(
+        JobAccess({}, {}, mcp_servers=frozenset({"svp_read"}), maximum_requests=1),
+        http=services.http,
+        model=services.model,
+        feed=services.feed,
+        log=services.log,
+        mcp=mcp,
+    )
+    call = {"tool": "mcp.svp_read.search", "arguments": {}}
+
+    assert (await broker.dispatch("mcp.read", call, "one"))["status"] == "succeeded"
+    assert (await broker.dispatch("mcp.read", call, "two"))["reason_code"] == "job.request_limit"
+    with pytest.raises(ValueError, match="request_limit"):
+        broker.check_result()
+
+
+async def test_an_mcp_read_without_a_composed_reader_is_unavailable() -> None:
+    services = Services()
+    broker = services.broker(JobAccess({}, {}, mcp_servers=frozenset({"svp_read"})))
+
+    reply = await broker.dispatch(
+        "mcp.read", {"tool": "mcp.svp_read.search", "arguments": {}}, "read"
+    )
+
+    assert reply["reason_code"] == "job.mcp_unavailable"
+
+
 async def test_code_path_has_no_implicit_model_and_binds_approved_credential() -> None:
     services = Services()
     broker = services.broker(JobAccess({}, {"api.github.com": "github-reader"}))

@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 SESSION_TITLE_MAX_LENGTH = 64
 SESSION_BROWSER_PROFILE_METADATA_KEY = "browser_profile_id"
 SESSION_SCHEDULE_ID_METADATA_KEY = "schedule_id"
+# ADR-0291: the MCP servers a scheduled session may be offered, by id.
+SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY = "schedule_mcp_servers"
 SESSION_COCKPIT_REFRESH_METADATA_KEY = "cockpit_refresh"
 SESSION_RUN_KIND_METADATA_KEY = "run_kind"
 SESSION_PROJECT_SCOPE_METADATA_KEY = "project_scope"

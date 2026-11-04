@@ -1,3 +1,8 @@
+# ADR-0291: On 2026-11-03 the owner asked for MCP tools in scheduled runs and
+# Cockpit widgets, and chose per-schedule servers plus read-only MCP calls from
+# saved jobs. Each schedule names its servers, the approval lists them, and a
+# job's grant names what it may read. Implemented, not yet delivered: the schedule
+# environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
 # ADR-0290: On 2026-11-03 the owner directed that semantic retrieval be
 # activated and stay on ("turned on and off for many months now and we are
 # failing to make progress"). A standing owner admission

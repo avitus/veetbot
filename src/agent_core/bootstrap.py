@@ -534,7 +534,12 @@ from agent_core.domain.execution import (
 from agent_core.domain.failures import log_failure
 from agent_core.domain.knowledge import KNOWLEDGE_OPENAI_SPACE
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig
-from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
+from agent_core.domain.mcp import (
+    MCPServerConfig,
+    MCPTransport,
+    ScriptedMCPServer,
+    is_email_server_id,
+)
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
     Capability,
@@ -615,10 +620,10 @@ from agent_core.knowledge.uploads import UploadAutoIngest
 from agent_core.mcp.configuration import (
     calling_server_configs,
     email_server_configs,
-    is_email_server_id,
     svp_server_configs,
     validate_mcp_config,
 )
+from agent_core.mcp.job_reads import JobMCPReads
 from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.bounded_recall_admission import BoundedAdmission
 from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
@@ -787,12 +792,20 @@ from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolR
 from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
 from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsubscribeTool
 from agent_core.tools.executor import ToolPipeline
-from agent_core.tools.job_schedules import JobScheduleCreateTool, JobScheduleUpdateTool
+from agent_core.tools.job_schedules import (
+    JobScheduleCreateTool,
+    JobScheduleUpdateTool,
+    MCPJobScheduleCreateTool,
+    MCPJobScheduleUpdateTool,
+)
 from agent_core.tools.jobs import (
     JOB_TOOL_NAMES,
     JobManageTool,
     JobRunTool,
     JobToolset,
+    MCPJobManageTool,
+    MCPJobRunTool,
+    MCPStoredKeyJobRunTool,
     StoredKeyJobRunTool,
 )
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
@@ -828,7 +841,9 @@ from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
     COCKPIT_FEED_SCOPES,
     SCHEDULE_CREATE_TOOL_NAME,
+    CockpitMCPScheduleCreateTool,
     CockpitScheduleCreateTool,
+    MCPScheduleCreateTool,
     PreviousCockpitScheduleCreateTool,
     ScheduleCreateTool,
     SingleCallScheduleCreateTool,
@@ -839,7 +854,9 @@ from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_PAUSE_TOOL_NAME,
     SCHEDULE_RESUME_TOOL_NAME,
     SCHEDULE_UPDATE_TOOL_NAME,
+    CockpitMCPScheduleUpdateTool,
     CockpitScheduleUpdateTool,
+    MCPScheduleUpdateTool,
     PreviousScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
@@ -2327,13 +2344,19 @@ def _schedule_principal(settings: Settings) -> Principal:
         for row in calling_server_configs(settings.auth_tenant_id, enabled=settings.call_enabled)
         for scope in row.required_scopes
     }
+    # ADR-0291: a schedule that names Scale VP keeps its scope; the worker holds the grant.
+    svp_scopes = {
+        scope
+        for row in svp_server_configs(settings.auth_tenant_id, enabled=settings.svp_enabled)
+        for scope in row.required_scopes
+    }
     # ADR-0254: a feed-keeping schedule's occurrence keeps its Cockpit scopes.
     feed_scopes = COCKPIT_FEED_SCOPES if settings.cockpit_enabled else ()
     return Principal(
         tenant_id=settings.auth_tenant_id,
         principal_id=settings.auth_principal_id,
         roles=set(settings.auth_roles),
-        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *feed_scopes},
+        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *svp_scopes, *feed_scopes},
     )
 
 
@@ -3566,9 +3589,13 @@ async def _compose(
     if job_publication is not None and job_execution is not None:
         job_toolset = JobToolset(job_publication, job_execution)
         registry.register(JobManageTool(job_toolset))
+        registry.register(MCPJobManageTool(job_toolset))
         registry.register(JobRunTool(job_toolset))
         if integration_secrets is not None:
             registry.register(StoredKeyJobRunTool(job_toolset))
+        registry.register(MCPJobRunTool(job_toolset))
+        if integration_secrets is not None:
+            registry.register(MCPStoredKeyJobRunTool(job_toolset))
     registry.register(RunInspectTool(uow_factory))
     if settings.code_tools_enabled and settings.code_source_root is not None:
         source_tree = FilesystemSourceTree(
@@ -3672,7 +3699,10 @@ async def _compose(
             )
         )
         if settings.cockpit_enabled:
-            for cockpit_create in (PreviousCockpitScheduleCreateTool, CockpitScheduleCreateTool):
+            for cockpit_create in (
+                PreviousCockpitScheduleCreateTool,
+                CockpitScheduleCreateTool,
+            ):
                 registry.register(
                     cockpit_create(
                         schedule_service,
@@ -3682,11 +3712,29 @@ async def _compose(
                         calling_enabled=settings.call_enabled,
                     )
                 )
+        # ADR-0291: the deployment's newest versions register last, so they are offered.
+        # The one without Cockpit stays for a run pinned before Cockpit was turned on.
+        for mcp_create in (
+            MCPScheduleCreateTool,
+            *((CockpitMCPScheduleCreateTool,) if settings.cockpit_enabled else ()),
+        ):
+            registry.register(
+                mcp_create(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
         registry.register(PreviousScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
         if settings.cockpit_enabled:
             registry.register(CockpitScheduleUpdateTool(schedule_service))
+        registry.register(MCPScheduleUpdateTool(schedule_service))
+        if settings.cockpit_enabled:
+            registry.register(CockpitMCPScheduleUpdateTool(schedule_service))
         if settings.jobs_enabled:
             registry.register(
                 JobScheduleCreateTool(
@@ -3698,7 +3746,21 @@ async def _compose(
                 )
             )
             registry.register(
+                MCPJobScheduleCreateTool(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
+            registry.register(
                 JobScheduleUpdateTool(
+                    schedule_service, uow_factory, agent, schedule_definition_limits
+                )
+            )
+            registry.register(
+                MCPJobScheduleUpdateTool(
                     schedule_service, uow_factory, agent, schedule_definition_limits
                 )
             )
@@ -5059,6 +5121,16 @@ async def _compose(
                 ids=ids,
             ).complete
 
+        if job_execution is not None:
+            # ADR-0291: a job's reads face the same engine as a tool call.
+            job_execution.mcp = JobMCPReads(
+                runtime=mcp_runtime,
+                registry=registry,
+                policy=policy_engine,
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+            )
         pipeline = ToolPipeline(
             registry,
             uow_factory,

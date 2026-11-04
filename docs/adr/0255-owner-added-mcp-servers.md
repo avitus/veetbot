@@ -7,6 +7,7 @@
   that tenant-configured HTTP servers reach the network only through the
   sandbox egress allowlist
 - Detailed design: `docs/plan/tool-system.md`
+- Amended by: ADR-0291, under which scheduled work is offered only the servers it names
 
 ## Context
 
