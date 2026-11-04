@@ -350,6 +350,8 @@ import UserNotifications
                         {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"WAITING_FOR_APPROVAL","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
                         """
                 )
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/approvals/\(approvalID.uuidString)"):
                 return try response(
                     for: request,
@@ -1398,6 +1400,8 @@ import UserNotifications
                 return try response(for: request, statusCode: 200, body: """
                     {"id":"\(runID)","session_id":"\(sessionID)","parent_run_id":null,"status":"WAITING_FOR_APPROVAL","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
                     """)
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/approvals/\(approvalID)"):
                 return try response(for: request, statusCode: 200, body: """
                     {"id":"\(approvalID)","run_id":"\(runID)","session_id":"\(sessionID)","status":"PENDING","tool_name":"sandbox.run_command","action_summary":"Run command","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-08-14T00:04:00Z","resolved_at":null,"resolved_by":null,"decision":null}
@@ -3922,6 +3926,8 @@ import UserNotifications
                     """)
             case ("GET", "/v1/runs/\(ids.run)/events"):
                 return try response(for: request, statusCode: 200, body: "")
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/approvals/\(ids.approval)"):
                 return try response(for: request, statusCode: 200, body: """
                     {"id":"\(ids.approval)","run_id":"\(ids.run)","session_id":"\(ids.session)","status":"PENDING","tool_name":"sandbox.run","action_summary":"Run code","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
