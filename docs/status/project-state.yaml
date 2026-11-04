@@ -1,7 +1,7 @@
 # ADR-0294: On 2026-11-03 the owner asked to add email attachments to Veetbot's
 # file storage, and chose the email's chat, a Save button plus an approval-gated
-# Chat tool, and knowledge on every save. Implemented on email-attachments, not
-# yet delivered. No milestone or gate moves.
+# Chat tool, and knowledge on every save. Implemented, not yet tried on a real
+# mailbox. No milestone or gate moves.
 # ADR-0291: On 2026-11-03 the owner asked for MCP tools in scheduled runs and
 # Cockpit widgets, and chose per-schedule servers plus read-only MCP calls from
 # saved jobs. Each schedule names its servers, the approval lists them, and a

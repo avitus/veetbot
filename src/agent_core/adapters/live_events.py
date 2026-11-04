@@ -91,9 +91,9 @@ class PostgresLiveEventBroadcaster:
 
     @asynccontextmanager
     async def listen(self, channel: str) -> AsyncIterator[LiveSubscription]:
+        """Hold one dedicated `LISTEN` connection for as long as the subscription lasts."""
         connection = await asyncpg.connect(self._dsn)
         subscription = _QueueSubscription(asyncio.Queue(maxsize=LIVE_QUEUE_SIZE))
-        listening = False
 
         def listener(
             _connection: asyncpg.Connection[Any],
@@ -116,14 +116,12 @@ class PostgresLiveEventBroadcaster:
 
         try:
             await connection.add_listener(channel, listener)
-            listening = True
             yield subscription
         finally:
-            try:
-                if listening:
-                    await connection.remove_listener(channel, listener)
-            finally:
-                await connection.close()
+            # A client that drops cancels the request's scope, and that cancellation
+            # is delivered again at every await, so an awaited UNLISTEN or close
+            # leaves the connection open. Ending the session also ends its LISTEN.
+            connection.terminate()
 
     async def publish(
         self,

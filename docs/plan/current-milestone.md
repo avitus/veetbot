@@ -8,8 +8,8 @@ title: Current Milestone
   attachments to Veetbot's file storage and chose the email's chat as the place, a Save
   button plus an approval-gated Chat tool as the ways in, and knowledge on every save.
   [The decision](../adr/0294-save-email-attachments-to-the-chat.md) adds no schema,
-  setting, or scope. Implemented on `email-attachments`, not yet delivered; no milestone
-  or gate moves.
+  setting, or scope. Implemented, not yet tried on a real mailbox; no milestone or gate
+  moves.
 
 - **Server email checks — ADR-0286:** On 2026-11-01 the owner accepted
   [the decision](../adr/0286-server-checks-for-new-mail.md) and authorized its
