@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -289,6 +289,10 @@ async def assert_refresh_admits_one_durable_typed_task_without_owner_message() -
             assert history.items == []
             assert run.limits.deadline_at is not None
             assert run.limits.max_cost == 1
+            # Queue time is not execution time (ADR-0295): the 120 s starts at the
+            # first claim, inside an outer bound that also allows for the queue.
+            assert run.limits.execution_seconds == 120
+            assert run.deadline_at == run.created_at + timedelta(seconds=420)
         sessions = await client.get("/v1/sessions")
         assert sessions.json()["items"] == []
 

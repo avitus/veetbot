@@ -310,6 +310,7 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
         proposed = await app.runs.get(operation.run_id)
         assert proposed.status is RunStatus.WAITING_FOR_APPROVAL
         assert proposed.priority == 0, "a send proposal joins the interactive class"
+        assert proposed.limits.execution_seconds is None, "a send keeps its agent deadline"
         async with app.uow_factory() as uow:
             before = await uow.invocations.list_for_run(proposed.id, app.principal)
         assert not any(
@@ -1595,6 +1596,7 @@ async def test_rejected_requested_draft_fails_its_task_and_keeps_the_prior_draft
             app.principal, kind="draft", thread_id=thread.id
         )
         run = await app.runs.get(operation.run_id)
+        assert run.limits.execution_seconds == 120, "a draft's time starts at its claim"
         assert run.status is RunStatus.FAILED
         assert run.failure is not None
         assert run.failure.error_class == "EmailModelResultError"

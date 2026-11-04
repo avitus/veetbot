@@ -377,6 +377,9 @@ small sample.
 
 Approved admission bounds are 100 thread summaries per account per slice,
 10 full-thread reads per account per slice, and a 120-second execution deadline.
+That time starts at the first claim. A claim more than 300 seconds after admission
+gets only what remains of the slice plus those 300, and past that fails; an earlier
+deadline on the agent still applies (ADR-0295).
 These are upper bounds: inherited tool, output-byte, context, token, and cost
 limits may stop work sooner. Checkpoint between pages. Oversized threads need
 explicit continuation or a partial-content marker; truncation must never be
