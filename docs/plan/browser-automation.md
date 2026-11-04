@@ -283,7 +283,8 @@ log carries the bytes.
 `browser.act@1.8.0` stores the file through the run's artifact writer as an
 `EXTERNAL_UNTRUSTED` capture of this chat, with the capture mark, so
 `artifact.read_capture` opens it under its existing rules and it is deleted with
-the chat. The structured result gains `saved_file`, kept by the context projection:
+the chat. The mark's `literal` flag has the reader take the file as its own text,
+never as serialized tool output. The structured result gains `saved_file`, kept by the context projection:
 the artifact ID, name, media type, size, section count and the exact `tool.call`
 that reads it, or `status: refused` with a reason. A plan that cannot reach the
 reader gets `reader_unavailable`, and nothing is stored. Input schema and description

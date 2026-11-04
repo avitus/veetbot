@@ -273,7 +273,7 @@ async def test_an_approved_download_is_saved_as_a_capture_the_reader_opens() -> 
     assert created["filename"] == "Activity.CSV"
     assert created["media_type"] == "text/csv"
     assert created["metadata"] == {
-        CAPTURE_METADATA_KEY: {"tool": "browser.act", "required_scopes": []}
+        CAPTURE_METADATA_KEY: {"tool": "browser.act", "required_scopes": [], "literal": True}
     }
     assert capture_text(created["data"]).strip() == CSV.strip()
     artifact = UUID(saved["artifact"])
@@ -330,8 +330,17 @@ async def test_a_postcondition_read_does_not_lose_the_file() -> None:
     assert result.structured["saved_file"]["status"] == "saved"
 
 
-async def test_the_saved_file_opens_in_the_capture_reader(tmp_path: Path) -> None:
-    """Writer, row and reader together, so a CSV is what the model reads back."""
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[]",
+        '[{"kind": "text", "text": "only this"}, {"date": "01/02", "amount": -15.49}]',
+        "42",
+        CSV,
+    ],
+)
+async def test_the_saved_file_opens_in_the_capture_reader(tmp_path: Path, text: str) -> None:
+    """Writer, row and reader together: a file reads back as its own text, whatever it holds."""
 
     clock, factory = await _factory()
     async with factory() as uow:
@@ -346,7 +355,7 @@ async def test_the_saved_file_opens_in_the_capture_reader(tmp_path: Path) -> Non
             origin=ArtifactOrigin.TOOL_OUTPUT,
         )
     )
-    provider = _DownloadingProvider(BrowserDownload.from_bytes("Activity.CSV", CSV.encode()))
+    provider = _DownloadingProvider(BrowserDownload.from_bytes("Activity.CSV", text.encode()))
 
     result = await BrowserActTool(provider).execute(ARGUMENTS, context)
     assert result.structured is not None
@@ -355,13 +364,14 @@ async def test_the_saved_file_opens_in_the_capture_reader(tmp_path: Path) -> Non
         {"artifact": saved["artifact"], "section": 1}, context
     )
     found = await ArtifactReadCaptureTool(factory, store, clock).execute(
-        {"artifact": saved["artifact"], "find": "streaming"}, context
+        {"artifact": saved["artifact"], "find": text[:2]}, context
     )
 
     assert read.ok and read.structured is not None
-    assert read.structured["text"].strip() == CSV.strip()
+    assert read.structured["text"].strip() == text.strip()
+    assert saved["sections"] == read.structured["sections"] == 1
     assert read.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
-    assert found.ok and found.structured is not None and found.structured["total"] == 1
+    assert found.ok and found.structured is not None and found.structured["total"] >= 1
 
 
 def test_the_context_projection_keeps_the_saved_file_note() -> None:

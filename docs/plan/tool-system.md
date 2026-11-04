@@ -2519,7 +2519,8 @@ its own here.
 
 **Text and sections.** A capture's text is the `text` of its text parts in
 order, joined by a blank line. A partial capture is not valid JSON, so it is
-read as UTF-8, with invalid sequences replaced. Sections are a pure function
+read as UTF-8, with invalid sequences replaced. A capture marked `literal` holds
+a file saved by a browser click, and is read whole as UTF-8 (ADR-0294). Sections are a pure function
 of that text. Section 1 starts at offset zero. Each section is the longest run
 of whole lines from its start whose rendered result, header included, fits
 16,384 bytes, measured as `content_bytes` measures admission. The header is

@@ -32,6 +32,7 @@ from agent_core.domain.browser_download import BrowserDownload
 from agent_core.domain.browser_follow import profile_handle
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.captures import (
+    CAPTURE_LITERAL_KEY,
     CAPTURE_METADATA_KEY,
     CAPTURE_READER_TOOL_NAME,
     CaptureSections,
@@ -327,13 +328,14 @@ class BrowserActTool:
                     CAPTURE_METADATA_KEY: {
                         "tool": self.spec.name,
                         "required_scopes": sorted(self.spec.required_scopes),
+                        CAPTURE_LITERAL_KEY: True,
                     }
                 },
             )
         except (ArtifactIntegrityError, OSError):
             return {"status": "refused", "reason": "failed"}
         sections = CaptureSections(
-            capture_text(data), artifact_id=ref.artifact_id, tool=self.spec.name
+            capture_text(data, literal=True), artifact_id=ref.artifact_id, tool=self.spec.name
         ).count
         return {
             "status": "saved",

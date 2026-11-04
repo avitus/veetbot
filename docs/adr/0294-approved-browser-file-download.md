@@ -71,7 +71,9 @@ further constraints shape the contract.
    writes it through the run's artifact writer with origin `tool_output`, trust
    `EXTERNAL_UNTRUSTED` and the capture mark, so `artifact.read_capture` opens it
    under its existing session, expiry and scope rules, and it is deleted with the
-   chat. The structured result gains `saved_file`, which the context projection
+   chat. The mark also says `literal`, so the reader takes the file as its own
+   text and never as serialized tool output, which a JSON array would otherwise
+   be mistaken for. The structured result gains `saved_file`, which the context projection
    always keeps. It carries the artifact ID, name, type, size, section count and
    the exact `tool.call` to read it, or `status: refused` with a reason. A chat
    whose plan cannot reach the reader gets `reader_unavailable` and nothing is
