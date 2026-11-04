@@ -1033,15 +1033,7 @@ class PythonPlaywrightRuntime:
                 on_stage(BrowserVerificationStage.INSPECT)
                 challenge_visible = await self._sign_in_challenge_visible(page)
                 confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
-                current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
-                if (
-                    _origin_allowed(page.url, self._allowed_origins)
-                    and (
-                        current_path == confirmed_path
-                        or current_path.startswith(confirmed_path + "/")
-                    )
-                    and not challenge_visible
-                ):
+                if self._on_confirmed_page(page, confirmed_path) and not challenge_visible:
                     # A challenge or a different path is already negative
                     # evidence. Background work on that page must not hold
                     # the signed-out control open. A possible positive result
@@ -1065,19 +1057,23 @@ class PythonPlaywrightRuntime:
                 challenge_visible=challenge_visible,
             )
 
+    def _on_confirmed_page(self, page: Page, confirmed_path: str) -> bool:
+        """Whether the page is still on an allowed origin at or below the confirmed path."""
+        current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
+        return _origin_allowed(page.url, self._allowed_origins) and (
+            current_path == confirmed_path or current_path.startswith(confirmed_path + "/")
+        )
+
     async def _challenge_by(self, page: Page, *, confirmed_path: str, deadline: float) -> bool:
         """Whether a signed-out page asks to sign in by ``deadline`` (ADR-0296).
 
         Chase draws its framed form after its requests go quiet. Only the signed-out
         control waits, so this adds no time to a page that does ask, and a page that
-        moves has already told the session apart.
+        leaves the confirmed path has already told the session apart.
         """
         loop = asyncio.get_running_loop()
         # A hash route keeps the path, and Chase moves its hash while it draws.
-        while (
-            loop.time() < deadline
-            and ((urlsplit(page.url).path or "/").removesuffix("/") or "/") == confirmed_path
-        ):
+        while loop.time() < deadline and self._on_confirmed_page(page, confirmed_path):
             await asyncio.sleep(_CHALLENGE_POLL_SECONDS)
             # A page redrawing between polls is not an answer, so ask again.
             with suppress(PlaywrightError):

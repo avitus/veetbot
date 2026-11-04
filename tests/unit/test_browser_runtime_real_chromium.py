@@ -552,6 +552,34 @@ async def test_a_signed_out_page_that_draws_its_form_late_still_reads_as_signed_
     assert waiting.challenge_visible
 
 
+async def test_a_signed_out_page_that_moves_deeper_before_its_form_still_reads_as_signed_out() -> (
+    None
+):
+    """A move inside the confirmed page is not leaving it, so the control keeps looking."""
+
+    async def late(request: Request) -> Response:
+        del request
+        return html(
+            "<p>Loading</p>",
+            script="""
+            setTimeout(() => history.pushState({}, '', '/late/sign-in'), 1000);
+            setTimeout(() => {
+                const frame = document.createElement('iframe');
+                frame.srcdoc = '<input type="password">';
+                document.body.appendChild(frame);
+            }, 3000);
+            """,
+        )
+
+    async with browsing([Route("/late", late)]) as (site, runtime):
+        evidence = await runtime.load_page_evidence(
+            site.url("/late"), challenge_deadline=asyncio.get_running_loop().time() + 10
+        )
+
+    assert evidence.path == "/late/sign-in"
+    assert evidence.challenge_visible
+
+
 async def test_a_lease_stops_at_a_sign_in_form_in_a_frame() -> None:
     """A signed-out lease must pause for the owner instead of reading the sign-in page."""
 
