@@ -158,13 +158,16 @@ import Testing
     @Test
     func anUnrecoverableApprovalDoesNotHideAnOlderOne() async throws {
         let server = DeviceFlowServer { request in
-            if Self.route(request) == "GET veetbot.test /v1/runs/\(Self.otherRunID)" {
+            switch Self.route(request) {
+            case "GET veetbot.test /v1/runs/\(Self.otherRunID)":
                 return (200, Self.runBody(id: Self.otherRunID, status: "COMPLETED"))
+            case "GET veetbot.test /v1/runs/\(Self.runID)":
+                return (200, Self.runBody(id: Self.runID, status: "WAITING_FOR_APPROVAL"))
+            default:
+                break
             }
             return try Self.conversationRoutes(request, runStatus: nil) ?? {
                 switch Self.route(request) {
-                case "GET veetbot.test /v1/runs/\(Self.runID)":
-                    return (200, Self.runBody(id: Self.runID, status: "WAITING_FOR_APPROVAL"))
                 case "GET veetbot.test /v1/runs/\(Self.runID)/events":
                     return (503, "")
                 case "GET veetbot.test /v1/approvals":
@@ -180,6 +183,7 @@ import Testing
 
         #expect(model.runState.activeRunID == UUID(uuidString: Self.runID))
         #expect(model.awaitingOwnerApproval)
+        #expect(model.runState.runStatus == .waitingForApproval)
     }
 
     /// With no stream, a card decided on another device still leaves when the background

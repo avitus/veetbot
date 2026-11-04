@@ -10,6 +10,7 @@ import Testing
     private static let route = "GET veetbot.test /v1/runs/\(runID.uuidString)/events"
     private static let frameCount = 700
 
+    /// The durable history after a resume point, ending in the terminal frame.
     private static func replay(after lastEventID: Int) -> String {
         var body = ""
         for sequence in (lastEventID + 1)...(frameCount + 1) {
@@ -46,10 +47,12 @@ import Testing
         #expect(server.routes.filter { $0 == Self.route }.count == 1)
     }
 
+    /// One durable frame with the given id.
     private static func frame(_ sequence: Int) -> SSEFrame {
         SSEFrame(id: sequence, event: "tool.call.completed", data: [:])
     }
 
+    /// Order and completeness survive the producer waiting for room.
     @Test
     func aFullChannelMakesTheProducerWaitAndLosesNothing() async throws {
         let channel = BoundedFrameChannel(capacity: 2)
@@ -83,6 +86,7 @@ import Testing
         }
     }
 
+    /// A producer waiting for room must not outlive its consumer.
     @Test
     func aConsumerThatLeavesReleasesAWaitingProducer() async {
         let channel = BoundedFrameChannel(capacity: 1)
@@ -95,6 +99,7 @@ import Testing
         #expect(await blocked.value == false)
     }
 
+    /// A failed read still delivers what it already received, then reports once.
     @Test
     func queuedFramesAreDeliveredBeforeTheProducersFailure() async throws {
         struct Failure: Error {}
@@ -107,6 +112,7 @@ import Testing
         #expect(try await channel.next() == nil)
     }
 
+    /// Letting the stream go, without cancelling anything, stops the read.
     @Test
     func stoppingIterationEndsTheProducer() async throws {
         let stopped = AsyncStream<Void>.makeStream()

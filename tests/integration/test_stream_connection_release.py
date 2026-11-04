@@ -44,6 +44,7 @@ REPLAY_EVENT_BYTES = 2_000
 
 @pytest.fixture
 def database_url() -> str:
+    """The integration database this module counts connections on."""
     url = os.environ.get("DATABASE_URL")
     if not url:
         pytest.skip("DATABASE_URL is not set")
@@ -102,6 +103,7 @@ async def test_a_cancelled_subscription_closes_its_connection(named_url: str) ->
 
 
 async def test_an_ordinary_exit_closes_its_connection(named_url: str) -> None:
+    """Terminating instead of closing must not leave the ordinary path behind."""
     broadcaster = PostgresLiveEventBroadcaster(named_url)
     async with broadcaster.subscribe(SESSION_ID):
         assert await _open_connections(named_url) == 1

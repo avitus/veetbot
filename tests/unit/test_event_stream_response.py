@@ -16,6 +16,7 @@ from agent_core.api.sse import EventStreamResponse
 
 
 async def _serve_until_client_drops(response: EventStreamResponse) -> None:
+    """Serve one response the way uvicorn does, with the client leaving at the first body."""
     client_left = asyncio.Event()
     request_sent = False
 
@@ -37,6 +38,7 @@ async def _serve_until_client_drops(response: EventStreamResponse) -> None:
 
 
 async def test_a_stream_abandoned_mid_send_finishes_its_cleanup_before_the_request_ends() -> None:
+    """Cleanup has finished by the time the request ends, with no help from the collector."""
     steps: list[str] = []
 
     async def frames() -> AsyncGenerator[bytes, None]:
@@ -56,6 +58,7 @@ async def test_a_stream_abandoned_mid_send_finishes_its_cleanup_before_the_reque
 
 
 async def test_a_stream_that_ends_by_itself_is_delivered_and_closed() -> None:
+    """Closing changes nothing for a stream that runs to its own end."""
     sent: list[bytes] = []
     closed = False
 
@@ -82,6 +85,8 @@ async def test_a_stream_that_ends_by_itself_is_delivered_and_closed() -> None:
 
 
 def test_the_response_declares_an_event_stream_and_disables_proxy_buffering() -> None:
+    """Both routes rely on these headers, and on keeping their own."""
+
     async def frames() -> AsyncGenerator[bytes, None]:
         yield b""
 
