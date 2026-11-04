@@ -305,7 +305,7 @@ def _erased_reply(content: Any, marker: str, kept_files: frozenset[str]) -> list
 
     parts = content if isinstance(content, list) else []
     return [
-        {"type": "text", "text": marker},
+        {"kind": "text", "text": marker},
         *(
             part
             for part in parts

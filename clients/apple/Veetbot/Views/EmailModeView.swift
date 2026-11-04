@@ -2555,7 +2555,7 @@ struct EmailAttachmentSaveControl: View {
         Button(title) {
             Task { await model.saveAttachment(key, filename: attachment.filename) }
         }
-        .buttonStyle(.plain).veetType(.meta).foregroundColor(AppTheme.teal)
+        .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
         .fixedSize()
         .help("Keep a copy in this email's chat. A PDF or text file also becomes searchable.")
         .accessibilityLabel("\(title) \(attachment.filename)")

@@ -568,6 +568,7 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
     # The reply's text goes; a file that outlives this erasure keeps its link.
     reply = events[3].payload["message"]["content"]
     assert [part.get("artifact_id") for part in reply] == [None, str(kept_aid), str(promoted_aid)]
+    assert reply[0]["kind"] == "text"
     assert "keep.pdf" not in json.dumps(reply)
     async with factory() as uow:
         history = await uow.history.read(sid)
