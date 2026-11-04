@@ -19,6 +19,7 @@ from agent_core.domain.artifacts import (
     AUTO_INGEST_INGESTED,
     AUTO_INGEST_PENDING,
     AUTO_INGEST_REFUSED,
+    ArtifactOrigin,
 )
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import (
@@ -28,6 +29,7 @@ from agent_core.domain.knowledge import (
 )
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.ports.determinism import Clock
@@ -97,6 +99,14 @@ class UploadAutoIngest:
             try:
                 async with self._uow_factory() as uow:
                     current = await uow.artifacts.get(artifact.id, self._principal)
+                    # A reply attaches a saved file by its origin, which this would
+                    # change, and a terminal status is recorded after the reply.
+                    if current.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value and (
+                        current.run_id is not None
+                    ):
+                        run = await uow.runs.get(current.run_id, self._principal)
+                        if run.status not in TERMINAL_RUN_STATUSES:
+                            continue
             except NotFoundError:
                 continue
             if current.expires_at is not None and current.expires_at <= self._clock.now():

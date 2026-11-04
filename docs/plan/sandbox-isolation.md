@@ -1116,6 +1116,9 @@ class ArtifactRef:
     media_type: str
 ```
 
+The `ArtifactOrigin` sketch names the members. The stored values are lowercase, such as
+`email_attachment`, as `src/agent_core/domain/artifacts.py` defines them.
+
 `ArtifactRef` is what travels: into a tool result, into an event
 payload, into an API response. It carries no filename, no tenant, and
 no path, so a reference that leaks into a context window leaks a

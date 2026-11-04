@@ -90,6 +90,12 @@ class ArtifactOrigin(StrEnum):
     EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0295
 ```
 
+This sketch, like the one in [sandbox-isolation.md](sandbox-isolation.md), names the
+members. The stored values are lowercase, such as `email_attachment`, as
+`src/agent_core/domain/artifacts.py` defines them, so a filter compares against the
+lowercase value. A saved email attachment waits for its run to end before intake, because
+a reply attaches the file by its origin and intake changes that origin (ADR-0295).
+
 Ingestion writes `expires_at = None`, so the thirty-day sweeper does not collect it and
 the document owns the lifetime. Deletion writes `expires_at = now`, and the sweeper that
 already exists collects the bytes on its next pass. This is exactly the move ADR-0032

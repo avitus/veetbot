@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import replace
+from datetime import timedelta
 from io import BytesIO
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -432,6 +433,49 @@ async def test_the_knowledge_sweep_admits_a_saved_document_as_it_does_an_owner_f
     assert recorded.metadata["auto_ingest"] == AUTO_INGEST_INGESTED
 
 
+async def test_knowledge_waits_for_the_run_whose_reply_lists_the_file() -> None:
+    """Knowledge changes a file's origin, and a reply attaches by origin."""
+    from agent_core.knowledge.uploads import UploadAutoIngest
+
+    async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
+        thread = await _seed_thread(app)
+        operation = await _press(app, thread.id, "knowledge.write")
+        async with app.uow_factory() as uow:
+            [finished] = await uow.artifacts.list_for_run(operation.run_id, app.principal)
+            run = await uow.runs.get(operation.run_id, app.principal)
+            active = run.model_copy(update={"id": uuid4(), "status": RunStatus.RUNNING})
+            await uow.runs.create(active)
+            mid_run = await uow.artifacts.create(
+                finished.model_copy(
+                    update={
+                        "id": uuid4(),
+                        "run_id": active.id,
+                        "storage_uri": f"memory://{uuid4()}",
+                        "origin": ArtifactOrigin.EMAIL_ATTACHMENT.value,
+                    }
+                )
+            )
+        ingested: list[Any] = []
+
+        class Knowledge:
+            async def ingest(self, request: Any, *, origin_trust: TrustLevel) -> None:
+                ingested.append(request.source.id)
+
+        sweep = UploadAutoIngest(
+            uow_factory=app.uow_factory,
+            knowledge=cast(Any, Knowledge()),
+            principal=app.principal,
+            clock=app.clock,
+        )
+        assert await sweep.sweep_once() == 1
+        assert ingested == [finished.id]
+        async with app.uow_factory() as uow:
+            waiting = await uow.artifacts.get(mid_run.id, app.principal)
+        assert waiting.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
+        assert waiting.metadata["auto_ingest"] == "pending"
+        assert "auto_ingest_attempts" not in waiting.metadata
+
+
 async def test_a_file_deleted_during_a_sweep_is_never_read_into_knowledge() -> None:
     from agent_core.knowledge.uploads import UploadAutoIngest
 
@@ -441,7 +485,15 @@ async def test_a_file_deleted_during_a_sweep_is_never_read_into_knowledge() -> N
         async with app.uow_factory() as uow:
             [kept] = await uow.artifacts.list_for_run(operation.run_id, app.principal)
             second = await uow.artifacts.create(
-                kept.model_copy(update={"id": uuid4(), "name": "later.pdf"}, deep=True)
+                # A tie in creation time would order the two by their random ids.
+                kept.model_copy(
+                    update={
+                        "id": uuid4(),
+                        "name": "later.pdf",
+                        "created_at": kept.created_at + timedelta(seconds=1),
+                    },
+                    deep=True,
+                )
             )
         ingested: list[UUID] = []
 
