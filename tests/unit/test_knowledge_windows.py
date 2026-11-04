@@ -161,3 +161,20 @@ def test_a_chunk_under_the_whole_bound_stays_one_window() -> None:
         ["Guide"], short, budget_tokens=24, count_tokens=words
     )
     assert len(budget_only) > 1
+
+
+def test_the_whole_bound_measures_the_chunk_text_not_its_heading() -> None:
+    """The whole bound is the chunker's measure, the chunk's text alone.
+
+    The heading path still counts against the budget, as it is embedded, but
+    a section the chunker sized under the whole bound stays one window however
+    deep its heading sits.
+    """
+
+    body = " ".join(f"word{i}" for i in range(47))  # under a 48-word whole bound
+    heading = ["Guide", "Chapter", "Section", "Topic"]  # pushes the whole text to 51
+    assert words(knowledge_embedding_text(heading, body)) > 48
+    windows = knowledge_embedding_windows(
+        heading, body, budget_tokens=24, count_tokens=words, whole_tokens=48
+    )
+    assert windows == [knowledge_embedding_text(heading, body)]

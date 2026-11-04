@@ -143,7 +143,7 @@ it: a chunk under `KNOWLEDGE_OPENAI_WHOLE_TOKENS` (256 estimated tokens)
 stays one window, and a longer one is cut under
 `KNOWLEDGE_OPENAI_WINDOW_TOKENS` (128), by the chunker's estimate, under
 space revision `knowledge-openai@2`. Every gate member stays whole and
-passes as before (2, 1, 2); every chunk of the manual is cut, and its
+passes as before (2, 1, 2); all but two manual chunks are cut, and its
 answering section ranks sixth for the owner's words, seventh and first for
 the model's two queries, and second for the plain phrasing. The local route
 keeps its tokenizer and capacity, which a chunk may not exceed. The backfill

@@ -288,11 +288,13 @@ def knowledge_embedding_windows(
 ) -> list[str]:
     """The texts a chunk is embedded as under `KNOWLEDGE_EMBEDDING_TEXT_VERSION`.
 
-    `whole_tokens`, when given, is the length under which a chunk stays one
-    window although it is over the budget: windows rescue a long section
-    that mixes topics, and cutting a short topical one only sharpens its
-    distracting sentences. The local encoder gives none, since its budget is
-    a capacity the provider refuses to exceed.
+    `whole_tokens`, when given, is the length of text under which a chunk
+    stays one window although it is over the budget: windows rescue a long
+    section that mixes topics, and cutting a short topical one only sharpens
+    its distracting sentences. It measures the chunk's text alone, as the
+    chunker sizes a chunk, while the budget counts the heading too. The local
+    encoder gives none, since its budget is a capacity the provider refuses
+    to exceed.
 
     Without a budget the chunk is one window, the text `knowledge_embedding_text`
     gives. With one, the encoder's capacity, the chunk's text is cut into runs
@@ -312,7 +314,7 @@ def knowledge_embedding_windows(
     # One window only when the byte bound cut nothing from it; otherwise the
     # windows below each fit the bound, so no character is lost to it.
     if len(unbounded.encode("utf-8")) <= KNOWLEDGE_EMBEDDING_TEXT_BYTES and (
-        count(whole) <= budget_tokens or (whole_tokens is not None and count(whole) < whole_tokens)
+        count(whole) <= budget_tokens or (whole_tokens is not None and count(text) < whole_tokens)
     ):
         return [whole]
     # A heading has no length limit. The prefix keeps its deepest levels and
