@@ -1635,12 +1635,19 @@ class InMemoryArtifactRepository:
         artifacts.sort(key=lambda artifact: (artifact.created_at, artifact.id))
         return [artifact.model_copy(deep=True) for artifact in artifacts]
 
-    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+    async def retain_for_knowledge(
+        self, artifact_id: UUID, principal: Principal, *, now: datetime | None = None
+    ) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)
             if artifact is None or (
                 artifact.tenant_id != principal.tenant_id
                 or artifact.principal_id != principal.principal_id
+                or (
+                    now is not None
+                    and artifact.expires_at is not None
+                    and artifact.expires_at <= now
+                )
             ):
                 raise NotFoundError("artifact not found")
             if artifact.origin != "upload" and artifact.run_id in self._people_erased_runs:
@@ -1753,6 +1760,8 @@ class InMemoryArtifactRepository:
                 and artifact.principal_id == principal.principal_id
                 and artifact.origin in AUTO_INGEST_ORIGINS
                 and artifact.metadata.get("auto_ingest") == "pending"
+                # A file deleted or erased while pending never reaches knowledge (ADR-0294).
+                and (artifact.expires_at is None or artifact.expires_at > now)
                 and auto_ingest_due(artifact.metadata, now)
             ]
         pending.sort(key=lambda artifact: (artifact.created_at, artifact.id))

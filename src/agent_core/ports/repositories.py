@@ -384,8 +384,10 @@ class ArtifactRepository(Protocol):
     async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ArtifactRef]: ...
 
     async def retain_for_knowledge(
-        self, artifact_id: UUID, principal: Principal
-    ) -> ArtifactRef: ...
+        self, artifact_id: UUID, principal: Principal, *, now: datetime | None = None
+    ) -> ArtifactRef:
+        """Keep a source for its document; with `now`, an expired one is not found."""
+        ...
 
     async def retain_for_reply(
         self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID

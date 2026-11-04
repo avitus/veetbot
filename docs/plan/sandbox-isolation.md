@@ -1263,7 +1263,7 @@ the read routes answer `404` from that moment, and the sweeper removes the
 bytes and then the row. A final reply never attaches a file that is already
 expired, so a file deleted in the run that made it stays deleted. It takes one to fifty artifact ids. It deletes a file
 only when that file belongs to the caller and the current chat and has origin
-`SANDBOX_EXPORT` or `MODEL_OUTPUT`, the origins a reply attaches. Uploads,
+`SANDBOX_EXPORT`, `MODEL_OUTPUT` or `EMAIL_ATTACHMENT`, the origins a reply attaches. Uploads,
 captures, knowledge sources and trajectory exports are never eligible. Each
 id is reported as `deleted`, `already_deleted` or `not_deletable`, and a call
 with nothing deletable fails with `artifact.not_deletable`. The tool is

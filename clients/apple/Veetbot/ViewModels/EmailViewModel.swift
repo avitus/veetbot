@@ -1138,9 +1138,10 @@ public final class EmailViewModel: ObservableObject {
             attachmentSaves[key] = status == .completed ? .saved : .failed(Self.attachmentNotSavedMessage)
         } catch {
             guard generation == connection, !(error is CancellationError) else { return }
-            if case HTTPTransportError.api(let failure) = error,
+            if attachmentRequests[key]?.operationID == nil,
+               case HTTPTransportError.api(let failure) = error,
                let code = failure.statusCode, (400...499).contains(code), code != 408, code != 429 {
-                // The server answered: nothing was admitted, and nothing can be replayed.
+                // The server refused the request: nothing was admitted, so nothing can be replayed.
                 attachmentRequests[key] = nil
             }
             attachmentSaves[key] = .failed(error.localizedDescription)

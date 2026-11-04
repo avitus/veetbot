@@ -7,7 +7,7 @@ import json
 from dataclasses import replace
 from io import BytesIO
 from typing import Any, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -19,7 +19,7 @@ from agent_core.application.email_attachments import EmailAttachmentSaver
 from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
-from agent_core.domain.artifacts import ArtifactOrigin
+from agent_core.domain.artifacts import AUTO_INGEST_REFUSED, ArtifactOrigin
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
@@ -430,6 +430,38 @@ async def test_the_knowledge_sweep_admits_a_saved_document_as_it_does_an_owner_f
             recorded = await uow.artifacts.get(artifact.id, app.principal)
     assert ingested == [(artifact.id, TrustLevel.USER)]
     assert recorded.metadata["auto_ingest"] == AUTO_INGEST_INGESTED
+
+
+async def test_a_file_deleted_during_a_sweep_is_never_read_into_knowledge() -> None:
+    from agent_core.knowledge.uploads import UploadAutoIngest
+
+    async with build(settings=_settings(), mcp_client_factory=await _factory()) as app:
+        thread = await _seed_thread(app)
+        operation = await _press(app, thread.id, "knowledge.write")
+        async with app.uow_factory() as uow:
+            [kept] = await uow.artifacts.list_for_run(operation.run_id, app.principal)
+            second = await uow.artifacts.create(
+                kept.model_copy(update={"id": uuid4(), "name": "later.pdf"}, deep=True)
+            )
+        ingested: list[UUID] = []
+
+        class Knowledge:
+            async def ingest(self, request: Any, *, origin_trust: TrustLevel) -> None:
+                ingested.append(request.source.id)
+                async with app.uow_factory() as uow:
+                    await uow.artifacts.expire(second.id, app.principal, app.clock.now())
+
+        sweep = UploadAutoIngest(
+            uow_factory=app.uow_factory,
+            knowledge=cast(Any, Knowledge()),
+            principal=app.principal,
+            clock=app.clock,
+        )
+        assert await sweep.sweep_once() == 1
+        async with app.uow_factory() as uow:
+            recorded = await uow.artifacts.get(second.id, app.principal)
+    assert ingested == [kept.id]
+    assert recorded.metadata["auto_ingest"] == AUTO_INGEST_REFUSED
 
 
 async def test_source_erasure_expires_the_file_and_its_receipt_but_cache_expiry_does_not() -> None:

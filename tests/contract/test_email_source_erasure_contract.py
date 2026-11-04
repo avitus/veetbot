@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from agent_core.bootstrap import build
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import MemoryAuthority
 from agent_core.domain.messages import TextPart, ToolResultItem
@@ -439,6 +439,7 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
                 trust=TrustLevel.EXTERNAL_UNTRUSTED,
                 expires_at=None,
                 created_at=NOW,
+                metadata={"auto_ingest": "pending"},
             )
         )
         await uow.approvals.create(
@@ -454,10 +455,21 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
             )
         )
     async with factory() as uow:
+        assert [
+            item.id
+            for item in await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
+        ] == [aid]
+    async with factory() as uow:
         counts = await uow.session_deletions.erase_email_source(
             principal(), "work", "t1", frozenset({"m1"}), NOW
         )
     assert counts["pending_artifacts"] == 1
+    # An erased file must not come back through a knowledge intake still pending.
+    async with factory() as uow:
+        assert await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9) == []
+    with pytest.raises(NotFoundError):
+        async with factory() as uow:
+            await uow.artifacts.retain_for_knowledge(aid, principal(), now=NOW)
     async with factory() as uow:
         events = await uow.events.list_after(sid, 0, principal())
         recorded = {item.id: item for item in await uow.invocations.list_for_run(rid, principal())}
@@ -473,6 +485,79 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
     assert "invoice.pdf" not in recorded[iid].model_dump_json()
     assert json.loads(recorded[other_iid].raw_arguments)["filename"] == "keep.pdf"
     assert aid in {artifact.id for artifact in expired}
+
+
+async def assert_denied_save_erased(factory: UnitOfWorkFactory) -> None:
+    """A denied save leaves no receipt, only the calls that named the file (ADR-0294)."""
+    sid, rid, iid = uuid4(), uuid4(), uuid4()
+    name = "mcp.gmail_read.save_attachment"
+    arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}
+    async with factory() as uow:
+        await uow.sessions.create(session().model_copy(update={"id": sid}))
+        await uow.runs.create(
+            run(status=RunStatus.COMPLETED).model_copy(
+                update={"id": rid, "session_id": sid, "final_message": "invoice.pdf was denied"}
+            )
+        )
+        await uow.events.append(
+            NewEvent(
+                session_id=sid,
+                run_id=rid,
+                event_type="model.response.completed",
+                actor_type="runtime",
+                payload={"tool_calls": [{"name": "tool.call", "arguments": json.dumps(arguments)}]},
+            )
+        )
+        await uow.invocations.create(
+            ToolInvocation(
+                id=iid,
+                run_id=rid,
+                session_id=sid,
+                step_number=1,
+                call_id="denied",
+                tool_name=name,
+                tool_version="1",
+                side_effect=SideEffectClass.NETWORK_READ,
+                risk=RiskLevel.LOW,
+                status=ToolInvocationStatus.DENIED,
+                raw_arguments=json.dumps(arguments),
+                idempotency_key=str(iid),
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        await uow.approvals.create(
+            approval_request().model_copy(
+                update={
+                    "session_id": sid,
+                    "run_id": rid,
+                    "action_id": iid,
+                    "tool_invocation_id": iid,
+                    "tool_name": name,
+                    "arguments": arguments,
+                }
+            )
+        )
+    async with factory() as uow:
+        await uow.session_deletions.erase_email_source(
+            principal(), "work", "t1", frozenset({"m1"}), NOW
+        )
+    async with factory() as uow:
+        [event] = await uow.events.list_after(sid, 0, principal())
+        [invocation] = await uow.invocations.list_for_run(rid, principal())
+        approval = await uow.approvals.get_by_action(iid)
+        finished = await uow.runs.get(rid, principal())
+    assert "invoice.pdf" not in json.dumps(event.payload)
+    assert "invoice.pdf" not in invocation.model_dump_json()
+    assert approval is not None and "invoice.pdf" not in approval.model_dump_json()
+    assert finished.final_message is None
+
+
+async def test_memory_denied_save_erasure_contract() -> None:
+    async with build(
+        settings=memory_settings(), storage="memory", principal=principal()
+    ) as composition:
+        await assert_denied_save_erased(composition.uow_factory)
 
 
 async def test_memory_saved_attachment_erasure_contract() -> None:

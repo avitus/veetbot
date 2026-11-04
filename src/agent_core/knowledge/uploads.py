@@ -93,6 +93,15 @@ class UploadAutoIngest:
         admitted = 0
         for artifact in pending:
             attempts = int(artifact.metadata.get(AUTO_INGEST_ATTEMPTS_KEY, 0)) + 1
+            # The owner may delete the file, or erase its source, during this batch.
+            try:
+                async with self._uow_factory() as uow:
+                    current = await uow.artifacts.get(artifact.id, self._principal)
+            except NotFoundError:
+                continue
+            if current.expires_at is not None and current.expires_at <= self._clock.now():
+                await self._record(artifact, AUTO_INGEST_REFUSED, "not_found", attempts)
+                continue
             request = KnowledgeIngestRequest(
                 source=artifact,
                 title=artifact.name,

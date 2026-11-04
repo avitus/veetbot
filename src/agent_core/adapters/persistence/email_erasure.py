@@ -367,6 +367,13 @@ async def erase_postgres_source(
     affected_sessions: set[UUID] = set()
     affected_runs: set[UUID] = set()
     for row in event_rows:
+        # A denied save leaves no receipt, only the calls that named the file.
+        if row.actor_type != "principal" and (
+            erase_attachment_names(row.payload, message_ids) != row.payload
+        ):
+            affected_sessions.add(row.session_id)
+            if row.run_id is not None:
+                affected_runs.add(row.run_id)
         if row.actor_type != "runtime" or not source_tool(
             row.payload.get("name"), servers[row.session_id]
         ):
@@ -691,6 +698,13 @@ def erase_memory_source_locked(
     affected_runs: set[UUID] = set()
     for sid, server in servers.items():
         for event in repository._events._events.get(sid, []):
+            # A denied save leaves no receipt, only the calls that named the file.
+            if event.actor_type != "principal" and (
+                erase_attachment_names(event.payload, message_ids) != event.payload
+            ):
+                affected_sessions.add(sid)
+                if event.run_id is not None:
+                    affected_runs.add(event.run_id)
             if event.actor_type != "runtime" or not source_tool(event.payload.get("name"), server):
                 continue
             erased = erase_result(event.payload, thread_id, message_ids, account_id=account_id)

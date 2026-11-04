@@ -3407,6 +3407,30 @@ import SwiftUI
         #expect(server.bodies.count == 1, "The admitted operation needs no second request")
     }
 
+    @Test func testARefusedStatusReadKeepsFollowingTheAdmittedOperation() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            if !server.recovered {
+                return (404, "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found.\",\"details\":{}}}")
+            }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed = model.attachmentSave(key) else {
+            Issue.record("A refused read must offer Retry")
+            return
+        }
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count == 1, "A retained operation is never admitted again")
+    }
+
     @Test func testAConnectionResetForgetsSaveState() async throws {
         let model = try makeModel(pollNanoseconds: 1_000) { _ in (200, self.saveOperationJSON("COMPLETED")) }
         let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
