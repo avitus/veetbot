@@ -1607,6 +1607,51 @@ def evidence_runtime(page: FakeEvidencePage) -> PythonPlaywrightRuntime:
     return runtime
 
 
+async def test_a_second_look_needs_a_final_reading_it_could_really_make(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0297: a page that cannot be read has not shown that it asks nobody to sign in."""
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    await page.goto("https://www.duolingo.com/learn", wait_until="commit", timeout=1)
+
+    async def unreadable(_page: object) -> bool:
+        raise PlaywrightError("the page is redrawing")
+
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", unreadable)
+
+    with pytest.raises(PlaywrightError):
+        await runtime.look_again_by(
+            "https://www.duolingo.com/learn",
+            observed_seconds=0,
+            deadline=asyncio.get_running_loop().time() + 0.3,
+        )
+
+
+async def test_a_second_look_rides_out_a_page_that_is_briefly_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    await page.goto("https://www.duolingo.com/learn", wait_until="commit", timeout=1)
+    readings = iter([PlaywrightError("the page is redrawing")])
+
+    async def settling(_page: object) -> bool:
+        for failure in readings:
+            raise failure
+        return False
+
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", settling)
+
+    evidence = await runtime.look_again_by(
+        "https://www.duolingo.com/learn",
+        observed_seconds=0,
+        deadline=asyncio.get_running_loop().time() + 0.3,
+    )
+
+    assert not evidence.challenge_visible
+
+
 async def test_page_evidence_reports_origin_path_and_challenge() -> None:
     """ADR-0128: a verification load reports where it landed and whether it asks to sign in."""
 
@@ -1624,10 +1669,12 @@ async def test_page_evidence_reports_origin_path_and_challenge() -> None:
     challenged = await runtimes[1].load_page_evidence("https://www.duolingo.com/learn")
     left = await runtimes[2].load_page_evidence("https://www.duolingo.com/learn")
 
-    assert kept == BrowserPageEvidence(
+    # How long each page was watched depends on the clock, and is checked on its own.
+    assert kept.observed_seconds >= 0 and challenged.observed_seconds >= 0
+    assert kept.model_copy(update={"observed_seconds": 0.0}) == BrowserPageEvidence(
         on_allowed_origin=True, path="/learn", challenge_visible=False
     )
-    assert challenged == BrowserPageEvidence(
+    assert challenged.model_copy(update={"observed_seconds": 0.0}) == BrowserPageEvidence(
         on_allowed_origin=True, path="/log-in", challenge_visible=True
     )
     assert left.on_allowed_origin is False

@@ -1438,6 +1438,8 @@ import Testing
                     profileID, origins: ["https://secure.example.org", "https://example.org"],
                     status: "needs_user", lastSignIn: lastSignIn
                 )]))
+            case "GET veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (200, "[]")
             default:
                 return nil
             }
@@ -1547,18 +1549,14 @@ import Testing
         let profileID = UUID()
         let server = rememberedLoginServer(profileID: profileID, ceremonyID: UUID(), lastSignIn: "remote")
         let model = try await configuredModel(server)
-        let profile = try JSONDecoder.server.decode(
-            BrowserProfileView.self,
-            from: Data(Self.profile(
-                profileID, origins: ["https://example.org"], status: "needs_user", lastSignIn: "remote"
-            ).utf8)
-        )
+        await model.refreshBrowserProfiles()
+        let profile = try #require(model.browserProfiles.first)
+        #expect(profile.lastSignInMode == .remote)
         _ = try #require(model.beginDeviceSignIn(profile: profile))
-        let before = model.browserProfiles
 
         await model.abandonDeviceSignIn()
 
-        #expect(model.browserProfiles == before)
+        #expect(model.browserProfiles.first?.lastSignInMode == .remote)
     }
 
     @Test

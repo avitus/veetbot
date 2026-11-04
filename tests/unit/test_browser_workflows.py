@@ -1,6 +1,7 @@
 """Reviewed recipes still cross the ordinary action-approval and effect boundary."""
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -464,9 +465,27 @@ async def test_a_follow_request_in_a_chat_whose_login_was_deleted_is_not_a_crash
             await uow.browser_profiles.delete(
                 PROFILE_ID, app.principal, expected_generation=revoked.generation
             )
+            # The one X login this request would otherwise have picked up.
+            await uow.browser_profiles.create(
+                profile.model_copy(
+                    update={
+                        "id": UUID(int=0xF0110),
+                        "provider_ref": "opaque-x-reference",
+                        "allowed_origins": ("https://x.com",),
+                    }
+                )
+            )
 
         submitted = await app.services.runs.submit(
             principal, session.id, [TextContentBlock(text="Follow @mitsuhiko")], None, None
         )
 
         assert (await app.runs.wait_terminal(submitted.run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            bound = await uow.sessions.get(session.id, principal)
+            message = await uow.events.latest_before(
+                session.id, (1 << 63) - 1, "user.message.created", principal
+            )
+        assert bound.metadata["browser_profile_id"] == str(PROFILE_ID)
+        assert message is not None
+        assert "browser_follow_target" not in message.payload

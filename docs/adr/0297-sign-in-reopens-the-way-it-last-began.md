@@ -56,6 +56,8 @@ faults stopped it before the download could run.
    than the control's page was, each measured from its own load, because the two
    browsers can load at different speeds. A pair that would pass keeps looking at the
    signed-in copy until then, and a form or a move away there ends `session_signed_out`.
+   That look must end with a reading of the page that worked: one that fails ends the check
+   as `tool.browser.provider_unavailable`, which saves nothing.
    If the check's limit, less two seconds to read the session, leaves too little time, the
    sign-in ends `session_unconfirmed` and nothing is saved. All of this shares one limit,
    which starts with the check's first step. A configured site definition reads the page's

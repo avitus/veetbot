@@ -1084,6 +1084,10 @@ class PythonPlaywrightRuntime:
             challenge_visible = await self._challenge_by(
                 page, confirmed_path=confirmed_path, deadline=min(old_enough, deadline)
             )
+        if not challenge_visible:
+            # Passing needs a reading that worked, not only time gone by: a failure here
+            # ends the check, because an unreadable page has not shown there is no form.
+            challenge_visible = await self._sign_in_challenge_visible(page)
         return self._page_evidence_now(page, challenge_visible)
 
     def _on_confirmed_page(self, page: Page, confirmed_path: str) -> bool:
