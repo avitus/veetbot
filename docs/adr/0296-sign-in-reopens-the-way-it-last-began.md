@@ -45,7 +45,8 @@ faults stopped it before the download could run.
    link (ADR-0288 decision 4).
 3. **The device window stays within reach.** A profile last signed in through the
    remote browser shows **Use this device** on its row, because a site can refuse a
-   datacenter browser while accepting the owner's device. Choosing it records `device`.
+   datacenter browser while accepting the owner's device. Beginning a sign-in there records
+   `device`, and the app notes it at once, so the choice holds if that sign-in fails.
 4. **The signed-out control may wait for a sign-in form.** Only the load without a
    session, only while it still reads as signed in, and only until five seconds before
    the check's thirty-second limit, or until it leaves the confirmed path. A hash change
@@ -64,17 +65,19 @@ faults stopped it before the download could run.
    and stayed on the path, in yes or no, never an address. The device path keeps its
    rule that a verdict logs nothing (ADR-0128, amendment of 2026-10-06).
 6. **A chat bound to a deleted login has no website.** The workflow step treats it as
-   unbound, as every other reader of that binding already does. A workflow already in
-   progress still ends with its existing conflict.
+   unbound, as the other readers of that binding do. A workflow already in progress still
+   ends with its existing conflict. A follow request in such a chat is admitted without a
+   follow, and the chat is not rebound to another login.
 
 ## Validation
 
 Tests cover the deleted binding through a full run, the recorded mode through the
 public API and the shared repository contract, the card, the row and the offer in the
 Apple client, and the wait in real Chromium on a page that moves its hash and draws a
-framed password field three seconds after going quiet, and that a form or a move both
-copies make late is rejected, for device and remote sign-ins and end to end in real
-Chromium. Chase has not been exercised.
+framed password field three seconds after going quiet. Contract tests also verify that a
+late form or move on the signed-in copy is rejected for device sign-ins, and that a late
+form is rejected for remote sign-ins. A real-Chromium device-handoff test covers the
+late-form case. Chase has not been exercised.
 
 The owner's production check is the one ADR-0294 names: in a new chat, ask for
 recurring charges, sign in when asked, approve the Download clicks.

@@ -16,6 +16,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.views import TextContentBlock
 from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_config import base_environment
@@ -434,3 +435,38 @@ async def test_a_chat_whose_website_login_was_deleted_still_answers(
         run_id = await app.runs.submit("I am signed in now.", session.id)
 
         assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+
+
+async def test_a_follow_request_in_a_chat_whose_login_was_deleted_is_not_a_crash() -> None:
+    """The message is admitted without a follow, and the chat is not rebound to another login."""
+    async with bootstrap.build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[ScriptedTurn(text="Which account?")]),
+        enabled_tools=["browser.navigate", "browser.observe", "browser.act"],
+        browser_provider_override=FakeBrowserProvider(),
+    ) as app:
+        await seed_browser_authority(app)
+        principal = app.principal.model_copy(
+            update={"scopes": {*app.principal.scopes, "browser.profile.read"}}
+        )
+        session = await app.services.sessions.create(
+            principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        async with app.uow_factory() as uow:
+            profile = await uow.browser_profiles.get(PROFILE_ID, app.principal)
+            revoked = await uow.browser_profiles.transition(
+                PROFILE_ID,
+                app.principal,
+                expected_generation=profile.generation,
+                status=BrowserProfileStatus.REVOKED,
+                updated_at=app.clock.now(),
+            )
+            await uow.browser_profiles.delete(
+                PROFILE_ID, app.principal, expected_generation=revoked.generation
+            )
+
+        submitted = await app.services.runs.submit(
+            principal, session.id, [TextContentBlock(text="Follow @mitsuhiko")], None, None
+        )
+
+        assert (await app.runs.wait_terminal(submitted.run_id)).status is RunStatus.COMPLETED

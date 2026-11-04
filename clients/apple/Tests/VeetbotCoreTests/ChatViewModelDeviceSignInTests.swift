@@ -1503,6 +1503,64 @@ import Testing
         #expect(WebsiteAccessActions.offersDeviceSignIn(profile))
     }
 
+    /// Beginning a device sign-in changed the remembered way on the server, so a
+    /// row left showing the old one would reopen the way the owner just moved away from.
+    @Test
+    func aFailedDeviceSignInStillRemembersTheDeviceWay() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.page([Self.profile(
+                    profileID, origins: ["https://example.org"], status: "needs_user", lastSignIn: "remote"
+                )]))
+            case "GET veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (200, "[]")
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return (422, #"{"error":{"code":"session_empty","message":"Empty."}}"#)
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            default:
+                return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        await model.refreshBrowserProfiles()
+        let profile = try #require(model.browserProfiles.first)
+        #expect(profile.lastSignInMode == .remote)
+        let request = try #require(model.beginDeviceSignIn(profile: profile))
+
+        let result = await model.completeDeviceSignIn(
+            request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+        )
+
+        #expect(result == .failed(DeviceSignInFailure(message: DeviceSignInMessage.sessionEmpty, canRetry: true)))
+        #expect(model.browserProfiles.first?.lastSignInMode == .device)
+    }
+
+    /// Opening the window begins nothing on the server, so closing it changes nothing.
+    @Test
+    func aDeviceWindowClosedUnusedKeepsTheRememberedWay() async throws {
+        let profileID = UUID()
+        let server = rememberedLoginServer(profileID: profileID, ceremonyID: UUID(), lastSignIn: "remote")
+        let model = try await configuredModel(server)
+        let profile = try JSONDecoder.server.decode(
+            BrowserProfileView.self,
+            from: Data(Self.profile(
+                profileID, origins: ["https://example.org"], status: "needs_user", lastSignIn: "remote"
+            ).utf8)
+        )
+        _ = try #require(model.beginDeviceSignIn(profile: profile))
+        let before = model.browserProfiles
+
+        await model.abandonDeviceSignIn()
+
+        #expect(model.browserProfiles == before)
+    }
+
     @Test
     func aLoginWithNoRememberedWayNeedsNoSecondButton() throws {
         let profile = try JSONDecoder.server.decode(

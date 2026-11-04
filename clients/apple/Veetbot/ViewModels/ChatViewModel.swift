@@ -2326,6 +2326,22 @@ public final class ChatViewModel: ObservableObject {
         return await beginRemoteSignIn(profileID: profile.id, loginURL: origin + "/", from: surface) != nil
     }
 
+    private func rememberDeviceSignIn(for profileID: UUID) {
+        browserProfiles = browserProfiles.map { profile in
+            guard profile.id == profileID else { return profile }
+            return BrowserProfileView(
+                id: profile.id,
+                allowedOrigins: profile.allowedOrigins,
+                status: profile.status,
+                generation: profile.generation,
+                createdAt: profile.createdAt,
+                updatedAt: profile.updatedAt,
+                lastUsedAt: profile.lastUsedAt,
+                lastSignInMode: .device
+            )
+        }
+    }
+
     /// The owner tapped I'm signed in: create the profile if it is new, begin
     /// a device ceremony, hand the session over once and learn the outcome
     /// (0128-design §5.2). The launch URL and its capability exist only in
@@ -2450,6 +2466,8 @@ public final class ChatViewModel: ObservableObject {
         case .success(let begun):
             ceremony = begun
             openCeremonyID = begun.id
+            // Beginning recorded this on the server; a failure below reloads nothing (ADR-0296).
+            rememberDeviceSignIn(for: profileID)
         case .failure(let error):
             return await settle(failure(error.message))
         }
