@@ -338,10 +338,9 @@ public final class ChatViewModel: ObservableObject {
                 runState.seed(run: run)
                 watch(runID: run.id)
             }
-            for listed in approvals where listed.runID == run.id {
-                loadedApprovalIDs.insert(listed.id)
-                runState.mergeApproval(listed)
-            }
+            // Read the run's approvals afresh: what was listed before the run read can
+            // have been decided since.
+            await refreshPendingApprovals(presentingFailure: false)
             return
         }
     }
@@ -1170,7 +1169,7 @@ public final class ChatViewModel: ObservableObject {
                 // its approval even when the stream cannot connect; if this read
                 // fails too, the stream reports it.
                 if run.status == .waitingForApproval {
-                    await refreshPendingApprovals(presentingFailure: false)
+                    Task { await refreshPendingApprovals(presentingFailure: false) }
                 }
             }
             loadedNotificationSessionID = session.id

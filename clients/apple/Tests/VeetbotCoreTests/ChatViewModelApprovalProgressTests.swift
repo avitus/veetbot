@@ -32,6 +32,7 @@ import Testing
         }
 
         let model = try await openedModel(server)
+        try await waitForCards(1, on: model)
 
         #expect(model.awaitingOwnerApproval)
         #expect(
@@ -212,12 +213,92 @@ import Testing
             }()
         }
         let model = try await openedModel(server)
+        try await waitForCards(1, on: model)
         #expect(model.awaitingOwnerApproval)
 
         decided.value = true
         await model.refreshSessionsAwaitingApproval()
 
         #expect(!model.awaitingOwnerApproval)
+    }
+
+    /// A slow approval read must not hold up the conversation opening, which another
+    /// selection could otherwise overtake.
+    @Test
+    func openingAWaitingRunDoesNotWaitForItsApprovals() async throws {
+        let approvalRoute = "GET veetbot.test /v1/approvals"
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request, runStatus: "WAITING_FOR_APPROVAL") ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (503, "")
+                case approvalRoute:
+                    return (200, try Self.pendingApprovals())
+                default:
+                    return nil
+                }
+            }()
+        }
+        let approvalRead = server.hold(approvalRoute)
+        defer { approvalRead.open() }
+        let opened = LockedFlag()
+        let model = try makeModel(server)
+        #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
+        let opening = Task {
+            await model.openSharedSession(Self.sessionID)
+            opened.value = true
+        }
+        #expect(await server.arrival(of: approvalRoute))
+        for _ in 0..<200 where !opened.value {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(opened.value)
+
+        approvalRead.open()
+        await opening.value
+        for _ in 0..<200 where !model.awaitingOwnerApproval {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(model.awaitingOwnerApproval)
+    }
+
+    /// An approval decided while recovery reads its run must not come back as a card.
+    @Test
+    func anApprovalDecidedDuringRecoveryDoesNotReturn() async throws {
+        let decided = LockedFlag()
+        let runRoute = "GET veetbot.test /v1/runs/\(Self.otherRunID)"
+        let server = DeviceFlowServer { request in
+            if Self.route(request) == runRoute {
+                return (200, Self.runBody(id: Self.otherRunID, status: "RUNNING"))
+            }
+            return try Self.conversationRoutes(request) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.otherRunID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (
+                        200,
+                        decided.value
+                            ? #"{"items":[],"next_cursor":null}"#
+                            : try Self.pendingApprovals(runID: Self.otherRunID)
+                    )
+                default:
+                    return nil
+                }
+            }()
+        }
+        let runRead = server.hold(runRoute)
+        defer { runRead.open() }
+        let model = try await openedModel(server)
+
+        let refresh = Task { await model.refreshSessionsAwaitingApproval() }
+        #expect(await server.arrival(of: runRoute))
+        decided.value = true
+        runRead.open()
+        await refresh.value
+
+        #expect(model.runState.activeRunID == UUID(uuidString: Self.otherRunID))
+        #expect(!model.runState.docksAttention)
     }
 
     /// One card's failed read must not leave the other decided cards on screen.
@@ -251,6 +332,7 @@ import Testing
             }()
         }
         let model = try await openedModel(server)
+        try await waitForCards(2, on: model)
         #expect(model.runState.approvals.filter { $0.status.isPending }.count == 2)
 
         decided.value = true
@@ -441,6 +523,13 @@ import Testing
             historyStore: VolatileSessionHistoryStore(),
             urlSession: URLSession(configuration: server.configuration(base: .ephemeral))
         )
+    }
+
+    /// Opening a conversation loads its cards in the background; waits up to two seconds.
+    private func waitForCards(_ count: Int, on model: ChatViewModel) async throws {
+        for _ in 0..<200 where model.runState.approvals.filter({ $0.status.isPending }).count != count {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
     }
 
     private func openedModel(_ server: DeviceFlowServer) async throws -> ChatViewModel {
