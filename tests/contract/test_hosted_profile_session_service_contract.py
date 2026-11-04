@@ -88,6 +88,8 @@ class HandoffScenario:
     signed_out_blocks_seconds: float = 0
     with_observation: BrowserObservation | None = None
     without_observation: BrowserObservation | None = None
+    # What the signed-in page shows by its second look, if not what its load saw.
+    with_session_later: BrowserPageEvidence | None = None
 
 
 @dataclass
@@ -110,6 +112,7 @@ class FakeSessionRuntime:
     scenario: HandoffScenario | None = None
     evidence_urls: list[str] = field(default_factory=list)
     challenge_deadlines: list[float | None] = field(default_factory=list)
+    later_looks: list[str] = field(default_factory=list)
     # Successive answers to authentication_status, then ``authentication``.
     authentication_samples: list[BrowserAuthenticationStatus] = field(default_factory=list)
     status_checks: int = 0
@@ -235,6 +238,15 @@ class FakeSessionRuntime:
             )
         assert isinstance(outcome, BrowserPageEvidence)
         return outcome
+
+    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence:
+        del deadline
+        self.later_looks.append(url)
+        if self.scenario is not None and self.scenario.with_session_later is not None:
+            return self.scenario.with_session_later
+        return BrowserPageEvidence(
+            on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
 
     async def storage_state(self) -> bytes:
         if self.scenario is not None and self.scenario.storage_error is not None:
@@ -1296,6 +1308,72 @@ async def test_only_the_signed_out_control_waits_for_a_sign_in_form(tmp_path: Pa
     deadline = signed_out.challenge_deadlines[0]
     assert deadline is not None
     assert 0 < deadline - asyncio.get_running_loop().time() <= 30.0 - 5.0
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=True, path="/learn", challenge_visible=True),
+            id="draws-a-form",
+        ),
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=True, path="/log-in", challenge_visible=False),
+            id="moves-away",
+        ),
+    ],
+)
+async def test_what_both_copies_do_late_is_never_proof_of_a_session(
+    tmp_path: Path, later: BrowserPageEvidence
+) -> None:
+    """The control's wait must not make two identical signed-out pages look different."""
+    scenario = HandoffScenario(with_session_later=later)
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    before = await sealed_material(sessions)
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(DeviceSessionRejected) as rejected:
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert rejected.value.code == "session_signed_out"
+    assert writes == []
+    assert await sealed_material(sessions) == before
+    assert len(runtimes[0].later_looks) == 1
+
+
+async def test_a_remote_check_looks_again_at_the_signed_in_copy_before_saving(
+    tmp_path: Path,
+) -> None:
+    scenario = HandoffScenario(
+        with_session_later=BrowserPageEvidence(
+            on_allowed_origin=True, path="/account", challenge_visible=True
+        )
+    )
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/account"
+    )
+
+    result = await sessions.refresh_authentication(ceremony.id, principal())
+
+    assert result.status is not BrowserAuthenticationStatus.READY
+    assert [runtime.later_looks for runtime in runtimes if runtime.later_looks]
+
+
+async def test_only_a_pair_that_would_pass_looks_again(tmp_path: Path) -> None:
+    """A verdict the first look already settles costs no more time."""
+    scenario = HandoffScenario(without_session=None)
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(DeviceSessionRejected):
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert all(runtime.later_looks == [] for runtime in runtimes)
 
 
 async def test_a_rejected_remote_check_logs_what_each_load_saw_without_an_address(

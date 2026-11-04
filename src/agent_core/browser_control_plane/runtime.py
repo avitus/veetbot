@@ -74,6 +74,8 @@ class StatefulBrowserRuntime(Protocol):
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
 
+    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence: ...
+
     async def storage_state(self) -> dict[str, object]: ...
 
     async def authentication_status(self) -> BrowserAuthenticationStatus: ...
@@ -240,6 +242,18 @@ class HostedPlaywrightSessionRuntime:
             return await self._runtime.load_page_evidence(
                 url, on_stage=on_stage, challenge_deadline=challenge_deadline
             )
+        except BrowserProviderError:
+            raise
+        except Exception as exc:
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
+
+    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence:
+        """Report what the page already loaded shows by ``deadline`` (ADR-0296)."""
+        try:
+            return await self._runtime.look_again_by(url, deadline=deadline)
         except BrowserProviderError:
             raise
         except Exception as exc:

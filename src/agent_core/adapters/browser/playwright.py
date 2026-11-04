@@ -1057,6 +1057,23 @@ class PythonPlaywrightRuntime:
                 challenge_visible=challenge_visible,
             )
 
+    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence:
+        """Report what the page already loaded for ``url`` shows by ``deadline`` (ADR-0296)."""
+        page = self._current_page()
+        confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
+        challenge_visible = False
+        with suppress(PlaywrightError):
+            challenge_visible = await self._sign_in_challenge_visible(page)
+        if not challenge_visible:
+            challenge_visible = await self._challenge_by(
+                page, confirmed_path=confirmed_path, deadline=deadline
+            )
+        return BrowserPageEvidence(
+            on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
+            path=(urlsplit(page.url).path or "/")[:4096],
+            challenge_visible=challenge_visible,
+        )
+
     def _on_confirmed_page(self, page: Page, confirmed_path: str) -> bool:
         """Whether the page is still on an allowed origin at or below the confirmed path."""
         current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"

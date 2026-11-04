@@ -68,6 +68,11 @@ DEVICE_VERIFICATION_SECONDS = 30.0
 # The signed-out control stops looking for a sign-in form this long before the
 # check's limit, which leaves the time to read the session it is checking (ADR-0296).
 SIGNED_OUT_CONTROL_RESERVE_SECONDS = 5.0
+# A pair that would pass looks at the signed-in copy this much longer, so it has
+# been watched for longer than the control that found a form (ADR-0296).
+SIGNED_IN_SECOND_LOOK_SECONDS = 5.0
+# Reading the session being saved still has to fit inside the check's limit.
+SIGNED_IN_SECOND_LOOK_RESERVE_SECONDS = 2.0
 # Headed browsers alive at once, each budgeted a third of the container (ADR-0145).
 MAXIMUM_LIVE_BROWSERS = 3
 # Element facts beside one observation are cut to this many serialized bytes.
@@ -211,6 +216,8 @@ class BrowserSessionRuntime(Protocol):
     ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
+
+    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence: ...
 
     async def storage_state(self) -> bytes: ...
 
@@ -772,6 +779,7 @@ class HostedProfileSessionService:
             page = definition.origin + definition.protected_path
         signed_in = self._runtime_factory(state.tenant_id)
         signed_out = self._runtime_factory(state.tenant_id)
+        limit = asyncio.get_running_loop().time() + self._verification_seconds
         loads = [
             asyncio.create_task(
                 _page_evidence(
@@ -792,6 +800,9 @@ class HostedProfileSessionService:
         try:
             async with asyncio.timeout(self._verification_seconds):
                 with_session, without_session = await asyncio.gather(*loads)
+                with_session = await _after_second_look(
+                    definition, signed_in, with_session, without_session, page, limit
+                )
                 try:
                     await self._verify_page_pair(
                         definition, signed_in, signed_out, with_session, without_session, page
@@ -1031,6 +1042,7 @@ class HostedProfileSessionService:
         progress = (_VerificationLoad("with_session"), _VerificationLoad("without_session"))
         clock = asyncio.get_running_loop().time
         began = clock()
+        limit = began + self._verification_seconds
         loads = [
             asyncio.create_task(_page_evidence(signed_in, material, origins, page, progress[0])),
             asyncio.create_task(
@@ -1048,6 +1060,9 @@ class HostedProfileSessionService:
             try:
                 async with asyncio.timeout(self._verification_seconds):
                     with_session, without_session = await asyncio.gather(*loads)
+                    with_session = await _after_second_look(
+                        definition, signed_in, with_session, without_session, page, limit
+                    )
                     await self._verify_page_pair(
                         definition, signed_in, signed_out, with_session, without_session, page
                     )
@@ -1438,6 +1453,34 @@ def _log_unfinished_verification(
         named or f"with_session={BrowserVerificationStage.CAPTURE.value}",
         elapsed_seconds,
     )
+
+
+async def _after_second_look(
+    definition: BrowserSiteVerification | None,
+    signed_in: BrowserSessionRuntime,
+    with_session: BrowserPageEvidence,
+    without_session: BrowserPageEvidence,
+    page: str,
+    limit: float,
+) -> BrowserPageEvidence:
+    """Look again at a signed-in copy the control's late answer alone would prove (ADR-0296).
+
+    The control may wait for a form or a move that the signed-in load finished too
+    early to see. Both loads began together and this starts after both ended, so the
+    signed-in copy has been watched for longer than the control was. A site definition
+    reads the page's own content, so it needs no second look.
+    """
+    if definition is not None:
+        return with_session
+    try:
+        _decide(with_session, without_session, confirmed_path=urlsplit(page).path)
+    except DeviceSessionRejected:
+        return with_session
+    deadline = min(
+        asyncio.get_running_loop().time() + SIGNED_IN_SECOND_LOOK_SECONDS,
+        limit - SIGNED_IN_SECOND_LOOK_RESERVE_SECONDS,
+    )
+    return await signed_in.look_again_by(page, deadline=deadline)
 
 
 def _log_rejected_evidence(

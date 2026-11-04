@@ -99,6 +99,12 @@ class FakeStatefulRuntime:
             on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
         )
 
+    async def look_again_by(self, url: str, *, deadline: float) -> BrowserPageEvidence:
+        del deadline
+        return BrowserPageEvidence(
+            on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
+
     async def storage_state(self) -> dict[str, object]:
         return self.storage
 

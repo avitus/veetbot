@@ -49,8 +49,13 @@ faults stopped it before the download could run.
 4. **The signed-out control may wait for a sign-in form.** Only the load without a
    session, only while it still reads as signed in, and only until five seconds before
    the check's thirty-second limit, or until it leaves the confirmed path. A hash change
-   keeps the path. This adds evidence and never loosens the verdict: the same page still
-   ends `session_unconfirmed` if no form appears, and the signed-in load never waits.
+   keeps the path. The same page still ends `session_unconfirmed` if no form appears.
+   The wait alone could make two identical signed-out pages look different, so a pair
+   that would pass looks at the signed-in copy for five seconds more, stopping two
+   seconds before the limit, and a form or a move away there ends `session_signed_out`. Both loads began
+   together and that look starts after both ended, so the signed-in copy has been watched
+   for longer than the control was. A site definition reads the page's own content and
+   needs no second look.
 5. **A remote rejection logs what each load saw.** Whether each load showed a challenge
    and stayed on the path, in yes or no, never an address. The device path keeps its
    rule that a verdict logs nothing (ADR-0128, amendment of 2026-10-06).
@@ -63,7 +68,9 @@ faults stopped it before the download could run.
 Tests cover the deleted binding through a full run, the recorded mode through the
 public API and the shared repository contract, the card, the row and the offer in the
 Apple client, and the wait in real Chromium on a page that moves its hash and draws a
-framed password field three seconds after going quiet. Chase has not been exercised.
+framed password field three seconds after going quiet, and that a form or a move both
+copies make late is rejected, for device and remote sign-ins and end to end in real
+Chromium. Chase has not been exercised.
 
 The owner's production check is the one ADR-0294 names: in a new chat, ask for
 recurring charges, sign in when asked, approve the Download clicks.
@@ -76,7 +83,10 @@ recurring charges, sign in when asked, approve the Download clicks.
   The new log line will then say so, and the next step is a site definition, not a
   longer wait.
 - A check that ends without a sign-in form now takes about twenty-five seconds rather
-  than failing as soon as the page goes quiet.
+  than failing as soon as the page goes quiet, and a sign-in that passes takes five
+  seconds longer.
+- If the check is already near its limit, the second look is cut short, down to a single
+  look at the signed-in copy.
 - Chase may sign a saved login out within hours, which this does not change.
 - Deleting a login still leaves the chat's binding in place, so the chat shows no website
   until one is connected.

@@ -75,6 +75,7 @@ class MembersSite:
                 Route("/", self.home),
                 Route("/log-in", self.log_in, methods=["GET", "POST"]),
                 Route("/learn", self.learn),
+                Route("/late-form", self.late_form),
             ]
         )
 
@@ -94,10 +95,27 @@ class MembersSite:
             "<input type='password' name='secret'><button>Sign in</button></form>"
         )
 
+    async def late_form(self, request: Request) -> Response:
+        """Asks everyone to sign in, session or not, once its requests have gone quiet."""
+        del request
+        return _late_form_page()
+
     async def learn(self, request: Request) -> Response:
         if request.cookies.get("session") != self.token:
             return RedirectResponse("/log-in", status_code=302)
         return HTMLResponse(f"<h1>{MEMBERS_TEXT}</h1>")
+
+
+def _late_form_page() -> Response:
+    return HTMLResponse(
+        """<!doctype html><title>Loading</title><p>Loading</p><script>
+        setTimeout(() => {
+            const frame = document.createElement('iframe');
+            frame.srcdoc = '<input type="password">';
+            document.body.appendChild(frame);
+        }, 3000);
+        </script>"""
+    )
 
 
 def refusing_headless_browsers(app: ASGIApp) -> ASGIApp:
@@ -412,6 +430,24 @@ async def test_a_session_the_site_refuses_is_signed_out(tmp_path: Path) -> None:
     assert response.json()["error"]["code"] == "session_signed_out"
     assert status.status is BrowserAuthenticationStatus.CANCELLED
     assert members.token not in response.text
+
+
+async def test_a_form_both_copies_draw_late_does_not_confirm_a_sign_in(tmp_path: Path) -> None:
+    """ADR-0296: the control's wait must not turn one page into proof of a session."""
+    require_real_browser()
+    members = MembersSite()
+    async with (
+        local_https_site(members.app) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        response, ceremony_id = await hand_off(
+            service, cookie=await signed_in_cookie(members), confirmed_path="/late-form"
+        )
+        status = await service.sessions.authentication_status(ceremony_id, OWNER)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "session_signed_out"
+    assert status.status is BrowserAuthenticationStatus.CANCELLED
 
 
 async def test_a_page_anyone_can_see_does_not_confirm_a_sign_in(tmp_path: Path) -> None:
