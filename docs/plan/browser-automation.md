@@ -251,16 +251,17 @@ owner-requested extension and its verification requirements.
 
 A click or key press through `browser.act` that carries no grant or research
 constraint holds a one-file window for as long as the act runs. A file started
-inside the window is saved; every other file is cancelled, whether a page starts
-it on its own, a navigation or read meets it, or a sign-in ceremony does. A grant-
+inside the window is saved, whatever started it (ADR-0294 records why cause cannot
+be established); every other file is cancelled, whether a page starts it on its
+own, a navigation or read meets it, or a sign-in ceremony does. A grant-
 or research-authorized act that meets a file cancels it and reports
 `needs_approval`. Neither kind of grant covers a download: a control named with
 `download` or `export`, or a link with a `download` attribute, already reads as a
 file-transfer consequence, and a plain control that turns out to save a file is
 refused live.
 
-The runtime admits at most 2 MiB of text: UTF-8 or Windows-1252, with no NUL byte,
-normalized to UTF-8. Size is checked while the file downloads, in a private
+The runtime admits at most 2 MiB of text: UTF-8 or Windows-1252, with no NUL byte
+and no PDF signature in the first kilobyte, normalized to UTF-8. Size is checked while the file downloads, in a private
 directory under the session's temporary home, and the file is removed from there
 once read. Everything else is a named refusal: `unsupported_type`, `too_large`,
 `timed_out` or `failed`. The website's suggested name is reduced to a bare name of

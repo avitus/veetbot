@@ -38,14 +38,15 @@ further constraints shape the contract.
 
 1. **A file needs an individually approved act.** While a `browser.act` click or
    key press runs, the runtime holds a one-file window. Only an act that carries
-   no grant or research constraint may save; a website login's sign-in, a page's
-   own timer, a navigation, a read, and a grant-authorized or research-permitted
-   act all still cancel the file. A grant-authorized act that met a file reports
+   no grant or research constraint may save. A file started outside that window,
+   whether by a page on its own, a sign-in, a navigation or a read, and any file
+   met by a grant-authorized or research-permitted act, is still cancelled. A grant-authorized act that met a file reports
    `needs_approval`. A control named with `download` or `export`, or a link with a
    `download` attribute, already reads as a file-transfer consequence
    (`browser_classification.py`), so it asks for approval.
 2. **Only bounded text is admitted.** The file is at most 2 MiB, decodes as UTF-8
-   or Windows-1252, and holds no NUL byte. It is normalized to UTF-8. Anything
+   or Windows-1252, holds no NUL byte, and has no PDF signature in its first
+   kilobyte. It is normalized to UTF-8. Anything
    else, including PDF and spreadsheet files, is refused by name:
    `unsupported_type`, `too_large`, `timed_out` or `failed`. The size is checked
    while the file downloads, in a private directory under the session's temporary
@@ -96,6 +97,15 @@ This ADR stays Proposed until that check passes.
 
 ## Limits
 
+- The window is a span of time, so it cannot name a file's cause. A page that
+  starts a file during an approved click takes the slot, and the file is saved as
+  if the click had asked for it. Requiring cause would refuse the case this exists
+  for: a banking page fetches the data and saves it later from a script, which
+  carries no link to the click. The consequence is one bounded, untrusted text file
+  from a site the owner connected and was acting on, which adds nothing the page
+  could not already show the model as text. No page can trigger a save without an
+  approved click in progress. This is a residual risk for the owner to accept with
+  this ADR.
 - Text files only. PDF statements and spreadsheets are refused and need their own
   contract. A QFX or OFX file is admitted as plain text.
 - A file that starts more than 10 seconds after the click, or on a click whose

@@ -304,6 +304,7 @@ class _DownloadWindow:
 
     approved: bool
     started: asyncio.Event = field(default_factory=asyncio.Event)
+    download: Download | None = None
     reading: asyncio.Task[BrowserDownload] | None = None
     refused: bool = False
 
@@ -323,6 +324,18 @@ async def _discard_download(download: Download) -> None:
         await download.cancel()
     with suppress(PlaywrightError):
         await download.delete()
+
+
+async def _close_download_window(window: _DownloadWindow) -> None:
+    """Stop a file an act that ended early left unread; a finished read is untouched."""
+
+    if window.reading is None or window.download is None:
+        return
+    window.reading.cancel()
+    await asyncio.gather(window.reading, return_exceptions=True)
+    # A read cancelled before its first step never reached its own cleanup.
+    if window.reading.cancelled():
+        await _discard_download(window.download)
 
 
 def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
@@ -750,6 +763,7 @@ class PythonPlaywrightRuntime:
         """Admit one file to an approved act's window and cancel every other (ADR-0294)."""
         window = self._download_window
         if window is not None and window.approved and window.reading is None:
+            window.download = download
             window.reading = asyncio.create_task(self._read_download(download))
             window.started.set()
             return
@@ -1445,10 +1459,8 @@ class PythonPlaywrightRuntime:
             self._document_fence = None
             refused_page = self._fence_refused_page
             self._fence_refused_page = False
-            # An act that ends early stops its file; a finished read is untouched.
-            if window is not None and window.reading is not None:
-                window.reading.cancel()
-                await asyncio.gather(window.reading, return_exceptions=True)
+            if window is not None:
+                await _close_download_window(window)
         if refused_page:
             # The action sent the page toward a document outside the grant,
             # which never loaded; the page now shows the browser's error page.

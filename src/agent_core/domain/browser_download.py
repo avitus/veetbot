@@ -17,6 +17,10 @@ _MEDIA_TYPES = {
     ".tsv": "text/tab-separated-values",
 }
 _DEFAULT_MEDIA_TYPE = "text/plain"
+# A PDF may be plain characters throughout, and readers accept its header anywhere
+# in the first kilobyte.
+_PDF_SIGNATURE = b"%PDF-"
+_PDF_HEADER_BYTES = 1024
 
 BrowserDownloadRefusal = Literal[
     "needs_approval",
@@ -45,7 +49,7 @@ def _media_type(name: str) -> str:
 def _text(data: bytes) -> str | None:
     """The file's text, or None when its bytes are not one of the two encodings."""
 
-    if b"\0" in data:
+    if b"\0" in data or _PDF_SIGNATURE in data[:_PDF_HEADER_BYTES]:
         return None
     for encoding in ("utf-8-sig", "cp1252"):
         try:
@@ -90,7 +94,7 @@ class BrowserDownload(BaseModel):
                 raise ValueError("a saved download has a platform name and media type")
             data = base64.b64decode(self.data_base64, validate=True)
             data.decode("utf-8")
-            if not data or len(data) > MAX_BROWSER_DOWNLOAD_BYTES or b"\0" in data:
+            if not data or len(data) > MAX_BROWSER_DOWNLOAD_BYTES or _text(data) is None:
                 raise ValueError("a saved download is bounded text")
         if self.status == "refused" and (
             self.reason is None

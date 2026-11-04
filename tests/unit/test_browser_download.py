@@ -17,7 +17,11 @@ from agent_core.adapters.browser.hosted_sessions import (
     MAXIMUM_SESSION_RESPONSE_BYTES,
     BrowserSessionObservation,
 )
-from agent_core.adapters.browser.playwright import PythonPlaywrightRuntime
+from agent_core.adapters.browser.playwright import (
+    PythonPlaywrightRuntime,
+    _close_download_window,
+    _DownloadWindow,
+)
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.browser_control_plane.api import _snapshot_response
@@ -129,6 +133,24 @@ def test_a_file_that_is_not_text_is_refused(data: bytes) -> None:
     assert download.data_base64 is None
 
 
+@pytest.mark.parametrize("data", [b"%PDF-1.4\n1 0 obj\n", b"\n\n%PDF-1.7\nascii only\n"])
+def test_a_pdf_of_plain_characters_is_still_refused(data: bytes) -> None:
+    download = BrowserDownload.from_bytes("report.pdf", data)
+    assert (download.status, download.reason) == ("refused", "unsupported_type")
+
+
+def test_the_worker_refuses_a_pdf_the_service_called_text() -> None:
+    with pytest.raises(ValidationError):
+        BrowserDownload.model_validate(
+            {
+                "status": "saved",
+                "filename": "report.txt",
+                "media_type": "text/plain",
+                "data_base64": "JVBERi0xLjQK",
+            }
+        )
+
+
 def test_a_file_over_the_limit_is_refused() -> None:
     download = BrowserDownload.from_bytes("x.csv", b"a" * (MAX_BROWSER_DOWNLOAD_BYTES + 1))
     assert (download.status, download.reason) == ("refused", "too_large")
@@ -210,6 +232,22 @@ async def test_an_interrupted_read_stops_the_transfer_instead_of_waiting_for_it(
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(reading, 2)
 
+    assert download.cancelled.is_set() and download.deleted
+
+
+async def test_a_file_during_an_approved_click_is_admitted_whatever_started_it() -> None:
+    """The window is temporal: ADR-0294's Limits record why it cannot name a file's cause."""
+
+    runtime = PythonPlaywrightRuntime()
+    window = _DownloadWindow(approved=True)
+    runtime._download_window = window
+    download = _UnfinishedDownload()
+
+    await runtime._handle_download(cast(Download, download))
+
+    assert window.reading is not None and not download.cancelled.is_set()
+    # The act ends before the read takes its first step, the narrowest early end.
+    await _close_download_window(window)
     assert download.cancelled.is_set() and download.deleted
 
 
