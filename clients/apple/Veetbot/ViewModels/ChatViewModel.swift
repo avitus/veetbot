@@ -299,39 +299,50 @@ public final class ChatViewModel: ObservableObject {
         let sessions = Set(pending.map(\.sessionID))
         if sessionsAwaitingApproval != sessions { sessionsAwaitingApproval = sessions }
         if let selectedSessionID {
-            await recoverApprovalsTheStreamMissed(
-                pending.filter { $0.sessionID == selectedSessionID }, in: selectedSessionID
-            )
+            let listed = pending.filter { $0.sessionID == selectedSessionID }
+            await recoverApprovalsTheStreamMissed(listed, in: selectedSessionID)
+            // A loaded card the server no longer lists was decided elsewhere.
+            let listedIDs = Set(listed.map(\.id))
+            let leftTheList = runState.approvals.contains {
+                $0.status.isPending && !listedIDs.contains($0.id) && approvalsInFlight[$0.id] == nil
+            }
+            if leftTheList { await refreshPendingApprovals(presentingFailure: false) }
         }
     }
 
     /// The server says the open conversation waits on the owner and no card shows it.
     /// The stream may be down, the details may have failed to load, or another device may
-    /// have started the run, so the run comes from the approval. A background read, so a
-    /// failure is left for the next one.
+    /// have started the run, so each approval names its own run, newest first, until one
+    /// is still active in this conversation. A background read, so a failure is left for
+    /// the next one.
     private func recoverApprovalsTheStreamMissed(_ approvals: [ApprovalView], in sessionID: UUID) async {
+        guard let api else { return }
         let loaded = Set(runState.approvals.filter { $0.status.isPending }.map(\.id))
-        guard let api,
-            let newest = approvals.filter({ !loaded.contains($0.id) && approvalsInFlight[$0.id] == nil })
-                .max(by: { $0.createdAt < $1.createdAt })
-        else { return }
+        let missed = approvals
+            .filter { !loaded.contains($0.id) && approvalsInFlight[$0.id] == nil }
+            .sorted { $0.createdAt > $1.createdAt }
         let generation = connectionGeneration
         let knownRunID = runState.activeRunID
-        guard let run = try? await api.getRun(newest.runID),
-            generation == connectionGeneration, sessionID == selectedSessionID,
-            knownRunID == runState.activeRunID, run.sessionID == sessionID, run.status.isActive
-        else { return }
-        if knownRunID == run.id {
-            // A terminal stream event outranks a slower read of the same run.
-            guard !(runState.runStatus?.isTerminal ?? false) else { return }
-            runState.seed(run: run)
-        } else {
-            runState.seed(run: run)
-            watch(runID: run.id)
-        }
-        for approval in approvals where approval.runID == run.id {
-            loadedApprovalIDs.insert(approval.id)
-            runState.mergeApproval(approval)
+        var tried: Set<UUID> = []
+        for approval in missed where tried.insert(approval.runID).inserted {
+            let read = try? await api.getRun(approval.runID)
+            guard generation == connectionGeneration, sessionID == selectedSessionID,
+                knownRunID == runState.activeRunID
+            else { return }
+            guard let run = read, run.sessionID == sessionID, run.status.isActive else { continue }
+            if knownRunID == run.id {
+                // A terminal stream event outranks a slower read of the same run.
+                guard !(runState.runStatus?.isTerminal ?? false) else { return }
+                runState.seed(run: run)
+            } else {
+                runState.seed(run: run)
+                watch(runID: run.id)
+            }
+            for listed in approvals where listed.runID == run.id {
+                loadedApprovalIDs.insert(listed.id)
+                runState.mergeApproval(listed)
+            }
+            return
         }
     }
 
@@ -2006,6 +2017,8 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Loads the active run's pending approvals and reconciles cards that left the list.
+    /// A background caller passes `presentingFailure: false` and retries on its next read.
     public func refreshPendingApprovals(presentingFailure: Bool = true) async {
         guard let api, let sessionID = selectedSessionID else { return }
         let generation = connectionGeneration

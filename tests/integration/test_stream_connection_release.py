@@ -61,6 +61,7 @@ def named_url(database_url: str) -> str:
 
 
 async def _open_connections(url: str) -> int:
+    """Count this test's connections by the application name its URL carries."""
     parsed = make_url(url)
     name = parsed.query["application_name"]
     connection = await asyncpg.connect(
@@ -108,6 +109,7 @@ async def test_an_ordinary_exit_closes_its_connection(named_url: str) -> None:
 
 
 def _settings(tmp_path: Path) -> Settings:
+    """Settings for an in-memory composition; only the broadcaster here is real."""
     return Settings(
         database_url="postgresql+asyncpg://unused/agent",
         deployment_mode=DeploymentMode.DEVELOPMENT,
@@ -174,6 +176,7 @@ async def _drop_client_after(app: ASGIApp, path: str, body_chunks: int) -> None:
     request_sent = False
 
     async def receive() -> Message:
+        """Deliver the request, then wait for the client to leave."""
         nonlocal request_sent
         if not request_sent:
             request_sent = True
@@ -182,6 +185,7 @@ async def _drop_client_after(app: ASGIApp, path: str, body_chunks: int) -> None:
         return {"type": "http.disconnect"}
 
     async def send(message: Message) -> None:
+        """Count body chunks and drop the client after the chosen one."""
         nonlocal delivered
         if message["type"] == "http.response.body":
             delivered += 1

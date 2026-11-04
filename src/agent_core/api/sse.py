@@ -55,6 +55,7 @@ class EventStreamResponse(StreamingResponse):
         self._frames = frames
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Serve the stream, then close it even if the request was cancelled."""
         try:
             await super().__call__(scope, receive, send)
         finally:

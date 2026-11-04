@@ -28,6 +28,8 @@ public struct ReconnectingEventStream: Sendable {
         self.maximumTotalReconnects = maximumTotalReconnects
     }
 
+    /// A run's frames across connections, resuming after the last durable id until a
+    /// terminal frame, an authorization failure or the reconnect limit ends it.
     public func frames(
         runID: UUID,
         startingAfter initialID: Int? = nil

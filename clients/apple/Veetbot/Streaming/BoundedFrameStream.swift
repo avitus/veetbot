@@ -76,6 +76,7 @@ actor BoundedFrameChannel {
         waitingConsumer = nil
     }
 
+    /// Wakes the producer if it is waiting for room.
     private func resumeProducer() {
         waitingProducer?.resume()
         waitingProducer = nil
@@ -97,10 +98,12 @@ private final class BoundedFrameProducer: Sendable {
         cancel()
     }
 
+    /// The channel's next frame.
     func next() async throws -> SSEFrame? {
         try await channel.next()
     }
 
+    /// Stops the read and releases whichever side of the channel is waiting.
     func cancel() {
         task.cancel()
         let channel = channel
@@ -111,6 +114,8 @@ private final class BoundedFrameProducer: Sendable {
 enum BoundedFrameStream {
     static let defaultCapacity = 256
 
+    /// Starts `produce` at once and streams what it sends; its thrown error ends the
+    /// stream after the queued frames, and leaving the stream cancels it.
     static func make(
         capacity: Int = defaultCapacity,
         produce: @escaping @Sendable (BoundedFrameChannel) async throws -> Void

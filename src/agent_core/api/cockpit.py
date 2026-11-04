@@ -89,6 +89,7 @@ def cockpit_router(
             raise MalformedRequestError("Last-Event-ID must not be negative")
 
         async def frames() -> AsyncGenerator[bytes, None]:
+            """Emit events and idle heartbeats, cleaning up the stream when it closes."""
             iterator = cast(
                 AsyncGenerator[StreamFrame, None],
                 service.stream(authenticated, after).__aiter__(),

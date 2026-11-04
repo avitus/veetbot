@@ -27,6 +27,8 @@ public struct SSEReader: Sendable {
         self.maximumFrameBytes = maximumFrameBytes
     }
 
+    /// Reads one connection's frames, pausing the read while the consumer is behind.
+    /// EOF finishes the stream; reconnecting is the caller's decision.
     public func frames(path: String, lastEventID: Int?) -> AsyncThrowingStream<SSEFrame, Error> {
         let transport = transport
         let maximumFrameBytes = maximumFrameBytes

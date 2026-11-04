@@ -91,6 +91,7 @@ class PostgresLiveEventBroadcaster:
 
     @asynccontextmanager
     async def listen(self, channel: str) -> AsyncIterator[LiveSubscription]:
+        """Hold one dedicated `LISTEN` connection for as long as the subscription lasts."""
         connection = await asyncpg.connect(self._dsn)
         subscription = _QueueSubscription(asyncio.Queue(maxsize=LIVE_QUEUE_SIZE))
 

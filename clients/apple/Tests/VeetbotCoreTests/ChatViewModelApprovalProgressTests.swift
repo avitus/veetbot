@@ -154,6 +154,68 @@ import Testing
         #expect(model.awaitingOwnerApproval)
     }
 
+    /// A newer approval on a finished run must not hide an older one still waiting.
+    @Test
+    func anUnrecoverableApprovalDoesNotHideAnOlderOne() async throws {
+        let server = DeviceFlowServer { request in
+            if Self.route(request) == "GET veetbot.test /v1/runs/\(Self.otherRunID)" {
+                return (200, Self.runBody(id: Self.otherRunID, status: "COMPLETED"))
+            }
+            return try Self.conversationRoutes(request, runStatus: nil) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)":
+                    return (200, Self.runBody(id: Self.runID, status: "WAITING_FOR_APPROVAL"))
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (200, try Self.pendingApprovals(olderOn: Self.runID, newerOn: Self.otherRunID))
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+
+        await model.refreshSessionsAwaitingApproval()
+
+        #expect(model.runState.activeRunID == UUID(uuidString: Self.runID))
+        #expect(model.awaitingOwnerApproval)
+    }
+
+    /// With no stream, a card decided on another device still leaves when the background
+    /// read stops listing it.
+    @Test
+    func aCardDecidedElsewhereLeavesWithoutAStream() async throws {
+        let decided = LockedFlag()
+        let server = DeviceFlowServer { request in
+            let path = request.url?.path ?? ""
+            if path.hasPrefix("/v1/approvals/") {
+                return (200, try Self.approval(resolvedWith: "approve_once"))
+            }
+            return try Self.conversationRoutes(request, runStatus: "WAITING_FOR_APPROVAL") ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (
+                        200,
+                        decided.value
+                            ? #"{"items":[],"next_cursor":null}"# : try Self.pendingApprovals()
+                    )
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        #expect(model.awaitingOwnerApproval)
+
+        decided.value = true
+        await model.refreshSessionsAwaitingApproval()
+
+        #expect(!model.awaitingOwnerApproval)
+    }
+
     /// A listing that lags behind its run, or names another conversation's run, changes nothing.
     @Test(arguments: [("COMPLETED", false), ("WAITING_FOR_APPROVAL", true)])
     func aStaleOrForeignApprovalIsNotRecovered(status: String, foreignRun: Bool) async throws {
@@ -366,6 +428,37 @@ import Testing
         }
     }
 
+    /// Two pending approvals of one conversation, on the runs named, oldest first.
+    nonisolated private static func pendingApprovals(olderOn older: String, newerOn newer: String) throws -> String {
+        func approval(run: String, id: String, createdAt: String) throws -> [String: Any] {
+            var object = try WireModelsTests.contractExample(
+                "approval_views", "offered", key: "approval"
+            )
+            object["id"] = id
+            object["session_id"] = sessionID.uuidString.lowercased()
+            object["run_id"] = run
+            object["created_at"] = createdAt
+            return object
+        }
+        let body = try JSONSerialization.data(
+            withJSONObject: [
+                "items": [
+                    try approval(
+                        run: newer, id: "6a1c3f0e-2b4d-4c8e-9f10-0000000000b2",
+                        createdAt: "2026-09-25T18:05:00Z"
+                    ),
+                    try approval(
+                        run: older, id: "6a1c3f0e-2b4d-4c8e-9f10-0000000000b1",
+                        createdAt: "2026-09-25T18:00:00Z"
+                    ),
+                ],
+                "next_cursor": NSNull(),
+            ]
+        )
+        return String(decoding: body, as: UTF8.self)
+    }
+
+    /// One run as the server returns it, by default in the open conversation.
     nonisolated private static func runBody(id: String, status: String, sessionID owner: String? = nil) -> String {
         #"{"id":"\#(id)","session_id":"\#(owner ?? sessionID.uuidString)","parent_run_id":null,"status":"\#(status)","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-09-25T18:00:00Z","updated_at":"2026-09-25T18:01:00Z"}"#
     }
