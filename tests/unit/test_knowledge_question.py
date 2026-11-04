@@ -65,6 +65,20 @@ def test_a_title_word_keeps_its_accented_letters() -> None:
 def test_a_name_is_matched_as_written_so_punctuation_counts() -> None:
     asked = "C# memory management"
     assert knowledge_question_without_document_names(asked, ["C++.pdf"]) == asked
+    assert knowledge_question_without_document_names(asked, ["C.pdf"]) == asked
     assert knowledge_question_without_document_names("C++.pdf memory model", ["C++.pdf"]) == (
         "memory model"
     )
+    assert knowledge_question_without_document_names("C++ memory model", ["C++.pdf"]) == (
+        "memory model"
+    )
+
+
+def test_sentence_punctuation_after_a_name_is_kept() -> None:
+    asked = "Tell me about C. Thanks"
+    assert knowledge_question_without_document_names(asked, ["C.pdf"]) == "Tell me about . Thanks"
+
+
+def test_case_folds_beyond_ascii() -> None:
+    asked = "STRASSE speed limits"
+    assert knowledge_question_without_document_names(asked, ["Stra\u00dfe.pdf"]) == "speed limits"
