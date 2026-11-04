@@ -595,6 +595,7 @@ async def test_a_client_that_drops_ends_its_stream_and_subscription(
         class Counted:
             @asynccontextmanager
             async def listen(self, channel: str) -> AsyncIterator[Any]:
+                """Count this stream's subscription for as long as it is open."""
                 nonlocal subscriptions
                 subscriptions += 1
                 try:
@@ -608,6 +609,7 @@ async def test_a_client_that_drops_ends_its_stream_and_subscription(
         request_sent = False
 
         async def receive() -> dict[str, Any]:
+            """Deliver the request, then wait for the client to leave."""
             nonlocal request_sent
             if not request_sent:
                 request_sent = True
@@ -616,6 +618,7 @@ async def test_a_client_that_drops_ends_its_stream_and_subscription(
             return {"type": "http.disconnect"}
 
         async def send(message: Any) -> None:
+            """Drop the client at the stream's first frame, with the subscription open."""
             if message["type"] == "http.response.body":
                 assert subscriptions == 1
                 client_left.set()

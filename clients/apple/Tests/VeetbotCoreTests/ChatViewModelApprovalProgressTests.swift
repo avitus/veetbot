@@ -220,6 +220,46 @@ import Testing
         #expect(!model.awaitingOwnerApproval)
     }
 
+    /// One card's failed read must not leave the other decided cards on screen.
+    @Test
+    func aFailedReadDoesNotStopTheOtherDecidedCardsLeaving() async throws {
+        let decided = LockedFlag()
+        let firstReadFailed = LockedFlag()
+        let server = DeviceFlowServer { request in
+            let path = request.url?.path ?? ""
+            if path.hasPrefix("/v1/approvals/") {
+                if !firstReadFailed.value {
+                    firstReadFailed.value = true
+                    return (503, "")
+                }
+                return (200, try Self.approval(resolvedWith: "approve_once", id: request.url?.lastPathComponent))
+            }
+            return try Self.conversationRoutes(request, runStatus: "WAITING_FOR_APPROVAL") ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (
+                        200,
+                        decided.value
+                            ? #"{"items":[],"next_cursor":null}"#
+                            : try Self.pendingApprovals(olderOn: Self.runID, newerOn: Self.runID)
+                    )
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        #expect(model.runState.approvals.filter { $0.status.isPending }.count == 2)
+
+        decided.value = true
+        await model.refreshSessionsAwaitingApproval()
+
+        #expect(firstReadFailed.value)
+        #expect(model.runState.approvals.filter { $0.status.isPending }.count == 1)
+    }
+
     /// A listing that lags behind its run, or names another conversation's run, changes nothing.
     @Test(arguments: [("COMPLETED", false), ("WAITING_FOR_APPROVAL", true)])
     func aStaleOrForeignApprovalIsNotRecovered(status: String, foreignRun: Bool) async throws {
@@ -481,8 +521,9 @@ import Testing
     }
 
     /// The offered contract approval as the server returns it once resolved.
-    nonisolated private static func approval(resolvedWith decision: String) throws -> String {
+    nonisolated private static func approval(resolvedWith decision: String, id: String? = nil) throws -> String {
         var object = try WireModelsTests.contractExample("approval_views", "offered", key: "approval")
+        if let id { object["id"] = id }
         object["status"] = "APPROVED"
         object["decision"] = decision
         object["resolved_at"] = "2026-09-25T18:00:30Z"

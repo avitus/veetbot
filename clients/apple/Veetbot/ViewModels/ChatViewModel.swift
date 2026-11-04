@@ -2046,10 +2046,17 @@ public final class ChatViewModel: ObservableObject {
             // A resolved card disappears from this list. Read its stored decision
             // so every device updates even if the resolution stream was missed.
             for approvalID in knownPending.subtracting(stillPending) {
-                let stored = try await api.getApproval(approvalID)
-                guard generation == connectionGeneration, sessionID == selectedSessionID,
-                    runID == runState.activeRunID else { return }
-                runState.mergeApproval(stored)
+                do {
+                    let stored = try await api.getApproval(approvalID)
+                    guard generation == connectionGeneration, sessionID == selectedSessionID,
+                        runID == runState.activeRunID else { return }
+                    runState.mergeApproval(stored)
+                } catch {
+                    // One card's failed read must not stop the others leaving.
+                    guard generation == connectionGeneration, sessionID == selectedSessionID,
+                        runID == runState.activeRunID else { return }
+                    if presentingFailure { present(error) }
+                }
             }
         } catch {
             guard generation == connectionGeneration, sessionID == selectedSessionID,
