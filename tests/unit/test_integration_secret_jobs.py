@@ -204,6 +204,8 @@ async def test_composed_job_tool_checks_binding_and_approval_shows_metadata(tmp_
         assert isinstance(tool, RegisteredTool)
         assert tool.spec.version == "1.3.0"
         assert registry.get("job.run", "1.1.0").spec.version == "1.1.0"
+        # A run pinned before stored keys were turned on still resumes (ADR-0291).
+        assert registry.get("job.run", "1.2.0").spec.version == "1.2.0"
         assert registry.get("job.run", "1.0.0").spec.version == "1.0.0"
         arguments = {
             "slug": saved.slug,

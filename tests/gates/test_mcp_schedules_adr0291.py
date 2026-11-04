@@ -328,6 +328,17 @@ def test_earlier_tool_versions_stay_as_pinned() -> None:
         assert "use_mcp_servers" not in tool.spec.input_schema["properties"]
 
 
+async def test_a_run_pinned_before_cockpit_was_turned_on_still_resumes() -> None:
+    from tests.gates.test_cockpit_feed_refresh_adr0254 import _composition
+
+    async with _composition(cockpit=True) as (composition, _):
+        registry = composition.tool_pipeline._registry
+        assert registry.get("schedule.create", "1.8.0").spec.version == "1.8.0"
+        assert registry.get("schedule.update", "1.3.0").spec.version == "1.3.0"
+        assert registry.get("schedule.create").spec.version == "1.9.0"
+        assert registry.get("schedule.update").spec.version == "1.4.0"
+
+
 # --- Saved jobs ---
 
 

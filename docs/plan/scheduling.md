@@ -1132,8 +1132,11 @@ clears it. Only an enabled owner-added, Gmail or Scale VP row may be named;
 anything else fails as `schedule.mcp_server_unavailable`, so calling keeps
 `place_call`. A job schedule names none and fails as `schedule.job_mcp_servers`,
 because its scopes derive from its grant; switching a feed schedule to a saved
-job drops the schedule's own set. The materializer records the set in
-the session as `schedule_mcp_servers`, and the context planner offers an
+job drops the schedule's own set. Naming is how the model asks for a server: a
+schedule that holds an operator server's scope without naming it, as a call or
+Gmail schedule does, still needs its caller to hold that scope. The materializer
+records the set in the session as `schedule_mcp_servers`, and the context planner
+offers an
 owner-added server's tools in a scheduled session, or in a child of one, only if
 it is named. A write stays `REQUIRE_APPROVAL`, whichever server it is on.
 A feed-keeping schedule that either version creates is

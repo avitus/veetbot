@@ -39,7 +39,9 @@ widgets get MCP data through feed schedules and through saved jobs.
    takes `use_mcp_servers`, and `schedule.update` may replace the set; the
    approval view lists them. The model still never names a scope: each server's
    `required_scopes` join `requested_scopes`, and an update removes the scopes
-   of the servers it drops.
+   of the servers it drops. `requested_scopes` may still hold a scope no named
+   server explains, because call and Gmail schedules do (ADR-0213); the caller
+   must hold it, and the model has no way to ask for it.
 
 2. **Who may be named.** An enabled row that is owner-added, a Gmail server or
    Scale VP. Anything else is `schedule.mcp_server_unavailable`. Calling keeps

@@ -3593,9 +3593,9 @@ async def _compose(
         registry.register(JobRunTool(job_toolset))
         if integration_secrets is not None:
             registry.register(StoredKeyJobRunTool(job_toolset))
+        registry.register(MCPJobRunTool(job_toolset))
+        if integration_secrets is not None:
             registry.register(MCPStoredKeyJobRunTool(job_toolset))
-        else:
-            registry.register(MCPJobRunTool(job_toolset))
     registry.register(RunInspectTool(uow_factory))
     if settings.code_tools_enabled and settings.code_source_root is not None:
         source_tree = FilesystemSourceTree(
@@ -3713,25 +3713,28 @@ async def _compose(
                     )
                 )
         # ADR-0291: the deployment's newest versions register last, so they are offered.
-        registry.register(
-            (CockpitMCPScheduleCreateTool if settings.cockpit_enabled else MCPScheduleCreateTool)(
-                schedule_service,
-                agent,
-                schedule_definition_limits,
-                uow_factory=uow_factory,
-                calling_enabled=settings.call_enabled,
+        # The one without Cockpit stays for a run pinned before Cockpit was turned on.
+        for mcp_create in (
+            MCPScheduleCreateTool,
+            *((CockpitMCPScheduleCreateTool,) if settings.cockpit_enabled else ()),
+        ):
+            registry.register(
+                mcp_create(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
             )
-        )
         registry.register(PreviousScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
         if settings.cockpit_enabled:
             registry.register(CockpitScheduleUpdateTool(schedule_service))
-        registry.register(
-            (CockpitMCPScheduleUpdateTool if settings.cockpit_enabled else MCPScheduleUpdateTool)(
-                schedule_service
-            )
-        )
+        registry.register(MCPScheduleUpdateTool(schedule_service))
+        if settings.cockpit_enabled:
+            registry.register(CockpitMCPScheduleUpdateTool(schedule_service))
         if settings.jobs_enabled:
             registry.register(
                 JobScheduleCreateTool(
