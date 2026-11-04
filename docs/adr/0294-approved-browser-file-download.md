@@ -53,7 +53,8 @@ further constraints shape the contract.
    or Windows-1252, holds no NUL byte, and has no PDF signature in its first
    kilobyte. It is normalized to UTF-8. Anything
    else, including PDF and spreadsheet files, is refused by name:
-   `unsupported_type`, `too_large`, `timed_out` or `failed`. The size is checked
+   `unsupported_type`, `too_large`, `timed_out` or `failed`, which an empty file
+   also reports, having nothing to read. The size is checked
    while the file downloads, in a private directory under the session's temporary
    home, so a large file is cancelled rather than held. The file is removed from
    that directory once read. The website's suggested name is reduced to a bare
@@ -62,8 +63,9 @@ further constraints shape the contract.
 3. **The wait is bounded and starts only where it helps.** After the page settles,
    an act on a control whose accessible name contains `download`, `export` or
    `csv`, or a link with a `download` attribute, waits up to 10 seconds for the file
-   to start; any started file then has up to 8 seconds to finish. Both fit
-   `browser.act`'s 30 seconds. The name decides only whether to wait, never
+   to start; any started file then has up to 8 seconds to finish. The wait ends 24
+   seconds after the act's window opened, however slow the click was, so
+   `browser.act`'s 30 seconds can still report the click. The name decides only whether to wait, never
    whether to admit. The window closes when the act returns, so a later file is
    cancelled.
 4. **The bytes cross once, in the act's response.** `BrowserObservation` gains an
@@ -71,7 +73,8 @@ further constraints shape the contract.
    observation, and the worker's response limit grows by that envelope.
    The worker repeats the admission checks on what it parses, since the service
    handles hostile pages. Observation results list their fields explicitly, so
-   the bytes never reach a tool result, an event or a log.
+   the bytes never reach the `browser.act` result, an event or a log. A later
+   `artifact.read_capture` result returns bounded text from the file.
 5. **The tool saves the file as a capture of the chat.** `browser.act@1.8.0`
    writes it through the run's artifact writer with origin `tool_output`, trust
    `EXTERNAL_UNTRUSTED` and the capture mark, so `artifact.read_capture` opens it

@@ -152,6 +152,10 @@ def test_the_worker_refuses_a_pdf_the_service_called_text() -> None:
         )
 
 
+def test_an_empty_file_is_refused_because_there_is_nothing_to_read() -> None:
+    assert BrowserDownload.from_bytes("a.csv", b"") == BrowserDownload.refused("failed")
+
+
 def test_a_file_over_the_limit_is_refused() -> None:
     download = BrowserDownload.from_bytes("x.csv", b"a" * (MAX_BROWSER_DOWNLOAD_BYTES + 1))
     assert (download.status, download.reason) == ("refused", "too_large")
@@ -265,6 +269,31 @@ async def test_a_file_from_outside_the_login_is_refused_and_leaves_the_slot_free
     await runtime._handle_download(cast(Download, inside))
     assert window.reading is not None and not inside.cancelled.is_set()
     await _close_download_window(window)
+
+
+async def test_a_slow_click_leaves_no_time_to_wait_for_a_file_that_never_starts() -> None:
+    """The click ran, so the file wait must not spend the tool's time on an unknown outcome."""
+    window = _DownloadWindow(approved=True, deadline=asyncio.get_running_loop().time())
+
+    finished = await asyncio.wait_for(
+        PythonPlaywrightRuntime()._finish_download(window, names_a_file=True), 2
+    )
+
+    assert finished is None
+
+
+async def test_a_file_still_arriving_when_the_act_runs_out_of_time_is_timed_out() -> None:
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://site.test",)
+    window = _DownloadWindow(approved=True, deadline=asyncio.get_running_loop().time() + 0.2)
+    runtime._download_window = window
+    download = _UnfinishedDownload()
+
+    await runtime._handle_download(cast(Download, download))
+    finished = await asyncio.wait_for(runtime._finish_download(window, names_a_file=True), 2)
+
+    assert finished == BrowserDownload.refused("timed_out")
+    assert download.cancelled.is_set() and download.deleted
 
 
 async def test_a_file_during_an_approved_click_is_admitted_whatever_started_it() -> None:

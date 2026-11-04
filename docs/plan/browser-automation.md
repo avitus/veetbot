@@ -270,21 +270,22 @@ The runtime admits at most 2 MiB of text: UTF-8 or Windows-1252, with no NUL byt
 and no PDF signature in the first kilobyte, normalized to UTF-8. Size is checked while the file downloads, in a private
 directory under the session's temporary home, and the file is removed from there
 once read. Everything else is a named refusal: `unsupported_type`, `too_large`,
-`timed_out` or `failed`. The website's suggested name is reduced to a bare name of
+`timed_out` or `failed`, which an empty file also reports, having nothing to read. The website's suggested name is reduced to a bare name of
 letters, digits, `.`, `_` and `-`, and the media type comes from the name's suffix:
 `text/csv`, `text/tab-separated-values`, otherwise `text/plain`.
 
 After the page settles, an act on a control whose accessible name contains
 `download`, `export` or `csv`, or on a link with a `download` attribute, waits up to
 10 seconds for the file to start. Any started file then has up to 8 seconds to
-finish. Both fit the tool's 30 seconds. The name decides only whether to wait,
+finish. The wait ends 24 seconds after the act's window opened, however slow the click
+was, so the tool's 30 seconds can still report the click. The name decides only whether to wait,
 never whether to admit. A later file is cancelled and unreported.
 
 The bytes cross the service boundary once, in base64, on the act's own observation
 (`BrowserObservation.download`); the worker's session response limit allows for
 this envelope, and the worker repeats the admission checks on what it parses.
-Observation results list their fields, so no tool result, event or
-log carries the bytes.
+Observation results list their fields, so no `browser.act` result, event or log
+carries the bytes; a later `artifact.read_capture` result returns bounded text from the file.
 
 `browser.act@1.8.0` stores the file through the run's artifact writer as an
 `EXTERNAL_UNTRUSTED` capture of this chat, with the capture mark, so

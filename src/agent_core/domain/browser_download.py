@@ -64,7 +64,7 @@ class BrowserDownload(BaseModel):
     """What one approved click saved, or why it saved nothing.
 
     The bytes travel only from the isolated browser to the tool, which stores
-    them as a capture; no event, log or tool result carries them. The name is
+    them as a capture; no event, log or ``browser.act`` result carries them. The name is
     website-supplied and stays ``EXTERNAL_UNTRUSTED`` with the rest of the result.
     """
 

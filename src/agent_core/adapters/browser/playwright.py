@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
 import secrets
@@ -141,10 +142,12 @@ _CONTROL_SELECTOR = """(() => {
 # A page settles for at most this long after navigation or an action (ADR-0130).
 SETTLE_SECONDS = 2.0
 # ADR-0294: an approved click on a control that names a file waits this long for
-# the page to start it, and any started file this long to finish. Together with
-# the settle they fit browser.act's 30 seconds.
+# the page to start it, and any started file this long to finish.
 DOWNLOAD_START_SECONDS = 10.0
 DOWNLOAD_READ_SECONDS = 8.0
+# The file wait ends this long after the act's window opened, however slow the click
+# was, leaving browser.act's 30 seconds room to report the click.
+DOWNLOAD_ACT_BUDGET_SECONDS = 24.0
 _DOWNLOAD_POLL_SECONDS = 0.1
 _DOWNLOAD_CONTROL = re.compile(r"download|export|csv", re.IGNORECASE)
 _FILE_ACTION_KINDS = frozenset({BrowserActionKind.CLICK, BrowserActionKind.PRESS})
@@ -309,6 +312,7 @@ class _DownloadWindow:
     """
 
     approved: bool
+    deadline: float = math.inf
     started: asyncio.Event = field(default_factory=asyncio.Event)
     download: Download | None = None
     reading: asyncio.Task[BrowserDownload] | None = None
@@ -777,15 +781,17 @@ class PythonPlaywrightRuntime:
                 await _discard_download(download)
                 return
             window.download = download
-            window.reading = asyncio.create_task(self._read_download(download))
+            window.reading = asyncio.create_task(self._read_download(download, window.deadline))
             window.started.set()
             return
         await _discard_download(download)
 
-    async def _read_download(self, download: Download) -> BrowserDownload:
+    async def _read_download(
+        self, download: Download, act_deadline: float = math.inf
+    ) -> BrowserDownload:
         """Wait for the file within its time and size limits, then remove it from disk."""
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + DOWNLOAD_READ_SECONDS
+        deadline = min(loop.time() + DOWNLOAD_READ_SECONDS, act_deadline)
         finished = asyncio.ensure_future(download.path())
         try:
             while not finished.done():
@@ -823,7 +829,8 @@ class PythonPlaywrightRuntime:
         """What this act's window saved or refused; None when the page offered no file."""
         if names_a_file and window.reading is None:
             with suppress(TimeoutError):
-                await asyncio.wait_for(window.started.wait(), DOWNLOAD_START_SECONDS)
+                left = window.deadline - asyncio.get_running_loop().time()
+                await asyncio.wait_for(window.started.wait(), min(DOWNLOAD_START_SECONDS, left))
         if window.reading is not None:
             return await window.reading
         return None if window.refusal is None else BrowserDownload.refused(window.refusal)
@@ -1427,7 +1434,10 @@ class PythonPlaywrightRuntime:
         documents_before = self._main_frame_navigations
         starts_files = action.kind in _FILE_ACTION_KINDS
         names_a_file = starts_files and self._control_names_a_file(action.ref)
-        window = _DownloadWindow(approved=constraint is None and starts_files)
+        window = _DownloadWindow(
+            approved=constraint is None and starts_files,
+            deadline=asyncio.get_running_loop().time() + DOWNLOAD_ACT_BUDGET_SECONDS,
+        )
         download: BrowserDownload | None = None
         self._download_window = window
         # A refusal belongs to the act whose fence made it: every act starts
