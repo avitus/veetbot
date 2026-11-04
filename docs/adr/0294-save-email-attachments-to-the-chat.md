@@ -81,7 +81,10 @@ either be truncated or written into append-only history.
    in any chat that saved or tried to save the file, while keeping the call and the
    owner's decision. A file deleted or erased while its knowledge intake is pending never
    reaches knowledge. Only email erasure reads approvals: call erasure shares this code
-   and has no saved files, and the call worker's role keeps its grants unchanged.
+   and has no saved files, and the call worker's role keeps its grants unchanged. A saved
+   file follows its own message rather than its run: one run can save from two emails, so
+   erasing one leaves the other's file, and a save whose receipt a crash lost is still
+   found. A file whose source cannot be read is erased with the run.
 
 9. **`save_attachment` is an unindexed deferral.** It has one name per mailbox, and
    as a read it would have taken a definition slot from a tool used on a request's

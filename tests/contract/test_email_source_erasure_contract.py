@@ -369,7 +369,13 @@ async def assert_email_source_erasure(factory: UnitOfWorkFactory) -> None:
 async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
     """A plain chat has no Gmail metadata, and the file name is in its calls (ADR-0294)."""
     sid, rid, iid, aid = uuid4(), uuid4(), uuid4(), uuid4()
-    other_iid = uuid4()
+    other_iid, kept_aid, unreceipted_rid, unreceipted_aid, unknown_aid = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
     name = "mcp.gmail_read.save_attachment"
     arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}
     other = {"message_id": "m2", "attachment_index": 0, "filename": "keep.pdf"}
@@ -423,25 +429,39 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
             invocation(iid, arguments, result_item=item, structured_result=receipt)
         )
         await uow.invocations.create(invocation(other_iid, other))
-        await uow.artifacts.create(
-            ArtifactRef(
-                id=aid,
-                tenant_id=principal().tenant_id,
-                principal_id=principal().principal_id,
-                session_id=sid,
-                run_id=rid,
-                name="invoice.pdf",
-                media_type="application/pdf",
-                storage_uri=f"memory://{aid}",
-                sha256="a" * 64,
-                size_bytes=1,
-                origin="email_attachment",
-                trust=TrustLevel.EXTERNAL_UNTRUSTED,
-                expires_at=None,
-                created_at=NOW,
-                metadata={"auto_ingest": "pending"},
+        # A crash can lose the receipt, so this run names no file at all.
+        await uow.runs.create(
+            run(status=RunStatus.COMPLETED).model_copy(
+                update={"id": unreceipted_rid, "session_id": sid}
             )
         )
+        for artifact_id, artifact_run, metadata in (
+            (aid, rid, {"auto_ingest": "pending", "email_source": {"message_id": "m1"}}),
+            # One run can save from two emails; this file is the other email's.
+            (kept_aid, rid, {"auto_ingest": "pending", "email_source": {"message_id": "m2"}}),
+            (unreceipted_aid, unreceipted_rid, {"email_source": {"message_id": "m1"}}),
+            # A source nobody can read is treated as the email being erased.
+            (unknown_aid, rid, {}),
+        ):
+            await uow.artifacts.create(
+                ArtifactRef(
+                    id=artifact_id,
+                    tenant_id=principal().tenant_id,
+                    principal_id=principal().principal_id,
+                    session_id=sid,
+                    run_id=artifact_run,
+                    name="invoice.pdf",
+                    media_type="application/pdf",
+                    storage_uri=f"memory://{artifact_id}",
+                    sha256="a" * 64,
+                    size_bytes=1,
+                    origin="email_attachment",
+                    trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                    expires_at=None,
+                    created_at=NOW,
+                    metadata=metadata,
+                )
+            )
         await uow.approvals.create(
             approval_request().model_copy(
                 update={
@@ -455,18 +475,21 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
             )
         )
     async with factory() as uow:
-        assert [
+        assert {
             item.id
             for item in await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
-        ] == [aid]
+        } == {aid, kept_aid}
     async with factory() as uow:
         counts = await uow.session_deletions.erase_email_source(
             principal(), "work", "t1", frozenset({"m1"}), NOW
         )
-    assert counts["pending_artifacts"] == 1
+    assert counts["pending_artifacts"] == 3
     # An erased file must not come back through a knowledge intake still pending.
     async with factory() as uow:
-        assert await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9) == []
+        assert [
+            item.id
+            for item in await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
+        ] == [kept_aid]
     with pytest.raises(NotFoundError):
         async with factory() as uow:
             await uow.artifacts.retain_for_knowledge(aid, principal(), now=NOW)
@@ -484,7 +507,9 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
     assert '"m1"' in json.dumps(events[0].payload)
     assert "invoice.pdf" not in recorded[iid].model_dump_json()
     assert json.loads(recorded[other_iid].raw_arguments)["filename"] == "keep.pdf"
-    assert aid in {artifact.id for artifact in expired}
+    expired_ids = {artifact.id for artifact in expired}
+    assert {aid, unreceipted_aid, unknown_aid} <= expired_ids
+    assert kept_aid not in expired_ids
 
 
 async def assert_denied_save_erased(factory: UnitOfWorkFactory) -> None:

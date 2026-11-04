@@ -12,6 +12,7 @@ from agent_core.domain.artifacts import (
     ATTACHMENT_METADATA_KEY,
     AUTO_INGEST_KEY,
     AUTO_INGEST_PENDING,
+    EMAIL_SOURCE_METADATA_KEY,
 )
 from agent_core.domain.attachments import stored_email_attachment_name
 from agent_core.domain.mcp import MCPCallResult
@@ -20,7 +21,6 @@ from agent_core.domain.tools import ToolExecutionContext
 from agent_core.model.attachments import KNOWLEDGE_MEDIA_TYPES, PDF_MEDIA_TYPE
 from agent_core.ports.artifacts import ArtifactWriter, AttachmentInspector
 
-EMAIL_SOURCE_METADATA_KEY = "email_source"
 _FALLBACK_MEDIA_TYPE = "application/octet-stream"
 _CHUNK_BYTES = 64 * 1024
 

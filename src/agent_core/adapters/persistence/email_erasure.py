@@ -30,6 +30,11 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ToolInvocationRow,
 )
 from agent_core.domain.agents import Principal
+from agent_core.domain.artifacts import (
+    EMAIL_SOURCE_METADATA_KEY,
+    ArtifactOrigin,
+    outlives_source_erasure,
+)
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY
@@ -657,16 +662,31 @@ async def erase_postgres_source(
             ):
                 await session.delete(episode)
                 counts["episodes"] += 1
-    artifacts = list(
-        (
+    artifacts = [
+        artifact
+        for artifact in (
             await session.scalars(
                 select(ArtifactRow).where(
-                    ArtifactRow.run_id.in_(affected_runs),
-                    ArtifactRow.origin != "upload",
+                    or_(
+                        and_(
+                            ArtifactRow.run_id.in_(affected_runs),
+                            ArtifactRow.origin != "upload",
+                        ),
+                        # A crash can lose a save's receipt, but not the file's own record.
+                        and_(
+                            ArtifactRow.tenant_id == principal.tenant_id,
+                            ArtifactRow.principal_id == principal.principal_id,
+                            ArtifactRow.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value,
+                            ArtifactRow.metadata_json[EMAIL_SOURCE_METADATA_KEY][
+                                "message_id"
+                            ].astext.in_(sorted(message_ids)),
+                        ),
+                    )
                 )
             )
         ).all()
-    )
+        if not outlives_source_erasure(artifact.origin, artifact.metadata_json, message_ids)
+    ]
     for artifact in artifacts:
         artifact.expires_at = erased_at
     if artifacts:
@@ -889,7 +909,19 @@ def erase_memory_source_locked(
             counts["episodes"] += 1
     expired_artifacts = set()
     for key, artifact in list(repository._artifacts._rows.items()):
-        if artifact.run_id in affected_runs and artifact.origin != "upload":
+        in_affected_run = artifact.run_id in affected_runs and artifact.origin != "upload"
+        # A crash can lose a save's receipt, but not the file's own record.
+        source = artifact.metadata.get(EMAIL_SOURCE_METADATA_KEY)
+        names_source = (
+            artifact.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
+            and artifact.tenant_id == principal.tenant_id
+            and artifact.principal_id == principal.principal_id
+            and isinstance(source, dict)
+            and source.get("message_id") in message_ids
+        )
+        if (in_affected_run or names_source) and not outlives_source_erasure(
+            artifact.origin, artifact.metadata, message_ids
+        ):
             repository._artifacts._rows[key] = artifact.model_copy(update={"expires_at": erased_at})
             expired_artifacts.add(artifact.id)
     for key, export in list(repository._trajectory_exports._rows.items()):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -97,6 +98,7 @@ class StoredArtifactRef:
 # kept on the artifact row, and every one of them is visible in ArtifactView.
 ATTACHMENT_METADATA_KEY = "attachment"
 AUTO_INGEST_KEY = "auto_ingest"
+EMAIL_SOURCE_METADATA_KEY = "email_source"
 AUTO_INGEST_REASON_KEY = "auto_ingest_reason"
 AUTO_INGEST_ATTEMPTS_KEY = "auto_ingest_attempts"
 AUTO_INGEST_PENDING = "pending"
@@ -221,3 +223,19 @@ class AttachmentContent:
     artifact_id: UUID
     data: bytes
     truncated: bool = False
+
+
+def outlives_source_erasure(
+    origin: str, metadata: Mapping[str, Any], message_ids: frozenset[str]
+) -> bool:
+    """A saved file copies its own email, whatever else its run read (ADR-0294).
+
+    Its bytes come from Gmail, so erasing a different source in the same run
+    leaves it alone. A source nobody can read is treated as the one being erased.
+    """
+
+    if origin != ArtifactOrigin.EMAIL_ATTACHMENT.value:
+        return False
+    source = metadata.get(EMAIL_SOURCE_METADATA_KEY)
+    message_id = source.get("message_id") if isinstance(source, Mapping) else None
+    return isinstance(message_id, str) and bool(message_id) and message_id not in message_ids
