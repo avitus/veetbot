@@ -31,7 +31,8 @@ failed the same way that morning.
 
 ## Decision
 
-1. **`RunLimits.execution_seconds`.** A run may carry a window of working time.
+1. **`RunLimits.execution_seconds`.** A run may carry a window of working time, of
+   at most one day.
    The first claim sets `deadline_at` to the sooner of the claim time plus the
    window and the deadline set at creation, in the column and in the limits, and
    clears the window in the same statement's transaction. A reclaim after a crash
@@ -40,15 +41,17 @@ failed the same way that morning.
 2. **Unset windows do not serialize.** `execution_seconds` is left out of a dump
    when unset, so agent and delegation digests over `RunLimits` do not move and
    no stored run changes shape. Earlier releases ignore the field.
-3. **Every email task but a send uses a window** of its slice, 120 seconds or
-   300 for a subscription batch. Its creation deadline is the slice plus
-   `EMAIL_QUEUE_ALLOWANCE_SECONDS` (300, one scheduled run's usual deadline). A
+3. **A refresh or a draft uses a window** of its 120-second slice. Its creation
+   deadline is the slice plus `EMAIL_QUEUE_ALLOWANCE_SECONDS` (300, one scheduled
+   run's usual deadline). A
    task claimed within the allowance gets its whole slice. A later claim gets what
    remains of the creation deadline, because slices are bounded and checkpointed,
    so a shorter one still makes progress. A task claimed after that deadline fails.
    A deadline set on the agent still caps the creation deadline, so an earlier one
    can shorten or end a slice claimed within the allowance. A send keeps its agent
-   deadline.
+   deadline. An archive or subscription gesture keeps its deadline from admission,
+   because the owner's consent lapses 120 seconds after the gesture and a longer
+   wait could only end in a refusal.
 4. **`worker.reserved_async_slots` becomes 2 and takes effect.** The value was
    validated and read by nothing. `agent worker --role async` now starts one
    `--single-slot` process per slot and supervises them: a signal stops them all
@@ -85,7 +88,8 @@ change.
 - The async unit uses about one more GB of memory (954 MB per process, with 6.3 GB
   available when measured) and a few more PostgreSQL connections, and one more
   process competes for CPU at restart.
-- Rolling back needs no step: the earlier code reads no slots, and a run already
-  admitted keeps its longer creation deadline.
+- Rolling back needs no step: the earlier code reads no slots. A run not yet claimed
+  keeps its longer creation deadline, and one already claimed keeps the shorter
+  deadline its claim set.
 - Slices that run out of time while working (October 27, November 2) are a
   separate cause, not addressed here.

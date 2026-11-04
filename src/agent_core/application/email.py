@@ -1316,8 +1316,12 @@ class EmailExperienceService:
                 )
             # A batch may send mail and page a sender's Inbox after its one-click request.
             slice_seconds = timedelta(seconds=300 if kind == "subscription" else 120)
-            # The slice's own time starts at its first claim; this bounds the wait too.
-            latest = now + slice_seconds + timedelta(seconds=EMAIL_QUEUE_ALLOWANCE_SECONDS)
+            # A refresh or draft's own time starts at its first claim, with this bound on
+            # the wait too. A gesture's consent lapses too soon for it to wait (ADR-0295).
+            windowed = kind in {"refresh", "draft"}
+            latest = now + slice_seconds
+            if windowed:
+                latest += timedelta(seconds=EMAIL_QUEUE_ALLOWANCE_SECONDS)
             deadline = (
                 self.agent.limits.deadline_at
                 if kind == "send"
@@ -1328,9 +1332,7 @@ class EmailExperienceService:
                 update={
                     "max_cost": reservation if reservation else self.agent.limits.max_cost,
                     "deadline_at": deadline,
-                    "execution_seconds": (
-                        None if kind == "send" else int(slice_seconds.total_seconds())
-                    ),
+                    "execution_seconds": (int(slice_seconds.total_seconds()) if windowed else None),
                 },
             )
             # A consented send is parked for the undo window first (ADR-0279).

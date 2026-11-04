@@ -76,7 +76,7 @@ class RunLimits(BaseModel):
     # Seconds of work counted from the first claim, inside deadline_at. The claim
     # turns this into the deadline and clears it, so a reclaim keeps that deadline
     # (ADR-0295).
-    execution_seconds: int | None = Field(default=None, gt=0)
+    execution_seconds: int | None = Field(default=None, gt=0, le=86_400)
 
     @model_serializer(mode="wrap")
     def omit_unset_execution_window(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:

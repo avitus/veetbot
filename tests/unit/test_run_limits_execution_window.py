@@ -1,5 +1,8 @@
 """An unset execution window leaves serialized limits, and their digests, unchanged."""
 
+import pytest
+from pydantic import ValidationError
+
 from agent_core.domain.runs import RunLimits
 
 
@@ -17,3 +20,10 @@ def test_a_set_window_survives_the_round_trip_through_the_runs_row() -> None:
 def test_limits_stored_by_an_earlier_release_load_without_a_window() -> None:
     dumped = RunLimits().model_dump(mode="json")
     assert RunLimits.model_validate(dumped).execution_seconds is None
+
+
+@pytest.mark.parametrize("seconds", [0, -1, 86_401, 10**12])
+def test_a_window_outside_one_day_is_refused(seconds: int) -> None:
+    """A huge window would overflow the deadline at claim and wedge the queue."""
+    with pytest.raises(ValidationError):
+        RunLimits(execution_seconds=seconds)

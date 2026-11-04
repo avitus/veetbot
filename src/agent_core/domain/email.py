@@ -19,7 +19,7 @@ from agent_core.domain.email_subscriptions import EmailSubscriptionConsent
 
 EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
-# How long an email task may wait for a worker before its own slice starts (ADR-0295):
+# How long a refresh or draft may wait for a worker before its slice starts (ADR-0295):
 # long enough for one scheduled run, whose usual deadline is five minutes.
 EMAIL_QUEUE_ALLOWANCE_SECONDS = 300
 # Background learning stops here; new mail keeps the rest of each ceiling (ADR-0256).
