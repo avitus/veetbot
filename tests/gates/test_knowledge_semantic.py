@@ -16,6 +16,8 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.persistence.memory import (
@@ -33,14 +35,24 @@ from agent_core.domain.knowledge import (
     KnowledgeVisibility,
     RetrievedPassage,
 )
+from agent_core.domain.messages import ProviderPin
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.runs import RunStatus
 from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.knowledge.service import KnowledgeService
-from tests.contract.knowledge_embedding_fixture import RecordedEmbeddingProvider
-from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal
+from tests.contract.knowledge_embedding_fixture import (
+    FIXTURE,
+    LOCAL_FIXTURE,
+    RecordedEmbeddingProvider,
+)
+from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "evals/corpora/knowledge_paraphrase"
+# The OpenAI space the arm runs in (ADR-0290), and the memory index's local
+# encoder (ADR-0188's MiniLM tuple), recorded with its windows and kept as the
+# measured miss that sent the arm to its own provider.
+SPACES = pytest.mark.parametrize("fixture", [FIXTURE, LOCAL_FIXTURE], ids=["openai", "onnx"])
 
 
 async def _bytes(value: bytes) -> AsyncIterator[bytes]:
@@ -80,6 +92,21 @@ async def _service(
         principal(),
         embedder=embedder,
     )
+    if embedder is not None:
+        # A production run is pinned to the model it answers with; the
+        # question reaches only that provider (ADR-0290).
+        async with factory() as uow:
+            await uow.runs.create(run(status=RunStatus.COMPLETED))
+            await uow.runs.set_provider_pin(
+                RUN_ID,
+                ProviderPin(
+                    run_id=RUN_ID,
+                    provider=embedder.space.provider,
+                    model=embedder.space.model,
+                    registry_version="gate",
+                    pinned_at=NOW,
+                ),
+            )
     return service, writer, factory
 
 
@@ -129,20 +156,23 @@ def _rank(passages: list[RetrievedPassage], answer: str) -> int | None:
     return next((index for index, item in enumerate(passages, 1) if answer in item.text), None)
 
 
-async def _ranks(tmp_path: Path, channel: KnowledgeSemanticChannel | None) -> dict[str, int | None]:
+async def _ranks(
+    tmp_path: Path, channel: KnowledgeSemanticChannel | None, fixture: Path = FIXTURE
+) -> dict[str, int | None]:
     """The answering passage's rank per corpus member under one configuration."""
 
     embedder = None
     if channel is not None:
-        provider = RecordedEmbeddingProvider()
-        embedder = KnowledgeEmbedder(provider, provider.space, channel=channel)
+        embedder = RecordedEmbeddingProvider(fixture).embedder(channel=channel)
     service, writer, factory = await _service(tmp_path, embedder)
     members = _members()
     for member in members:
         await _ingest(service, writer, factory, member)
     ranks: dict[str, int | None] = {}
     for member in members:
-        result = await service.search(_query(member["question"]), session_id=SESSION_ID)
+        result = await service.search(
+            _query(member["question"]), session_id=SESSION_ID, run_id=RUN_ID
+        )
         ranks[member["title"]] = _rank(result.passages, member["answer"])
     return ranks
 
@@ -150,9 +180,23 @@ async def _ranks(tmp_path: Path, channel: KnowledgeSemanticChannel | None) -> di
 async def test_paraphrase_lift(tmp_path: Path) -> None:
     """With the semantic arm on, every answering passage is in the top two."""
 
-    ranks = await _ranks(tmp_path, "dense")
+    ranks = await _ranks(tmp_path, "dense", FIXTURE)
     misses = {title: rank for title, rank in ranks.items() if rank is None or rank > 2}
     assert not misses, misses
+
+
+async def test_the_local_encoder_does_not_reach_the_top_two(tmp_path: Path) -> None:
+    """The measured reason the arm has its own provider (ADR-0290).
+
+    The memory index's local encoder scores by shared words: a section that
+    repeats "click" or "tray" outranks the passage that answers, at its full
+    256-token window and at every smaller window budget tried, so two of the
+    three members miss. Recorded so a change of local encoder is measured
+    rather than assumed to lift.
+    """
+
+    ranks = await _ranks(tmp_path, "dense", LOCAL_FIXTURE)
+    assert sum(1 for rank in ranks.values() if rank is None or rank > 2) >= 2, ranks
 
 
 async def test_lexical_alone_misses_the_paraphrase(tmp_path: Path) -> None:
@@ -179,11 +223,12 @@ async def test_hybrid_fusion_does_not_reach_the_top_two(tmp_path: Path) -> None:
     that lifts hybrid fusion is seen rather than guessed.
     """
 
-    ranks = await _ranks(tmp_path, "hybrid")
+    ranks = await _ranks(tmp_path, "hybrid", FIXTURE)
     assert all(rank is None or rank > 2 for rank in ranks.values()), ranks
 
 
-async def test_an_unrelated_question_returns_no_passage(tmp_path: Path) -> None:
+@SPACES
+async def test_an_unrelated_question_returns_no_passage(tmp_path: Path, fixture: Path) -> None:
     """The semantic floor: a question none of the documents answers finds nothing.
 
     The lexical arm returns only chunks holding a query term; the semantic arm
@@ -192,12 +237,13 @@ async def test_an_unrelated_question_returns_no_passage(tmp_path: Path) -> None:
     nearest page of a car manual.
     """
 
-    provider = RecordedEmbeddingProvider()
-    embedder = KnowledgeEmbedder(provider, provider.space, channel="dense")
+    embedder = RecordedEmbeddingProvider(fixture).embedder(channel="dense")
     service, writer, factory = await _service(tmp_path, embedder)
     members = _members()
     for member in members:
         await _ingest(service, writer, factory, member)
     for member in members:
-        result = await service.search(_query(member["unrelated_question"]), session_id=SESSION_ID)
+        result = await service.search(
+            _query(member["unrelated_question"]), session_id=SESSION_ID, run_id=RUN_ID
+        )
         assert result.passages == [], (member["unrelated_question"], result.passages)

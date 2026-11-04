@@ -34,6 +34,10 @@ from agent_core.memory.reconsolidation_policy import POLICY_VERSION
 from agent_core.memory.semantic_indexing import SemanticIndexingPass
 from agent_core.memory.semantic_runtime import RunSemanticQueries
 from agent_core.memory.source_recovery import BoundedSourceRecovery
+from agent_core.memory.standing_recall_admission import (
+    STANDING_ADMISSION_VERSION,
+    bind_standing_recall,
+)
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock
 from agent_core.ports.embeddings import EmbeddingProvider, LocalEmbeddingProvider
@@ -161,6 +165,13 @@ def bind_index_manifest(
     }
     raw = _read_bounded(manifest)
     document = json.loads(raw, object_pairs_hook=_unique_object)
+    if isinstance(document, dict) and document.get("version") == STANDING_ADMISSION_VERSION:
+        # ADR-0290: the owner's standing decision; no release census, no expiry.
+        if principal is None or clock is None:
+            raise ValueError("Standing recall requires actual owner and clock")
+        return bind_standing_recall(
+            manifest, evidence, dependencies, principal=principal, clock=clock
+        )
     if isinstance(document, dict) and document.get("version") in (
         "recall-bounded-admission@1",
         "recall-bounded-admission@2",

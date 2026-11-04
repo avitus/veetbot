@@ -245,6 +245,10 @@ class DurableWorker:
                 await asyncio.gather(upkeep, return_exceptions=True)
 
 
+# The knowledge vector backfill's deadline per maintenance round (ADR-0290).
+KNOWLEDGE_VECTOR_SWEEP_SECONDS = 60.0
+
+
 class MaintenanceWorker:
     """Run the periodic sweeps that keep durable state bounded and queues moving."""
 
@@ -274,6 +278,7 @@ class MaintenanceWorker:
         sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         sweep_folder_proposals: Callable[[], Awaitable[int]] | None = None,
         sweep_upload_ingests: Callable[[], Awaitable[int]] | None = None,
+        sweep_knowledge_vectors: Callable[[], Awaitable[int]] | None = None,
         sweep_people_duplicates: Callable[[], Awaitable[int]] | None = None,
         sweep_browser_task_grants: Callable[[], Awaitable[int]] | None = None,
         sweep_conversation_titles: Callable[[], Awaitable[int]] | None = None,
@@ -315,6 +320,7 @@ class MaintenanceWorker:
         self._sweep_terminal_schedules = sweep_terminal_schedules
         self._sweep_folder_proposals = sweep_folder_proposals
         self._sweep_upload_ingests = sweep_upload_ingests
+        self._sweep_knowledge_vectors = sweep_knowledge_vectors
         self._sweep_people_duplicates = sweep_people_duplicates
         self._sweep_browser_task_grants = sweep_browser_task_grants
         self._sweep_conversation_titles = sweep_conversation_titles
@@ -524,6 +530,15 @@ class MaintenanceWorker:
                 await self._sweep_upload_ingests()
             except Exception:
                 logger.exception("owner upload knowledge ingestion sweep failed")
+        # Documents the semantic arm never saw gain vectors a batch a round.
+        if self._sweep_knowledge_vectors is not None:
+            try:
+                # One round is at most 64 chunks in provider batches of 32; a
+                # slow provider must not hold the sweeps that follow (ADR-0290).
+                async with asyncio.timeout(KNOWLEDGE_VECTOR_SWEEP_SECONDS):
+                    await self._sweep_knowledge_vectors()
+            except Exception as exc:
+                logger.warning("knowledge vector backfill sweep ended (%s)", type(exc).__name__)
         # Titles follow a reply within seconds, so this pass runs every round (ADR-0155).
         if self._sweep_conversation_titles is not None:
             try:

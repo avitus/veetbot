@@ -518,6 +518,7 @@ from agent_core.domain.code import (
     CODE_WRITE_TOOL_NAMES,
     RUN_INSPECT_TOOL_NAME,
 )
+from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -531,6 +532,7 @@ from agent_core.domain.execution import (
     ResourceLimits,
 )
 from agent_core.domain.failures import log_failure
+from agent_core.domain.knowledge import KNOWLEDGE_OPENAI_SPACE
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig
 from agent_core.domain.mcp import (
     MCPServerConfig,
@@ -606,6 +608,7 @@ from agent_core.folders.grouping import ModelAssistedThreadGrouper
 from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
+from agent_core.knowledge.backfill import KnowledgeVectorBackfill
 from agent_core.knowledge.chunking import (
     MAX_KNOWLEDGE_SOURCE_BYTES,
     PlainTextExtractor,
@@ -661,6 +664,8 @@ from agent_core.memory.retrieval import (
     HybridMemoryRetriever,
 )
 from agent_core.memory.semantic_deployment import (
+    DOCUMENT,
+    IndexProfiles,
     SemanticCompositionInputs,
     SemanticServices,
     compose_indexing,
@@ -1601,6 +1606,158 @@ def default_fake_script() -> FakeModelScript:
             ),
             ScriptedTurn(text="391", stop_reason=StopReason.END_TURN),
         ]
+    )
+
+
+async def prepare_standing_admission(
+    *,
+    instruction: str,
+    reference: str,
+    rollback_build_ref: str,
+    out: Path,
+    supersedes: str | None,
+    decided_at: datetime | None,
+) -> dict[str, Any]:
+    """Write the two standing-admission files from the live composition (ADR-0290).
+
+    The dependency digests come from the same composition the API runs,
+    stopped before any model or provider is built; a remote profile or a
+    configuration without query preparation is refused with the reason.
+    """
+
+    from agent_core.memory.standing_recall_admission import write_standing_admission
+
+    settings = load_settings()
+    profiles = IndexProfiles.model_validate(load_config_document(settings, DOCUMENT))
+    if len(profiles.configurations) != 1:
+        raise ConfigurationError("the semantic index needs one explicit configuration")
+    profile = profiles.configurations[0]
+    if profile.local is None:
+        raise ConfigurationError(
+            "a standing admission needs the local encoder; the configured index is remote"
+        )
+    captured: list[SemanticCompositionInputs] = []
+
+    class _CapturedError(Exception):
+        pass
+
+    def capture(inputs: SemanticCompositionInputs) -> None:
+        captured.append(inputs)
+        raise _CapturedError
+
+    # The live digests come from the same composition the API runs, stopped
+    # before any model or provider is built.
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            model_metadata_only=True,
+            recall_capture=capture,
+        ):
+            raise ConfigurationError("composition capture exposed a runtime")
+    except _CapturedError:
+        pass
+    inputs = captured[0]
+    retrieval = inputs.configuration.get("memory", {}).get("retrieval", {})
+    if retrieval.get("semantic_enabled") is not True:
+        raise ConfigurationError(
+            "a standing admission needs memory.retrieval.semantic_enabled true "
+            "in the effective configuration"
+        )
+    # The same conditions composition refuses a bounded admission under,
+    # checked here so the operator learns before any file is written.
+    if profile.reader_sha256 is None:
+        raise ConfigurationError(
+            "a standing admission needs the reviewed reader in the semantic index configuration"
+        )
+    if settings.memory_reconsolidation_enabled:
+        raise ConfigurationError(
+            "a standing admission refuses unattended reconsolidation; disable it first"
+        )
+    dependencies = inputs.dependencies(profile)
+    owner = inputs.configuration["principal"]
+    evidence_path, manifest_path = write_standing_admission(
+        out,
+        tenant_id=str(owner["tenant"]),
+        principal_id=str(owner["owner"]),
+        instruction=instruction,
+        reference=reference,
+        rollback_build_ref=rollback_build_ref,
+        dependencies=dependencies,
+        activated_at=system_clock().now(),
+        decided_at=decided_at,
+        supersedes=supersedes,
+    )
+    return {
+        "evidence": str(evidence_path),
+        "evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
+        "manifest": str(manifest_path),
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "embedding_space_key": profile.embedding.space.key,
+        "embedding_configuration_sha256": dependencies["embedding_configuration_sha256"],
+        "tenant_id": str(owner["tenant"]),
+        "principal_id": str(owner["owner"]),
+    }
+
+
+async def _knowledge_embedder(
+    settings: Settings,
+    index: SemanticServices | None,
+    credentials: CredentialResolver,
+) -> KnowledgeEmbedder | None:
+    """The knowledge semantic arm's embedder, or None when search stays lexical.
+
+    ADR-0289 borrowed the memory index's admitted provider. ADR-0290 adds the
+    arm's own OpenAI provider on the `openai` credential, the model gate 13
+    measured lift with, because the local encoder measured none; a missing
+    credential, like a missing index, leaves search lexical and says so once.
+    """
+
+    if not settings.knowledge_semantic_enabled:
+        return None
+    if settings.knowledge_semantic_provider == "openai":
+        if settings.memory_semantic_index_enabled and index is None:
+            # The index is configured but its admission was rejected at
+            # startup (withdrawn files, ADR-0269's fallback): the knowledge
+            # arm's egress stays withdrawn with it rather than composing on
+            # the flag alone.
+            logger.warning(
+                "knowledge_semantic_unavailable_using_lexical", extra={"reason": "admission"}
+            )
+            return None
+        key = ""
+        with suppress(PermissionError):
+            key = (await credentials.resolve(CredentialRef("openai"))).reveal()
+        if not key:
+            logger.warning(
+                "knowledge_semantic_unavailable_using_lexical", extra={"reason": "credential"}
+            )
+            return None
+        # The arm's egress follows the semantic index's admission when one is
+        # composed, so withdrawing the standing files stops it as well; with
+        # no index the flag alone turns it off.
+        # A question reaches the provider only from a run pinned to it; the
+        # service reads the run's pin at search (ADR-0290).
+        return KnowledgeEmbedder(
+            OpenAIEmbeddingProvider(key),
+            KNOWLEDGE_OPENAI_SPACE,
+            channel=settings.knowledge_semantic_channel,
+            admitted=(lambda: True) if index is None else (index.admitted or (lambda: True)),
+        )
+    if index is None:
+        logger.warning("knowledge_semantic_unavailable_using_lexical", extra={"reason": "index"})
+        return None
+    # A local encoder admits fewer tokens than a chunk holds, so chunks are
+    # embedded in windows its own tokenizer sizes.
+    local_encoder = index.local_provider
+    return KnowledgeEmbedder(
+        index.provider,
+        index.space,
+        channel=settings.knowledge_semantic_channel,
+        local=local_encoder is not None,
+        admitted=index.admitted or (lambda: True),
+        window_tokens=None if local_encoder is None else local_encoder.maximum_tokens,
+        count_tokens=None if local_encoder is None else local_encoder.count_tokens,
     )
 
 
@@ -4723,21 +4880,11 @@ async def _compose(
         general_artifact_store = FilesystemArtifactStore(
             artifact_root, maximum_bytes=artifact_maximum_bytes
         )
-        knowledge_embedder: KnowledgeEmbedder | None = None
-        if settings.knowledge_semantic_enabled:
-            # ADR-0289: the knowledge semantic arm embeds chunks and questions
-            # with the semantic index's admitted provider; without one, search
-            # stays lexical and says so once at startup.
-            if semantic_index_pass is None:
-                logger.warning("knowledge_semantic_unavailable_using_lexical")
-            else:
-                knowledge_embedder = KnowledgeEmbedder(
-                    semantic_index_pass.provider,
-                    semantic_index_pass.space,
-                    channel=settings.knowledge_semantic_channel,
-                    local=semantic_index_pass.local_provider is not None,
-                    admitted=semantic_index_pass.admitted or (lambda: True),
-                )
+        # ADR-0289 and ADR-0290: the knowledge semantic arm's provider, or
+        # lexical search that says so once at startup.
+        knowledge_embedder = await _knowledge_embedder(
+            settings, semantic_index_pass, credential_resolver
+        )
         knowledge_service = KnowledgeService(
             uow_factory,
             general_artifact_store,
@@ -6132,6 +6279,16 @@ async def _compose(
                         principal=principal,
                         clock=clock,
                     ).sweep_once,
+                    sweep_knowledge_vectors=(
+                        None
+                        if knowledge_embedder is None
+                        else KnowledgeVectorBackfill(
+                            uow_factory=uow_factory,
+                            embedder=knowledge_embedder,
+                            principal=principal,
+                            clock=clock,
+                        ).sweep_once
+                    ),
                     folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None

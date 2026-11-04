@@ -208,12 +208,18 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   and recoverable truncation of ADR-0258.
 - `agent_core.memory` grew the general recall path and the release-bound
   semantic index behind the `AGENT_MEMORY_SEMANTIC_INDEX_*` settings
-  (Milestone 33, ADR-0178; activation stays evidence-gated).
+  (Milestone 33, ADR-0178). In production it runs on the owner's standing
+  admission, `agent_core.memory.standing_recall_admission` (ADR-0290): no
+  expiry, no release census, hard-bound to the local encoder tuple, prepared
+  by `agent memory standing-admission` and installed by root.
   `agent_core.knowledge.embedding` is the knowledge semantic arm behind
-  `AGENT_KNOWLEDGE_SEMANTIC_ENABLED` (ADR-0289): chunk vectors in
-  `knowledge_chunk_vectors`, the question embedded at search, and the arms
-  fused by the shared `agent_core.domain.retrieval_fusion`; off by default
-  until the paraphrase gate is measured with the production space.
+  `AGENT_KNOWLEDGE_SEMANTIC_ENABLED` (ADR-0289): chunks embedded in windows
+  under the encoder's capacity (`knowledge-text@2`) into
+  `knowledge_chunk_vectors`, the question embedded at search, the arms fused
+  by the shared `agent_core.domain.retrieval_fusion`, and
+  `agent_core.knowledge.backfill` giving earlier documents their vectors
+  from the maintenance loop. `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER` picks the
+  memory index's provider or the arm's own OpenAI one (ADR-0290).
 - `agent_core.application.records` and `agent_core.tools.records` are the
   owner's named numeric series behind `AGENT_RECORDS_ENABLED` (Milestone 34,
   ADR-0239). `agent_core.cockpit`, `agent_core.application.cockpit*` and the

@@ -1286,16 +1286,18 @@ valid code-only rollback target. The runbook below detects the target's cadence
 support and checks the stored values while all schedule writers are stopped.
 If it refuses the target, roll forward instead, or restore a database snapshot
 from before the first such revision and then roll the code back. Never run an
-automatic Alembic downgrade as part of rollback. The same rule covers a release
-from before ADR-0291: its schedule model forbids a revision that names MCP
-servers, and its schedule role refuses to start with `AGENT_SVP_ENABLED=1` and
-no credential. Once every unit is stopped and the stored revisions pass, the
-runbook removes that line from the schedule environment. It puts the line back
-before restarting the current release if the rollback then fails. After a
-successful rollback, add the line back before the next release, whose parity
-check otherwise refuses it. Such a target also cannot read a saved job that
-declares `mcp.read`, and the runbook does not check for one, so that job fails
-until you roll forward. Run the complete block in one
+automatic Alembic downgrade as part of rollback. The block also refuses a
+target whose expected schema revision is not the database's, before any unit
+stops, since such a target's startup check would reject the database. The same
+care covers a release from before ADR-0291: its schedule model forbids a revision
+that names MCP servers, and its schedule role refuses to start with
+`AGENT_SVP_ENABLED=1` and no credential. Once every unit is stopped and the stored
+revisions pass, the runbook removes that line from the schedule environment. It
+puts the line back before restarting the current release if the rollback then
+fails. After a successful rollback, add the line back before the next release,
+whose parity check otherwise refuses it. Such a target also cannot read a saved
+job that declares `mcp.read`, and the runbook does not check for one, so that job
+fails until you roll forward. Run the complete block in one
 shell so file descriptor 9 holds the same deployment lock from before writer
 quiescence through readiness verification. The block retags the target's
 Cockpit builder image as `production` when the target has one; a target from
@@ -1454,6 +1456,48 @@ rollback_on_exit() {
   exit "$status"
 }
 trap rollback_on_exit EXIT
+
+# A target that expects an older schema revision cannot read the database
+# (its startup check refuses it), so refuse here, before any unit stops.
+target_schema_compatibility="$({
+  set -a
+  # shellcheck disable=SC1090
+  . "$environment_file"
+  set +a
+  cd "$target"
+  "$target/.venv/bin/python" - <<'PY'
+import asyncio
+import os
+
+from sqlalchemy import text
+
+from agent_core.adapters.persistence.database import create_engine
+from agent_core.adapters.persistence.revision import EXPECTED_REVISION
+
+
+async def main() -> None:
+    engine = create_engine(os.environ["DATABASE_URL"])
+    async with engine.connect() as connection:
+        stored = (await connection.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
+    await engine.dispose()
+    print("compatible" if stored == EXPECTED_REVISION else f"incompatible {stored} {EXPECTED_REVISION}")
+
+
+asyncio.run(main())
+PY
+})"
+case "$target_schema_compatibility" in
+  compatible) ;;
+  incompatible*)
+    echo "The database schema is not the target's expected revision ($target_schema_compatibility);" >&2
+    echo "a code-only rollback cannot read it. Roll forward, or restore a snapshot first." >&2
+    exit 1
+    ;;
+  *)
+    echo "Could not determine the target's schema compatibility" >&2
+    exit 1
+    ;;
+esac
 
 rollback_pending=1
 sudo systemctl stop "${managed_units[@]}"
@@ -1943,6 +1987,65 @@ restore the retained configuration and restart. If an application rollback is
 needed, use the compatible retained release without downgrading the database.
 Verify readiness and public identities after either action, retain the incident,
 and record the rollout outcome before any separately authorized extension.
+
+### Standing owner activation of semantic retrieval (ADR-0290)
+
+Production semantic recall and the knowledge semantic arm run on the owner's
+standing decision, not a trial: the admission has no expiry, no check-ins and
+no release census, and it is hard-bound only to the local encoder tuple. The
+bounded routes above remain available for a future trial.
+
+**Prepare the files** on the host as `veetbot`, from the current release with
+the environment sourced, with the owner's exact instruction in a file:
+
+```sh
+.venv/bin/agent memory standing-admission --instruction-file /tmp/standing/instruction.txt \
+  --reference <reference to the owner's message> \
+  --rollback-build-ref <full commit of the retained previous release> \
+  --out /tmp/standing
+```
+
+The command composes the live configuration exactly as startup does, refuses a
+remote profile or a profile without query preparation, writes
+`standing-evidence.json` and `standing-admission.json`, and prints their
+digests and the embedding space key. It never prints the instruction back.
+
+**Install as root.** Move both files to `/etc/veetbot/recall/standing/`
+(directory `root:veetbot 0750`, files `0640`), then in `/etc/veetbot/veetbot.env`
+set:
+
+```dotenv
+AGENT_MEMORY_SEMANTIC_INDEX_ENABLED=1
+AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE=/etc/veetbot/recall/standing/standing-evidence.json
+AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST=/etc/veetbot/recall/standing/standing-admission.json
+AGENT_KNOWLEDGE_SEMANTIC_ENABLED=1
+AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai
+```
+
+The knowledge arm embeds with OpenAI's `text-embedding-3-small` on the existing
+`VEETBOT_OPENAI_KEY` (public and internal text only); the memory index's local
+encoder measured no paraphrase lift. Restart the API, the interactive and
+asynchronous run workers and maintenance.
+
+**Verify.** After the restart the API journal shows neither
+`semantic_recall_unavailable_using_sparse` nor
+`knowledge_semantic_unavailable_using_lexical`; a new private chat's
+`memory.recalled` event carries the admission's binding digest; the
+maintenance journal logs `knowledge_vectors_backfilled` rounds until the
+owner's current documents are covered (64 chunks a round; a 403-chunk manual
+takes seven rounds); and `knowledge.search` in a fresh chat
+returns a passage that paraphrases the question. Readiness alone still proves
+nothing about semantic activation.
+
+**Withdraw.** Set `AGENT_MEMORY_SEMANTIC_INDEX_ENABLED=0` and
+`AGENT_KNOWLEDGE_SEMANTIC_ENABLED=0` and restart, or change or remove the
+installed files: the knowledge arm reads the index's admission before every
+provider call, so the files withdraw its OpenAI calls with memory recall, and
+sparse recall and lexical search continue; a restart with the index enabled
+but not admitted leaves the arm lexical as well. Only with the index flag off
+does the knowledge flag alone govern the arm. A different encoder withdraws the
+admission by itself; prepare and install the files again once the owner
+decides.
 
 ### Application reliability diagnostics and optional alerts (ADR-0205)
 

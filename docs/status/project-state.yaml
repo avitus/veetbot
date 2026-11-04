@@ -3,6 +3,16 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0290: On 2026-11-03 the owner directed that semantic retrieval be
+# activated and stay on ("turned on and off for many months now and we are
+# failing to make progress"). A standing owner admission
+# (recall-standing-admission@1) carries the instruction with no expiry and no
+# release census, hard-bound only to the local encoder tuple; knowledge chunks
+# embed in windows under the encoder's capacity (knowledge-text@2) with a
+# maintenance backfill; gate 13 re-recorded in the local space found no lift,
+# so the knowledge arm runs on its own OpenAI provider
+# (AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai). Accepted; a recorded deviation
+# from the plan's activation evidence. No milestone or gate moves.
 # ADR-0289: On 2026-11-02 the owner's question about valve-like sounds from
 # the parked car missed the manual's passage under coverage ranking, and the
 # owner asked for the knowledge semantic arm the design defers on measured
