@@ -2033,7 +2033,8 @@ asynchronous run workers and maintenance.
 `memory.recalled` event carries the admission's binding digest; the
 maintenance journal logs `knowledge_vectors_backfilled` rounds until the
 owner's current documents are covered (64 chunks a round; a 403-chunk manual
-takes seven rounds); and `knowledge.search` in a fresh chat
+takes seven rounds, about 2,300 windows) and, after the last round,
+`knowledge_vectors_pruned` for a previous space; and `knowledge.search` in a fresh chat
 returns a passage that paraphrases the question. Readiness alone still proves
 nothing about semantic activation.
 

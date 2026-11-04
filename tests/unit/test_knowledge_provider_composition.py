@@ -9,7 +9,11 @@ import pytest
 from agent_core.bootstrap import _knowledge_embedder
 from agent_core.config import ConfigurationError, load_settings
 from agent_core.domain.credentials import CredentialRef, SecretValue
-from agent_core.domain.knowledge import KNOWLEDGE_OPENAI_SPACE
+from agent_core.domain.knowledge import (
+    KNOWLEDGE_OPENAI_SPACE,
+    KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+    KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+)
 from agent_core.domain.memory import Sensitivity
 from tests.unit.test_config import base_environment
 
@@ -111,3 +115,21 @@ async def test_the_openai_arm_stays_lexical_when_the_enabled_index_was_not_admit
     with caplog.at_level(logging.WARNING):
         assert await _knowledge_embedder(settings, None, Resolver("sk-test")) is None
     assert "knowledge_semantic_unavailable_using_lexical" in caplog.text
+
+
+async def test_the_openai_arm_embeds_chunks_in_measured_windows() -> None:
+    """A whole 600-token chunk dilutes its one answering sentence; windows keep it reachable."""
+
+    settings = _settings(AGENT_KNOWLEDGE_SEMANTIC_PROVIDER="openai", VEETBOT_OPENAI_KEY="sk-test")
+    embedder = await _knowledge_embedder(settings, None, Resolver("sk-test"))
+    assert embedder is not None
+    assert embedder.window_tokens == KNOWLEDGE_OPENAI_WINDOW_TOKENS == 128
+    assert embedder.whole_tokens == KNOWLEDGE_OPENAI_WHOLE_TOKENS == 256
+    assert KNOWLEDGE_OPENAI_SPACE.revision == "knowledge-openai@2"
+    sentence = "The cooling fan may run for several minutes after the engine is shut off. "
+    long_chunk = (sentence * 40).strip()
+    windows = embedder.window_texts(["Driving tips", "General driving notes"], long_chunk)
+    assert len(windows) > 1 and all(len(w.encode()) // 4 <= 128 + 4 for w in windows)
+    # About 180 estimated tokens: over the budget, under the whole bound.
+    short_chunk = (sentence * 10).strip()
+    assert len(embedder.window_texts(["Driving tips"], short_chunk)) == 1

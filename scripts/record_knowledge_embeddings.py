@@ -49,6 +49,10 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from agent_core.adapters.embeddings.openai import OpenAIEmbeddingProvider  # noqa: E402
+from agent_core.domain.knowledge import (  # noqa: E402
+    KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+    KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+)
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig  # noqa: E402
 from agent_core.domain.semantic_memory import EmbeddingSpace  # noqa: E402
 from agent_core.knowledge.chunking import DeterministicChunker, normalize_text  # noqa: E402
@@ -232,7 +236,14 @@ async def main() -> int:
             print("VEETBOT_OPENAI_KEY is not set", file=sys.stderr)
             return 2
         space = SPACE
-        embedder = KnowledgeEmbedder(OpenAIEmbeddingProvider(key), space)
+        # The OpenAI route embeds in the measured windows (ADR-0290), by the
+        # chunker's estimate, so the fixture holds the windows ingestion makes.
+        embedder = KnowledgeEmbedder(
+            OpenAIEmbeddingProvider(key),
+            space,
+            window_tokens=KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+            whole_tokens=KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+        )
         target = FIXTURE
     texts = corpus_texts(embedder)
     vectors = await embedder.embed_texts(texts)
@@ -250,6 +261,9 @@ async def main() -> int:
         fixture["token_counts"] = dict(sorted(counts.items()))
         fixture["model_sha256"] = config.model_sha256
         fixture["tokenizer_sha256"] = config.tokenizer_sha256
+    else:
+        fixture["window_tokens"] = KNOWLEDGE_OPENAI_WINDOW_TOKENS
+        fixture["whole_tokens"] = KNOWLEDGE_OPENAI_WHOLE_TOKENS
     out = _option("--out")
     if out is not None:
         target = Path(out).resolve()

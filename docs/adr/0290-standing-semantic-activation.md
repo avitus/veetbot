@@ -2,7 +2,7 @@
 
 - Status: Accepted (explicit owner direction on 2026-11-03)
 - Date: 2026-11-03
-- Related: ADR-0178, ADR-0188, ADR-0199, ADR-0220, ADR-0223, ADR-0246, ADR-0269, ADR-0274, ADR-0289
+- Related: ADR-0178, ADR-0188, ADR-0199, ADR-0220, ADR-0223, ADR-0246, ADR-0269, ADR-0274, ADR-0289, ADR-0292
 - Detailed design: `docs/plan/general-memory-recall.md`, `docs/plan/knowledge-documents.md`
 
 ## Context
@@ -59,13 +59,13 @@ section that repeats "click" or "tray" outranks the passage that answers.
 3. **Knowledge chunks are embedded in windows.** `knowledge-text@2` embeds a
    chunk as one or more windows, each the heading path over a slice of the
    chunk text, packed under the provider's token capacity with the local
-   tokenizer's own count; an unbounded provider gets one window identical to
-   `knowledge-text@1`. A chunk's semantic score is its best window.
+   tokenizer's own count; an unbounded provider got one window identical to
+   `knowledge-text@1` until ADR-0292 gave the OpenAI route windows of its
+   own. A chunk's semantic score is its best window.
    `knowledge_chunk_vectors` keys on chunk, space and window. A maintenance
    sweep embeds the chunks of the owner's current documents that have no
    vector in the active space, so documents ingested before activation gain
-   vectors without a new version, and a new encoder re-embeds every document
-   without an operator step.
+   vectors without a new version (ADR-0292 adds the prune of other spaces).
 4. **The knowledge arm turns on with its own provider.**
    `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai` gives the arm OpenAI's
    `text-embedding-3-small` at 1536 dimensions on the existing `openai`
@@ -112,6 +112,48 @@ because "click" and "heating" appear in its other sections. The local
 recording at the full window is kept as
 `evals/fixtures/embeddings/knowledge_paraphrase.onnx.json`, and the gate
 records the miss beside the lift so a change of local encoder is measured.
+
+### The first live measurement: whole chunks dilute, windows lift
+
+Activated on 2026-11-03 with whole-chunk OpenAI vectors, a fresh chat about
+the valve-like sounds embedded its questions (the traces read
+`knowledge@1+semantic@1:…:dense`) and still missed: the answering chunk is a
+2,800-character "General driving notes" section whose one relevant sentence
+is averaged with the tailgate and the particulate filter. Ranked against the
+manual's 401 chunks by best window, with OpenAI's model, for the owner's
+question, the model's two search queries and a plain phrasing:
+
+| Embedding unit | Owner's words | Model query 1 | Model query 2 | Plain phrasing |
+| --- | --- | --- | --- | --- |
+| Whole chunk | 78 | 136 | 106 | 11 |
+| 160-token windows | 41 | 46 | 26 | 6 |
+| 128-token windows | 6 | 7 | 1 | 2 |
+| 96-token windows | 7 | 6 | 1 | 1 |
+| 64-token windows | 4 | 7 | 2 | 1 |
+| 48-token windows | 6 | 7 | 2 | 1 |
+
+Windows cut both ways. Gate 13's members are short, single-topic sections,
+and cutting them sharpens their distracting sentences: at 96 and 128 tokens
+the thermostat guide's "confirmed with a short click" sentence, a diluted
+part of a whole section before, became a window that overtook the answer,
+and the gate failed, while 160 tokens passed the gate and left the manual at
+ranks 41 to 6. Overlapping windows did not change either side. So the OpenAI
+route cuts a chunk into windows only when the chunk is long enough to need
+it: a chunk under `KNOWLEDGE_OPENAI_WHOLE_TOKENS` (256 estimated tokens)
+stays one window, and a longer one is cut under
+`KNOWLEDGE_OPENAI_WINDOW_TOKENS` (128), by the chunker's estimate, under
+space revision `knowledge-openai@2`. Every gate member stays whole and
+passes as before (2, 1, 2); all but two manual chunks are cut, and its
+answering section ranks sixth for the owner's words, seventh and first for
+the model's two queries, and second for the plain phrasing. The local route
+keeps its tokenizer and capacity, which a chunk may not exceed. The backfill
+prunes any other space once the active one is full (ADR-0292), so a new
+encoder or budget replaces rather than piles up; the manual is about 2,300
+windows and 244,000 tokens once. Model query 1 stays at rank 6 or 7 under
+every budget because it names the document, which pulls the front-matter
+chunk; that is the query, not the ranking. The owner's own words rank behind
+the parking sections, which is why `knowledge.search` runs with the model's
+refined query rather than the question verbatim.
 
 ## Deviation from the plan
 

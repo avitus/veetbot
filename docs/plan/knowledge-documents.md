@@ -265,15 +265,18 @@ earn it.
 The arm is built ([ADR-0289](../adr/0289-knowledge-semantic-arm.md)) and off by
 default in a fresh deployment. Ingestion embeds each chunk under a named text version,
 `knowledge-text@2`: one or more windows, each the heading path over a slice of the
-chunk text, packed under the provider's token capacity with the provider's own
-tokenizer count, and one window identical to the whole text under an unbounded
-provider. The vectors come from the provider the memory semantic index admitted and
+chunk text, packed under a token budget: the local encoder's capacity by its own
+tokenizer count, or, for the OpenAI route, a 128-token budget by the chunker's estimate
+applied only to chunks of 256 estimated tokens or more, since a whole 600-token chunk
+averages its one answering sentence away while cutting a short topical section only
+sharpens its distractors (ADR-0292 measured ranks 78 to 136 whole against 1 to 7
+windowed on the owner's manual). The vectors come from the provider the memory semantic index admitted and
 go to `knowledge_chunk_vectors`, one row per chunk, embedding space and window,
 cascading with the chunk; the in-memory store keeps the same rows, and a chunk's
 semantic score is its best window. A maintenance sweep embeds the chunks of the
-owner's current documents that lack a vector in the active space, so a document
-ingested before activation, or under a previous encoder, gains vectors without a new
-version. The provider is `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER`: `index` borrows the memory
+owner's current documents that lack a vector in the active space and, once that space
+is full, prunes vectors of any other space (ADR-0292), so an earlier document or encoder
+gains vectors without a new version and the old ones do not pile up. The provider is `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER`: `index` borrows the memory
 semantic index's admitted provider and reads its admission before every call; `openai`
 is the arm's own `text-embedding-3-small` on the `openai` credential, the model gate 13
 measured lift with, needing no index. A remote provider
