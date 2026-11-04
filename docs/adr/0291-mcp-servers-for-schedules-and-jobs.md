@@ -41,7 +41,9 @@ widgets get MCP data through feed schedules and through saved jobs.
    `required_scopes` join `requested_scopes`, and an update removes the scopes
    of the servers it drops. `requested_scopes` may still hold a scope no named
    server explains, because call and Gmail schedules do (ADR-0213); the caller
-   must hold it, and the model has no way to ask for it.
+   must hold it, and the model has no way to ask for it. Only Scale VP's scope
+   must be named (`schedule.mcp_scope_unnamed`), because this decision is what
+   first lets a schedule keep it.
 
 2. **Who may be named.** An enabled row that is owner-added, a Gmail server or
    Scale VP. Anything else is `schedule.mcp_server_unavailable`. Calling keeps

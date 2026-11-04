@@ -690,6 +690,15 @@ async def _validate_definition(
         raise ScheduleValidationError(
             "schedule.mcp_scope_required", "A schedule must request its MCP servers' scopes."
         )
+    # ADR-0291: unlike call and Gmail schedules, nothing older holds this scope unnamed.
+    if (
+        not isinstance(definition.task, JobTask)
+        and "mcp.svp_read.use" in definition.requested_scopes
+        and "svp_read" not in definition.mcp_servers
+    ):
+        raise ScheduleValidationError(
+            "schedule.mcp_scope_unnamed", "A schedule must name Scale VP to hold its scope."
+        )
     if definition.browser_profile_id is not None:
         require_scope(principal, "browser.profile.read")
         if "browser.profile.read" not in definition.requested_scopes:

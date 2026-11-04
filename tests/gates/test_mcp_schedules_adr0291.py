@@ -151,6 +151,24 @@ async def test_a_server_that_cannot_be_named_creates_no_schedule(
     assert page.items == []
 
 
+async def test_the_route_refuses_scale_vp_scope_without_naming_it(tmp_path: Path) -> None:
+    """Only ADR-0291 lets a schedule keep this scope, so nothing older relies on holding it."""
+    _factory, context = await _production(
+        tmp_path, [ScriptedTurn(text="Ready.", stop_reason=StopReason.END_TURN)]
+    )
+    async with context as app:
+        principal = app.principal.model_copy(
+            update={"scopes": {*app.principal.scopes, "mcp.svp_read.use"}}
+        )
+        definition = derived_definition(
+            *_pins(app), title="Pipeline", instruction="Read deals.", cadence=_once()
+        ).model_copy(update={"requested_scopes": frozenset({"mcp.svp_read.use"})})
+        with pytest.raises(ScheduleValidationError) as refused:
+            await app.services.schedules.create(principal, definition, "unnamed-scope")
+
+    assert refused.value.reason == "schedule.mcp_scope_unnamed"
+
+
 async def test_an_owner_added_server_is_named_without_a_scope(tmp_path: Path) -> None:
     _factory, context = await _production(
         tmp_path,
