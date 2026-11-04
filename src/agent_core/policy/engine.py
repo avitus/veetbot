@@ -22,7 +22,10 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run
-from agent_core.mcp.configuration import is_mutating_email_server_id
+from agent_core.mcp.configuration import (
+    is_model_email_attachment_action,
+    is_mutating_email_server_id,
+)
 from agent_core.policy.hardline import hardline_matches
 
 _WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch", "web.fetch_json", "web.inspect_image"})
@@ -208,6 +211,7 @@ def evaluate_deterministic(
             and (
                 is_mutating_email_server_id(action.target.server_id)
                 or action.target.server_id == "bland_call"
+                or is_model_email_attachment_action(action.target.server_id, action.name)
             )
         )
         or action.name == UNSUBSCRIBE_TOOL_NAME
@@ -215,6 +219,7 @@ def evaluate_deterministic(
         # ADRs 0071, 0097 and 0112 forbid policy profiles from turning mailbox mutations,
         # sends, telephone calls, or unsubscribe requests into standing allows. A
         # standing-grant design must own any relaxation rather than hiding it in a profile.
+        # ADR-0296 holds Chat saving an email attachment to the same floor.
         decision = PolicyDecisionType.REQUIRE_APPROVAL
     escalated = (
         decision

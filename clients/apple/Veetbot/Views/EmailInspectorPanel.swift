@@ -131,17 +131,22 @@ struct EmailInspectorPanel: View {
             .id(thread.id)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("inspector.email.teach")
-        let attachments = (thread.messages ?? []).flatMap { $0.attachments ?? [] }
+        let attachments = (thread.messages ?? []).flatMap { message in
+            (message.attachments ?? []).enumerated().map { index, attachment in
+                (key: EmailAttachmentKey(threadID: thread.id, messageID: message.id, index: index),
+                 attachment: attachment)
+            }
+        }
         InspectorSection(title: "Attachments", trailing: attachments.isEmpty ? nil : "\(attachments.count)") {
             VStack(alignment: .leading, spacing: VeetSpace.s1) {
                 if attachments.isEmpty {
                     Text("No attachments.").veetType(.meta).foregroundColor(AppTheme.inkFaint)
                 }
-                ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
-                    attachmentRow(attachment)
+                ForEach(attachments, id: \.key) { item in
+                    attachmentRow(item.attachment, key: item.key)
                 }
                 if !attachments.isEmpty {
-                    Text("Veetbot does not open attachments; they stay in Gmail.")
+                    Text("Veetbot does not open attachments unless you save one to this email's chat.")
                         .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -324,7 +329,7 @@ struct EmailInspectorPanel: View {
         .accessibilityIdentifier("inspector.email.priority")
     }
 
-    private func attachmentRow(_ attachment: EmailAttachmentView) -> some View {
+    private func attachmentRow(_ attachment: EmailAttachmentView, key: EmailAttachmentKey) -> some View {
         HStack(spacing: VeetSpace.s2) {
             Image(systemName: attachment.mimeType.hasPrefix("image/") ? "photo" : "paperclip")
                 .veetIcon(.small)
@@ -336,8 +341,10 @@ struct EmailInspectorPanel: View {
                 Text(attachment.filename).veetType(.ui).foregroundColor(AppTheme.ink).lineLimit(1).truncationMode(.middle)
                 Text(attachmentDetail(attachment)).veetType(.meta).foregroundColor(AppTheme.inkFaint).lineLimit(1)
             }
+            Spacer(minLength: 0)
+            EmailAttachmentSaveControl(model: model, key: key, attachment: attachment)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private func attachmentDetail(_ attachment: EmailAttachmentView) -> String {

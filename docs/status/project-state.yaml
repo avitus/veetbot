@@ -1,3 +1,7 @@
+# ADR-0296: On 2026-11-03 the owner asked to add email attachments to Veetbot's
+# file storage, and chose the email's chat, a Save button plus an approval-gated
+# Chat tool, and knowledge on every save. Implemented, not yet tried on a real
+# mailbox. No milestone or gate moves.
 # ADR-0295: On 2026-11-04 the owner reported email refreshes failing and chose
 # both repairs: an email slice's 120 seconds start at its first claim rather than
 # at admission, and the async role runs two processes. Accepted; no milestone or

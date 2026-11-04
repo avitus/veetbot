@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, text, update
+from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, text, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,8 +89,8 @@ from agent_core.domain.approvals import (
 )
 from agent_core.domain.artifacts import (
     AUTO_INGEST_NOT_BEFORE_KEY,
+    AUTO_INGEST_ORIGINS,
     REPLY_ATTACHMENT_ORIGINS,
-    ArtifactOrigin,
     auto_ingest_metadata,
     claimed_upload,
 )
@@ -3198,7 +3198,14 @@ class PostgresArtifactRepository:
             raise NotFoundError("artifact not found")
         return artifact_to_domain(row)
 
-    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+    async def retain_for_knowledge(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
+    ) -> ArtifactRef:
         artifact = await self.get(artifact_id, principal)
         if (
             artifact.run_id is not None
@@ -3213,6 +3220,13 @@ class PostgresArtifactRepository:
                     ArtifactRow.id == artifact_id,
                     ArtifactRow.tenant_id == principal.tenant_id,
                     ArtifactRow.principal_id == principal.principal_id,
+                    true()
+                    if now is None
+                    else or_(ArtifactRow.expires_at.is_(None), ArtifactRow.expires_at > now),
+                    # The row lock taken here holds any erasure until this document commits.
+                    true()
+                    if unchanged_from is None
+                    else ArtifactRow.expires_at.is_not_distinct_from(unchanged_from.expires_at),
                 )
                 .values(origin="knowledge_source", expires_at=None)
                 .returning(ArtifactRow)
@@ -3351,7 +3365,9 @@ class PostgresArtifactRepository:
                 select(ArtifactRow)
                 .where(
                     ArtifactRow.metadata_json["auto_ingest"].astext == "pending",
-                    ArtifactRow.origin == ArtifactOrigin.UPLOAD.value,
+                    ArtifactRow.origin.in_(sorted(AUTO_INGEST_ORIGINS)),
+                    # A file deleted or erased while pending never reaches knowledge (ADR-0296).
+                    or_(ArtifactRow.expires_at.is_(None), ArtifactRow.expires_at > now),
                     ArtifactRow.tenant_id == principal.tenant_id,
                     ArtifactRow.principal_id == principal.principal_id,
                     # A deferred upload leaves the batch, so it never blocks a due one.

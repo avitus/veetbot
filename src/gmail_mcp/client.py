@@ -16,6 +16,8 @@ from urllib.parse import quote
 import httpx
 
 from gmail_mcp.constants import (
+    ATTACHMENT_MAXIMUM_BYTES,
+    ATTACHMENT_UPSTREAM_MAXIMUM_BYTES,
     GMAIL_API_ROOT,
     GOOGLE_TOKEN_ENDPOINT,
     OUTPUT_MAXIMUM_BYTES,
@@ -174,12 +176,18 @@ class GmailClient:
         self._access_token_expires_at = time.monotonic() + float(expires_in)
         return token
 
-    async def _read_body(self, response: httpx.Response, *, mutating: bool) -> bytes:
+    async def _read_body(
+        self,
+        response: httpx.Response,
+        *,
+        mutating: bool,
+        maximum_bytes: int = UPSTREAM_MAXIMUM_BYTES,
+    ) -> bytes:
         body = bytearray()
         try:
             async for chunk in response.aiter_bytes():
                 body.extend(chunk)
-                if len(body) > UPSTREAM_MAXIMUM_BYTES:
+                if len(body) > maximum_bytes:
                     code = "gmail.outcome_unknown" if mutating else "gmail.provider_output_invalid"
                     raise GmailError(code)
         finally:
@@ -195,6 +203,7 @@ class GmailClient:
         body: dict[str, object] | None = None,
         mutating: bool = False,
         allow_reauthentication: bool = True,
+        maximum_bytes: int = UPSTREAM_MAXIMUM_BYTES,
     ) -> dict[str, Any]:
         """Bound response reads and normalize failures according to dispatch safety."""
         token = await self._token()
@@ -207,7 +216,7 @@ class GmailClient:
         )
         try:
             response = await self._http_client.send(request, stream=True)
-            raw = await self._read_body(response, mutating=mutating)
+            raw = await self._read_body(response, mutating=mutating, maximum_bytes=maximum_bytes)
         except httpx.HTTPError as exc:
             code = "gmail.outcome_unknown" if mutating else "gmail.provider_unavailable"
             raise GmailError(code) from exc
@@ -225,6 +234,7 @@ class GmailClient:
                     body=body,
                     mutating=False,
                     allow_reauthentication=False,
+                    maximum_bytes=maximum_bytes,
                 )
             raise GmailError("gmail.credential_rejected")
         if status == 429:
@@ -305,6 +315,90 @@ class GmailClient:
                 stripped = _HTML_TAG.sub(" ", html.unescape(decoded))
                 rendered_html.append(_WHITESPACE.sub(" ", stripped).strip())
         return "\n".join(plain or rendered_html), attachments
+
+    @staticmethod
+    def _attachment_parts(payload: object) -> list[dict[str, Any]]:
+        """Attachment parts in the order `_payload_content` lists them (ADR-0296)."""
+        if not isinstance(payload, dict):
+            return []
+        found: list[dict[str, Any]] = []
+        stack: list[dict[str, Any]] = [payload]
+        while stack:
+            part = stack.pop()
+            nested = part.get("parts")
+            if isinstance(nested, list):
+                stack.extend(item for item in reversed(nested) if isinstance(item, dict))
+            filename = part.get("filename")
+            if isinstance(filename, str) and filename:
+                found.append(part)
+        return found
+
+    @staticmethod
+    def _decoded_attachment(data: object) -> bytes:
+        if not isinstance(data, str) or len(data) > ATTACHMENT_UPSTREAM_MAXIMUM_BYTES:
+            raise GmailError("gmail.provider_output_invalid")
+        try:
+            decoded = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+        except ValueError as exc:
+            raise GmailError("gmail.provider_output_invalid") from exc
+        if len(decoded) > ATTACHMENT_MAXIMUM_BYTES:
+            raise GmailError("gmail.attachment_too_large")
+        return decoded
+
+    async def fetch_attachment(
+        self, message_id: str, attachment_index: int, filename: str
+    ) -> dict[str, Any]:
+        """Read one attachment by its listed position, checked against its name.
+
+        Gmail issues a new attachment id on each read, so the position is what
+        stays stable, and the id is only ever used straight after the read.
+        """
+        self._required_text(message_id, "message_id", maximum=256)
+        self._required_text(filename, "filename", maximum=1024)
+        path = f"/messages/{quote(message_id, safe='')}"
+        try:
+            # A small file's bytes can sit inside the message, so it gets the same bound.
+            message = await self._request(
+                "GET",
+                path,
+                params={"format": "full"},
+                maximum_bytes=ATTACHMENT_UPSTREAM_MAXIMUM_BYTES,
+            )
+        except GmailResourceNotFoundError as exc:
+            raise GmailError("gmail.attachment_not_found") from exc
+        parts = self._attachment_parts(message.get("payload"))
+        if not 0 <= attachment_index < len(parts):
+            raise GmailError("gmail.attachment_not_found")
+        part = parts[attachment_index]
+        if str(part["filename"])[:1024] != filename:
+            raise GmailError("gmail.attachment_not_found")
+        body = part.get("body")
+        body = body if isinstance(body, dict) else {}
+        declared = body.get("size")
+        if isinstance(declared, int) and declared > ATTACHMENT_MAXIMUM_BYTES:
+            raise GmailError("gmail.attachment_too_large")
+        attachment_id = body.get("attachmentId")
+        if isinstance(attachment_id, str) and attachment_id:
+            try:
+                fetched = await self._request(
+                    "GET",
+                    f"{path}/attachments/{quote(attachment_id, safe='')}",
+                    maximum_bytes=ATTACHMENT_UPSTREAM_MAXIMUM_BYTES,
+                )
+            except GmailResourceNotFoundError as exc:
+                raise GmailError("gmail.attachment_not_found") from exc
+            content = self._decoded_attachment(fetched.get("data"))
+        else:
+            content = self._decoded_attachment(body.get("data"))
+        mime_type = part.get("mimeType")
+        return {
+            "thread_id": str(message.get("threadId", "")),
+            "message_id": message_id,
+            "filename": filename,
+            "mime_type": mime_type if isinstance(mime_type, str) else "",
+            "size_bytes": len(content),
+            "data_base64": base64.b64encode(content).decode("ascii"),
+        }
 
     @staticmethod
     def _headers(payload: object) -> dict[str, str]:

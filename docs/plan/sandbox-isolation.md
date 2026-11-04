@@ -1105,6 +1105,7 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"
 
 
 @dataclass(frozen=True)
@@ -1115,6 +1116,9 @@ class ArtifactRef:
     media_type: str
 ```
 
+The `ArtifactOrigin` sketch names the members. The stored values are lowercase, such as
+`email_attachment`, as `src/agent_core/domain/artifacts.py` defines them.
+
 `ArtifactRef` is what travels: into a tool result, into an event
 payload, into an API response. It carries no filename, no tenant, and
 no path, so a reference that leaks into a context window leaks a
@@ -1122,9 +1126,10 @@ random identifier and three facts about bytes. `ArtifactMetadata` is
 what the store holds and what `GET /v1/artifacts/{id}` reads after
 authorization, which ADR-0028 already specifies.
 
-`origin` exists because the six sources have different review
+`origin` exists because the seven sources have different review
 properties and an operator asking "what did this run produce" wants
-them separated. `TOOL_OUTPUT` is the truncation path
+them separated. `EMAIL_ATTACHMENT` is a file saved from an email (ADR-0296),
+which rides on the run's reply as an export does. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
 `artifact.export` of a workspace path; `MODEL_OUTPUT` is
 `artifact.export` of text the model wrote, produced since ADR-0122, and
@@ -1233,7 +1238,7 @@ and a sweeper deletes expired objects and their metadata rows. ADR-0120
 gives uploads their own two lifetimes: 24 hours while unclaimed, and none
 once a sent message claims one, so an attachment lives as long as its
 conversation and goes with it. ADR-0122 applies the second rule to the
-run's own `SANDBOX_EXPORT` and `MODEL_OUTPUT` artifacts when its final
+run's own `SANDBOX_EXPORT`, `MODEL_OUTPUT` and `EMAIL_ATTACHMENT` artifacts when its final
 reply attaches them; an export from a run that never replies keeps its
 30 days.
 
@@ -1261,7 +1266,7 @@ the read routes answer `404` from that moment, and the sweeper removes the
 bytes and then the row. A final reply never attaches a file that is already
 expired, so a file deleted in the run that made it stays deleted. It takes one to fifty artifact ids. It deletes a file
 only when that file belongs to the caller and the current chat and has origin
-`SANDBOX_EXPORT` or `MODEL_OUTPUT`, the origins a reply attaches. Uploads,
+`SANDBOX_EXPORT`, `MODEL_OUTPUT` or `EMAIL_ATTACHMENT`, the origins a reply attaches. Uploads,
 captures, knowledge sources and trajectory exports are never eligible. Each
 id is reported as `deleted`, `already_deleted` or `not_deletable`, and a call
 with nothing deletable fails with `artifact.not_deletable`. The tool is

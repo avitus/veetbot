@@ -1641,6 +1641,12 @@ gesture in Email mode satisfies the approval through the exact-match consent
 consumer ADR-0095 introduced, never through a standing authorization, and a
 Chat proposal parks in the ordinary queue.
 
+[ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md) adds one more arm:
+`save_attachment` on a Gmail read server, which the default matrix would allow
+as a network read. The profile is unchanged. The application-only
+`fetch_attachment` stays out of the arm, since the model cannot call it and the
+owner's press on Save is the request.
+
 
 ADR-0143 adds the exact `notification.write` scope for the bounded notification
 sync route. It authorizes terminal-result receipts and reconciliation, never

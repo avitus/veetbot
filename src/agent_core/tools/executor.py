@@ -112,6 +112,7 @@ from agent_core.domain.tools import (
     ToolSpec,
     deferred_definition_text,
 )
+from agent_core.mcp.configuration import is_email_attachment_tool
 from agent_core.policy.revalidation import revalidation_denial_reason
 from agent_core.ports.artifacts import ArtifactWriterProvider
 from agent_core.ports.credentials import CredentialResolver, UnavailableCredentialResolver
@@ -318,6 +319,8 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
         if arguments.get("content") is not None:
             return ArtifactOrigin.MODEL_OUTPUT
         return ArtifactOrigin.SANDBOX_EXPORT
+    if is_email_attachment_tool(tool.spec.server_id, tool.spec.name.rpartition(".")[2]):
+        return ArtifactOrigin.EMAIL_ATTACHMENT
     return ArtifactOrigin.TOOL_OUTPUT
 
 

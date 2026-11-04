@@ -5,8 +5,10 @@ import pytest
 from agent_core.bootstrap import build
 from tests.contract.support import principal
 from tests.contract.test_email_source_erasure_contract import (
+    assert_denied_save_erased,
     assert_email_source_erasure,
     assert_erasure_waits_for_potential_producer,
+    assert_saved_attachment_erased,
 )
 from tests.integration.m2_support import database_settings
 
@@ -117,6 +119,20 @@ async def test_postgres_source_revision_erasure_batches_matching_events() -> Non
         finally:
             await engine.dispose()
         assert len(deletes) == 1, "one source with multiple events should use one revision delete"
+
+
+async def test_postgres_saved_attachment_erasure_contract() -> None:
+    async with build(
+        settings=database_settings(), storage="postgres", principal=principal()
+    ) as composition:
+        await assert_saved_attachment_erased(composition.uow_factory)
+
+
+async def test_postgres_denied_save_erasure_contract() -> None:
+    async with build(
+        settings=database_settings(), storage="postgres", principal=principal()
+    ) as composition:
+        await assert_denied_save_erased(composition.uow_factory)
 
 
 async def test_postgres_source_erasure_contract() -> None:

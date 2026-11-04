@@ -58,6 +58,16 @@ class ArchiveRequest(RevisionRequest):
     idempotency_key: str = Field(min_length=1, max_length=200)
 
 
+class SaveAttachmentRequest(BaseModel):
+    """One press on Save for one attachment the client was shown (ADR-0296)."""
+
+    model_config = ConfigDict(extra="forbid")
+    message_id: str = Field(min_length=1, max_length=256)
+    attachment_index: int = Field(ge=0, le=1000, strict=True)
+    filename: str = Field(min_length=1, max_length=1024)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
 class LearningRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paused: bool
@@ -210,6 +220,25 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
             thread_id,
             body.expected_revision,
             archived=body.archived,
+            idempotency_key=body.idempotency_key,
+        )
+
+    @router.post(
+        "/v1/email/threads/{thread_id}/attachments/save",
+        openapi_extra={"required_scope": "email.write"},
+    )
+    async def save_attachment(
+        thread_id: UUID,
+        body: SaveAttachmentRequest,
+        authenticated: Annotated[Principal, secured("email.write")],
+    ) -> EmailOperation:
+        """Store one listed attachment in the thread's chat; the press is the consent."""
+        return await service.save_attachment(
+            authenticated,
+            thread_id,
+            message_id=body.message_id,
+            attachment_index=body.attachment_index,
+            filename=body.filename,
             idempotency_key=body.idempotency_key,
         )
 
