@@ -255,7 +255,9 @@ inside the window is saved, whatever started it (ADR-0294 records why cause cann
 be established); every other file is cancelled, whether a page starts it on its
 own, a navigation or read meets it, or a sign-in ceremony does. A grant-
 or research-authorized act that meets a file cancels it and reports
-`needs_approval`, whatever kind of action it was. A file must also come from one of
+`needs_approval`, whatever kind of action it was; a click or key press on a control
+that names a file waits for that file as an approved one does, so a late file is
+reported too. Any other action reports only a file that starts before it settles. A file must also come from one of
 the profile's origins, read from its URL, with a `blob:` URL read as the origin
 inside it. Anything else, including a third-party frame's file and a `data:` URL,
 which names no origin, is cancelled as `origin_not_allowed` and leaves the window

@@ -770,6 +770,7 @@ class PythonPlaywrightRuntime:
         window = self._download_window
         if window is not None and not window.approved:
             window.refusal = "needs_approval"
+            window.started.set()
         elif window is not None and window.reading is None:
             if not _origin_allowed(download.url.removeprefix("blob:"), self._allowed_origins):
                 window.refusal = "origin_not_allowed"
@@ -809,7 +810,10 @@ class PythonPlaywrightRuntime:
             await _discard_download(download)
 
     def _control_names_a_file(self, ref: str) -> bool:
-        """Whether a click may take a moment to start a file; it never authorizes one."""
+        """Whether a click may take a moment to start a file; it never authorizes one.
+
+        A grant-authorized click waits too, so a late file is reported, not lost in silence.
+        """
         facts = None if self._facts is None else self._facts.elements.get(ref)
         return ref in self._file_controls or (facts is not None and facts.download)
 
@@ -817,7 +821,7 @@ class PythonPlaywrightRuntime:
         self, window: _DownloadWindow, *, names_a_file: bool
     ) -> BrowserDownload | None:
         """What this act's window saved or refused; None when the page offered no file."""
-        if window.approved and names_a_file and window.reading is None:
+        if names_a_file and window.reading is None:
             with suppress(TimeoutError):
                 await asyncio.wait_for(window.started.wait(), DOWNLOAD_START_SECONDS)
         if window.reading is not None:
@@ -1421,8 +1425,9 @@ class PythonPlaywrightRuntime:
                     raise
 
         documents_before = self._main_frame_navigations
-        names_a_file = self._control_names_a_file(action.ref)
-        window = _DownloadWindow(approved=constraint is None and action.kind in _FILE_ACTION_KINDS)
+        starts_files = action.kind in _FILE_ACTION_KINDS
+        names_a_file = starts_files and self._control_names_a_file(action.ref)
+        window = _DownloadWindow(approved=constraint is None and starts_files)
         download: BrowserDownload | None = None
         self._download_window = window
         # A refusal belongs to the act whose fence made it: every act starts

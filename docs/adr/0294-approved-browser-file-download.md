@@ -45,7 +45,8 @@ further constraints shape the contract.
    `blob:` URL read as the origin inside it. A file from anywhere else, such as an
    embedded third-party frame, is refused as `origin_not_allowed` and does not take
    the slot. A `data:` URL names no origin, so it is refused too. A grant-authorized act that met a file reports
-   `needs_approval`. A control named with `download` or `export`, or a link with a
+   `needs_approval`, and a click or key press on a control that names a file waits
+   for it as an approved one does, so a late file is reported too. A control named with `download` or `export`, or a link with a
    `download` attribute, already reads as a file-transfer consequence
    (`browser_classification.py`), so it asks for approval.
 2. **Only bounded text is admitted.** The file is at most 2 MiB, decodes as UTF-8

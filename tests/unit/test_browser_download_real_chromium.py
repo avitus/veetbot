@@ -1,11 +1,13 @@
 """A real Chromium saves a file only for an individually approved click (ADR-0294)."""
 
 import asyncio
+import time
 
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from agent_core.adapters.browser.playwright import DOWNLOAD_START_SECONDS
 from agent_core.domain.browser import BrowserAction, BrowserActionKind
 from agent_core.domain.browser_download import MAX_BROWSER_DOWNLOAD_BYTES
 from tests.unit.test_browser_playwright import GRANT_NOW, lesson_constraint
@@ -143,6 +145,64 @@ async def test_any_act_a_grant_authorized_reports_the_file_it_cancelled() -> Non
 
     assert after.download is not None
     assert (after.download.status, after.download.reason) == ("refused", "needs_approval")
+
+
+async def test_a_grant_authorized_click_reports_a_file_the_page_starts_late() -> None:
+    """The model must learn the file was cancelled, not read the click as doing nothing.
+
+    A grant never reaches a control named download or export; a CSV button it can.
+    """
+
+    async def lesson(request: Request) -> Response:
+        del request
+        return html(
+            '<button id="go">Get CSV</button>',
+            script="""
+            document.querySelector('#go').onclick = () => setTimeout(() => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(new Blob(['secret'], {type: 'text/csv'}));
+                link.download = 'Activity.csv';
+                document.body.appendChild(link);
+                link.click();
+            }, 3000);
+            """,
+        )
+
+    async with browsing([Route("/lesson", lesson)]) as (site, runtime):
+        before = await runtime.navigate(site.url("/lesson"))
+        after = await runtime.act(
+            _click(before.revision, before.elements[0].ref),
+            constraint=lesson_constraint(origins=(site.origin,)),
+            now=GRANT_NOW,
+        )
+
+    assert after.download is not None
+    assert (after.download.status, after.download.reason) == ("refused", "needs_approval")
+    assert after.download.data_base64 is None
+
+
+async def test_only_a_click_or_key_press_waits_for_a_file_a_control_names() -> None:
+    """Ticking a box called CSV details is not asking for a file."""
+
+    async def lesson(request: Request) -> Response:
+        del request
+        return html('<label><input id="go" type="checkbox">CSV details</label>')
+
+    async with browsing([Route("/lesson", lesson)]) as (site, runtime):
+        before = await runtime.navigate(site.url("/lesson"))
+        started = time.monotonic()
+        after = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.CHECK,
+                expected_revision=before.revision,
+                ref=before.elements[0].ref,
+            ),
+            constraint=lesson_constraint(origins=(site.origin,)),
+            now=GRANT_NOW,
+        )
+
+    assert time.monotonic() - started < DOWNLOAD_START_SECONDS
+    assert after.download is None
 
 
 async def test_a_binary_file_is_refused_and_named_as_unsupported() -> None:
