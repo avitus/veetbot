@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from typing import Any, cast
@@ -39,7 +40,6 @@ from agent_core.domain.captures import (
     capture_text,
     reader_call,
 )
-from agent_core.domain.errors import ArtifactIntegrityError
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
     AuthorizationTurn,
@@ -66,6 +66,8 @@ from agent_core.tools.browser_results import (
     serialized_observation,
 )
 from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME
+
+logger = logging.getLogger(__name__)
 
 _CONDITION_SCHEMA = browser_condition_schema()
 _CONDITION_DEFINITIONS = _CONDITION_SCHEMA.pop("$defs")
@@ -332,7 +334,9 @@ class BrowserActTool:
                     }
                 },
             )
-        except (ArtifactIntegrityError, OSError):
+        except Exception:
+            # The click already ran, so a lost file must not cost it its result.
+            logger.exception("browser_download_capture_failed", extra={"size_bytes": len(data)})
             return {"status": "refused", "reason": "failed"}
         sections = CaptureSections(
             capture_text(data, literal=True), artifact_id=ref.artifact_id, tool=self.spec.name

@@ -38,6 +38,7 @@ from agent_core.domain.captures import (
     capture_text,
     reader_call,
 )
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.messages import FileReferencePart, TextPart
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.tools import ToolExecutionContext
@@ -333,6 +334,39 @@ async def test_the_model_learns_why_a_file_was_refused() -> None:
     validate_output(result.structured, BrowserActTool.spec.output_schema)
     assert result.structured["saved_file"] == {"status": "refused", "reason": "needs_approval"}
     assert writer.created == []
+
+
+class _FailingWriter:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    async def create(self, *args: object, **kwargs: object) -> StoredArtifactRef:
+        del args, kwargs
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error", [ConflictError("artifact row refused"), RuntimeError("database went away")]
+)
+async def test_a_file_that_cannot_be_stored_never_costs_the_click_its_result(
+    error: Exception,
+) -> None:
+    provider = _DownloadingProvider(BrowserDownload.from_bytes("a.csv", CSV.encode()))
+
+    result = await BrowserActTool(provider).execute(ARGUMENTS, _context(_FailingWriter(error)))
+
+    assert result.ok and result.structured is not None
+    validate_output(result.structured, BrowserActTool.spec.output_schema)
+    assert result.structured["saved_file"] == {"status": "refused", "reason": "failed"}
+
+
+async def test_cancelling_the_run_while_a_file_is_stored_still_cancels_it() -> None:
+    provider = _DownloadingProvider(BrowserDownload.from_bytes("a.csv", CSV.encode()))
+
+    with pytest.raises(asyncio.CancelledError):
+        await BrowserActTool(provider).execute(
+            ARGUMENTS, _context(_FailingWriter(asyncio.CancelledError()))
+        )
 
 
 async def test_a_chat_that_cannot_read_a_capture_saves_nothing() -> None:

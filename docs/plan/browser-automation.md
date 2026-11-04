@@ -293,7 +293,8 @@ the chat. The mark's `literal` flag has the reader take the file as its own text
 never as serialized tool output. The structured result gains `saved_file`, kept by the context projection:
 the artifact ID, name, media type, size, section count and the exact `tool.call`
 that reads it, or `status: refused` with a reason. A plan that cannot reach the
-reader gets `reader_unavailable`, and nothing is stored. Input schema and description
+reader gets `reader_unavailable`, and nothing is stored. A file that cannot be stored
+reports `failed`, and the click keeps its result, because it already ran. Input schema and description
 are unchanged, so the tool's definition costs no more; `browser.act@1.7.0` stays
 registered for chats pinned to it and reports no file. ADR-0294 records this
 owner-requested extension, its limits and its verification requirements.
