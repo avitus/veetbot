@@ -255,7 +255,7 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
     assert {
         ArtifactOrigin.SANDBOX_EXPORT.value,
         ArtifactOrigin.MODEL_OUTPUT.value,
-        ArtifactOrigin.EMAIL_ATTACHMENT.value,  # ADR-0294.
+        ArtifactOrigin.EMAIL_ATTACHMENT.value,  # ADR-0295.
     } == set(REPLY_ATTACHMENT_ORIGINS)
     assert [artifact.id for artifact in chosen] == [written.id, first.id, renamed.id]
     assert reply_file_reference(written) == FileReferencePart(

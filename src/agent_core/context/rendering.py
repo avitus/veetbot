@@ -65,7 +65,7 @@ UNINDEXED_DEFERRED_TOOLS = frozenset(
 def is_unindexed_deferred(spec: ToolSpec) -> bool:
     """Whether the instructions, not the index, advertise this tool.
 
-    ADR-0294 adds save_attachment, which has one name per mailbox, so the index's
+    ADR-0295 adds save_attachment, which has one name per mailbox, so the index's
     spare entries are not spent on a rare action that always asks the owner.
     """
 

@@ -1762,7 +1762,8 @@ async def test_the_context_seam_carries_todays_arguments_and_only_a_subclass_ext
     await TestOnlyRuntime().start("http://127.0.0.1:9", ("https://site.example",))
 
     assert chromium.contexts[0] == {
-        "accept_downloads": False,
+        # ADR-0294: an act's download window admits or cancels each file.
+        "accept_downloads": True,
         "service_workers": "block",
         "storage_state": None,
     }

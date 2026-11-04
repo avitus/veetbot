@@ -758,6 +758,7 @@ from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
     BrowserActTool,
+    PinnedBrowserActTool,
 )
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
@@ -3679,17 +3680,15 @@ async def _compose(
             )
         # ADR-0129: the approval card describes the action whatever the flag;
         # it offers a task grant only when task grants are enabled.
-        registry.register(
-            BrowserActTool(
-                browser_provider,
-                presenter=BrowserActApprovalPresenter(
-                    browser_provider,
-                    context_reader=_task_grant_context_reader(uow_factory, clock),
-                    enabled=_task_grants_composed(settings, browser_provider),
-                    now=clock.now,
-                ),
-            )
+        act_presenter = BrowserActApprovalPresenter(
+            browser_provider,
+            context_reader=_task_grant_context_reader(uow_factory, clock),
+            enabled=_task_grants_composed(settings, browser_provider),
+            now=clock.now,
         )
+        # ADR-0294: a chat pinned to the earlier spec keeps it; the latest is offered.
+        registry.register(PinnedBrowserActTool(browser_provider, presenter=act_presenter))
+        registry.register(BrowserActTool(browser_provider, presenter=act_presenter))
     if settings.delegation_enabled:
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:

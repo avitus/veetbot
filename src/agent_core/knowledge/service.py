@@ -23,6 +23,7 @@ from agent_core.domain.knowledge import (
     KnowledgeResult,
     KnowledgeSemanticQuery,
     RetrievedPassage,
+    knowledge_question_without_document_names,
 )
 from agent_core.domain.memory import (
     RecallMoment,
@@ -311,6 +312,16 @@ class KnowledgeService:
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
         )
+        asked = query
+        if authorized:
+            # A question that names a document aims at the catalogue, not
+            # the corpus: the name drops out before either arm runs, and
+            # the trace keeps the question as asked (ADR-0293).
+            async with self._uow_factory() as uow:
+                titles = await uow.knowledge.visible_titles(query)
+            text = knowledge_question_without_document_names(query.text, titles)
+            if text != query.text:
+                query = query.model_copy(update={"text": text})
         semantic = (
             await self._embed_question(query.text, await self._run_provider(run_id))
             if authorized
@@ -338,7 +349,7 @@ class KnowledgeService:
                 tenant_id=self._principal.tenant_id,
                 principal_id=self._principal.principal_id,
                 current_scope=query.current_scope or "general",
-                text=query.text,
+                text=asked.text,
                 profile=RecallProfile.TASK,
                 budget_tokens=query.budget_tokens,
                 max_items=query.max_passages,

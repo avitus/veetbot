@@ -87,7 +87,7 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"   # new
-    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0294
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0295
 ```
 
 Ingestion writes `expires_at = None`, so the thirty-day sweeper does not collect it and
@@ -222,7 +222,7 @@ and neither reaches the conversation. Deleting the conversation deletes the
 document through the existing cascade on its source artifact.
 
 A readable text, Markdown, or PDF email attachment the owner saves takes the same path
-([ADR-0294](../adr/0294-save-email-attachments-to-the-chat.md)). Pressing Save or approving
+([ADR-0295](../adr/0295-save-email-attachments-to-the-chat.md)). Pressing Save or approving
 Chat's request is the human admission, and it needs the same `knowledge.write`. Source
 erasure removes the file and its document; email cache expiry does not.
 
@@ -358,7 +358,12 @@ is every place it differs, because the differences are the design.
    a passage by the same formula, three quarters coverage with the document's authority
    and scope affinity making up the rest. The **query former is shared** with memory —
    the same objective, the same active entities, the same aliasing — because the task
-   is the same task. The arms are not shared.
+   is the same task. The arms are not shared. Before either arm runs, the name of any
+   document the query may read, its title or file name as a contiguous phrase, drops
+   out of the question: a model aims a search by naming the document, and the name
+   matches the cover page ahead of the passage
+   ([ADR-0293](../adr/0293-knowledge-search-asks-the-corpus.md)); the trace keeps the
+   question as asked.
 3. **Knowledge has its own budget class**, and this is the most consequential decision
    in the document. A passage is up to 1,000 tokens against a belief's twenty-five. If
    knowledge drew from in-turn recall's 2,000-token allowance, a single retrieved
@@ -383,7 +388,11 @@ is every place it differs, because the differences are the design.
    sources that disagree are a library, and resolving that at read time would be the
    retriever deciding which author is right. They are replaced by a **per-document cap
    of two passages**, which does the useful half of diversification — stopping one
-   verbose document from filling the budget — without adjudicating anything.
+   verbose document from filling the budget — without adjudicating anything. The cap
+   reserves room rather than capping the result: every document's first two passages
+   come before any document's third, and the rest of the budget fills by rank, so a
+   corpus of one document is not starved
+   ([ADR-0293](../adr/0293-knowledge-search-asks-the-corpus.md)).
 8. **Feedback is one-directional.** Citations are recorded for ranking evaluation and
    for the trace. They do not raise a document's authority, for the reason belief usage
    does not raise confidence: evidence must come from the world, not from the retriever
@@ -565,7 +574,8 @@ class KnowledgeStore(Protocol):
 One tool, returning `TrustLevel.KNOWLEDGE` data, plus the ingestion tool:
 
 - **`knowledge.search`** — text query, optional `as_of`, returns ranked passages with
-  their chunk ids and heading paths. `required_scopes` is empty, mirroring `skill.write`
+  their chunk ids and heading paths; the name of a visible document drops out of the
+  text first (ADR-0293). `required_scopes` is empty, mirroring `skill.write`
   shipping without a `skill.read`: nothing in 0.1 could check a read scope, and an
   uncheckable scope is worse than a missing one.
 - **`knowledge.ingest`** — takes an `ArtifactRef`, a title, and a visibility. Requires
@@ -584,7 +594,7 @@ build time alongside the other builtin domains.
 | A poisoned passage is followed as an instruction | `TrustLevel.KNOWLEDGE`, the rendered envelope, and `instruction_like` on the chunk |
 | Citations stop resolving after a chunker change | chunk ids are deterministic per `chunker_version`; re-chunking makes a new set beside the old |
 | A passage is quoted with words the source does not contain | verbatim after a closed normalization list; `content_sha256` on every chunk |
-| One document fills the retrieval budget | per-document cap of two passages, plus the relevance floor |
+| One document fills the retrieval budget | per-document cap of two passages reserving every other document's first two, plus the relevance floor |
 | Knowledge starves the belief budget | its own budget class, which yields before in-turn recall |
 | A truncated passage becomes a misquotation | passages drop whole; never truncated to fit |
 | Cross-tenant or cross-project leak | `tenant_id` and `visibility` are SQL predicates, never rank features |
@@ -718,7 +728,8 @@ That is eight case gates, three property gates, and two corpus gates.
 - **Passages drop whole.** A truncated passage is a misquotation with a citation
   attached.
 - **No supersession collapse, no conflict surfacing, no per-subject cap.** Two sources
-  that disagree are a library. A per-document cap of two does the useful half.
+  that disagree are a library. A per-document cap of two does the useful half, and it
+  reserves rather than caps (ADR-0293).
 - **Ranking is four terms.** No confidence, no reinforcement, no utility — the agent is
   quoting, not believing, and `recency` reads the document's date rather than the
   ingestion date.

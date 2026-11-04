@@ -2516,7 +2516,7 @@ struct EmailSendReview: View {
 
 
 /// Save for one attachment, on the Mac panel and the iPhone and iPad message rows
-/// (ADR-0294). What it says is the only record of the press until the chat is opened.
+/// (ADR-0295). What it says is the only record of the press until the chat is opened.
 struct EmailAttachmentSaveControl: View {
     @ObservedObject var model: EmailViewModel
     let key: EmailAttachmentKey

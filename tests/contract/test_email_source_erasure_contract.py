@@ -11,7 +11,12 @@ from agent_core.bootstrap import build
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import MemoryAuthority
-from agent_core.domain.messages import TextPart, ToolResultItem
+from agent_core.domain.messages import (
+    AssistantMessage,
+    FileReferencePart,
+    TextPart,
+    ToolResultItem,
+)
 from agent_core.domain.policies import RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
@@ -367,7 +372,7 @@ async def assert_email_source_erasure(factory: UnitOfWorkFactory) -> None:
 
 
 async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
-    """A plain chat has no Gmail metadata, and the file name is in its calls (ADR-0294)."""
+    """A plain chat has no Gmail metadata, and the file name is in its calls (ADR-0295)."""
     sid, rid, iid, aid = uuid4(), uuid4(), uuid4(), uuid4()
     other_iid, kept_aid, unreceipted_rid, unreceipted_aid, unknown_aid = (
         uuid4(),
@@ -376,6 +381,13 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
         uuid4(),
         uuid4(),
     )
+    promoted_aid, promoted_erased_aid = uuid4(), uuid4()
+
+    def chip(artifact_id: Any) -> FileReferencePart:
+        return FileReferencePart(
+            artifact_id=artifact_id, media_type="application/pdf", filename="chip.pdf"
+        )
+
     name = "mcp.gmail_read.save_attachment"
     arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}
     other = {"message_id": "m2", "attachment_index": 0, "filename": "keep.pdf"}
@@ -412,9 +424,25 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
             run(status=RunStatus.COMPLETED).model_copy(update={"id": rid, "session_id": sid})
         )
         for event_type, payload in (
-            ("model.response.completed", {"tool_calls": [{"name": "tool.call", **wrapped}]}),
+            (
+                "model.response.completed",
+                {"conversation_items": [], "tool_calls": [{"name": "tool.call", **wrapped}]},
+            ),
             ("tool.call.proposed", {"name": "tool.call", "arguments": wrapped}),
             ("tool.call.completed", {"name": name, "result_item": item.model_dump(mode="json")}),
+            (
+                "assistant.message.completed",
+                {
+                    "message": AssistantMessage(
+                        content=[
+                            TextPart(text="Saved invoice.pdf and keep.pdf"),
+                            chip(aid),
+                            chip(kept_aid),
+                            chip(promoted_aid),
+                        ]
+                    ).model_dump(mode="json")
+                },
+            ),
         ):
             await uow.events.append(
                 NewEvent(
@@ -435,14 +463,38 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
                 update={"id": unreceipted_rid, "session_id": sid}
             )
         )
-        for artifact_id, artifact_run, metadata in (
-            (aid, rid, {"auto_ingest": "pending", "email_source": {"message_id": "m1"}}),
+        saved_files: list[tuple[Any, Any, dict[str, Any], Any]] = [
+            (
+                aid,
+                rid,
+                {"auto_ingest": "pending", "email_source": {"message_id": "m1"}},
+                "email_attachment",
+            ),
             # One run can save from two emails; this file is the other email's.
-            (kept_aid, rid, {"auto_ingest": "pending", "email_source": {"message_id": "m2"}}),
-            (unreceipted_aid, unreceipted_rid, {"email_source": {"message_id": "m1"}}),
+            (
+                kept_aid,
+                rid,
+                {"auto_ingest": "pending", "email_source": {"message_id": "m2"}},
+                "email_attachment",
+            ),
+            (
+                unreceipted_aid,
+                unreceipted_rid,
+                {"email_source": {"message_id": "m1"}},
+                "email_attachment",
+            ),
             # A source nobody can read is treated as the email being erased.
-            (unknown_aid, rid, {}),
-        ):
+            (unknown_aid, rid, {}, "email_attachment"),
+            # Knowledge taking a file over changes its origin, not its source.
+            (promoted_aid, rid, {"email_source": {"message_id": "m2"}}, "knowledge_source"),
+            (
+                promoted_erased_aid,
+                unreceipted_rid,
+                {"email_source": {"message_id": "m1"}},
+                "knowledge_source",
+            ),
+        ]
+        for artifact_id, artifact_run, metadata, origin in saved_files:
             await uow.artifacts.create(
                 ArtifactRef(
                     id=artifact_id,
@@ -455,7 +507,7 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
                     storage_uri=f"memory://{artifact_id}",
                     sha256="a" * 64,
                     size_bytes=1,
-                    origin="email_attachment",
+                    origin=origin,
                     trust=TrustLevel.EXTERNAL_UNTRUSTED,
                     expires_at=None,
                     created_at=NOW,
@@ -475,6 +527,8 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
             )
         )
     async with factory() as uow:
+        await uow.history.catch_up(sid)
+    async with factory() as uow:
         assert {
             item.id
             for item in await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
@@ -483,7 +537,7 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
         counts = await uow.session_deletions.erase_email_source(
             principal(), "work", "t1", frozenset({"m1"}), NOW
         )
-    assert counts["pending_artifacts"] == 3
+    assert counts["pending_artifacts"] == 4
     # An erased file must not come back through a knowledge intake still pending.
     async with factory() as uow:
         assert [
@@ -499,21 +553,33 @@ async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
         expired = await uow.artifacts.list_expired(NOW, limit=100)
         approval = await uow.approvals.get_by_action(iid)
     assert approval is not None and "invoice.pdf" not in approval.model_dump_json()
-    assert len(events) == 3
+    assert len(events) == 4
     for event in events:
         assert "invoice.pdf" not in json.dumps(event.payload)
+    # The reply's text goes; a file that outlives this erasure keeps its link.
+    reply = events[3].payload["message"]["content"]
+    assert [part.get("artifact_id") for part in reply] == [None, str(kept_aid), str(promoted_aid)]
+    assert "keep.pdf" not in json.dumps(reply)
+    async with factory() as uow:
+        history = await uow.history.read(sid)
+    [cached] = [entry for entry in history.items if isinstance(entry, AssistantMessage)]
+    assert [getattr(part, "artifact_id", None) for part in cached.content] == [
+        None,
+        kept_aid,
+        promoted_aid,
+    ]
     # The call is still identifiable; only the sender's name is gone.
     assert "save_attachment" in json.dumps(events[0].payload)
     assert '"m1"' in json.dumps(events[0].payload)
     assert "invoice.pdf" not in recorded[iid].model_dump_json()
     assert json.loads(recorded[other_iid].raw_arguments)["filename"] == "keep.pdf"
     expired_ids = {artifact.id for artifact in expired}
-    assert {aid, unreceipted_aid, unknown_aid} <= expired_ids
-    assert kept_aid not in expired_ids
+    assert {aid, unreceipted_aid, unknown_aid, promoted_erased_aid} <= expired_ids
+    assert not {kept_aid, promoted_aid} & expired_ids
 
 
 async def assert_denied_save_erased(factory: UnitOfWorkFactory) -> None:
-    """A denied save leaves no receipt, only the calls that named the file (ADR-0294)."""
+    """A denied save leaves no receipt, only the calls that named the file (ADR-0295)."""
     sid, rid, iid = uuid4(), uuid4(), uuid4()
     name = "mcp.gmail_read.save_attachment"
     arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}

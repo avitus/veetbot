@@ -1632,6 +1632,7 @@ class ToolPipeline:
                 else None
             ),
             timeout_seconds=effective_timeout,
+            monotonic_deadline=monotonic_deadline,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,

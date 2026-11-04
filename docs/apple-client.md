@@ -982,7 +982,7 @@ list and the reading column, teal for the gist rule and draft states, amber
 for attention, and filled capsules that keep contrasting text.
 
 Thread detail renders text and attachment metadata without remote content.
-Save on an attachment keeps a copy in the email's chat (ADR-0294), where it arrives on
+Save on an attachment keeps a copy in the email's chat (ADR-0295), where it arrives on
 a reply and appears in Artifacts. The control then reads "Saved to chat" until the
 connection resets; a file over 32 MB says so instead, and a failure offers Retry.
 Feedback distinguishes people, topics, thread importance and reply need, reports

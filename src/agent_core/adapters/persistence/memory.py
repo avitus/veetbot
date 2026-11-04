@@ -1760,7 +1760,7 @@ class InMemoryArtifactRepository:
                 and artifact.principal_id == principal.principal_id
                 and artifact.origin in AUTO_INGEST_ORIGINS
                 and artifact.metadata.get("auto_ingest") == "pending"
-                # A file deleted or erased while pending never reaches knowledge (ADR-0294).
+                # A file deleted or erased while pending never reaches knowledge (ADR-0295).
                 and (artifact.expires_at is None or artifact.expires_at > now)
                 and auto_ingest_due(artifact.metadata, now)
             ]

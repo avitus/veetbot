@@ -219,7 +219,7 @@ def evaluate_deterministic(
         # ADRs 0071, 0097 and 0112 forbid policy profiles from turning mailbox mutations,
         # sends, telephone calls, or unsubscribe requests into standing allows. A
         # standing-grant design must own any relaxation rather than hiding it in a profile.
-        # ADR-0294 holds Chat saving an email attachment to the same floor.
+        # ADR-0295 holds Chat saving an email attachment to the same floor.
         decision = PolicyDecisionType.REQUIRE_APPROVAL
     escalated = (
         decision

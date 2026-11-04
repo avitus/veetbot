@@ -36,7 +36,7 @@ _EMAIL_CLASSIFICATIONS = {
 _EMAIL_ACCOUNT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
-# ADR-0294: both read a file's bytes, so the runtime stores them instead of
+# ADR-0295: both read a file's bytes, so the runtime stores them instead of
 # returning them. The second is the model's and always asks the owner.
 EMAIL_FETCH_ATTACHMENT_TOOL = "fetch_attachment"
 EMAIL_SAVE_ATTACHMENT_TOOL = "save_attachment"

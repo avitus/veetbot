@@ -318,7 +318,7 @@ class GmailClient:
 
     @staticmethod
     def _attachment_parts(payload: object) -> list[dict[str, Any]]:
-        """Attachment parts in the order `_payload_content` lists them (ADR-0294)."""
+        """Attachment parts in the order `_payload_content` lists them (ADR-0295)."""
         if not isinstance(payload, dict):
             return []
         found: list[dict[str, Any]] = []

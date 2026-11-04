@@ -48,7 +48,7 @@ STABLE_FAILURE_CODES: Final = frozenset(
 
 UPSTREAM_MAXIMUM_BYTES: Final = 8 * 1024 * 1024
 OUTPUT_MAXIMUM_BYTES: Final = 1024 * 1024
-# ADR-0294: the chat upload limit. Only the attachment request gets the larger
+# ADR-0295: the chat upload limit. Only the attachment request gets the larger
 # upstream bound, which holds this many bytes in base64 plus its JSON wrapper.
 ATTACHMENT_MAXIMUM_BYTES: Final = 32 * 1024 * 1024
 ATTACHMENT_UPSTREAM_MAXIMUM_BYTES: Final = (ATTACHMENT_MAXIMUM_BYTES // 3 + 1) * 4 + 64 * 1024

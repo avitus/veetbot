@@ -2162,7 +2162,7 @@ class _TaskIO:
         )
 
     async def save_attachment(self) -> RunOutcome:
-        """Store one attachment and put it on the thread chat's reply (ADR-0294)."""
+        """Store one attachment and put it on the thread chat's reply (ADR-0295)."""
         selection = self.task.attachment
         if selection is None:
             raise ConflictError("attachment task has no selection")

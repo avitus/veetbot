@@ -65,7 +65,8 @@ emptied space.
   at `text-embedding-3-small` prices.
 - The model's first query names the document, which pulls the front-matter
   chunk ahead of the answer under every budget; the model's refined query
-  ranks the answer first. That is the query, not the ranking.
+  ranks the answer first. That is the query, not the ranking; ADR-0293 takes
+  the document's name out of the question.
 - Between a deployment and the sweep's last round the new space is partly
   filled, and a chunk without a vector is reached lexically; the runbook
   watches `knowledge_vectors_backfilled` rounds and the single prune.

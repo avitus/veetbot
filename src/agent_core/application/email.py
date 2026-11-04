@@ -1089,7 +1089,7 @@ class EmailExperienceService:
         """Authorize, coalesce, and reserve an email task before durable dispatch."""
         # Typed owner gestures: no model, no catalog, no automatic-email dollars.
         gesture = kind in {"archive", "subscription"}
-        # ADR-0294: also a typed gesture, but its file belongs in the thread's own chat.
+        # ADR-0295: also a typed gesture, but its file belongs in the thread's own chat.
         thread_gesture = kind == "attachment"
         for scope in ("email.write", "run.write", "session.write"):
             require_scope(principal, scope)
@@ -1970,7 +1970,7 @@ class EmailExperienceService:
         filename: str,
         idempotency_key: str,
     ) -> EmailOperation:
-        """Admit one press on Save for an attachment this thread lists (ADR-0294)."""
+        """Admit one press on Save for an attachment this thread lists (ADR-0295)."""
         require_scope(principal, "artifact.write")
         if not idempotency_key or len(idempotency_key) > 200:
             raise ValueError("invalid save request")

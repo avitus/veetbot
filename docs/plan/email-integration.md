@@ -86,7 +86,7 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
   body, label ids. HTML bodies are reduced to text; attachments are named
   with filename, type, and size but never fetched by this call.
 - `save_attachment(message_id, attachment_index, filename)`
-  ([ADR-0294](../adr/0294-save-email-attachments-to-the-chat.md)) — stores one listed
+  ([ADR-0295](../adr/0295-save-email-attachments-to-the-chat.md)) — stores one listed
   attachment in the run's chat, up to 32 MiB, after the owner approves. The application-only
   `fetch_attachment` takes the same arguments for the Save button. The position is the
   attachment's place in `get_thread`'s list, because Gmail issues a new attachment id on
@@ -274,7 +274,7 @@ Nothing here runs with networking disabled, and the specification says which
 process is which rather than leaving it to be inferred. The Milestone 8
 adapter spawns a stdio server as an ordinary child process of the worker, and
 [tool-system.md](tool-system.md) states the consequence
-(tool-system.md:1133-1135): a stdio child inherits the worker's network
+(tool-system.md:1136-1138): a stdio child inherits the worker's network
 position, which in this platform is a privileged one, which is why stdio
 servers are operator-configured only. The restriction that applies to the
 worker is that the worker itself dials nothing on a `gmail_*` call; the child
@@ -356,7 +356,7 @@ closed set of stable, content-free codes: credential rejection, rate limit,
 temporary provider unavailability, permanent provider rejection, invalid
 provider output, and — the sixth, and the one the two write servers need —
 an outcome the server cannot determine. Fetching a file adds a missing and an
-oversized attachment (ADR-0294). Google's raw error text, diagnostic
+oversized attachment (ADR-0295). Google's raw error text, diagnostic
 headers, and `WWW-Authenticate` values never cross the pipe — normalized
 mailbox content is the tool result, and it is the only upstream content that
 does. Connect-time auth failure is
@@ -392,19 +392,19 @@ request has been dispatched, and the corpus already owns the machinery that
 says so. The executor watermarks every call whose side effect is not `NONE`
 before the tool implementation runs — the conservative rule
 [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md) records and
-`mark_effect_sent` implements (tool-system.md:704-707) — so `effect_sent_at`
+`mark_effect_sent` implements (tool-system.md:707-710) — so `effect_sent_at`
 is set on every write and send before its request leaves the worker, and the
 recovery table's answer for a `NON_IDEMPOTENT` call whose watermark is set is
-`UNCERTAIN` (tool-system.md:719). A rate limit, a 5xx, or a lost response
+`UNCERTAIN` (tool-system.md:722). A rate limit, a 5xx, or a lost response
 observed after dispatch is therefore reported by the server as the
 undetermined-outcome code, resolves to the platform's `uncertain` outcome with
-`tool.outcome_unknown` and `retryable: false` (tool-system.md:882-886), and is
+`tool.outcome_unknown` and `retryable: false` (tool-system.md:885-889), and is
 blocked from being proposed again in the run by the unified breaker's
-threshold-of-one row (tool-system.md:925). This is the rule
+threshold-of-one row (tool-system.md:928). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:2065-2067) and the one
+after the watermark (tool-system.md:2068-2070) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
-(browser-automation.md:1328-1332), generalized from those two cases to every
+(browser-automation.md:1383-1387), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an
 amendment to [tool-system.md](tool-system.md) in the change that implements
 it, keyed on the declared idempotency class rather than on any `gmail_*` name,

@@ -1,7 +1,9 @@
 """Streaming artifact-store integrity contract."""
 
+import asyncio
 import hashlib
 import os
+import threading
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -70,6 +72,69 @@ async def test_artifact_store_rejects_digest_drift_without_committing(tmp_path: 
     ref = StoredArtifactRef(broken.artifact_id, broken.sha256, broken.size_bytes, broken.media_type)
     with pytest.raises(FileNotFoundError):
         _ = [chunk async for chunk in store.open(ref, tenant_id=broken.tenant_id)]
+
+
+async def test_cancelling_a_put_during_its_rename_leaves_no_file_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancelled caller holds no reference, so a finished rename would be an orphan."""
+    content = b"bytes"
+    store = FilesystemArtifactStore(tmp_path)
+    renamed = threading.Event()
+    release = threading.Event()
+    rename = os.replace
+
+    def slow_replace(source: str, destination: Path) -> None:
+        rename(source, destination)
+        renamed.set()
+        release.wait(5)
+
+    monkeypatch.setattr("agent_core.adapters.artifacts.filesystem.os.replace", slow_replace)
+    put = asyncio.create_task(store.put(_chunks(content), _metadata(content)))
+    try:
+        await asyncio.to_thread(renamed.wait, 5)
+        put.cancel()
+        await asyncio.sleep(0)
+    finally:
+        release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await put
+    assert [path for path in tmp_path.rglob("*") if path.is_file()] == []
+
+
+async def test_a_second_cancel_during_the_rollback_still_removes_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"bytes"
+    store = FilesystemArtifactStore(tmp_path)
+    renamed = threading.Event()
+    release = threading.Event()
+    rename = os.replace
+
+    def slow_replace(source: str, destination: Path) -> None:
+        rename(source, destination)
+        renamed.set()
+        release.wait(5)
+
+    monkeypatch.setattr("agent_core.adapters.artifacts.filesystem.os.replace", slow_replace)
+    put = asyncio.create_task(store.put(_chunks(content), _metadata(content)))
+    try:
+        await asyncio.to_thread(renamed.wait, 5)
+        put.cancel()
+        await asyncio.sleep(0.05)
+        put.cancel()
+        await asyncio.sleep(0.05)
+    finally:
+        release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await put
+    for _ in range(100):
+        if not [path for path in tmp_path.rglob("*") if path.is_file()]:
+            break
+        await asyncio.sleep(0.02)
+    assert [path for path in tmp_path.rglob("*") if path.is_file()] == []
 
 
 async def _false(_artifact_id: UUID) -> bool:

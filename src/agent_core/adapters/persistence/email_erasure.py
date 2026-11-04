@@ -30,11 +30,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ToolInvocationRow,
 )
 from agent_core.domain.agents import Principal
-from agent_core.domain.artifacts import (
-    EMAIL_SOURCE_METADATA_KEY,
-    ArtifactOrigin,
-    outlives_source_erasure,
-)
+from agent_core.domain.artifacts import EMAIL_SOURCE_METADATA_KEY, outlives_source_erasure
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY
@@ -42,7 +38,7 @@ from agent_core.mcp.configuration import is_email_attachment_tool
 
 _ERASED = "[email source erased]"
 _IDENTITY_FIELDS = frozenset({"id", "message_id", "thread_id", "history_id", "internal_date"})
-# What makes a value a copy of a message; a saved file's receipt names it (ADR-0294).
+# What makes a value a copy of a message; a saved file's receipt names it (ADR-0295).
 _SOURCE_CONTENT_KEYS = ("body", "from", "snippet", "filename")
 _UNFINISHED_INVOCATIONS = ("PROPOSED", "AUTHORIZED", "WAITING_FOR_APPROVAL", "RUNNING")
 
@@ -245,7 +241,7 @@ def read_server(metadata: dict[str, Any], account_id: str) -> str | None:
 
 
 def _saves_attachment(name: object) -> bool:
-    """A saved file's receipt carries its source's ids, in any session (ADR-0294).
+    """A saved file's receipt carries its source's ids, in any session (ADR-0295).
 
     A chat with no Gmail metadata can save too, so this cannot wait for the
     session's account binding. Gmail ids do not repeat across a principal's
@@ -304,8 +300,25 @@ def source_tool(name: object, server: str | None) -> bool:
     )
 
 
+def _erased_reply(content: Any, marker: str, kept_files: frozenset[str]) -> list[dict[str, Any]]:
+    """The reply's text goes; a file that outlives this erasure keeps its link (ADR-0295)."""
+
+    parts = content if isinstance(content, list) else []
+    return [
+        {"type": "text", "text": marker},
+        *(
+            part
+            for part in parts
+            if isinstance(part, dict) and str(part.get("artifact_id")) in kept_files
+        ),
+    ]
+
+
 def derived_payload(
-    payload: dict[str, Any], event_type: str, marker: str = _ERASED
+    payload: dict[str, Any],
+    event_type: str,
+    marker: str = _ERASED,
+    kept_files: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     if marker == call_erasure.MARKER:
         return cast(dict[str, Any], call_erasure.erase_derived(payload))
@@ -313,7 +326,7 @@ def derived_payload(
     if event_type == "assistant.message.completed":
         message = copied.get("message")
         if isinstance(message, dict):
-            message["content"] = [{"type": "text", "text": marker}]
+            message["content"] = _erased_reply(message.get("content"), marker, kept_files)
         if "content" in copied:
             copied["content"] = marker
     elif event_type == "run.completed" and "final_message" in copied:
@@ -533,6 +546,23 @@ async def erase_postgres_source(
         )
     for trace_row, erased_trace in trace_changes:
         trace_row.trace = erased_trace
+    # Call erasure removes every file of the run, as it always has.
+    kept_files = (
+        frozenset()
+        if calling
+        else frozenset(
+            str(artifact.id)
+            for artifact in (
+                await session.scalars(
+                    select(ArtifactRow).where(
+                        ArtifactRow.run_id.in_(affected_runs),
+                        ArtifactRow.origin != "upload",
+                    )
+                )
+            ).all()
+            if outlives_source_erasure(artifact.metadata_json, message_ids)
+        )
+    )
     for row in event_rows:
         payload = changes.get(row.id)
         if payload is None and row.actor_type != "principal":
@@ -545,7 +575,10 @@ async def erase_postgres_source(
             and row.actor_type != "principal"
         ):
             payload = derived_payload(
-                row.payload, row.event_type, "[call source erased]" if calling else _ERASED
+                row.payload,
+                row.event_type,
+                "[call source erased]" if calling else _ERASED,
+                kept_files,
             )
         if row.actor_type != "principal":
             payload = erase_attachment_names(
@@ -644,7 +677,10 @@ async def erase_postgres_source(
                 source_event.run_id in affected_runs
                 and source_event.event_type == "assistant.message.completed"
             ):
-                history.item = {**history.item, "content": [{"type": "text", "text": _ERASED}]}
+                history.item = {
+                    **history.item,
+                    "content": _erased_reply(history.item.get("content"), _ERASED, kept_files),
+                }
             if source_event.run_id in affected_runs:
                 history.item = erase_attachment_names(history.item, message_ids)
         episodes = list(
@@ -676,7 +712,6 @@ async def erase_postgres_source(
                         and_(
                             ArtifactRow.tenant_id == principal.tenant_id,
                             ArtifactRow.principal_id == principal.principal_id,
-                            ArtifactRow.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value,
                             ArtifactRow.metadata_json[EMAIL_SOURCE_METADATA_KEY][
                                 "message_id"
                             ].astext.in_(sorted(message_ids)),
@@ -685,7 +720,7 @@ async def erase_postgres_source(
                 )
             )
         ).all()
-        if not outlives_source_erasure(artifact.origin, artifact.metadata_json, message_ids)
+        if str(artifact.id) not in kept_files
     ]
     for artifact in artifacts:
         artifact.expires_at = erased_at
@@ -829,6 +864,18 @@ def erase_memory_source_locked(
         if retained != revisions:
             repository._memories._history[belief_id] = retained
     repository._traces._traces.update(trace_changes)
+    # Call erasure removes every file of the run, as it always has.
+    kept_files = (
+        frozenset()
+        if calling
+        else frozenset(
+            str(artifact.id)
+            for artifact in repository._artifacts._rows.values()
+            if artifact.run_id in affected_runs
+            and artifact.origin != "upload"
+            and outlives_source_erasure(artifact.metadata, message_ids)
+        )
+    )
     for sid in affected_sessions:
         updated = []
         for event in repository._events._events.get(sid, []):
@@ -843,7 +890,10 @@ def erase_memory_source_locked(
                 and event.actor_type != "principal"
             ):
                 payload = derived_payload(
-                    event.payload, event.event_type, "[call source erased]" if calling else _ERASED
+                    event.payload,
+                    event.event_type,
+                    "[call source erased]" if calling else _ERASED,
+                    kept_files,
                 )
             if event.actor_type != "principal":
                 payload = erase_attachment_names(
@@ -913,15 +963,12 @@ def erase_memory_source_locked(
         # A crash can lose a save's receipt, but not the file's own record.
         source = artifact.metadata.get(EMAIL_SOURCE_METADATA_KEY)
         names_source = (
-            artifact.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
-            and artifact.tenant_id == principal.tenant_id
+            artifact.tenant_id == principal.tenant_id
             and artifact.principal_id == principal.principal_id
             and isinstance(source, dict)
             and source.get("message_id") in message_ids
         )
-        if (in_affected_run or names_source) and not outlives_source_erasure(
-            artifact.origin, artifact.metadata, message_ids
-        ):
+        if (in_affected_run or names_source) and str(artifact.id) not in kept_files:
             repository._artifacts._rows[key] = artifact.model_copy(update={"expires_at": erased_at})
             expired_artifacts.add(artifact.id)
     for key, export in list(repository._trajectory_exports._rows.items()):

@@ -1,4 +1,4 @@
-"""Store the file a Gmail read returns and hand back a receipt (ADR-0294)."""
+"""Store the file a Gmail read returns and hand back a receipt (ADR-0295)."""
 
 from __future__ import annotations
 

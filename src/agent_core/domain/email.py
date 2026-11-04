@@ -328,7 +328,7 @@ class EmailOperation(EmailValue):
 
 
 class EmailAttachmentSelection(EmailValue):
-    """One attachment of one message, by listed position and name (ADR-0294)."""
+    """One attachment of one message, by listed position and name (ADR-0295)."""
 
     message_id: str = Field(min_length=1, max_length=256)
     attachment_index: int = Field(ge=0, le=1000, strict=True)

@@ -69,7 +69,7 @@ type CallInterceptor = Callable[
     ],
     Awaitable[MCPCallResult],
 ]
-# ADR-0294: stores the file a call returns and hands back a receipt.
+# ADR-0295: stores the file a call returns and hands back a receipt.
 type EmailAttachmentSaver = Callable[
     [
         ToolExecutionContext,

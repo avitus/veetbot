@@ -2096,7 +2096,7 @@ feedback. See [the installation design](cockpit.md#one-approval-for-widget-insta
 `run` and `code` domains so the assistant can establish why something of its own
 failed, read the code involved, test a repair and offer it for review. All five
 tools are unindexed deferred entries, as `save_attachment` is on each Gmail read
-server (ADR-0294): the default instructions name them, they
+server (ADR-0295): the default instructions name them, they
 use no definition slot and no index entry, and they are reached through
 `tool.call`.
 

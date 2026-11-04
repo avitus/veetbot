@@ -507,13 +507,10 @@ def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
         "Never replay uncertain writes; success is not causal proof."
     )
     assert {
-        tool.spec.version
-        for tool in (
-            BrowserNavigateTool(provider),
-            BrowserObserveTool(provider),
-            BrowserActTool(provider),
-        )
+        tool.spec.version for tool in (BrowserNavigateTool(provider), BrowserObserveTool(provider))
     } == {"1.7.0"}
+    # ADR-0294: act's result gained the saved-file note; its description did not change.
+    assert BrowserActTool(provider).spec.version == "1.8.0"
 
 
 async def test_observe_continuation_uses_the_bound_provider_without_refreshing() -> None:
