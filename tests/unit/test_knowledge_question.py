@@ -55,3 +55,16 @@ def test_an_apostrophe_inside_a_name_is_not_a_possessive() -> None:
 def test_a_plural_is_not_a_title_word() -> None:
     asked = "How do glasses break?"
     assert knowledge_question_without_document_names(asked, ["Glass"]) == asked
+
+
+def test_a_title_word_keeps_its_accented_letters() -> None:
+    asked = "Caf\u00e9's opening hours"
+    assert knowledge_question_without_document_names(asked, ["Caf\u00e9.pdf"]) == "opening hours"
+
+
+def test_a_name_is_matched_as_written_so_punctuation_counts() -> None:
+    asked = "C# memory management"
+    assert knowledge_question_without_document_names(asked, ["C++.pdf"]) == asked
+    assert knowledge_question_without_document_names("C++.pdf memory model", ["C++.pdf"]) == (
+        "memory model"
+    )

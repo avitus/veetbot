@@ -278,19 +278,21 @@ def _pieces(run: str, level: int) -> list[str]:
     return pieces
 
 
-# A question's words, a possessive "'s" (straight or curly, either case, at
-# the end of the word) kept with its word, and a title's file extension,
-# which the model may quote with the name.
-_QUESTION_WORD = re.compile(r"[0-9A-Za-z]+(?:['\u2019][sS](?![0-9A-Za-z]))?")
+# A question's words, in any script, with a possessive "'s" (straight or
+# curly, either case, at the end of the word) kept with its word; a title's
+# file extension, which the model may quote with the name; and the quotes a
+# name may be written in.
+_QUESTION_WORD = re.compile(r"[^\W_]+(?:['\u2019][sS](?!\w))?")
 _FILE_EXTENSION = re.compile(r"\.[0-9A-Za-z]{1,5}$")
+_POSSESSIVE = re.compile(r"'s(?!\w)")
 _NAME_QUOTES = "\"'\u201c\u201d\u2018\u2019"
 
 
-def _question_key(word: str) -> str:
-    # Case and a possessive fold away; a plural does not, since a name is
-    # matched as written ("glasses" is not the title "Glass").
-    lowered = word.lower()
-    return lowered[:-2] if lowered.endswith(("'s", "\u2019s")) else lowered
+def _name_key(text: str) -> str:
+    """A name, or a run of question text, as it is compared: case, possessives and spacing fold."""
+
+    lowered = text.lower().replace("\u2019", "'")
+    return " ".join(_POSSESSIVE.sub("", lowered).split())
 
 
 def knowledge_question_without_document_names(text: str, titles: Iterable[str]) -> str:
@@ -299,27 +301,29 @@ def knowledge_question_without_document_names(text: str, titles: Iterable[str]) 
     A search asks the corpus, not the catalogue: a question that names a
     document by its title or file name, as a model does to aim at it, matches
     the document's cover page ahead of the passage it wants. Each name is
-    matched as a contiguous phrase, in any case, with or without its file
-    extension and a possessive, and the quotes around it go with it. The
+    matched as written, as a contiguous run of the question in any case, with
+    or without its file extension and a possessive, and the quotes around it
+    go with it; punctuation inside a name counts, so "C#" is not "C++". The
     words of a name that appear apart stay, as does a question that is
     nothing but a name.
     """
 
-    names: set[tuple[str, ...]] = set()
+    names: dict[tuple[str, ...], set[str]] = {}
     for title in titles:
         for phrase in (title, _FILE_EXTENSION.sub("", title)):
-            words = tuple(
-                _question_key(match.group(0)) for match in _QUESTION_WORD.finditer(phrase)
-            )
+            words = tuple(_name_key(match.group(0)) for match in _QUESTION_WORD.finditer(phrase))
             if words:
-                names.add(words)
+                names.setdefault(words, set()).add(_name_key(phrase))
     matches = list(_QUESTION_WORD.finditer(text))
-    keys = [_question_key(match.group(0)) for match in matches]
+    keys = [_name_key(match.group(0)) for match in matches]
     dropped = [False] * len(matches)
-    for name in sorted(names, key=len, reverse=True):
-        size = len(name)
+    for words, written in sorted(names.items(), key=lambda item: -len(item[0])):
+        size = len(words)
         for start in range(len(keys) - size + 1):
-            if tuple(keys[start : start + size]) == name:
+            if tuple(keys[start : start + size]) != words:
+                continue
+            span = text[matches[start].start() : matches[start + size - 1].end()]
+            if _name_key(span) in written:
                 dropped[start : start + size] = [True] * size
     if not any(dropped) or all(dropped):
         return text

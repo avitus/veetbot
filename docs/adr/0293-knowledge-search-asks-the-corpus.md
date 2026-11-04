@@ -34,8 +34,9 @@ had to rank first or second to be returned at all.
    runs, the service lists the titles the query may read
    (`KnowledgeStore.visible_titles`, both stores, under the search's own
    visibility, validity and sensitivity rules) and removes each title, or the
-   title without its file extension, where it appears as a contiguous phrase
-   in any case, with or without a possessive, together with the quotes around
+   title without its file extension, where it appears as written, a
+   contiguous run in any case and script with or without a possessive, its
+   punctuation counting ("C#" is not "C++"), together with the quotes around
    it (`knowledge_question_without_document_names`). Title words that appear
    apart stay, since a question may share a word with a title; a question
    that is nothing but a name stays whole. The trace keeps the question as
