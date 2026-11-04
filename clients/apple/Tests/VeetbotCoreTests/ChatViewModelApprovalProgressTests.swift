@@ -301,6 +301,47 @@ import Testing
         #expect(!model.runState.docksAttention)
     }
 
+    /// A status the stream delivers during recovery's run read is newer than what that
+    /// read returns, so "Needs your approval" must not fall back to "Working…".
+    @Test
+    func aSlowRunReadDoesNotOverwriteANewerStatus() async throws {
+        let runRoute = "GET veetbot.test /v1/runs/\(Self.runID)"
+        let listed = LockedFlag()
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request, runStatus: "RUNNING") ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/runs/\(Self.runID)/events":
+                    return (503, "")
+                case "GET veetbot.test /v1/approvals":
+                    return (
+                        200,
+                        listed.value ? try Self.pendingApprovals() : #"{"items":[],"next_cursor":null}"#
+                    )
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        let runID = try #require(UUID(uuidString: Self.runID))
+        #expect(model.runState.runStatus == .running)
+        let earlierReads = server.routes.filter { $0 == runRoute }.count
+        let runRead = server.hold(runRoute)
+        defer { runRead.open() }
+
+        listed.value = true
+        let refresh = Task { await model.refreshSessionsAwaitingApproval() }
+        for _ in 0..<500 where server.routes.filter({ $0 == runRoute }).count == earlierReads {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        model.runState.begin(runID: runID, status: .waitingForApproval)
+        runRead.open()
+        await refresh.value
+
+        #expect(model.runState.runStatus == .waitingForApproval)
+        #expect(model.awaitingOwnerApproval)
+    }
+
     /// One card's failed read must not leave the other decided cards on screen.
     @Test
     func aFailedReadDoesNotStopTheOtherDecidedCardsLeaving() async throws {

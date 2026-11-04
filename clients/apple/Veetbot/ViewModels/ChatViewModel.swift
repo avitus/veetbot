@@ -323,6 +323,7 @@ public final class ChatViewModel: ObservableObject {
             .sorted { $0.createdAt > $1.createdAt }
         let generation = connectionGeneration
         let knownRunID = runState.activeRunID
+        let knownStatus = runState.runStatus
         var tried: Set<UUID> = []
         for approval in missed where tried.insert(approval.runID).inserted {
             let read = try? await api.getRun(approval.runID)
@@ -333,7 +334,8 @@ public final class ChatViewModel: ObservableObject {
             if knownRunID == run.id {
                 // A terminal stream event outranks a slower read of the same run.
                 guard !(runState.runStatus?.isTerminal ?? false) else { return }
-                runState.seed(run: run)
+                // So does any status the stream delivered during the read.
+                if runState.runStatus == knownStatus { runState.seed(run: run) }
             } else {
                 runState.seed(run: run)
                 watch(runID: run.id)
