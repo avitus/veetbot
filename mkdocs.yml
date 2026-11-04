@@ -429,4 +429,5 @@ nav:
       - "ADR-0290: Standing semantic activation": adr/0290-standing-semantic-activation.md
       - "ADR-0291: MCP servers for schedules and jobs": adr/0291-mcp-servers-for-schedules-and-jobs.md
       - "ADR-0292: Knowledge windows and the prune of a superseded space": adr/0292-knowledge-windows-and-prune.md
+      - "ADR-0295: Email slice time starts at claim, and two async processes": adr/0295-execution-window-and-async-slots.md
   - Changelog: changelog.md

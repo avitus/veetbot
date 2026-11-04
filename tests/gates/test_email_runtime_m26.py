@@ -310,6 +310,7 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
         proposed = await app.runs.get(operation.run_id)
         assert proposed.status is RunStatus.WAITING_FOR_APPROVAL
         assert proposed.priority == 0, "a send proposal joins the interactive class"
+        assert proposed.limits.execution_seconds is None, "a send keeps its agent deadline"
         async with app.uow_factory() as uow:
             before = await uow.invocations.list_for_run(proposed.id, app.principal)
         assert not any(

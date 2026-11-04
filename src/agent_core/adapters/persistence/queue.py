@@ -19,7 +19,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import RunRow
 from agent_core.domain.errors import ConflictError, WorkerFencedError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
-from agent_core.domain.runs import FailureReason, Run, RunFailure, RunStatus
+from agent_core.domain.runs import FailureReason, Run, RunFailure, RunLimits, RunStatus
 from agent_core.ports.determinism import Clock
 from agent_core.runtime.state_machine import require_transition
 
@@ -90,9 +90,26 @@ class PostgresRunQueue:
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
             return None
+        self._start_execution_window(row, now)
+        await self._session.flush()
         run = run_to_domain(row)
         lease = WorkerLease(run_id=run.id, worker_id=worker_id, lease_epoch=run.lease_epoch)
         return ClaimedRun(run=run, lease=lease)
+
+    @staticmethod
+    def _start_execution_window(row: RunRow, now: datetime) -> None:
+        """Count a windowed run's time from this claim, so the queue does not spend it."""
+        seconds = row.limits.get("execution_seconds")
+        if seconds is None:
+            return
+        deadline = now + timedelta(seconds=seconds)
+        if row.deadline_at is not None:
+            deadline = min(deadline, row.deadline_at)
+        limits = RunLimits.model_validate(row.limits).model_copy(
+            update={"deadline_at": deadline, "execution_seconds": None}
+        )
+        row.limits = limits.model_dump(mode="json")
+        row.deadline_at = deadline
 
     async def heartbeat(self, lease: WorkerLease) -> tuple[bool, bool]:
         statement = (

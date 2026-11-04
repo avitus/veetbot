@@ -494,7 +494,7 @@ detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
 at `policy-and-approvals.md:1274-1275` and the resolve at
 `policy-and-approvals.md:1330`, and one reference in
-`runtime-loop.md:1310` to `POST /runs/{id}/input` that routed to an
+`runtime-loop.md:1313` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -1001,7 +1001,7 @@ That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1824`, and the sibling join
-at `runtime-loop.md:1267` reads it. Restricted context is
+at `runtime-loop.md:1270` reads it. Restricted context is
 `context-engine.md:559`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
@@ -1010,7 +1010,7 @@ gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:1107`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
-`runtime-loop.md:1275`: *"the parent's `deadline_at` is copied onto
+`runtime-loop.md:1278`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:1103`. Two are partial: the explicit objective has a
@@ -1027,7 +1027,7 @@ Re-measuring surfaced a conflict the stale count was hiding.
 `session_id` where status is not one of `COMPLETED`, `FAILED`, or
 `CANCELLED`, to enforce Section 27.5's one active run per session. A
 parent suspended on a child waits in `WAITING_FOR_APPROVAL` carrying
-a typed suspension kind, which `runtime-loop.md:290` chose over an
+a typed suspension kind, which `runtime-loop.md:293` chose over an
 eighth state, and that is not one of the three — so a child run in
 the parent's own session cannot be inserted. Section 27.6 offers both
 placements, *"the parent's session or a dedicated child session per
