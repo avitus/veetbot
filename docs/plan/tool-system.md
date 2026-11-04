@@ -2508,7 +2508,7 @@ row carries that mark, its tenant, principal and session are the run's, its
 `expires_at` has not passed, its `trust` is `EXTERNAL_UNTRUSTED`, and the run's
 principal holds every recorded scope. Any other case returns
 `tool.capture.not_found`. That covers another session's capture, a
-`SANDBOX_EXPORT`, `MODEL_OUTPUT`, `UPLOAD` or `KNOWLEDGE_SOURCE` artifact, a
+`SANDBOX_EXPORT`, `MODEL_OUTPUT`, `UPLOAD`, `KNOWLEDGE_SOURCE` or `EMAIL_ATTACHMENT` artifact, a
 tool's own `TOOL_OUTPUT` file such as a chart, a capture of a tool whose
 output is trusted, a capture written before the mark existed, and a capture
 whose producing tool's scope has been revoked. A single code means the reader

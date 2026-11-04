@@ -1235,7 +1235,7 @@ and a sweeper deletes expired objects and their metadata rows. ADR-0120
 gives uploads their own two lifetimes: 24 hours while unclaimed, and none
 once a sent message claims one, so an attachment lives as long as its
 conversation and goes with it. ADR-0122 applies the second rule to the
-run's own `SANDBOX_EXPORT` and `MODEL_OUTPUT` artifacts when its final
+run's own `SANDBOX_EXPORT`, `MODEL_OUTPUT` and `EMAIL_ATTACHMENT` artifacts when its final
 reply attaches them; an export from a run that never replies keeps its
 30 days.
 
