@@ -76,7 +76,11 @@ from agent_core.domain.browser_classification import (
     path_is_within_prefix,
 )
 from agent_core.domain.browser_diagnostics import browser_phase, browser_phase_call
-from agent_core.domain.browser_download import MAX_BROWSER_DOWNLOAD_BYTES, BrowserDownload
+from agent_core.domain.browser_download import (
+    MAX_BROWSER_DOWNLOAD_BYTES,
+    BrowserDownload,
+    BrowserDownloadRefusal,
+)
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
@@ -299,14 +303,16 @@ VirtualDisplayFactory = Callable[[], VirtualDisplay | None]
 class _DownloadWindow:
     """One act's chance to save one file; it closes when the act returns (ADR-0294).
 
-    Only an act no grant authorized is ``approved``. Any other file is cancelled.
+    Only a click or key press no grant authorized is ``approved``, and only a file
+    from the login's origins takes the slot. Any other file is cancelled, and its
+    refusal is reported if nothing was saved.
     """
 
     approved: bool
     started: asyncio.Event = field(default_factory=asyncio.Event)
     download: Download | None = None
     reading: asyncio.Task[BrowserDownload] | None = None
-    refused: bool = False
+    refusal: BrowserDownloadRefusal | None = None
 
 
 def _directory_bytes(path: str) -> int:
@@ -762,13 +768,17 @@ class PythonPlaywrightRuntime:
     async def _handle_download(self, download: Download) -> None:
         """Admit one file to an approved act's window and cancel every other (ADR-0294)."""
         window = self._download_window
-        if window is not None and window.approved and window.reading is None:
+        if window is not None and not window.approved:
+            window.refusal = "needs_approval"
+        elif window is not None and window.reading is None:
+            if not _origin_allowed(download.url.removeprefix("blob:"), self._allowed_origins):
+                window.refusal = "origin_not_allowed"
+                await _discard_download(download)
+                return
             window.download = download
             window.reading = asyncio.create_task(self._read_download(download))
             window.started.set()
             return
-        if window is not None and not window.approved:
-            window.refused = True
         await _discard_download(download)
 
     async def _read_download(self, download: Download) -> BrowserDownload:
@@ -812,7 +822,7 @@ class PythonPlaywrightRuntime:
                 await asyncio.wait_for(window.started.wait(), DOWNLOAD_START_SECONDS)
         if window.reading is not None:
             return await window.reading
-        return BrowserDownload.refused("needs_approval") if window.refused else None
+        return None if window.refusal is None else BrowserDownload.refused(window.refusal)
 
     async def _close_popup(self, page: Page) -> None:
         """Destroy a popup with interception intact, or end its browser session."""
@@ -1412,11 +1422,7 @@ class PythonPlaywrightRuntime:
 
         documents_before = self._main_frame_navigations
         names_a_file = self._control_names_a_file(action.ref)
-        window = (
-            _DownloadWindow(approved=constraint is None)
-            if action.kind in _FILE_ACTION_KINDS
-            else None
-        )
+        window = _DownloadWindow(approved=constraint is None and action.kind in _FILE_ACTION_KINDS)
         download: BrowserDownload | None = None
         self._download_window = window
         # A refusal belongs to the act whose fence made it: every act starts
@@ -1449,8 +1455,7 @@ class PythonPlaywrightRuntime:
             readiness = await self._settle(
                 page, after_document=self._main_frame_navigations != documents_before
             )
-            if window is not None:
-                download = await self._finish_download(window, names_a_file=names_a_file)
+            download = await self._finish_download(window, names_a_file=names_a_file)
         finally:
             self._download_window = None
             if draft_binding is not None:
@@ -1459,8 +1464,7 @@ class PythonPlaywrightRuntime:
             self._document_fence = None
             refused_page = self._fence_refused_page
             self._fence_refused_page = False
-            if window is not None:
-                await _close_download_window(window)
+            await _close_download_window(window)
         if refused_page:
             # The action sent the page toward a document outside the grant,
             # which never loaded; the page now shows the browser's error page.

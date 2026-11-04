@@ -255,7 +255,11 @@ inside the window is saved, whatever started it (ADR-0294 records why cause cann
 be established); every other file is cancelled, whether a page starts it on its
 own, a navigation or read meets it, or a sign-in ceremony does. A grant-
 or research-authorized act that meets a file cancels it and reports
-`needs_approval`. Neither kind of grant covers a download: a control named with
+`needs_approval`, whatever kind of action it was. A file must also come from one of
+the profile's origins, read from its URL, with a `blob:` URL read as the origin
+inside it. Anything else, including a third-party frame's file and a `data:` URL,
+which names no origin, is cancelled as `origin_not_allowed` and leaves the window
+open for the click's own file. Neither kind of grant covers a download: a control named with
 `download` or `export`, or a link with a `download` attribute, already reads as a
 file-transfer consequence, and a plain control that turns out to save a file is
 refused live.

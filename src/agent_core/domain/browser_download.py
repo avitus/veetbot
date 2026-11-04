@@ -24,6 +24,7 @@ _PDF_HEADER_BYTES = 1024
 
 BrowserDownloadRefusal = Literal[
     "needs_approval",
+    "origin_not_allowed",
     "unsupported_type",
     "too_large",
     "timed_out",

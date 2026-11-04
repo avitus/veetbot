@@ -40,7 +40,11 @@ further constraints shape the contract.
    key press runs, the runtime holds a one-file window. Only an act that carries
    no grant or research constraint may save. A file started outside that window,
    whether by a page on its own, a sign-in, a navigation or a read, and any file
-   met by a grant-authorized or research-permitted act, is still cancelled. A grant-authorized act that met a file reports
+   met by a grant-authorized or research-permitted act, is still cancelled. The
+   file must also come from one of the login's origins, read from its URL, with a
+   `blob:` URL read as the origin inside it. A file from anywhere else, such as an
+   embedded third-party frame, is refused as `origin_not_allowed` and does not take
+   the slot. A `data:` URL names no origin, so it is refused too. A grant-authorized act that met a file reports
    `needs_approval`. A control named with `download` or `export`, or a link with a
    `download` attribute, already reads as a file-transfer consequence
    (`browser_classification.py`), so it asks for approval.
@@ -110,11 +114,11 @@ This ADR stays Proposed until that check passes.
   this ADR.
 - Text files only. PDF statements and spreadsheets are refused and need their own
   contract. A QFX or OFX file is admitted as plain text.
-- A file that starts more than 10 seconds after the click, or on a click whose
-  control names no file, is cancelled and unreported.
+- A file that starts more than 10 seconds after the click, or after the page has
+  settled on a click whose control names no file, is cancelled and unreported.
 - A file a popup or new window starts is not seen: popups stay closed.
-- A file served from an origin outside the login is refused by the document guard,
-  the same as any other navigation.
+- A site whose button saves through a `data:` URL, or serves the file from another
+  of its own hosts, is refused until that host is added to the login.
 - The capture reader's limits apply: 2 sections a step and 16 a run at 16 KiB, so
   a full read stops at about 256 KiB; `find` still searches the whole file.
 - Chat reads the file itself. It has no sandbox import for computing over the rows,

@@ -205,7 +205,8 @@ class _UnfinishedDownload:
 
     suggested_filename = "a.csv"
 
-    def __init__(self) -> None:
+    def __init__(self, url: str = "https://site.test/file") -> None:
+        self.url = url
         self.cancelled = asyncio.Event()
         self.deleted = False
 
@@ -235,10 +236,41 @@ async def test_an_interrupted_read_stops_the_transfer_instead_of_waiting_for_it(
     assert download.cancelled.is_set() and download.deleted
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://elsewhere.test/file.csv",
+        "blob:https://elsewhere.test/1b2c",
+        "http://site.test/file.csv",
+        "data:text/csv,a%2Cb",
+        "blob:null/1b2c",
+        "about:blank",
+    ],
+)
+async def test_a_file_from_outside_the_login_is_refused_and_leaves_the_slot_free(url: str) -> None:
+    runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://site.test",)
+    window = _DownloadWindow(approved=True)
+    runtime._download_window = window
+    outside = _UnfinishedDownload(url)
+
+    await runtime._handle_download(cast(Download, outside))
+
+    assert outside.cancelled.is_set() and outside.deleted
+    assert window.reading is None and not window.started.is_set()
+    assert window.refusal == "origin_not_allowed"
+
+    inside = _UnfinishedDownload("blob:https://site.test/1b2c")
+    await runtime._handle_download(cast(Download, inside))
+    assert window.reading is not None and not inside.cancelled.is_set()
+    await _close_download_window(window)
+
+
 async def test_a_file_during_an_approved_click_is_admitted_whatever_started_it() -> None:
     """The window is temporal: ADR-0294's Limits record why it cannot name a file's cause."""
 
     runtime = PythonPlaywrightRuntime()
+    runtime._allowed_origins = ("https://site.test",)
     window = _DownloadWindow(approved=True)
     runtime._download_window = window
     download = _UnfinishedDownload()

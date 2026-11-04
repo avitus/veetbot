@@ -111,6 +111,40 @@ async def test_a_click_a_grant_authorized_never_saves_a_file() -> None:
     assert after.download.data_base64 is None
 
 
+async def test_any_act_a_grant_authorized_reports_the_file_it_cancelled() -> None:
+    """A task grant also covers ticking a box, and a page may save a file on that."""
+
+    async def lesson(request: Request) -> Response:
+        del request
+        return html(
+            '<label><input id="go" type="checkbox">Show details</label>',
+            script="""
+            document.querySelector('#go').onchange = () => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(new Blob(['secret'], {type: 'text/csv'}));
+                link.download = 'Activity.csv';
+                document.body.appendChild(link);
+                link.click();
+            };
+            """,
+        )
+
+    async with browsing([Route("/lesson", lesson)]) as (site, runtime):
+        before = await runtime.navigate(site.url("/lesson"))
+        after = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.CHECK,
+                expected_revision=before.revision,
+                ref=before.elements[0].ref,
+            ),
+            constraint=lesson_constraint(origins=(site.origin,)),
+            now=GRANT_NOW,
+        )
+
+    assert after.download is not None
+    assert (after.download.status, after.download.reason) == ("refused", "needs_approval")
+
+
 async def test_a_binary_file_is_refused_and_named_as_unsupported() -> None:
     async def home(request: Request) -> Response:
         del request
