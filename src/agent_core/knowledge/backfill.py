@@ -58,11 +58,6 @@ class KnowledgeVectorBackfill:
             return 0
         allowed = [item for item in Sensitivity if self._embedder.allows(item)]
         async with self._uow_factory() as uow:
-            # Vectors of any other space, a previous encoder or window
-            # budget, go as the active space fills; they are derived rows.
-            pruned = await uow.knowledge.remove_embeddings_outside(
-                self._principal.tenant_id, self._principal.principal_id, self._embedder.space.key
-            )
             chunks = await uow.knowledge.chunks_without_vectors(
                 self._principal.tenant_id,
                 self._principal.principal_id,
@@ -70,9 +65,20 @@ class KnowledgeVectorBackfill:
                 sensitivities=allowed,
                 limit=self._batch_chunks,
             )
-        if pruned:
-            logger.info("knowledge_vectors_pruned", extra={"vectors": pruned})
+            if not chunks:
+                # Vectors of any other space, a previous encoder or window
+                # budget, go only once the active space holds every current
+                # chunk: until then the release still reading that space,
+                # the previous API during a restart or a rollback, keeps
+                # its vectors (ADR-0292). They are derived rows.
+                pruned = await uow.knowledge.remove_embeddings_outside(
+                    self._principal.tenant_id,
+                    self._principal.principal_id,
+                    self._embedder.space.key,
+                )
         if not chunks:
+            if pruned:
+                logger.info("knowledge_vectors_pruned", extra={"vectors": pruned})
             return 0
         done = windows = 0
         for start in range(0, len(chunks), self._group_chunks):

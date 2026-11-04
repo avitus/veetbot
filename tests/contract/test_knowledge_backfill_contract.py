@@ -226,16 +226,25 @@ async def test_a_withdrawal_inside_a_group_writes_nothing_for_it(
 async def test_vectors_outside_the_active_space_are_pruned(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A new space, from a new encoder or budget, replaces the old vectors rather than piling up."""
+    """A new space, from a new encoder or budget, replaces the old vectors rather than piling up.
+
+    The old vectors go only once the active space holds every current chunk:
+    until then a release still reading the old space, the previous API during
+    a restart or a rollback, finds its vectors in place.
+    """
 
     factory, store = await _factory()
     await store.ingest(_document(1, TEXT))
     old = EmbeddingSpace(provider="fixture", model="semantic", revision="v0", dimensions=3)
     old_embedder = KnowledgeEmbedder(Provider(), old)
     assert await _backfill(factory, old_embedder).sweep_once() == 3
-    sweep = _backfill(factory, KnowledgeEmbedder(Provider(), SPACE))
+    sweep = _backfill(factory, KnowledgeEmbedder(Provider(), SPACE), batch=2)
     with caplog.at_level(logging.INFO, logger="agent_core.knowledge.backfill"):
-        assert await sweep.sweep_once() == 3
+        assert await sweep.sweep_once() == 2
+        assert all(old.key in spaces for spaces in store._vectors.values())
+        assert await sweep.sweep_once() == 1
+        assert all(old.key in spaces for spaces in store._vectors.values())
+        assert await sweep.sweep_once() == 0
     assert all(old.key not in spaces for spaces in store._vectors.values())
     assert all(SPACE.key in spaces for spaces in store._vectors.values())
     pruned = [r for r in caplog.records if r.msg == "knowledge_vectors_pruned"]
@@ -265,7 +274,9 @@ async def test_the_prune_leaves_other_owners_vectors_alone() -> None:
     for owner in (None, other_tenant, other_principal):
         assert await _backfill(factory, old_embedder, owner=owner).sweep_once() == 3
 
-    assert await _backfill(factory, KnowledgeEmbedder(Provider(), SPACE)).sweep_once() == 3
+    sweep = _backfill(factory, KnowledgeEmbedder(Provider(), SPACE))
+    assert await sweep.sweep_once() == 3
+    assert await sweep.sweep_once() == 0
     foreign = [*tenant_document.chunks, *principal_document.chunks]
     assert all(set(store._vectors[chunk.chunk_id]) == {old.key} for chunk in foreign)
     owned = _document(1, TEXT).chunks

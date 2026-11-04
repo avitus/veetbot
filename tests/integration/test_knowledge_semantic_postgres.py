@@ -428,6 +428,8 @@ async def test_windows_are_stored_scored_by_their_best_and_backfilled(tmp_path: 
             batch_chunks=64,
         )
         assert await again.sweep_once() == 6
+        # The old space goes only in the round that finds the new one full.
+        assert await again.sweep_once() == 0
         async with create_engine(settings.database_url).begin() as connection:
             await connection.execute(
                 text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),

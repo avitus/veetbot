@@ -2,7 +2,7 @@
 
 - Status: Accepted (explicit owner direction on 2026-11-03)
 - Date: 2026-11-03
-- Related: ADR-0178, ADR-0188, ADR-0199, ADR-0220, ADR-0223, ADR-0246, ADR-0269, ADR-0274, ADR-0289
+- Related: ADR-0178, ADR-0188, ADR-0199, ADR-0220, ADR-0223, ADR-0246, ADR-0269, ADR-0274, ADR-0289, ADR-0292
 - Detailed design: `docs/plan/general-memory-recall.md`, `docs/plan/knowledge-documents.md`
 
 ## Context
@@ -58,14 +58,14 @@ section that repeats "click" or "tray" outranks the passage that answers.
    introduced.
 3. **Knowledge chunks are embedded in windows.** `knowledge-text@2` embeds a
    chunk as one or more windows, each the heading path over a slice of the
-   chunk text: the local route packs them under the provider's capacity by
-   its tokenizer's count; the OpenAI route cuts a chunk whose text the
-   chunker estimates at 256 tokens or more into 128-token windows and keeps
-   a shorter one whole (the measurement below). A chunk's semantic score is
-   its best window; `knowledge_chunk_vectors` keys on chunk, space and
-   window. A maintenance sweep embeds the owner's current chunks that lack a
-   vector in the active space and prunes every other space's vectors, so an
-   earlier document gains vectors and a new encoder replaces the old ones.
+   chunk text, packed under the provider's token capacity with the local
+   tokenizer's own count; an unbounded provider got one window identical to
+   `knowledge-text@1` until ADR-0292 gave the OpenAI route windows of its
+   own. A chunk's semantic score is its best window.
+   `knowledge_chunk_vectors` keys on chunk, space and window. A maintenance
+   sweep embeds the chunks of the owner's current documents that have no
+   vector in the active space, so documents ingested before activation gain
+   vectors without a new version (ADR-0292 adds the prune of other spaces).
 4. **The knowledge arm turns on with its own provider.**
    `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai` gives the arm OpenAI's
    `text-embedding-3-small` at 1536 dimensions on the existing `openai`
@@ -147,7 +147,7 @@ passes as before (2, 1, 2); all but two manual chunks are cut, and its
 answering section ranks sixth for the owner's words, seventh and first for
 the model's two queries, and second for the plain phrasing. The local route
 keeps its tokenizer and capacity, which a chunk may not exceed. The backfill
-prunes vectors of any other space as it fills the active one, so a new
+prunes any other space once the active one is full (ADR-0292), so a new
 encoder or budget replaces rather than piles up; the manual is about 2,300
 windows and 244,000 tokens once. Model query 1 stays at rank 6 or 7 under
 every budget because it names the document, which pulls the front-matter
