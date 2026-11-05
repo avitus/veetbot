@@ -2297,6 +2297,7 @@ import UserNotifications
             try await Task.sleep(nanoseconds: 1_000_000)
         }
         let question = try #require(model.runState.clarifyingQuestion)
+        try #require(server.offerReads > 0)
 
         #expect(await model.answerQuestion(question, answer: "Not now"))
         held.signal()
@@ -2320,6 +2321,8 @@ import UserNotifications
         for _ in 0..<5_000 where server.offerReads == 0 {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
+        // The held read must be the one already started, or a later read would wait on it.
+        try #require(server.offerReads > 0)
 
         // Reopening the chat starts a new watch, which reads the current offer.
         await model.selectSession(try #require(model.history.first))
@@ -2348,6 +2351,8 @@ import UserNotifications
         for _ in 0..<5_000 where server.offerReads == 0 {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
+        // The held read must be the one already started, or a later read would wait on it.
+        try #require(server.offerReads > 0)
 
         await model.refreshWebsiteOffer()
         #expect(model.websiteOffer?.offerID == server.offerID)
