@@ -27,6 +27,7 @@ from agent_core.domain.errors import (
     ApprovalRequiredError,
     AuthorizationError,
     ConflictError,
+    DatabaseCapacityError,
     NotFoundError,
     ToolValidationError,
 )
@@ -649,7 +650,9 @@ async def test_timeout_after_dispatch_preserves_write_uncertainty(
     assert invocation.outcome.retryable is (not write)
 
 
-@pytest.mark.parametrize("authorization_work", ["stalled", "elapsed_clock", "elapsed_monotonic"])
+@pytest.mark.parametrize(
+    "authorization_work", ["stalled", "elapsed_clock", "elapsed_monotonic", "capacity"]
+)
 async def test_standing_authorization_shares_the_execution_deadline(
     tmp_path: Path, authorization_work: str
 ) -> None:
@@ -698,6 +701,10 @@ async def test_standing_authorization_shares_the_execution_deadline(
                 turn: AuthorizationTurn | None = None,
             ) -> StandingAuthorization:
                 del turn
+                if authorization_work == "capacity":
+                    # Connection exhaustion abandons the attempt for lease recovery;
+                    # it never becomes an approval card (event-log-and-persistence).
+                    raise DatabaseCapacityError("injected while authorizing")
                 expected_deadline = NOW + timedelta(seconds=tool.spec.timeout_seconds)
                 if run.deadline_at is not None:
                     expected_deadline = min(expected_deadline, run.deadline_at)
@@ -744,6 +751,9 @@ async def test_standing_authorization_shares_the_execution_deadline(
         if authorization_work == "stalled":
             with pytest.raises(ApprovalRequiredError):
                 await dispatch
+        elif authorization_work == "capacity":
+            with pytest.raises(DatabaseCapacityError):
+                await dispatch
         else:
             result = await dispatch
             assert result[0].is_error is (authorization_work == "elapsed_clock")
@@ -752,6 +762,10 @@ async def test_standing_authorization_shares_the_execution_deadline(
 
     if authorization_work == "stalled":
         assert invocation.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
+        assert invocation.effect_sent_at is None
+        assert tool.observed is None
+    elif authorization_work == "capacity":
+        assert invocation.status is not ToolInvocationStatus.WAITING_FOR_APPROVAL
         assert invocation.effect_sent_at is None
         assert tool.observed is None
     elif authorization_work == "elapsed_clock":

@@ -2125,6 +2125,8 @@ class ToolPipeline:
                 action_deadline=action_deadline,
                 turn=_active_turn_facts(checkpoint),
             )
+        except DatabaseCapacityError:
+            raise
         except Exception:
             logger.exception(
                 "standing_authorization_failed",

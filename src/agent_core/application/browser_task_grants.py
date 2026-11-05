@@ -38,7 +38,12 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskGrantView,
     BrowserTaskScopePolicy,
 )
-from agent_core.domain.errors import AgentCoreError, ConflictError, NotFoundError
+from agent_core.domain.errors import (
+    AgentCoreError,
+    ConflictError,
+    DatabaseCapacityError,
+    NotFoundError,
+)
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.policies import (
     AuthorizationTurn,
@@ -364,6 +369,10 @@ class CompositeStandingAuthorizer:
                     action_deadline=action_deadline,
                     turn=turn,
                 )
+            except DatabaseCapacityError:
+                # The worker abandons the attempt for lease recovery; an
+                # exhausted database is not a refusal (event-log-and-persistence).
+                raise
             except (AgentCoreError, OSError, ValueError):
                 logger.exception("standing_authorizer_failed")
                 continue
