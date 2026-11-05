@@ -411,6 +411,7 @@ is not an authorization input.
 | `POST /v1/approvals/{id}/resolve` | `approval.resolve` |
 | `GET /v1/artifacts/{id}` | `artifact.read` |
 | `GET /v1/artifacts/{id}/content` | `artifact.read` |
+| `POST /v1/email/threads/{id}/attachments/save` | `email.write`, and `artifact.write` in the service (ADR-0296) |
 | `POST /v1/browser-profiles` | `browser.profile.write` |
 | `GET /v1/browser-profiles` | `browser.profile.read` |
 | `GET /v1/browser-profiles/{id}` | `browser.profile.read` |
@@ -875,7 +876,9 @@ It requires `session.read` and returns the standard page shape:
 
 Items are ordered by ascending immutable session sequence. The default page size
 is 100 and the server clamps it to 200. The cursor is opaque and identifies the
-last returned message sequence; an invalid cursor is `malformed_request`. As on
+last sequence counted toward the page, which is a reply left empty by a deletion
+when one ends the page; a client continues with `next_cursor` even when `items`
+is empty. An invalid cursor is `malformed_request`. As on
 the point read, a missing, cross-tenant, or differently owned session is 404.
 
 The route is a transcript projection rather than an event-log export. Ordinary
@@ -883,7 +886,10 @@ The route is a transcript projection rather than an event-log export. Ordinary
 and the response converts their content to the public content-block vocabulary.
 An assistant item carries a `file` block for each file its run exported
 (ADR-0122), after the text; the block names an artifact the owner reads through
-`GET /v1/artifacts/{artifact_id}/content`.
+`GET /v1/artifacts/{artifact_id}/content`. An assistant item omits a file or image
+block whose artifact is expired or gone, as after `artifact.delete` (ADR-0277).
+The event keeps the reference. A reply left with no block still counts toward the
+page and moves the cursor, so a page can hold fewer items than its limit.
 The scheduler-authored `user.message.created` event that seeds a scheduled run
 is context-only and does not produce a transcript item; its complete
 instruction remains available through the authorized schedule point read. Tool
@@ -980,7 +986,7 @@ reason `active_run_exists`. Without `offer_id` the endpoint is unchanged.
 1. Authenticate, producing the `Principal`.
 2. Check `run.write`.
 3. Load the session in the principal's tenant, or 404.
-4. Reject a `CLOSED` session with `invalid_state` and status 409.
+4. Reject a `CLOSED` session with `invalid_state_transition` and status 409.
 5. Validate the content blocks. Since ADR-0120 an `image` or `file` block
    must name an upload of the caller in this session that has not expired,
    or it is `not_found`; the stored parts take the upload's recorded type,
@@ -1282,11 +1288,22 @@ most one. Supplying a stale `question_id` — one already resolved — is
 `conflict` with status 409 rather than a silent second resume, and that
 is the entire reason the field exists.
 
-**A run not in `WAITING_FOR_USER` is `invalid_state` with status 409.**
+The runtime's own sign-in pause adds `sign_in` to that event's
+`suspension`: `browser_profile_id`, `origin` and `expires_at` when the run waits
+for a verified sign-in, otherwise none of them. A client shows a sign-in card
+for it. With a waiting website the card takes no answer until `expires_at`, when
+the run stops resuming by itself and a reply continues it. Without one there is
+no expiry to wait for: the owner signs in and replies at any time. A run with a
+deadline adds `run_deadline_at` in both cases, past which the card offers only
+stopping the run (ADR-0280).
+
+**A run not in `WAITING_FOR_USER` is `invalid_state_transition` with status 409.**
 Not 404: the run exists, and telling a client its answer arrived too
-late is more useful than telling it the run is gone. A run that timed
-out waiting has already failed with `INPUT_DEADLINE_EXCEEDED`, and the
-409 body's `details` names that.
+late is more useful than telling it the run is gone. A waiting run whose own
+deadline has passed gets the same answer and stays waiting, because only
+stopping it remains (ADR-0280). A message sent to its session instead still
+ends it with `deadline_exceeded`, which frees the chat on surfaces that cannot
+stop a run.
 
 The response is `202` with the same body as message submission, so a
 client that answered a question and a client that started a turn hold
@@ -1477,6 +1494,15 @@ has begun the status is already `200` and cannot be revised, so every
 check that can fail — authentication, scope, tenancy, existence —
 happens before the first byte of the stream.
 
+A client can also leave at any moment, and the stream gives back what it
+holds when it does. Each stream owns one dedicated PostgreSQL `LISTEN`
+connection, and a dropped client cancels the request's scope, which is
+delivered again at every later await. So `EventStreamResponse` closes the
+stream shielded from that scope rather than leaving it to garbage collection,
+and the broadcaster ends the connection without awaiting. On 2026-11-03, one
+long chat reconnecting used up PostgreSQL's 100 connections in about three
+minutes because neither held.
+
 ### Overflow
 
 A client that reads slower than the run produces will eventually fill
@@ -1499,6 +1525,11 @@ This is the fourth non-inference and the reason it is safe to state so
 briefly: **a client must not treat the stream as the source of truth.**
 The event log is. The stream is a fast path to it, and every failure
 mode of the fast path resolves to reading the log.
+
+The same holds on the client. Its read waits while the consumer is behind,
+so a long replay is slowed by TCP rather than torn down and reconnected, and a
+run waiting on the owner loads its approvals from `GET /v1/approvals` whether
+or not its stream connects.
 
 ### What the payloads may not contain
 
@@ -2218,11 +2249,13 @@ build failure.
 ## Milestone 26 email routes
 
 The approved [email-experience.md](email-experience.md) defines the account,
-thread, refresh, feedback, learning, draft and send-proposal route families.
+thread, refresh, feedback, learning, draft, send-proposal and one-press send
+(`/send`, `/send-undo`; ADR-0279) route families.
 Application scopes `email.read` and `email.write` intersect current mailbox MCP
 authority; send-proposal returns ordinary run/approval references and existing
-approval routes authorize dispatch. There is no direct-send route or arbitrary
-write extension to the memory API. Every command requires validation,
+approval routes authorize dispatch; `/send` admits a governed task whose
+`REQUIRE_APPROVAL` the owner's own press resolves once (ADR-0279). There is no
+direct-send route or arbitrary write extension to the memory API. Every command requires validation,
 authorization, failure, conflict and retry coverage under the existing error
 vocabulary; ordinary run SSE remains the progress transport.
 
@@ -2503,3 +2536,22 @@ foreign or unknown widget, revision or feed is an indistinguishable 404.
 Cockpit adds no error code. A write that does not fit its live widget is
 `malformed_request`, and a build that reached no verdict is
 `sandbox_execution_error`.
+
+## Integration keys (ADR-0275)
+
+When enabled, `GET /v1/integration-secrets` requires `settings.read` and returns
+`{secrets: [...]}` with only caller-owned active metadata: `id`, `reference`,
+`label`, `origin`, `auth_scheme`, `revision`, `created_at`, `updated_at`.
+`PUT /v1/integration-secrets/{id}` requires `settings.write` and accepts immutable
+`label`, `origin` and `auth_scheme` fields plus secret `value` and integer
+`expected_revision` (0 creates); it returns the saved metadata. Identical
+lost-response retries return that metadata without another mutation.
+`DELETE /v1/integration-secrets/{id}` requires `settings.write`, an integer
+`If-Match` revision and returns 204; owned tombstone retries also return 204.
+Wrong-owner and unknown existing IDs are 404, malformed writes 400, missing
+scopes 403, stale revisions/binding changes/tombstone recreation 409, bodies over
+8 KiB 413, and a key that cannot be opened `503 integration_key_unavailable` with
+empty details. All responses use private, no-store caching, including failures. Parse secret bodies manually under the
+cap; never reflect body fields, values, unknown field names or parser details
+in errors. There is no GET-by-ID, reveal or export route. See
+[the owner and operator guide](../integration-keys.md).

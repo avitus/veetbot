@@ -66,6 +66,8 @@ as an archival record.
   Schedules, Persona, and settings.
 - [Downloadable client](client.md) — the terminal client's build, connection,
   and security guidance.
+- [Agent-written jobs](jobs.md) — saved Python programs, approved access,
+  one-time runs, schedules and the MVP activation procedure.
 - [Production deployment](deployment.md) — host preparation, release,
   feature flags and owner scopes, verification, and rollback.
 - [Gmail integration runbook](gmail-integration-runbook.md) — connecting

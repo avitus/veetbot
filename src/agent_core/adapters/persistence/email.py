@@ -9,11 +9,13 @@ import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     DateTime,
+    Numeric,
     Text,
     and_,
     case,
@@ -199,6 +201,27 @@ class InMemoryEmailStore:
                         >= created_since
                     )
                 )
+            ),
+            key=lambda record: record.key,
+        )
+        return [record.model_copy(deep=True) for record in selected[:limit]]
+
+    async def list_empty_checks(
+        self, principal: Principal, *, created_before: datetime, limit: int = 100
+    ) -> builtins.list[EmailRecord]:
+        """Settled server checks that found nothing and cost nothing, created before the cutoff."""
+        _validate_limit(limit)
+        selected = sorted(
+            (
+                record
+                for record in self._records.values()
+                if record.tenant_id == principal.tenant_id
+                and record.principal_id == principal.principal_id
+                and record.kind == "task"
+                and record.payload.get("empty_check") is True
+                and record.payload.get("settled_cost") is not None
+                and Decimal(str(record.payload["settled_cost"])) == 0
+                and datetime.fromisoformat(str(record.payload["created_at"])) < created_before
             ),
             key=lambda record: record.key,
         )
@@ -474,6 +497,30 @@ class PostgresEmailStore:
         rows = (
             await self._session.scalars(
                 query.order_by(EmailRecordRow.key)
+                .limit(limit)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        return [email_record_to_domain(row) for row in rows]
+
+    async def list_empty_checks(
+        self, principal: Principal, *, created_before: datetime, limit: int = 100
+    ) -> builtins.list[EmailRecord]:
+        """Settled server checks that found nothing and cost nothing, created before the cutoff."""
+        _validate_limit(limit)
+        rows = (
+            await self._session.scalars(
+                select(EmailRecordRow)
+                .where(
+                    EmailRecordRow.tenant_id == principal.tenant_id,
+                    EmailRecordRow.principal_id == principal.principal_id,
+                    EmailRecordRow.kind == "task",
+                    EmailRecordRow.payload["empty_check"].astext == "true",
+                    EmailRecordRow.payload["settled_cost"].astext.cast(Numeric) == 0,
+                    EmailRecordRow.payload["created_at"].astext.cast(DateTime(timezone=True))
+                    < created_before,
+                )
+                .order_by(EmailRecordRow.key)
                 .limit(limit)
                 .execution_options(populate_existing=True)
             )

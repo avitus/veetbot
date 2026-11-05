@@ -29,7 +29,8 @@ this tranche. Browser automation remains disabled and absent from the registry
 until a provider is explicitly bound.
 
 ADR-0148 adds individually approved rich-text typing and the separately
-classified image-upload contract below. Other file transfers remain unavailable.
+classified image-upload contract below. ADR-0294 adds the separately classified
+text-file download below. Other file transfers remain unavailable.
 
 The following are not goals:
 
@@ -115,8 +116,8 @@ Provider observations and full approval facts stay unchanged. Metadata or a
 single complete reference that cannot fit produces `tool.browser.output_invalid`.
 Pagination is read-only, stays under the same profile and origin authority,
 and changes neither the generic output admission cap nor artifact access.
-Version 1.0.0 remains registered for pinned chats; a new profile-bound chat
-selects the new schema. Navigate, act and upload keep their existing versions.
+Version 1.0.0 is retired (ADR-0266); a profile-bound chat selects the new
+schema. Navigate, act and upload keep their existing versions.
 
 ## Tool contract
 
@@ -183,8 +184,8 @@ waiting source run's question in that run, through
 offer on that device. Website Access opened from a chat offers "Use in this
 chat" separately from the device default for new chats.
 
-Downloads, uploads other than the image contract below, clipboard access,
-notifications, geolocation, camera, microphone, password-manager access, and
+Downloads other than the text-file contract below, uploads other than the image
+contract below, clipboard access, notifications, geolocation, camera, microphone, password-manager access, and
 new windows are denied until each has
 its own classified contract. Cross-origin popups are closed and reported.
 The ephemeral provider also refuses typing into password fields or controls
@@ -243,8 +244,62 @@ upload or chooser click is uncertain on failure and is never blindly retried.
 Providers advertise upload only when they implement the optional image-upload
 port. Bound hosted chats keep it defined with the other browser tools. Existing
 frozen chats retain their roster; start a new profile-bound chat to use upload.
-Downloads, arbitrary files and videos remain unavailable. ADR-0148 records this
+Arbitrary files and videos remain unavailable for upload. ADR-0148 records this
 owner-requested extension and its verification requirements.
+
+### Individually approved text-file download
+
+A click or key press through `browser.act` that carries no grant or research
+constraint holds a one-file window for as long as the act runs. A file started
+inside the window is saved, whatever started it (ADR-0294 records why cause cannot
+be established); every other file is cancelled, whether a page starts it on its
+own, a navigation or read meets it, or a sign-in ceremony does. A grant-
+or research-authorized act that meets a file cancels it and reports
+`needs_approval`, whatever kind of action it was; a click or key press on a control
+that names a file waits for that file as an approved one does, so a late file is
+reported too. Any other action reports only a file that starts before it settles. A file must also come from one of
+the profile's origins, read from its URL, with a `blob:` URL read as the origin
+inside it. Anything else, including a third-party frame's file and a `data:` URL,
+which names no origin, is cancelled as `origin_not_allowed` and leaves the window
+open for the click's own file. Neither kind of grant covers a download: a control named with
+`download` or `export`, or a link with a `download` attribute, already reads as a
+file-transfer consequence, and a plain control that turns out to save a file is
+refused live.
+
+The runtime admits at most 2 MiB of text: UTF-8 or Windows-1252, with no NUL byte
+and no PDF signature in the first kilobyte, normalized to UTF-8. Size is checked while the file downloads, in a private
+directory under the session's temporary home, and the file is removed from there
+once read. Everything else is a named refusal: `unsupported_type`, `too_large`,
+`timed_out` or `failed`, which an empty file also reports, having nothing to read. The website's suggested name is reduced to a bare name of
+letters, digits, `.`, `_` and `-`, and the media type comes from the name's suffix:
+`text/csv`, `text/tab-separated-values`, otherwise `text/plain`.
+
+After the page settles, an act on a control whose accessible name contains
+`download`, `export` or `csv`, or on a link with a `download` attribute, waits up to
+10 seconds for the file to start. Any started file then has up to 8 seconds to
+finish. The wait ends 20 seconds after the act's window opened, however slow the click
+was, and a file that starts after that is refused as `timed_out`, so the tool's 30 seconds still hold the observation, a postcondition of up to 5
+seconds and storing the file, which gives up 1 second before the limit. The name decides only whether to wait,
+never whether to admit. A later file is cancelled and unreported.
+
+The bytes cross the service boundary once, in base64, on the act's own observation
+(`BrowserObservation.download`); the worker's session response limit allows for
+this envelope, and the worker repeats the admission checks on what it parses.
+Observation results list their fields, so no `browser.act` result, event or log
+carries the bytes; a later `artifact.read_capture` result returns bounded text from the file.
+
+`browser.act@1.8.0` stores the file through the run's artifact writer as an
+`EXTERNAL_UNTRUSTED` capture of this chat, with the capture mark, so
+`artifact.read_capture` opens it under its existing rules and it is deleted with
+the chat. The mark's `literal` flag has the reader take the file as its own text,
+never as serialized tool output. The structured result gains `saved_file`, kept by the context projection:
+the artifact ID, name, media type, size, section count and the exact `tool.call`
+that reads it, or `status: refused` with a reason. A plan that cannot reach the
+reader gets `reader_unavailable`, and nothing is stored. A file that cannot be stored in time
+reports `failed`, and the click keeps its result, because it already ran. Input schema and description
+are unchanged, so the tool's definition costs no more; `browser.act@1.7.0` stays
+registered for chats pinned to it and reports no file. ADR-0294 records this
+owner-requested extension, its limits and its verification requirements.
 
 ## Profiles and authentication
 
@@ -765,7 +820,10 @@ can assert success. In the remote ceremony a caller cannot submit a
 credential. In the device ceremony the user's client submits the site session
 once, and the service's own verification decides the outcome. CAPTCHA, MFA,
 reauthentication, consent, password fields, and one-time-code fields keep a
-remote ceremony in `needs_user` until the user completes them directly.
+remote ceremony in `needs_user` until the user completes them directly. A
+password or one-time-code field counts in a visible frame of the page as well as
+in the page itself, because some websites keep their sign-in form in a frame
+(ADR-0288).
 
 In the remote ceremony the runtime reports `ready` only on evidence of a sign-in
 it mediated itself: during this ceremony the user sent text while one of those
@@ -805,7 +863,11 @@ The service sweeps every fifteen seconds and closes expired runtimes without
 waiting for a request. It checks each open remote ceremony once in its last
 twenty seconds and seals it only when two checks 2.5 seconds apart both find
 the evidence above, so a check made while a submission is in flight does not
-seal. The service keeps each terminal outcome for twenty-four hours, in memory,
+seal. A status check or sweep already deciding a ceremony when its five minutes
+end runs to its own thirty-second budget, which for a sweep starts at its first
+check, so a sign-in finished in the last seconds is still saved; the browser
+surface closes at the limit either way, and neither starts deciding after it.
+The service keeps each terminal outcome for twenty-four hours, in memory,
 so the public record can still learn it.
 
 ### Device sign-in ceremony
@@ -836,7 +898,13 @@ script, script message handler, or automation setting, so it reads nothing the
 user types. Top-level navigation stays on the profile's allowed origins. New
 windows, downloads, and other schemes are refused; subframes load as the site's
 resources do. Before a new profile exists, the first load may adopt a redirect
-between a bare hostname and its `www` subdomain as the profile's origin. When
+between a bare hostname and its `www` subdomain as the profile's origin. Also
+before a new profile exists, a top-level move to another host of the same
+registrable domain, approximated as for website offers and on the default HTTPS
+port, is held back and named to the user, who may allow that exact origin. The window then
+loads the page, and the profile is created with every allowed origin, up to the
+64-origin limit (ADR-0287). A page cannot add an origin by itself, any other host
+stays refused, and an existing profile's origins never change. When
 the user confirms, the client reads the store's cookies and keeps those whose
 domain is an allowed host or a parent of one. It reads `localStorage` of the
 allowed origins it visited in an isolated script world, and sends them once with
@@ -900,7 +968,15 @@ embedded page, does not hold verification until the full-page `load` event.
 The five-second network wait expiring does not make a pending authentication
 request safe to ignore: documents, scripts, stylesheets, XHR and fetch requests
 must finish and remain idle for 500 ms before the path and challenge evidence
-below can be positive. A fetch or XHR event stream with HTTP 200 and media
+below can be positive. A signed-out control whose page still reads as signed in
+then keeps looking for a sign-in field until five seconds before that limit, or
+until it leaves the confirmed path, because a site such as Chase draws its framed
+form after its requests go quiet. A pair then passes only if the signed-in page has been
+watched for at least three seconds longer than the control's page, each from its own load:
+it keeps looking until then, a form or a move away there ends `session_signed_out`, and too
+little time left ends `session_unconfirmed`. A new document on the signed-in copy restarts
+its age. A configured site definition neither waits
+nor looks again (ADR-0297). A fetch or XHR event stream with HTTP 200 and media
 type `text/event-stream` instead counts as established when its response
 headers arrive (ADR-0147); its continuing body does not hold the wait open.
 The media type is case-insensitive and may have parameters. An unanswered
@@ -1011,8 +1087,11 @@ refuse each disallowed hop before dispatch, even when that host previously
 served a page resource. The isolated runtime records the disallowed navigation
 request, reports the launch as `tool.browser.url_disallowed`, and discards the
 browser; any other launch navigation failure is
-`tool.browser.provider_unavailable`. Neither carries raw browser text. The
-application turns the disallowed redirect into the same `400 malformed_request`
+`tool.browser.provider_unavailable`. Neither carries raw browser text. The launch
+only opens the page: it does not read it for an agent, so a page that keeps
+moving as it loads still reaches the owner. Finishing the sign-in likewise reads
+only the page's address. The application turns the disallowed
+redirect into the same `400 malformed_request`
 with a fixed message that names the bare-versus-`www` case and asks for the
 website's final address, creates no ceremony record, and leaves the profile
 available for a corrected retry.
@@ -1022,7 +1101,11 @@ login page. An omitted scheme defaults to HTTPS. The client derives the primary
 allowed origin from that URL and opens the full URL, preserving its path, query,
 and fragment. It signs in on the device by default and offers the remote
 browser as the alternative, and any profile that is not revoked can be signed
-in again on the device. Website scripts, stylesheets, images, fonts,
+in again on the device or, from that window, through the remote browser, where
+backing out keeps the profile (ADR-0288). A profile remembers how its latest
+sign-in began (`last_sign_in_mode`), and Sign in again, the chat's sign-in card
+and the website offer reopen that way; a profile last signed in through the
+remote browser keeps **Use this device** on its row (ADR-0297). Website scripts, stylesheets, images, fonts,
 cross-origin APIs, and embedded verification frames load automatically without
 CDN configuration. This resource permission also applies when an existing
 profile is reused. A resource origin cannot authorize top-level navigation or an
@@ -1451,7 +1534,8 @@ retains its existing lease-operation serialization.
   deletable, encrypted at rest, and inaccessible through model-authored ids.
 - Every redirect and action remains within the provider-bound origin policy;
   private-network, non-HTTPS, popup, download, upload, clipboard, and device
-  access fail closed unless a later explicit contract authorizes them.
+  access fail closed unless a later explicit contract authorizes them (image
+  upload, ADR-0148; text-file download, ADR-0294).
 - Mutating actions require explicit bounded-gesture permission (ADR-0168), a
   constrained ordinary-interaction permission (ADR-0209), an approval, a matching
   unexpired standing grant, or an unexpired, unexhausted task grant inside an owner-configured
@@ -1559,9 +1643,9 @@ also use version 1.7.0 for their additive observation output contract. No
 selector, script, offset, or profile is model selectable. An adapter without
 expansion support returns `tool.browser.action_not_allowed`.
 
-The published `browser.observe` 1.0.0 and offset-paged 1.1.0 contracts remain
-registered for pinned chats, alongside `browser.navigate` and `browser.act`
-1.0.0. New chats receive 1.7.0 and its provider-bound continuations. The older
+The offset-paged `browser.observe` 1.1.0 contract remains registered; the
+1.0.0 contracts of `browser.observe`, `browser.navigate` and `browser.act` are
+retired (ADR-0266). New chats receive 1.7.0 and its provider-bound continuations. The older
 offset pages continue to fit the configured inline budget. All ephemeral
 expansion and extraction calls share the page-operation lock used by navigation,
 actions and uploads.
@@ -1795,7 +1879,10 @@ any fresh read evidence. Authentication challenges discard references and requir
 owner-controlled sign-in. The runtime may suspend for that owner action twice;
 the failed call is already complete and is not replayed on resume. Existing
 profile generation checks invalidate old leases, approvals and grants. Uncertain
-writes retain `tool.browser.outcome_unknown` and are never automatically resent.
+writes retain `tool.browser.outcome_unknown` and are never automatically resent. The
+sign-in question's `run.waiting_for_user` suspension carries `sign_in`, with
+`browser_profile_id`, `origin` and `expires_at` from the trusted wait when one exists, and the
+app shows a sign-in card in place of a question card (ADR-0280).
 
 For small model budgets, retain coverage scope/version, limit flags and omission
 counts inline. Scan counters stay in the canonical artifact with

@@ -224,6 +224,12 @@ not make a forwarded statement about her true.
 2. Use an explicitly selected person or owner-confirmed mapping.
 3. Match an exact, validated channel identifier to its time-valid assignment.
 4. Use a unique, previously evidenced alias within its supported context.
+   A name the owner states in Chat also selects the one non-merged person who
+   holds that exact name as an alias in any context, or as their display name,
+   when the owner has a current, resolved direct relationship with them; two
+   such people stay ambiguous, and a name without an owner tie still identifies
+   nobody on its own
+   ([ADR-0264](../adr/0264-owner-stated-names-reach-the-tied-person.md)).
 5. Keep unresolved candidates when multiple identities fit. Ask a targeted
    question only when choosing is necessary for the current task.
 
@@ -284,6 +290,10 @@ number the owner states in Chat identifies that person for mail and texts, and
 a person the owner creates gets an owner-confirmed name alias. Assignment
 deduplication retains distinct ended and live periods. Import admission and
 source selection use the same distinct assignments as identity snapshots.
+Owner-stated name fallback may qualify a single unqualified display-name
+candidate through a direct owner relationship, but only when both the edge and
+its supporting belief are currently visible, live, temporally valid and within
+the sensitivity ceiling. Multiple name candidates remain ambiguous (ADR-0264).
 
 Cross-claim admission uses only owner-asserted sources in the requested scope;
 an untrusted or foreign-scope claim cannot supply another claim's owner tie.
@@ -565,18 +575,28 @@ Automatic and planned deliberate recall share this People context mechanism.
 [ADR-0238](../adr/0238-owner-overview-and-memory-delivery.md) adds direct owner
 relationship pages for explicit owner/family overviews. The first family page
 includes family and partner edges; deliberate `memory.search` can select a group
-and continue after the returned person identifier. Each page visits at most three
-focal identities and reads at most 100 relationship rows per identity, under the
-owner fence. Pages order their people closest first: partner or spouse,
+and continue after the returned person identifier. A continuation page visits at
+most three focal identities; a first page runs on until it has reached the first
+member of every tier present, holding three to eight people
+([ADR-0265](../adr/0265-the-first-family-page-reaches-every-tier.md),
+`+owner-overview@3`). Each page reads at most 100 relationship rows per identity,
+under the owner fence. Pages order their people closest first: partner or spouse,
 children, parents, siblings, then other relatives, ties broken by identifier
-(ADR-0259, `+owner-overview@2`), so the automatic first page holds the owner's
-household; one overview reads at most 50 people per relationship group, and a
-group holding more says so and points the model to asking about a person by
-name. Existing belief visibility predicates admit the supporting evidence
+(ADR-0259), so the automatic first page holds the owner's household and reaches
+their parents and siblings; one overview reads at most 50 people per relationship
+group, and a group holding more says so and points the model to asking about a
+person by name. Existing belief visibility predicates admit the supporting evidence
 before projection; neither names nor indirect graph paths infer relationships.
 Directed endpoints and evidence confidence are retained, including provisional
 status. Coverage and continuation are rendered inside the shared recall budget;
-a page never claims exhaustive knowledge. Other permitted ordinary recall remains
+the cursor advances only past contiguous people whose eligible context was
+actually delivered, reserving its metadata before selecting evidence. The first
+remaining person gets the full shared budget before ordinary beliefs compete. If
+that person still cannot fit, the response explicitly marks their context
+incomplete and advances past them to reach later people. It discloses that omitted
+relationship context is not paginated by `people.context`, rather than promising
+that a narrower query will recover it. This exception and its cursor are
+also budgeted before selection; a page never claims exhaustive knowledge. Other permitted ordinary recall remains
 available alongside the direct relationships.
 
 Disconnected source accounts make live source navigation unavailable; they do
@@ -589,7 +609,8 @@ contract rather than treating every unavailable provider as an erasure request.
 
 People context shares the existing retrieved-context allocation; it is not an
 additional unbounded prompt section. Start with at most three focal people,
-20 combined items, five recent interactions per focal person, and ten one-hop
+except the first owner/family overview page may include up to eight. Both paths
+retain 20 combined items, five recent interactions per focal person, and ten one-hop
 relationship candidates, all subordinate to the existing 2,000-token task
 recall ceiling and deterministic truncation rules. Explicit lookup can page;
 it does not raise the run's budget. Conflict pairs travel together or receive a

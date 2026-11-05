@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import logging
 import os
@@ -56,6 +57,10 @@ from agent_core.adapters.cockpit.github import (
     load_app_private_key,
 )
 from agent_core.adapters.cockpit.runtime import Draft202012SchemaCheck, FileCockpitRuntime
+from agent_core.adapters.code.github import GitHubCodeProposals
+from agent_core.adapters.code.sandbox import SandboxCodeChecker, code_check_sandbox
+from agent_core.adapters.code.screen import SandboxCodeScreen
+from agent_core.adapters.code.source_tree import FilesystemSourceTree
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -75,11 +80,16 @@ from agent_core.adapters.execution.docker import (
     resolve_local_image_digest,
 )
 from agent_core.adapters.execution.fake import FakeExecutionEnvironment, fake_image_digest
+from agent_core.adapters.execution.jobs import SandboxJobRunner
 from agent_core.adapters.execution.service import ExecutionServiceClient, ExecutionServiceServer
 from agent_core.adapters.identity import (
     ConfiguredSchedulePrincipalDirectory,
     StaticPrincipalResolver,
 )
+from agent_core.adapters.jobs.credentials import GitHubReaderCredentials
+from agent_core.adapters.jobs.http import JobHTTP
+from agent_core.adapters.jobs.screen import SandboxJobScreen
+from agent_core.adapters.jobs.stored_credentials import StoredJobCredentials
 from agent_core.adapters.judgment import TypeSafeJudgmentProvider
 from agent_core.adapters.knowledge.pdf import PdfTextExtractor
 from agent_core.adapters.live_events import (
@@ -122,6 +132,10 @@ from agent_core.adapters.persistence.cockpit import (
     PostgresWidgetCommitOutbox,
     PostgresWidgetStore,
 )
+from agent_core.adapters.persistence.code_drafts import (
+    InMemoryCodeDraftRepository,
+    PostgresCodeDraftRepository,
+)
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
@@ -140,6 +154,11 @@ from agent_core.adapters.persistence.device_channel import (
 from agent_core.adapters.persistence.dreaming import PostgresDreamingSchedule
 from agent_core.adapters.persistence.email import InMemoryEmailStore, PostgresEmailStore
 from agent_core.adapters.persistence.folder_repositories import PostgresFolderStore
+from agent_core.adapters.persistence.integration_secrets import (
+    InMemoryIntegrationSecretStore,
+    PostgresIntegrationSecretStore,
+)
+from agent_core.adapters.persistence.jobs import InMemoryJobStore, PostgresJobStore
 from agent_core.adapters.persistence.latency_report import chat_latency_report
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
@@ -257,6 +276,7 @@ from agent_core.adapters.schedule_wakeup import (
     InMemoryScheduleWakeup,
     PostgresScheduleWakeup,
 )
+from agent_core.adapters.sealing import AESGCMSecretSealer as IntegrationSecretSealer
 from agent_core.adapters.skills.memory import InMemorySkillRepository
 from agent_core.adapters.skills.stores import (
     FilesystemSkillPackageStore,
@@ -274,6 +294,7 @@ from agent_core.adapters.telegram import (
 from agent_core.adapters.unsubscribe.http import HttpOneClickTransport
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.keenable import KeenableWebProvider
+from agent_core.adapters.web.public_image import PublicImageReader
 from agent_core.adapters.web.routing import WeightedWebProviderRouter
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.adapters.whatsapp import (
@@ -318,6 +339,7 @@ from agent_core.application.cockpit import (
     CommitOutboxWorker,
 )
 from agent_core.application.cockpit_feeds import CockpitFeeds
+from agent_core.application.cockpit_installation import WidgetInstallationAuthorizer
 from agent_core.application.cockpit_platform_feeds import platform_feed_sources
 from agent_core.application.cockpit_projector import (
     CockpitFeedRetention,
@@ -325,6 +347,8 @@ from agent_core.application.cockpit_projector import (
     PlatformFeedSource,
 )
 from agent_core.application.cockpit_views import CockpitBoard, CockpitRetention
+from agent_core.application.code_drafts import CodeDrafts
+from agent_core.application.code_proposals import CodeProposalWorker
 from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_ingest import DeviceMessageIngestService
 from agent_core.application.device_management import (
@@ -332,7 +356,12 @@ from agent_core.application.device_management import (
     NotificationInboxService,
 )
 from agent_core.application.email import EmailExperienceService
+from agent_core.application.email_attachments import EmailAttachmentSaver
 from agent_core.application.folder_service import PublicFolderService
+from agent_core.application.integration_secrets import IntegrationSecrets
+from agent_core.application.job_execution import JobExecution
+from agent_core.application.job_grants import JobGrantAuthorizer
+from agent_core.application.jobs import JobPublication
 from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.application.media_inputs import StoredMediaInputResolver
 from agent_core.application.model_settings import PublicModelSettingsService
@@ -463,7 +492,7 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
-from agent_core.context.budget import records_catalog_caps
+from agent_core.context.budget import knowledge_catalog_caps, records_catalog_caps
 from agent_core.context.builder import BudgetedContextBuilder
 from agent_core.context.compactor import StructuredCompactor
 from agent_core.context.estimator import ConservativeTokenEstimator
@@ -481,6 +510,16 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfile, BrowserRunState
 from agent_core.domain.browser_act_views import TaskGrantSessionContext
 from agent_core.domain.captures import CAPTURE_READER_TOOL_NAME
+from agent_core.domain.code import (
+    CODE_DRAFT_TOOL_NAME,
+    CODE_PROPOSE_TOOL_NAME,
+    CODE_READ_TOOL_NAME,
+    CODE_TEST_TOOL_NAME,
+    CODE_TOOL_NAMES,
+    CODE_WRITE_TOOL_NAMES,
+    RUN_INSPECT_TOOL_NAME,
+)
+from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -494,8 +533,18 @@ from agent_core.domain.execution import (
     ResourceLimits,
 )
 from agent_core.domain.failures import log_failure
+from agent_core.domain.knowledge import (
+    KNOWLEDGE_OPENAI_SPACE,
+    KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+    KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+)
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig
-from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
+from agent_core.domain.mcp import (
+    MCPServerConfig,
+    MCPTransport,
+    ScriptedMCPServer,
+    is_email_server_id,
+)
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
     Capability,
@@ -530,6 +579,7 @@ from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     CancelReason,
     Run,
+    RunKind,
     RunLimits,
     RunOutcome,
     RunStatus,
@@ -538,6 +588,7 @@ from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinit
 from agent_core.domain.sessions import (
     DEFAULT_PROJECT_SCOPE,
     SESSION_BROWSER_PROFILE_METADATA_KEY,
+    SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     Session,
     SessionStatus,
     project_scope,
@@ -562,21 +613,25 @@ from agent_core.folders.grouping import ModelAssistedThreadGrouper
 from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
+from agent_core.knowledge.backfill import KnowledgeVectorBackfill
+from agent_core.knowledge.catalog import KnowledgeCatalogReader
 from agent_core.knowledge.chunking import (
     MAX_KNOWLEDGE_SOURCE_BYTES,
     PlainTextExtractor,
     RoutingExtractor,
 )
+from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.knowledge.uploads import UploadAutoIngest
 from agent_core.mcp.configuration import (
     calling_server_configs,
     email_server_configs,
-    is_email_server_id,
     svp_server_configs,
     validate_mcp_config,
 )
+from agent_core.mcp.job_reads import JobMCPReads
 from agent_core.mcp.runtime import MCPRuntime
+from agent_core.memory.bounded_recall_admission import BoundedAdmission
 from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
 from agent_core.memory.distillation import (
     NemoriAssistedCandidateExtractor,
@@ -615,6 +670,8 @@ from agent_core.memory.retrieval import (
     HybridMemoryRetriever,
 )
 from agent_core.memory.semantic_deployment import (
+    DOCUMENT,
+    IndexProfiles,
     SemanticCompositionInputs,
     SemanticServices,
     compose_indexing,
@@ -633,6 +690,7 @@ from agent_core.persona.boundaries import persona_boundaries
 from agent_core.persona.preview import PersonaPreviewer
 from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
+from agent_core.policy.jobs import JobPolicyEngine, job_publication_ruleset
 from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
@@ -652,6 +710,7 @@ from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.embeddings import LocalEmbeddingProvider as LocalEmbeddingPort
+from agent_core.ports.jobs import JobRunner, JobScreen
 from agent_core.ports.judgment import JudgmentProvider
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPOAuthGateway, MCPServerRepository
@@ -676,6 +735,8 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.email_tasks import EmailTaskRunner
 from agent_core.runtime.executor import RunExecutor, SurfaceRunStateWriter
+from agent_core.runtime.job_model import JobModelCompletion
+from agent_core.runtime.jobs import execute_job
 from agent_core.runtime.loop import RunContext
 from agent_core.runtime.scheduled_browser import (
     ScheduledBrowserUnavailableError,
@@ -691,57 +752,84 @@ from agent_core.skills.package import SkillPackageValidator
 from agent_core.titles.generator import ConversationTitleGenerator
 from agent_core.titles.profiles import TitleProfiles
 from agent_core.titles.titling import ConversationTitlePass, request_title_after_run
-from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
+from agent_core.tools.artifact_delete import ArtifactDeleteTool
+from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.artifact_read_capture import ArtifactReadCaptureTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
     BrowserActTool,
-    LegacyBrowserActTool,
+    PinnedBrowserActTool,
 )
-from agent_core.tools.browser_navigate import BrowserNavigateTool, LegacyBrowserNavigateTool
+from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
     ArticleBrowserObserveTool,
     BrowserObserveTool,
-    LegacyBrowserObserveTool,
     PagedBrowserObserveTool,
 )
 from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.cockpit import (
     COCKPIT_TOOL_NAMES,
+    CockpitCheckTool,
     CockpitToolset,
+    PreviousCockpitCheckTool,
+    PreviousCockpitReadTool,
     cockpit_tools,
     offers_widget_writes,
 )
 from agent_core.tools.cockpit import WIDGET_WRITE_TOOL as COCKPIT_WIDGET_WRITE_TOOL
+from agent_core.tools.cockpit_installation import (
+    INSTALL_TOOL_NAMES,
+    CockpitInstallTool,
+    CockpitPrepareTool,
+)
+from agent_core.tools.code import (
+    CodeDraftTool,
+    CodeProposeTool,
+    CodeReadTool,
+    CodeTestTool,
+    CodeToolset,
+)
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
-from agent_core.tools.delegate_run import DelegateRunTool, LegacyDelegateRunTool
+from agent_core.tools.delegate_run import DelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolRuntime
 from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
 from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsubscribeTool
 from agent_core.tools.executor import ToolPipeline
+from agent_core.tools.job_schedules import (
+    JobScheduleCreateTool,
+    JobScheduleUpdateTool,
+    MCPJobScheduleCreateTool,
+    MCPJobScheduleUpdateTool,
+)
+from agent_core.tools.jobs import (
+    JOB_TOOL_NAMES,
+    JobManageTool,
+    JobRunTool,
+    JobToolset,
+    MCPJobManageTool,
+    MCPJobRunTool,
+    MCPStoredKeyJobRunTool,
+    StoredKeyJobRunTool,
+)
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
 from agent_core.tools.media_generation import (
     ImageGenerationTool,
-    LegacyImageGenerationTool,
-    LegacyVideoGenerationTool,
     VideoGenerationTool,
 )
-from agent_core.tools.memory_learn import LegacyMemoryLearnTool, MemoryLearnTool
+from agent_core.tools.memory_learn import MemoryLearnTool
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
 from agent_core.tools.memory_remember import (
-    LegacyMemoryRememberTool,
     MemoryRememberTool,
     PeopleMemoryRememberTool,
     SessionScopedMemoryRememberTool,
 )
 from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.people import (
-    LegacyPeopleHistoryTool,
     PeopleContextTool,
     PeopleHistoryTool,
     PeopleSearchTool,
@@ -755,14 +843,15 @@ from agent_core.tools.records import (
     RecordsQueryTool,
 )
 from agent_core.tools.registry import StaticToolRegistry
+from agent_core.tools.run_inspect import RunInspectTool
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
     COCKPIT_FEED_SCOPES,
     SCHEDULE_CREATE_TOOL_NAME,
+    CockpitMCPScheduleCreateTool,
     CockpitScheduleCreateTool,
-    LegacyScheduleCreateTool,
+    MCPScheduleCreateTool,
     PreviousCockpitScheduleCreateTool,
-    PreviousScheduleCreateTool,
     ScheduleCreateTool,
     SingleCallScheduleCreateTool,
 )
@@ -772,8 +861,9 @@ from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_PAUSE_TOOL_NAME,
     SCHEDULE_RESUME_TOOL_NAME,
     SCHEDULE_UPDATE_TOOL_NAME,
+    CockpitMCPScheduleUpdateTool,
     CockpitScheduleUpdateTool,
-    LegacyScheduleListTool,
+    MCPScheduleUpdateTool,
     PreviousScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
@@ -783,13 +873,13 @@ from agent_core.tools.schedule_lifecycle import (
 )
 from agent_core.tools.skill_load import (
     SKILL_LOAD_TOOL_NAME,
-    LegacySkillLoadTool,
     SkillLoadTool,
 )
 from agent_core.tools.skill_manage import SkillManageTool
 from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME, ToolCallTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_fetch_json import WebFetchJsonTool
+from agent_core.tools.web_inspect_image import WebInspectImageTool
 from agent_core.tools.web_search import WebSearchTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
@@ -874,6 +964,8 @@ class ApplicationServices:
     schedule_runs: ScheduleMaterializer | None = None
     # Milestone 35: present only when AGENT_COCKPIT_ENABLED is set.
     cockpit: CockpitBoard | None = None
+    # ADR-0275: present only when AGENT_INTEGRATION_SECRETS_ENABLED is set.
+    integration_secrets: IntegrationSecrets | None = None
     # ADR-0255: present only when AGENT_MCP_SERVERS_ENABLED is set.
     mcp_servers: MCPServerSettingsService | None = None
 
@@ -908,8 +1000,10 @@ class _CockpitMaintenance:
         self._owner_names = owner_names
         self._profiles = profiles
         self._client: httpx.AsyncClient | None = None
+        self.jobs: JobPublication | None = None
 
     def sweeps(self) -> dict[str, Any]:
+        """Bind maintenance credentials and compose publication, import, and feed sweeps."""
         settings = self._settings
         required = {
             "AGENT_COCKPIT_GITHUB_REPOSITORY": settings.cockpit_github_repository,
@@ -984,12 +1078,48 @@ class _CockpitMaintenance:
             principal=self._principal,
             history_days=feeds.history_days,
         )
+        widget_outbox = CommitOutboxWorker(**common)
+        widget_importer = BranchImporter(
+            **common, builder=self._builder, owner_names=self._owner_names
+        )
+        if self.jobs is not None:
+            self.jobs.repository = GitHubWidgetRepository(
+                self._client,
+                tokens,
+                repository=settings.cockpit_github_repository,
+                branch="cockpit/jobs",
+                package_kind="job",
+            )
+
+        code_proposals = (
+            CodeProposalWorker(
+                uow_factory=self._uow_factory,
+                clock=self._clock,
+                publisher=GitHubCodeProposals(
+                    self._client, tokens, repository=settings.cockpit_github_repository
+                ),
+            )
+            if settings.code_proposals_enabled
+            else None
+        )
+
+        async def flush_packages() -> int:
+            """Flush enabled widget, job and code proposal queues through their own adapters."""
+            count = await widget_outbox.run_once() if settings.cockpit_enabled else 0
+            count += await self.jobs.flush(self._principal) if self.jobs is not None else 0
+            return count + (await code_proposals.run_once() if code_proposals is not None else 0)
+
+        async def import_packages() -> int:
+            """Import enabled widget and job branches without mixing their package namespaces."""
+            count = await widget_importer.run_once() if settings.cockpit_enabled else 0
+            return count + (
+                await self.jobs.import_changes(self._principal) if self.jobs is not None else 0
+            )
+
         return {
-            "sweep_cockpit_outbox": CommitOutboxWorker(**common).run_once,
+            "sweep_cockpit_outbox": flush_packages,
             "sweep_cockpit_events": retention.run_once,
-            "sweep_cockpit_import": BranchImporter(
-                **common, builder=self._builder, owner_names=self._owner_names
-            ).run_once,
+            "sweep_cockpit_import": import_packages,
             "cockpit_import_interval_seconds": publication.import_interval_seconds,
             "sweep_cockpit_feeds": projector.run_once,
             "sweep_cockpit_feed_history": feed_history.run_once,
@@ -1049,7 +1179,11 @@ class Composition:
     # The Cockpit builder and its own sandbox manager, only behind the flag (M35).
     cockpit_builder: WidgetBuilder | None = None
     cockpit_sandbox: SandboxManager | None = None
+    code_sandbox: SandboxManager | None = None
     cockpit_publication: CockpitPublication | None = None
+    job_publication: JobPublication | None = None
+    job_execution: JobExecution | None = None
+    job_credentials: GitHubReaderCredentials | None = None
     cockpit_maintenance: _CockpitMaintenance | None = None
     # An evaluation's in-memory widget branch and the outbox that commits to it.
     cockpit_local_branch: WidgetRepository | None = None
@@ -1104,7 +1238,18 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "For other generated images or videos, use "
     "image.generate or video.generate when available. These tools attach the file to "
     "your reply automatically. Never say a file is attached unless its export or "
-    "generation tool succeeded. When the owner asks you to learn from or remember a named "
+    "generation tool succeeded. To delete files you generated in this chat when the owner "
+    "asks, call artifact.delete through tool.call with their artifact ids; it never deletes "
+    "the owner's uploads. To keep an email attachment as a file when the owner asks, call "
+    "mcp.gmail_read.save_attachment through tool.call (each account's read server has one) "
+    "with the message id, its zero-based attachment_index and filename from get_thread; it "
+    "asks the owner first, and your reply carries the file. "
+    "When a schedule, job or widget fails, find the cause before answering, "
+    "never asking the owner for errors you can read: call run.inspect through tool.call, and "
+    "cockpit.read's diagnostics for a widget. A tile showing Paused is the device's watchdog, "
+    "not a paused schedule. Where enabled, code.read, code.draft, code.test and code.propose "
+    "read your source, then change, test and propose it for the owner's review. "
+    "When the owner asks you to learn from or remember a named "
     "website, proactively retain useful separate observations with memory.learn after reading "
     "it. Use observations with call_id and an exact 8-512 character quote; omit claim and "
     "subject to save the excerpt itself, without a paraphrase or explanatory wrapper. "
@@ -1117,7 +1262,12 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "was remembered or that pending formation succeeded. Save with memory.remember only what "
     "the owner stated, in their words, when they asked to remember it; a plan, schedule or "
     "calendar you derived from web or document content belongs in the reply or an artifact, "
-    "never in memory. Never mention a save, or a failed save, the owner did not ask for."
+    "never in memory. Never mention a save, or a failed save, the owner did not ask for. "
+    "For widget creation, when cockpit.prepare is available, prepare and test the entire "
+    "widget and collector before calling cockpit.install for one final summarized approval. "
+    "Do not publish components or request new job access separately while preparing. Use "
+    "offline trials or existing grants, then include all new access and the schedule "
+    "in the proposal."
 )
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}
@@ -1127,9 +1277,11 @@ _BROWSER_TOOL_NAMES = frozenset(
 def _session_tool_filter(
     browser_provider: BrowserProvider | None,
 ) -> Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]:
+    """Build the browser and widget tool filter for each session."""
     session_bound = isinstance(browser_provider, SessionBoundHostedBrowserProvider)
 
     def filter_tools(session: Session, tools: Sequence[ToolSpec]) -> list[ToolSpec]:
+        """Hide browser tools without a binding and widget writes outside owner chat."""
         kept = list(tools)
         if session_bound:
             selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
@@ -1137,7 +1289,12 @@ def _session_tool_filter(
                 kept = [tool for tool in kept if tool.name not in _BROWSER_TOOL_NAMES]
         # Widgets are written only in the owner's interactive chat (docs/plan/cockpit.md).
         if not offers_widget_writes(session.metadata):
-            kept = [tool for tool in kept if tool.name != COCKPIT_WIDGET_WRITE_TOOL]
+            kept = [
+                tool
+                for tool in kept
+                if tool.name
+                not in {COCKPIT_WIDGET_WRITE_TOOL, *INSTALL_TOOL_NAMES, *CODE_WRITE_TOOL_NAMES}
+            ]
         return kept
 
     return filter_tools
@@ -1463,6 +1620,162 @@ def default_fake_script() -> FakeModelScript:
     )
 
 
+async def prepare_standing_admission(
+    *,
+    instruction: str,
+    reference: str,
+    rollback_build_ref: str,
+    out: Path,
+    supersedes: str | None,
+    decided_at: datetime | None,
+) -> dict[str, Any]:
+    """Write the two standing-admission files from the live composition (ADR-0290).
+
+    The dependency digests come from the same composition the API runs,
+    stopped before any model or provider is built; a remote profile or a
+    configuration without query preparation is refused with the reason.
+    """
+
+    from agent_core.memory.standing_recall_admission import write_standing_admission
+
+    settings = load_settings()
+    profiles = IndexProfiles.model_validate(load_config_document(settings, DOCUMENT))
+    if len(profiles.configurations) != 1:
+        raise ConfigurationError("the semantic index needs one explicit configuration")
+    profile = profiles.configurations[0]
+    if profile.local is None:
+        raise ConfigurationError(
+            "a standing admission needs the local encoder; the configured index is remote"
+        )
+    captured: list[SemanticCompositionInputs] = []
+
+    class _CapturedError(Exception):
+        pass
+
+    def capture(inputs: SemanticCompositionInputs) -> None:
+        captured.append(inputs)
+        raise _CapturedError
+
+    # The live digests come from the same composition the API runs, stopped
+    # before any model or provider is built.
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            model_metadata_only=True,
+            recall_capture=capture,
+        ):
+            raise ConfigurationError("composition capture exposed a runtime")
+    except _CapturedError:
+        pass
+    inputs = captured[0]
+    retrieval = inputs.configuration.get("memory", {}).get("retrieval", {})
+    if retrieval.get("semantic_enabled") is not True:
+        raise ConfigurationError(
+            "a standing admission needs memory.retrieval.semantic_enabled true "
+            "in the effective configuration"
+        )
+    # The same conditions composition refuses a bounded admission under,
+    # checked here so the operator learns before any file is written.
+    if profile.reader_sha256 is None:
+        raise ConfigurationError(
+            "a standing admission needs the reviewed reader in the semantic index configuration"
+        )
+    if settings.memory_reconsolidation_enabled:
+        raise ConfigurationError(
+            "a standing admission refuses unattended reconsolidation; disable it first"
+        )
+    dependencies = inputs.dependencies(profile)
+    owner = inputs.configuration["principal"]
+    evidence_path, manifest_path = write_standing_admission(
+        out,
+        tenant_id=str(owner["tenant"]),
+        principal_id=str(owner["owner"]),
+        instruction=instruction,
+        reference=reference,
+        rollback_build_ref=rollback_build_ref,
+        dependencies=dependencies,
+        activated_at=system_clock().now(),
+        decided_at=decided_at,
+        supersedes=supersedes,
+    )
+    return {
+        "evidence": str(evidence_path),
+        "evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
+        "manifest": str(manifest_path),
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "embedding_space_key": profile.embedding.space.key,
+        "embedding_configuration_sha256": dependencies["embedding_configuration_sha256"],
+        "tenant_id": str(owner["tenant"]),
+        "principal_id": str(owner["owner"]),
+    }
+
+
+async def _knowledge_embedder(
+    settings: Settings,
+    index: SemanticServices | None,
+    credentials: CredentialResolver,
+) -> KnowledgeEmbedder | None:
+    """The knowledge semantic arm's embedder, or None when search stays lexical.
+
+    ADR-0289 borrowed the memory index's admitted provider. ADR-0290 adds the
+    arm's own OpenAI provider on the `openai` credential, the model gate 13
+    measured lift with, because the local encoder measured none; a missing
+    credential, like a missing index, leaves search lexical and says so once.
+    """
+
+    if not settings.knowledge_semantic_enabled:
+        return None
+    if settings.knowledge_semantic_provider == "openai":
+        if settings.memory_semantic_index_enabled and index is None:
+            # The index is configured but its admission was rejected at
+            # startup (withdrawn files, ADR-0269's fallback): the knowledge
+            # arm's egress stays withdrawn with it rather than composing on
+            # the flag alone.
+            logger.warning(
+                "knowledge_semantic_unavailable_using_lexical", extra={"reason": "admission"}
+            )
+            return None
+        key = ""
+        with suppress(PermissionError):
+            key = (await credentials.resolve(CredentialRef("openai"))).reveal()
+        if not key:
+            logger.warning(
+                "knowledge_semantic_unavailable_using_lexical", extra={"reason": "credential"}
+            )
+            return None
+        # The arm's egress follows the semantic index's admission when one is
+        # composed, so withdrawing the standing files stops it as well; with
+        # no index the flag alone turns it off.
+        # A question reaches the provider only from a run pinned to it; the
+        # service reads the run's pin at search (ADR-0290).
+        # Whole chunks average their one answering sentence away; windows
+        # under the measured budget keep it reachable (ADR-0290).
+        return KnowledgeEmbedder(
+            OpenAIEmbeddingProvider(key),
+            KNOWLEDGE_OPENAI_SPACE,
+            channel=settings.knowledge_semantic_channel,
+            admitted=(lambda: True) if index is None else (index.admitted or (lambda: True)),
+            window_tokens=KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+            whole_tokens=KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+        )
+    if index is None:
+        logger.warning("knowledge_semantic_unavailable_using_lexical", extra={"reason": "index"})
+        return None
+    # A local encoder admits fewer tokens than a chunk holds, so chunks are
+    # embedded in windows its own tokenizer sizes.
+    local_encoder = index.local_provider
+    return KnowledgeEmbedder(
+        index.provider,
+        index.space,
+        channel=settings.knowledge_semantic_channel,
+        local=local_encoder is not None,
+        admitted=index.admitted or (lambda: True),
+        window_tokens=None if local_encoder is None else local_encoder.maximum_tokens,
+        count_tokens=None if local_encoder is None else local_encoder.count_tokens,
+    )
+
+
 def _memory_uow_repositories(
     *,
     agents: InMemoryAgentRepository,
@@ -1479,6 +1792,7 @@ def _memory_uow_repositories(
     traces: InMemoryTraceStore | None = None,
     knowledge: InMemoryKnowledgeStore | None = None,
 ) -> UnitOfWorkRepositories:
+    """Assemble the in-memory repositories shared by the composition's units of work."""
     approvals = approvals or InMemoryApprovalRepository(clock)
     skills = skills or InMemorySkillRepository(
         InMemorySkillPackageStore(),
@@ -1587,6 +1901,10 @@ def _memory_uow_repositories(
         calls=InMemoryCallStore(),
         people=people,
         records=records,
+        integration_secrets=InMemoryIntegrationSecretStore(),
+        jobs=InMemoryJobStore(),
+        code_drafts=InMemoryCodeDraftRepository(),
+        job_outbox=InMemoryWidgetCommitOutbox(),
         cockpit_widgets=InMemoryWidgetStore(),
         cockpit_outbox=InMemoryWidgetCommitOutbox(),
         cockpit_feeds=InMemoryFeedStore(),
@@ -1693,6 +2011,10 @@ def _postgres_repository_factory(
             calls=PostgresCallStore(session),
             people=people,
             records=records,
+            integration_secrets=PostgresIntegrationSecretStore(session),
+            jobs=PostgresJobStore(session),
+            code_drafts=PostgresCodeDraftRepository(session),
+            job_outbox=PostgresWidgetCommitOutbox(session, package_kind="job"),
             cockpit_widgets=PostgresWidgetStore(session),
             cockpit_outbox=PostgresWidgetCommitOutbox(session),
             cockpit_feeds=PostgresFeedStore(session),
@@ -2037,13 +2359,19 @@ def _schedule_principal(settings: Settings) -> Principal:
         for row in calling_server_configs(settings.auth_tenant_id, enabled=settings.call_enabled)
         for scope in row.required_scopes
     }
+    # ADR-0291: a schedule that names Scale VP keeps its scope; the worker holds the grant.
+    svp_scopes = {
+        scope
+        for row in svp_server_configs(settings.auth_tenant_id, enabled=settings.svp_enabled)
+        for scope in row.required_scopes
+    }
     # ADR-0254: a feed-keeping schedule's occurrence keeps its Cockpit scopes.
     feed_scopes = COCKPIT_FEED_SCOPES if settings.cockpit_enabled else ()
     return Principal(
         tenant_id=settings.auth_tenant_id,
         principal_id=settings.auth_principal_id,
         roles=set(settings.auth_roles),
-        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *feed_scopes},
+        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *svp_scopes, *feed_scopes},
     )
 
 
@@ -2895,6 +3223,8 @@ async def _compose(
     recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
     cockpit_builder_override: WidgetBuilder | None = None,
     cockpit_local_branch: bool = False,
+    job_runner_override: JobRunner | None = None,
+    job_screen_override: JobScreen | None = None,
     mcp_oauth_gateway: MCPOAuthGateway | None = None,
 ) -> tuple[Composition, list[ModelProvider]]:
     """Assemble the complete runtime graph for one selected storage backend."""
@@ -3007,8 +3337,11 @@ async def _compose(
             raise ConfigurationError(f"MCP {name} must be a positive integer")
         warmup_limits[name] = value
     cockpit_sandbox: SandboxManager | None = None
+    code_sandbox: SandboxManager | None = None
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
+        job_environment: Any = fake_environment
+        job_image_options: dict[str, Any] = {"image_digest": fake_image_digest()}
         sandbox_manager = SandboxManager(
             fake_environment,
             image_digest=fake_image_digest(),
@@ -3017,8 +3350,12 @@ async def _compose(
             parent_environment=os.environ,
             passthrough_names=settings.sandbox_passthrough,
         )
-        if settings.cockpit_enabled:
+        if settings.cockpit_enabled or settings.jobs_enabled:
             cockpit_sandbox = cockpit_build_sandbox(
+                fake_environment, image_digest=fake_image_digest(), limits=sandbox_limits
+            )
+        if settings.code_tools_enabled:
+            code_sandbox = code_check_sandbox(
                 fake_environment, image_digest=fake_image_digest(), limits=sandbox_limits
             )
     elif settings.sandbox.value in {"docker", "gvisor"}:
@@ -3033,6 +3370,10 @@ async def _compose(
                 execution_environment.resolve_image_digest,
                 settings.cockpit_builder_image,
             )
+            code_image_resolver = partial(
+                execution_environment.resolve_image_digest,
+                settings.code_sandbox_image,
+            )
         else:
             execution_environment = DockerExecutionEnvironment(
                 clock, ids, runtime="runsc" if settings.sandbox.value == "gvisor" else None
@@ -3041,6 +3382,9 @@ async def _compose(
             builder_image_resolver = partial(
                 resolve_local_image_digest, settings.cockpit_builder_image
             )
+            code_image_resolver = partial(resolve_local_image_digest, settings.code_sandbox_image)
+        job_environment = execution_environment
+        job_image_options = {"resolve_image_digest": image_resolver}
         sandbox_manager = SandboxManager(
             execution_environment,
             resolve_image_digest=image_resolver,
@@ -3049,10 +3393,16 @@ async def _compose(
             parent_environment=os.environ,
             passthrough_names=settings.sandbox_passthrough,
         )
-        if settings.cockpit_enabled:
+        if settings.cockpit_enabled or settings.jobs_enabled:
             cockpit_sandbox = cockpit_build_sandbox(
                 execution_environment,
                 resolve_image_digest=builder_image_resolver,
+                limits=sandbox_limits,
+            )
+        if settings.code_tools_enabled:
+            code_sandbox = code_check_sandbox(
+                execution_environment,
+                resolve_image_digest=code_image_resolver,
                 limits=sandbox_limits,
             )
     else:
@@ -3067,7 +3417,7 @@ async def _compose(
     cockpit_toolset: CockpitToolset | None = None
     local_branch: FakeWidgetRepository | None = None
     local_outbox: CommitOutboxWorker | None = None
-    if cockpit_builder is not None:
+    if cockpit_builder is not None and settings.cockpit_enabled:
         cockpit_profiles = CockpitProfiles.from_document(
             load_config_document(settings, "cockpit/profiles.yaml")
         )
@@ -3145,6 +3495,101 @@ async def _compose(
                 people=settings.people_enabled,
             ),
         )
+    integration_secrets = None
+    if settings.integration_secrets_enabled:
+        if settings.integration_secrets_key is None:
+            raise ConfigurationError("Integration keys require the configured master key")
+        integration_secrets = IntegrationSecrets(
+            uow_factory,
+            IntegrationSecretSealer(
+                base64.urlsafe_b64decode(settings.integration_secrets_key.get_secret_value()),
+                purpose="veetbot.integration-secret",
+            ),
+            clock,
+            ids,
+        )
+    job_publication: JobPublication | None = None
+    job_execution: JobExecution | None = None
+    job_credentials: GitHubReaderCredentials | None = None
+    if settings.jobs_enabled:
+        assert cockpit_sandbox is not None
+        job_credentials = GitHubReaderCredentials(
+            token_factory=GitHubAppTokens,
+            app_id=settings.jobs_github_app_id,
+            installation_id=settings.jobs_github_installation_id,
+            key_file=settings.jobs_github_key_file,
+            clock=clock,
+        )
+        job_publication = JobPublication(
+            integration_secrets=integration_secrets,
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            schema_check=Draft202012SchemaCheck(),
+            screen=job_screen_override or SandboxJobScreen(cockpit_sandbox, ids),
+            owner_names=(
+                (settings.call_configuration.public_name,)
+                if settings.call_configuration is not None
+                else ()
+            ),
+            repository=FakeWidgetRepository(package_kind="job") if cockpit_local_branch else None,
+        )
+
+        def job_runner(timeout: int) -> JobRunner:
+            """Use the supplied test runner or build a sandbox runner with the grant's timeout."""
+            if job_runner_override is not None:
+                return job_runner_override
+            return SandboxJobRunner(
+                SandboxManager(
+                    job_environment,
+                    limits=replace(sandbox_limits, wall_clock_seconds=timeout),
+                    **job_image_options,
+                ),
+                timeout_seconds=timeout,
+            )
+
+        job_execution = JobExecution(
+            uow_factory=uow_factory,
+            clock=clock,
+            runner=job_runner,
+            schema_check=Draft202012SchemaCheck(),
+            http=JobHTTP(job_credentials, operator_hosts=settings.jobs_allowed_hosts).request,
+            http_for_access=(
+                lambda owner, access: (
+                    JobHTTP(
+                        job_credentials,
+                        operator_hosts=settings.jobs_allowed_hosts,
+                        stored_credentials=StoredJobCredentials(
+                            integration_secrets, owner, access
+                        ).resolve,
+                    ).request
+                )
+            )
+            if integration_secrets is not None
+            else None,
+            feeds=CockpitFeeds(
+                uow_factory=uow_factory,
+                clock=clock,
+                schema_check=Draft202012SchemaCheck(),
+                history_max=288,
+            ),
+        )
+    if job_publication is not None:
+        if cockpit_maintenance is None:
+            assert cockpit_builder is not None
+            cockpit_maintenance = _CockpitMaintenance(
+                settings,
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                builder=cockpit_builder,
+                owner_names=(),
+                profiles=CockpitProfiles.from_document(
+                    load_config_document(settings, "cockpit/profiles.yaml")
+                ),
+            )
+        cockpit_maintenance.jobs = job_publication
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
     episode_search = EventEpisodeSearch(uow_factory, principal)
@@ -3156,6 +3601,42 @@ async def _compose(
         wake_worker=schedule_notify,
     )
     registry = StaticToolRegistry()
+    if job_publication is not None and job_execution is not None:
+        job_toolset = JobToolset(job_publication, job_execution)
+        registry.register(JobManageTool(job_toolset))
+        registry.register(MCPJobManageTool(job_toolset))
+        registry.register(JobRunTool(job_toolset))
+        if integration_secrets is not None:
+            registry.register(StoredKeyJobRunTool(job_toolset))
+        registry.register(MCPJobRunTool(job_toolset))
+        if integration_secrets is not None:
+            registry.register(MCPStoredKeyJobRunTool(job_toolset))
+    registry.register(RunInspectTool(uow_factory))
+    if settings.code_tools_enabled and settings.code_source_root is not None:
+        source_tree = FilesystemSourceTree(
+            settings.code_source_root, release_id=settings.release_id
+        )
+        code_toolset = CodeToolset(
+            drafts=CodeDrafts(tree=source_tree, uow_factory=uow_factory, clock=clock, ids=ids),
+            uow_factory=uow_factory,
+            clock=clock,
+            checker=None if code_sandbox is None else SandboxCodeChecker(code_sandbox, ids),
+            screen=(
+                SandboxCodeScreen(cockpit_sandbox, ids)
+                if settings.code_proposals_enabled and cockpit_sandbox is not None
+                else None
+            ),
+            owner_names=(
+                (settings.call_configuration.public_name,)
+                if settings.call_configuration is not None
+                else ()
+            ),
+        )
+        registry.register(CodeReadTool(source_tree))
+        registry.register(CodeDraftTool(code_toolset))
+        registry.register(CodeTestTool(code_toolset))
+        if settings.code_proposals_enabled:
+            registry.register(CodeProposeTool(code_toolset))
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
     registry.register(ToolCallTool())
@@ -3167,16 +3648,11 @@ async def _compose(
     registry.register(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
-    # A session keeps the exact tool version it was shown, and the registry
-    # treats the last registration as latest: 1.0.0 stays for pinned sessions.
-    registry.register(LegacyArtifactExportTool())
     registry.register(ArtifactExportTool())
     if media_provider is not None:
         media_inputs = StoredMediaInputResolver(
             uow_factory=uow_factory, store=FilesystemArtifactStore(artifact_root), clock=clock
         )
-        registry.register(LegacyImageGenerationTool(media_provider))
-        registry.register(LegacyVideoGenerationTool(media_provider))
         registry.register(ImageGenerationTool(media_provider, image_resolver=media_inputs))
         registry.register(VideoGenerationTool(media_provider, image_resolver=media_inputs))
     if web_search_provider is not None:
@@ -3184,10 +3660,9 @@ async def _compose(
     if web_fetch_provider is not None:
         registry.register(WebFetchTool(web_fetch_provider))
         registry.register(WebFetchJsonTool(web_fetch_provider))
+        registry.register(WebInspectImageTool(PublicImageReader().read))
     if browser_provider is not None:
-        registry.register(LegacyBrowserNavigateTool(browser_provider))
         registry.register(BrowserNavigateTool(browser_provider))
-        registry.register(LegacyBrowserObserveTool(browser_provider))
         registry.register(
             PagedBrowserObserveTool(browser_provider, inline_output_bytes=inline_output_bytes)
         )
@@ -3206,40 +3681,18 @@ async def _compose(
             )
         # ADR-0129: the approval card describes the action whatever the flag;
         # it offers a task grant only when task grants are enabled.
-        registry.register(
-            LegacyBrowserActTool(
-                browser_provider,
-                presenter=BrowserActApprovalPresenter(
-                    browser_provider,
-                    context_reader=_task_grant_context_reader(uow_factory, clock),
-                    enabled=_task_grants_composed(settings, browser_provider),
-                    now=clock.now,
-                ),
-            )
+        act_presenter = BrowserActApprovalPresenter(
+            browser_provider,
+            context_reader=_task_grant_context_reader(uow_factory, clock),
+            enabled=_task_grants_composed(settings, browser_provider),
+            now=clock.now,
         )
-        registry.register(
-            BrowserActTool(
-                browser_provider,
-                presenter=BrowserActApprovalPresenter(
-                    browser_provider,
-                    context_reader=_task_grant_context_reader(uow_factory, clock),
-                    enabled=_task_grants_composed(settings, browser_provider),
-                    now=clock.now,
-                ),
-            )
-        )
+        # ADR-0294: a chat pinned to the earlier spec keeps it; the latest is offered.
+        registry.register(PinnedBrowserActTool(browser_provider, presenter=act_presenter))
+        registry.register(BrowserActTool(browser_provider, presenter=act_presenter))
     if settings.delegation_enabled:
-        registry.register(LegacyDelegateRunTool())
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
-        registry.register(
-            LegacyScheduleCreateTool(schedule_service, agent, schedule_definition_limits)
-        )
-        registry.register(
-            PreviousScheduleCreateTool(
-                schedule_service, agent, schedule_definition_limits, uow_factory=uow_factory
-            )
-        )
         registry.register(
             SingleCallScheduleCreateTool(
                 schedule_service,
@@ -3259,7 +3712,10 @@ async def _compose(
             )
         )
         if settings.cockpit_enabled:
-            for cockpit_create in (PreviousCockpitScheduleCreateTool, CockpitScheduleCreateTool):
+            for cockpit_create in (
+                PreviousCockpitScheduleCreateTool,
+                CockpitScheduleCreateTool,
+            ):
                 registry.register(
                     cockpit_create(
                         schedule_service,
@@ -3269,12 +3725,73 @@ async def _compose(
                         calling_enabled=settings.call_enabled,
                     )
                 )
-        registry.register(LegacyScheduleListTool(schedule_service))
+        # ADR-0291: the deployment's newest versions register last, so they are offered.
+        # The one without Cockpit stays for a run pinned before Cockpit was turned on.
+        for mcp_create in (
+            MCPScheduleCreateTool,
+            *((CockpitMCPScheduleCreateTool,) if settings.cockpit_enabled else ()),
+        ):
+            registry.register(
+                mcp_create(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
         registry.register(PreviousScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
         if settings.cockpit_enabled:
             registry.register(CockpitScheduleUpdateTool(schedule_service))
+        registry.register(MCPScheduleUpdateTool(schedule_service))
+        if settings.cockpit_enabled:
+            registry.register(CockpitMCPScheduleUpdateTool(schedule_service))
+        if settings.jobs_enabled:
+            registry.register(
+                JobScheduleCreateTool(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
+            registry.register(
+                MCPJobScheduleCreateTool(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
+            registry.register(
+                JobScheduleUpdateTool(
+                    schedule_service, uow_factory, agent, schedule_definition_limits
+                )
+            )
+            registry.register(
+                MCPJobScheduleUpdateTool(
+                    schedule_service, uow_factory, agent, schedule_definition_limits
+                )
+            )
+        if settings.jobs_enabled and cockpit_toolset is not None:
+            for installation_tool in (CockpitPrepareTool, CockpitInstallTool):
+                registry.register(
+                    installation_tool(
+                        cockpit_toolset,
+                        job_toolset,
+                        JobScheduleCreateTool(
+                            schedule_service,
+                            agent,
+                            schedule_definition_limits,
+                            uow_factory=uow_factory,
+                        ),
+                        settings.jobs_allowed_hosts,
+                    )
+                )
         registry.register(SchedulePauseTool(schedule_service))
         registry.register(ScheduleResumeTool(schedule_service))
         registry.register(ScheduleCancelTool(schedule_service))
@@ -3295,8 +3812,23 @@ async def _compose(
             )
 
     registry.register(UpdateWorkingStateTool(working_state, validate_source_events))
+    job_ruleset = job_publication_ruleset(ruleset) if settings.jobs_enabled else None
     async with uow_factory() as uow:
         await uow.agents.put(agent)
+        if job_ruleset is not None:
+            await uow.policy_profiles.record(
+                PolicyProfileRecord(
+                    policy_version=job_ruleset.policy_version,
+                    profile_name=job_ruleset.profile_name,
+                    profile_sha256=job_ruleset.profile_sha256,
+                    hardline_sha256=job_ruleset.hardline_sha256,
+                    rule_count=len(job_ruleset.rules)
+                    + len(job_ruleset.tool_rules)
+                    + len(job_ruleset.hardline),
+                    loaded_at=clock.now(),
+                    loaded_by="composition-root",
+                )
+            )
         await uow.policy_profiles.record(
             PolicyProfileRecord(
                 policy_version=ruleset.policy_version,
@@ -3803,10 +4335,8 @@ async def _compose(
         usage=memory_profiles.retrieval.usage,
         people_enabled=settings.people_enabled,
     )
-    registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
     source_learning = SourceLearningService(memory_service, uow_factory, clock)
-    registry.register(LegacyMemoryLearnTool(source_learning))
     registry.register(MemoryLearnTool(source_learning))
     if settings.people_enabled:
         registry.register(PeopleMemoryRememberTool(memory_service))
@@ -3973,24 +4503,37 @@ async def _compose(
             if cockpit_sandbox is not None:
                 with suppress(BaseException):
                     await cockpit_sandbox.close()
+            if code_sandbox is not None:
+                with suppress(BaseException):
+                    await code_sandbox.close()
             for provider in effective_providers.values():
                 with suppress(BaseException):
                     await provider.close()
     semantic_index_pass = None
     if settings.memory_semantic_index_enabled:
-        semantic_index_pass = await compose_indexing(
-            root=REPOSITORY_ROOT,
-            settings=settings,
-            principal=principal,
-            factory=uow_factory,
-            clock=clock,
-            credentials=credential_resolver,
-            configuration=recall_composition.configuration,
-            formation=recall_composition.formation,
-            reader=recall_composition.reader,
-            provider_factory=OpenAIEmbeddingProvider,
-            local_provider_factory=local_embedding_provider,
-        )
+        try:
+            semantic_index_pass = await compose_indexing(
+                root=REPOSITORY_ROOT,
+                settings=settings,
+                principal=principal,
+                factory=uow_factory,
+                clock=clock,
+                credentials=credential_resolver,
+                configuration=recall_composition.configuration,
+                formation=recall_composition.formation,
+                reader=recall_composition.reader,
+                provider_factory=OpenAIEmbeddingProvider,
+                local_provider_factory=local_embedding_provider,
+            )
+            if semantic_index_pass and isinstance(semantic_index_pass.admitted, BoundedAdmission):
+                logger.info(
+                    "semantic_trial_composed binding=%s jobs=%s",
+                    semantic_index_pass.admitted.receipt_sha256,
+                    int(settings.jobs_enabled),
+                )
+        except ConfigurationError:
+            # Admission remains strict; only the optional runtime arm is unavailable.
+            logger.warning("semantic_recall_unavailable_using_sparse")
 
     async def sweep_semantic_index() -> int:
         assert semantic_index_pass is not None
@@ -4007,10 +4550,19 @@ async def _compose(
         clock,
         ids,
         principal,
-        profile=memory_profiles.retrieval,
+        # Keep the configured profile in the admission identity, but use the
+        # ordinary sparse policy (including owner anchors) without semantic services.
+        profile=memory_profiles.retrieval
+        if semantic_index_pass is not None
+        else memory_profiles.retrieval.model_copy(update={"semantic_enabled": False}),
         trace_retention=memory_profiles.traces,
         reconsolidation_enabled=True if settings.memory_dreaming_review_enabled else recon_admitted,
         reconsolidation_owner_approved_only=settings.memory_dreaming_review_enabled,
+        semantic_binding_sha256=(
+            semantic_index_pass.admitted.receipt_sha256
+            if semantic_index_pass and isinstance(semantic_index_pass.admitted, BoundedAdmission)
+            else None
+        ),
         runtime_semantic_queries=None
         if semantic_index_pass is None
         else semantic_index_pass.queries,
@@ -4137,8 +4689,6 @@ async def _compose(
         people_retriever = PeopleAwareMemoryRetriever(people_context, principal)
         registry.register(PeopleSearchTool(uow_factory, clock))
         registry.register(PeopleContextTool(people_context))
-        # Chats pinned before ADR-0126 keep 1.0.0; the latest registration wins.
-        registry.register(LegacyPeopleHistoryTool(people_service))
         registry.register(PeopleHistoryTool(people_service))
     records_service: RecordsService | None = None
     try:
@@ -4155,6 +4705,9 @@ async def _compose(
         registry.register(RecordsDeleteTool(records_service, records_zone))
         registry.register(RecordsImportTool(records_service, records_zone))
     if cockpit_toolset is not None:
+        registry.register(PreviousCockpitReadTool(cockpit_toolset))
+        registry.register(PreviousCockpitCheckTool(cockpit_toolset))
+        registry.register(CockpitCheckTool(cockpit_toolset))
         for cockpit_tool in cockpit_tools(cockpit_toolset):
             registry.register(cockpit_tool)
     registry.register(MemoryRecallEpisodesTool(episode_search))
@@ -4227,6 +4780,7 @@ async def _compose(
             warmup_retry_seconds=float(warmup_limits["warmup_retry_seconds"]),
             warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
+            email_attachment_saver=EmailAttachmentSaver(SignatureAttachmentInspector()),
             access_tokens=owner_mcp_servers,
             owner_servers_enabled=settings.mcp_servers_enabled,
         )
@@ -4240,10 +4794,6 @@ async def _compose(
             maximum_loaded=int(skill_bodies_config["max_items"]),
             maximum_body_tokens=int(skill_bodies_config["max_tokens"]),
         )
-        # A session keeps the exact tool version it was shown. Retain compatible
-        # builtin history so the 1.1.0 revision cannot turn an advertised
-        # skill.load into an unknown capability for an existing session.
-        registry.register(LegacySkillLoadTool(skill_catalogs))
         registry.register(SkillLoadTool(skill_catalogs))
         if settings.skill_authoring_enabled:
             registry.register(SkillManageTool(uow_factory, skill_store))
@@ -4338,6 +4888,9 @@ async def _compose(
             inline_output_bytes=inline_output_bytes,
             catalog_source=records_service,
             catalog_max_series=records_catalog_max_series,
+            # ADR-0299: the documents on file, read through the store's own rule.
+            knowledge_catalog_source=KnowledgeCatalogReader(uow_factory, clock),
+            knowledge_catalog_max_documents=knowledge_catalog_caps(context_classes)[0],
         )
         compactor = StructuredCompactor(
             estimator,
@@ -4346,6 +4899,11 @@ async def _compose(
         trajectory_artifact_store = LocalTrajectoryArtifactStore(artifact_root)
         general_artifact_store = FilesystemArtifactStore(
             artifact_root, maximum_bytes=artifact_maximum_bytes
+        )
+        # ADR-0289 and ADR-0290: the knowledge semantic arm's provider, or
+        # lexical search that says so once at startup.
+        knowledge_embedder = await _knowledge_embedder(
+            settings, semantic_index_pass, credential_resolver
         )
         knowledge_service = KnowledgeService(
             uow_factory,
@@ -4361,9 +4919,10 @@ async def _compose(
                 ]
             ),
             trace_retention=memory_profiles.traces,
+            embedder=knowledge_embedder,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
-        registry.register(KnowledgeSearchTool(knowledge_service))
+        registry.register(KnowledgeSearchTool(knowledge_service, factory=uow_factory))
         artifact_writers = ArtifactWriterFactory(
             uow_factory,
             general_artifact_store,
@@ -4381,6 +4940,7 @@ async def _compose(
                 run_maximum_reads=capture_run_maximum_reads,
             )
         )
+        registry.register(ArtifactDeleteTool(uow_factory, clock))
 
         async def reconcile_artifact_orphans() -> int:
             async def metadata_exists(artifact_id: UUID) -> bool:
@@ -4433,7 +4993,12 @@ async def _compose(
         # the standing authorizer's engine: an advisory escalation can never be
         # satisfied by a standing grant, and a resumed invocation never re-asks.
         deterministic_engine = DeterministicPolicyEngine(ruleset)
-        policy_engine: PolicyEngine = deterministic_engine
+        tool_deterministic_engine: PolicyEngine = deterministic_engine
+        if job_ruleset is not None:
+            tool_deterministic_engine = JobPolicyEngine(
+                deterministic_engine, DeterministicPolicyEngine(job_ruleset)
+            )
+        policy_engine: PolicyEngine = tool_deterministic_engine
         if ruleset.advisory_enabled or settings.policy_advisory_observe_enabled:
             if judgment_provider is None:
                 # Never fail closed on the advisor's availability.
@@ -4442,7 +5007,7 @@ async def _compose(
                 )
             else:
                 policy_engine = AdvisedPolicyEngine(
-                    deterministic_engine,
+                    tool_deterministic_engine,
                     JudgmentPolicyAdvisor(judgment_provider),
                     # Enforcing is a profile value and hashes into `policy_version`;
                     # observing changes no decision and is an environment flag.
@@ -4452,6 +5017,9 @@ async def _compose(
                 )
         # ADR-0172: specific owner consent, then ADR-0129 standing/task grants.
         standing_authorizers: list[StandingAuthorizer] = []
+        if settings.jobs_enabled:
+            standing_authorizers.append(JobGrantAuthorizer(uow_factory))
+            standing_authorizers.append(WidgetInstallationAuthorizer(uow_factory))
         if browser_provider is not None:
             standing_authorizers.append(
                 BrowserFollowConsentAuthorizer(
@@ -4542,14 +5110,51 @@ async def _compose(
                 ):
                     raise ConflictError("archive task cannot dispatch another external action")
                 await public_services.email.validate_archive(owner, run, lease)
+            # A consented send revalidates the press at the dispatch watermark too.
+            if (
+                task is not None
+                and task.kind == "send"
+                and task.send_consent is not None
+                and invocation.tool_name == task.send_consent.tool_name
+            ):
+                await public_services.email.validate_send(owner, run, lease)
 
+        async def job_model_factory(
+            current_run: Run, selected_agent: AgentSpec, lease: WorkerLease | None
+        ) -> object:
+            """Bind job completions to the current run, pinned provider, and usage ledger."""
+            resolved = resolved_model
+            provider: ModelProvider = model_provider
+            if current_run.provider_pin is not None:
+                resolved = await model_router.resolve_pinned(current_run.provider_pin)
+                resolved = resolved.model_copy(update={"policy_name": selected_agent.model_policy})
+                provider = effective_providers[resolved.provider]
+            return JobModelCompletion(
+                run=current_run,
+                provider=provider,
+                resolved=resolved,
+                budgets=UnitOfWorkBudgetLedger(uow_factory, clock, lease),
+                clock=clock,
+                ids=ids,
+            ).complete
+
+        if job_execution is not None:
+            # ADR-0291: a job's reads face the same engine as a tool call.
+            job_execution.mcp = JobMCPReads(
+                runtime=mcp_runtime,
+                registry=registry,
+                policy=policy_engine,
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+            )
         pipeline = ToolPipeline(
             registry,
             uow_factory,
             clock,
             ids,
             policy=policy_engine,
-            recovery_policy=deterministic_engine,
+            recovery_policy=tool_deterministic_engine,
             workspace_factory=sandbox_manager,
             artifact_writers=artifact_writers,
             current_principal=principal,
@@ -4560,6 +5165,7 @@ async def _compose(
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
             standing_authorizer=standing_authorizer,
+            job_model_factory=job_model_factory,
             delegations=delegation_materializer,
             before_effect=guard_email_effect,
         )
@@ -4634,22 +5240,32 @@ async def _compose(
                         if run.status not in TERMINAL_RUN_STATUSES:
                             return
                         completed = run
-                        await uow.events.append(
-                            NewEvent(
-                                session_id=run.session_id,
-                                run_id=run.id,
-                                event_type="memory.formation.requested",
-                                actor_type="runtime",
-                                payload={
-                                    "trigger": "run_terminal",
-                                    "terminal_status": run.status.value,
-                                    "not_before": (
-                                        clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
-                                    ).isoformat(),
-                                },
-                                derivation_key=f"memory.formation.requested:{run.id}",
-                            )
+                        # A server check that found nothing has nothing to form (ADR-0286).
+                        session = await uow.sessions.get(run.session_id, principal)
+                        record = (
+                            await uow.email.get(principal, "task", str(run.id))
+                            if session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is True
+                            else None
                         )
+                        if record is not None and record.payload.get("empty_check") is True:
+                            completed = None
+                        else:
+                            await uow.events.append(
+                                NewEvent(
+                                    session_id=run.session_id,
+                                    run_id=run.id,
+                                    event_type="memory.formation.requested",
+                                    actor_type="runtime",
+                                    payload={
+                                        "trigger": "run_terminal",
+                                        "terminal_status": run.status.value,
+                                        "not_before": (
+                                            clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
+                                        ).isoformat(),
+                                    },
+                                    derivation_key=f"memory.formation.requested:{run.id}",
+                                )
+                            )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
             if completed is not None:
@@ -4829,7 +5445,11 @@ async def _compose(
         from agent_core.runtime.email_junk import EmailJunkFilter
 
         async def execute_email_task(context: RunContext) -> RunOutcome | None:
-            """Recognize persisted typed work even when its public feature is disabled."""
+            """Dispatch persisted typed work before the general agent loop."""
+            if context.run.kind is RunKind.JOB:
+                return await execute_job(
+                    context, None if job_execution is None else job_execution.run
+                )
             await browser_workflows(context)
             if people_import_runner is None:
                 async with uow_factory() as uow:
@@ -4902,6 +5522,9 @@ async def _compose(
             )(context)
 
         async def is_email_task(run: Run, run_principal: Principal) -> bool:
+            """Identify typed job and email runs that bypass ordinary agent preparation."""
+            if run.kind is RunKind.JOB:
+                return True
             return await public_services.email.get_task(run_principal, run.id) is not None
 
         async def resolve_email_archive_approval(
@@ -4914,6 +5537,20 @@ async def _compose(
                 approval_id,
                 ApprovalResolutionType.APPROVE_ONCE,
                 "Explicit owner archive gesture",
+                lease=lease,
+            )
+
+        async def resolve_email_send_approval(
+            owner: Principal,
+            approval_id: UUID,
+            lease: WorkerLease | None,
+        ) -> None:
+            """The owner's one press on Send consents to this exact message (ADR-0279)."""
+            await archive_approval_service.resolve(
+                owner,
+                approval_id,
+                ApprovalResolutionType.APPROVE_ONCE,
+                "Explicit owner send gesture",
                 lease=lease,
             )
 
@@ -4965,12 +5602,29 @@ async def _compose(
                 else None
             ),
         )
+
+        async def queued_delay(run_id: UUID) -> float | None:
+            """Seconds until a queued run may start; None once it is no longer queued."""
+            async with uow_factory() as uow:
+                queued = await uow.runs.get(run_id, principal)
+            if queued.status is not RunStatus.QUEUED:
+                return None
+            if queued.scheduled_for is None:
+                return 0.0
+            return max(0.0, (queued.scheduled_for - clock.now()).total_seconds())
+
+        local_import_tasks: set[asyncio.Task[None]] = set()
         dispatcher = (
-            InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
+            InlineRunDispatcher(
+                executor.execute,
+                unit_of_work_open=uow_factory.is_open,
+                delay_before=queued_delay,
+                sleep=lambda seconds: clock.sleep(seconds),
+                tasks=local_import_tasks,
+            )
             if storage == "memory"
             else PostgresRunDispatcher()
         )
-        local_import_tasks: set[asyncio.Task[None]] = set()
         if people_service is not None:
             if storage == "memory":
 
@@ -5450,6 +6104,7 @@ async def _compose(
                 if task_grants_enabled
                 else None
             ),
+            integration_secrets=integration_secrets,
             mcp_servers=owner_mcp_servers,
             calls=call_service,
             email=EmailExperienceService(
@@ -5471,6 +6126,8 @@ async def _compose(
                 cleanup_artifacts=cleanup_email_artifacts,
                 cancel_parked_run=executor.cancel_parked_run,
                 resolve_archive_approval=resolve_email_archive_approval,
+                resolve_send_approval=resolve_email_send_approval,
+                send_undo_seconds=settings.email_send_undo_seconds,
                 current_archive_principal=lambda: (
                     principal
                     if settings.email_mode_enabled
@@ -5481,6 +6138,14 @@ async def _compose(
                 unsubscribe_grace_days=email_budget_limits.unsubscribe_grace_days,
             ),
         )
+
+        async def sweep_email_cache() -> int:
+            removed = await public_services.email.expire_cache(principal)
+            return removed + await public_services.email.prune_empty_checks(principal)
+
+        async def sweep_email_check() -> int:
+            return int(await public_services.email.admit_arrival_check(principal) is not None)
+
         if people_service is not None:
             people_service.imports.account_servers = public_services.email.account_servers
         if settings.email_mode_enabled:
@@ -5598,7 +6263,10 @@ async def _compose(
                     sweep_approvals=approval_service.expire_due,
                     sweep_exports=trajectory_service.sweep_once,
                     sweep_artifacts=artifact_writers.sweep_expired,
-                    sweep_email_cache=lambda: public_services.email.expire_cache(principal),
+                    sweep_email_cache=sweep_email_cache,
+                    sweep_email_check=sweep_email_check
+                    if settings.email_background_checks_enabled
+                    else None,
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,
@@ -5626,8 +6294,21 @@ async def _compose(
                         title_pass.run_once if title_pass is not None else None
                     ),
                     sweep_upload_ingests=UploadAutoIngest(
-                        uow_factory=uow_factory, knowledge=knowledge_service, principal=principal
+                        uow_factory=uow_factory,
+                        knowledge=knowledge_service,
+                        principal=principal,
+                        clock=clock,
                     ).sweep_once,
+                    sweep_knowledge_vectors=(
+                        None
+                        if knowledge_embedder is None
+                        else KnowledgeVectorBackfill(
+                            uow_factory=uow_factory,
+                            embedder=knowledge_embedder,
+                            principal=principal,
+                            clock=clock,
+                        ).sweep_once
+                    ),
                     folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None
@@ -5655,7 +6336,11 @@ async def _compose(
                 sandbox=sandbox_manager,
                 cockpit_builder=cockpit_builder,
                 cockpit_sandbox=cockpit_sandbox,
+                code_sandbox=code_sandbox,
                 cockpit_publication=cockpit_publication,
+                job_publication=job_publication,
+                job_execution=job_execution,
+                job_credentials=job_credentials,
                 cockpit_maintenance=cockpit_maintenance,
                 cockpit_local_branch=local_branch,
                 cockpit_local_outbox=local_outbox,
@@ -5700,6 +6385,9 @@ async def _compose(
         if cockpit_sandbox is not None:
             with suppress(BaseException):
                 await cockpit_sandbox.close()
+        if code_sandbox is not None:
+            with suppress(BaseException):
+                await code_sandbox.close()
         for provider in effective_providers.values():
             with suppress(BaseException):
                 await provider.close()
@@ -6096,6 +6784,8 @@ async def build(
     device_channel_override: DeviceChannel | None = None,
     cockpit_builder_override: WidgetBuilder | None = None,
     cockpit_local_branch: bool = False,
+    job_runner_override: JobRunner | None = None,
+    job_screen_override: JobScreen | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
     memory_provider_evaluation_policy: str = PROVIDER_FORMATION_POLICY_VERSION,
@@ -6399,6 +7089,7 @@ async def build(
         ),
         "sandbox.run_command",
         "artifact.export",
+        ArtifactDeleteTool.spec.name,
         *(["image.generate", "video.generate"] if media_enabled else []),
         WORKING_STATE_TOOL_NAME,
         SKILL_LOAD_TOOL_NAME,
@@ -6423,7 +7114,7 @@ async def build(
         *([] if web_search_enabled and web_fetch_enabled else ["knowledge.ingest"]),
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
-        *(["web.fetch", "web.fetch_json"] if web_fetch_enabled else []),
+        *(["web.fetch", "web.fetch_json", "web.inspect_image"] if web_fetch_enabled else []),
         *(
             [SCHEDULE_CREATE_TOOL_NAME, *SCHEDULE_LIFECYCLE_TOOL_NAMES]
             if effective_settings.schedule_api_enabled
@@ -6442,6 +7133,22 @@ async def build(
         ),
         *(["delegate.run"] if effective_settings.delegation_enabled else []),
         *(COCKPIT_TOOL_NAMES if effective_settings.cockpit_enabled else ()),
+        *(JOB_TOOL_NAMES if effective_settings.jobs_enabled else ()),
+        RUN_INSPECT_TOOL_NAME,
+        *(
+            (CODE_READ_TOOL_NAME, CODE_DRAFT_TOOL_NAME, CODE_TEST_TOOL_NAME)
+            if effective_settings.code_tools_enabled
+            else ()
+        ),
+        *((CODE_PROPOSE_TOOL_NAME,) if effective_settings.code_proposals_enabled else ()),
+        *(
+            INSTALL_TOOL_NAMES
+            if effective_settings.jobs_enabled
+            and effective_settings.cockpit_enabled
+            and effective_settings.schedule_api_enabled
+            and effective_settings.schedule_worker_enabled
+            else ()
+        ),
         *(
             [
                 RecordsListTool.spec.name,
@@ -6476,6 +7183,7 @@ async def build(
             # A JSON read is a narrower web.fetch, chosen once the model knows
             # the answer is JSON; it waits in the index (ADR-0258).
             "web.fetch_json",
+            "web.inspect_image",
             SCHEDULE_UPDATE_TOOL_NAME,
             SCHEDULE_PAUSE_TOOL_NAME,
             SCHEDULE_RESUME_TOOL_NAME,
@@ -6490,7 +7198,15 @@ async def build(
             RecordsImportTool.spec.name,
             # The Cockpit is a mode of its own; its tools never take a definition slot.
             *COCKPIT_TOOL_NAMES,
+            *JOB_TOOL_NAMES,
+            *INSTALL_TOOL_NAMES,
+            # ADR-0281: reached when something failed, or when the code itself is the subject.
+            RUN_INSPECT_TOOL_NAME,
+            *CODE_TOOL_NAMES,
             CAPTURE_READER_TOOL_NAME,
+            # ADR-0277: unindexed, like the capture reader; the default
+            # instructions name it, so it takes no index entry.
+            ArtifactDeleteTool.spec.name,
         )
         if name in default_enabled_tools
     ]
@@ -6838,6 +7554,8 @@ async def build(
             recall_capture=recall_capture,
             cockpit_builder_override=cockpit_builder_override,
             cockpit_local_branch=cockpit_local_branch,
+            job_runner_override=job_runner_override,
+            job_screen_override=job_screen_override,
         )
         composition = replace(
             composition,
@@ -6898,6 +7616,14 @@ async def build(
                 await composition.sandbox.close()
             except Exception as exc:
                 logger.warning("sandbox_close_failed", extra={"error_class": type(exc).__name__})
+            if composition.job_credentials is not None:
+                try:
+                    await composition.job_credentials.close()
+                except Exception as exc:
+                    logger.warning(
+                        "job_credentials_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
             if composition.cockpit_maintenance is not None:
                 with suppress(Exception):
                     await composition.cockpit_maintenance.close()
@@ -6907,6 +7633,14 @@ async def build(
                 except Exception as exc:
                     logger.warning(
                         "cockpit_sandbox_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
+            if composition.code_sandbox is not None:
+                try:
+                    await composition.code_sandbox.close()
+                except Exception as exc:
+                    logger.warning(
+                        "code_sandbox_close_failed",
                         extra={"error_class": type(exc).__name__},
                     )
             for proxy in (composition.mcp_proxy, composition.owner_mcp_proxy):

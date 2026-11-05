@@ -75,9 +75,3 @@ class BrowserNavigateTool:
             observation,
             self.spec.maximum_output_bytes,
         )
-
-
-class LegacyBrowserNavigateTool(BrowserNavigateTool):
-    """Keep the original navigation version available to pinned chats."""
-
-    spec = BrowserNavigateTool.spec.model_copy(update={"version": "1.0.0"})

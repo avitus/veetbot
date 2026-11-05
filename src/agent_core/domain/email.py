@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from email.utils import getaddresses
@@ -18,8 +19,18 @@ from agent_core.domain.email_subscriptions import EmailSubscriptionConsent
 
 EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
+# How long a refresh or draft may wait for a worker before its slice starts (ADR-0295):
+# long enough for one scheduled run, whose usual deadline is five minutes.
+EMAIL_QUEUE_ALLOWANCE_SECONDS = 300
 # Background learning stops here; new mail keeps the rest of each ceiling (ADR-0256).
 EMAIL_LEARNING_SHARE = Decimal("0.75")
+# A server check stops here, leaving the rest for when the owner is in Email (ADR-0286).
+EMAIL_ARRIVAL_DAILY_SHARE = Decimal("0.5")
+EMAIL_ARRIVAL_MONTHLY_SHARE = Decimal("0.9")
+EMAIL_ARRIVAL_DAYS = 7
+EMAIL_ARRIVAL_MAX_WAIT_SECONDS = 3600
+EMAIL_ARRIVAL_MAX_FAILURES_COUNTED = 5
+EMAIL_EMPTY_CHECK_RETENTION_DAYS = 7
 EMAIL_HISTORY_DAYS = 90
 EMAIL_BODY_RETENTION = timedelta(days=30)
 
@@ -31,6 +42,8 @@ class EmailBudgetLimits(EmailValue):
     monthly_cost: Decimal = Field(ge=Decimal("0.01"), allow_inf_nan=False)
     # How long an unsubscribed sender has to comply before it is shown as still sending.
     unsubscribe_grace_days: int = Field(default=10, ge=2, le=60)
+    # How often the server checks for new mail while Email is closed (ADR-0286).
+    check_interval_seconds: int = Field(default=300, ge=60, le=3600)
 
 
 class EmailImportBudget(EmailValue):
@@ -158,6 +171,64 @@ class EmailArchiveConsent(EmailValue):
         return hashlib.sha256(value.encode()).hexdigest()
 
 
+class EmailSendConsent(EmailValue):
+    """One press on Send: the owner's consent to one exact draft revision (ADR-0279)."""
+
+    tenant_id: str
+    principal_id: str
+    account_id: str
+    provider_thread_id: str
+    read_server_id: str
+    send_server_id: str
+    draft_id: UUID
+    draft_revision: int
+    source_revision: int
+    # sha256 of the exact send arguments; the task record never holds mail content.
+    arguments_digest: str
+    expires_at: datetime
+    undo_until: datetime
+
+    @property
+    def tool_name(self) -> str:
+        """The one account-bound send capability this press may satisfy."""
+        return f"mcp.{self.send_server_id}.send_message"
+
+    @property
+    def digest(self) -> str:
+        """Fingerprint of the whole consent, recorded in the gesture event."""
+        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+
+
+def send_arguments_digest(arguments: dict[str, Any]) -> str:
+    """A stable digest of the exact send arguments, so the task record never holds mail content."""
+    return hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest()
+
+
+def send_message_arguments(draft: EmailDraft, provider_thread_id: str) -> dict[str, Any]:
+    """The exact `send_message` call one draft revision stands for; admission and dispatch agree."""
+    return {
+        "to": ", ".join(draft.to),
+        "cc": ", ".join(draft.cc) or None,
+        "bcc": ", ".join(draft.bcc) or None,
+        "subject": draft.subject,
+        "body": draft.body,
+        "thread_id": provider_thread_id,
+        "in_reply_to": draft.in_reply_to,
+        "references": " ".join(draft.references) or None,
+    }
+
+
+def send_gesture(task_id: UUID, consent: EmailSendConsent) -> dict[str, object]:
+    """The authenticated press; identities and a digest only, never mail content."""
+    return {
+        "task_id": str(task_id),
+        "draft_id": str(consent.draft_id),
+        "draft_revision": consent.draft_revision,
+        "source_revision": consent.source_revision,
+        "consent_digest": consent.digest,
+    }
+
+
 def archive_result_matches(consent: EmailArchiveConsent, result: dict[str, Any] | None) -> bool:
     """Require the first-party write receipt to name exactly the requested delta."""
     arguments = consent.arguments
@@ -237,6 +308,8 @@ class EmailDraft(EmailValue):
     send_claim_id: UUID | None = None
     provider_thread_id: str | None = None
     send_tool_name: str | None = None
+    # Set while a one-press send is parked and can still be undone (ADR-0279).
+    send_undo_until: datetime | None = None
 
 
 class EmailFeedback(EmailValue):
@@ -257,13 +330,21 @@ class EmailOperation(EmailValue):
     replayed: bool = False
 
 
+class EmailAttachmentSelection(EmailValue):
+    """One attachment of one message, by listed position and name (ADR-0296)."""
+
+    message_id: str = Field(min_length=1, max_length=256)
+    attachment_index: int = Field(ge=0, le=1000, strict=True)
+    filename: str = Field(min_length=1, max_length=1024)
+
+
 class EmailTask(EmailValue):
     """Typed server-owned intent; never synthesized owner conversation text."""
 
     id: UUID
     run_id: UUID
     session_id: UUID
-    kind: Literal["refresh", "draft", "send", "archive", "subscription"]
+    kind: Literal["refresh", "draft", "send", "archive", "subscription", "attachment"]
     account_ids: list[str]
     thread_id: UUID | None = None
     draft_id: UUID | None = None
@@ -271,14 +352,19 @@ class EmailTask(EmailValue):
     instruction: str | None = None
     archive_consent: EmailArchiveConsent | None = None
     subscription_consent: EmailSubscriptionConsent | None = None
+    send_consent: EmailSendConsent | None = None
+    attachment: EmailAttachmentSelection | None = None
     created_at: datetime
     reservation: Decimal = Decimal("0")
     settled_cost: Decimal | None = None
     # A budget estimate, never a claim of known provider usage (ADR-0173).
     budget_charge: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     budget_charge_reason: Literal["incomplete_usage", "missing_run"] | None = None
-    # A refresh admitted above the learning share reads only new mail (ADR-0256).
-    scope: Literal["full", "new_mail"] = "full"
+    # A refresh admitted above the learning share reads only new mail (ADR-0256);
+    # a server check handles only arrivals (ADR-0286).
+    scope: Literal["full", "new_mail", "arrivals"] = "full"
+    # A server check that found nothing to do; removed after a retention window.
+    empty_check: bool = False
     stage: str = "queued"
     state: dict[str, object] = Field(default_factory=dict)
 
@@ -291,29 +377,6 @@ class EmailDraftEdit(EmailValue):
     bcc: list[str] = Field(default_factory=list, max_length=100)
     subject: str = Field(max_length=998)
     body: str = Field(max_length=500_000)
-
-
-class EmailBulkExclusionCandidate(EmailValue):
-    """One retained thread the unsubscribe census indexes (ADR-0116)."""
-
-    thread_id: UUID
-    account_id: str
-    subject: str = Field(max_length=998)
-    revision: int = Field(ge=1)
-
-
-class EmailBulkExclusionOutcome(EmailValue):
-    thread_id: UUID
-    status: str
-    reason: str | None = None
-
-
-class EmailBulkExclusionReport(EmailValue):
-    """What the operator pass found and, when confirmed, what it excluded."""
-
-    confirmed: bool
-    candidates: list[EmailBulkExclusionCandidate]
-    excluded: list[EmailBulkExclusionOutcome]
 
 
 class EmailLearningState(EmailValue):

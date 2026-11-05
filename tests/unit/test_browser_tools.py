@@ -32,7 +32,7 @@ from agent_core.domain.tools import ToolFailureKind
 from agent_core.ports.browser import BrowserProvider
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
-from agent_core.tools.browser_observe import BrowserObserveTool, LegacyBrowserObserveTool
+from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.browser_results import bounded_observation_payload
 from tests.contract.support import tool_context
 
@@ -491,11 +491,6 @@ def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
         "Open an https:// URL within runtime browser_origins; returns the settled page and fresh "
         "refs. After navigation_cancelled, observe the existing page."
     )
-    assert LegacyBrowserObserveTool(provider).spec.description == (
-        "Read the current page of this chat's website profile again. navigate and act "
-        "already return the settled page, so observe only to refresh a page that changes "
-        "on its own."
-    )
     assert BrowserObserveTool(provider).spec.description == (
         "Read modes: {}; next_observe after/cursor; "
         "focus with region_ref+expected_revision and no text_offset first, then copy next_text "
@@ -512,13 +507,10 @@ def test_browser_descriptions_say_the_returned_page_is_settled() -> None:
         "Never replay uncertain writes; success is not causal proof."
     )
     assert {
-        tool.spec.version
-        for tool in (
-            BrowserNavigateTool(provider),
-            BrowserObserveTool(provider),
-            BrowserActTool(provider),
-        )
+        tool.spec.version for tool in (BrowserNavigateTool(provider), BrowserObserveTool(provider))
     } == {"1.7.0"}
+    # ADR-0294: act's result gained the saved-file note; its description did not change.
+    assert BrowserActTool(provider).spec.version == "1.8.0"
 
 
 async def test_observe_continuation_uses_the_bound_provider_without_refreshing() -> None:

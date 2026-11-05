@@ -23,6 +23,7 @@ import httpx
 import pytest
 
 from agent_core.api import create_app
+from agent_core.application.cockpit_diagnostics import diagnostics
 from agent_core.bootstrap import Composition, build
 from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import (
@@ -73,6 +74,7 @@ ROUTES = {
     ("POST", "/v1/cockpit/widgets/{slug}/revert"): "cockpit.write",
     ("POST", "/v1/cockpit/widgets/{slug}/delete"): "cockpit.write",
     ("POST", "/v1/cockpit/widgets/{slug}/restore"): "cockpit.write",
+    ("POST", "/v1/cockpit/widgets/{slug}/diagnostics"): "cockpit.write",
     ("POST", "/v1/cockpit/refresh"): "cockpit.write",
 }
 
@@ -219,7 +221,7 @@ async def test_off_means_every_cockpit_route_is_absent() -> None:
         assert not [name for name in registry._latest if name.startswith("cockpit.")]
 
 
-async def test_on_mounts_exactly_the_ten_routes_under_their_scopes() -> None:
+async def test_on_mounts_exactly_the_cockpit_routes_under_their_scopes() -> None:
     async with cockpit_api() as (_composition, client):
         mounted = {
             (method, route.path): (route.openapi_extra or {}).get("required_scope")
@@ -577,8 +579,96 @@ async def test_the_stream_resumes_resets_heartbeats_and_closes_at_its_lifetime(
     await _heartbeats_while_idle(tmp_path / "heartbeat", monkeypatch)
 
 
+async def test_a_client_that_drops_ends_its_stream_and_subscription(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dropped client must not leave the stream's subscription, which is a dedicated
+    PostgreSQL connection in production, waiting for garbage collection."""
+
+    monkeypatch.setattr("agent_core.api.cockpit.HEARTBEAT_SECONDS", 0.01)
+    async with cockpit_api(config_dir=_overlay(tmp_path, max_seconds=30)) as (composition, client):
+        board = composition.services.cockpit
+        assert board is not None
+        live_events = board._live_events
+        subscriptions = 0
+
+        class Counted:
+            @asynccontextmanager
+            async def listen(self, channel: str) -> AsyncIterator[Any]:
+                """Count this stream's subscription for as long as it is open."""
+                nonlocal subscriptions
+                subscriptions += 1
+                try:
+                    async with live_events.listen(channel) as subscription:
+                        yield subscription
+                finally:
+                    subscriptions -= 1
+
+        monkeypatch.setattr(board, "_live_events", Counted())
+        client_left = asyncio.Event()
+        request_sent = False
+
+        async def receive() -> dict[str, Any]:
+            """Deliver the request, then wait for the client to leave."""
+            nonlocal request_sent
+            if not request_sent:
+                request_sent = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await client_left.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: Any) -> None:
+            """Drop the client at the stream's first frame, with the subscription open."""
+            if message["type"] == "http.response.body":
+                assert subscriptions == 1
+                client_left.set()
+                await asyncio.sleep(1)
+
+        transport = client._transport
+        assert isinstance(transport, httpx.ASGITransport)
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/v1/cockpit/stream",
+            "raw_path": b"/v1/cockpit/stream",
+            "query_string": b"",
+            "headers": [(b"host", b"localhost")],
+            "client": ("127.0.0.1", 1234),
+            "server": ("localhost", 80),
+        }
+        await asyncio.wait_for(transport.app(scope, receive, send), timeout=5)
+        assert client_left.is_set()
+        assert subscriptions == 0
+
+
 async def test_a_malformed_resume_point_is_refused_before_the_stream_opens() -> None:
     async with cockpit_api() as (_composition, client):
         for header in ("soon", "-1"):
             response = await client.get("/v1/cockpit/stream", headers={"Last-Event-ID": header})
             assert response.status_code == 400, header
+
+
+async def test_device_failure_is_scoped_content_free_and_retryable() -> None:
+    async with cockpit_api() as (composition, client):
+        live = await _live_widget(composition)
+        url = "/v1/cockpit/widgets/weather/diagnostics"
+        body = {"revision_id": str(live.id), "code": "render_failed"}
+        assert (await client.post(url, json=body)).status_code == 204
+        assert (await client.post(url, json=body)).status_code == 204
+        assert (await client.post(url, json={**body, "code": "arbitrary"})).status_code == 400
+        assert (await client.post(url, json={**body, "text": "private"})).status_code == 400
+        foreign = await _live_widget(composition, OTHER)
+        assert (
+            await client.post(url, json={**body, "revision_id": str(foreign.id)})
+        ).status_code == 404
+        async with composition.uow_factory() as uow:
+            events = await uow.process_events.list("cockpit.device_failure")
+            assert len(events) == 1
+            assert events[0].payload["code"] == "render_failed"
+            assert await uow.cockpit_events.latest_sequence(OWNER) is None
+            read = await diagnostics(uow, OWNER, "weather", live.id)
+            assert [item["code"] for item in read["device_failures"]] == ["render_failed"]
+            assert not (await diagnostics(uow, OTHER, "weather", foreign.id))["device_failures"]

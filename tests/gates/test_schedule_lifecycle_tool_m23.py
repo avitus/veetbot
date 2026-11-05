@@ -130,7 +130,6 @@ async def test_schedule_lifecycle_tools_are_feature_gated_and_classified() -> No
         specs = {
             name: composition.tool_pipeline._registry.get(name).spec for name in LIFECYCLE_NAMES
         }
-        legacy_list_spec = composition.tool_pipeline._registry.get("schedule.list", "1.0.1").spec
         previous_list_spec = composition.tool_pipeline._registry.get("schedule.list", "1.0.2").spec
         run_id = await composition.runs.submit("ready?")
         run = await composition.runs.wait_terminal(run_id)
@@ -147,7 +146,6 @@ async def test_schedule_lifecycle_tools_are_feature_gated_and_classified() -> No
     # ADR-0254: 1.1.0 can describe an INTERVAL cadence; earlier versions stay pinned.
     assert specs["schedule.list"].version == "1.1.0"
     assert previous_list_spec.version == "1.0.2"
-    assert legacy_list_spec.version == "1.0.1"
     assert specs["schedule.update"].required_scopes == {"schedule.write"}
     assert specs["schedule.update"].side_effect is SideEffectClass.EXTERNAL_WRITE
     assert specs["schedule.update"].risk is RiskLevel.HIGH

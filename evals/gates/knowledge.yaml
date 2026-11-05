@@ -73,3 +73,11 @@
   check: tests/gates/test_knowledge_m9.py::test_corpus_recall
   corpus: evals/corpora/knowledge_recall/
   minimum_members: 3
+- id: gate.knowledge.paraphrase_lift
+  milestone: 9
+  kind: corpus
+  spec: docs/plan/knowledge-documents.md#hard-gates
+  statement: "**Paraphrase lift** — across a corpus of documents whose answering passage shares no content word with its question, the semantic arm places that passage within the top two passages `knowledge.search` returns, where lexical retrieval alone does not; the gate replays vectors a real embedding model produced for the corpus. A corpus gate."
+  check: tests/gates/test_knowledge_semantic.py::test_paraphrase_lift
+  corpus: evals/corpora/knowledge_paraphrase/
+  minimum_members: 3

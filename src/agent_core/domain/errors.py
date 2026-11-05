@@ -17,6 +17,10 @@ class NotFoundError(AgentCoreError):
     """A tenant-scoped object does not exist or is not visible."""
 
 
+class IntegrationSecretUnavailableError(AgentCoreError):
+    """A stored key cannot be authenticated with this host's master key."""
+
+
 class ConflictError(AgentCoreError):
     """The requested guarded state change is not valid."""
 

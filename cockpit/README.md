@@ -25,10 +25,9 @@ Requires Node.js 22.13 or newer.
 make test-cockpit
 ```
 
-That installs the locked dependencies and Chromium, builds the runtime into
+That installs the locked dependencies, Chromium and WebKit, builds the runtime into
 `dist/`, runs every test under `tests/` (kit, builder, manifest, fixture,
-screen and realm among them), and lints. The realm tests also
-run in WebKit wherever Playwright has it installed.
+screen and realm among them), and lints. The fixture preview uses WebKit and returns visible text and a PNG.
 
 Build one widget package:
 

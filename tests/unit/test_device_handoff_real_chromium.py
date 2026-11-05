@@ -43,7 +43,12 @@ from agent_core.browser_control_plane.service import HostedProfileLifecycleServi
 from agent_core.browser_control_plane.sessions import HostedProfileSessionService
 from agent_core.browser_control_plane.verification import BrowserVerificationCatalog
 from agent_core.domain.agents import Principal
-from agent_core.domain.browser import BrowserAuthenticationMode, BrowserAuthenticationStatus
+from agent_core.domain.browser import (
+    BrowserAuthenticationMode,
+    BrowserAuthenticationStatus,
+    BrowserInteractiveEvent,
+    BrowserProviderError,
+)
 from agent_core.domain.credentials import SecretValue
 from tests.real_browser_support import (
     LocalHttpsSite,
@@ -70,6 +75,9 @@ class MembersSite:
                 Route("/", self.home),
                 Route("/log-in", self.log_in, methods=["GET", "POST"]),
                 Route("/learn", self.learn),
+                Route("/late-form", self.late_form),
+                Route("/moving", self.moving),
+                Route("/moving/next", self.moving_next),
             ]
         )
 
@@ -89,10 +97,50 @@ class MembersSite:
             "<input type='password' name='secret'><button>Sign in</button></form>"
         )
 
+    async def late_form(self, request: Request) -> Response:
+        """Asks everyone to sign in, session or not, once its requests have gone quiet."""
+        del request
+        return _late_form_page()
+
+    async def moving(self, request: Request) -> Response:
+        """Signed-out visitors are asked at once; a session is asked only on the next document."""
+        if request.cookies.get("session") != self.token:
+            return await self.log_in(request)
+        return HTMLResponse(
+            """<!doctype html><title>Loading</title><p>Loading</p><script>
+            setTimeout(() => { location.href = '/moving/next'; }, 2500);
+            </script>"""
+        )
+
+    async def moving_next(self, request: Request) -> Response:
+        """Stays below the confirmed path and draws its form after the first page's time is up."""
+        del request
+        return HTMLResponse(
+            """<!doctype html><title>Loading</title><p>Loading</p><script>
+            setTimeout(() => {
+                const frame = document.createElement('iframe');
+                frame.srcdoc = '<input type="password">';
+                document.body.appendChild(frame);
+            }, 2500);
+            </script>"""
+        )
+
     async def learn(self, request: Request) -> Response:
         if request.cookies.get("session") != self.token:
             return RedirectResponse("/log-in", status_code=302)
         return HTMLResponse(f"<h1>{MEMBERS_TEXT}</h1>")
+
+
+def _late_form_page() -> Response:
+    return HTMLResponse(
+        """<!doctype html><title>Loading</title><p>Loading</p><script>
+        setTimeout(() => {
+            const frame = document.createElement('iframe');
+            frame.srcdoc = '<input type="password">';
+            document.body.appendChild(frame);
+        }, 3000);
+        </script>"""
+    )
 
 
 def refusing_headless_browsers(app: ASGIApp) -> ASGIApp:
@@ -242,6 +290,112 @@ async def test_a_handed_off_session_is_verified_sealed_and_used_by_a_lease(
     assert {policy.destinations[0].host for policy in site.egress_policies} == {"site.test"}
 
 
+class RestlessSignInSite:
+    """Sign-in pages that keep moving as they load, as Chase's did on 2026-11-02."""
+
+    FORM = "<form><input name='email'><input type='password' name='secret'></form>"
+
+    def __init__(self) -> None:
+        self.app = Starlette(
+            routes=[
+                Route("/routing", self.routing),
+                Route("/replacing", self.replacing),
+                Route("/settled", self.settled),
+                Route("/account", self.account),
+            ]
+        )
+
+    ROUTING = "<script>let n=0;setInterval(()=>{location.hash=String(++n)},2)</script>"
+
+    async def routing(self, request: Request) -> Response:
+        del request
+        return HTMLResponse(self.FORM + self.ROUTING)
+
+    async def account(self, request: Request) -> Response:
+        """Signed in, the form gives way to a page that keeps routing."""
+        if "session" in request.cookies:
+            return HTMLResponse("<h1>Accounts</h1>" + self.ROUTING)
+        response = HTMLResponse(
+            "<form><input autofocus name='email'><input type='password' name='secret'></form>"
+            "<script>document.querySelector('input').addEventListener("
+            "'input',()=>location.assign('/account'))</script>"
+        )
+        response.set_cookie("session", "synthetic", secure=True)
+        return response
+
+    async def replacing(self, request: Request) -> Response:
+        del request
+        return HTMLResponse("<script>location.replace('/settled')</script>")
+
+    async def settled(self, request: Request) -> Response:
+        del request
+        return HTMLResponse(self.FORM)
+
+
+@pytest.mark.parametrize("path", ["/routing", "/replacing"])
+async def test_a_remote_sign_in_opens_a_page_that_keeps_moving(tmp_path: Path, path: str) -> None:
+    """The owner reads the page, so a page too busy for an agent to read still opens."""
+    require_real_browser()
+    async with (
+        local_https_site(RestlessSignInSite().app) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        ceremony = await service.sessions.begin_authentication(
+            PROFILE_ID, OWNER, PROVIDER_REF, login_url=site.url(path)
+        )
+        assert ceremony.launch_url is not None
+        capability = parse_qs(urlsplit(ceremony.launch_url).fragment)["capability"][0]
+        frame = await service.sessions.authentication_frame(ceremony.id, capability)
+        await service.sessions.cancel_authentication(ceremony.id, OWNER)
+
+    assert frame.startswith(b"\x89PNG")
+
+
+async def test_a_remote_sign_in_finishes_on_a_page_that_keeps_moving(tmp_path: Path) -> None:
+    require_real_browser()
+    async with (
+        local_https_site(RestlessSignInSite().app) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        ceremony = await service.sessions.begin_authentication(
+            PROFILE_ID, OWNER, PROVIDER_REF, login_url=site.url("/account")
+        )
+        assert ceremony.launch_url is not None
+        capability = parse_qs(urlsplit(ceremony.launch_url).fragment)["capability"][0]
+        await service.sessions.authentication_event(
+            ceremony.id, capability, BrowserInteractiveEvent(kind="text", text="s")
+        )
+
+        status = BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+        for _ in range(100):
+            refreshed = await service.sessions.refresh_authentication(ceremony.id, OWNER)
+            status = refreshed.status
+            if status is BrowserAuthenticationStatus.READY:
+                break
+            await asyncio.sleep(0.1)
+
+    assert status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_remote_sign_in_still_refuses_a_page_outside_the_profile(tmp_path: Path) -> None:
+    require_real_browser()
+
+    async def leaving(request: Request) -> Response:
+        del request
+        return RedirectResponse("https://elsewhere.test/", status_code=302)
+
+    async with (
+        local_https_site(Starlette(routes=[Route("/", leaving)])) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        with pytest.raises(BrowserProviderError) as refused:
+            await service.sessions.begin_authentication(
+                PROFILE_ID, OWNER, PROVIDER_REF, login_url=site.url("/")
+            )
+
+    assert refused.value.reason_code == "tool.browser.url_disallowed"
+
+
 async def test_a_site_that_refuses_headless_browsers_confirms_a_handed_off_session(
     tmp_path: Path,
 ) -> None:
@@ -301,6 +455,44 @@ async def test_a_session_the_site_refuses_is_signed_out(tmp_path: Path) -> None:
     assert response.json()["error"]["code"] == "session_signed_out"
     assert status.status is BrowserAuthenticationStatus.CANCELLED
     assert members.token not in response.text
+
+
+async def test_a_form_both_copies_draw_late_does_not_confirm_a_sign_in(tmp_path: Path) -> None:
+    """ADR-0297: the control's wait must not turn one page into proof of a session."""
+    require_real_browser()
+    members = MembersSite()
+    async with (
+        local_https_site(members.app) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        response, ceremony_id = await hand_off(
+            service, cookie=await signed_in_cookie(members), confirmed_path="/late-form"
+        )
+        status = await service.sessions.authentication_status(ceremony_id, OWNER)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "session_signed_out"
+    assert status.status is BrowserAuthenticationStatus.CANCELLED
+
+
+async def test_a_form_the_next_document_draws_late_does_not_confirm_a_sign_in(
+    tmp_path: Path,
+) -> None:
+    """ADR-0297: the signed-in copy is watched from its newest document's load, not its first."""
+    require_real_browser()
+    members = MembersSite()
+    async with (
+        local_https_site(members.app) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        response, ceremony_id = await hand_off(
+            service, cookie=await signed_in_cookie(members), confirmed_path="/moving"
+        )
+        status = await service.sessions.authentication_status(ceremony_id, OWNER)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "session_signed_out"
+    assert status.status is BrowserAuthenticationStatus.CANCELLED
 
 
 async def test_a_page_anyone_can_see_does_not_confirm_a_sign_in(tmp_path: Path) -> None:

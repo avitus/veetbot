@@ -39,7 +39,7 @@ def test_no_stale_active_gate() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
     active = [entry for entry in entries if entry.milestone <= 11]
-    assert len(active) == 227
+    assert len(active) == 228
     assert all(entry.check != "tests/gates/pending.py::pending_gate" for entry in active)
     assert all(not entry.optional for entry in active)
 
@@ -98,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 640
+    assert len(entries) == 642
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -155,7 +155,7 @@ def test_census_is_derived() -> None:
         6: 11,
         7: 7,
         8: 17,
-        9: 26,
+        9: 27,
         10: 38,
         11: 23,
         12: 20,
@@ -172,7 +172,7 @@ def test_census_is_derived() -> None:
         23: 12,
         24: 12,
         25: 12,
-        26: 32,
+        26: 33,
         27: 14,
         28: 36,
         29: 17,
@@ -502,7 +502,7 @@ def test_email_experience_has_complete_milestone_26_gate_area() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
     email_entries = [entry for entry in entries if entry.milestone == 26]
-    assert len(email_entries) == 32
+    assert len(email_entries) == 33
     assert all(entry.id.startswith("gate.email.experience_") for entry in email_entries)
     assert all(entry.spec == "docs/plan/email-experience.md#hard-gates" for entry in email_entries)
     assert all(GATE_ID.fullmatch(entry.id) for entry in email_entries)

@@ -146,7 +146,16 @@ deliberate rounds reserve one slot per validated search. All execute under the
 same deadline and four-slot/two-round ceiling. Exhaustion supplies an explicit
 limitation while retaining mandatory corrections. Unused and failed reservations
 cannot be renewed after resume. The runtime evaluator uses this same allowance
-for sparse and semantic arms. Context assembly now records its existing block
+for sparse and semantic arms.
+[ADR-0282](../adr/0282-recall-preparation-keeps-its-own-clock.md) amends that
+accounting after a production outage: provider preparation runs on its own
+five-second clock and the searches get their own ten seconds from the moment it
+returns, inside one fifteen-second durable reservation; the automatic round is
+reserved once per run and refreshed on later build steps without new slots or
+rounds, while deliberate searches reserve one slot each from the two it leaves,
+in at most two deliberate rounds; and a refused or timed-out automatic recall
+appends `memory.recall.limited` with its reason beside the limitation marker.
+Context assembly now records its existing block
 priority as one deduplicated twenty-original rank prefix, as specified in
 [ADR-0192](../adr/0192-recovered-source-evaluation.md). The scorer verifies that
 runtime receipt against exact observed blocks; it never invents a cross-query
@@ -759,6 +768,20 @@ Only one restart phase is represented; it cannot be silently replaced after
 another lapse. Operator verification of the retained receipts, final release
 gates and a separate actual owner decision remain required before installation.
 Preparation alone grants no activation, and legacy formats retain their rules.
+
+[ADR-0290](../adr/0290-standing-semantic-activation.md) records the owner's
+2026-11-03 standing decision that semantic retrieval be activated and stay on.
+`recall-standing-evidence@1` carries the owner's instruction, its reference and
+statement digest, one tenant and owner, and the composition digests observed
+at preparation; `recall-standing-admission@1` binds the evidence digest, the
+owner, an activation time and the embedding configuration key, with no expiry,
+no deployment reference and no release census, so the admission survives
+releases and configuration edits and is withdrawn by file mutation, by the
+flag, or by a different encoder. Composition keeps the local encoder,
+interactive private owner queries, no unattended reconsolidation and the
+request and USD 2 daily indexing ceilings. This is a recorded deviation from
+the activation evidence above; it completes no M33 gate and leaves the trial
+routes available.
 
 ## Hard gates
 

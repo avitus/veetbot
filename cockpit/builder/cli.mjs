@@ -14,6 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { previewWidget } from './lib/preview.mjs';
 import { buildWidget } from './lib/build.mjs';
 import { readPackage } from './lib/package.mjs';
 
@@ -46,7 +47,7 @@ function readStdinPackage() {
   if (screen.commitMessage !== undefined && typeof screen.commitMessage !== 'string') {
     usage('stdin screen commitMessage must be text');
   }
-  return { files: new Map(Object.entries(files)), screen, read: [] };
+  return { files: new Map(Object.entries(files)), screen, preview: input.preview, read: [] };
 }
 
 let parsed;
@@ -86,10 +87,18 @@ try {
     mkdirSync(parsed.values.out, { recursive: true });
     writeFileSync(path.join(parsed.values.out, `${result.sha256}.js`), result.bundle);
   }
-  const report = { ok: result.ok, slug, kit_api: result.kit_api, sha256: result.sha256, diagnostics: result.diagnostics };
+  let report = { ok: result.ok, slug, kit_api: result.kit_api, sha256: result.sha256, diagnostics: result.diagnostics };
   if (result.ok && parsed.values['emit-bundle']) Object.assign(report, { bundle: result.bundle, manifest: result.manifest });
+  if (result.ok && source.preview) {
+    const rendered = await previewWidget(result, files, source.preview);
+    if (rendered.diagnostics) {
+      report = { ok: false, slug, diagnostics: rendered.diagnostics };
+    } else {
+      report.preview = rendered.preview;
+    }
+  }
   process.stdout.write(`${JSON.stringify(report)}\n`);
-  process.exit(result.ok ? 0 : 1);
+  process.exitCode = report.ok ? 0 : 1;
 } catch (error) {
   process.stderr.write(`cockpit builder failed: ${/** @type {Error} */ (error).message}\n`);
   process.exit(2);

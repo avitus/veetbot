@@ -81,6 +81,7 @@ reclaim_image_storage() {
   fi
   prune_release_images "$SANDBOX_REPOSITORY" "$running"
   prune_release_images "$BUILDER_REPOSITORY" "$running"
+  prune_release_images "$CODE_SANDBOX_REPOSITORY" "$running"
   prune_release_images "$PROFILE_REPOSITORY" "$running"
   docker builder prune --all --force --filter until=48h >/dev/null || \
     printf 'warning: could not prune the build cache; continuing.\n' >&2
@@ -119,6 +120,9 @@ PRODUCTION_IMAGE="$SANDBOX_REPOSITORY:production"
 BUILDER_REPOSITORY="veetbot-cockpit-builder"
 BUILDER_RELEASE_IMAGE="$BUILDER_REPOSITORY:$RELEASE_ID"
 BUILDER_PRODUCTION_IMAGE="$BUILDER_REPOSITORY:production"
+CODE_SANDBOX_REPOSITORY="veetbot-code-sandbox"
+CODE_SANDBOX_RELEASE_IMAGE="$CODE_SANDBOX_REPOSITORY:$RELEASE_ID"
+CODE_SANDBOX_PRODUCTION_IMAGE="$CODE_SANDBOX_REPOSITORY:production"
 PROFILE_RELEASE_IMAGE="$PROFILE_REPOSITORY:$RELEASE_ID"
 PREVIOUS_RELEASE=""
 PROMOTED=0
@@ -132,6 +136,9 @@ mkdir -p "$RELEASES_DIR" "$SHARED_DIR/uv-cache"
 cleanup() {
   local status=$?
   trap - EXIT
+  if (( status != 0 )) && [[ -n "${HANDOFF_ATTEMPT:-}" ]]; then
+    rm -f -- "$HANDOFF_ATTEMPT"
+  fi
   if [[ -n "$HEALTH_HEADERS" ]]; then
     rm -f -- "$HEALTH_HEADERS"
   fi
@@ -208,6 +215,7 @@ for required in \
   deploy/systemd/veetbot-call-ingress.service \
   execution/sandbox.Dockerfile \
   execution/cockpit-builder.Dockerfile \
+  execution/code-sandbox.Dockerfile \
   scripts/check_schedule_database_permissions.py \
   scripts/check_surface_database_permissions.py \
   scripts/database_role_permissions.py \
@@ -223,6 +231,8 @@ fi
 umask 027
 printf 'VEETBOT_RELEASE_ID=%s\nAGENT_EXECUTION_SERVICE_SOCKET=%s\n' \
   "$RELEASE_ID" "$EXECUTION_SERVICE_SOCKET" >"$STAGE/.release.env"
+# The execution service admits only this tag, so a host need not repeat it (ADR-0281).
+printf 'AGENT_CODE_SANDBOX_IMAGE=%s\n' "$CODE_SANDBOX_PRODUCTION_IMAGE" >>"$STAGE/.release.env"
 
 cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
@@ -235,6 +245,7 @@ uv sync --frozen --no-dev --compile-bytecode
 docker build -f deploy/postgres.Dockerfile -t veetbot-postgres:16-alpine-vector0.8.7 .
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
 docker build -f execution/cockpit-builder.Dockerfile -t "$BUILDER_RELEASE_IMAGE" .
+docker build -f execution/code-sandbox.Dockerfile -t "$CODE_SANDBOX_RELEASE_IMAGE" .
 docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
 # The Cockpit builder canary: a reference widget must build under gVisor with
 # no network, a read-only root, no credentials and the sandbox's flags, or the
@@ -360,6 +371,10 @@ if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
   [[ "$(environment_flag "$SCHEDULE_ENV_FILE" AGENT_COCKPIT_ENABLED)" == \
     "${AGENT_COCKPIT_ENABLED:-0}" ]] || fail \
     "schedule worker AGENT_COCKPIT_ENABLED must match the application environment"
+  # Likewise a schedule that names Scale VP keeps its scope only under this flag.
+  [[ "$(environment_flag "$SCHEDULE_ENV_FILE" AGENT_SVP_ENABLED)" == \
+    "${AGENT_SVP_ENABLED:-0}" ]] || fail \
+    "schedule worker AGENT_SVP_ENABLED must match the application environment"
 fi
 if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
   [[ "$NOTIFY_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \
@@ -479,6 +494,7 @@ docker compose --env-file "$ENV_FILE" \
 export VEETBOT_RELEASE_ID="$RELEASE_ID"
 export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
 export AGENT_COCKPIT_BUILDER_IMAGE="$BUILDER_RELEASE_IMAGE"
+export AGENT_CODE_SANDBOX_IMAGE="$CODE_SANDBOX_RELEASE_IMAGE"
 "$STAGE/.venv/bin/alembic" upgrade head
 "$STAGE/.venv/bin/python" scripts/check_production_deployment.py
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
@@ -502,6 +518,19 @@ if [[ "${AGENT_SURFACE_WORKER_ENABLED:-0}" == "1" ]]; then
   ); then
     fail "surface database role does not satisfy its least-privilege allowlist"
   fi
+fi
+
+# The verifier and its interpreter are installed separately by the operator.
+# Never execute privileged Python from the candidate release or pass it paths.
+HANDOFF_ATTEMPT="$STAGE/.venv/recall-handoff-attempt"
+rm -f -- "$HANDOFF_ATTEMPT"
+prepare_handoff() {
+  { cat /proc/sys/kernel/random/uuid && printf '%s\n' "${VEETBOT_DELIVERY_WORKFLOW_ID:-local}"; } >"$HANDOFF_ATTEMPT" &&
+    sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --prepare
+}
+if [[ -x /usr/local/sbin/veetbot-recall-handoff ]] && ! prepare_handoff; then
+  rm -f -- "$HANDOFF_ATTEMPT"
+  printf 'Recall handoff refused for %s; proceeding with sparse fallback.\n' "$RELEASE_ID" >&2
 fi
 
 if [[ -n "$PREVIOUS_RELEASE" ]]; then
@@ -579,6 +608,21 @@ if [[ "${AGENT_CALL_INGRESS_ENABLED:-0}" == "1" ]]; then
     "could not grant veetbot-call-ingress read access to $STAGE"
 fi
 
+commit_handoff() {
+  local status=0
+  sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --commit || status=$?
+  if (( status == 75 )); then
+    # Only an expired preflight is retryable. Keep its receipt and use a fresh nonce.
+    prepare_handoff && sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --commit
+  else
+    return "$status"
+  fi
+}
+if [[ -f "$HANDOFF_ATTEMPT" ]] && ! commit_handoff; then
+  rm -f -- "$HANDOFF_ATTEMPT"
+  printf 'Recall cutover check failed for %s; using sparse retrieval.\n' "$RELEASE_ID" >&2
+fi
+
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"
 rm -f -- "$NEXT_CURRENT"
 ln -s "$STAGE" "$NEXT_CURRENT"
@@ -588,6 +632,7 @@ cp "$COCKPIT_RUNTIME_STAGE/manifest.json" "$COCKPIT_RUNTIME_DIR/.manifest.json.n
 mv -f "$COCKPIT_RUNTIME_DIR/.manifest.json.next" "$COCKPIT_RUNTIME_DIR/manifest.json"
 docker tag "$RELEASE_IMAGE" "$PRODUCTION_IMAGE"
 docker tag "$BUILDER_RELEASE_IMAGE" "$BUILDER_PRODUCTION_IMAGE"
+docker tag "$CODE_SANDBOX_RELEASE_IMAGE" "$CODE_SANDBOX_PRODUCTION_IMAGE"
 sudo systemctl enable --now "${UNITS[@]}"
 sudo systemctl restart "${UNITS[@]}"
 for calling_unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
@@ -671,6 +716,14 @@ for unit in ${CALL_UNITS[@]+"${CALL_UNITS[@]}"}; do
   pid="$(sudo systemctl show --property MainPID --value "$unit")"
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "$unit has no main process"
 done
+
+if [[ -f "$HANDOFF_ATTEMPT" ]] && ! sudo -n /usr/local/sbin/veetbot-recall-handoff "$RELEASE_ID" --verify; then
+  rm -f -- "$HANDOFF_ATTEMPT"
+  printf 'Semantic trial readback failed; retiring attempt %s.\n' "$RELEASE_ID" >&2
+fi
+if [[ -n "$PREVIOUS_RELEASE" ]]; then
+  rm -f -- "$PREVIOUS_RELEASE/.venv/recall-handoff-attempt"
+fi
 
 kept=0
 while IFS= read -r candidate; do

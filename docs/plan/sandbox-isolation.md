@@ -1105,6 +1105,7 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"
 
 
 @dataclass(frozen=True)
@@ -1115,6 +1116,9 @@ class ArtifactRef:
     media_type: str
 ```
 
+The `ArtifactOrigin` sketch names the members. The stored values are lowercase, such as
+`email_attachment`, as `src/agent_core/domain/artifacts.py` defines them.
+
 `ArtifactRef` is what travels: into a tool result, into an event
 payload, into an API response. It carries no filename, no tenant, and
 no path, so a reference that leaks into a context window leaks a
@@ -1122,9 +1126,10 @@ random identifier and three facts about bytes. `ArtifactMetadata` is
 what the store holds and what `GET /v1/artifacts/{id}` reads after
 authorization, which ADR-0028 already specifies.
 
-`origin` exists because the six sources have different review
+`origin` exists because the seven sources have different review
 properties and an operator asking "what did this run produce" wants
-them separated. `TOOL_OUTPUT` is the truncation path
+them separated. `EMAIL_ATTACHMENT` is a file saved from an email (ADR-0296),
+which rides on the run's reply as an export does. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
 `artifact.export` of a workspace path; `MODEL_OUTPUT` is
 `artifact.export` of text the model wrote, produced since ADR-0122, and
@@ -1233,7 +1238,7 @@ and a sweeper deletes expired objects and their metadata rows. ADR-0120
 gives uploads their own two lifetimes: 24 hours while unclaimed, and none
 once a sent message claims one, so an attachment lives as long as its
 conversation and goes with it. ADR-0122 applies the second rule to the
-run's own `SANDBOX_EXPORT` and `MODEL_OUTPUT` artifacts when its final
+run's own `SANDBOX_EXPORT`, `MODEL_OUTPUT` and `EMAIL_ATTACHMENT` artifacts when its final
 reply attaches them; an export from a run that never replies keeps its
 30 days.
 
@@ -1252,6 +1257,26 @@ still deleted on schedule; the reference remains and resolves to a
 `404`, which is honest, and the alternative — reference counting
 across the event log — is a distributed garbage collector nobody
 asked for.
+
+### Owner-requested deletion (ADR-0277)
+
+The owner can ask Chat to delete files it generated, and
+`artifact.delete@1.0.0` does it the same way: it sets `expires_at` to now,
+the read routes answer `404` from that moment, and the sweeper removes the
+bytes and then the row. A final reply never attaches a file that is already
+expired, so a file deleted in the run that made it stays deleted. It takes one to fifty artifact ids. It deletes a file
+only when that file belongs to the caller and the current chat and has origin
+`SANDBOX_EXPORT`, `MODEL_OUTPUT` or `EMAIL_ATTACHMENT`, the origins a reply attaches. Uploads,
+captures, knowledge sources and trajectory exports are never eligible. Each
+id is reported as `deleted`, `already_deleted` or `not_deletable`, and a call
+with nothing deletable fails with `artifact.not_deletable`. The tool is
+classified `NONE` / `MEDIUM` / `IDEMPOTENT`, requires `artifact.write`, runs
+serially, and returns `INTERNAL_TOOL` output. It refuses any turn whose origin
+trust is `EXTERNAL_UNTRUSTED` with `artifact.untrusted_turn`. Like
+`artifact.read_capture`, it is an unindexed deferral: the default agent
+instructions name it, and it takes no deferred-index entry. The session
+transcript omits a reply's file block once its artifact is gone
+([http-api-and-streaming.md](http-api-and-streaming.md#durable-session-transcript)).
 
 ## Nothing outlives its lease
 
@@ -1787,3 +1812,59 @@ builds a canary under runsc.
 
 Tenants still cannot choose an image. The per-tenant question remains open.
 [cockpit.md](cockpit.md) owns the build contract.
+
+## Code check image
+
+[ADR-0281](../adr/0281-veetbot-debugs-and-changes-its-own-code.md) adds a third
+platform-owned image, `execution/code-sandbox.Dockerfile`, for `code.test`. It
+holds the release's tracked source at `/source`, the locked dependencies and
+check tools in a virtual environment, and Node with the Cockpit packages. The
+project is not installed, so a check imports the draft from its workspace.
+
+It runs under the same isolation as the builder: networking off, a read-only
+root, a no-exec `/tmp`, a minimal explicit environment that inherits nothing from
+the application, and no credentials. Each check gets
+a fresh sandbox labelled `purpose=code_check`, held to its own wall-clock deadline
+and released when the check returns.
+
+The entry point, `agent_core/execution/code_checks.py`, runs a closed command per
+kind. A target must be an existing path under `tests/`, `src/`, `cockpit/`,
+`execution/` or `scripts/`, and is never an option. A draft file may only be written below the same
+directories, never through a symbolic link.
+
+A pass here says less than hosted CI. The sandbox has no PostgreSQL, Docker,
+browser engine, `.git` or installed `agent` command, so tests that need one fail
+or skip. `tests/native` and the two Cockpit tests that start a browser
+(`builder`, `realm`) never run.
+All of `tests/unit` does not finish inside the check's deadline, so a check names
+the tests a draft concerns.
+
+## Agent-written jobs MVP (ADR-0268)
+
+The owner authorized implementation on 2026-10-29. A job is a Python module
+exporting `main(inputs, job)`. Inputs are a JSON object. `job.http.request`,
+`job.model.complete`, `job.feed.publish` and `job.log` use the existing
+programmatic bridge transport. Code decides which calls occur; execution does
+not automatically plan or summarize with a model. The returned value is bounded
+JSON and remains untrusted. Standard output from the program is diagnostic text,
+separate from the structured result.
+
+The implementation provides the sandbox-side library and entry point plus an
+execution adapter. The adapter sends source and inputs on stdin to
+`python -m agent_core.execution.job_runner` through `SandboxManager`, with a
+run and lease supplied by its caller. Source is at most 64 KiB, inputs at most
+64 KiB, and the JSON result at most 64 KiB. Execution uses the existing deadline,
+output bounds, bridge call cap and cleanup. It dispatches only the four named
+operations declared by the package. The caller must supply an authorized broker;
+the adapter itself grants no HTTP, model or feed access. No source is executed
+on the worker.
+
+The SDK uses synchronous, sequential broker calls. HTTP returns the broker's
+JSON response envelope, model completion returns text, feed publication returns
+a receipt, and logging sends a bounded line. A refused call raises a useful
+job error. Production broker composition, grants, persistence, tools and
+scheduling are implemented behind the default-off `AGENT_JOBS_ENABLED` flag.
+`bootstrap.py` registers the job authoring, execution and schedule tools when
+the flag is enabled. Local contract checks use known synthetic programs and
+scripted services; production acceptance remains pending. Existing sandbox
+isolation requirements still apply.

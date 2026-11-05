@@ -29,17 +29,6 @@ MAX_CONTENT_BYTES = 1_048_576
 # Text the owner can open anywhere; nothing a viewer would execute (ADR-0122).
 CONTENT_MEDIA_TYPES = frozenset({"text/plain", "text/markdown", "text/csv", "application/json"})
 
-LEGACY_INPUT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
-        "filename": {"type": "string", "minLength": 1, "maxLength": 1024},
-        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
-    },
-    "required": ["path", "filename", "media_type"],
-    "additionalProperties": False,
-}
-
 # `path` defaults to the empty string, exactly as workspace.list_files does, so
 # the shipped `path_inside_workspace` policy condition admits a content-only
 # call without a change to the policy profile. The tool, not the schema,
@@ -222,24 +211,4 @@ def _attached(artifact_id: object, sha256: str, size_bytes: int, media_type: str
         content=[TextPart(text=json.dumps(reported, sort_keys=True, separators=(",", ":")))],
         structured=structured,
         artifacts=[structured],
-    )
-
-
-class LegacyArtifactExportTool(ArtifactExportTool):
-    """Compatibility registration for sessions pinned to the path-only 1.0.0 revision."""
-
-    spec = ToolSpec(
-        name="artifact.export",
-        version="1.0.0",
-        description="Export one file from this run's disposable workspace as a durable artifact.",
-        input_schema=LEGACY_INPUT_SCHEMA,
-        output_schema=OUTPUT_SCHEMA,
-        side_effect=SideEffectClass.WORKSPACE_READ,
-        risk=RiskLevel.LOW,
-        idempotency=IdempotencyClass.IDEMPOTENT,
-        required_scopes={"artifact.write"},
-        timeout_seconds=30,
-        maximum_output_bytes=4096,
-        allow_parallel=False,
-        output_trust=TrustLevel.INTERNAL_TOOL,
     )

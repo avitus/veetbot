@@ -150,6 +150,7 @@ class ToolExecutionContext(BaseModel):
     idempotency_key: str
     deadline_at: datetime        # already min'd with the run deadline
     timeout_seconds: float       # effective, not the declared value
+    monotonic_deadline: float | None  # the event-loop time the pipeline stops the call
     maximum_output_bytes: int
     target: ExecutionTarget
     workspace: WorkspaceHandle | None
@@ -172,7 +173,9 @@ Four fields need their justification.
 `timeout_seconds` is the *effective* timeout, already reduced to fit inside the
 run deadline. A tool never sees `ToolSpec.timeout_seconds` and never computes
 its own budget; the executor does that once, in one place, where it can also
-refuse to start a call that cannot finish.
+refuse to start a call that cannot finish. `monotonic_deadline` is the same limit
+as the instant the pipeline enforces, for a tool that must return before it, since
+`timeout_seconds` was measured before the call's pre-effect work.
 Standing authorization, pre-effect checks, watermark persistence, and execution
 share one absolute deadline. Unavailable standing authority falls back to
 interactive approval; a timeout after a non-idempotent effect watermark is `UNCERTAIN`, returning non-retryable `tool.outcome_unknown` (media retains its charge warning); otherwise it returns `tool.timeout`.
@@ -359,6 +362,8 @@ The first segment is the **domain**, and domains are partitioned:
 | `people` | builtin, People memory | build time, People flag |
 | `records` | builtin, owner records | build time, records flag |
 | `cockpit` | builtin, Cockpit widgets and feeds | build time, Cockpit flag |
+| `run` | builtin, the owner's run evidence | build time |
+| `code` | builtin, the release's source and proposals | build time, code tools flag |
 | `image` `video` | builtin, generated media | build time, TensorScale credential (ADR-0140) |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
@@ -579,7 +584,10 @@ present in the model request that produced this call.** It is not a property of
 the arguments at all; it answers "was untrusted content in the room". It is
 cheap, it is deterministic, it requires no matching, and it is exactly the
 signal a rule like *require approval for external writes when the turn saw
-untrusted content* needs.
+untrusted content* needs. In a serial batch, the results of the calls before
+this one count as present, although the conversation receives them only when
+the batch ends, and so do a sandbox script's earlier bridge results for each
+later bridge call (ADR-0277).
 
 **`argument_trust` defaults to `EXTERNAL_UNTRUSTED` for every argument**,
 because the model produced them and ADR-0002 labels model output
@@ -2365,7 +2373,8 @@ Nothing in the adapter, the runtime or the policy profile changes.
 whose command is `python -m svp_mcp --mode read`, classified `NETWORK_READ`,
 `LOW`, `READ_ONLY`, requiring `mcp.svp_read.use`, which composition adds to
 the owner's principal. A supplied row with that id is refused. The schedule
-role composes no such scope, so a scheduled run is not offered the tools.
+role vouches for that scope only (ADR-0291), and a scheduled run is offered the
+tools only when its schedule names `svp_read`.
 
 **The credential is a path.** The row uses the `env` scheme with `auth_name`
 `SVP_MCP_CREDENTIAL_FILE`, and the credential resolver maps `svp_read` to the
@@ -2502,7 +2511,7 @@ row carries that mark, its tenant, principal and session are the run's, its
 `expires_at` has not passed, its `trust` is `EXTERNAL_UNTRUSTED`, and the run's
 principal holds every recorded scope. Any other case returns
 `tool.capture.not_found`. That covers another session's capture, a
-`SANDBOX_EXPORT`, `MODEL_OUTPUT`, `UPLOAD` or `KNOWLEDGE_SOURCE` artifact, a
+`SANDBOX_EXPORT`, `MODEL_OUTPUT`, `UPLOAD`, `KNOWLEDGE_SOURCE` or `EMAIL_ATTACHMENT` artifact, a
 tool's own `TOOL_OUTPUT` file such as a chart, a capture of a tool whose
 output is trusted, a capture written before the mark existed, and a capture
 whose producing tool's scope has been revoked. A single code means the reader
@@ -2513,7 +2522,8 @@ its own here.
 
 **Text and sections.** A capture's text is the `text` of its text parts in
 order, joined by a blank line. A partial capture is not valid JSON, so it is
-read as UTF-8, with invalid sequences replaced. Sections are a pure function
+read as UTF-8, with invalid sequences replaced. A capture marked `literal` holds
+a file saved by a browser click, and is read whole as UTF-8 (ADR-0294). Sections are a pure function
 of that text. Section 1 starts at offset zero. Each section is the longest run
 of whole lines from its start whose rendered result, header included, fits
 16,384 bytes, measured as `content_bytes` measures admission. The header is
@@ -2600,7 +2610,8 @@ checked-in table:
 
 Schema failures return the ordinary `tool.arguments_invalid`.
 
-**Roster.** The tool is the one *unindexed deferral*. The default agent
+**Roster.** The tool is an *unindexed deferral*, the first of two;
+`artifact.delete` (ADR-0277) is the other. The default agent
 enables and defers it. The planner pins it with the deferred tools, and
 `tool.call` resolves it like any of them, but the index renders no entry for
 it, and it counts against neither index cap

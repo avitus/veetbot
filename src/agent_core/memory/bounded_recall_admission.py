@@ -31,6 +31,12 @@ from agent_core.memory.production_recall_restart import (
     validate_restart_window,
 )
 from agent_core.memory.production_recall_trial import ProductionRecallTrial, validate_trial_window
+from agent_core.memory.recall_handoff import (
+    attempt_sha256,
+    read_receipt,
+    retired_origin,
+    target_receipt,
+)
 from agent_core.memory.recall_release_binding import (
     InputFile,
     RecallInputManifest,
@@ -152,6 +158,7 @@ class BoundedAdmission:
     """Marker used by composition to require local, interactive owner queries."""
 
     check: Callable[[], bool]
+    receipt_sha256: str | None = None
 
     def __call__(self) -> bool:
         return self.check()
@@ -375,9 +382,24 @@ def bind_bounded_recall(
         "reader_configuration_sha256",
     }
     revision = release_id.rsplit("-", 1)[-1]
+    handoff = None
+    if facts.production_trial and binding.deployment_build_ref.startswith(revision):
+        _require(
+            not retired_origin(manifest, raw_manifest), "release handoff retired original build"
+        )
+    if facts.production_trial is not None and not binding.deployment_build_ref.startswith(revision):
+        handoff = target_receipt(
+            root,
+            manifest,
+            raw_manifest,
+            release_id,
+            binding.evidence_sha256,
+            binding.target_inputs.digest,
+            binding.rollback_build_ref,
+        )
     _require(
         re.fullmatch(r"[a-f0-9]{7,40}", revision) is not None
-        and binding.deployment_build_ref.startswith(revision)
+        and (binding.deployment_build_ref.startswith(revision) or handoff is not None)
         and binding.rollback_build_ref != binding.deployment_build_ref
         and (binding.tenant_id, binding.principal_id)
         == (principal.tenant_id, principal.principal_id)
@@ -417,6 +439,7 @@ def bind_bounded_recall(
         _require(
             facts.human_review.reviewed_at <= binding.activated_at, "activation predates review"
         )
+    attempt = attempt_sha256(root) if handoff is not None else None
     revoked = False
 
     def admitted() -> bool:
@@ -425,6 +448,13 @@ def bind_bounded_recall(
             try:
                 revoked = (
                     not active_since <= clock.now() < binding.expires_at
+                    or (
+                        handoff is not None
+                        and (
+                            read_receipt(manifest, attempt_sha256(root)) != handoff
+                            or attempt_sha256(root) != attempt
+                        )
+                    )
                     or _read_bounded(manifest) != raw_manifest
                     or _read_bounded(evidence) != raw_evidence
                     or input_stamps(root) != stamps
@@ -434,4 +464,6 @@ def bind_bounded_recall(
         return not revoked
 
     _require(admitted(), "bounded evidence changed while binding")
-    return BoundedAdmission(admitted)
+    return BoundedAdmission(
+        admitted, _digest(handoff or raw_manifest) if facts.production_trial else None
+    )

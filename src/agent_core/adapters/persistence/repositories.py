@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, text, update
+from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, text, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +88,8 @@ from agent_core.domain.approvals import (
     approval_status_for,
 )
 from agent_core.domain.artifacts import (
+    AUTO_INGEST_NOT_BEFORE_KEY,
+    AUTO_INGEST_ORIGINS,
     REPLY_ATTACHMENT_ORIGINS,
     auto_ingest_metadata,
     claimed_upload,
@@ -96,6 +98,7 @@ from agent_core.domain.browser import (
     ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS,
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationRecord,
     BrowserAuthenticationStatus,
     BrowserGrant,
@@ -155,6 +158,7 @@ from agent_core.domain.runs import (
 from agent_core.domain.sessions import (
     PEOPLE_OPERATIONAL_SESSION_PURPOSES,
     REGENERABLE_TITLE_SOURCES,
+    SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
@@ -518,11 +522,15 @@ class PostgresSessionRepository:
         cursor: SessionCursor | None = None,
         exclude_operational: bool = False,
     ) -> list[Session]:
+        """List owned sessions with operational filters applied before the page limit."""
         predicates: list[Any] = [
             SessionRow.tenant_id == principal.tenant_id,
             SessionRow.principal_id == principal.principal_id,
         ]
         if exclude_operational:
+            predicates.append(
+                ~SessionRow.metadata_json.contains({SESSION_COCKPIT_REFRESH_METADATA_KEY: True})
+            )
             predicates.append(
                 SessionRow.metadata_json[SESSION_EMAIL_OPERATIONAL_METADATA_KEY]
                 .as_boolean()
@@ -1876,6 +1884,11 @@ def _browser_profile_to_domain(row: BrowserProfileRow) -> BrowserProfile:
         created_at=row.created_at,
         updated_at=row.updated_at,
         last_used_at=row.last_used_at,
+        last_sign_in_mode=(
+            None
+            if row.last_sign_in_mode is None
+            else BrowserAuthenticationMode(row.last_sign_in_mode)
+        ),
     )
 
 
@@ -1898,6 +1911,9 @@ class PostgresBrowserProfileRepository:
             "created_at": profile.created_at,
             "updated_at": profile.updated_at,
             "last_used_at": profile.last_used_at,
+            "last_sign_in_mode": (
+                None if profile.last_sign_in_mode is None else profile.last_sign_in_mode.value
+            ),
         }
 
     async def create(self, profile: BrowserProfile) -> BrowserProfile:
@@ -2077,6 +2093,25 @@ class PostgresBrowserProfileRepository:
         ).one_or_none()
         if row is None:
             raise ConcurrencyConflict("browser profile generation changed")
+        return _browser_profile_to_domain(row)
+
+    async def record_sign_in_mode(
+        self, profile_id: UUID, principal: Principal, mode: BrowserAuthenticationMode
+    ) -> BrowserProfile:
+        row = (
+            await self._session.scalars(
+                update(BrowserProfileRow)
+                .where(
+                    BrowserProfileRow.id == profile_id,
+                    BrowserProfileRow.tenant_id == principal.tenant_id,
+                    BrowserProfileRow.principal_id == principal.principal_id,
+                )
+                .values(last_sign_in_mode=mode.value)
+                .returning(BrowserProfileRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("browser profile not found")
         return _browser_profile_to_domain(row)
 
     async def advance_generation(
@@ -3163,7 +3198,14 @@ class PostgresArtifactRepository:
             raise NotFoundError("artifact not found")
         return artifact_to_domain(row)
 
-    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+    async def retain_for_knowledge(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
+    ) -> ArtifactRef:
         artifact = await self.get(artifact_id, principal)
         if (
             artifact.run_id is not None
@@ -3178,6 +3220,13 @@ class PostgresArtifactRepository:
                     ArtifactRow.id == artifact_id,
                     ArtifactRow.tenant_id == principal.tenant_id,
                     ArtifactRow.principal_id == principal.principal_id,
+                    true()
+                    if now is None
+                    else or_(ArtifactRow.expires_at.is_(None), ArtifactRow.expires_at > now),
+                    # The row lock taken here holds any erasure until this document commits.
+                    true()
+                    if unchanged_from is None
+                    else ArtifactRow.expires_at.is_not_distinct_from(unchanged_from.expires_at),
                 )
                 .values(origin="knowledge_source", expires_at=None)
                 .returning(ArtifactRow)
@@ -3307,14 +3356,22 @@ class PostgresArtifactRepository:
         await self._session.flush()
         return claimed
 
-    async def pending_auto_ingest(self, principal: Principal, *, limit: int) -> list[ArtifactRef]:
+    async def pending_auto_ingest(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[ArtifactRef]:
+        not_before = ArtifactRow.metadata_json[AUTO_INGEST_NOT_BEFORE_KEY].astext
         rows = (
             await self._session.scalars(
                 select(ArtifactRow)
                 .where(
                     ArtifactRow.metadata_json["auto_ingest"].astext == "pending",
+                    ArtifactRow.origin.in_(sorted(AUTO_INGEST_ORIGINS)),
+                    # A file deleted or erased while pending never reaches knowledge (ADR-0296).
+                    or_(ArtifactRow.expires_at.is_(None), ArtifactRow.expires_at > now),
                     ArtifactRow.tenant_id == principal.tenant_id,
                     ArtifactRow.principal_id == principal.principal_id,
+                    # A deferred upload leaves the batch, so it never blocks a due one.
+                    or_(not_before.is_(None), sql_cast(not_before, DateTime(timezone=True)) <= now),
                 )
                 .order_by(ArtifactRow.created_at, ArtifactRow.id)
                 .limit(limit)
@@ -3330,10 +3387,15 @@ class PostgresArtifactRepository:
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef:
         row = await self._owned_for_update(artifact_id, principal)
         row.metadata_json = auto_ingest_metadata(
-            dict(row.metadata_json), state=state, reason=reason, attempts=attempts
+            dict(row.metadata_json),
+            state=state,
+            reason=reason,
+            attempts=attempts,
+            not_before=not_before,
         )
         await self._session.flush()
         return artifact_to_domain(row)

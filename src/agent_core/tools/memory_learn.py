@@ -56,9 +56,3 @@ class MemoryLearnTool:
                 TextPart(text=json.dumps({"results": results})),
             ],
         )
-
-
-class LegacyMemoryLearnTool(MemoryLearnTool):
-    """Keep the compatible handler available to sessions pinned before version 1.1."""
-
-    spec = MemoryLearnTool.spec.model_copy(update={"version": "1.0.0"}, deep=True)

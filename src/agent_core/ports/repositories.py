@@ -384,8 +384,19 @@ class ArtifactRepository(Protocol):
     async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ArtifactRef]: ...
 
     async def retain_for_knowledge(
-        self, artifact_id: UUID, principal: Principal
-    ) -> ArtifactRef: ...
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
+    ) -> ArtifactRef:
+        """Keep a source for its document; with `now`, an expired one is not found.
+
+        With `unchanged_from`, one whose expiry has changed since that read is not
+        found either, so an erasure during an intake cannot be undone (ADR-0296).
+        """
+        ...
 
     async def retain_for_reply(
         self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID
@@ -422,8 +433,15 @@ class ArtifactRepository(Protocol):
         ...
 
     async def pending_auto_ingest(
-        self, principal: Principal, *, limit: int
-    ) -> list[ArtifactRef]: ...
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[ArtifactRef]:
+        """The owner's chat uploads awaiting ingestion whose backoff has elapsed.
+
+        Oldest first, at most `limit`; an upload still in backoff is neither
+        listed nor counted against the limit, and an artifact of any other
+        origin is never listed (ADR-0284).
+        """
+        ...
 
     async def record_auto_ingest(
         self,
@@ -433,6 +451,7 @@ class ArtifactRepository(Protocol):
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef: ...
 
 

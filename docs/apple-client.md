@@ -274,7 +274,9 @@ the window is a resizable sheet that opens at 1000 by 760 points and shrinks
 no smaller than 820 by 680. The app opens
 a `WKWebView` with a non-persistent data store, the platform's own user agent,
 no injected script or message handler, and top-level navigation confined to
-the profile's origins. The user types usernames, passwords, and one-time codes
+the profile's origins. For a new website, a move to another address of the same
+website is held back and named, and Allow adds that exact address to the new
+login and continues there (ADR-0287). The user types usernames, passwords, and one-time codes
 into the website itself, and the app reads none of them. When the user taps
 I'm signed in, the app creates the profile if it is new, begins a device
 ceremony, and sends that website's cookies and `localStorage` once, directly
@@ -285,9 +287,11 @@ page address is persisted, logged, or kept in view state. The service filters
 and verifies the session and decides the outcome. Passkeys and identity
 providers on other origins do not work in that window. Every profile row that
 is not revoked has Sign in again, which opens the same window for that
-profile. For a new website, Use Veetbot's remote browser is also available
-before a sign-in attempt and after a supported failure: it clears the window's
-data and continues with the remote ceremony below. While any task permission
+profile. Use Veetbot's remote browser is also available there, before a sign-in
+attempt and after a supported failure: it clears the window's data and continues
+with the remote ceremony below. For a saved login, backing out of that ceremony
+keeps the login, and a sign-in started from a chat opens Website Access for its
+link (ADR-0288). While any task permission
 is active (ADR-0129), a compact Task
 permissions row at the end of Website Access shows how many, and its menu
 stops any one of them at once.
@@ -487,6 +491,21 @@ activity order. A lone scheduled session stays in the history. Groups start
 collapsed; the owner's toggles are remembered on the device. Scheduled rows
 carry no move menu, and the groups render whether or not the server offers
 folders.
+
+The mode switch reads **Cockpit, Chat, Email** in that order. Each regular-width
+left pane leads with it, above search or accounts. Sidebars start at 320 points
+with a 300-point minimum and a 420-point maximum. The labels remain on one line
+at standard text sizes; accessibility text sizes may wrap without clipping.
+On iPad, a touch or pointer drag of the sidebar divider changes a shared,
+device-local width; VoiceOver can adjust it and a double tap resets it.
+A narrower window constrains the displayed width without replacing that choice;
+below 672 points the iPad uses compact navigation. The Mac window minimum is
+812 points to fit its sidebar, inbox and reader floors.
+The top-right More menu exposes Memory, People, Schedules, Persona and Settings
+in all three iPad modes; Email has no second utility menu at the bottom.
+When Email has less than 660 points beside the sidebar, the selected thread
+replaces the list in that area, with an Inbox back button. Wider windows show
+both list and reader. Compact navigation and in-progress drafts are preserved.
 
 In compact iPhone and iPad layouts, sidebar rows push an activating chat
 destination before selecting a historical session or resetting to a new
@@ -897,7 +916,7 @@ date, and one line per message counts its attachments and opens their list.
 Context leads with any spam flag, then Veetbot's summary (a thread not yet
 assessed says "Assessment pending" once), why the thread is in the priority
 list (its level and reason), the sender, Teach Veetbot, the attachments
-(listed, never opened), the draft's state with a way to ask for one, and a
+(listed, each with Save), the draft's state with a way to ask for one, and a
 Thread card with the account, the Gmail state and one Show original switch
 for the whole thread; its
 **Activity** tab replays the draft run's events and shows the calls that made
@@ -914,11 +933,13 @@ the draft waits on (new mail in the thread, an unknown send status, a pending
 approval, an edit from another device) is one amber-ruled card that names the
 decision with its action beside it; a save refused because another device
 edited the draft shows only that card, never the refusal as a second error.
-Review & Send is the filled capsule; Draft
+Send is the filled capsule (⌘↩): one press consents to the exact reply and
+parks it for the undo window, during which the notice reads "Sending" with
+Undo beside it, then Sent (ADR-0279). Draft
 options is a quiet icon menu at the trailing edge, and Refine with Veetbot
 folds its field and button into one row.
 The bottom bar keeps Discuss in Chat and the reply shortcut on the material
-edge. The Email learning, Draft history, Review & Send and unsubscribe sheets
+edge. The Email learning, Draft history, pending-approval review and unsubscribe sheets
 share `EmailSheetHeader` (a display-face title and a quiet way out); the
 Subscriptions census takes the same row and capsule styles.
 A compact mailbox-status disclosure retains
@@ -950,8 +971,9 @@ reply composer. Why this matters and Improve priorities expand on demand, while
 the persistent Your reply action reaches the editor without scrolling through
 the conversation. From and To stay visible; Cc, Bcc and subject expand together
 and initially open when copy recipients are present. Draft options collect save,
-history, writing-example endorsement and discard. Review & Send remains the
-primary composer action and opens a separate, scrollable exact-message review.
+history, writing-example endorsement and discard. Send is the primary composer
+action; the exact-message review sheet remains only for a draft already
+awaiting approval through the older proposal path.
 Native interaction coverage checks the five-row inbox, divider dragging and
 width preservation across mode changes and relaunch, the reply shortcut,
 optional feedback, recipient-field discovery and separation of Chat and Email
@@ -960,6 +982,9 @@ list and the reading column, teal for the gist rule and draft states, amber
 for attention, and filled capsules that keep contrasting text.
 
 Thread detail renders text and attachment metadata without remote content.
+Save on an attachment keeps a copy in the email's chat (ADR-0296), where it arrives on
+a reply and appears in Artifacts. The control then reads "Saved to chat" until the
+connection resets; a file over 32 MB says so instead, and a failure offers Retry.
 Feedback distinguishes people, topics, thread importance and reply need, reports
 the applied scope and judgment, and supports Undo. Changing the target clears
 the previous person or topic value; person feedback requires an explicit choice.
@@ -967,9 +992,11 @@ Learning controls expose pause/resume, scoped resets and explicit source
 exclusion. Draft edits autosave
 with optimistic revisions; conflicts preserve local and server versions, and
 draft history can restore earlier text into the editor. Typing continues while a
-save is in flight, so Review & Send settles the newest revision through bounded
+save is in flight, so Send settles the newest revision through bounded
 save attempts before freezing one, and reports a save that will not settle rather
-than freezing text the owner cannot see. A failed owner action is reported beside
+than freezing text the owner cannot see. A press the server refuses because mail
+arrived shows that mail in the stale notice, and Undo within the window returns
+the editor with the text intact. A failed owner action is reported beside
 the control that caused it, and a failed mail read with the conversation it could
 not refresh; an action refused far from its button reads as no action at all. The Writing style menu
 can explicitly endorse the displayed wording as an example after saving any

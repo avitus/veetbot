@@ -245,7 +245,13 @@ class DurableWorker:
                 await asyncio.gather(upkeep, return_exceptions=True)
 
 
+# The knowledge vector backfill's deadline per maintenance round (ADR-0290).
+KNOWLEDGE_VECTOR_SWEEP_SECONDS = 60.0
+
+
 class MaintenanceWorker:
+    """Run the periodic sweeps that keep durable state bounded and queues moving."""
+
     def __init__(
         self,
         *,
@@ -257,6 +263,7 @@ class MaintenanceWorker:
         sweep_exports: Callable[[], Awaitable[int]] | None = None,
         sweep_artifacts: Callable[[], Awaitable[int]] | None = None,
         sweep_email_cache: Callable[[], Awaitable[int]] | None = None,
+        sweep_email_check: Callable[[], Awaitable[int]] | None = None,
         sweep_sandboxes: SandboxSweep | None = None,
         sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
         sweep_memory: Callable[[], Awaitable[int]] | None = None,
@@ -271,6 +278,7 @@ class MaintenanceWorker:
         sweep_terminal_schedules: Callable[[], Awaitable[int]] | None = None,
         sweep_folder_proposals: Callable[[], Awaitable[int]] | None = None,
         sweep_upload_ingests: Callable[[], Awaitable[int]] | None = None,
+        sweep_knowledge_vectors: Callable[[], Awaitable[int]] | None = None,
         sweep_people_duplicates: Callable[[], Awaitable[int]] | None = None,
         sweep_browser_task_grants: Callable[[], Awaitable[int]] | None = None,
         sweep_conversation_titles: Callable[[], Awaitable[int]] | None = None,
@@ -283,6 +291,7 @@ class MaintenanceWorker:
         sweep_cockpit_feed_history: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
         email_cache_sweep_interval_seconds: float = 3600,
+        email_check_sweep_interval_seconds: float = 60,
         memory_decay_interval_seconds: float = 86_400,
         terminal_schedule_sweep_interval_seconds: float = 3600,
         folder_proposal_interval_seconds: float = 900,
@@ -298,6 +307,7 @@ class MaintenanceWorker:
         self._sweep_exports = sweep_exports
         self._sweep_artifacts = sweep_artifacts
         self._sweep_email_cache = sweep_email_cache
+        self._sweep_email_check = sweep_email_check
         self._sweep_sandboxes = sweep_sandboxes
         self._sweep_artifact_orphans = sweep_artifact_orphans
         self._sweep_memory = sweep_memory
@@ -310,6 +320,7 @@ class MaintenanceWorker:
         self._sweep_terminal_schedules = sweep_terminal_schedules
         self._sweep_folder_proposals = sweep_folder_proposals
         self._sweep_upload_ingests = sweep_upload_ingests
+        self._sweep_knowledge_vectors = sweep_knowledge_vectors
         self._sweep_people_duplicates = sweep_people_duplicates
         self._sweep_browser_task_grants = sweep_browser_task_grants
         self._sweep_conversation_titles = sweep_conversation_titles
@@ -325,6 +336,8 @@ class MaintenanceWorker:
             raise ValueError("artifact orphan interval must be positive")
         if email_cache_sweep_interval_seconds <= 0:
             raise ValueError("email cache sweep interval must be positive")
+        if email_check_sweep_interval_seconds <= 0:
+            raise ValueError("email check sweep interval must be positive")
         if memory_decay_interval_seconds <= 0:
             raise ValueError("memory decay interval must be positive")
         if terminal_schedule_sweep_interval_seconds <= 0:
@@ -349,6 +362,8 @@ class MaintenanceWorker:
         # only reclaims storage and need not rescan every few seconds.
         self._email_cache_sweep_interval = timedelta(seconds=email_cache_sweep_interval_seconds)
         self._last_email_cache_sweep_at: datetime | None = None
+        self._email_check_sweep_interval = timedelta(seconds=email_check_sweep_interval_seconds)
+        self._last_email_check_sweep_at: datetime | None = None
         # Decay is a slow sweep on its own timer: the maintenance pass runs
         # every few seconds, and a belief may lose one step per interval.
         self._memory_decay_interval = timedelta(seconds=memory_decay_interval_seconds)
@@ -394,6 +409,7 @@ class MaintenanceWorker:
             logger.warning("Semantic index slice ended (%s)", type(exc).__name__)
 
     async def run_once(self) -> int:
+        """Run one maintenance pass over every sweep; returns how many queue items it reclaimed."""
         async with self._uow_factory() as uow:
             reclaimed = (
                 0 if uow.queue is None else await uow.queue.reclaim_expired(self._reclaim_limit)
@@ -514,6 +530,15 @@ class MaintenanceWorker:
                 await self._sweep_upload_ingests()
             except Exception:
                 logger.exception("owner upload knowledge ingestion sweep failed")
+        # Documents the semantic arm never saw gain vectors a batch a round.
+        if self._sweep_knowledge_vectors is not None:
+            try:
+                # One round is at most 64 chunks in provider batches of 32; a
+                # slow provider must not hold the sweeps that follow (ADR-0290).
+                async with asyncio.timeout(KNOWLEDGE_VECTOR_SWEEP_SECONDS):
+                    await self._sweep_knowledge_vectors()
+            except Exception as exc:
+                logger.warning("knowledge vector backfill sweep ended (%s)", type(exc).__name__)
         # Titles follow a reply within seconds, so this pass runs every round (ADR-0155).
         if self._sweep_conversation_titles is not None:
             try:
@@ -531,6 +556,17 @@ class MaintenanceWorker:
                 await self._sweep_email_cache()
             except Exception:
                 logger.exception("email cache expiry sweep failed")
+        # The service decides whether a check is due; this only bounds how often it asks.
+        if self._sweep_email_check is not None and (
+            self._last_email_check_sweep_at is None
+            or self._clock.now() - self._last_email_check_sweep_at
+            >= self._email_check_sweep_interval
+        ):
+            self._last_email_check_sweep_at = self._clock.now()
+            try:
+                await self._sweep_email_check()
+            except Exception:
+                logger.exception("email arrival check failed")
         if self._sweep_memory is not None:
             try:
                 await self._sweep_memory()

@@ -4042,7 +4042,7 @@ run history remain outside this read-only extension.
 The owner approved the complete client modes and email proposal and explicitly
 requested a new milestone on 2026-09-11 (ADR-0092). Milestone 26 is an independent
 parallel workstream and does not move the verified gate ceiling. The canonical
-[email-experience.md](email-experience.md) defines its thirty-two blocking gates,
+[email-experience.md](email-experience.md) defines its thirty-three blocking gates,
 exact approved quality thresholds, source lifecycle and implementation contracts.
 
 Implement:
@@ -4084,7 +4084,7 @@ Implement:
 
 Acceptance criteria:
 
-- Every one of the thirty-two declared gates passes with real implementation
+- Every one of the thirty-three declared gates passes with real implementation
   checks; no pending or private quality requirement is counted as complete.
 - All functional and approved quality requirements in the detailed design pass,
   including frozen chronological importance holdouts, personalized style/reply
@@ -4096,7 +4096,7 @@ Acceptance criteria:
 - Existing milestones and security requirements are preserved. Completing this
   parallel workstream does not advance the sequential verified ceiling.
 
-Excluded: background monitoring, Gmail push/digests, automatic Gmail writes,
+Excluded: background monitoring beyond ADR-0286's arrival checks, Gmail push/digests, automatic Gmail writes,
 Gmail draft synchronization, standing send grants, another provider, public OAuth,
 attachments, calendar, permanent mailbox deletion, terminal UI work, autonomous
 sending, offline-authoritative edits, model routing and a general learned memory
@@ -4425,11 +4425,33 @@ Acceptance requires:
 The verified sequential ceiling does not move. These remain outside this
 milestone:
 
-- deterministic collectors that fetch outside data with no model run;
+- deterministic collectors were outside the original M35 scope; ADR-0268 now
+  admits agent-written jobs as an independent MVP extension;
 - a browser or television rendering;
 - WidgetKit, Lock Screen and Live Activities;
 - the assistant using MagicPath at runtime;
 - webhook-driven import.
+
+### Agent-written jobs MVP (ADR-0268)
+
+On 2026-10-29 the owner authorized [ADR-0268](../adr/0268-agent-written-jobs.md):
+saved Python programs written by the Veetbot agent, executed once or by the
+existing scheduler. A job may combine brokered HTTP, computation, explicit
+model calls and feed publication. Code-only work makes no model call; work
+requiring judgment can call the model gateway from code. The first deliveries
+are a code-only GitHub PR collector and a mixed code/model workflow.
+
+Reuse existing sandbox, approval, budget, scheduling and publication mechanisms.
+The MVP includes approved live trials and useful repair feedback. Widget renderer
+changes and broader hardening are not prerequisites. This admits only job-specific
+approved access, not general standing approval grants under roadmap B8. The
+verified milestone ceiling and existing gate requirements remain unchanged.
+
+On 2026-10-30 the owner amended widget creation under ADR-0270: prepare and
+test the complete widget and optional collector privately, then ask once with a
+summary covering publication, exact private access and the refresh schedule.
+Reads, offline trials and trials under existing approved access do not require
+per-step approvals; new access and publication wait for the final approval.
 
 ### Roadmap beyond Milestone 15
 

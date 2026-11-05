@@ -88,6 +88,8 @@ class HandoffScenario:
     signed_out_blocks_seconds: float = 0
     with_observation: BrowserObservation | None = None
     without_observation: BrowserObservation | None = None
+    # What the signed-in page shows by its second look, if not what its load saw.
+    with_session_later: BrowserPageEvidence | None = None
 
 
 @dataclass
@@ -102,10 +104,17 @@ class FakeSessionRuntime:
     observe_started: asyncio.Event | None = None
     observe_release: asyncio.Event | None = None
     navigate_error: Exception | None = None
+    # The page loaded, but reading it for an agent failed.
+    read_error: Exception | None = None
+    observe_error: Exception | None = None
     # Device-handoff verification: what each load shows, keyed by whether the
     # runtime started with a session, and the failures a scenario injects.
     scenario: HandoffScenario | None = None
     evidence_urls: list[str] = field(default_factory=list)
+    challenge_deadlines: list[float | None] = field(default_factory=list)
+    later_looks: list[str] = field(default_factory=list)
+    later_look_requests: list[tuple[float, float]] = field(default_factory=list)
+    status_delay_seconds: float = 0.0
     # Successive answers to authentication_status, then ``authentication``.
     authentication_samples: list[BrowserAuthenticationStatus] = field(default_factory=list)
     status_checks: int = 0
@@ -144,9 +153,24 @@ class FakeSessionRuntime:
         """Simulate the browser navigation result needed by this failure-path regression."""
         if self.navigate_error is not None:
             raise self.navigate_error
+        if self.read_error is not None:
+            raise self.read_error
         return BrowserObservation(url=url, revision="revision-1", text="safe observation")
 
+    async def open_for_sign_in(self, url: str) -> None:
+        del url
+        if self.navigate_error is not None:
+            raise self.navigate_error
+
+    async def page_url(self) -> str:
+        return (await self._current_page()).url
+
     async def observe(self) -> BrowserObservation:
+        if self.observe_error is not None:
+            raise self.observe_error
+        return await self._current_page()
+
+    async def _current_page(self) -> BrowserObservation:
         if self.observe_started is not None:
             self.observe_started.set()
         if self.observe_release is not None:
@@ -193,8 +217,10 @@ class FakeSessionRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         self.evidence_urls.append(url)
+        self.challenge_deadlines.append(challenge_deadline)
         scenario = self.scenario or HandoffScenario()
         if scenario.gate is not None:
             scenario.started.set()
@@ -215,6 +241,20 @@ class FakeSessionRuntime:
         assert isinstance(outcome, BrowserPageEvidence)
         return outcome
 
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        self.later_looks.append(url)
+        self.later_look_requests.append((observed_seconds, deadline))
+        if self.scenario is not None and self.scenario.with_session_later is not None:
+            return self.scenario.with_session_later
+        return BrowserPageEvidence(
+            on_allowed_origin=True,
+            path=urlsplit(url).path or "/",
+            challenge_visible=False,
+            observed_seconds=observed_seconds,
+        )
+
     async def storage_state(self) -> bytes:
         if self.scenario is not None and self.scenario.storage_error is not None:
             raise self.scenario.storage_error
@@ -222,6 +262,7 @@ class FakeSessionRuntime:
 
     async def authentication_status(self) -> BrowserAuthenticationStatus:
         self.status_checks += 1
+        await asyncio.sleep(self.status_delay_seconds)
         if self.authentication_samples:
             return self.authentication_samples.pop(0)
         return self.authentication
@@ -627,6 +668,23 @@ async def assert_authentication_ceremony_is_direct_single_use_and_runtime_decide
         assert runtimes[0].closed is True
 
 
+async def test_a_sign_in_finishes_on_a_page_too_busy_for_an_agent_to_read(
+    tmp_path: Path,
+) -> None:
+    """Finishing only needs where the owner landed, not a reading of the page."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    runtimes[0].authentication = BrowserAuthenticationStatus.READY
+    runtimes[0].observe_error = BrowserProviderError("tool.browser.page_changed", retryable=False)
+
+    result = await sessions.refresh_authentication(ceremony.id, principal())
+
+    assert result.status is BrowserAuthenticationStatus.READY
+
+
 @pytest.mark.parametrize(
     "runtime_status",
     [
@@ -810,6 +868,46 @@ async def test_authentication_launch_navigation_failure_is_stable_and_discards_r
     assert retried.launch_url is not None
     assert len(runtimes) == 2
     assert runtimes[1].closed is False
+
+
+async def test_a_sign_in_page_that_cannot_be_read_still_opens_for_the_owner(
+    tmp_path: Path,
+) -> None:
+    """Production, 2026-11-02: Chase's page kept moving, and reading it ended the sign-in."""
+
+    lifecycle, _unused, runtimes, _times = services(tmp_path)
+    await provision(lifecycle)
+    keyring = StaticProfileKeyring(
+        {"key-v1": hashlib.sha256(b"synthetic-session-key").digest()},
+        current_version="key-v1",
+    )
+
+    def moving_page(tenant_id: str) -> FakeSessionRuntime:
+        del tenant_id
+        runtime = FakeSessionRuntime(
+            read_error=BrowserProviderError("tool.browser.page_changed", retryable=False)
+        )
+        runtimes.append(runtime)
+        return runtime
+
+    sessions = HostedProfileSessionService(
+        FilesystemEncryptedProfileStore(tmp_path / "profiles", keyring),
+        runtime_factory=moving_page,
+        now=lambda: NOW,
+        process_secret=b"synthetic-process-secret-with-32-bytes",
+        ceremony_base_url="https://browser-login.example.test",
+    )
+
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+
+    assert ceremony.launch_url is not None
+    assert ceremony.status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    assert runtimes[-1].closed is False
 
 
 # --- ADR-0128: device sign-in handoff --------------------------------------
@@ -1203,6 +1301,163 @@ async def test_a_session_the_site_does_not_confirm_is_cancelled_and_never_sealed
     assert writes == []
     assert await sealed_material(sessions) == before
     assert len(runtimes) == 2 and all(runtime.closed for runtime in runtimes)
+
+
+async def test_only_the_signed_out_control_waits_for_a_sign_in_form(tmp_path: Path) -> None:
+    """A slow form must not read as "same without a session", and a signed-in page never waits."""
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=HandoffScenario())
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    signed_in, signed_out = runtimes
+    assert signed_in.challenge_deadlines == [None]
+    deadline = signed_out.challenge_deadlines[0]
+    assert deadline is not None
+    assert 0 < deadline - asyncio.get_running_loop().time() <= 30.0 - 5.0
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=True, path="/learn", challenge_visible=True),
+            id="draws-a-form",
+        ),
+        pytest.param(
+            BrowserPageEvidence(on_allowed_origin=True, path="/log-in", challenge_visible=False),
+            id="moves-away",
+        ),
+    ],
+)
+async def test_what_both_copies_do_late_is_never_proof_of_a_session(
+    tmp_path: Path, later: BrowserPageEvidence
+) -> None:
+    """The control's wait must not make two identical signed-out pages look different."""
+    scenario = HandoffScenario(with_session_later=later)
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    before = await sealed_material(sessions)
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(DeviceSessionRejected) as rejected:
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert rejected.value.code == "session_signed_out"
+    assert writes == []
+    assert await sealed_material(sessions) == before
+    assert len(runtimes[0].later_looks) == 1
+
+
+async def test_a_remote_check_looks_again_at_the_signed_in_copy_before_saving(
+    tmp_path: Path,
+) -> None:
+    scenario = HandoffScenario(
+        with_session_later=BrowserPageEvidence(
+            on_allowed_origin=True, path="/account", challenge_visible=True
+        )
+    )
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/account"
+    )
+
+    result = await sessions.refresh_authentication(ceremony.id, principal())
+
+    assert result.status is not BrowserAuthenticationStatus.READY
+    assert [runtime.later_looks for runtime in runtimes if runtime.later_looks]
+
+
+async def test_a_signed_in_copy_watched_for_too_short_a_time_proves_nothing(
+    tmp_path: Path,
+) -> None:
+    """Browsers load at different speeds, so each page's age is measured from its own load."""
+    scenario = HandoffScenario(
+        without_session=BrowserPageEvidence(
+            on_allowed_origin=True, path="/log-in", challenge_visible=True, observed_seconds=10.0
+        ),
+        with_session_later=BrowserPageEvidence(
+            on_allowed_origin=True, path="/learn", challenge_visible=False, observed_seconds=12.9
+        ),
+    )
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    before = await sealed_material(sessions)
+    writes = record_writes(sessions)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(DeviceSessionRejected) as rejected:
+        await sessions.accept_device_session(
+            ceremony_id, capability, device_handoff(confirmed_url="https://example.org/learn")
+        )
+
+    assert rejected.value.code == "session_unconfirmed"
+    assert runtimes[0].later_look_requests[0][0] == 13.0
+    assert writes == []
+    assert await sealed_material(sessions) == before
+
+
+async def test_a_remote_check_keeps_one_limit_from_its_first_step(tmp_path: Path) -> None:
+    """Time spent before the two loads comes out of their budget, so a result still arrives."""
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path, scenario=HandoffScenario(), verification_seconds=6.0
+    )
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/account"
+    )
+    runtimes[0].status_delay_seconds = 0.3
+
+    began = asyncio.get_running_loop().time()
+    await sessions.refresh_authentication(ceremony.id, principal())
+
+    control_deadlines = [
+        deadline for runtime in runtimes for deadline in runtime.challenge_deadlines if deadline
+    ]
+    look_deadlines = [
+        deadline for runtime in runtimes for _age, deadline in runtime.later_look_requests
+    ]
+    assert len(control_deadlines) == 1 and len(look_deadlines) == 1
+    assert control_deadlines[0] - began <= 6.0 - 5.0 + 0.1
+    assert look_deadlines[0] - began <= 6.0 - 2.0 + 0.1
+
+
+async def test_only_a_pair_that_would_pass_looks_again(tmp_path: Path) -> None:
+    """A verdict the first look already settles costs no more time."""
+    scenario = HandoffScenario(without_session=None)
+    lifecycle, sessions, runtimes, _times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    ceremony_id, capability = await begin_device(sessions)
+
+    with pytest.raises(DeviceSessionRejected):
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+
+    assert all(runtime.later_looks == [] for runtime in runtimes)
+
+
+async def test_a_rejected_remote_check_logs_what_each_load_saw_without_an_address(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path, scenario=HandoffScenario(with_session=None, without_session=None)
+    )
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/account"
+    )
+
+    with caplog.at_level(logging.INFO):
+        await sessions.refresh_authentication(ceremony.id, principal())
+
+    assert (
+        "session check rejected (session_unconfirmed): with_session challenge=False stayed=True; "
+        "without_session challenge=False stayed=True"
+    ) in caplog.text
+    assert "/account" not in caplog.text
+    assert runtimes[-1].challenge_deadlines[0] is not None
 
 
 async def test_a_handoff_with_nothing_in_scope_is_empty(tmp_path: Path) -> None:
@@ -1797,6 +2052,400 @@ async def test_a_swept_ceremony_never_serves_two_callers_at_once(tmp_path: Path)
     )
 
     assert overlapped is False
+
+
+async def verifying_past_the_limit(
+    tmp_path: Path, **scenario_fields: Any
+) -> tuple[HandoffScenario, HostedProfileSessionService, list[FakeSessionRuntime], Any, UUID, str]:
+    """A remote sign-in whose status is ready, five seconds from its limit."""
+
+    scenario = HandoffScenario(gate=asyncio.Event(), **scenario_fields)
+    lifecycle, sessions, runtimes, times = services(tmp_path, scenario=scenario)
+    await provision(lifecycle)
+    view = await sessions.begin_authentication(
+        PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+    )
+    assert view.launch_url is not None
+    times[0] = NOW + timedelta(minutes=5) - timedelta(seconds=5)
+    sessions._sweep_sample_seconds = 0  # noqa: SLF001 - two samples, no wait between them
+    return scenario, sessions, runtimes, times, view.id, view.launch_url.split("#capability=", 1)[1]
+
+
+async def surface_runs_into_the_limit(
+    sessions: HostedProfileSessionService, ceremony_id: UUID, capability: str, times: Any
+) -> None:
+    """The browser surface's once-a-second frame request is what runs into the limit."""
+    assert await sessions.authenticate_surface(ceremony_id, capability) is True
+    times[0] += timedelta(seconds=6)
+    assert await sessions.authenticate_surface(ceremony_id, capability) is False
+
+
+async def test_a_status_check_saves_a_sign_in_the_limit_overtakes(tmp_path: Path) -> None:
+    """Production, 2026-11-03: Chase was signed in with seconds left, and expiry discarded it."""
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await scenario.started.wait()
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
+    assert runtimes[0].closed is False
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    view = await asyncio.wait_for(checking, timeout=2)
+
+    assert view.status is BrowserAuthenticationStatus.READY
+    assert runtimes[0].closed is True
+
+
+async def test_the_sweep_saves_a_sign_in_the_limit_overtakes(tmp_path: Path) -> None:
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    sweeping = asyncio.create_task(sessions.sweep())
+    await scenario.started.wait()
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
+    assert runtimes[0].closed is False
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+
+    assert view.status is BrowserAuthenticationStatus.READY
+    assert runtimes[0].closed is True
+
+
+async def test_a_status_check_waiting_on_the_sweep_reads_its_outcome(tmp_path: Path) -> None:
+    """The sweep closes the page when it saves; the waiting check must not touch it."""
+    scenario, sessions, runtimes, _times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    sweeping = asyncio.create_task(sessions.sweep())
+    await scenario.started.wait()
+    original = runtimes[0].authentication_status
+
+    async def open_page_only() -> BrowserAuthenticationStatus:
+        assert runtimes[0].closed is False
+        return await original()
+
+    runtimes[0].authentication_status = open_page_only  # type: ignore[method-assign]
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await asyncio.sleep(0)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await asyncio.wait_for(checking, timeout=2)
+
+    assert view.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_refused_session_expires_when_its_late_verification_ends(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path, with_session=SIGNED_OUT
+    )
+    sweeping = asyncio.create_task(sessions.sweep())
+    await scenario.started.wait()
+    times[0] += timedelta(seconds=6)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await asyncio.wait_for(sweeping, timeout=2)
+    assert runtimes[0].closed is False
+
+    await sessions.sweep()
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+    assert runtimes[0].closed is True
+    logged = {
+        (record.getMessage(), record.__dict__.get("failure_type")) for record in caplog.records
+    }
+    assert ("remote sign-in session not confirmed", "session_signed_out") in logged
+    assert ("sign-in ceremony expired", "authentication_required") in logged
+
+
+async def test_a_sweep_that_fails_says_what_failed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    (
+        _scenario,
+        sessions,
+        runtimes,
+        _times,
+        _ceremony_id,
+        _capability,
+    ) = await verifying_past_the_limit(tmp_path)
+
+    async def unavailable() -> BrowserAuthenticationStatus:
+        raise RuntimeError("private page detail")
+
+    runtimes[0].authentication_status = unavailable  # type: ignore[method-assign]
+
+    await sessions.sweep()
+
+    reasons = [
+        record.__dict__.get("failure_type")
+        for record in caplog.records
+        if record.getMessage() == "remote sign-in sweep failed"
+    ]
+    assert reasons == ["RuntimeError"]
+    assert "private page detail" not in caplog.text
+
+
+async def sweep_between_samples(
+    sessions: HostedProfileSessionService, runtime: FakeSessionRuntime
+) -> asyncio.Task[None]:
+    """A sweep that has taken its first sample and is waiting to take the second."""
+    sessions._sweep_sample_seconds = 0.25  # noqa: SLF001 - long enough to act inside the wait
+    checks = runtime.status_checks
+    sweeping = asyncio.create_task(sessions.sweep())
+    while runtime.status_checks == checks:
+        await asyncio.sleep(0)
+    return sweeping
+
+
+async def test_the_sweep_saves_a_sign_in_the_limit_overtakes_between_samples(
+    tmp_path: Path,
+) -> None:
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    assert scenario.gate is not None
+    scenario.gate.set()
+    sweeping = await sweep_between_samples(sessions, runtimes[0])
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
+    assert runtimes[0].closed is False
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+
+    assert view.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_status_check_inside_the_sweeps_wait_keeps_the_limit_off(tmp_path: Path) -> None:
+    """Both are deciding; the check finishing first must not end the sweep's protection."""
+    scenario, sessions, runtimes, times, ceremony_id, capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    assert scenario.gate is not None
+    scenario.gate.set()
+    runtimes[0].authentication_samples = [
+        BrowserAuthenticationStatus.READY,
+        BrowserAuthenticationStatus.NEEDS_USER,
+        BrowserAuthenticationStatus.READY,
+    ]
+    sweeping = await sweep_between_samples(sessions, runtimes[0])
+    checked = await sessions.refresh_authentication(ceremony_id, principal())
+    assert checked.status is BrowserAuthenticationStatus.NEEDS_USER
+    await surface_runs_into_the_limit(sessions, ceremony_id, capability, times)
+    assert runtimes[0].closed is False
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+
+    assert view.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_status_check_past_the_limit_leaves_the_sweep_deciding(tmp_path: Path) -> None:
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    assert scenario.gate is not None
+    scenario.gate.set()
+    sweeping = await sweep_between_samples(sessions, runtimes[0])
+    checks = runtimes[0].status_checks
+    times[0] += timedelta(seconds=6)
+
+    checked = await sessions.refresh_authentication(ceremony_id, principal())
+
+    assert checked.status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    assert runtimes[0].status_checks == checks
+    assert runtimes[0].closed is False
+    await asyncio.wait_for(sweeping, timeout=2)
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.READY
+
+
+async def test_a_stuck_sample_does_not_hold_off_the_limit(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    _scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    sessions._verification_seconds = 0.01  # noqa: SLF001 - the budget the sample runs out of
+
+    async def stuck() -> BrowserAuthenticationStatus:
+        await asyncio.Event().wait()
+        raise AssertionError("never answers")
+
+    runtimes[0].authentication_status = stuck  # type: ignore[method-assign]
+
+    await asyncio.wait_for(sessions.sweep(), timeout=2)
+    times[0] += timedelta(seconds=6)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+    assert runtimes[0].closed is True
+    assert [
+        record.__dict__.get("failure_type")
+        for record in caplog.records
+        if record.getMessage() == "remote sign-in sweep failed"
+    ] == ["TimeoutError"]
+
+
+async def test_the_sweep_reads_a_status_check_that_finished_before_its_turn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Between its last sample and its verification, a queued check can save and close the page."""
+    caplog.set_level(logging.INFO)
+    scenario, sessions, runtimes, _times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    assert scenario.gate is not None
+    scenario.gate.set()
+    second_sample = asyncio.Event()
+    release = asyncio.Event()
+    original = runtimes[0].authentication_status
+
+    async def held_second_sample() -> BrowserAuthenticationStatus:
+        if runtimes[0].status_checks == 1:
+            second_sample.set()
+            await release.wait()
+        return await original()
+
+    runtimes[0].authentication_status = held_second_sample  # type: ignore[method-assign]
+    sweeping = asyncio.create_task(sessions.sweep())
+    await asyncio.wait_for(second_sample.wait(), timeout=2)
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    release.set()
+
+    view = await asyncio.wait_for(checking, timeout=2)
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    assert view.status is BrowserAuthenticationStatus.READY
+    assert len(runtimes) == 3, "one page and the check's two verification browsers"
+    assert "remote sign-in sweep failed" not in caplog.text
+
+
+async def test_a_sweep_kept_waiting_past_the_limit_starts_no_verification(tmp_path: Path) -> None:
+    """It was due in time, but its first sample only got its turn after the limit."""
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path, with_session=SIGNED_OUT
+    )
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await scenario.started.wait()
+    checks = runtimes[0].status_checks
+    sweeping = asyncio.create_task(sessions.sweep())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    times[0] += timedelta(seconds=6)
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    await asyncio.wait_for(checking, timeout=2)
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    assert runtimes[0].status_checks == checks
+    assert len(runtimes) == 3, "one page and the check's two verification browsers"
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+
+
+async def test_a_sweep_kept_waiting_keeps_its_whole_budget(tmp_path: Path) -> None:
+    """The budget is for deciding, and starts at the first check, not in the queue before it."""
+    scenario, sessions, runtimes, _times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    sessions._verification_seconds = 0.4  # noqa: SLF001 - shorter than the queue plus the check
+    page = sessions._ceremonies[ceremony_id].runtime_lock  # noqa: SLF001 - the page is held
+    await page.acquire()
+    sweeping = asyncio.create_task(sessions.sweep())
+    await asyncio.sleep(0.3)
+    page.release()
+    await scenario.started.wait()
+    await asyncio.sleep(0.2)
+    assert scenario.gate is not None
+    scenario.gate.set()
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+
+    assert view.status is BrowserAuthenticationStatus.READY
+    assert runtimes[0].closed is True
+
+
+async def test_a_sweep_waiting_on_a_stuck_page_does_not_hold_off_the_limit(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    _scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path
+    )
+    sessions._verification_seconds = 0.01  # noqa: SLF001 - the budget the wait runs out of
+    page = sessions._ceremonies[ceremony_id].runtime_lock  # noqa: SLF001 - the page never frees
+    await page.acquire()
+
+    await asyncio.wait_for(sessions.sweep(), timeout=2)
+    times[0] += timedelta(seconds=6)
+
+    view = await sessions.authentication_status(ceremony_id, principal())
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+    assert runtimes[0].closed is True
+    assert [
+        record.__dict__.get("failure_type")
+        for record in caplog.records
+        if record.getMessage() == "remote sign-in sweep failed"
+    ] == ["TimeoutError"]
+
+
+async def test_a_status_check_queued_past_the_limit_starts_no_verification(tmp_path: Path) -> None:
+    """Only the verification already under way outlives the limit."""
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path, with_session=SIGNED_OUT
+    )
+    first = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await scenario.started.wait()
+    queued = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    times[0] += timedelta(seconds=6)
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    unconfirmed = await asyncio.wait_for(first, timeout=2)
+    view = await asyncio.wait_for(queued, timeout=2)
+
+    assert unconfirmed.status is BrowserAuthenticationStatus.NEEDS_USER
+    assert view.status is BrowserAuthenticationStatus.EXPIRED
+    assert runtimes[0].closed is True
+    assert len(runtimes) == 3, "one page and the first check's two verification browsers"
+
+
+async def test_the_sweep_starts_nothing_on_a_ceremony_past_its_limit(tmp_path: Path) -> None:
+    scenario, sessions, runtimes, times, ceremony_id, _capability = await verifying_past_the_limit(
+        tmp_path, with_session=SIGNED_OUT
+    )
+    checking = asyncio.create_task(sessions.refresh_authentication(ceremony_id, principal()))
+    await scenario.started.wait()
+    times[0] += timedelta(seconds=6)
+    sweeping = asyncio.create_task(sessions.sweep())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert scenario.gate is not None
+    scenario.gate.set()
+
+    await asyncio.wait_for(checking, timeout=2)
+    await asyncio.wait_for(sweeping, timeout=2)
+
+    assert len(runtimes) == 3, "one page and the check's two verification browsers"
 
 
 # --- ADR-0129: element facts beside the observation --------------------------

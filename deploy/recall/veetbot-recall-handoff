@@ -1,0 +1,6 @@
+#!/opt/veetbot-recall-verifier/bin/python -I
+"""Privileged operator entry point. Use only the independently installed interpreter."""
+from agent_core.bootstrap import system_clock
+from agent_core.operations.recall_release_handoff import command
+
+command(system_clock())

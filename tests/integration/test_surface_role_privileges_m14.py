@@ -456,8 +456,10 @@ async def exercise_surface_role(role_url: str) -> None:
                 return (await uow.runs.get(run_id, owner)).status
 
         async def poll(surface: SurfaceWorkerComposition) -> list[tuple[int, str]]:
-            # A minute per poll keeps the owner under the per-sender rate window.
-            clock.advance(timedelta(minutes=1))
+            # Two minutes per poll: past the ninety-second attention grace before a
+            # prompt dispatches (ADR-0143), and lets the one-minute per-sender window
+            # expire between polls.
+            clock.advance(timedelta(minutes=2))
             await surface.worker.run_once()
             return bot.take()
 

@@ -11,6 +11,7 @@ from datetime import datetime
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.code import CODE_WRITE_TOOL_NAMES
 from agent_core.domain.delegations import (
     ChildOutcome,
     Delegation,
@@ -45,6 +46,8 @@ from agent_core.domain.runs import (
 from agent_core.domain.security import contains_credential
 from agent_core.domain.sessions import (
     SESSION_RUN_KIND_METADATA_KEY,
+    SESSION_SCHEDULE_ID_METADATA_KEY,
+    SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY,
     Session,
     SessionStatus,
     conversation_title,
@@ -76,7 +79,13 @@ WriteProbe = Callable[[str], None]
 # child-run behavior (ADR-0083). `cockpit.widget.write` commits to a public
 # branch, which only the owner's own chat does (ADR-0240).
 FORBIDDEN_CHILD_TOOLS = frozenset(
-    {"delegate.run", "skill.manage", "device.sms.send", "cockpit.widget.write"}
+    {
+        "delegate.run",
+        "skill.manage",
+        "device.sms.send",
+        "cockpit.widget.write",
+        *CODE_WRITE_TOOL_NAMES,
+    }
 )
 # json.dumps escapes neither < nor >, so a brief naming the envelope tag could
 # read to the child model as closing the untrusted-data boundary.
@@ -142,6 +151,21 @@ def _child_agent(parent: AgentSpec, brief: DelegationBrief, limits: RunLimits) -
             "synthesis_reserve": "enforced",
         },
     )
+
+
+def _inherited_servers(parent: Session) -> dict[str, object]:
+    """A child of scheduled work keeps its parent's named servers (ADR-0291)."""
+    metadata = parent.metadata
+    if (
+        SESSION_SCHEDULE_ID_METADATA_KEY not in metadata
+        and SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY not in metadata
+    ):
+        return {}
+    return {
+        SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY: metadata.get(
+            SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY, []
+        )
+    }
 
 
 def _seed_content(brief: DelegationBrief) -> str:
@@ -406,6 +430,7 @@ class DelegationMaterializer:
         self._probe("agent")
         session_id = self._ids.new_id()
         run_id = self._ids.new_id()
+        parent_session = await uow.sessions.get(run.session_id, principal)
         session = Session(
             id=session_id,
             tenant_id=run.tenant_id,
@@ -419,6 +444,8 @@ class DelegationMaterializer:
                 "parent_run_id": str(run.id),
                 "parent_session_id": str(run.session_id),
                 "delegation_id": str(delegation_id),
+                # ADR-0291: a child of scheduled work stays within its named servers.
+                **_inherited_servers(parent_session),
             },
             created_at=now,
             updated_at=now,

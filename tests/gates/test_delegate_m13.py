@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -727,32 +725,6 @@ async def test_delegated_research_cannot_consume_synthesis_headroom(
     assert failed.failure is not None
     assert failed.failure.details == {"synthesis_reserve": dimension}
     assert len(invocations) == expected_invocations
-
-
-async def test_persisted_delegate_run_v1_remains_resolvable_for_export(tmp_path: Path) -> None:
-    """Keep exact lookup available for pre-1.0.1 invocations and checkpoints."""
-
-    async with build(
-        settings=_delegation_settings(tmp_path),
-        principal=principal(),
-        fixed_clock_at=support.NOW,
-        sequential_ids=True,
-    ) as app:
-        registry = app.trajectories._tools
-        legacy = registry.get("delegate.run", "1.0.0")
-        current = registry.get("delegate.run")
-
-    assert legacy.spec.version == "1.0.0"
-    legacy_schema = json.dumps(
-        legacy.spec.input_schema,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    assert hashlib.sha256(legacy_schema).hexdigest() == (
-        "09b6e1616a36eef98b7c4fa2740f38b473017156ed6a155d74c08eae67b628d3"
-    )
-    assert current.spec.version == "1.0.1"
 
 
 def _delegation_settings(tmp_path: Path, *, enabled: bool = True) -> Settings:

@@ -218,10 +218,11 @@ public struct SessionView: Codable, Identifiable, Sendable {
         metadata["schedule_id"]?.stringValue.flatMap(UUID.init(uuidString:))
     }
 
-    /// Internal Email and People work must never become a Chat conversation.
+    /// Internal Email, People and widget upkeep must never become a Chat conversation.
     /// Identify internal audit sessions that should not appear as ordinary conversations.
     var isOperational: Bool {
         if metadata["email_operational"]?.boolValue == true { return true }
+        if metadata["cockpit_refresh"]?.boolValue == true { return true }
         guard let purpose = metadata["purpose"]?.stringValue else { return false }
         return purpose == "people-management" || purpose == "people-import"
     }
@@ -243,6 +244,8 @@ public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
     public let lastUsedAt: Date?
+    /// How its latest sign-in began; nil before its first (ADR-0297).
+    public let lastSignInMode: BrowserAuthenticationMode?
 
     enum CodingKeys: String, CodingKey {
         case id, status, generation
@@ -250,6 +253,7 @@ public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case lastUsedAt = "last_used_at"
+        case lastSignInMode = "last_sign_in_mode"
     }
 }
 

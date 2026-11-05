@@ -111,6 +111,7 @@ Assembly order is fixed and total:
 | 12 | B | Working-state block | per entry |
 | 13 | B | In-turn recall and correction lines | `MEMORY` |
 | 13a | B | Records catalog, if any | `INTERNAL_TOOL` |
+| 13b | B | Knowledge catalog, if any | `INTERNAL_TOOL` |
 | 14 | B | Runtime metadata: current date, principal scope, surface; the origins `browser.navigate` accepts when the plan offers it | `PLATFORM` |
 | 15 | B | A new trailing user input, if present | `USER` |
 
@@ -141,8 +142,14 @@ through an injected `RecordsCatalogSource` as in-turn recall is read through
 its retriever, and absent, with no bytes, when the flag is off, the principal
 lacks `records.read`, or the owner has no series. Row 2's framing gains one
 fixed sentence for it, the same in every session whether or not the catalog
-is present. They are listed here because assembly
-order is fixed and total, and a table that omits five of its rows is neither.
+is present. Row 13b is added by
+[ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md) and owned by
+[knowledge-documents.md](knowledge-documents.md#the-document-catalog-in-context):
+the documents on file, a `UserMessage` with `trust=INTERNAL_TOOL` and
+`source="knowledge.catalog"`, read through an injected `KnowledgeCatalogSource`,
+absent with no bytes when the roster lacks `knowledge.search` or the run may read
+no document, and with one fixed sentence of its own in row 2. They are listed here because assembly
+order is fixed and total, and a table that omits six of its rows is neither.
 
 Platform policy comes first because it is the only content that must be read before
 anything that might try to override it. The current user message comes last because
@@ -219,6 +226,12 @@ rebuilds once at the next unpinned run. An initialized empty tool set is pinned,
 as are legacy nonempty pins and pending calls: retries and approval resumes
 must not refresh authority or rewrite their advertised tools. A scheduler's
 seed checkpoint with no pins or pending calls can still build its first plan.
+Across a builder upgrade, the executor explicitly marks an initialized roster
+for preservation. The planner retains it only if every pinned defined and deferred
+tool's exact contract remains registered for that principal and its existing
+model, policy, persona and prefix checks still pass. Added registry entries wait
+for the next unpinned run; missing or changed contracts are not grandfathered
+(ADR-0266).
 Scope reduction alone preserves the prefix even across runs; revocation
 continues to be enforced at call time without rewriting its prefix.
 
@@ -236,16 +249,12 @@ tracked metric and its target is 1.0**; a deployment averaging materially more t
 one has a configuration problem, and because the counter exists, it has one
 visibly.
 
-One rotation reason rebuilds nothing. Before
-[ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's hash
-covered each tool's scope set in whatever order its worker's hash seed gave
-it, and its plan event recorded the scopes as they stood when it was written.
-When such a plan's hash matches its prefix rendered with those recorded
-orders, and nothing else about the plan changed, the planner appends the same
-plan as a new epoch with its canonical hashes and reason
-`prefix_hash_canonicalized`. It does not rebuild the plan under a run that
-may be parked on an approval, and the provider receives the same bytes, so
-nothing is re-cached.
+Before [ADR-0134](../adr/0134-tool-scope-sets-serialize-sorted.md), a plan's
+hash covered each tool's scope set in whatever order its worker's hash seed
+gave it. Scope sets now serialize sorted, so the hash is canonical; the
+re-key that once absorbed the recorded order was retired by
+[ADR-0266](../adr/0266-spent-one-time-repairs-are-retired.md) once no plan
+could still match it, and such a plan rotates like any other.
 
 ### The history cache window
 
@@ -285,8 +294,7 @@ session: its markers move every step, so a one-hour write there would pay the
 premium on each request, and a shorter entry after a longer one is the order
 the provider requires. The TTL is not prefix identity either. It never rotates
 an epoch, and a plan built before ADR-0132 keeps the default until a rotation
-for another reason rebuilds it; a `prefix_hash_canonicalized` epoch copies the
-plan and keeps its breakpoints.
+for another reason rebuilds it.
 
 ### Session identity and OpenAI history lookback
 
@@ -363,13 +371,14 @@ ceiling.
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Persona row | 30 entries / 2,000 tokens | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 9,000 tokens | No | Only at an epoch boundary |
-| A | Deferred tool index | 40 entries / 2,500 tokens | No | Only at an epoch boundary |
+| A | Deferred tool index | 50 entries / 3,000 tokens | No | Only at an epoch boundary |
 | A | Owner tool index | 40 entries / 2,000 tokens | No | Only at an epoch boundary |
 | A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
 | B | Working state | 1,000 | No | Never |
 | B | Records catalog | 16 series / 600 tokens | No | First |
+| B | Knowledge catalog | 12 documents / 400 tokens | No | Second, whole |
 | B | Knowledge passages | 3 passages / 3,000 tokens | No | First |
 | B | In-turn recall | 2,000 | No | Second |
 | B | Tool results | 25% of body | Partly | Third |
@@ -420,9 +429,12 @@ arguments return that tool's whole definition, its description and its input
 schema ([ADR-0258](../adr/0258-deferred-definitions-and-truncation-recovery.md)).
 A tool is **advertised** by its
 definition or by its index entry. The index is its own Region A class,
-forty entries and 2,500 tokens, and the prefix ceiling rose by exactly that cap:
-2,000 under ADR-0123 and 500 more under
-[ADR-0262](../adr/0262-deferred-index-token-headroom.md).
+fifty entries and 3,000 tokens, and the prefix ceiling rose by exactly that cap:
+2,000 under ADR-0123, 500 more under
+[ADR-0262](../adr/0262-deferred-index-token-headroom.md) and 500 more under
+[ADR-0267](../adr/0267-deferred-index-headroom.md), which also raised the
+item cap from forty. The fullest production chat must leave ten entries and
+500 tokens of it free, so the next tool fails a gate rather than a chat.
 An entry lists required parameters in the order of the schema's `required`
 array and optional ones by name, never in the order of the schema's
 properties: the builder re-renders the prefix from the specifications on the
@@ -458,9 +470,13 @@ resolved by `tool.call`, but the index renders no entry for it, and it counts
 against neither index cap. Its only useful advertisement is the capture marker
 that names it, so it adds no bytes to the prefix. It never takes a
 definition; a plan without `tool.call` records it as skipped.
+[ADR-0277](../adr/0277-chat-deletes-files-it-generated.md) adds a second one,
+`artifact.delete`, which a sentence in the default agent instructions
+advertises instead of an index entry.
 
 In a session bound to a website profile, `browser.navigate`,
-`browser.observe` and `browser.act` are required definitions (ADR-0130): they
+`browser.observe` and `browser.act` are required definitions (ADR-0130), and
+so is `browser.upload` wherever the provider registers it (ADR-0148): they
 rank ahead of every other candidate, neither the agent's deferral list nor
 overflow moves them to the index, and a plan that cannot define them fails at
 plan time. What they displace moves to the index in the order above.
@@ -470,13 +486,11 @@ a definition slot, and every candidate without a definition becomes an index
 entry: the configured deferrals first, then the overflow in the order above.
 What fits in neither is skipped, and its name is recorded on the plan event as
 `skipped_tool_names`. An agent without `tool.call` defers nothing and records
-its skips the same way, so no tool leaves the roster silently. Builder version
-`context-builder@12` treats a `context-builder@11` plan as current, because it
-renders the same bytes: re-planning it could move the selection under a run
-parked on an approval. From `context-builder@13` the framing's records catalog
-sentence changes those bytes, so such a plan fails its prefix-hash recheck and
-re-plans once
-([Milestone 34 records catalog framing](#milestone-34-records-catalog-framing)). Earlier versions rebuild through the ordinary logged
+its skips the same way, so no tool leaves the roster silently. A plan from
+any earlier builder version re-plans once through the ordinary logged epoch
+rotation (ADR-0266 retired the builder equivalence that spared
+`context-builder@11` plans until `context-builder@13` changed the framing,
+[Milestone 34 records catalog framing](#milestone-34-records-catalog-framing)). Earlier versions rebuild through the ordinary logged
 epoch rotation, so existing sessions recover the configured capabilities
 without replacing their history. A snapshot containing People context is
 retained even when it contains no ordinary beliefs; the epoch rotation also
@@ -505,8 +519,9 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 24,500 tokens — 24,000 before
-ADR-0262 added 500 to the deferred tool index, 22,000 before ADR-0255 added
+The prefix classes sum to a hard ceiling of 25,000 tokens — 24,500 before
+ADR-0267 added 500 more to the deferred tool index, 24,000 before
+ADR-0262 added 500 to it, 22,000 before ADR-0255 added
 the 2,000 of the owner-added servers' index, 15,000 before
 Milestone 22's persona row, whose 2,000-token class raised the ceiling by
 exactly its own cap, the same move the skill classes made, 17,000 before
@@ -662,6 +677,11 @@ the cheapest and most recoverable loss first:
    cap. The builder has no knowledge-passage yield step today, so
    `records_catalog` is the first entry a pressure event records, before in-turn
    recall trims ([owner-records.md](owner-records.md#the-records-catalog-in-context)).
+   The knowledge catalog follows it, also whole and for the same reason: a
+   catalog that names some documents misstates the corpus, and one
+   `knowledge.search` reaches what it named; `knowledge_catalog` is the
+   second entry a pressure event records
+   ([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)).
 1. **Knowledge passages drop, lowest-ranked first.** They are dropped whole and
    never truncated, because a passage shortened to fit is a misquotation of a
    document the model is about to cite. They go first because the corpus is still
@@ -867,7 +887,11 @@ Three properties matter:
   last entries, holds names and dates and never values, may mention a due series
   once per session and never while the owner is mid-task, and is not a request to
   log ([owner-records.md](owner-records.md#the-records-catalog-in-context) gives
-  the text).
+  the text). Since [ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)
+  it carries one more on the knowledge catalog: it lists the documents on file
+  by title with their dates and passage counts, holds titles and never
+  passages, and a question that falls within a listed document is searched
+  with `knowledge.search` before it is answered from general knowledge.
 - **Content cannot close its own envelope.** The closing marker carries a
   per-item nonce, and any occurrence of the delimiter syntax inside content is
   escaped at render time. Without this, "ignore the above and " preceded by a
@@ -991,7 +1015,13 @@ allowance per assembly, shortened to the run's remaining deadline. This bound al
 applies when optional semantic preparation is disabled; it never renews or
 replaces a stricter runtime search permit. A timed-out read is cancelled and
 awaited, not detached or retried. Base timeout supplies a fixed limitation marker
-instead of implying that no memory exists. Delta timeout preserves completed base
+instead of implying that no memory exists. Optional provider preparation runs
+before assembly on its own five-second clock and never spends this allowance
+([ADR-0282](../adr/0282-recall-preparation-keeps-its-own-clock.md)). A base read
+refused by the runtime permit or timed out here is also logged as
+`context_memory_recall_limited` and marked on the request, and the runtime
+records `memory.recall.limited` with the reason: a turn without recall is
+observable, not silent. Delta timeout preserves completed base
 evidence. Mandatory frozen-snapshot corrections still run and remain in context;
 browser evidence, tool-call/result pairs and the frozen prefix are unchanged.
 Caller cancellation still propagates. This prevents optional recall from consuming
@@ -1039,6 +1069,7 @@ class ContextBudget(BaseModel):
     tool_result_tokens: int
     knowledge_tokens: int           # knowledge spec: Region B, passages
     records_catalog_tokens: int = 0 # owner-records spec: Region B, row 13a
+    knowledge_catalog_tokens: int = 0 # knowledge spec: Region B, row 13b
     safety_margin_ratio: float = 0.05
 ```
 
@@ -1246,10 +1277,11 @@ legitimate body changes and cache availability affect it.
   would duplicate in-turn recall and leave a missing turn ambiguous between a
   selection defect and a ranking miss; a live projection read would let two seeds
   of one run disagree.
-- **Yield order is the records catalog, knowledge passages, then in-turn
-  recall, then tool-result truncation, then compaction** — cheapest and most
-  recoverable first. The catalog drops whole and one `records.list` recovers
-  it; knowledge passages follow because the corpus is still there and one
+- **Yield order is the records catalog, the knowledge catalog, knowledge
+  passages, then in-turn recall, then tool-result truncation, then
+  compaction** — cheapest and most
+  recoverable first. The catalogs drop whole, and one `records.list` or one
+  `knowledge.search` recovers what each named; knowledge passages follow because the corpus is still there and one
   `knowledge.search` re-reaches it; compaction is last because it alone costs a model call and
   loses information irreversibly within the run. This is the same order stated
   where the ladder is specified, and the two must not drift apart.
@@ -1352,3 +1384,14 @@ Beside each `model.request.started`, the run loop appends `memory.delivered`
 naming the recall traces whose blocks are in that request's body. That is the
 delivered set the usage hook charges for non-use; a block dropped under
 pressure and the prefix snapshot are not in it.
+
+## Knowledge catalog framing
+
+Context builder identity advances to `context-builder@16` when row 2's
+framing gains the knowledge catalog sentence of
+[knowledge-documents.md](knowledge-documents.md#the-document-catalog-in-context)
+([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)). The
+sentence is in every session's prefix whether or not a catalog renders, so
+every `context-builder@15` plan fails its stored prefix-hash recheck and
+re-plans once through the ordinary logged epoch rotation. The fifty-turn
+stability script holds one prefix under its existing 1,640 bytes of padding.

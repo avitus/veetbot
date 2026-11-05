@@ -202,6 +202,15 @@ async def test_production_overview_first_page_is_the_closest_family() -> None:
         await closeness_overview_run(app)
 
 
+async def test_production_overview_first_page_reaches_every_family_tier() -> None:
+    from tests.contract.owner_overview_cases import tiered_overview_run
+
+    async with build(
+        settings=replace(_settings(), people_enabled=True), script=script(True)
+    ) as app:
+        await tiered_overview_run(app)
+
+
 async def test_production_overview_says_when_a_group_exceeds_what_it_reads() -> None:
     from tests.contract.owner_overview_cases import overflow_overview_run
 

@@ -14,14 +14,18 @@ if TYPE_CHECKING:
 from sqlalchemy import (
     DateTime,
     Integer,
+    Numeric,
     SQLColumnExpression,
     Text,
     and_,
     any_,
     bindparam,
+    case,
     delete,
+    exists,
     false,
     func,
+    literal,
     not_,
     or_,
     select,
@@ -57,6 +61,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ConsolidationWatermarkRow,
     IntegratedEpisodeRow,
     KnowledgeChunkRow,
+    KnowledgeChunkVectorRow,
     KnowledgeDocumentRow,
     MemoryRejectionRow,
     MemoryRevisionRow,
@@ -72,12 +77,19 @@ from agent_core.domain.erasure import erased_rejection, memory_erasure_tombstone
 from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.knowledge import (
     DocumentAuthority,
+    KnowledgeCatalog,
+    KnowledgeCatalogLine,
+    KnowledgeCatalogQuery,
     KnowledgeChunk,
+    KnowledgeChunkEmbedding,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
+    KnowledgeReader,
+    KnowledgeSemanticQuery,
     KnowledgeVisibility,
     RetrievedPassage,
+    fuse_passage_arms,
 )
 from agent_core.domain.memory import (
     HOME_LOCATION_PATTERN,
@@ -105,11 +117,13 @@ from agent_core.domain.memory import (
     TracedBelief,
     TracedPassage,
     TracedPersonContext,
+    lexical_query_forms,
     lexical_query_terms,
     recall_query_terms,
     recall_term_forms,
 )
 from agent_core.domain.reconsolidation import content_signature
+from agent_core.domain.semantic_memory import checked_vector
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
 from agent_core.ports.people import PeopleStore
@@ -1654,6 +1668,33 @@ class PostgresTraceStore:
                 row.trace = updated.model_dump(mode="json")
 
 
+def _knowledge_eligible(query: KnowledgeReader, as_of: datetime) -> tuple[ColumnElement[bool], ...]:
+    """The documents a knowledge query may read: tenant, validity, sensitivity, visibility."""
+
+    visibility = or_(
+        KnowledgeDocumentRow.visibility == KnowledgeVisibility.TENANT.value,
+        (
+            (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PRINCIPAL.value)
+            & (KnowledgeDocumentRow.ingested_by_principal_id == query.principal_id)
+        ),
+        (
+            (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PROJECT.value)
+            & (KnowledgeDocumentRow.project_scope == query.current_scope)
+        ),
+    )
+    return (
+        KnowledgeDocumentRow.tenant_id == query.tenant_id,
+        _knowledge_source_visible(),
+        KnowledgeDocumentRow.valid_from <= as_of,
+        or_(
+            KnowledgeDocumentRow.valid_to.is_(None),
+            KnowledgeDocumentRow.valid_to > as_of,
+        ),
+        KnowledgeDocumentRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
+        visibility,
+    )
+
+
 def _knowledge_source_visible() -> ColumnElement[bool]:
     return (
         ~select(ArtifactRow.id)
@@ -1706,6 +1747,27 @@ def _chunk(row: KnowledgeChunkRow) -> KnowledgeChunk:
     )
 
 
+def _vector_rows(embeddings: Sequence[KnowledgeChunkEmbedding]) -> list[dict[str, Any]]:
+    return [
+        {
+            "chunk_id": embedding.chunk_id,
+            "space_key": embedding.space.key,
+            "window": embedding.window,
+            "space": embedding.space.model_dump(mode="json"),
+            "text_version": embedding.text_version,
+            "embedding": list(checked_vector(embedding.vector, embedding.space)),
+        }
+        for embedding in embeddings
+    ]
+
+
+_DOCUMENT_AUTHORITY_WEIGHT = {
+    DocumentAuthority.PRINCIPAL_AUTHORED: 1.0,
+    DocumentAuthority.PRINCIPAL_SUPPLIED: 0.7,
+    DocumentAuthority.FETCHED: 0.4,
+}
+
+
 class PostgresKnowledgeStore:
     def __init__(self, session: AsyncSession, clock: Clock) -> None:
         self._session = session
@@ -1737,6 +1799,10 @@ class PostgresKnowledgeStore:
             pg_insert(KnowledgeChunkRow),
             [chunk.model_dump(mode="python") for chunk in prepared.chunks],
         )
+        if prepared.embeddings:
+            await self._session.execute(
+                pg_insert(KnowledgeChunkVectorRow), _vector_rows(prepared.embeddings)
+            )
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None:
         result = (
@@ -1755,69 +1821,183 @@ class PostgresKnowledgeStore:
         ).one_or_none()
         return None if result is None else _knowledge_document(result[0], result[1])
 
-    async def search(self, query: KnowledgeQuery) -> list[RetrievedPassage]:
+    async def search(
+        self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
+    ) -> list[RetrievedPassage]:
         as_of = query.as_of or self._clock.now()
-        terms = lexical_query_terms(query.text)
-        if not terms:
+        forms = lexical_query_forms(query.text)
+        if not forms and semantic is None:
             return []
-        vector = func.to_tsvector(
-            "simple",
-            func.concat(KnowledgeChunkRow.heading_path.cast(Text), " ", KnowledgeChunkRow.text),
-        )
-        # Any-term semantics, as `lexical_query_terms` documents and the in-memory
-        # store answers: a question rarely shares every word with its passage.
-        term_queries = [func.plainto_tsquery("simple", term) for term in terms]
-        any_term: Any = term_queries[0]
-        for term_query in term_queries[1:]:
-            any_term = any_term.op("||")(term_query)
-        rank = func.ts_rank_cd(vector, any_term)
-        visibility = or_(
-            KnowledgeDocumentRow.visibility == KnowledgeVisibility.TENANT.value,
-            (
-                (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PRINCIPAL.value)
-                & (KnowledgeDocumentRow.ingested_by_principal_id == query.principal_id)
-            ),
-            (
-                (KnowledgeDocumentRow.visibility == KnowledgeVisibility.PROJECT.value)
-                & (KnowledgeDocumentRow.project_scope == query.current_scope)
-            ),
-        )
-        rows = list(
-            (
+        eligible = _knowledge_eligible(query, as_of)
+        # Each arm ranks every eligible chunk by scalar columns alone, and the
+        # rows a passage needs are fetched once the reservation has chosen it,
+        # so a common term does not pull every matching chunk's text into
+        # memory (ADR-0293). chunk id -> (document id, authority, project scope).
+        meta: dict[str, tuple[UUID, str, str | None]] = {}
+        lexical: list[tuple[str, float]] = []
+        if forms:
+            vector = func.to_tsvector(
+                "simple",
+                func.concat(KnowledgeChunkRow.heading_path.cast(Text), " ", KnowledgeChunkRow.text),
+            )
+            # Any-term semantics, as `lexical_query_terms` documents and the
+            # in-memory store answers: a question rarely shares every word with
+            # its passage. Each term matches any of its folded spellings (ADR-0285).
+            term_queries = [
+                func.plainto_tsquery("simple", form) for group in forms for form in group
+            ]
+            any_term: Any = term_queries[0]
+            for term_query in term_queries[1:]:
+                any_term = any_term.op("||")(term_query)
+            # Coverage, the number of distinct query terms a passage holds, ranks
+            # ahead of density: a passage about the question beats a passage that
+            # repeats one of its words (ADR-0285).
+            coverage = sum(
+                (
+                    case(
+                        (
+                            or_(
+                                *[
+                                    vector.op("@@")(func.plainto_tsquery("simple", form))
+                                    for form in group
+                                ]
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                    for group in forms
+                ),
+                literal(0),
+            )
+            rank = func.ts_rank_cd(vector, any_term)
+            # Under the dense channel the lexical arm reaches only the chunks
+            # the space has not seen, so an older document stays reachable
+            # (ADR-0289).
+            unseen = (
+                ()
+                if semantic is None or semantic.channel == "hybrid"
+                else (
+                    ~exists().where(
+                        KnowledgeChunkVectorRow.chunk_id == KnowledgeChunkRow.chunk_id,
+                        KnowledgeChunkVectorRow.space_key == semantic.space.key,
+                    ),
+                )
+            )
+            rows = (
                 await self._session.execute(
-                    select(KnowledgeChunkRow, KnowledgeDocumentRow, rank.label("rank"))
+                    select(
+                        KnowledgeChunkRow.chunk_id,
+                        KnowledgeDocumentRow.document_id,
+                        KnowledgeDocumentRow.authority,
+                        KnowledgeDocumentRow.project_scope,
+                        coverage.label("coverage"),
+                    )
                     .join(
                         KnowledgeDocumentRow,
                         KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
                     )
-                    .where(
-                        KnowledgeDocumentRow.tenant_id == query.tenant_id,
-                        _knowledge_source_visible(),
-                        KnowledgeDocumentRow.valid_from <= as_of,
-                        or_(
-                            KnowledgeDocumentRow.valid_to.is_(None),
-                            KnowledgeDocumentRow.valid_to > as_of,
-                        ),
-                        KnowledgeDocumentRow.sensitivity.in_(
-                            _allowed_sensitivities(query.sensitivity_ceiling)
-                        ),
-                        visibility,
-                        vector.op("@@")(any_term),
-                    )
-                    .order_by(rank.desc(), KnowledgeChunkRow.chunk_id)
-                    .limit(max(query.max_passages * 8, 64))
+                    .where(*eligible, *unseen, vector.op("@@")(any_term))
+                    # Every matching chunk, as the in-memory store ranks them: a
+                    # limit here would drop a later document's first passages
+                    # before the per-document reservation sees them (ADR-0293).
+                    .order_by(coverage.desc(), rank.desc(), KnowledgeChunkRow.chunk_id)
                 )
             ).all()
+            for chunk_id, document_id, authority, project_scope, raw_coverage in rows:
+                meta[chunk_id] = (document_id, authority, project_scope)
+                lexical.append((chunk_id, int(raw_coverage) / len(forms)))
+        semantic_arm: list[tuple[str, float]] = []
+        if semantic is not None:
+            # The semantic arm (knowledge-documents.md, "Indexing"): exact
+            # cosine distance over every eligible chunk vector in the query's
+            # space, a chunk scored by its nearest window, every chunk ranked.
+            distance = func.min(
+                KnowledgeChunkVectorRow.embedding.cosine_distance(
+                    list(checked_vector(semantic.vector, semantic.space))
+                )
+            )
+            best = (
+                select(KnowledgeChunkVectorRow.chunk_id, distance.label("distance"))
+                .where(KnowledgeChunkVectorRow.space_key == semantic.space.key)
+                .group_by(KnowledgeChunkVectorRow.chunk_id)
+                .subquery()
+            )
+            rows = (
+                await self._session.execute(
+                    select(
+                        KnowledgeChunkRow.chunk_id,
+                        KnowledgeDocumentRow.document_id,
+                        KnowledgeDocumentRow.authority,
+                        KnowledgeDocumentRow.project_scope,
+                        best.c.distance,
+                    )
+                    .join(best, best.c.chunk_id == KnowledgeChunkRow.chunk_id)
+                    .join(
+                        KnowledgeDocumentRow,
+                        KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+                    )
+                    .where(*eligible)
+                    .order_by(
+                        func.round(best.c.distance.cast(Numeric), 7), KnowledgeChunkRow.chunk_id
+                    )
+                )
+            ).all()
+            for chunk_id, document_id, authority, project_scope, raw_distance in rows:
+                meta[chunk_id] = (document_id, authority, project_scope)
+                semantic_arm.append((chunk_id, max(-1.0, min(1.0, 1 - float(raw_distance)))))
+        if semantic is None:
+            matches = {chunk_id: (match, ["lexical"]) for chunk_id, match in lexical}
+        else:
+            matches = fuse_passage_arms(lexical, semantic_arm, channel=semantic.channel)
+        # The lexical order is the database's (coverage, density, chunk id);
+        # with the semantic arm the fused match orders candidates, as the
+        # in-memory store orders them.
+        ordered = (
+            [chunk_id for chunk_id, _ in lexical]
+            if semantic is None
+            else sorted(matches, key=lambda chunk_id: (-matches[chunk_id][0], chunk_id))
         )
         per_document: defaultdict[UUID, int] = defaultdict(int)
-        passages: list[RetrievedPassage] = []
-        for chunk, document, raw_rank in rows:
-            if per_document[document.document_id] >= query.max_per_document:
-                continue
-            score = min(1.0, float(raw_rank) + 0.25)
+        within: list[tuple[str, float, list[str]]] = []
+        beyond: list[tuple[str, float, list[str]]] = []
+        for chunk_id in ordered:
+            document_id, authority, project_scope = meta[chunk_id]
+            match, arms = matches[chunk_id]
+            # The same formula the in-memory store answers with: the match
+            # first, then the document's authority and its affinity with the scope.
+            score = min(
+                1.0,
+                0.75 * match
+                + 0.15 * _DOCUMENT_AUTHORITY_WEIGHT[DocumentAuthority(authority)]
+                + 0.1 * (1.0 if project_scope == query.current_scope else 0.5),
+            )
             if score < query.min_score:
                 continue
-            per_document[document.document_id] += 1
+            # The per-document cap reserves every document's first passages
+            # and the rest fill by rank, as the in-memory store (ADR-0293).
+            if per_document[document_id] < query.max_per_document:
+                per_document[document_id] += 1
+                within.append((chunk_id, score, arms))
+            else:
+                beyond.append((chunk_id, score, arms))
+        chosen = (within + beyond)[: query.max_passages]
+        if not chosen:
+            return []
+        rows = (
+            await self._session.execute(
+                select(KnowledgeChunkRow, KnowledgeDocumentRow)
+                .join(
+                    KnowledgeDocumentRow,
+                    KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+                )
+                .where(KnowledgeChunkRow.chunk_id.in_([chunk_id for chunk_id, _, _ in chosen]))
+            )
+        ).all()
+        found = {chunk.chunk_id: (chunk, document) for chunk, document in rows}
+        passages: list[RetrievedPassage] = []
+        for chunk_id, score, arms in chosen:
+            chunk, document = found[chunk_id]
             passages.append(
                 RetrievedPassage(
                     chunk_id=chunk.chunk_id,
@@ -1829,7 +2009,7 @@ class PostgresKnowledgeStore:
                     authority=DocumentAuthority(document.authority),
                     sensitivity=Sensitivity(document.sensitivity),
                     score=score,
-                    arms=["lexical"],
+                    arms=arms,
                     instruction_like=chunk.contains_instruction_like_text,
                 )
             )
@@ -1845,6 +2025,125 @@ class PostgresKnowledgeStore:
             .where(KnowledgeChunkRow.chunk_id == chunk_id, _knowledge_source_visible())
         )
         return None if row is None else _chunk(row)
+
+    async def visible_titles(self, query: KnowledgeQuery) -> list[str]:
+        as_of = query.as_of or self._clock.now()
+        titles = (
+            await self._session.scalars(
+                select(KnowledgeDocumentRow.title)
+                .where(*_knowledge_eligible(query, as_of))
+                .distinct()
+                .order_by(KnowledgeDocumentRow.title)
+            )
+        ).all()
+        return [str(title) for title in titles]
+
+    async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog:
+        """The readable current documents by title, each with its chunk count."""
+
+        counted = (
+            select(
+                KnowledgeChunkRow.document_row_id.label("document_row_id"),
+                func.count().label("passages"),
+            )
+            .group_by(KnowledgeChunkRow.document_row_id)
+            .subquery()
+        )
+        rows = (
+            await self._session.execute(
+                select(
+                    KnowledgeDocumentRow.title,
+                    KnowledgeDocumentRow.doc_date,
+                    KnowledgeDocumentRow.ingested_at,
+                    func.coalesce(counted.c.passages, 0),
+                )
+                .outerjoin(counted, counted.c.document_row_id == KnowledgeDocumentRow.row_id)
+                .where(*_knowledge_eligible(query, query.as_of))
+                .order_by(KnowledgeDocumentRow.title, KnowledgeDocumentRow.document_id)
+            )
+        ).all()
+        lines = [
+            KnowledgeCatalogLine(
+                title=str(title),
+                doc_date=doc_date,
+                ingested_at=ingested_at,
+                passages=int(passages),
+            )
+            for title, doc_date, ingested_at, passages in rows
+        ]
+        return KnowledgeCatalog(
+            lines=tuple(lines[: query.max_documents]),
+            omitted=max(0, len(lines) - query.max_documents),
+        )
+
+    async def chunks_without_vectors(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        space_key: str,
+        *,
+        sensitivities: Sequence[Sensitivity],
+        limit: int,
+    ) -> list[KnowledgeChunk]:
+        seen = (
+            select(KnowledgeChunkVectorRow.chunk_id)
+            .where(
+                KnowledgeChunkVectorRow.chunk_id == KnowledgeChunkRow.chunk_id,
+                KnowledgeChunkVectorRow.space_key == space_key,
+            )
+            .exists()
+        )
+        rows = (
+            await self._session.scalars(
+                select(KnowledgeChunkRow)
+                .join(
+                    KnowledgeDocumentRow,
+                    KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+                )
+                .where(
+                    KnowledgeDocumentRow.tenant_id == tenant_id,
+                    KnowledgeDocumentRow.ingested_by_principal_id == principal_id,
+                    KnowledgeDocumentRow.valid_to.is_(None),
+                    KnowledgeDocumentRow.sensitivity.in_([item.value for item in sensitivities]),
+                    _knowledge_source_visible(),
+                    ~seen,
+                )
+                .order_by(KnowledgeChunkRow.document_row_id, KnowledgeChunkRow.ordinal)
+                .limit(limit)
+            )
+        ).all()
+        return [_chunk(row) for row in rows]
+
+    async def remove_embeddings_outside(
+        self, tenant_id: str, principal_id: str, space_key: str
+    ) -> int:
+        owned = (
+            select(KnowledgeChunkRow.chunk_id)
+            .join(
+                KnowledgeDocumentRow,
+                KnowledgeDocumentRow.row_id == KnowledgeChunkRow.document_row_id,
+            )
+            .where(
+                KnowledgeDocumentRow.tenant_id == tenant_id,
+                KnowledgeDocumentRow.ingested_by_principal_id == principal_id,
+            )
+        )
+        result = await self._session.execute(
+            delete(KnowledgeChunkVectorRow).where(
+                KnowledgeChunkVectorRow.space_key != space_key,
+                KnowledgeChunkVectorRow.chunk_id.in_(owned),
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def add_embeddings(self, embeddings: Sequence[KnowledgeChunkEmbedding]) -> None:
+        if not embeddings:
+            return
+        await self._session.execute(
+            pg_insert(KnowledgeChunkVectorRow)
+            .values(_vector_rows(embeddings))
+            .on_conflict_do_nothing(constraint="pk_knowledge_chunk_vectors")
+        )
 
     async def delete(self, document_id: UUID, principal: Principal) -> list[ArtifactRef]:
         rows = list(

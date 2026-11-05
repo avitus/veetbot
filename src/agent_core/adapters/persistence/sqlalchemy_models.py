@@ -421,6 +421,10 @@ class BrowserProfileRow(Base):
             "AND encryption_key_version IS NOT NULL)",
             name="binding_consistent",
         ),
+        CheckConstraint(
+            "last_sign_in_mode IS NULL OR last_sign_in_mode IN ('remote','device')",
+            name="last_sign_in_mode_closed",
+        ),
         Index(
             "ix_browser_profiles_tenant_principal_created",
             "tenant_id",
@@ -448,6 +452,7 @@ class BrowserProfileRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sign_in_mode: Mapped[str | None] = mapped_column(Text)
 
 
 class BrowserGrantRow(Base):
@@ -1412,6 +1417,26 @@ class KnowledgeChunkRow(Base):
     tokens: Mapped[int] = mapped_column(Integer)
     contains_instruction_like_text: Mapped[bool] = mapped_column(Boolean)
     content_sha256: Mapped[str] = mapped_column(String(64))
+
+
+class KnowledgeChunkVectorRow(Base):
+    """A chunk's derived vector in one embedding space (knowledge-documents.md, "Indexing")."""
+
+    __tablename__ = "knowledge_chunk_vectors"
+    __table_args__ = (
+        CheckConstraint("vector_dims(embedding) = (space->>'dimensions')::int", name="dimensions"),
+    )
+
+    chunk_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("knowledge_chunks.chunk_id", ondelete="CASCADE"), primary_key=True
+    )
+    space_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    # Which window of the chunk the vector embeds; a chunk the encoder admits
+    # whole has one, zero. A reserved word in SQL, quoted by the dialect.
+    window: Mapped[int] = mapped_column(Integer, primary_key=True, server_default=text("0"))
+    space: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    text_version: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(VECTOR())
 
 
 class ScheduleRow(Base):
@@ -3088,10 +3113,11 @@ class CockpitCommitOutboxRow(Base):
         PrimaryKeyConstraint(
             "tenant_id", "principal_id", "revision_id", name="pk_cockpit_commit_outbox"
         ),
-        Index("ix_cockpit_commit_outbox_due", "tenant_id", "next_attempt_at"),
+        Index("ix_cockpit_commit_outbox_due", "tenant_id", "package_kind", "next_attempt_at"),
         CheckConstraint("operation IN ('write', 'remove')", name="operation"),
         CheckConstraint("attempts >= 0", name="attempts"),
     )
+    package_kind: Mapped[str] = mapped_column(Text, server_default="widget")
     tenant_id: Mapped[str] = mapped_column(Text)
     principal_id: Mapped[str] = mapped_column(Text)
     revision_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
@@ -3113,6 +3139,7 @@ class CockpitImportFailureRow(Base):
         ),
         CheckConstraint("jsonb_typeof(diagnostics) = 'array'", name="diagnostics"),
     )
+    package_kind: Mapped[str] = mapped_column(Text, server_default="widget")
     tenant_id: Mapped[str] = mapped_column(Text)
     principal_id: Mapped[str] = mapped_column(Text)
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
@@ -3121,3 +3148,72 @@ class CockpitImportFailureRow(Base):
     diagnostics: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     seen: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class JobRecordRow(Base):
+    """Local source revisions and private grants for one owner-scoped job."""
+
+    __tablename__ = "agent_jobs"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "slug", name="pk_agent_jobs"),
+        CheckConstraint("version >= 1", name="version"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    body: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class CodeDraftRow(Base):
+    """One owner's edits against a release, and the outbox entry that proposes them."""
+
+    __tablename__ = "code_drafts"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "slug", name="pk_code_drafts"),
+        Index(
+            "ix_code_drafts_due_proposals",
+            "tenant_id",
+            "next_attempt_at",
+            postgresql_where=text("state = 'proposing'"),
+        ),
+        CheckConstraint("version >= 1", name="version"),
+        CheckConstraint("state IN ('open', 'proposing', 'proposed', 'discarded')", name="state"),
+        CheckConstraint("(proposal IS NULL) = (next_attempt_at IS NULL)", name="next_attempt_at"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(Text)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    base_release: Mapped[str] = mapped_column(Text)
+    base_revision: Mapped[str] = mapped_column(Text)
+    files: Mapped[dict[str, str | None]] = mapped_column(JSONB)
+    state: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    proposal: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    # Copied out of `proposal` so the outbox scan compares timestamps, not JSON text.
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IntegrationSecretRow(Base):
+    __tablename__ = "integration_secrets"
+    __table_args__ = (
+        CheckConstraint("revision > 0", name="integration_secrets_revision"),
+        CheckConstraint(
+            "(deleted_at IS NULL) = (sealed_value IS NOT NULL)",
+            name="integration_secrets_lifecycle",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text, index=True)
+    principal_id: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)
+    auth_scheme: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
+    sealed_value: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1409,6 +1409,571 @@ import SwiftUI
         #expect(model.currentEdit?.isDirty == false)
     }
 
+    /// An autosave in flight must not grey out Review & Send: the proposal waits for
+    /// that save and then carries the settled revision, with no second save.
+    @Test func testReviewSendStaysAvailableWhileAnAutosaveIsInFlight() async throws {
+        let requests = EmailRequestRecorder()
+        let saveGate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "PUT" {
+                let saves = requests.snapshot.filter { $0.httpMethod == "PUT" }.count
+                return (200, self.draftJSON(revision: saves + 1, body: "Edited body"), saves == 1 ? saveGate : nil)
+            }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.draftJSON(revision: 2, body: "Edited body", status: "awaiting_approval"))}", nil)
+            }
+            if request.url!.path.contains("/runs/") {
+                return (200, "{\"id\":\"\(self.runID)\",\"status\":\"WAITING_FOR_APPROVAL\"}", nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { saveGate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited body")
+        let saving = Task { await model.saveDraft() }
+        try await waitForEmailTestCondition { saveGate.isWaiting }
+        #expect(model.isSaving)
+        #expect(model.canReview, "a save in flight must not disable Review & Send")
+        let sending = Task { await model.prepareSend() }
+        saveGate.release()
+        _ = await saving.value
+        await sending.value
+
+        #expect(requests.snapshot.filter { $0.url!.path.hasSuffix("send-proposal") }.count == 1)
+        #expect(requests.snapshot.filter { $0.httpMethod == "PUT" }.count == 1)
+        #expect(model.currentEdit?.isDirty == false)
+    }
+
+    /// A send the server ends because new mail arrived must say so beside the draft,
+    /// not just close the review and leave the draft looking untouched.
+    @Test func testSendEndedByNewMailIsReportedBesideTheDraft() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.draftJSON(status: "awaiting_approval"))}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "COMPLETED")) }
+            let proposed = requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") }
+            return (200, proposed
+                ? self.newMailThreadJSON(draft: self.staleDraftJSON())
+                : self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.prepareSend()
+
+        #expect(model.draft?.stale == true)
+        #expect(model.review == nil)
+        #expect(model.draftActionMessage == EmailViewModel.sendEndedByNewMailMessage)
+    }
+
+    /// The new-mail notice names who wrote and quotes them, so the owner can decide
+    /// without hunting through the thread for what changed.
+    @Test func testStaleDraftNoticeNamesTheNewMail() async throws {
+        let now = ISO8601DateFormatter().date(from: "2026-09-11T00:10:00Z")!
+        let model = try makeModel(now: { now }) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let messages = [
+                self.messageJSON(id: "m1", sender: "Alex Chen <alex@example.test>",
+                                 body: "Here is the agenda.", sentAt: "2026-09-10T23:00:00Z"),
+                self.messageJSON(id: "m2", sender: "Dana Lee <dana@example.test>",
+                                 body: "Thursday works better for me, can we move it?", sentAt: "2026-09-11T00:07:00Z"),
+            ].joined(separator: ",")
+            return (200, self.newMailThreadJSON(draft: self.staleDraftJSON())
+                .replacingOccurrences(of: "\"messages\":[]", with: "\"messages\":[\(messages)]"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+
+        #expect(model.newMailSinceDraft?.id == "m2")
+        #expect(model.staleMailMessage(locale: Locale(identifier: "en_US")) ==
+            "Dana Lee wrote 3 minutes ago: “Thursday works better for me, can we move it?” Read it above, then confirm your reply still fits.")
+    }
+
+    /// When the send proposal outlasts the local wait, the owner sees that it is still
+    /// being prepared, and the review opens from a later refresh without another press.
+    @Test func testLongSendPreparationIsVisibleAndReviewOpensWhenReady() async throws {
+        let ready = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/approvals/") {
+                return (200, self.approvalJSON(body: "Thanks, I will review the agenda."))
+            }
+            // Admission marks the draft awaiting approval; the approval itself comes later.
+            let queued = self.draftJSON(status: "awaiting_approval").replacingOccurrences(
+                of: "\"approval_id\":\"\(self.approvalID)\"", with: "\"approval_id\":null")
+            if request.url!.path.hasSuffix("send-proposal") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(queued)}")
+            }
+            if request.url!.path.contains("/runs/") {
+                return (200, self.runJSON(status: ready.isSet ? "WAITING_FOR_APPROVAL" : "QUEUED"))
+            }
+            return (200, self.threadJSON(draft: ready.isSet ? self.draftJSON(status: "awaiting_approval") : queued))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.prepareSend()
+
+        #expect(model.review == nil)
+        #expect(model.draftActionMessage == nil)
+        #expect(model.sendProgressMessage == EmailViewModel.stillPreparingSendMessage)
+        ready.set()
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.review?.id == approvalID)
+        #expect(model.sendProgressMessage == nil)
+    }
+
+    /// One press on Send consents to the exact revision at the thread revision on screen:
+    /// no proposal, no sheet, and an Undo window the draft carries (ADR-0279).
+    @Test func testSendIsOnePressWithAnUndoWindow() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+
+        let send = try #require(requests.snapshot.first { $0.url!.path.hasSuffix("/send") })
+        let body = try Self.archiveRequestBody(send)
+        #expect(body["expected_revision"] as? Double == 2)
+        #expect(body["source_revision"] as? Double == 1)
+        #expect((body["idempotency_key"] as? String)?.isEmpty == false)
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
+        #expect(model.review == nil)
+        #expect(model.draft?.status == "sending")
+        #expect(model.canUndoSend)
+        #expect(model.draftActionMessage == nil)
+    }
+
+    /// Undo inside the window takes the send back and returns the editor with the text intact.
+    @Test func testUndoReturnsTheParkedSendToEditing() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.hasSuffix("/send-undo") {
+                return (200, self.draftJSON(revision: 2, body: "Edited before sending").replacingOccurrences(
+                    of: "\"approval_id\":\"\(self.approvalID)\"", with: "\"approval_id\":null"))
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("/send-undo") }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: undone ? self.draftJSON(revision: 2, body: "Edited before sending") : sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.canUndoSend)
+        await model.undoSend()
+
+        let undo = try #require(requests.snapshot.first { $0.url!.path.hasSuffix("/send-undo") })
+        #expect(try Self.archiveRequestBody(undo)["expected_revision"] as? Double == 2)
+        #expect(try Self.archiveRequestBody(undo)["run_id"] as? String == runID.uuidString, "Undo names the send it takes back")
+        #expect(model.draft?.status == "ready")
+        #expect(model.draft?.canEdit == true)
+        #expect(!model.canUndoSend)
+        #expect(model.currentEdit?.body == "Edited before sending")
+        #expect(model.draftActionMessage == nil)
+    }
+
+    /// The revision survives an Undo, so a second press must carry a new idempotency key;
+    /// replaying the cancelled send's key would be refused as already done.
+    @Test func testSendAfterUndoUsesANewIdempotencyKey() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.hasSuffix("/send-undo") {
+                return (200, self.draftJSON(revision: 2, body: "Edited before sending").replacingOccurrences(
+                    of: "\"approval_id\":\"\(self.approvalID)\"", with: "\"approval_id\":null"))
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("/send-undo") }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: undone
+                ? self.draftJSON(revision: 2, body: "Edited before sending")
+                : sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.canUndoSend)
+        await model.undoSend()
+        #expect(model.draft?.status == "ready")
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        #expect(sends.count == 2)
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 2 && keys[0] != keys[1])
+    }
+
+    /// A send that failed must not keep its idempotency key: "try again" is a new
+    /// admission, not a replay of the dead operation.
+    @Test func testSendAfterAFailedSendUsesANewIdempotencyKey() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "FAILED")) }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: sent
+                ? self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")
+                : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.draft?.status == "failed")
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        #expect(sends.count == 2)
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 2 && keys[0] != keys[1])
+    }
+
+    /// A known failure clears the key even when the thread refresh that would show the
+    /// failed draft does not land; the next press after a later refresh is a new request.
+    @Test func testKnownFailureClearsTheSendKeyWithoutADraftRefresh() async throws {
+        let requests = EmailRequestRecorder()
+        let refreshWorks = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "FAILED")) }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            guard sent else { return (200, self.threadJSON(draft: self.draftJSON())) }
+            // The refresh that would show the failed draft is down until the test allows it.
+            guard refreshWorks.isSet else { return (503, Self.error("unavailable", "Mail is briefly unavailable.")) }
+            return (200, self.threadJSON(draft: self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.draft?.status == "sending", "the refresh never landed, so the draft still looks parked")
+        refreshWorks.set()
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draft?.status == "failed")
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        #expect(sends.count == 2)
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 2 && keys[0] != keys[1])
+    }
+
+    /// A watcher left over from an earlier send must not clear the key of, or report
+    /// its failure against, a newer send the owner started after a refresh showed the
+    /// earlier one had failed.
+    @Test func testAnEarlierSendsWatcherLeavesANewerSendAlone() async throws {
+        let requests = EmailRequestRecorder()
+        let secondRunID = UUID(uuidString: "00000000-0000-0000-0000-000000000903")!
+        let firstFailed = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 100_000_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }.count
+            if request.url!.path.hasSuffix("/send") {
+                let run = sends == 1 ? self.runID : secondRunID
+                return (200, "{\"run_id\":\"\(run)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON(runID: run))}")
+            }
+            if request.url!.path.contains("/runs/\(self.runID)") {
+                return (200, self.runJSON(status: firstFailed.isSet ? "FAILED" : "QUEUED"))
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED", id: secondRunID)) }
+            // After the first send, the thread shows it failed; after the second, the new parked send.
+            if sends >= 2 { return (200, self.threadJSON(draft: self.parkedDraftJSON(runID: secondRunID))) }
+            if sends == 1 {
+                return (200, self.threadJSON(draft: self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")))
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        // The first send's watcher keeps polling (run queued) while the thread already shows it failed.
+        let firstSend = Task { await model.sendNow() }
+        try await waitForEmailTestCondition { model.draft?.status == "failed" }
+        let secondSend = Task { await model.sendNow() }
+        try await waitForEmailTestCondition { model.draft?.runID == secondRunID }
+        #expect(model.canUndoSend)
+        // Now the first run reports its failure to the leftover watcher.
+        firstFailed.set()
+        await firstSend.value
+        secondSend.cancel()
+
+        #expect(model.draft?.runID == secondRunID)
+        #expect(model.draftActionMessage == nil, "the earlier send's failure is not the newer send's")
+        #expect(model.canUndoSend)
+    }
+
+    /// A press whose response was lost retries with the same key, so the server can
+    /// replay the admission instead of sending twice.
+    @Test func testALostSendResponseRetriesWithTheSameKey() async throws {
+        let requests = EmailRequestRecorder()
+        let admitted = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                // The first press never gets its answer, through the transport's own
+                // retry as well; the next press carries the same key and is admitted.
+                let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }.count
+                if sends <= 2 { throw URLError(.networkConnectionLost) }
+                admitted.set()
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            return (200, self.threadJSON(draft: admitted.isSet
+                ? self.parkedDraftJSON() : self.draftJSON(revision: 2, body: "Edited before sending")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.draftActionMessage?.isEmpty == false)
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(Set(keys).count == 1, "every attempt of the same press carries one key")
+        #expect(model.draft?.status == "sending")
+    }
+
+    /// Undo that succeeded on the server but whose response was lost (or an Undo from
+    /// another device) leaves a restored draft; the next press is a new request.
+    @Test func testSendAfterALostUndoResponseUsesANewIdempotencyKey() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.hasSuffix("/send-undo") { throw URLError(.networkConnectionLost) }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "CANCELLED")) }
+            let undone = requests.snapshot.contains { $0.url!.path.hasSuffix("/send-undo") }
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            // After the lost Undo, the server shows the restored draft with no run.
+            let restored = self.draftJSON(revision: 2, body: "Edited before sending")
+                .replacingOccurrences(of: "\"run_id\":\"\(self.runID)\"", with: "\"run_id\":null")
+                .replacingOccurrences(of: "\"approval_id\":\"\(self.approvalID)\"", with: "\"approval_id\":null")
+            return (200, self.threadJSON(draft: undone ? restored : sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        await model.undoSend()
+        try await waitForEmailTestCondition { model.draft?.status == "ready" && model.draft?.runID == nil }
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        #expect(sends.count == 2)
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 2 && keys[0] != keys[1])
+    }
+
+    /// A press whose response was lost keeps its key only until a refresh proves the
+    /// press landed or the draft moved on; a failed draft at the same revision then gets
+    /// a new key on the next press.
+    @Test func testARefreshThatShowsTheLostPressFailedRetiresItsKey() async throws {
+        let requests = EmailRequestRecorder()
+        let failed = EmailTestFlag()
+        let model = try makeModel(pollNanoseconds: 1_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }.count
+                if sends <= 2 { throw URLError(.networkConnectionLost) }
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            return (200, self.threadJSON(draft: failed.isSet
+                ? self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")
+                : self.draftJSON(revision: 2, body: "Edited before sending")))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        #expect(model.draftActionMessage?.isEmpty == false)
+        // The server had admitted that press after all; a refresh shows it failed.
+        failed.set()
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.draft?.status == "failed")
+        await model.sendNow()
+
+        let sends = requests.snapshot.filter { $0.url!.path.hasSuffix("/send") }
+        let keys = try sends.map { try #require(Self.archiveRequestBody($0)["idempotency_key"] as? String) }
+        #expect(keys.count == 3)
+        #expect(keys[0] == keys[1] && keys[1] != keys[2])
+    }
+
+    /// A press belongs to the draft it was made on. Moving to another conversation
+    /// while that press's save settles must not send the newly opened draft.
+    @Test func testSendPressedOnOneDraftNeverSendsAnotherOpenedDuringItsSave() async throws {
+        let requests = EmailRequestRecorder()
+        let saveGate = EmailArchiveResponseGate()
+        let otherThreadID = UUID(uuidString: "00000000-0000-0000-0000-000000000811")!
+        let otherDraftID = UUID(uuidString: "00000000-0000-0000-0000-000000000812")!
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "PUT" {
+                return (200, self.draftJSON(revision: 2, body: "Edited on the first draft"), saveGate)
+            }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}", nil)
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED"), nil) }
+            if request.url!.path.hasSuffix(otherThreadID.uuidString) {
+                let other = self.threadJSON(draft: self.draftJSON(body: "A clean reply on the other thread"))
+                    .replacingOccurrences(of: self.threadID.uuidString, with: otherThreadID.uuidString)
+                    .replacingOccurrences(of: self.draftID.uuidString, with: otherDraftID.uuidString)
+                return (200, other, nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { saveGate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited on the first draft")
+        let pressed = Task { await model.sendNow() }
+        try await waitForEmailTestCondition { saveGate.isWaiting }
+        await model.openThread(otherThreadID)
+        #expect(model.draft?.id == otherDraftID)
+        saveGate.release()
+        await pressed.value
+
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }, "nothing may be sent from a press made on another draft")
+        #expect(model.draft?.id == otherDraftID)
+        #expect(model.draft?.status == "ready")
+    }
+
+    /// A refused Undo (the send was already claimed) keeps watching that send so its
+    /// outcome is still reported, instead of leaving a silent "sending" draft.
+    @Test func testRefusedUndoKeepsWatchingTheSend() async throws {
+        let requests = EmailRequestRecorder()
+        let failed = EmailTestFlag()
+        // A 20 ms poll keeps the restarted watcher alive (120 polls, about 2.4 s)
+        // well past the refusal assertion, instead of spending its attempts at once.
+        let model = try makeModel(pollNanoseconds: 20_000_000, now: { ISO8601DateFormatter().date(from: "2026-09-11T00:00:00Z")! }) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.hasSuffix("/send-undo") {
+                return (409, Self.error("invalid_state", "This reply is already on its way and can't be undone."))
+            }
+            // The run stays queued until the test releases its failure, so the refusal
+            // is asserted before the restarted watcher can report anything.
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: failed.isSet ? "FAILED" : "QUEUED")) }
+            return (200, self.threadJSON(draft: failed.isSet
+                ? self.draftJSON(revision: 2, body: "Edited before sending", status: "failed")
+                : self.parkedDraftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Edited before sending")
+        await model.sendNow()
+        await model.undoSend()
+        #expect(model.draftActionMessage == "This reply is already on its way and can't be undone.")
+        // The restarted watcher reports the send's own outcome once it lands.
+        failed.set()
+        try await waitForEmailTestCondition { model.draftActionMessage == EmailViewModel.sendFailedMessage }
+        #expect(model.draft?.status == "failed")
+    }
+
+    /// A press the server refuses because mail arrived shows that mail, in the server's words.
+    @Test func testSendRefusedForUnseenMailShowsTheNewMail() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (409, Self.error("invalid_state", "New mail arrived on this thread. Read it, then send again."))
+            }
+            let refused = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, refused ? self.newMailThreadJSON(draft: self.staleDraftJSON()) : self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.sendNow()
+
+        #expect(model.draftActionMessage == "New mail arrived on this thread. Read it, then send again.")
+        #expect(model.draft?.stale == true)
+        #expect(!model.canUndoSend)
+    }
+
+    /// Once the window closes and the run completes, the draft reads Sent.
+    @Test func testSendReportsSentWhenTheRunCompletes() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "PUT" { return (200, self.draftJSON(revision: 2, body: "Edited before sending")) }
+            if request.url!.path.hasSuffix("/send") {
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") {
+                let polls = requests.snapshot.filter { $0.url!.path.contains("/runs/") }.count
+                return (200, self.runJSON(status: polls >= 3 ? "COMPLETED" : "QUEUED"))
+            }
+            let polls = requests.snapshot.filter { $0.url!.path.contains("/runs/") }.count
+            let sent = requests.snapshot.contains { $0.url!.path.hasSuffix("/send") }
+            return (200, self.threadJSON(draft: polls >= 3 ? self.draftJSON(revision: 2, status: "sent") : sent ? self.parkedDraftJSON() : self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.sendNow()
+
+        #expect(model.draft?.status == "sent")
+        #expect(!model.canUndoSend)
+        #expect(model.draftActionMessage == nil)
+    }
+
     /// A reply over the approval view's 512-character ceiling arrives truncated. The
     /// published digest still proves the frozen body is exactly the displayed draft,
     /// so review opens instead of silently refusing every long email.
@@ -2643,6 +3208,30 @@ import SwiftUI
         #expect(model.learning?.styleExamples == 1)
     }
 
+    /// A learning reset shows while it runs and confirms when done; the sheet barely changes otherwise.
+    @Test func testResettingLearningShowsProgressAndConfirms() async throws {
+        let requests = EmailRequestRecorder()
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("learning/reset") {
+                _ = gate.wait(timeout: .now() + 5)
+                return (200, "{\"paused\":false,\"profile_revision\":3,\"excluded_sources\":0,\"style_examples\":0,\"history_processed\":25,\"history_complete\":false}")
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, self.pageJSON())
+        }
+        let reset = Task { await model.resetLearning(scope: "preferences") }
+        try await waitForEmailTestCondition { requests.snapshot.contains { $0.url!.path.hasSuffix("learning/reset") } }
+        #expect(model.isResettingLearning)
+        gate.signal()
+        await reset.value
+        #expect(!model.isResettingLearning)
+        #expect(toasts.current?.text == "Importance preferences reset.")
+    }
+
     @Test func testWritingExampleCannotEndorseAfterAConflictingSave() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -2692,8 +3281,195 @@ import SwiftUI
         }.joined(separator: ",")
     }
 
+    // MARK: - Saving an attachment (ADR-0296)
+
+    private func saveOperationJSON(_ status: String) -> String {
+        "{\"operation_id\":\"\(threadID)\",\"run_id\":\"\(runID)\",\"status\":\"\(status)\",\"replayed\":false}"
+    }
+
+    @Test func testSavingAnAttachmentNamesItsPositionAndFollowsTheOperationToSaved() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            return (200, self.saveOperationJSON(server.read() == 1 ? "RUNNING" : "COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 2)
+        #expect(model.attachmentSave(key) == nil)
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+
+        #expect(model.attachmentSave(key) == .saved)
+        let bodies = server.bodies
+        #expect(bodies.count == 1)
+        let body = try #require(bodies.first)
+        #expect(body["message_id"] as? String == "m1")
+        #expect(body["attachment_index"] as? Int == 2)
+        #expect(body["filename"] as? String == "invoice.pdf")
+        #expect((body["idempotency_key"] as? String)?.isEmpty == false)
+        #expect(server.reads == 2)
+    }
+
+    @Test func testAFailedSaveSaysSoAndAPressAfterItIsANewRequest() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            return (200, self.saveOperationJSON(server.bodies.count == 1 ? "FAILED" : "COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed(let message) = model.attachmentSave(key) else {
+            Issue.record("A failed run must read as failed")
+            return
+        }
+        #expect(message.contains("could not be saved"))
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(Set(server.bodies.compactMap { $0["idempotency_key"] as? String }).count == 2)
+    }
+
+    @Test func testARefusedSaveShowsTheServersReasonAndASavedFileIsNotSavedAgain() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                if server.bodies.count == 1 {
+                    return (409, "{\"error\":{\"code\":\"conflict\",\"message\":\"Veetbot is still working on this thread. Try again in a moment.\",\"details\":{}}}")
+                }
+            }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed(let message) = model.attachmentSave(key) else {
+            Issue.record("A refusal must read as failed")
+            return
+        }
+        #expect(message.contains("still working"))
+
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(server.bodies.count == 2, "A saved file needs no second copy")
+    }
+
+    @Test func testARetryAfterALostAnswerRepeatsTheSameRequest() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                // The transport retries a lost request, so the whole press must lose it.
+                if !server.recovered { throw URLError(.networkConnectionLost) }
+                return (200, self.saveOperationJSON("COMPLETED"))
+            }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed = model.attachmentSave(key) else {
+            Issue.record("A lost answer must offer Retry")
+            return
+        }
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count >= 2)
+        #expect(Set(server.bodies.compactMap { $0["idempotency_key"] as? String }).count == 1)
+    }
+
+    @Test func testARetryAfterALostStatusFollowsTheAdmittedOperation() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            // The transport retries reads, so every read in the first press fails.
+            if server.bodies.count == 1, !server.recovered { throw URLError(.networkConnectionLost) }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed = model.attachmentSave(key) else {
+            Issue.record("A lost status must offer Retry")
+            return
+        }
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count == 1, "The admitted operation needs no second request")
+    }
+
+    @Test func testARefusedStatusReadKeepsFollowingTheAdmittedOperation() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            if !server.recovered {
+                return (404, "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found.\",\"details\":{}}}")
+            }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        guard case .failed = model.attachmentSave(key) else {
+            Issue.record("A refused read must offer Retry")
+            return
+        }
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count == 1, "A retained operation is never admitted again")
+    }
+
+    @Test func testAConnectionResetKeepsFollowingAnAdmittedSave() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("/attachments/save") {
+                server.posted(try Self.archiveRequestBody(request))
+                return (200, self.saveOperationJSON("QUEUED"))
+            }
+            if !server.recovered { throw URLError(.networkConnectionLost) }
+            return (200, self.saveOperationJSON("COMPLETED"))
+        }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        // Signing in again resets the connection, for the same account and the same file.
+        model.resetConnection()
+        #expect(model.attachmentSave(key) == nil)
+        server.recover()
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        #expect(server.bodies.count == 1, "A second press must not save a second copy")
+    }
+
+    @Test func testAConnectionResetForgetsSaveState() async throws {
+        let model = try makeModel(pollNanoseconds: 1_000) { _ in (200, self.saveOperationJSON("COMPLETED")) }
+        let key = EmailAttachmentKey(threadID: threadID, messageID: "m1", index: 0)
+        await model.saveAttachment(key, filename: "invoice.pdf")
+        #expect(model.attachmentSave(key) == .saved)
+        model.resetConnection()
+        #expect(model.attachmentSave(key) == nil)
+    }
+
+    @Test func testAFileOverTheLimitCannotBeSaved() {
+        #expect(EmailAttachmentView.canSave(size: nil))
+        #expect(EmailAttachmentView.canSave(size: 32 * 1024 * 1024))
+        #expect(!EmailAttachmentView.canSave(size: 32 * 1024 * 1024 + 1))
+    }
+
     private func makeModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
+        pollNanoseconds: UInt64 = 1_000_000_000,
         now: @escaping () -> Date = Date.init,
         statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         toasts: ToastCenter? = nil,
@@ -2708,7 +3484,8 @@ import SwiftUI
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
         return EmailViewModel(
-            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, now: now, statusBackoff: statusBackoff,
+            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, pollNanoseconds: pollNanoseconds,
+            now: now, statusBackoff: statusBackoff,
             toasts: toasts ?? ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
         )
     }
@@ -2742,6 +3519,24 @@ import SwiftUI
     private func draftJSON(revision: Int = 1, body: String = "Thanks, I will review the agenda.", status: String = "ready") -> String {
         """
         {"id":"\(draftID)","thread_id":"\(threadID)","account_id":"personal","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board discussion","body":"\(body)","status":"\(status)","stale":false,"run_id":"\(runID)","approval_id":"\(approvalID)","session_id":"\(threadID)","updated_at":"2026-09-11T00:00:00Z"}
+        """
+    }
+    /// The draft the server returns while a one-press send is parked in its undo window.
+    private func parkedDraftJSON(runID: UUID? = nil) -> String {
+        draftJSON(revision: 2, body: "Edited before sending", status: "sending")
+            .replacingOccurrences(of: "\"approval_id\":\"\(approvalID)\"", with: "\"approval_id\":null")
+            .replacingOccurrences(of: "\"run_id\":\"\(self.runID)\"", with: "\"run_id\":\"\(runID ?? self.runID)\"")
+            .replacingOccurrences(of: "\"updated_at\":\"2026-09-11T00:00:00Z\"",
+                                  with: "\"updated_at\":\"2026-09-11T00:00:00Z\",\"send_undo_until\":\"2026-09-11T00:00:10Z\"")
+    }
+    private func runJSON(status: String, id: UUID? = nil) -> String {
+        """
+        {"id":"\(id ?? runID)","session_id":"\(threadID)","status":"\(status)","step_count":1,"model_call_count":0,"tool_call_count":0,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8},"created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z"}
+        """
+    }
+    private func messageJSON(id: String, sender: String, body: String, sentAt: String) -> String {
+        """
+        {"id":"\(id)","sender":"\(sender)","to":["owner@example.test"],"cc":[],"subject":"Board discussion","body":"\(body)","sent_at":"\(sentAt)","complete":true}
         """
     }
     /// The thread after new mail arrived: its revision advanced past the draft's source revision.
@@ -2839,6 +3634,14 @@ private final class EmailArchiveRaceURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// A switch the test flips while the handler keeps answering on URLSession's queue.
+private final class EmailTestFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.withLock { value = true } }
+    var isSet: Bool { lock.withLock { value } }
+}
+
 private final class EmailRequestRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [URLRequest] = []
@@ -2852,6 +3655,20 @@ private final class StatusBackoffRecorder: @unchecked Sendable {
     private var values: [UInt64] = []
     func append(_ value: UInt64) { lock.withLock { values.append(value) } }
     var snapshot: [UInt64] { lock.withLock { values } }
+}
+
+/// What the attachment tests' fake server saw; URL loading runs off the main actor.
+private final class AttachmentSaveServer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [[String: Any]] = []
+    private var readCount = 0
+    private var isRecovered = false
+    var recovered: Bool { lock.withLock { isRecovered } }
+    func recover() { lock.withLock { isRecovered = true } }
+    var bodies: [[String: Any]] { lock.withLock { recorded } }
+    var reads: Int { lock.withLock { readCount } }
+    func posted(_ body: [String: Any]) { lock.withLock { recorded.append(body) } }
+    func read() -> Int { lock.withLock { readCount += 1; return readCount } }
 }
 
 private final class EmailTestURLProtocol: URLProtocol {

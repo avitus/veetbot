@@ -15,6 +15,8 @@ import Foundation
     @Published public private(set) var isForgotten = false
     @Published public private(set) var requiresRefresh = false
     @Published public private(set) var canRetrySave = false
+    /// The possible duplicate whose answer is being sent, so its callout shows progress.
+    @Published public private(set) var resolvingSuggestionID: UUID?
     @Published public private(set) var identityEvidence: [PeopleIdentityEvidenceView] = []
     @Published public private(set) var isLoadingIdentityEvidence = false
     @Published public private(set) var identityEvidenceError: String?
@@ -56,6 +58,7 @@ import Foundation
     private var isConnectionValid = true
     private var connectionObserver: AnyCancellable?
     private let makeAPIClient: @Sendable () async -> VeetbotAPIClient?
+    private let toasts: ToastCenter
     private var requestID = UUID()
     private var nextHistoryCursor: String?
     private var historyStarted = false
@@ -71,8 +74,9 @@ import Foundation
         let api: VeetbotAPIClient
     }
 
-    public init(personID: UUID, notifications: NotificationCenter = .default, makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = { await MemoryViewModel.makeDefaultAPIClient() }) {
+    public init(personID: UUID, notifications: NotificationCenter = .default, makeAPIClient: @escaping @Sendable () async -> VeetbotAPIClient? = { await MemoryViewModel.makeDefaultAPIClient() }, toasts: ToastCenter? = nil) {
         self.personID = personID
+        self.toasts = toasts ?? .shared
         self.makeAPIClient = makeAPIClient
         connectionObserver = notifications.publisher(for: .peopleConnectionChanged).sink { [weak self] _ in
             Task { @MainActor in self?.invalidateConnection() }
@@ -275,7 +279,9 @@ import Foundation
 
     /// Merges a possible duplicate, or keeps the pair apart for good.
     public func resolveSuggestion(_ suggestion: PeopleMergeSuggestionView, decision: String, sessionID: UUID?) async {
-        guard isConnectionValid else { return }
+        guard isConnectionValid, resolvingSuggestionID == nil else { return }
+        resolvingSuggestionID = suggestion.id
+        defer { resolvingSuggestionID = nil }
         await submit(.suggestion(suggestion.id), body: ["decision": .string(decision),
             "expected_revision": .number(Double(suggestion.revision))], sessionID: sessionID)
     }
@@ -336,8 +342,13 @@ import Foundation
                 let result = try await write.api.correctPerson(personID, body: write.body, key: write.key)
                 guard isConnectionValid else { return }
                 if let erasure = result.erasure { receipt = erasure }
+                // Confirming or rejecting leaves the row as it was; the toast says it took.
+                if write.body["operation"] == .string("affirm") { toasts.show("Fact confirmed.") }
+                if write.body["operation"] == .string("reject") { toasts.show("Fact rejected.") }
             case .suggestion(let suggestionID):
                 _ = try await write.api.resolveMergeSuggestion(suggestionID, body: write.body, key: write.key)
+                guard isConnectionValid else { return }
+                toasts.show(write.body["decision"] == .string("merge") ? "Merged." : "Kept separate. Veetbot will not suggest this pair again.")
             case .identity, .forget:
                 let result = try await (write.kind == .identity
                     ? write.api.identityOperation(body: write.body, key: write.key)

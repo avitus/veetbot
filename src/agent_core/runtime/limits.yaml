@@ -10,7 +10,8 @@ worker:
   lease_seconds: 30.0
   heartbeat_divisor: 3
   reserved_interactive_slots: 1
-  reserved_async_slots: 1
+  # One process per slot, so a long scheduled run does not hold up the rest (ADR-0295).
+  reserved_async_slots: 2
 sweeps:
   reclaim_expired_seconds: 5
   approval_reaper_seconds: 30
@@ -40,6 +41,7 @@ email:
   daily_cost: 20.0
   monthly_cost: 200.0
   unsubscribe_grace_days: 10
+  check_interval_seconds: 300
 scheduling:
   scan_batch: 100
   fallback_poll_seconds: 30

@@ -63,6 +63,12 @@ class FakeStatefulRuntime:
     async def navigate(self, url: str) -> BrowserObservation:
         return BrowserObservation(url=url, revision="r1")
 
+    async def open_for_sign_in(self, url: str) -> None:
+        del url
+
+    async def page_url(self) -> str:
+        return "https://example.org"
+
     async def observe(self) -> BrowserObservation:
         return BrowserObservation(url="https://example.org", revision="r1")
 
@@ -86,10 +92,22 @@ class FakeStatefulRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         on_stage(BrowserVerificationStage.NAVIGATE)
         return BrowserPageEvidence(
             on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        del deadline
+        return BrowserPageEvidence(
+            on_allowed_origin=True,
+            path=urlsplit(url).path or "/",
+            challenge_visible=False,
+            observed_seconds=observed_seconds,
         )
 
     async def storage_state(self) -> dict[str, object]:
@@ -250,6 +268,35 @@ async def test_hosted_runtime_normalizes_low_level_navigation_failures() -> None
     assert disallowed.value is low_level.error
 
 
+async def test_hosted_runtime_normalizes_low_level_sign_in_open_failures() -> None:
+    """Opening a page for the owner keeps navigate's stable failure codes."""
+
+    class FailingOpenRuntime(FakeStatefulRuntime):
+        error: Exception = RuntimeError("provider-private-diagnostic")
+
+        async def open_for_sign_in(self, url: str) -> None:
+            del url
+            raise self.error
+
+    low_level = FailingOpenRuntime()
+    runtime = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=low_level,
+        proxy_factory=lambda *args, **kwargs: None,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(BrowserProviderError) as unavailable:
+        await runtime.open_for_sign_in("https://example.org/login")
+    low_level.error = BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+    with pytest.raises(BrowserProviderError) as disallowed:
+        await runtime.open_for_sign_in("https://example.org/login")
+
+    assert unavailable.value.reason_code == "tool.browser.provider_unavailable"
+    assert unavailable.value.retryable is True
+    assert "provider-private-diagnostic" not in str(unavailable.value)
+    assert disallowed.value is low_level.error
+
+
 async def test_hosted_runtime_forwards_page_evidence_and_normalizes_failures() -> None:
     """ADR-0128: verification evidence passes through; raw failures become stable codes."""
 
@@ -261,10 +308,13 @@ async def test_hosted_runtime_forwards_page_evidence_and_normalizes_failures() -
             url: str,
             *,
             on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+            challenge_deadline: float | None = None,
         ) -> BrowserPageEvidence:
             if self.error is not None:
                 raise self.error
-            return await super().load_page_evidence(url, on_stage=on_stage)
+            return await super().load_page_evidence(
+                url, on_stage=on_stage, challenge_deadline=challenge_deadline
+            )
 
     low_level = FailingEvidenceRuntime()
     runtime = HostedPlaywrightSessionRuntime(

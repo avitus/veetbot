@@ -350,6 +350,8 @@ import UserNotifications
                         {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"WAITING_FOR_APPROVAL","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
                         """
                 )
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/approvals/\(approvalID.uuidString)"):
                 return try response(
                     for: request,
@@ -1363,7 +1365,7 @@ import UserNotifications
     }
 
     /// Preserve a newly focused approval when an earlier history refresh finishes.
-    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
+    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#, #"{"cockpit_refresh":true}"#])
     func testReconciliationPreservesNewlyFocusedOperationalApproval(metadata: String) async throws {
         let sessionID = UUID(), runID = UUID(), approvalID = UUID()
         let lock = NSLock()
@@ -1398,6 +1400,8 @@ import UserNotifications
                 return try response(for: request, statusCode: 200, body: """
                     {"id":"\(runID)","session_id":"\(sessionID)","parent_run_id":null,"status":"WAITING_FOR_APPROVAL","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
                     """)
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/approvals/\(approvalID)"):
                 return try response(for: request, statusCode: 200, body: """
                     {"id":"\(approvalID)","run_id":"\(runID)","session_id":"\(sessionID)","status":"PENDING","tool_name":"sandbox.run_command","action_summary":"Run command","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-08-14T00:04:00Z","resolved_at":null,"resolved_by":null,"decision":null}
@@ -1438,7 +1442,7 @@ import UserNotifications
     }
 
     /// Remove cached internal-session rows while preserving their server audit records.
-    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#])
+    @Test(arguments: [#"{"purpose":"people-management"}"#, #"{"email_operational":true}"#, #"{"cockpit_refresh":true}"#])
     func testSynchronizationPrunesCachedOperationalSessions(metadata: String) async throws {
         let conversationID = UUID()
         let auditID = UUID()
@@ -1940,6 +1944,8 @@ import UserNotifications
         var offered = true
         /// Whether accepting continues the source run parked on a question.
         var continuesSourceRun = false
+        /// How the offered login's latest sign-in began (ADR-0297).
+        var lastSignIn: String?
 
         final class Log: @unchecked Sendable {
             var connections: [URLRequest] = []
@@ -1974,8 +1980,10 @@ import UserNotifications
             #"{"offer":{"offer_id":"\#(offerID.uuidString)","source_sequence":50,"connected_origin":null,"websites":[{"profile_id":"\#(profileID.uuidString)","origins":["https://mychart.example-health.org"],"status":"\#(status)"}],"expires_at":"2026-10-26T17:14:49Z"}}"#
         }
 
+        var lastSignInJSON: String { lastSignIn.map { "\"\($0)\"" } ?? "null" }
+
         var profilesBody: String {
-            #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://mychart.example-health.org"],"status":"\#(listedStatus ?? status)","generation":7,"created_at":"2026-10-21T05:04:11Z","updated_at":"2026-10-21T17:04:59Z","last_used_at":null}],"next_cursor":null}"#
+            #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://mychart.example-health.org"],"status":"\#(listedStatus ?? status)","generation":7,"created_at":"2026-10-21T05:04:11Z","updated_at":"2026-10-21T17:04:59Z","last_used_at":null,"last_sign_in_mode":\#(lastSignInJSON)}],"next_cursor":null}"#
         }
 
         /// Answers a request as (status, body, extra headers), or nil for a 404.
@@ -1995,6 +2003,9 @@ import UserNotifications
                 return (200, accepted ? #"{"offer":null}"# : offerBody, [:])
             case ("GET", "/v1/browser-profiles"):
                 return (200, profilesBody, [:])
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                let ceremony = #"{"id":"\#(UUID().uuidString)","profile_id":"\#(profileID.uuidString)","status":"needs_user","expires_at":"2099-01-01T00:00:00Z","launch_url":"https://browser.example/authentication/1#token"}"#
+                return (201, ceremony, [:])
             case ("GET", "/v1/browser-task-grants"):
                 return (200, #"{"items":[],"next_cursor":null}"#, [:])
             case ("PUT", "/v1/sessions/\(sessionID.uuidString)/website"):
@@ -2120,6 +2131,22 @@ import UserNotifications
         await model.acceptWebsiteOffer(website)
 
         #expect(model.deviceSignInRequest?.profileID == server.profileID)
+        #expect(server.connections.isEmpty)
+    }
+
+    @Test
+    func testAWebsiteLastSignedInRemotelyStartsThereBeforeConnecting() async throws {
+        var server = WebsiteOfferServer()
+        server.status = "needs_user"
+        server.lastSignIn = "remote"
+        let model = try await websiteOfferModel(server)
+        let website = try #require(model.websiteOffer?.websites.first)
+
+        await model.acceptWebsiteOffer(website)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(model.websiteAuthenticationLaunchURL != nil)
+        #expect(model.isWebsiteAccessPresented)
         #expect(server.connections.isEmpty)
     }
 
@@ -3922,6 +3949,8 @@ import UserNotifications
                     """)
             case ("GET", "/v1/runs/\(ids.run)/events"):
                 return try response(for: request, statusCode: 200, body: "")
+            case ("GET", "/v1/approvals"):
+                return try response(for: request, statusCode: 200, body: #"{"items":[],"next_cursor":null}"#)
             case ("GET", "/v1/approvals/\(ids.approval)"):
                 return try response(for: request, statusCode: 200, body: """
                     {"id":"\(ids.approval)","run_id":"\(ids.run)","session_id":"\(ids.session)","status":"PENDING","tool_name":"sandbox.run","action_summary":"Run code","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-09-11T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}

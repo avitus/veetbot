@@ -380,7 +380,7 @@ joined by dots, of which the last is the action. The four `browser.` scopes
 have three; the other forty-two have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1431` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1439` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -1641,6 +1641,12 @@ gesture in Email mode satisfies the approval through the exact-match consent
 consumer ADR-0095 introduced, never through a standing authorization, and a
 Chat proposal parks in the ordinary queue.
 
+[ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md) adds one more arm:
+`save_attachment` on a Gmail read server, which the default matrix would allow
+as a network read. The profile is unchanged. The application-only
+`fetch_attachment` stays out of the arm, since the model cannot call it and the
+owner's press on Save is the request.
+
 
 ADR-0143 adds the exact `notification.write` scope for the bounded notification
 sync route. It authorizes terminal-result receipts and reconciliation, never
@@ -1682,3 +1688,34 @@ diagnostic rather than a denial.
 The edit moves the content-addressed policy version. The step that makes it
 updates the pinned shipped version and names any version-bound evidence it
 affects. [cockpit.md](cockpit.md#the-tools) owns the tool contract.
+
+### One widget installation approval (ADR-0270)
+
+The owner explicitly replaced widget creation's per-step approvals with one
+summarized approval for its exact prepared package. `cockpit.install` uses the
+derived jobs policy profile and requires approval. Its service verifies the
+approved normalized arguments hash, tool, owner and conversation before any
+publication or grant. An immutable successful `cockpit.prepare` invocation binds
+all code, access and cadence; the card does not grant arbitrary future changes.
+A durable authorization receipt allows idempotent continuation of that same
+installation, never a different proposal or a policy denial.
+
+The existing job standing-authorizer seam also admits `job.manage` reads and
+trials in interactive turns whose latest user message has USER trust, even
+after memory or external results. A trial either has no external access or uses
+an existing owned grant without changing its private inputs; its feeds remain
+previews. Untrusted content still cannot authorize new grants or publication.
+These narrow owner-authorized preparation semantics do not change the global
+trust overlay or authorize scheduled/delegated authoring.
+
+
+### Jobs and semantic recall coexistence (ADR-0272)
+
+A jobs-enabled configuration may receive exact semantic admission after the
+coexistence repairs and operational assessment. Jobs remain outside implicit
+semantic retrieval; invalid semantic admission does not disable jobs. Reuse of
+external job authority binds the approval and immutable code revision. Live
+trials require execution authority even when publication would otherwise be
+allowed; an exact owned grant may satisfy that requirement. Existing approved
+schedules retain their original code/grant pins. Public jobs branch writes are
+restricted to the screened publishing App, without a human bypass.

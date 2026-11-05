@@ -69,6 +69,10 @@ TOOL_MESSAGES: dict[str, str] = {
     ),
     "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
     "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",
+    "tool.web.image_unavailable": (
+        "The photo could not be inspected. Use a public JPEG, PNG or WebP URL, or a "
+        "SmugMug link with one photo selected."
+    ),
     "tool.web.json_invalid": ("The page is not a JSON document; read it with web.fetch instead."),
     "tool.web.json_selection_too_large": (
         "The selected fields exceed the tool's output limit; select fewer fields or narrower paths."
@@ -164,6 +168,16 @@ TOOL_MESSAGES: dict[str, str] = {
         "No capture with that id can be read in this chat. Use an artifact id from a "
         "capture marker or truncation pointer in this conversation."
     ),
+    # ADR-0277: artifact.delete removes only files Chat generated in this chat.
+    "artifact.not_deletable": (
+        "Nothing was deleted. None of those ids is a file you generated in this chat; the "
+        "user's uploads and other chats' files cannot be deleted. Use the artifact ids "
+        "shown on files in this conversation."
+    ),
+    "artifact.untrusted_turn": (
+        "Nothing was deleted. This turn read external content, so it cannot delete files. "
+        "Ask the user to repeat the request in a new message."
+    ),
     "tool.capture.section_out_of_range": (
         "That section is past the end of the capture. The capture marker and every "
         "section header give the number of sections."
@@ -258,6 +272,15 @@ TOOL_MESSAGES: dict[str, str] = {
         "was read. Call cockpit.read read_widget and pass its head_revision_id as "
         "expected_revision to update it."
     ),
+    "cockpit.change_too_large": (
+        "Not published. This change was too large to show the owner whole. Make a smaller "
+        "change, or tell the owner it can be asked for in a new chat that reads no outside "
+        "content."
+    ),
+    "cockpit.change_not_shown": (
+        "Not published. The approval card could not show the owner this change. Tell the "
+        "owner, and try again."
+    ),
     "cockpit.expected_revision_required": (
         "An update names the widget's head_revision_id as expected_revision; call "
         "cockpit.read read_widget for it."
@@ -266,6 +289,11 @@ TOOL_MESSAGES: dict[str, str] = {
         "That widget is deleted. Restore it with the restore operation, or use another slug."
     ),
     "cockpit.widget_not_deleted": "Only a deleted widget can be restored.",
+    "cockpit.removal_queued": (
+        "Not published. The owner approved removing this widget and that removal is still "
+        "waiting for its commit, so it would take this change with it. Tell the owner. Once "
+        "the widget is deleted, restore it or create it again."
+    ),
     "cockpit.layout_changed": (
         "The layout changed since it was read. Call cockpit.read get_layouts and pass its "
         "revision as expected_revision."

@@ -47,31 +47,23 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 
-def _spec(*, video: bool, references: bool = True) -> ToolSpec:
-    request_type = (
-        (VideoGenerationArguments if video else ImageGenerationArguments)
-        if references
-        else (VideoGenerationRequest if video else ImageGenerationRequest)
-    )
+def _spec(*, video: bool) -> ToolSpec:
+    request_type = VideoGenerationArguments if video else ImageGenerationArguments
     kind = "video" if video else "image"
     return ToolSpec(
         name=f"{kind}.generate",
-        version="1.1.0" if references else "1.0.0",
+        version="1.1.0",
         description=(
             f"Generate one {kind} from a text prompt and attach the file to your reply. "
             "Requires approval and incurs provider charges. "
             "Do not repeat a failed or timed-out generation without asking the user: "
             "the provider may already have charged. "
+            "Optionally supply reference_image_ids from this chat's attachment labels "
+            "or generated files. "
             + (
-                "Optionally supply reference_image_ids from this chat's attachment labels "
-                "or generated files. "
-                + (
-                    "Order them first frame, then optional last frame."
-                    if video
-                    else "Use up to eight ordered images for editing or visual references."
-                )
-                if references
-                else "No reference images or editing."
+                "Order them first frame, then optional last frame."
+                if video
+                else "Use up to eight ordered images for editing or visual references."
             )
         ),
         input_schema=request_type.model_json_schema(),
@@ -208,16 +200,6 @@ class VideoGenerationTool(ImageGenerationTool):
     )
     media_type = "video/mp4"
     extension = "mp4"
-
-
-class LegacyImageGenerationTool(ImageGenerationTool):
-    spec = _spec(video=False, references=False)
-    request_type = ImageGenerationRequest
-
-
-class LegacyVideoGenerationTool(VideoGenerationTool):
-    spec = _spec(video=True, references=False)
-    request_type = VideoGenerationRequest
 
 
 def _failure(kind: ToolFailureKind, reason: str, detail: str) -> ToolResult:

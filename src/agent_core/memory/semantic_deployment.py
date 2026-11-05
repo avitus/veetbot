@@ -13,8 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.config import ConfigurationError, DeploymentMode, Settings, load_config_document
 from agent_core.domain.agents import Principal
 from agent_core.domain.credentials import CredentialRef
+from agent_core.domain.embeddings import EmbeddingError
 from agent_core.domain.general_recall_release import RecallReleaseIdentity
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig, local_execution
+from agent_core.domain.semantic_memory import EmbeddingSpace
 from agent_core.domain.semantic_work import EmbeddingConfig
 from agent_core.memory.bounded_recall_admission import BoundedAdmission, bind_bounded_recall
 from agent_core.memory.general_recall_evidence import (
@@ -32,6 +34,10 @@ from agent_core.memory.reconsolidation_policy import POLICY_VERSION
 from agent_core.memory.semantic_indexing import SemanticIndexingPass
 from agent_core.memory.semantic_runtime import RunSemanticQueries
 from agent_core.memory.source_recovery import BoundedSourceRecovery
+from agent_core.memory.standing_recall_admission import (
+    STANDING_ADMISSION_VERSION,
+    bind_standing_recall,
+)
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock
 from agent_core.ports.embeddings import EmbeddingProvider, LocalEmbeddingProvider
@@ -73,6 +79,10 @@ class IndexConfiguration(BaseModel):
 @dataclass(frozen=True)
 class SemanticServices:
     index: SemanticIndexingPass
+    # The admitted provider and its space, which the knowledge semantic arm
+    # shares (ADR-0289) rather than composing a second egress path.
+    provider: EmbeddingProvider
+    space: EmbeddingSpace
     queries: RunSemanticQueries | None = None
     local_provider: LocalEmbeddingProvider | None = None
     source_recovery: BoundedSourceRecovery | None = None
@@ -155,6 +165,13 @@ def bind_index_manifest(
     }
     raw = _read_bounded(manifest)
     document = json.loads(raw, object_pairs_hook=_unique_object)
+    if isinstance(document, dict) and document.get("version") == STANDING_ADMISSION_VERSION:
+        # ADR-0290: the owner's standing decision; no release census, no expiry.
+        if principal is None or clock is None:
+            raise ValueError("Standing recall requires actual owner and clock")
+        return bind_standing_recall(
+            manifest, evidence, dependencies, principal=principal, clock=clock
+        )
     if isinstance(document, dict) and document.get("version") in (
         "recall-bounded-admission@1",
         "recall-bounded-admission@2",
@@ -308,7 +325,7 @@ async def compose_indexing(
         assert local_provider_factory is not None and profile.model_directory is not None
         try:
             local_provider = local_provider_factory(profile.model_directory, profile.local)
-        except Exception:
+        except EmbeddingError:
             raise ConfigurationError("Semantic index local model is unavailable") from None
         provider = local_provider
         if query_enabled:
@@ -342,6 +359,8 @@ async def compose_indexing(
     # No provider object, model loading or credential resolution before admission.
     return SemanticServices(
         admitted=admitted,
+        provider=provider,
+        space=profile.embedding.space,
         index=SemanticIndexingPass(
             factory,
             clock,

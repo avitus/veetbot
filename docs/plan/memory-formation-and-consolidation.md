@@ -232,7 +232,13 @@ the project it was learned in, and is defined in
 
 [ADR-0232](../adr/0232-owner-memory-incident-repairs.md) adds a bounded,
 same-session possession-restatement match without using broad subject similarity
-as identity. A generic child-existence claim cannot supersede a named child.
+as identity;
+[ADR-0283](../adr/0283-owner-possessions-reach-recall-and-corroborate.md) lets
+that narrow assertion key match across sessions, so a possession the owner
+states in three chats is one corroborated active belief rather than three
+provisional ones; the belief keeps its own session's event numbers, the other
+chat's corroboration is remembered by the derivation key on the event it
+appends, and replaying that chat changes nothing. A generic child-existence claim cannot supersede a named child.
 Bare capitalized possessives alone do not establish possessions. The People
 provider path classifies direct owner possessions as attributes while preserving
 the frozen formation@9 classification. New `memory.remember` versions default
@@ -943,9 +949,9 @@ itself, the subject is the model's grounded subject of at most 64 characters
 or the authorized host when omitted, the host is the belief's
 `attribution_host` rather than text inside the statement, and portability is
 `contextual`; recall prints `(learned from <host>)` beside the identifier.
-Rows learned under `@1` keep their embedded citation until
-`agent memory reshape --policy owner-source-learning@1 --confirm` supersedes
-each with its `@2` shape through formation, citing the same source events;
+The rows learned under `@1` were superseded with their `@2` shape through
+formation on 2026-10-26, citing the same source events (ADR-0250; ADR-0266
+retired the reshape command);
 receipts follow `superseded_by`, a `@1` deletion or correction still blocks
 the `@2` identity, and an expired claim may be learned again from a fresh read;
 a retired claim still refuses, even once its expiry has passed.

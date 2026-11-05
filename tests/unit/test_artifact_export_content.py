@@ -13,8 +13,6 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.execution.local_workspace import LocalWorkspaceHandle
-from agent_core.bootstrap import build
-from agent_core.config import load_settings
 from agent_core.domain.artifacts import StoredArtifactRef
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
@@ -28,10 +26,9 @@ from agent_core.domain.policies import (
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import DEFAULT_RULESET
-from agent_core.tools.artifact_export import ArtifactExportTool, LegacyArtifactExportTool
+from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.validation import validate_and_normalize
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, principal, run, tool_context
-from tests.unit.test_config import base_environment
 
 ARTIFACT_ID = UUID(int=4242)
 
@@ -146,20 +143,6 @@ async def test_path_mode_tells_the_model_the_file_is_attached(tmp_path: Path) ->
     }
 
 
-async def test_the_pinned_legacy_version_also_reports_the_attachment(tmp_path: Path) -> None:
-    workspace = LocalWorkspaceHandle(tmp_path / "workspace")
-    await workspace.write("report.txt", b"legacy\n")
-    writer = _RecordingWriter()
-
-    result = await LegacyArtifactExportTool().execute(
-        {"path": "report.txt", "filename": "report.txt", "media_type": "text/plain"},
-        _context(writer, workspace),
-    )
-
-    assert result.ok is True, result.failure
-    assert json.loads(_only_text(result.content))["attached_to_reply"] is True
-
-
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -214,37 +197,17 @@ async def test_content_mode_reports_an_unavailable_writer_as_internal() -> None:
 
 def test_version_two_adds_content_and_defaults_the_path() -> None:
     spec = ArtifactExportTool.spec
-    legacy = LegacyArtifactExportTool.spec
 
     assert (spec.name, spec.version) == ("artifact.export", "2.0.0")
-    assert (legacy.name, legacy.version) == ("artifact.export", "1.0.0")
     assert spec.input_schema["properties"]["path"]["default"] == ""
     assert spec.input_schema["properties"]["content"] == {
         "type": "string",
         "maxLength": 1_048_576,
     }
     assert spec.input_schema["required"] == ["filename", "media_type"]
-    assert legacy.input_schema["required"] == ["path", "filename", "media_type"]
-    assert "content" not in legacy.input_schema["properties"]
-    # The classification is unchanged, so the policy profile and its version are too.
-    for candidate in (spec, legacy):
-        assert candidate.side_effect is SideEffectClass.WORKSPACE_READ
-        assert candidate.required_scopes == {"artifact.write"}
-    assert spec.output_schema == legacy.output_schema
-
-
-async def test_the_registry_keeps_both_versions_and_serves_two_by_default(tmp_path: Path) -> None:
-    settings = replace(
-        load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
-        artifact_root=tmp_path / "artifacts",
-    )
-    async with build(settings=settings) as composition:
-        registry = composition.tool_pipeline._registry
-        current = registry.get("artifact.export")
-        pinned = registry.get("artifact.export", "1.0.0")
-
-    assert current.spec.version == "2.0.0"
-    assert pinned.spec == LegacyArtifactExportTool.spec
+    # The classification is the path-only one, so the policy profile and its version are too.
+    assert spec.side_effect is SideEffectClass.WORKSPACE_READ
+    assert spec.required_scopes == {"artifact.write"}
 
 
 def _export_action(arguments: dict[str, Any]) -> ProposedAction:

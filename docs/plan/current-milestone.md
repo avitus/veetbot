@@ -4,6 +4,69 @@ title: Current Milestone
 
 # Current milestone
 
+- **Save an email attachment — ADR-0296:** On 2026-11-03 the owner asked to add email
+  attachments to Veetbot's file storage and chose the email's chat as the place, a Save
+  button plus an approval-gated Chat tool as the ways in, and knowledge on every save.
+  [The decision](../adr/0296-save-email-attachments-to-the-chat.md) adds no schema,
+  setting, or scope. Implemented, not yet tried on a real mailbox; no milestone or gate
+  moves.
+
+- **Server email checks — ADR-0286:** On 2026-11-01 the owner accepted
+  [the decision](../adr/0286-server-checks-for-new-mail.md) and authorized its
+  implementation on `email-checks`. A default-off maintenance pass checks for new
+  mail every five minutes while Email is closed. It handles only new or changed
+  mail, within 50% of the daily and 90% of the rolling allowance. Activation needs
+  one measured production week and adds a thirty-third Milestone 26 gate.
+
+- **Veetbot's code power — ADR-0281:** On 2026-11-01 the owner asked for
+  first-class coding and debugging power after Veetbot could not explain a
+  failing widget, and chose power up to opening pull requests. Five deferred
+  tools read run failures, read the running release's source, draft and test a
+  change offline, and open a pull request to `dev` after the owner approves. The
+  tools never merge or deploy. Default off behind `AGENT_CODE_TOOLS_ENABLED` and
+  `AGENT_CODE_PROPOSALS_ENABLED`, except the read-only `run.inspect`. Activation
+  needs the owner's GitHub App change. No milestone or gate moves.
+
+- **Integration keys MVP — ADR-0275:** On 2026-10-30 the owner accepted
+  [the decision](../adr/0275-in-app-integration-secrets.md) and authorized its
+  implementation on `secret-store`. The default-off MVP reuses PostgreSQL,
+  AES-GCM sealing and approved job grants, with native Settings for key entry.
+  See [the operator guide](../integration-keys.md). Production activation and
+  ADR-0268's jobs prerequisites remain separate; no milestone or gate moves.
+
+- **Agent-written jobs MVP — ADR-0268:** On 2026-10-29 the owner authorized
+  implementation of saved Python programs that combine code and explicit model
+  calls as appropriate. The MVP implementation now includes saved packages,
+  private grants, HTTP/model/feed/log brokers, agent tools and pinned job tasks
+  through the existing scheduler. Code-only runs use no model; mixed runs charge
+  only explicit completions. Local execution, publication, schedule and
+  PostgreSQL tests provide implementation evidence. PR 210 delivered the code,
+  and the owner authorized activation on 2026-10-30. Job publication and the
+  repository-scoped reader are configured; a fresh interactive chat passed a
+  code-only sandbox trial and published a generic GitHub job. That job read both
+  selected repositories twice with the same grant and no model operations.
+  Mixed-job, widget-feed and day-long acceptance remain pending; see
+  [the operator guide](../jobs.md).
+  On 2026-10-30 the owner requested one summarized approval at the end of
+  widget creation (ADR-0270). The combined preparation/installation repair is
+  implemented with composed approval, retry and refusal tests; delivery and
+  production verification remain pending.
+  Existing protections remain, broader hardening is deferred, and no milestone
+  or gate moves.
+
+- **Email reply flow repairs — ADR-0278:** On 2026-10-31 the owner reported
+  that replying to an email was slow, with inert-looking controls and opaque
+  "email changed" notices, and chose these repairs first: send tasks run in
+  the interactive queue class, the one governed mailbox read follows Final
+  Send, server refusals are written for the owner, and the Apple client keeps
+  Review & Send available while an autosave is in flight, says when a send
+  ended without dispatch, and names the new mail that stalled a draft. A
+  one-press send with Undo remains a separate decision on the exact-send
+  approval (ADR-0278). On 2026-10-31 the owner then authorized that decision
+  as ADR-0279: Send is one press that consents to the exact revision, parked
+  for a ten-second Undo window and resolved through the ordinary approval by
+  the Archive-style consent consumer. No milestone or gate moves.
+
 - **Owner-added MCP servers — ADR-0255:** On 2026-10-26 the owner asked to
   connect the MagicPath MCP server and to add MCP servers from the Settings
   window. Owner-added HTTP servers are stored with a per-server access level,
@@ -369,7 +432,7 @@ title: Current Milestone
 - **Milestone 26 — Client modes and adaptive email experience:** authorized on
   2026-09-11 as a new independent parallel workstream under ADR-0092;
   [email-experience.md](email-experience.md) contains the approved complete
-  design and thirty-two gates. Twenty-seven backend and native acceptance checks
+  design and thirty-three gates. Twenty-eight backend and native acceptance checks
   are bound; four private quality gates and integrated release evidence remain
   pending, and the milestone remains in progress. Aggregate automatic
   email budgets are USD 20/day and USD 200/rolling thirty days. ADR-0096 limits
@@ -808,7 +871,7 @@ Milestone 23 completed when its twelve gates and the cumulative registry
 passed, the PostgreSQL lane passed, and hosted CI and a clean final CodeRabbit
 review passed on pull requests 89 and 98, the second merged on 2026-09-06.
 
-Milestone 26 completes only when all thirty-two gates and approved quality
+Milestone 26 completes only when all thirty-three gates and approved quality
 requirements, relevant local/PostgreSQL/native lanes, authorized owner mailbox
 smoke, final-head hosted review and production delivery evidence pass. Until then
 its status remains in progress; it does not move the verified sequential ceiling.

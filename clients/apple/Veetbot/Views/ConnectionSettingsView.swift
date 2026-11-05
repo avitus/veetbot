@@ -5,6 +5,7 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case models
     case websiteAccess
     case mcpServers
+    case integrationKeys
     case notifications
     case appearance
     case smsIntegration
@@ -19,13 +20,13 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     // at each group's `case` in the page switch below.
     private static let titles: [ConnectionSettingsSection: String] = [
         .connection: "Connection", .models: "Models", .websiteAccess: "Website access",
-        .mcpServers: "MCP servers", .notifications: "Notifications", .appearance: "Appearance",
+        .integrationKeys: "Integration keys", .mcpServers: "MCP servers", .notifications: "Notifications", .appearance: "Appearance",
         .smsIntegration: "SMS integration", .dataAndPrivacy: "Data & privacy",
     ]
 
     private static let systemImages: [ConnectionSettingsSection: String] = [
         .connection: "key", .models: "wand.and.stars", .websiteAccess: "globe",
-        .mcpServers: "puzzlepiece.extension", .notifications: "bell", .appearance: "paintpalette",
+        .integrationKeys: "key.fill", .mcpServers: "puzzlepiece.extension", .notifications: "bell", .appearance: "paintpalette",
         .smsIntegration: "message", .dataAndPrivacy: "lock.shield",
     ]
 
@@ -681,6 +682,20 @@ public struct ConnectionSettingsView: View {
                 }
             }
 
+        case .integrationKeys:
+            SettingsCard(
+                title: "Integration keys",
+                summary: "Store keys securely for approved integrations.",
+                systemImage: "key.fill",
+                tint: AppTheme.tealText
+            ) {
+                if model.isConfigured {
+                    IntegrationKeysSettingsSection(api: model.currentAPIClient)
+                } else {
+                    Text("Connect this app to Veetbot before managing integration keys.")
+                }
+            }
+
         case .notifications:
             SettingsCard(
                 title: "Notifications",
@@ -971,11 +986,19 @@ public struct ConnectionSettingsView: View {
             Spacer(minLength: 8)
             if WebsiteAccessActions.offersSignInAgain(profile.status) {
                 Button("Sign in again") {
-                    model.beginDeviceSignIn(profile: profile)
+                    Task { await model.beginSignIn(profile: profile) }
                 }
                 .buttonStyle(SecondaryCapsuleButtonStyle())
                 .disabled(model.isManagingWebsiteAccess)
                 .accessibilityIdentifier("website-access.sign-in-again.\(profile.id.uuidString)")
+            }
+            if WebsiteAccessActions.offersDeviceSignIn(profile) {
+                Button("Use this device") {
+                    model.beginDeviceSignIn(profile: profile)
+                }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                .disabled(model.isManagingWebsiteAccess)
+                .accessibilityIdentifier("website-access.sign-in-device.\(profile.id.uuidString)")
             }
             if profile.status == .ready {
                 if model.selectedBrowserProfileID == profile.id {

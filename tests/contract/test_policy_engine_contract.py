@@ -1,3 +1,5 @@
+import pytest
+
 from agent_core.domain.policies import (
     ActionKind,
     ExecutionTarget,
@@ -9,11 +11,23 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.policy.engine import DeterministicPolicyEngine
+from agent_core.policy.jobs import JobPolicyEngine, job_publication_ruleset
 from agent_core.policy.loader import DEFAULT_RULESET
+from agent_core.ports.policies import PolicyEngine
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, principal, run
 
 
-async def test_policy_engine_is_deterministic_for_identical_inputs() -> None:
+@pytest.mark.parametrize(
+    "engine",
+    [
+        DeterministicPolicyEngine(DEFAULT_RULESET),
+        JobPolicyEngine(
+            DeterministicPolicyEngine(DEFAULT_RULESET),
+            DeterministicPolicyEngine(job_publication_ruleset(DEFAULT_RULESET)),
+        ),
+    ],
+)
+async def test_policy_engine_is_deterministic_for_identical_inputs(engine: PolicyEngine) -> None:
     action = ProposedAction(
         kind=ActionKind.TOOL_CALL,
         action_id=RUN_ID,
@@ -35,7 +49,6 @@ async def test_policy_engine_is_deterministic_for_identical_inputs() -> None:
         target=ExecutionTarget(kind="in_process", isolated=False, network_enabled=False),
         evaluated_at=NOW,
     )
-    engine = DeterministicPolicyEngine(DEFAULT_RULESET)
     first = await engine.evaluate(action, principal(), run())
     second = await engine.evaluate(action, principal(), run())
     assert first.model_dump_json() == second.model_dump_json()

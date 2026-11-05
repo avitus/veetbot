@@ -422,7 +422,7 @@ current chat's trusted website binding and request `browser.profile.read`.
 Its approval presentation identifies the profile and origins; missing binding
 fails as `schedule.browser_profile_required`, and normal creation validates
 ownership, READY state and current authority. The model cannot supply a profile
-UUID or arbitrary scopes. Version 1.1.1 remains for already pinned runs.
+UUID or arbitrary scopes. Versions 1.1.1 and 1.2.0 are retired (ADR-0266).
 Browser actions retain their existing approval rules,
 including ADR-0168's bounded-scroll permission in the default policy. Scheduled
 feed reads can scroll without an interactive grant. ADR-0209 also permits
@@ -452,6 +452,15 @@ remove the instruction from context, persistence, audit, or title generation.
 rejects a caller-supplied value; `ScheduleMaterializer` is the trusted path that
 writes it, so downstream context planning can use its presence as scheduled-run
 provenance.
+
+Feed-keeping revisions (those requesting `cockpit.write`) mark their occurrence
+sessions with reserved metadata `cockpit_refresh: true` (ADR-0271). These are
+operational audit sessions: the conversation index excludes them before
+pagination, and clients remove their cached Chat rows. Timer firings, Run now
+and refresh on entry share this rule, for both agent and job tasks and all
+outcomes. Schedule history, point reads and attention handling remain available.
+Existing occurrences are marked from their own immutable revision at upgrade;
+ordinary scheduled conversations remain visible.
 
 Cross-occurrence continuity comes from the principal's governed long-term
 memory and knowledge stores, not from reusing a conversation session. Provider
@@ -877,6 +886,12 @@ feed schedule passes those and fails every scheduled occurrence with
 `schedule.scope_revoked`. The release therefore refuses a schedule environment
 whose Cockpit flag differs from the application's.
 
+Scale VP follows it too (ADR-0291). The scheduler environment mirrors
+`AGENT_SVP_ENABLED`, and under it the snapshot holds `mcp.svp_read.use`. The
+role never holds `SVP_CREDENTIAL_FILE`: its loader does not require the path,
+and a supplied one is refused like any provider key. The release refuses a
+schedule environment whose flag differs from the application's.
+
 No in-memory scheduler queue is introduced. In-memory repositories exist only
 to run application and property tests; production startup refuses scheduling
 without PostgreSQL, a durable principal directory, and a non-development worker
@@ -989,7 +1004,9 @@ Scheduling is default-off through `AGENT_SCHEDULE_API_ENABLED=0` and
 
 The API, interactive worker, async worker, and schedule worker are separate
 roles in production. Interactive and async workers claim disjoint configured
-priority classes, preserving at least one slot for each workload. Multiple
+priority classes, preserving at least one slot for each workload. The async role
+runs one process per `worker.reserved_async_slots`, shipped as two so one long
+run does not hold up the rest (ADR-0295). Multiple
 schedule workers are safe. The schedule worker has database access and no API
 bearer token, model-provider, tool, sandbox, or object-store credential because
 it executes none of those capabilities. Release validation connects through
@@ -1106,6 +1123,26 @@ schedule to `mcp.bland_call.use` alone. In a Cockpit deployment, version 1.5.0's
 run can publish a feed ([cockpit.md](cockpit.md#assistant-feeds)); without the
 Cockpit flag 1.5.0 is not registered. Version 1.6.0 (ADR-0254) replaces it
 there and offers `INTERVAL`. 1.5.0 stays registered unchanged for pinned runs.
+Versions 1.8.0, 1.9.0 and 1.10.0 (ADR-0291) replace 1.4.0, 1.6.0 and 1.7.0 as
+the newest for their deployments, and `schedule.update` 1.3.0, 1.4.0 and 1.5.0
+replace 1.0.1, 1.1.0 and 1.2.0; the earlier versions stay registered for pinned
+runs. Each adds `use_mcp_servers`, the server ids the run may use, which the
+approval view lists as `mcp_servers`. A definition stores them as `mcp_servers`,
+absent while empty, and each server's `required_scopes` join `requested_scopes`.
+An update replaces the set and removes the scopes of the servers it drops; `[]`
+clears it. Only an enabled owner-added, Gmail or Scale VP row may be named;
+anything else fails as `schedule.mcp_server_unavailable`, so calling keeps
+`place_call`. A job schedule names none and fails as `schedule.job_mcp_servers`,
+because its scopes derive from its grant; switching a feed schedule to a saved
+job drops the schedule's own set. Naming is how the model asks for a server: a
+schedule that holds an operator server's scope without naming it, as a call or
+Gmail schedule does, still needs its caller to hold that scope. Scale VP's scope
+alone must be named (`schedule.mcp_scope_unnamed`), because no earlier schedule
+could keep it. The materializer
+records the set in the session as `schedule_mcp_servers`, and the context planner
+offers an
+owner-added server's tools in a scheduled session, or in a child of one, only if
+it is named. A write stays `REQUIRE_APPROVAL`, whichever server it is on.
 A feed-keeping schedule that either version creates is
 `notify: attention_only`, because its widget is its report. Its step, model-call, and tool-call
 limits are the minimum of the active agent's limits and the existing schedule
@@ -1158,7 +1195,8 @@ cadence instant, and reads the step event to build the run.
 Each run's seed is the instruction followed by a platform note: the call's
 number in the plan and earlier results, the follow-up's opening, or the plan's
 outcome. The note gives times as hours and minutes and holds no phone-like
-digit run. The final step runs with no scopes and completes the schedule. A
+digit run. The final step runs with no scopes, is offered no MCP server the
+schedule names (ADR-0291), and completes the schedule. A
 missing step event records `CONFIGURATION_FAILED` with
 `schedule.call_plan_step_missing`. The accountant skips
 `schedule_run_finished` for a plan's completed calls, so the final step is the
@@ -1246,7 +1284,9 @@ instant.
 }
 ```
 
-At least one of `title`, `instruction`, `at`, or `cadence` is required. `at`
+At least one of `title`, `instruction`, `at`, or `cadence` is required; from
+versions 1.3.0 and 1.4.0 (ADR-0291), `use_mcp_servers` alone also suffices, and
+`[]` clears the set. `at`
 and `cadence` are mutually exclusive and use the same closed values as
 `schedule.create`. In a Cockpit deployment, version 1.1.0 (ADR-0254) also
 accepts `INTERVAL` for a feed-keeping schedule; omitted patch fields retain their current values. The

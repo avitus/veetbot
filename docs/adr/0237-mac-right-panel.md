@@ -130,3 +130,16 @@ iPhone and iPad are unchanged. The same pass carried the Cockpit · Chat ·
 Email switch of "Mac — Chat · Right panel" into the clean reader design and
 into each Mac left pane (ADR-0240's build step 9). No server contract, policy,
 or milestone changes.
+
+### Three-mode navigation refinement (2026-10-29)
+
+The owner approved the updated canvas navigation for native implementation.
+The left panes now use 300 to 420 points, starting at 320, so Cockpit, Chat,
+and Email remain legible in that order. This supersedes the sidebar dimensions
+above; inbox and right-panel limits remain unchanged. Regular-width iPad uses
+a shared, device-local sidebar preference, a touch/pointer divider and
+VoiceOver adjustment. Each mode leads its left pane with the switch and puts
+utilities in the top-right More menu. Email removes its bottom utility row.
+In narrower iPad reading areas, selecting mail replaces the inbox with the
+reader and an Inbox back button. Compact navigation and mounted mode state
+remain intact. This is a client layout refinement with no server or policy change.

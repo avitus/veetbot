@@ -135,6 +135,7 @@ async def test_schedule_update_tool_is_feature_gated_and_classified() -> None:
     assert spec.allow_parallel is False
     assert spec.input_schema["additionalProperties"] is False
     assert set(spec.input_schema["properties"]) == {
+        "use_mcp_servers",
         "schedule_id",
         "expected_revision",
         "title",

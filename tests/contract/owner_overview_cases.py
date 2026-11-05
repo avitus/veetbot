@@ -295,10 +295,11 @@ async def seed_closeness(
 
 
 async def closeness_overview_run(app: Composition) -> None:
-    """ADR-0259: the first overview page holds the closest family, not the lowest ids.
+    """ADR-0259/0265: the first overview page holds the closest family, and every tier.
 
     Production: Riv was on page 2 because pages held three people in id order,
-    and the automatic path only ever renders page 1.
+    and the automatic path only ever renders page 1. Then, with the household
+    first, the owner's mother sat on the page the model never asked for.
     """
 
     session_id = await app.sessions.create()
@@ -306,12 +307,52 @@ async def closeness_overview_run(app: Composition) -> None:
     run_id = await app.runs.submit("Tell me everything you know about me.", session_id=session_id)
     assert (await finish(app, run_id)).status is RunStatus.COMPLETED
     initial = html.unescape(_requests(app)[-1].model_dump_json())
-    for edge in ("owner --spouse--> Erin", "owner --parent--> Riv", "owner --parent--> Kyrri"):
+    edges = (
+        "owner --spouse--> Erin",
+        "owner --parent--> Riv",
+        "owner --parent--> Kyrri",
+        "Mom --parent--> owner",
+        "owner --sibling--> Sib",
+        "owner --relative--> Cousin",
+    )
+    for edge in edges:
         assert edge in initial, edge
-    for name in ("Sib", "Cousin", "Mom"):
-        assert f"--> {name}" not in initial and f"{name} --" not in initial, name
-    # The continuation names the last person shown, in closeness order.
-    assert str(UUID(int=90014)) in initial and "people_after" in initial
+    # Closest first: the household precedes the parent, who precedes the sibling.
+    positions = [initial.index(edge) for edge in edges]
+    assert positions == sorted(positions)
+    # One person per tier fits the first page, so nothing is left to continue.
+    assert "Continue memory.search" not in initial
+    assert OVERFLOW_NOTE not in initial
+
+
+TIERED: tuple[tuple[int, str, RelationshipPredicate, bool], ...] = (
+    # Several people per tier: the first page reaches the first member of every
+    # tier and stops at the eighth person (ADR-0265).
+    (90020, "Erin", "spouse", True),
+    (90021, "Riv", "parent", True),
+    (90022, "Kyrri", "parent", True),
+    (90023, "Cheryl", "parent", False),
+    (90024, "Mom", "parent", False),
+    (90025, "Allan", "sibling", True),
+    (90026, "Bro", "sibling", True),
+    (90027, "Cousin", "relative", True),
+    (90028, "Cousin2", "relative", True),
+)
+
+
+async def tiered_overview_run(app: Composition) -> None:
+    """ADR-0265: the automatic page reaches every family tier, bounded at eight people."""
+
+    session_id = await app.sessions.create()
+    await seed_closeness(app, TIERED)
+    run_id = await app.runs.submit("Tell me what you know about my family", session_id=session_id)
+    assert (await finish(app, run_id)).status is RunStatus.COMPLETED
+    initial = html.unescape(_requests(app)[-1].model_dump_json())
+    for name in ("Erin", "Riv", "Kyrri", "Cheryl", "Mom", "Allan", "Bro", "Cousin"):
+        assert f"--> {name}" in initial or f"{name} --" in initial, name
+    assert "--> Cousin2" not in initial
+    # The continuation names the eighth person, in closeness order.
+    assert str(UUID(int=90027)) in initial and "people_after" in initial
     assert OVERFLOW_NOTE not in initial
 
 

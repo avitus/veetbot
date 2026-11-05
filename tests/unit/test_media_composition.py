@@ -154,7 +154,6 @@ async def test_tensorscale_key_enables_both_media_tools() -> None:
         for name in ("image.generate", "video.generate"):
             assert composition.tool_pipeline._registry.get(name).spec.name == name
             assert composition.tool_pipeline._registry.get(name).spec.version == "1.1.0"
-            assert composition.tool_pipeline._registry.get(name, "1.0.0").spec.version == "1.0.0"
 
 
 async def test_missing_key_advertises_neither_media_tool() -> None:

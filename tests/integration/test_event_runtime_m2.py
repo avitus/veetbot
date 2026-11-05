@@ -1474,7 +1474,7 @@ async def test_a_committed_final_reply_completes_the_resumed_run() -> None:
             ScriptedTurn(text="answered once"),
         ]
     )
-    original_complete_reply = runtime_loop._complete_reply
+    original_complete_reply = runtime_loop.complete_reply
 
     async def crash_after_the_reply(context: Any, message: Any) -> Any:
         await original_complete_reply(context, message)
@@ -1488,7 +1488,7 @@ async def test_a_committed_final_reply_completes_the_resumed_run() -> None:
     ) as composition:
         run_id = await composition.runs.submit("answer after one tool")
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(runtime_loop, "_complete_reply", crash_after_the_reply)
+            patch.setattr(runtime_loop, "complete_reply", crash_after_the_reply)
             interrupted = DurableWorker(
                 uow_factory=composition.uow_factory,
                 executor=composition.executor,

@@ -25,12 +25,14 @@ from agent_core.domain.browser_task_grants import (
 from agent_core.domain.cockpit import DeviceClass
 from agent_core.domain.cockpit_views import (
     CockpitChangeView,
+    CockpitDeviceFailure,
     CockpitLayoutView,
     CockpitLayoutWrite,
     CockpitSettingsView,
     CockpitSnapshotView,
     CockpitWidgetDetailView,
 )
+from agent_core.domain.credentials import SecretValue
 from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import DeviceInvocationStatus, DeviceRegistration
 from agent_core.domain.dreaming import DreamingSchedule, DreamingStatus, ForwardDreamingBoundary
@@ -635,6 +637,10 @@ class CockpitService(Protocol):
 
     async def widget(self, principal: Principal, slug: str) -> CockpitWidgetDetailView: ...
 
+    async def report_failure(
+        self, principal: Principal, slug: str, report: CockpitDeviceFailure
+    ) -> None: ...
+
     async def put_settings(
         self, principal: Principal, slug: str, values: dict[str, str | int | float | bool]
     ) -> CockpitSettingsView: ...
@@ -1002,6 +1008,36 @@ class EmailService(Protocol):
 
     async def operation(self, principal: Principal, operation_id: UUID) -> EmailOperation: ...
 
+    async def save_attachment(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        *,
+        message_id: str,
+        attachment_index: int,
+        filename: str,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
+    async def send(
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        source_revision: int,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
+    async def undo_send(
+        self,
+        principal: Principal,
+        draft_id: UUID,
+        *,
+        expected_revision: int,
+        run_id: UUID,
+    ) -> EmailDraft: ...
+
     async def archive(
         self,
         principal: Principal,
@@ -1060,3 +1096,21 @@ class CallingService(Protocol):
 
 class CallIngressService(Protocol):
     async def receive(self, body: bytes, signature: str, secret: str) -> bool: ...
+
+
+class IntegrationSecretSettings(Protocol):
+    async def list(self, principal: Principal) -> list[dict[str, object]]: ...
+
+    async def put(
+        self,
+        principal: Principal,
+        key_id: UUID,
+        *,
+        label: str,
+        origin: str,
+        auth_scheme: Literal["bearer", "x-api-key"],
+        value: SecretValue,
+        expected_revision: int,
+    ) -> dict[str, object]: ...
+
+    async def delete(self, principal: Principal, key_id: UUID, expected_revision: int) -> None: ...

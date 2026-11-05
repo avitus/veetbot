@@ -32,6 +32,7 @@ export type NativeMessage =
       theme: CockpitTheme;
       platform: CockpitPlatform;
       offsetMs: number;
+      frozenAt?: number;
       widgets: WidgetPlacement[];
       feeds: Record<string, FeedEnvelope>;
       /** The board's column count while native chrome narrows it (a details panel); absent keeps the platform's own. */
@@ -53,7 +54,7 @@ export interface RealmTile {
 }
 
 export type HostToRealm =
-  | { type: 'render'; theme: CockpitTheme; platform: CockpitPlatform; offsetMs: number; columns?: number; tiles: RealmTile[] }
+  | { type: 'render'; theme: CockpitTheme; platform: CockpitPlatform; offsetMs: number; frozenAt?: number; columns?: number; tiles: RealmTile[] }
   | { type: 'ping'; id: number };
 
 /** Realm → host. Anything else is dropped. */
@@ -61,7 +62,7 @@ export type RealmToHost =
   | { type: 'ready' }
   | { type: 'pong'; id: number }
   | { type: 'loaded'; key: string }
-  | { type: 'tile_error'; key: string }
+  | { type: 'tile_error'; key: string; phase?: 'bundle' }
   | { type: 'select'; key: string }
   | { type: 'intent'; key: string; kind: string; id: string };
 
@@ -69,7 +70,7 @@ export type RealmToHost =
 export type HostToNative =
   | { type: 'ready' }
   | { type: 'loaded'; slug: string; revision: string }
-  | { type: 'tile_error'; slug: string; revision: string }
+  | { type: 'tile_error'; slug: string; revision: string; phase?: 'bundle' }
   | { type: 'select'; slug: string }
   | { type: 'open'; slug: string; kind: IntentKind; id: string }
   | { type: 'quarantined'; slug: string; revision: string; reason: 'unresponsive' | 'navigated' };

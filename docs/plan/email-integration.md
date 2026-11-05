@@ -32,7 +32,7 @@ Proactive monitoring is a documented recipe over existing schedules and
 notifications, not new runtime.
 
 Out of scope: calendar; permanent deletion (`users.messages.delete` appears in
-no roster); attachment download or upload; Gmail push and Pub/Sub; interval or
+no roster); attachment upload; Gmail push and Pub/Sub; interval or
 cron recurrence (roadmap B5); the email inbound Surface (B3) and the email
 notification transport (B4); a second mail provider; public self-service OAuth
 and per-principal mailbox lifecycle; and any auto-approval or standing-grant
@@ -84,7 +84,15 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
   offer. No unsubscribe address appears in a search result.
 - `get_thread(thread_id)` — every message in one thread: headers, plain-text
   body, label ids. HTML bodies are reduced to text; attachments are named
-  with filename, type, and size but never fetched.
+  with filename, type, and size but never fetched by this call.
+- `save_attachment(message_id, attachment_index, filename)`
+  ([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)) — stores one listed
+  attachment in the run's chat, up to 32 MiB, after the owner approves. The application-only
+  `fetch_attachment` takes the same arguments for the Save button. The position is the
+  attachment's place in `get_thread`'s list, because Gmail issues a new attachment id on
+  every read, and a name that does not match is `gmail.attachment_not_found`. Both return
+  the file in structured content only, and the MCP runtime stores it and returns a receipt,
+  so its bytes reach no event, invocation, or checkpoint.
 - `list_labels()` — system and user label ids and names.
 
 `gmail_write`:
@@ -266,7 +274,7 @@ Nothing here runs with networking disabled, and the specification says which
 process is which rather than leaving it to be inferred. The Milestone 8
 adapter spawns a stdio server as an ordinary child process of the worker, and
 [tool-system.md](tool-system.md) states the consequence
-(tool-system.md:1128-1130): a stdio child inherits the worker's network
+(tool-system.md:1136-1138): a stdio child inherits the worker's network
 position, which in this platform is a privileged one, which is why stdio
 servers are operator-configured only. The restriction that applies to the
 worker is that the worker itself dials nothing on a `gmail_*` call; the child
@@ -347,7 +355,8 @@ one bounded result always returns. The server maps upstream failures to a
 closed set of stable, content-free codes: credential rejection, rate limit,
 temporary provider unavailability, permanent provider rejection, invalid
 provider output, and — the sixth, and the one the two write servers need —
-an outcome the server cannot determine. Google's raw error text, diagnostic
+an outcome the server cannot determine. Fetching a file adds a missing and an
+oversized attachment (ADR-0296). Google's raw error text, diagnostic
 headers, and `WWW-Authenticate` values never cross the pipe — normalized
 mailbox content is the tool result, and it is the only upstream content that
 does. Connect-time auth failure is
@@ -383,19 +392,19 @@ request has been dispatched, and the corpus already owns the machinery that
 says so. The executor watermarks every call whose side effect is not `NONE`
 before the tool implementation runs — the conservative rule
 [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md) records and
-`mark_effect_sent` implements (tool-system.md:699-702) — so `effect_sent_at`
+`mark_effect_sent` implements (tool-system.md:707-710) — so `effect_sent_at`
 is set on every write and send before its request leaves the worker, and the
 recovery table's answer for a `NON_IDEMPOTENT` call whose watermark is set is
-`UNCERTAIN` (tool-system.md:714). A rate limit, a 5xx, or a lost response
+`UNCERTAIN` (tool-system.md:722). A rate limit, a 5xx, or a lost response
 observed after dispatch is therefore reported by the server as the
 undetermined-outcome code, resolves to the platform's `uncertain` outcome with
-`tool.outcome_unknown` and `retryable: false` (tool-system.md:877-881), and is
+`tool.outcome_unknown` and `retryable: false` (tool-system.md:885-889), and is
 blocked from being proposed again in the run by the unified breaker's
-threshold-of-one row (tool-system.md:920). This is the rule
+threshold-of-one row (tool-system.md:928). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:2060-2062) and the one
+after the watermark (tool-system.md:2068-2070) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
-(browser-automation.md:1311-1315), generalized from those two cases to every
+(browser-automation.md:1394-1398), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an
 amendment to [tool-system.md](tool-system.md) in the change that implements
 it, keyed on the declared idempotency class rather than on any `gmail_*` name,

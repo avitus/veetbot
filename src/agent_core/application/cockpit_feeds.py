@@ -77,6 +77,7 @@ class CockpitFeeds:
         schema: FeedSchemaDocument | None = None,
         error: str | None = None,
         observed_at: datetime | None = None,
+        preview: bool = False,
     ) -> tuple[Feed, FeedSnapshot]:
         """Store one snapshot, registering the feed or replacing its schema first."""
 
@@ -106,6 +107,32 @@ class CockpitFeeds:
                         "feed_data_invalid", f"the data does not fit {feed_id}: {problems[0]}"
                     )
             try:
+                if preview:
+                    candidate = Feed(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        id=feed_id,
+                        schema=target,
+                        schema_version=(
+                            1
+                            if feed is None
+                            else feed.schema_version + int(target != feed.schema_document)
+                        ),
+                        created_at=now if feed is None else feed.created_at,
+                        updated_at=now,
+                    )
+                    return candidate, FeedSnapshot(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        feed_id=feed_id,
+                        sequence=1,
+                        observed_at=observed_at or now,
+                        expected_interval_seconds=expected_interval_seconds,
+                        error=error,
+                        data=data,
+                        schema_version=candidate.schema_version,
+                        recorded_at=now,
+                    )
                 if feed is None:
                     feed, _created = await uow.cockpit_feeds.register(
                         Feed(

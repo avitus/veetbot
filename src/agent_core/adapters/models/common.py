@@ -24,11 +24,13 @@ from agent_core.domain.messages import (
     ModelTransientError,
     ResolvedModel,
     TextPart,
+    ToolResultItem,
     UserMessage,
     sanitize_provider_code,
     sanitize_provider_parameter,
 )
 from agent_core.model.attachments import (
+    AttachmentDecision,
     AttachmentKind,
     MarkerReason,
     RenderedAttachment,
@@ -275,6 +277,24 @@ async def rendered_attachments(
     decisions = select_attachments(request.conversation)
     if not decisions:
         return {}
+    # Bytes are keyed by artifact ID within each resolver response. Keep each
+    # tool invocation separate so one authorized read cannot satisfy another.
+    groups: dict[str | None, dict[tuple[int, int], AttachmentDecision]] = {}
+    for key, decision in decisions.items():
+        groups.setdefault(decision.inspection_call, {})[key] = decision
+    rendered: RenderedAttachments = {}
+    for group in groups.values():
+        rendered.update(await _render_group(group, resolver, resolved, attempt))
+    return rendered
+
+
+async def _render_group(
+    decisions: dict[tuple[int, int], AttachmentDecision],
+    resolver: AttachmentResolver | None,
+    resolved: ResolvedModel,
+    attempt: ModelAttempt,
+) -> RenderedAttachments:
+    """Resolve one group of references with the same inspection authority."""
     reads = planned_reads(decisions, resolved.capabilities)
     contents: dict[UUID, AttachmentContent] = {}
     if reads and resolver is not None:
@@ -297,8 +317,9 @@ def has_attachment_parts(item: UserMessage) -> bool:
 
 
 def user_segments(
-    item_index: int, item: UserMessage, rendered: RenderedAttachments
+    item_index: int, item: UserMessage | ToolResultItem, rendered: RenderedAttachments
 ) -> list[UserSegment]:
+    """Preserve content order when expanding admitted references into text or media."""
     segments: list[UserSegment] = []
     for part_index, part in enumerate(item.content):
         if isinstance(part, TextPart):

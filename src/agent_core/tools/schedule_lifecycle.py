@@ -27,6 +27,7 @@ from agent_core.domain.tools import (
 )
 from agent_core.tools.schedule_create import (
     FEED_CADENCE_INPUT_SCHEMA,
+    MCP_SERVERS_INPUT_SCHEMA,
     RECURRING_CADENCE_INPUT_SCHEMA,
     CadenceInputError,
     parse_cadence,
@@ -453,16 +454,12 @@ class PreviousScheduleListTool(ScheduleListTool):
     lists_intervals = False
 
 
-class LegacyScheduleListTool(PreviousScheduleListTool):
-    """Compatibility registration for sessions pinned before the 1.0.2 repair."""
-
-    spec = _LIST_SPEC.model_copy(update={"version": "1.0.1"}, deep=True)
-
-
 class ScheduleUpdateTool:
     """Patch model-visible schedule fields without exposing execution authority."""
 
     offers_interval: ClassVar[bool] = False
+    # ADR-0291: only versions that offer it accept use_mcp_servers.
+    offers_mcp_servers: ClassVar[bool] = False
 
     spec = ToolSpec(
         name=SCHEDULE_UPDATE_TOOL_NAME,
@@ -495,9 +492,14 @@ class ScheduleUpdateTool:
         del tenant_id
         schedule_id = str(arguments.get("schedule_id", "<invalid>"))
         expected_revision = arguments.get("expected_revision", "<invalid>")
+        view = arguments
+        if self.offers_mcp_servers and "use_mcp_servers" in arguments:
+            # ADR-0291: an approval names the servers, and [] shows they are being cleared.
+            view = {key: value for key, value in arguments.items() if key != "use_mcp_servers"}
+            view["mcp_servers"] = sorted(arguments["use_mcp_servers"])
         return (
             f"Update schedule {schedule_id} at revision {expected_revision}",
-            arguments,
+            view,
         )
 
     async def execute(
@@ -512,6 +514,7 @@ class ScheduleUpdateTool:
             "instruction",
             "at",
             "cadence",
+            *(("use_mcp_servers",) if self.offers_mcp_servers else ()),
         }
         if not set(arguments) <= allowed:
             return _failure(
@@ -541,7 +544,9 @@ class ScheduleUpdateTool:
                 "expected_revision must be a positive integer",
                 message="The schedule was not updated.",
             )
-        changed_fields = {"title", "instruction", "at", "cadence"} & set(arguments)
+        changed_fields = {"title", "instruction", "at", "cadence", "use_mcp_servers"} & set(
+            arguments
+        )
         if not changed_fields:
             return _failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
@@ -559,6 +564,11 @@ class ScheduleUpdateTool:
                 title=arguments.get("title"),
                 instruction=arguments.get("instruction"),
                 cadence=cadence,
+                mcp_servers=(
+                    frozenset(arguments["use_mcp_servers"])
+                    if "use_mcp_servers" in arguments
+                    else None
+                ),
             )
         except CadenceInputError as exc:
             return _failure(
@@ -690,6 +700,39 @@ class CockpitScheduleUpdateTool(ScheduleUpdateTool):
             "input_schema": FEED_UPDATE_INPUT_SCHEMA,
         }
     )
+
+
+def _update_with_mcp_servers(spec: ToolSpec, version: str) -> ToolSpec:
+    """A new version whose update may replace a schedule's servers (ADR-0291)."""
+    return spec.model_copy(
+        update={
+            "version": version,
+            "description": spec.description
+            + " use_mcp_servers replaces the MCP servers its runs may use; [] clears them.",
+            "input_schema": {
+                **spec.input_schema,
+                "properties": {
+                    **spec.input_schema["properties"],
+                    "use_mcp_servers": MCP_SERVERS_INPUT_SCHEMA,
+                },
+                "anyOf": [*spec.input_schema["anyOf"], {"required": ["use_mcp_servers"]}],
+            },
+        }
+    )
+
+
+class MCPScheduleUpdateTool(ScheduleUpdateTool):
+    """Version 1.3.0 (ADR-0291): an update may replace the schedule's MCP servers."""
+
+    offers_mcp_servers = True
+    spec = _update_with_mcp_servers(ScheduleUpdateTool.spec, "1.3.0")
+
+
+class CockpitMCPScheduleUpdateTool(CockpitScheduleUpdateTool):
+    """Version 1.4.0 (ADR-0291): the same, where a feed may also move to an interval."""
+
+    offers_mcp_servers = True
+    spec = _update_with_mcp_servers(CockpitScheduleUpdateTool.spec, "1.4.0")
 
 
 class _ScheduleMutationTool:

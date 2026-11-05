@@ -575,6 +575,7 @@ class OpenAIResponsesProvider:
         resolved: ResolvedModel,
         attachments: RenderedAttachments | None = None,
     ) -> dict[str, Any]:
+        """Encode verified tool images as Responses function-call output."""
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)
@@ -607,11 +608,18 @@ class OpenAIResponsesProvider:
                     }
                 )
             elif isinstance(item, ToolResultItem):
+                segments = (
+                    user_segments(item_index, item, attachments or {})
+                    if any((item_index, j) in (attachments or {}) for j in range(len(item.content)))
+                    else []
+                )
                 inputs.append(
                     {
                         "type": "function_call_output",
                         "call_id": item.call_id,
-                        "output": text_content(item.content),
+                        "output": _user_content(segments)
+                        if segments
+                        else text_content(item.content),
                     }
                 )
             elif isinstance(item, ProviderReasoningItem):

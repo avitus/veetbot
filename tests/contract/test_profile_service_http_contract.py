@@ -90,6 +90,12 @@ class FakeRuntime:
             text_coverage=BrowserTextCoverage(scanned_nodes=2, scanned_text_characters=7),
         )
 
+    async def open_for_sign_in(self, url: str) -> None:
+        del url
+
+    async def page_url(self) -> str:
+        return self.origins[0]
+
     async def observe(self) -> BrowserObservation:
         return BrowserObservation(url=self.origins[0], revision="revision-1")
 
@@ -119,6 +125,7 @@ class FakeRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """A public home page, and members' pages that send a visitor to sign in."""
         on_stage(BrowserVerificationStage.NAVIGATE)
@@ -130,6 +137,17 @@ class FakeRuntime:
             )
         return BrowserPageEvidence(
             on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        del deadline
+        return BrowserPageEvidence(
+            on_allowed_origin=True,
+            path=urlsplit(url).path or "/",
+            challenge_visible=False,
+            observed_seconds=observed_seconds,
         )
 
     async def storage_state(self) -> bytes:
@@ -1178,6 +1196,28 @@ async def _every_handoff_path(root: Path) -> list[tuple[httpx.Response, str]]:
             await _handoff_once(root / f"injected-{index}", sentinel_handoff(), failure=failure)
         )
     return answers
+
+
+async def test_a_refused_browser_operation_logs_its_reason_and_not_its_address(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Production, 2026-11-02: three refused sign-ins left no record of why."""
+    caplog.set_level(logging.INFO, logger="agent_core.browser_control_plane.api")
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as http:
+        provider_ref = await _provision_over_http(http)
+        answered = await _begin_over_http(
+            http, provider_ref, mode=None, login_url="https://other.example/private-path"
+        )
+
+    assert answered.status_code == 409
+    reasons = [
+        record.__dict__["failure_type"]
+        for record in caplog.records
+        if record.getMessage() == "browser operation rejected"
+    ]
+    assert reasons == ["tool.browser.url_disallowed"]
+    assert not any("private-path" in str(record.__dict__) for record in caplog.records)
 
 
 async def test_device_handoff_logs_nothing_from_the_payload(

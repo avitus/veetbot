@@ -45,7 +45,7 @@ async def test_remember_defaults_to_authenticated_session_scope(
         async with app.uow_factory() as uow:
             stored = await uow.memories.get(UUID(result.structured["belief_id"]), principal())
         assert stored.scope == (scope or "workshop")
-        for version in ("1.0.0", "1.0.1", *(["2.0.0"] if people_enabled else [])):
+        for version in ("1.0.1", *(["2.0.0"] if people_enabled else [])):
             pinned = app.tool_pipeline._registry.get("memory.remember", version)
             assert "scope" in pinned.spec.input_schema["required"]
 

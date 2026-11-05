@@ -16,6 +16,7 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.memory.in_memory import InMemoryKnowledgeStore
 from agent_core.domain.knowledge import (
     DocumentAuthority,
+    KnowledgeCatalogQuery,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
@@ -40,6 +41,7 @@ def _document(
     tenant_id: str = TENANT,
     valid_from: datetime = NOW,
     valid_to: datetime | None = None,
+    authority: DocumentAuthority = DocumentAuthority.PRINCIPAL_SUPPLIED,
 ) -> KnowledgeIngestPrepared:
     base = prepared_knowledge().document
     document = KnowledgeDocument.model_validate(
@@ -52,7 +54,7 @@ def _document(
             "project_scope": project_scope,
             "title": f"Document {number}",
             "sensitivity": sensitivity,
-            "authority": DocumentAuthority.PRINCIPAL_SUPPLIED,
+            "authority": authority,
             "valid_from": valid_from,
             "valid_to": valid_to,
             "source_ref": base.source_ref.model_copy(update={"tenant_id": tenant_id}),
@@ -132,7 +134,14 @@ async def test_scope_affinity_ranks_a_project_document_above_an_equal_tenant_one
     assert ranked[0].score > ranked[1].score
 
 
-async def test_one_document_contributes_at_most_two_passages() -> None:
+async def test_a_document_yields_its_third_passage_after_every_other_document_has_two() -> None:
+    """The per-document cap reserves room; it does not cap the result (ADR-0293).
+
+    Every document's first two passages come before any document's third, so
+    a verbose document cannot crowd another out; after that the rest of the
+    budget fills by rank, so a corpus of one document is not starved.
+    """
+
     sections = "\n\n".join(
         f"# Step {index}\n\nThe rollback procedure step {index} reverts one service."
         for index in range(5)
@@ -144,14 +153,60 @@ async def test_one_document_contributes_at_most_two_passages() -> None:
 
     passages = await store.search(_query())
 
-    assert _ids(passages).count(UUID(int=2_001)) == 2
-    assert UUID(int=2_002) in _ids(passages)
-    assert len(passages) == 3
-    assert [passage.score for passage in passages] == sorted(
-        (passage.score for passage in passages), reverse=True
+    assert _ids(passages)[:3].count(UUID(int=2_001)) == 2
+    assert UUID(int=2_002) in _ids(passages)[:3]
+    assert _ids(passages)[3:] == [UUID(int=2_001)] * 3
+    assert [passage.score for passage in passages[:3]] == sorted(
+        (passage.score for passage in passages[:3]), reverse=True
     )
-    assert len(await store.search(_query(max_per_document=1, max_passages=10))) == 2
+    assert len(await store.search(_query(max_passages=3))) == 3
+    assert len(await store.search(_query(max_per_document=1, max_passages=10))) == 6
     assert len(await store.search(_query(max_passages=1))) == 1
+    alone = await _store(_document(1, sections))
+    assert len(await alone.search(_query())) == 5
+
+
+async def test_visible_titles_follow_the_visibility_rule() -> None:
+    store = await _store(
+        _document(1, "# Mine\n\nA rollback procedure."),
+        _document(
+            2, "# Theirs\n\nAnother rollback procedure.", visibility=KnowledgeVisibility.TENANT
+        ),
+    )
+    prepared = _document(3, "# Hidden\n\nA third rollback procedure.")
+    hidden = prepared.model_copy(
+        update={
+            "document": prepared.document.model_copy(
+                update={"ingested_by_principal_id": "someone-else"}
+            )
+        }
+    )
+    await store.ingest(hidden)
+
+    assert sorted(await store.visible_titles(_query())) == ["Document 1", "Document 2"]
+
+
+async def test_visible_titles_honour_the_people_erasure_fence() -> None:
+    """A non-upload document of an erased run is invisible to search, so its title is too."""
+
+    store = await _store(_document(1, "# Mine\n\nA rollback procedure."))
+    prepared = _document(2, "# Theirs\n\nAnother rollback procedure.")
+    fenced = prepared.model_copy(
+        update={
+            "document": prepared.document.model_copy(
+                update={
+                    "source_ref": prepared.document.source_ref.model_copy(
+                        update={"origin": "model_output", "run_id": UUID(int=72)}
+                    )
+                }
+            )
+        }
+    )
+    await store.ingest(fenced)
+    assert sorted(await store.visible_titles(_query())) == ["Document 1", "Document 2"]
+    store._people_erased_runs[UUID(int=72)] = NOW
+    assert await store.visible_titles(_query()) == ["Document 1"]
+    assert [p.document_id for p in await store.search(_query())] == [UUID(int=2_001)]
 
 
 async def test_sensitivity_ceiling_and_validity_window_are_hard_filters() -> None:
@@ -172,3 +227,189 @@ async def test_sensitivity_ceiling_and_validity_window_are_hard_filters() -> Non
     assert _ids(await store.search(ceiling)) == [UUID(int=2_002)]
     historical = _query(as_of=NOW - timedelta(days=2))
     assert _ids(await store.search(historical)) == [UUID(int=2_003)]
+
+
+async def test_a_question_finds_a_passage_in_another_spelling_of_its_words() -> None:
+    """ADR-0285: "valves" finds "valve"; prose rarely repeats the question's exact forms."""
+    store = await _store(
+        _document(1, "A valve opens and closes to equalise tank pressure after parking."),
+        _document(2, "Unrelated text about rollback procedures."),
+    )
+
+    found = await store.search(_query(text="valves closing after I parked"))
+
+    assert _ids(found) == [UUID(int=2_001)]
+
+    # A hyphenated word is indexed whole and in parts, as PostgreSQL's parser
+    # holds it, so "blind" reaches the manual's "blind-spot".
+    hyphenated = await _store(_document(3, "The blind-spot indicator lights when a car passes."))
+    assert _ids(await hyphenated.search(_query(text="blind"))) == [UUID(int=2_003)]
+    assert _ids(await hyphenated.search(_query(text="blind-spot"))) == [UUID(int=2_003)]
+
+
+async def test_coverage_ranks_before_authority_and_scope() -> None:
+    """ADR-0285: coverage orders first in both stores; the score's other parts only break ties.
+
+    A nine-of-ten passage from an authored, in-scope document scores higher
+    than a ten-of-ten passage from a fetched, out-of-scope one (0.88 against
+    0.86), yet the fuller passage still ranks first, as the PostgreSQL store
+    orders it.
+    """
+    question = "alpha bravo charlie delta echo foxtrot golf hotel india juliet"
+    store = await _store(
+        _document(
+            1,
+            "alpha bravo charlie delta echo foxtrot golf hotel india kilo.",
+            visibility=KnowledgeVisibility.PROJECT,
+            project_scope="atlas",
+            authority=DocumentAuthority.PRINCIPAL_AUTHORED,
+        ),
+        _document(
+            2,
+            "alpha bravo charlie delta echo foxtrot golf hotel india juliet.",
+            visibility=KnowledgeVisibility.TENANT,
+            authority=DocumentAuthority.FETCHED,
+        ),
+    )
+
+    ranked = await store.search(_query(text=question, current_scope="atlas"))
+
+    assert _ids(ranked) == [UUID(int=2_002), UUID(int=2_001)]
+    assert ranked[0].score < ranked[1].score, "The fuller passage wins on coverage, not score"
+
+
+async def test_coverage_outranks_density() -> None:
+    """ADR-0285: a passage holding more of the question beats one repeating a word of it."""
+    store = await _store(
+        _document(
+            1,
+            "Parking parking parking. Park here, park there, parking everywhere, parking.",
+        ),
+        _document(2, "After parking, a valve may click while the fuel system checks itself."),
+    )
+
+    ranked = await store.search(_query(text="valve noise after parking"))
+
+    assert _ids(ranked) == [UUID(int=2_002), UUID(int=2_001)]
+    assert ranked[0].score > ranked[1].score
+
+
+def _catalog_query(**changes: object) -> KnowledgeCatalogQuery:
+    values: dict[str, object] = {
+        "tenant_id": TENANT,
+        "principal_id": PRINCIPAL_ID,
+        "current_scope": None,
+        "as_of": NOW,
+        "max_documents": 12,
+    }
+    return KnowledgeCatalogQuery.model_validate(values | changes)
+
+
+async def test_catalog_lists_current_visible_documents_with_their_passage_counts() -> None:
+    """ADR-0299: the catalog follows the search visibility rule and counts passages."""
+
+    store = await _store(
+        _document(1, "# Mine\n\nA rollback procedure.\n\n## Second\n\nAnother passage."),
+        _document(
+            2, "# Theirs\n\nA shared rollback procedure.", visibility=KnowledgeVisibility.TENANT
+        ),
+        _document(
+            3,
+            "# Atlas\n\nThe rollback procedure for Atlas.",
+            visibility=KnowledgeVisibility.PROJECT,
+            project_scope="atlas",
+        ),
+        _document(4, "# Secret\n\nA restricted procedure.", sensitivity=Sensitivity.RESTRICTED),
+    )
+    prepared = _document(5, "# Hidden\n\nSomeone else's procedure.")
+    await store.ingest(
+        prepared.model_copy(
+            update={
+                "document": prepared.document.model_copy(
+                    update={"ingested_by_principal_id": "someone-else"}
+                )
+            }
+        )
+    )
+
+    catalog = await store.catalog(_catalog_query())
+    assert [(line.title, line.passages) for line in catalog.lines] == [
+        ("Document 1", 2),
+        ("Document 2", 1),
+        ("Document 4", 1),
+    ]
+    assert catalog.omitted == 0
+    assert all(line.ingested_at == NOW and line.doc_date is None for line in catalog.lines)
+
+    in_atlas = await store.catalog(_catalog_query(current_scope="atlas"))
+    assert [line.title for line in in_atlas.lines] == [
+        "Document 1",
+        "Document 2",
+        "Document 3",
+        "Document 4",
+    ]
+    internal = await store.catalog(_catalog_query(sensitivity_ceiling=Sensitivity.INTERNAL))
+    assert [line.title for line in internal.lines] == ["Document 1", "Document 2"]
+    colleague = await store.catalog(_catalog_query(principal_id=OTHER_PRINCIPAL))
+    assert [line.title for line in colleague.lines] == ["Document 2"]
+    assert (await store.catalog(_catalog_query(tenant_id="tenant-b"))).lines == ()
+
+
+async def test_catalog_caps_by_title_order_and_counts_the_rest() -> None:
+    store = await _store(
+        _document(3, "# C\n\nThird."),
+        _document(1, "# A\n\nFirst."),
+        _document(2, "# B\n\nSecond."),
+    )
+
+    catalog = await store.catalog(_catalog_query(max_documents=2))
+
+    assert [line.title for line in catalog.lines] == ["Document 1", "Document 2"]
+    assert catalog.omitted == 1
+
+
+async def test_catalog_shows_a_superseded_document_once_as_its_current_version() -> None:
+    first = _document(1, "# One\n\nThe first version.")
+    store = await _store(first)
+    newer = _document(1, "# One\n\nThe second version.\n\n## More\n\nIt grew.")
+    await store.ingest(
+        KnowledgeIngestPrepared(
+            document=newer.document.model_copy(
+                update={"row_id": UUID(int=1_901), "version": 2, "valid_from": NOW}
+            ),
+            chunks=[
+                chunk.model_copy(update={"document_row_id": UUID(int=1_901), "version": 2})
+                for chunk in newer.chunks
+            ],
+        )
+    )
+
+    catalog = await store.catalog(_catalog_query())
+
+    assert [(line.title, line.passages) for line in catalog.lines] == [("Document 1", 2)]
+    earlier = await store.catalog(_catalog_query(as_of=NOW - timedelta(seconds=1)))
+    assert earlier.lines == ()
+
+
+async def test_catalog_honours_the_people_erasure_fence() -> None:
+    store = await _store(_document(1, "# Mine\n\nA rollback procedure."))
+    prepared = _document(2, "# Theirs\n\nAnother rollback procedure.")
+    await store.ingest(
+        prepared.model_copy(
+            update={
+                "document": prepared.document.model_copy(
+                    update={
+                        "source_ref": prepared.document.source_ref.model_copy(
+                            update={"origin": "model_output", "run_id": UUID(int=72)}
+                        )
+                    }
+                )
+            }
+        )
+    )
+    assert [line.title for line in (await store.catalog(_catalog_query())).lines] == [
+        "Document 1",
+        "Document 2",
+    ]
+    store._people_erased_runs[UUID(int=72)] = NOW
+    assert [line.title for line in (await store.catalog(_catalog_query())).lines] == ["Document 1"]

@@ -92,8 +92,10 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 3. installs a release-local `.venv` from `uv.lock` using a shared download
    cache, and compiles the bytecode of its dependencies and of `src`, because
    the units' read-only filesystem keeps Python from caching it at run time;
-4. builds `agent-core-sandbox:<release-id>` and
-   `veetbot-cockpit-builder:<release-id>`, then requires the builder to build
+4. builds `agent-core-sandbox:<release-id>`,
+   `veetbot-cockpit-builder:<release-id>` and
+   `veetbot-code-sandbox:<release-id>` (ADR-0281; the preflight requires it, and
+   it has no canary), then requires the builder to build
    a reference widget under runsc with no network, a read-only root and the
    sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`). It copies the
    board's content-addressed runtime out of the builder image into
@@ -105,7 +107,7 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    `alembic upgrade head`, and runs the production preflight;
 7. stops both run workers, rechecks active provider pins, then switches
    `/opt/veetbot/current`, switches the board's runtime manifest to this
-   release's, tags the sandbox and builder images as `production`, and
+   release's, tags the sandbox, builder and code sandbox images as `production`, and
    restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
@@ -115,7 +117,8 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    promoted directory;
 9. retains the five newest valid releases; and
 10. retains the two newest timestamped `agent-core-sandbox`,
-    `veetbot-cockpit-builder` and `veetbot-browser-profile-service` image
+    `veetbot-cockpit-builder`, `veetbot-code-sandbox` and
+    `veetbot-browser-profile-service` image
     tags and prunes build cache that
     no build has used for 48 hours.
 
@@ -157,7 +160,7 @@ uses the deployment identity's existing Docker trust boundary; application
 identities still receive no Docker access.
 
 Image retention runs only after every verification above has passed. For each
-of the three repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
+of the four repositories it sorts the `YYYYMMDD-HHMMSS-<revision>` tags newest
 first and removes every tag after the second, which keeps the active release's
 image and its predecessor, the manual rollback target. It never removes the tag
 just released, a tag that `docker ps` reports a container running, or a tag
@@ -189,6 +192,16 @@ credentials in the application environment, which refuses to start with one.
 A pre-promotion failure removes only its staged directory. A post-promotion
 failure remains visible for diagnosis and manual rollback. Database migrations
 are never downgraded automatically.
+
+## Async worker slots
+
+`veetbot-async-worker` runs one process per `worker.reserved_async_slots` in
+`runtime/limits.yaml`, shipped as two (ADR-0295). The unit's `MainPID` is a small
+supervisor: stopping the unit stops every slot, and a slot that exits restarts the
+set after up to 55 seconds for the others to finish their runs. `systemctl status veetbot-async-worker` lists them, and each slot's runs carry its own
+process ID in `lease_owner`. Lowering the value to 1 in a reviewed overlay under
+`AGENT_CONFIG_DIR` and restarting the unit returns to one process, which frees
+about 1 GB of memory, but a long scheduled run then holds up email refreshes.
 
 ## One-time host preparation
 
@@ -503,7 +516,9 @@ or disabled together" when they differ); `AGENT_NOTIFICATION_API_ENABLED` and
 dispatch flags must change together" and "schedule worker notification flags
 must match the application notification flags"); `AGENT_COCKPIT_ENABLED`
 ("schedule worker AGENT_COCKPIT_ENABLED must match the application
-environment"); `AGENT_EMAIL_ENABLED` with `GMAIL_ACCOUNTS_FILE` as above; and
+environment"); `AGENT_SVP_ENABLED` ("schedule worker AGENT_SVP_ENABLED must
+match the application environment", ADR-0291), never with
+`SVP_CREDENTIAL_FILE`; `AGENT_EMAIL_ENABLED` with `GMAIL_ACCOUNTS_FILE` as above; and
 `AGENT_CALL_ENABLED` with the non-secret `BLAND_CONFIGURATION_FILE` path,
 because the scheduler derives a schedule's calling scopes from
 `AGENT_CALL_ENABLED` (ADR-0213). The template
@@ -1281,15 +1296,28 @@ valid code-only rollback target. The runbook below detects the target's cadence
 support and checks the stored values while all schedule writers are stopped.
 If it refuses the target, roll forward instead, or restore a database snapshot
 from before the first such revision and then roll the code back. Never run an
-automatic Alembic downgrade as part of rollback. Run the complete block in one
+automatic Alembic downgrade as part of rollback. The block also refuses a
+target whose expected schema revision is not the database's, before any unit
+stops, since such a target's startup check would reject the database. The same
+care covers a release from before ADR-0291: its schedule model forbids a revision
+that names MCP servers, and its schedule role refuses to start with
+`AGENT_SVP_ENABLED=1` and no credential. Once every unit is stopped and the stored
+revisions pass, the runbook removes that line from the schedule environment. It
+puts the line back before restarting the current release if the rollback then
+fails. After a successful rollback, add the line back before the next release,
+whose parity check otherwise refuses it. Such a target also cannot read a saved
+job that declares `mcp.read`, and the runbook does not check for one, so that job
+fails until you roll forward. Run the complete block in one
 shell so file descriptor 9 holds the same deployment lock from before writer
 quiescence through readiness verification. The block retags the target's
 Cockpit builder image as `production` when the target has one; a target from
-before Milestone 35 has none, and the newer builder tag stays, unused by it.
+before Milestone 35 has none, and the newer builder tag stays, unused by it. The
+code sandbox image (ADR-0281) follows the same rule.
 
 ```bash
 set -euo pipefail
 environment_file="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
+schedule_environment_file="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
 exec 9>/opt/veetbot/shared/deploy.lock
 if ! flock -w 900 9; then
   echo "Could not acquire /opt/veetbot/shared/deploy.lock" >&2
@@ -1332,6 +1360,14 @@ fi
 previous_builder_image="$(
   docker image inspect --format '{{.Id}}' veetbot-cockpit-builder:production 2>/dev/null || true
 )"
+# A release from before ADR-0281 has no code sandbox image.
+target_code_sandbox_image=""
+if docker image inspect "veetbot-code-sandbox:$target_id" >/dev/null 2>&1; then
+  target_code_sandbox_image="veetbot-code-sandbox:$target_id"
+fi
+previous_code_sandbox_image="$(
+  docker image inspect --format '{{.Id}}' veetbot-code-sandbox:production 2>/dev/null || true
+)"
 # The board's runtime lives under the artifact root the release exported it to.
 cockpit_runtime_dir="$({
   set -a
@@ -1372,6 +1408,22 @@ case "$target_calendar_compatibility" in
     ;;
 esac
 
+target_mcp_compatibility="$({
+  cd "$target"
+  "$target/.venv/bin/python" - <<'PY'
+from agent_core.domain.schedules import ScheduleDefinition
+
+print("compatible" if "mcp_servers" in ScheduleDefinition.model_fields else "incompatible")
+PY
+})"
+case "$target_mcp_compatibility" in
+  compatible | incompatible) ;;
+  *)
+    echo "Could not determine the target's schedule MCP server compatibility" >&2
+    exit 1
+    ;;
+esac
+
 app_next="/opt/veetbot/.rollback-$target_id-$$"
 docs_next="/opt/veetbot/shared/docs/.rollback-$target_id-$$"
 website_next="/opt/veetbot/shared/website/.rollback-$target_id-$$"
@@ -1379,6 +1431,7 @@ app_restore="/opt/veetbot/.rollback-restore-$$"
 docs_restore="/opt/veetbot/shared/docs/.rollback-restore-$$"
 website_restore="/opt/veetbot/shared/website/.rollback-restore-$$"
 health_headers=""
+schedule_environment_backup=""
 
 rollback_pending=0
 rollback_on_exit() {
@@ -1397,6 +1450,12 @@ rollback_on_exit() {
     if test -n "$previous_builder_image"; then
       docker tag "$previous_builder_image" veetbot-cockpit-builder:production
     fi
+    if test -n "$previous_code_sandbox_image"; then
+      docker tag "$previous_code_sandbox_image" veetbot-code-sandbox:production
+    fi
+    if test -n "$schedule_environment_backup"; then
+      sudo mv -f "$schedule_environment_backup" "$schedule_environment_file"
+    fi
     sudo systemctl restart "${managed_units[@]}"
   fi
   if test -n "$health_headers"; then
@@ -1408,9 +1467,58 @@ rollback_on_exit() {
 }
 trap rollback_on_exit EXIT
 
+# A target that expects an older schema revision cannot read the database
+# (its startup check refuses it), so refuse here, before any unit stops.
+target_schema_compatibility="$({
+  set -a
+  # shellcheck disable=SC1090
+  . "$environment_file"
+  set +a
+  cd "$target"
+  "$target/.venv/bin/python" - <<'PY'
+import asyncio
+import os
+
+from sqlalchemy import text
+
+from agent_core.adapters.persistence.database import create_engine
+from agent_core.adapters.persistence.revision import EXPECTED_REVISION
+
+
+async def main() -> None:
+    engine = create_engine(os.environ["DATABASE_URL"])
+    async with engine.connect() as connection:
+        stored = (await connection.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
+    await engine.dispose()
+    print("compatible" if stored == EXPECTED_REVISION else f"incompatible {stored} {EXPECTED_REVISION}")
+
+
+asyncio.run(main())
+PY
+})"
+case "$target_schema_compatibility" in
+  compatible) ;;
+  incompatible*)
+    echo "The database schema is not the target's expected revision ($target_schema_compatibility);" >&2
+    echo "a code-only rollback cannot read it. Roll forward, or restore a snapshot first." >&2
+    exit 1
+    ;;
+  *)
+    echo "Could not determine the target's schema compatibility" >&2
+    exit 1
+    ;;
+esac
+
 rollback_pending=1
 sudo systemctl stop "${managed_units[@]}"
+unreadable_schedule_revision=""
 if test "$target_calendar_compatibility" = incompatible; then
+  unreadable_schedule_revision="definition #>> '{cadence,kind}' IN ('MONTHLY','YEARLY')"
+fi
+if test "$target_mcp_compatibility" = incompatible; then
+  unreadable_schedule_revision="${unreadable_schedule_revision:+$unreadable_schedule_revision OR }definition -> 'mcp_servers' IS NOT NULL"
+fi
+if test -n "$unreadable_schedule_revision"; then
   incompatible_schedule_revisions="$({
     set -a
     # shellcheck disable=SC1090
@@ -1431,19 +1539,29 @@ if test "$target_calendar_compatibility" = incompatible; then
         postgres psql \
         --no-psqlrc --tuples-only --no-align \
         --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-        --command "SELECT count(*) FROM schedule_revisions WHERE definition #>> '{cadence,kind}' IN ('MONTHLY','YEARLY');" \
+        --command "SELECT count(*) FROM schedule_revisions WHERE $unreadable_schedule_revision;" \
       | tr -d '[:space:]'
   })"
   case "$incompatible_schedule_revisions" in
     '' | *[!0-9]*)
-      echo "Could not validate stored schedule cadence values" >&2
+      echo "Could not validate stored schedule revisions" >&2
       exit 1
       ;;
   esac
   if test "$incompatible_schedule_revisions" -ne 0; then
-    echo "Refusing a pre-Milestone-20 target: incompatible schedule revisions exist" >&2
+    echo "Refusing this target: schedule revisions it cannot read exist" >&2
     exit 1
   fi
+fi
+# A release from before ADR-0291 refuses this flag without the credential.
+if test "$target_mcp_compatibility" = incompatible \
+  && test -f "$schedule_environment_file" \
+  && test "$(awk -F= '$1 == "AGENT_SVP_ENABLED" { value = $2 } END { print value }' \
+    "$schedule_environment_file")" = 1; then
+  sudo cp -p "$schedule_environment_file" "$schedule_environment_file.rollback-$$"
+  schedule_environment_backup="$schedule_environment_file.rollback-$$"
+  awk -F= '$1 != "AGENT_SVP_ENABLED"' "$schedule_environment_backup" \
+    | sudo tee "$schedule_environment_file" >/dev/null
 fi
 ln -s "$target" "$app_next"
 ln -s "$docs_target" "$docs_next"
@@ -1451,6 +1569,9 @@ ln -s "$website_target" "$website_next"
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
 if test -n "$target_builder_image"; then
   docker tag "$target_builder_image" veetbot-cockpit-builder:production
+fi
+if test -n "$target_code_sandbox_image"; then
+  docker tag "$target_code_sandbox_image" veetbot-code-sandbox:production
 fi
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
@@ -1501,6 +1622,10 @@ for unit in "${managed_units[@]}"; do
 done
 rollback_pending=0
 trap - EXIT
+if test -n "$schedule_environment_backup"; then
+  sudo rm -f -- "$schedule_environment_backup"
+  echo "Add AGENT_SVP_ENABLED=1 back to $schedule_environment_file before the next release" >&2
+fi
 ```
 
 The returned `X-Veetbot-Release` and both public surfaces' `release.txt` files
@@ -1560,11 +1685,14 @@ service that is accidentally bound to a public interface.
 
 3. Set `AGENT_SVP_ENABLED=1` and
    `SVP_CREDENTIAL_FILE=/var/lib/veetbot/svp/credential.json` in
-   `/etc/veetbot/veetbot.env` only, then restart the API and the three
-   workers. Their units allow writes to that directory when it exists.
+   `/etc/veetbot/veetbot.env`, set `AGENT_SVP_ENABLED=1` alone in the schedule
+   environment (ADR-0291), then restart the API, the three workers and
+   `veetbot-schedule`. The API's and workers' units allow writes to that
+   directory when it exists; the schedule role never reads the credential.
 
 New chats are then offered `mcp.svp_read.list_operations`,
-`describe_operation` and `call_operation`; scheduled runs are not. On the
+`describe_operation` and `call_operation`; a scheduled run is offered them only
+when its schedule names `svp_read`. On the
 production roster the three are entries in the deferred tool index, reached
 with `tool.call`, and the production-roster gates include the flag
 (ADR-0124). A call that returns `svp.credential_rejected` after the grant
@@ -1686,6 +1814,12 @@ it on `avitus/veetbot` only, then note the App id and the installation id.
   deleted, with the admin and write roles exempt, so only the App is fenced;
 - nobody may force-push or delete `cockpit/widgets`;
 - no CircleCI workflow and no CodeRabbit review applies to `cockpit/widgets`.
+
+Code proposals (ADR-0281) need two more grants, and only when
+`AGENT_CODE_PROPOSALS_ENABLED=1`: the App's **Pull requests: Read and write**
+permission, and an exception to the first ruleset that lets the App create and
+update branches matching `veetbot/**`. The adapter never writes another branch,
+and it has no merge or review call.
 
 **The key.** Generate a private key for the App and install it as
 `/etc/veetbot/secrets/cockpit-github-app.pem`, owned by root with mode `0400`.
@@ -1864,6 +1998,66 @@ needed, use the compatible retained release without downgrading the database.
 Verify readiness and public identities after either action, retain the incident,
 and record the rollout outcome before any separately authorized extension.
 
+### Standing owner activation of semantic retrieval (ADR-0290)
+
+Production semantic recall and the knowledge semantic arm run on the owner's
+standing decision, not a trial: the admission has no expiry, no check-ins and
+no release census, and it is hard-bound only to the local encoder tuple. The
+bounded routes above remain available for a future trial.
+
+**Prepare the files** on the host as `veetbot`, from the current release with
+the environment sourced, with the owner's exact instruction in a file:
+
+```sh
+.venv/bin/agent memory standing-admission --instruction-file /tmp/standing/instruction.txt \
+  --reference <reference to the owner's message> \
+  --rollback-build-ref <full commit of the retained previous release> \
+  --out /tmp/standing
+```
+
+The command composes the live configuration exactly as startup does, refuses a
+remote profile or a profile without query preparation, writes
+`standing-evidence.json` and `standing-admission.json`, and prints their
+digests and the embedding space key. It never prints the instruction back.
+
+**Install as root.** Move both files to `/etc/veetbot/recall/standing/`
+(directory `root:veetbot 0750`, files `0640`), then in `/etc/veetbot/veetbot.env`
+set:
+
+```dotenv
+AGENT_MEMORY_SEMANTIC_INDEX_ENABLED=1
+AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE=/etc/veetbot/recall/standing/standing-evidence.json
+AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST=/etc/veetbot/recall/standing/standing-admission.json
+AGENT_KNOWLEDGE_SEMANTIC_ENABLED=1
+AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai
+```
+
+The knowledge arm embeds with OpenAI's `text-embedding-3-small` on the existing
+`VEETBOT_OPENAI_KEY` (public and internal text only); the memory index's local
+encoder measured no paraphrase lift. Restart the API, the interactive and
+asynchronous run workers and maintenance.
+
+**Verify.** After the restart the API journal shows neither
+`semantic_recall_unavailable_using_sparse` nor
+`knowledge_semantic_unavailable_using_lexical`; a new private chat's
+`memory.recalled` event carries the admission's binding digest; the
+maintenance journal logs `knowledge_vectors_backfilled` rounds until the
+owner's current documents are covered (64 chunks a round; a 403-chunk manual
+takes seven rounds, about 2,300 windows) and, after the last round,
+`knowledge_vectors_pruned` for a previous space; and `knowledge.search` in a fresh chat
+returns a passage that paraphrases the question. Readiness alone still proves
+nothing about semantic activation.
+
+**Withdraw.** Set `AGENT_MEMORY_SEMANTIC_INDEX_ENABLED=0` and
+`AGENT_KNOWLEDGE_SEMANTIC_ENABLED=0` and restart, or change or remove the
+installed files: the knowledge arm reads the index's admission before every
+provider call, so the files withdraw its OpenAI calls with memory recall, and
+sparse recall and lexical search continue; a restart with the index enabled
+but not admitted leaves the arm lexical as well. Only with the index flag off
+does the knowledge flag alone govern the arm. A different encoder withdraws the
+admission by itself; prepare and install the files again once the owner
+decides.
+
 ### Application reliability diagnostics and optional alerts (ADR-0205)
 
 After deploying the reliability changes, use the existing protected owner
@@ -1948,11 +2142,26 @@ positions, no SQL). Run the dry run first and keep its output with the
 authorization; the owner's affirmed home address and its seven partners are
 the first production case.
 
-### Learned-memory reshape (ADR-0250)
+### Possession merge (ADR-0283)
 
-`agent memory reshape --policy owner-source-learning@1` counts the live rows
-learned under the old shape; `--confirm` supersedes each with its `@2` belief
-through formation (claim as statement, host beside it, same sources,
-confidence and expiry) and leaves the old row readable as superseded. Run the
-dry run first; the production run needs the owner's authorization, and the
-fallback is the rows' own thirty-day expiry.
+`agent memory merge-possessions` groups the owner's live direct possessions by
+the narrow restatement key and reports the duplicate groups it would fold, the
+canonicals it would promote and the single-character placeholders it would
+retire; `--confirm` writes the repair through the governed path (the newest
+copy becomes the active canonical with the group's corroboration, strongest
+authority and durability, the rest are superseded with `memory.superseded`
+events, fresh store positions, no SQL). Run the dry run first; the three provisional copies of the owner's car
+formed between September and October 2026 are the first production case.
+
+### Chat upload ingestion retry (ADR-0284)
+
+`agent knowledge retry <artifact id>` returns a chat upload whose automatic
+ingestion failed or was refused to pending with a fresh attempt count, and
+refuses a pending or ingested upload or an artifact of another origin; the
+maintenance sweep ingests it on its next round and records the outcome on the
+upload as usual. A failed attempt is logged as `upload_knowledge_ingest_failed`
+with the error class, and the retries back off one minute and then fifteen.
+The owner's 424-page car manual, failed three times on 2026-10-23, is the
+first production case: run the retry, then read the maintenance journal for
+the error class if it fails again.
+

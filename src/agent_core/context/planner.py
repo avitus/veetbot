@@ -13,10 +13,10 @@ from weakref import WeakValueDictionary
 from agent_core.context.budget import ContextBudgetAllocator
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.rendering import (
-    UNINDEXED_DEFERRED_TOOLS,
     build_prefix,
     deferred_index_items,
     envelope_items,
+    is_unindexed_deferred,
     prefix_bytes,
 )
 from agent_core.domain.agents import DEFERRED_TOOLS_METADATA_KEY, AgentSpec, Principal
@@ -33,7 +33,6 @@ from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, S
 from agent_core.domain.messages import (
     CacheBreakpoint,
     CacheTtl,
-    ConversationItem,
     ResolvedModel,
 )
 from agent_core.domain.persona import render_persona, rendered_entry_count
@@ -43,6 +42,7 @@ from agent_core.domain.sessions import (
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_RUN_KIND_METADATA_KEY,
     SESSION_SCHEDULE_ID_METADATA_KEY,
+    SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY,
     Session,
     project_scope,
 )
@@ -55,12 +55,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@14"
-# Plans from these builders carry no deferred tools, so their builder version
-# alone does not rotate them (ADR-0123). Since context-builder@13 added the
-# records catalog sentence to the framing row they no longer render the same
-# bytes: their stored prefix hash fails the recheck below and they re-plan.
-_EQUIVALENT_EARLIER_BUILDERS = frozenset({"context-builder@11"})
+BUILDER_VERSION = "context-builder@16"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 # In priority order: the adapter keeps the earliest a model's breakpoint budget
 # allows. The history window is placed per request by the builder (Section 10.1).
@@ -99,7 +94,7 @@ def _authority_scope_hashes(principal: Principal) -> tuple[str, ...]:
 
 
 def _builder_is_current(version: str) -> bool:
-    return version == BUILDER_VERSION or version in _EQUIVALENT_EARLIER_BUILDERS
+    return version == BUILDER_VERSION
 
 
 def _with_history_window(plan: ContextPlan) -> ContextPlan:
@@ -166,6 +161,16 @@ def _cache_breakpoints(session: Session) -> tuple[CacheBreakpoint, ...]:
         item.model_copy(update={"ttl": ttl} if item.boundary in _PREFIX_BOUNDARIES else {})
         for item in CACHE_BREAKPOINTS
     )
+
+
+def _named_owner_tools(session: Session, tools: Sequence[ToolSpec]) -> list[ToolSpec]:
+    """ADR-0291: scheduled work is offered only the owner-added servers it names."""
+    metadata = session.metadata
+    named = metadata.get(SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY)
+    if SESSION_SCHEDULE_ID_METADATA_KEY not in metadata and named is None:
+        return list(tools)
+    servers = frozenset(named) if isinstance(named, list) else frozenset()
+    return [tool for tool in tools if tool.server_id in servers]
 
 
 def _has_tool_surface(session: Session) -> bool:
@@ -281,6 +286,25 @@ class EventContextPlanner:
         self._remember(plan)
         return plan.model_copy(deep=True)
 
+    def _pinned_contracts_available(self, plan: ContextPlan, principal: Principal) -> bool:
+        """An unfinished run may retain only exact contracts still registered for its owner."""
+        for spec in plan.pinned_tool_specs:
+            try:
+                current = self._registry.get(
+                    spec.name,
+                    spec.version,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    source=spec.source,
+                    server_id=spec.server_id,
+                    device_id=spec.device_id,
+                )
+            except NotFoundError:
+                return False
+            if current.spec != spec:
+                return False
+        return True
+
     async def plan(
         self,
         session: Session,
@@ -289,6 +313,7 @@ class EventContextPlanner:
         model: ResolvedModel,
         *,
         refresh_authorization: bool = False,
+        preserve_tool_pins: bool = False,
         prepare_surface: bool = True,
     ) -> ContextPlan:
         async with self._session_lock(session.id):
@@ -331,7 +356,14 @@ class EventContextPlanner:
                 unchanged = (
                     current.model_id == model_id
                     and current.policy_version == self._policy_version
-                    and _builder_is_current(current.builder_version)
+                    and (
+                        _builder_is_current(current.builder_version)
+                        or (
+                            preserve_tool_pins
+                            and not refresh_authorization
+                            and self._pinned_contracts_available(current, principal)
+                        )
+                    )
                     and current.persona_text == persona_text
                     and current.persona_version == persona_version
                     and not authority_changed
@@ -339,8 +371,6 @@ class EventContextPlanner:
                 )
                 if unchanged and current.prefix_sha256 == current_prefix_sha256:
                     return current
-                if unchanged and await self._hashed_with_recorded_scopes(current, current_prefix):
-                    return await self._canonicalize(current, current_prefix_sha256)
                 return await self._create(
                     session,
                     agent,
@@ -393,56 +423,6 @@ class EventContextPlanner:
                 deep=True,
             )
             return await self._append(rotated, "context.epoch.rotated", reason)
-
-    async def _hashed_with_recorded_scopes(
-        self, plan: ContextPlan, prefix: Sequence[ConversationItem]
-    ) -> bool:
-        """Whether the plan's hash covers its prefix with scopes in their recorded order.
-
-        Before ADR-0134 a worker hashed each scope set in the iteration order
-        its hash seed gave, which the plan event recorded. Such a plan renders
-        the same prompt; only its identity is not canonical.
-        """
-        recorded: dict[str, list[str]] = {}
-        async with self._uow_factory() as uow:
-            for event_type in sorted(PLAN_EVENT_TYPES):
-                event = await uow.events.latest_before(
-                    plan.session_id, LATEST_EVENT_BOUNDARY, event_type, self._principal
-                )
-                payload = None if event is None else event.payload.get("plan")
-                if not isinstance(payload, dict) or payload.get("epoch") != plan.epoch:
-                    continue
-                for spec in (
-                    *payload.get("tool_specs", ()),
-                    *payload.get("deferred_tool_specs", ()),
-                ):
-                    scopes = spec.get("required_scopes")
-                    if isinstance(scopes, list) and scopes != sorted(scopes):
-                        recorded[spec["name"]] = scopes
-                break
-        if not recorded:
-            return False
-        encoded = prefix_bytes(
-            prefix, plan.tool_specs, plan.deferred_tool_specs, recorded_scopes=recorded
-        )
-        return hashlib.sha256(encoded).hexdigest() == plan.prefix_sha256
-
-    async def _canonicalize(self, plan: ContextPlan, prefix_sha256: str) -> ContextPlan:
-        """Give an unchanged plan its canonical identity in a new epoch, without re-planning.
-
-        Re-planning could move the tool selection under a run parked on an
-        approval and fail it with tool_pin_mismatch (ADR-0123, ADR-0134).
-        """
-        canonical = plan.model_copy(
-            update={
-                "epoch": plan.epoch + 1,
-                "created_at": self._clock.now(),
-                "prefix_sha256": prefix_sha256,
-                "tool_schema_sha256": _tool_schema_sha256(plan.tool_specs),
-            },
-            deep=True,
-        )
-        return await self._append(canonical, "context.epoch.rotated", "prefix_hash_canonicalized")
 
     async def _active_persona(self, principal: Principal) -> tuple[str, int, tuple[UUID, ...], int]:
         """The rendered persona row and its pinned version for this principal.
@@ -553,9 +533,10 @@ class EventContextPlanner:
         )
         if owner_tools:
             tools = [tool for tool in tools if tool not in owner_tools]
+            owner_tools = _named_owner_tools(session, owner_tools)
         # ADR-0261: an unindexed deferral never competes for a definition or an
         # index entry; it is pinned behind tool.call or recorded as skipped.
-        unindexed = [tool for tool in tools if tool.name in UNINDEXED_DEFERRED_TOOLS]
+        unindexed = [tool for tool in tools if is_unindexed_deferred(tool)]
         if unindexed:
             tools = [tool for tool in tools if tool not in unindexed]
         if (

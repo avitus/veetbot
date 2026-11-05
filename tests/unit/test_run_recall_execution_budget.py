@@ -7,8 +7,10 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock, elapsed_time
 from agent_core.domain.recall_execution import (
+    EXHAUSTED,
     RecallBudgetExceededError,
     RecallExecutionPermit,
+    RecallSearchTimeoutError,
     recall_phase,
     recall_search,
 )
@@ -82,10 +84,23 @@ async def test_phase_exit_revokes_permit_in_an_inherited_context() -> None:
 
 async def test_elapsed_deadline_applies_even_when_injected_clock_is_fixed() -> None:
     allowance = permit(seconds=0.01)
-    with recall_phase(allowance), pytest.raises(RecallBudgetExceededError):
+    with recall_phase(allowance), pytest.raises(RecallBudgetExceededError) as caught:
         async with recall_search(recall_query(), session_id=SESSION_ID, run_id=RUN_ID):
             await asyncio.sleep(1)
     assert allowance.remaining == 0
+    # An admitted search that outlives the shared deadline is a timeout, told
+    # apart from an exhausted allowance so the health report can say which.
+    assert isinstance(caught.value, RecallSearchTimeoutError)
+    assert str(caught.value) != EXHAUSTED
+
+
+async def test_a_refused_search_is_exhaustion_not_a_timeout() -> None:
+    allowance = permit(slots=0)
+    with recall_phase(allowance), pytest.raises(RecallBudgetExceededError) as caught:
+        async with recall_search(recall_query(), session_id=SESSION_ID, run_id=RUN_ID):
+            pass
+    assert not isinstance(caught.value, RecallSearchTimeoutError)
+    assert str(caught.value) == EXHAUSTED
 
 
 async def test_cancellation_consumes_attempt_without_becoming_ordinary_failure() -> None:

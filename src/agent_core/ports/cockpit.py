@@ -20,6 +20,7 @@ from agent_core.domain.cockpit import (
     FeedSnapshot,
     ImportFailure,
     Layout,
+    OutboxOperation,
     RevisionState,
     Widget,
     WidgetRevision,
@@ -41,7 +42,9 @@ class WidgetStore(Protocol):
 
     async def create_widget(self, widget: Widget) -> Widget: ...
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget: ...
+    async def get_widget(
+        self, principal: Principal, slug: str, *, lock: bool = False
+    ) -> Widget: ...
 
     async def list_widgets(
         self, principal: Principal, *, include_deleted: bool = False
@@ -52,9 +55,14 @@ class WidgetStore(Protocol):
     async def get_revision(self, principal: Principal, revision_id: UUID) -> WidgetRevision: ...
 
     async def list_revisions(
-        self, principal: Principal, slug: str, *, limit: int
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        limit: int,
+        states: Sequence[RevisionState] | None = None,
     ) -> list[WidgetRevision]:
-        """Newest first."""
+        """Newest first; `states` narrows the rows before the limit applies."""
         ...
 
     async def set_revision_state(
@@ -106,14 +114,38 @@ class WidgetCommitOutbox(Protocol):
 
     One entry per revision (`ConflictError` reason `commit_queued`). `due`
     returns the tenant's entries whose next attempt is at or before `now`,
-    oldest first.
+    soonest attempt first, so a retry in backoff sorts after an entry accepted
+    later. An optional principal filter is applied before the limit.
     """
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry: ...
 
+    async def first_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        """The oldest outstanding operation for this owned widget, including backoff."""
+        ...
+
+    async def newest_for_widget(
+        self, principal: Principal, slug: str, operation: OutboxOperation | None = None
+    ) -> CommitOutboxEntry | None:
+        """The newest outstanding operation for this owned widget, including backoff.
+
+        `operation` narrows it to that kind of operation.
+        """
+        ...
+
+    async def removal_queued(self, principal: Principal, slug: str) -> bool:
+        """Whether this owned widget has an outstanding removal, including backoff."""
+        ...
+
     async def due(
-        self, tenant_id: str, *, now: datetime, limit: int
+        self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
     ) -> list[CommitOutboxEntry]: ...
+
+    async def due_heads(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[CommitOutboxEntry]:
+        """This owner's due entries with no older outstanding entry for their widget."""
+        ...
 
     async def reschedule(
         self,
@@ -130,7 +162,12 @@ class WidgetCommitOutbox(Protocol):
     async def record_import_failure(self, failure: ImportFailure) -> ImportFailure: ...
 
     async def import_failures(
-        self, principal: Principal, *, unseen_only: bool = False
+        self,
+        principal: Principal,
+        *,
+        unseen_only: bool = False,
+        slug: str | None = None,
+        limit: int | None = None,
     ) -> list[ImportFailure]:
         """Newest first."""
         ...
@@ -291,6 +328,14 @@ class BuildScreen:
 
 
 @dataclass(frozen=True, slots=True)
+class WidgetPreview:
+    fixture: str
+    size: str
+    text: str
+    png: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class WidgetBuild:
     """The builder's verdict. A rejection carries diagnostics and nothing else."""
 
@@ -300,6 +345,7 @@ class WidgetBuild:
     bundle: str | None = None
     bundle_sha256: str | None = None
     manifest: Mapping[str, Any] | None = None
+    preview: WidgetPreview | None = None
 
 
 class WidgetBuildFailedError(Exception):
@@ -322,6 +368,7 @@ class WidgetBuilder(Protocol):
         files: Mapping[str, str],
         *,
         screen: BuildScreen,
+        preview: Mapping[str, str] | None = None,
     ) -> WidgetBuild: ...
 
 

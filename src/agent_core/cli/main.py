@@ -9,9 +9,10 @@ import math
 import os
 import signal
 import socket
+import sys
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import aclosing
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
@@ -47,10 +48,10 @@ from agent_core.bootstrap import sequence_ids as sequence_ids
 from agent_core.bootstrap import system_clock as system_clock
 from agent_core.cli.people import app as people_app
 from agent_core.cli.people import configure as configure_people
-from agent_core.config import ConfigurationError
+from agent_core.cli.worker_slots import supervise_worker_slots
+from agent_core.config import ConfigurationError, load_config_document, load_settings
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest
-from agent_core.domain.email import EmailBulkExclusionReport
 from agent_core.domain.errors import (
     AgentCoreError,
     ConflictError,
@@ -111,6 +112,12 @@ class WorkerRole(StrEnum):
     SURFACE = "surface"
 
 
+def _async_worker_slots() -> int:
+    """Read how many processes the async role runs from the reviewed limits."""
+    limits = load_config_document(load_settings(), "runtime/limits.yaml")
+    return int(limits["worker"]["reserved_async_slots"])
+
+
 class QueuedRunTimeoutError(TimeoutError):
     def __init__(self, run_id: UUID) -> None:
         super().__init__(f"run remains queued: {run_id}")
@@ -138,10 +145,12 @@ approval_app = typer.Typer(name="approval", no_args_is_help=True)
 memory_app = typer.Typer(name="memory", no_args_is_help=True)
 reconsolidations_app = typer.Typer(name="reconsolidations", no_args_is_help=True)
 memory_app.add_typer(reconsolidations_app)
+knowledge_app = typer.Typer(name="knowledge", no_args_is_help=True)
 email_app = typer.Typer(name="email", no_args_is_help=True)
 persona_app = typer.Typer(name="persona", no_args_is_help=True)
 surface_app = typer.Typer(name="surface", no_args_is_help=True)
 app.add_typer(run_app)
+app.add_typer(knowledge_app)
 app.add_typer(session_app)
 app.add_typer(eval_app)
 app.add_typer(approval_app)
@@ -909,14 +918,24 @@ def worker_command(
             ),
         ),
     ] = WorkerRole.WORKER,
+    single_slot: Annotated[
+        bool,
+        typer.Option("--single-slot", hidden=True, help="Serve one slot of the async role."),
+    ] = False,
 ) -> None:
     """Execute an interactive, async, maintenance, schedule, notify, surface, or legacy role."""
 
     try:
-        asyncio.run(_serve_worker(role))
+        slots = 1 if single_slot or role is not WorkerRole.ASYNC else _async_worker_slots()
+        if slots == 1:
+            asyncio.run(_serve_worker(role))
+            return
+        slot = [sys.argv[0], "worker", "--role", role.value, "--single-slot"]
+        status = asyncio.run(supervise_worker_slots([slot] * slots))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
+    raise typer.Exit(status)
 
 
 async def _serve_api() -> None:
@@ -1181,33 +1200,6 @@ def reconsolidations_undo(
     )
 
 
-async def _email_exclude_bulk(confirm: bool) -> EmailBulkExclusionReport:
-    async with build(storage="postgres") as composition:
-        return await composition.services.email.exclude_bulk_sources(
-            composition.principal, confirm=confirm
-        )
-
-
-@email_app.command("exclude-bulk")
-def email_exclude_bulk(
-    confirm: Annotated[
-        bool,
-        typer.Option(
-            "--confirm",
-            help="Exclude every census-indexed thread; without it the pass only previews.",
-        ),
-    ] = False,
-) -> None:
-    """Exclude retained bulk-sender threads and erase what they formed (ADR-0116)."""
-
-    try:
-        result = asyncio.run(_email_exclude_bulk(confirm))
-    except ConfigurationError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from exc
-    typer.echo(result.model_dump_json())
-
-
 @memory_app.command("get")
 def memory_get(belief_id: UUID) -> None:
     """Inspect one governed memory, including formation and source identifiers."""
@@ -1321,40 +1313,6 @@ async def _memory_delete(belief_id: UUID) -> None:
         await composition.memory.delete(belief_id)
 
 
-async def _memory_reshape(policy: str, confirm: bool) -> Any:
-    async with build(storage="postgres") as composition:
-        return await composition.source_learning.reshape(policy=policy, confirm=confirm)
-
-
-@memory_app.command("reshape")
-def memory_reshape(
-    policy: Annotated[
-        str,
-        typer.Option("--policy", help="The learned-memory policy version to supersede."),
-    ] = "owner-source-learning@1",
-    confirm: Annotated[
-        bool,
-        typer.Option(
-            "--confirm",
-            help="Write the reshape; without it the pass only counts the rows it would supersede.",
-        ),
-    ] = False,
-) -> None:
-    """Supersede learned memories of one policy version with the @2 shape (ADR-0250).
-
-    Each row becomes a new belief citing the same source events, with the
-    claim as its statement and the website beside it; the old row is
-    superseded and its receipts follow. Governed supersession, never a rewrite.
-    """
-
-    try:
-        result = asyncio.run(_memory_reshape(policy, confirm))
-    except ConfigurationError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from exc
-    typer.echo(result.model_dump_json())
-
-
 async def _memory_reconcile_conflicts(confirm: bool) -> Any:
     async with build(storage="postgres") as composition:
         return await composition.memory.reconcile_conflicts(confirm=confirm)
@@ -1383,6 +1341,147 @@ def memory_reconcile_conflicts(
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(result.model_dump_json())
+
+
+async def _knowledge_retry(artifact_id: UUID) -> Any:
+    from agent_core.domain.artifacts import AUTO_INGEST_PENDING, retry_refusal
+
+    async with build(storage="postgres") as composition:
+        async with composition.uow_factory() as uow:
+            current = await uow.artifacts.get(artifact_id, composition.principal)
+            refusal = retry_refusal(current)
+            if refusal is not None:
+                raise ValueError(f"{current.name} cannot be retried: {refusal}")
+            artifact = await uow.artifacts.record_auto_ingest(
+                artifact_id,
+                composition.principal,
+                state=AUTO_INGEST_PENDING,
+                reason=None,
+                attempts=0,
+            )
+        return {"artifact_id": str(artifact.id), "name": artifact.name, "auto_ingest": "pending"}
+
+
+@knowledge_app.command("retry")
+def knowledge_retry(
+    artifact_id: Annotated[
+        UUID, typer.Argument(help="The chat upload to send to knowledge again.")
+    ],
+) -> None:
+    """Queue a failed or refused chat upload for ingestion again (ADR-0284).
+
+    The maintenance sweep picks it up on its next round with a fresh attempt
+    count; the outcome is recorded on the upload as before.
+    """
+
+    try:
+        result = asyncio.run(_knowledge_retry(artifact_id))
+    except (ConfigurationError, NotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result))
+
+
+async def _memory_merge_possessions(confirm: bool) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.merge_possessions(confirm=confirm)
+
+
+@memory_app.command("merge-possessions")
+def memory_merge_possessions(
+    confirm: Annotated[
+        bool,
+        typer.Option(
+            "--confirm",
+            help="Write the repair; without it the pass only reports what it would change.",
+        ),
+    ] = False,
+) -> None:
+    """Fold the owner's duplicate possession beliefs into one active belief (ADR-0283).
+
+    Live direct possessions that share the narrow restatement key become one
+    corroborated active belief, the newest, with the rest superseded; a
+    possession whose object is a single character is retired as a formation
+    placeholder. Never a SQL status edit.
+    """
+
+    try:
+        result = asyncio.run(_memory_merge_possessions(confirm))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
+
+
+async def _memory_standing_admission(
+    instruction_file: Path,
+    reference: str,
+    rollback_build_ref: str,
+    out: Path,
+    supersedes: str | None,
+    decided_at: datetime | None,
+) -> dict[str, Any]:
+    from agent_core.bootstrap import prepare_standing_admission
+
+    return await prepare_standing_admission(
+        instruction=instruction_file.read_text(encoding="utf-8").strip(),
+        reference=reference,
+        rollback_build_ref=rollback_build_ref,
+        out=out,
+        supersedes=supersedes,
+        decided_at=decided_at,
+    )
+
+
+@memory_app.command("standing-admission")
+def memory_standing_admission(
+    instruction_file: Annotated[
+        Path,
+        typer.Option("--instruction-file", help="A file holding the owner's words, verbatim."),
+    ],
+    reference: Annotated[
+        str, typer.Option("--reference", help="Where the owner said it (a message reference).")
+    ],
+    rollback_build_ref: Annotated[
+        str,
+        typer.Option("--rollback-build-ref", help="The retained release commit (40 hex)."),
+    ],
+    out: Annotated[Path, typer.Option("--out", help="An empty directory for the two files.")],
+    supersedes: Annotated[
+        str | None, typer.Option("--supersedes", help="The prior trial this replaces.")
+    ] = None,
+    decided_at: Annotated[
+        str | None,
+        typer.Option("--decided-at", help="When the owner decided (ISO 8601 with an offset)."),
+    ] = None,
+) -> None:
+    """Write the owner's standing semantic admission from the live composition (ADR-0290).
+
+    Reads the four live dependency digests exactly as composition does, then
+    writes `standing-evidence.json` and `standing-admission.json` into the
+    directory. Root installs them and points the semantic index settings at
+    them; the admission then holds until a file changes or the flag is off.
+    """
+
+    decided: datetime | None = None
+    if decided_at is not None:
+        try:
+            decided = datetime.fromisoformat(decided_at)
+        except ValueError:
+            decided = None
+        if decided is None or decided.tzinfo is None:
+            typer.echo("--decided-at must be ISO 8601 with a timezone offset", err=True)
+            raise typer.Exit(1)
+    try:
+        result = asyncio.run(
+            _memory_standing_admission(
+                instruction_file, reference, rollback_build_ref, out, supersedes, decided
+            )
+        )
+    except (ConfigurationError, OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result))
 
 
 @memory_app.command("delete")

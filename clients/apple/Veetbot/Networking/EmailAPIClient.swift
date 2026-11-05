@@ -69,6 +69,14 @@ extension VeetbotAPIClient {
                      "idempotency_key": .string(idempotencyKey)], key: idempotencyKey)
     }
 
+    /// One press on Save: a copy of this listed attachment goes to the thread's chat (ADR-0296).
+    public func saveEmailAttachment(_ key: EmailAttachmentKey, filename: String, idempotencyKey: String) async throws -> EmailOperationView {
+        try await emailCommand(path: "/threads/\(key.threadID.uuidString)/attachments/save",
+            values: ["message_id": .string(key.messageID), "attachment_index": .number(Double(key.index)),
+                     "filename": .string(filename), "idempotency_key": .string(idempotencyKey)],
+            key: idempotencyKey)
+    }
+
     /// Archive's gesture with the Spam delta: `true` reports the conversation, `false` restores it.
     public func reportEmailThreadSpam(_ thread: EmailThreadView, spam: Bool, idempotencyKey: String) async throws -> EmailOperationView {
         try await emailCommand(path: "/threads/\(thread.id.uuidString)/spam",
@@ -150,6 +158,32 @@ extension VeetbotAPIClient {
             path: "/drafts/\(draft.id.uuidString)/send-proposal",
             values: ["expected_revision": .number(Double(draft.revision))], key: idempotencyKey
         )
+    }
+
+    /// One press on Send: the exact revision and the thread revision the owner saw (ADR-0279).
+    public func sendEmailDraft(
+        _ draft: EmailDraftView, sourceRevision: Int, idempotencyKey: String
+    ) async throws -> EmailDraftOperation {
+        try await emailCommand(
+            path: "/drafts/\(draft.id.uuidString)/send",
+            values: [
+                "expected_revision": .number(Double(draft.revision)),
+                "source_revision": .number(Double(sourceRevision)),
+                "idempotency_key": .string(idempotencyKey),
+            ],
+            key: idempotencyKey
+        )
+    }
+
+    /// Takes back a send still parked in its undo window; the draft returns to editing.
+    public func undoEmailSend(_ draft: EmailDraftView) async throws -> EmailDraftView {
+        var values: [String: JSONValue] = ["expected_revision": .number(Double(draft.revision))]
+        // Name the send being taken back, so a late Undo cannot cancel a later press.
+        if let runID = draft.runID { values["run_id"] = .string(runID.uuidString) }
+        return try await transport.send(TransportRequest(
+            method: .post, path: "/v1/email/drafts/\(draft.id.uuidString)/send-undo",
+            body: try JSONEncoder.server.encode(values), retryAttempts: 2
+        ))
     }
 
     public func discardEmailDraft(_ draft: EmailDraftView, idempotencyKey: String) async throws {

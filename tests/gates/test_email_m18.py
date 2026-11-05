@@ -1259,17 +1259,22 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
     # The default agent no longer advertises workspace.list_files (ADR-0124)
     # and offers schedule management, source learning, workspace writes and
     # JSON field reads through the deferred tool index (ADRs 0123, 0233, 0258).
-    # The capture reader is pinned behind tool.call with no index entry (ADR-0261).
+    # The capture reader and the file deletion are pinned behind tool.call with
+    # no index entry (ADRs 0261 and 0277).
     assert len(plan.tool_specs) == 24
     assert set(plan.deferred_tool_names) == {
         "artifact.read_capture",
+        "artifact.delete",
         "memory.learn",
         "workspace.write_text",
         "web.fetch_json",
+        "web.inspect_image",
         "schedule.update",
         "schedule.pause",
         "schedule.resume",
         "schedule.cancel",
+        "run.inspect",
+        "mcp.gmail_read.save_attachment",  # ADR-0296: the instructions advertise it.
     }
     assert {
         "mcp.gmail_read.search_threads",

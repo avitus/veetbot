@@ -78,6 +78,29 @@ public struct EmailAttachmentView: Codable, Equatable, Sendable {
         case filename, size
         case mimeType = "mime_type"
     }
+
+    /// The server's limit (ADR-0296). An unknown size is left for the server to judge.
+    public static let saveLimitBytes = 32 * 1024 * 1024
+    public static func canSave(size: Int?) -> Bool { (size ?? 0) <= saveLimitBytes }
+}
+
+/// One attachment by what the server addresses it with: the message and its listed position.
+public struct EmailAttachmentKey: Hashable, Sendable {
+    public let threadID: UUID
+    public let messageID: String
+    public let index: Int
+    public init(threadID: UUID, messageID: String, index: Int) {
+        self.threadID = threadID
+        self.messageID = messageID
+        self.index = index
+    }
+}
+
+/// Where one press on Save has got to. A saved file is on the email's chat.
+public enum EmailAttachmentSaveState: Equatable, Sendable {
+    case saving
+    case saved
+    case failed(String)
 }
 
 public struct EmailMessageView: Codable, Identifiable, Equatable, Sendable {
@@ -210,6 +233,8 @@ public struct EmailDraftView: Codable, Identifiable, Equatable, Sendable {
     public let approvalID: UUID?
     public let sessionID: UUID?
     public let updatedAt: Date
+    /// While set and in the future, the send is parked and Undo takes it back (ADR-0279).
+    public var sendUndoUntil: Date?
 
     public var canEdit: Bool { ["ready", "awaiting_approval", "failed"].contains(status) }
     public var isProcessing: Bool { ["generating", "sending"].contains(status) }
@@ -225,6 +250,7 @@ public struct EmailDraftView: Codable, Identifiable, Equatable, Sendable {
         case approvalID = "approval_id"
         case sessionID = "session_id"
         case updatedAt = "updated_at"
+        case sendUndoUntil = "send_undo_until"
     }
 }
 

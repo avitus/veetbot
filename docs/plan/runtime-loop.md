@@ -224,7 +224,10 @@ means the sweep that fails overdue runs would be a full scan. The
 indexing. It is computed once at run creation and never recomputed; a run
 that pauses for a human approval for six hours is still bound by the
 deadline set when it was submitted, which is the behaviour the state machine
-already implies by listing deadline as a cause of `FAILED`.
+already implies by listing deadline as a cause of `FAILED`. One exception
+(ADR-0295): a run with `RunLimits.execution_seconds` has `deadline_at` set once
+more at its first claim, to the sooner of the claim plus that window and the
+creation deadline, so time spent queued does not spend the window.
 
 **`failure` gets a type.** `runs.failure JSONB` exists in Section 15 with no
 domain counterpart, and `failure.reason = "max_attempts_exceeded"` is
@@ -1224,7 +1227,7 @@ and never an error, per ADR-0002.
 
 A completed turn's text is not always the whole reply. ADR-0122 attaches every
 file the run exported: in one unit of work under the run's lease, the loop lists
-the run's `sandbox_export` and `model_output` artifacts, keeps one per name and
+the run's `sandbox_export`, `model_output` and `email_attachment` artifacts, keeps one per name and
 content in creation order, clears their expiry so they live with the
 conversation, appends a `file` part for each to the final message, and records
 `assistant.message.completed`. That augmented message replaces the turn's copy
@@ -1420,8 +1423,10 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Twenty-two more belong to subsystems this document does not touch. They are
-listed here for the same reason: Section 6.8's list is where an implementer
+Twenty-two more belong to subsystems this document does not touch, and the
+loop-owned `memory.recall.limited` sits beside them because ADR-0282 added it
+to the loop's vocabulary after Section 6.8 was written. They are listed here
+for the same reason: Section 6.8's list is where an implementer
 looks for the vocabulary, and these are not in it either.
 
 ```text
@@ -1441,6 +1446,7 @@ memory.reinforced            memory-formation-and-consolidation.md
 memory.superseded            memory-formation-and-consolidation.md
 memory.needs_confirmation    memory-formation-and-consolidation.md
 memory.recalled              memory-retrieval-and-ranking.md
+memory.recall.limited        context-engine.md, ADR-0282
 knowledge.document.ingested  knowledge-documents.md
 browser.task_grant.created   browser-automation.md, ADR-0129
 browser.task_grant.ended     browser-automation.md, ADR-0129
@@ -1450,11 +1456,13 @@ records.entry.deleted        owner-records.md, ADR-0239
 records.series.deleted       owner-records.md, ADR-0239
 ```
 
-Twenty-four in Section 6.8 plus these thirty-seven is the whole vocabulary
-of session-scoped events: sixty-one persisted event types, not one of
-them introduced here. The four `records.*` types arrived with Milestone 34
-and are appended to the run's session in the same unit of work as the
-record write.
+Twenty-four in Section 6.8 plus these thirty-eight is the whole vocabulary
+of session-scoped events: sixty-two persisted event types. One of them,
+`memory.recall.limited`, was introduced by ADR-0282 and is appended by the
+loop when a build step goes without automatic recall; every other one
+arrived with the document that owns it. The four `records.*` types arrived
+with Milestone 34 and are appended to the run's session in the same unit of
+work as the record write.
 
 Two of the original eighteen were declared after this consolidation was written and
 never folded into it. `mcp.server.reauthenticated` sits in the same
@@ -1473,8 +1481,8 @@ the run, under a span root that is explicitly not `agent.run`. A harness
 event has no session, and `events.session_id` is `NOT NULL`. They are event
 types by every other measure and they cannot be rows in `events` as the
 schema stands — the same wall `multi-device-and-surfaces.md` hits for
-device lifecycle events and leaves open. Sixty-one plus these four is
-sixty-five declared types, of which sixty-one have somewhere to be
+device lifecycle events and leaves open. Sixty-two plus these four is
+sixty-six declared types, of which sixty-two have somewhere to be
 stored.
 
 Two ownership assignments close gaps that were nobody's:

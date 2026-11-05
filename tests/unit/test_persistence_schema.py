@@ -50,6 +50,7 @@ def test_browser_profiles_schema_contains_metadata_only() -> None:
         "created_at",
         "updated_at",
         "last_used_at",
+        "last_sign_in_mode",
     }
     forbidden = {"cookies", "tokens", "storage_state", "credential", "material", "blob"}
     assert forbidden.isdisjoint(table.columns.keys())
@@ -57,6 +58,7 @@ def test_browser_profiles_schema_contains_metadata_only() -> None:
         "ck_browser_profiles_generation_nonnegative",
         "ck_browser_profiles_status_closed",
         "ck_browser_profiles_binding_consistent",
+        "ck_browser_profiles_last_sign_in_mode_closed",
     }
 
 
@@ -662,6 +664,7 @@ COCKPIT_TABLES: dict[str, tuple[set[str], set[str]]] = {
     "cockpit_commit_outbox": (
         {"tenant_id", "principal_id", "revision_id"},
         {
+            "package_kind",
             "slug",
             "operation",
             "attempts",
@@ -673,7 +676,7 @@ COCKPIT_TABLES: dict[str, tuple[set[str], set[str]]] = {
     ),
     "cockpit_import_failures": (
         {"tenant_id", "principal_id", "id"},
-        {"commit_sha", "slug", "diagnostics", "seen", "created_at"},
+        {"package_kind", "commit_sha", "slug", "diagnostics", "seen", "created_at"},
     ),
 }
 

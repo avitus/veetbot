@@ -1328,6 +1328,8 @@ class FakeCeremonyPage:
             insert_text=AsyncMock(), type=AsyncMock(), press=AsyncMock()
         )
         self.mouse = SimpleNamespace(click=AsyncMock())
+        self.main_frame = object()
+        self.frames: list[object] = [self.main_frame]
 
     def locator(self, selector: str) -> Mock:
         """Return the challenge fields; a hidden password input stays in the DOM."""
@@ -1350,6 +1352,86 @@ class FakeCeremonyPage:
         )
         matches.nth.return_value = match
         return matches
+
+
+def fake_frame(*, count: AsyncMock, frame_visible: bool = True) -> Mock:
+    """A subframe holding one candidate field, whose count the test controls."""
+    field = Mock(spec=Locator)
+    field.is_visible = AsyncMock(return_value=True)
+    fields = Mock(spec=Locator)
+    fields.count = count
+    fields.nth.return_value = field
+    owner = SimpleNamespace(is_visible=AsyncMock(return_value=frame_visible), dispose=AsyncMock())
+    return Mock(
+        frame_element=AsyncMock(return_value=owner),
+        locator=Mock(return_value=fields),
+        parent_frame=SimpleNamespace(parent_frame=None),
+    )
+
+
+async def test_a_frame_that_goes_away_during_the_scan_shows_no_field_and_loses_no_key() -> None:
+    """Typing must survive an embed that detaches, which pages do constantly."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(
+        fake_frame(count=AsyncMock(side_effect=PlaywrightError("Frame was detached")))
+    )
+    page.frames.append(fake_frame(count=AsyncMock(return_value=1)))
+    runtime = ceremony_runtime(page)
+
+    await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text="synthetic-entry"))
+
+    page.keyboard.type.assert_awaited_once_with("synthetic-entry")
+    # The scan went past the detached frame to the one showing a field.
+    assert await runtime.authentication_status() is BrowserAuthenticationStatus.NEEDS_USER
+
+
+async def test_a_frame_that_stalls_cannot_hold_up_the_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A key press and a verification load both wait on this scan."""
+    monkeypatch.setattr(playwright_adapter, "_FRAME_SCAN_SECONDS", 0.01)
+
+    async def never_answers() -> int:
+        await asyncio.Event().wait()
+        return 0
+
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(fake_frame(count=AsyncMock(side_effect=never_answers)))
+    runtime = ceremony_runtime(page)
+
+    status = await asyncio.wait_for(runtime.authentication_status(), timeout=5)
+
+    assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+
+
+async def test_a_stalled_frame_does_not_hide_a_field_in_another(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signed-out page with one slow embed must still read as signed out."""
+    monkeypatch.setattr(playwright_adapter, "_FRAME_SCAN_SECONDS", 0.05)
+
+    async def never_answers() -> int:
+        await asyncio.Event().wait()
+        return 0
+
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(fake_frame(count=AsyncMock(side_effect=never_answers)))
+    page.frames.append(fake_frame(count=AsyncMock(return_value=1)))
+    runtime = ceremony_runtime(page)
+
+    status = await asyncio.wait_for(runtime.authentication_status(), timeout=5)
+
+    assert status is BrowserAuthenticationStatus.NEEDS_USER
+
+
+async def test_a_field_in_a_frame_with_no_visible_owner_is_no_challenge() -> None:
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.frames.append(fake_frame(count=AsyncMock(return_value=1), frame_visible=False))
+    runtime = ceremony_runtime(page)
+
+    assert (
+        await runtime.authentication_status() is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    )
 
 
 def ceremony_runtime(page: FakeCeremonyPage) -> PythonPlaywrightRuntime:
@@ -1525,6 +1607,174 @@ def evidence_runtime(page: FakeEvidencePage) -> PythonPlaywrightRuntime:
     return runtime
 
 
+async def test_a_second_look_needs_a_final_reading_it_could_really_make(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0297: a page that cannot be read has not shown that it asks nobody to sign in."""
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    await page.goto("https://www.duolingo.com/learn", wait_until="commit", timeout=1)
+
+    async def unreadable(_page: object) -> bool:
+        raise PlaywrightError("the page is redrawing")
+
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", unreadable)
+
+    with pytest.raises(PlaywrightError):
+        await runtime.look_again_by(
+            "https://www.duolingo.com/learn",
+            observed_seconds=0,
+            deadline=asyncio.get_running_loop().time() + 0.3,
+        )
+
+
+async def test_a_second_look_rides_out_a_page_that_is_briefly_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    await page.goto("https://www.duolingo.com/learn", wait_until="commit", timeout=1)
+    readings = iter([PlaywrightError("the page is redrawing")])
+
+    async def settling(_page: object) -> bool:
+        for failure in readings:
+            raise failure
+        return False
+
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", settling)
+
+    evidence = await runtime.look_again_by(
+        "https://www.duolingo.com/learn",
+        observed_seconds=0,
+        deadline=asyncio.get_running_loop().time() + 0.3,
+    )
+
+    assert not evidence.challenge_visible
+
+
+async def test_a_second_look_keeps_a_move_away_when_the_page_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0297: a page already gone is the answer, whatever a read of it would do."""
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    await page.goto("https://www.duolingo.com/learn", wait_until="commit", timeout=1)
+
+    async def leaves_while_redrawing(_page: object) -> bool:
+        page.url = "https://www.duolingo.com/log-in"
+        raise PlaywrightError("the page is navigating")
+
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", leaves_while_redrawing)
+
+    evidence = await runtime.look_again_by(
+        "https://www.duolingo.com/learn",
+        observed_seconds=0,
+        deadline=asyncio.get_running_loop().time() + 0.3,
+    )
+
+    assert evidence.path == "/log-in"
+
+
+async def test_a_second_look_keeps_a_move_away_made_during_its_final_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0297: the last read can be the one a redirect interrupts."""
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    await page.goto("https://www.duolingo.com/learn", wait_until="commit", timeout=1)
+    readings = iter([False])
+
+    async def leaves_on_the_last_read(_page: object) -> bool:
+        for reading in readings:
+            return reading
+        page.url = "https://www.duolingo.com/log-in"
+        raise PlaywrightError("the page is navigating")
+
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", leaves_on_the_last_read)
+
+    evidence = await runtime.look_again_by(
+        "https://www.duolingo.com/learn",
+        observed_seconds=0,
+        deadline=asyncio.get_running_loop().time(),
+    )
+
+    assert evidence.path == "/log-in"
+
+
+async def test_a_second_look_watches_a_new_document_for_the_full_time() -> None:
+    """ADR-0297: a form the page's next document draws late still ends the check."""
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    loaded = await runtime.load_page_evidence("https://www.duolingo.com/learn")
+
+    async def next_document_asks_late() -> None:
+        await asyncio.sleep(0.2)
+        page.url = "https://www.duolingo.com/learn/home"
+        for handler in page.handlers["domcontentloaded"]:
+            handler(page)
+        await asyncio.sleep(0.45)
+        page.password_visible = True
+
+    moving = asyncio.create_task(next_document_asks_late())
+    evidence = await runtime.look_again_by(
+        "https://www.duolingo.com/learn",
+        # The first document turns this old about half a second from now.
+        observed_seconds=loaded.observed_seconds + 0.5,
+        deadline=asyncio.get_running_loop().time() + 5,
+    )
+    await moving
+
+    assert evidence.challenge_visible
+
+
+@pytest.mark.parametrize("signal", ["request", "domcontentloaded"])
+async def test_a_second_look_reports_the_age_of_the_newest_document(signal: str) -> None:
+    """ADR-0297: time spent on the document before does not count toward the one now open.
+
+    The clock restarts when the request for the next document leaves, so the old page
+    is not credited while its replacement is on the way, and again when it has loaded.
+    """
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+    await runtime.load_page_evidence("https://www.duolingo.com/learn")
+    await asyncio.sleep(0.3)
+    argument = (
+        FakeNavigationRequest("https://www.duolingo.com/learn/home")
+        if signal == "request"
+        else page
+    )
+    for handler in page.handlers[signal]:
+        handler(argument)
+
+    evidence = await runtime.look_again_by(
+        "https://www.duolingo.com/learn",
+        observed_seconds=5,
+        deadline=asyncio.get_running_loop().time(),
+    )
+
+    assert evidence.observed_seconds < 0.3
+
+
+async def test_a_control_counts_every_document_it_was_watched_on() -> None:
+    """ADR-0297: restarting the control's clock would shorten what the signed-in copy must pass."""
+    page = FakeEvidencePage()
+    runtime = evidence_runtime(page)
+
+    async def moves_while_the_control_waits() -> None:
+        await asyncio.sleep(0.3)
+        for handler in page.handlers["domcontentloaded"]:
+            handler(page)
+
+    moving = asyncio.create_task(moves_while_the_control_waits())
+    evidence = await runtime.load_page_evidence(
+        "https://www.duolingo.com/learn",
+        challenge_deadline=asyncio.get_running_loop().time() + 0.6,
+    )
+    await moving
+
+    assert evidence.observed_seconds >= 0.5
+
+
 async def test_page_evidence_reports_origin_path_and_challenge() -> None:
     """ADR-0128: a verification load reports where it landed and whether it asks to sign in."""
 
@@ -1542,10 +1792,12 @@ async def test_page_evidence_reports_origin_path_and_challenge() -> None:
     challenged = await runtimes[1].load_page_evidence("https://www.duolingo.com/learn")
     left = await runtimes[2].load_page_evidence("https://www.duolingo.com/learn")
 
-    assert kept == BrowserPageEvidence(
+    # How long each page was watched depends on the clock, and is checked on its own.
+    assert kept.observed_seconds >= 0 and challenged.observed_seconds >= 0
+    assert kept.model_copy(update={"observed_seconds": 0.0}) == BrowserPageEvidence(
         on_allowed_origin=True, path="/learn", challenge_visible=False
     )
-    assert challenged == BrowserPageEvidence(
+    assert challenged.model_copy(update={"observed_seconds": 0.0}) == BrowserPageEvidence(
         on_allowed_origin=True, path="/log-in", challenge_visible=True
     )
     assert left.on_allowed_origin is False
@@ -1680,7 +1932,8 @@ async def test_the_context_seam_carries_todays_arguments_and_only_a_subclass_ext
     await TestOnlyRuntime().start("http://127.0.0.1:9", ("https://site.example",))
 
     assert chromium.contexts[0] == {
-        "accept_downloads": False,
+        # ADR-0294: an act's download window admits or cancels each file.
+        "accept_downloads": True,
         "service_workers": "block",
         "storage_state": None,
     }

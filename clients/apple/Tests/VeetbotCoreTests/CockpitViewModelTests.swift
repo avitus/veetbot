@@ -26,6 +26,10 @@ import Testing
         var openStreams: Int { lock.withLock { _openStreams } }
         var refreshes: Int { lock.withLock { _refreshes } }
 
+        func reportCockpitFailure(_ slug: String, revision: UUID, code: CockpitFailureCode) async throws {
+            record("failure " + slug + " " + code.rawValue)
+        }
+
         func refreshCockpit() async throws {
             lock.withLock { _refreshes += 1 }
             if failRefresh { throw URLError(.networkConnectionLost) }
@@ -73,6 +77,13 @@ import Testing
         var calls: [String] { lock.withLock { _calls } }
         private func record(_ call: String) { lock.withLock { _calls.append(call) } }
         var failWrites = false
+        var holdSettings = false
+        private var settingsContinuation: CheckedContinuation<Void, Never>?
+        var settingsPending: Bool { lock.withLock { settingsContinuation != nil } }
+        func releaseSettings() {
+            let continuation = lock.withLock { let pending = settingsContinuation; settingsContinuation = nil; return pending }
+            continuation?.resume()
+        }
 
         var detailDelayNanoseconds: UInt64 = 0
 
@@ -87,6 +98,11 @@ import Testing
         func putCockpitSettings(_ slug: String, values: [String: JSONValue]) async throws {
             if failWrites { throw HTTPTransportError.api(APIError(code: .malformedRequest, message: "The settings do not fit.", requestID: "r", statusCode: 400)) }
             record("settings \(slug) \(values.keys.sorted())")
+            if holdSettings {
+                await withCheckedContinuation { continuation in
+                    lock.withLock { settingsContinuation = continuation }
+                }
+            }
         }
         func putCockpitLayout(
             _ deviceClass: CockpitDeviceClass, placements: [CockpitPlacement], expectedRevision: Int?
@@ -271,7 +287,14 @@ import Testing
         let board = model(client)
         board.setVisible(true)
         await eventually { board.snapshot != nil }
-        board.hostReported(.quarantined(slug: "weather", revision: "anything"))
+        let revision = board.snapshot!.widgets[0].revisionID.uuidString
+        board.hostReported(.tileError(slug: "weather", revision: "stale"))
+        board.hostReported(.bundleError(slug: "weather", revision: revision))
+        board.hostReported(.bundleError(slug: "weather", revision: revision))
+        board.hostReported(.quarantined(slug: "weather", revision: revision))
+        await eventually { client.calls.contains("failure weather quarantined") }
+        #expect(client.calls.filter { $0 == "failure weather bundle_failed" }.count == 1)
+        #expect(!client.calls.contains("failure weather render_failed"))
         #expect(board.quarantined == ["weather"])
         board.retry("weather")
         #expect(board.quarantined.isEmpty)
@@ -416,6 +439,45 @@ import Testing
         await board.saveSettings("weather", values: ["place": .string("x")])
         #expect(board.errorMessage == "The settings do not fit.")
         board.setVisible(false)
+    }
+
+    /// Saved settings leave the form looking as it did, so a toast says they were saved.
+    @Test
+    func savingSettingsIsConfirmed() async {
+        let client = FakeClient()
+        client.queueSnapshot(.success(Self.snapshot(cursor: 41)))
+        client.queueStream([])
+        let board = model(client)
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        board.toasts = toasts
+        board.setVisible(true)
+        await eventually { board.snapshot != nil }
+        await board.openDetail("weather")
+        await board.saveSettings("weather", values: ["place": .string("Harbor")])
+        #expect(toasts.current?.text == "Settings saved.")
+        board.setVisible(false)
+    }
+
+    @Test
+    func oldSettingsCompletionCannotChangeTheNewConnection() async {
+        let client = FakeClient()
+        client.holdSettings = true
+        let board = model(client)
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        board.toasts = toasts
+        let pending = Task { await board.saveSettings("old", values: [:]) }
+        await eventually { client.settingsPending }
+        board.resetConnection()
+        await board.delete("current")
+        let currentMessage = board.actionMessage
+        #expect(currentMessage != nil)
+        toasts.show("Current connection.")
+        client.releaseSettings()
+        await pending.value
+        #expect(board.actionMessage == currentMessage)
+        #expect(toasts.current?.text == "Current connection.")
+        #expect(board.selectedSlug == "current")
+        #expect(board.detail?.slug == "current")
     }
 
     @Test

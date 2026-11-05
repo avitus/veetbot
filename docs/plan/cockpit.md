@@ -89,15 +89,15 @@ The owner decided these on 2026-10-22:
   (`email-experience.md:52-53`), and that a mode confers no authority.
 - **The execution service.** It runs gVisor containers with a read-only root,
   networking off, an empty environment and run leases. Its one-image
-  assumption is an open question in `sandbox-isolation.md:1740-1744`. This
+  assumption is an open question in `sandbox-isolation.md:1765-1769`. This
   design answers it for exactly one additional, platform-owned image.
 - **The tool pipeline.** Classification decides policy, and a `tool_rules`
   entry can allow one tool by exact name. The trust overlay escalates an
   untrusted origin or untrusted arguments. The credential-to-egress hardline
   rule covers `publication` arguments.
 - **The deferred tool index.** Definitions are capped at thirty items, and
-  that cap already binds the owner's roster (`context-engine.md:380-384`).
-  The deferred index (`context-engine.md:411-416`) admits a tool as a
+  that cap already binds the owner's roster (`context-engine.md:389-393`).
+  The deferred index (`context-engine.md:420-425`) admits a tool as a
   one-line entry reached through `tool.call`.
 - **Durable live delivery.** The run event stream already works this way: a
   row is written, then NOTIFY sends its sequence inside the same transaction,
@@ -289,6 +289,11 @@ origin would need CORS headers the scheme handler does not send.
     deadline, native code reloads the view and leaves the most recently
     changed widget out of the next snapshot.
 
+  Only silence from a page that is awake and on screen counts. A late heartbeat,
+  a hidden board, or a web process the system ended while the board was hidden
+  restarts the deadline and quarantines nothing, because sleep and hidden pages
+  stop answering through no fault of a widget.
+
   A quarantined widget shows a "paused" state natively until its next
   revision or the owner's retry.
 - **Data flow.** The realm receives only, per widget, its declared feeds at
@@ -432,8 +437,14 @@ ever touches a branch under `cockpit/`.
 
 ### Writing
 
-The outbox worker in the maintenance role takes entries in order per widget.
-For each one it:
+The outbox worker in the maintenance role takes each widget's entries in the
+order they were accepted, whenever their retries fall due. An entry's place is
+fixed under the widget's row lock, after everything already queued for that
+widget, so a clock that repeats or steps back cannot reorder them, and that place
+also decides which pending write is a widget's head. An entry waits while an
+older one for its widget is outstanding, and a batch counts only each widget's
+oldest entry, so entries waiting behind a retry cannot crowd it out. For each
+one it:
 
 1. reads the branch head;
 2. creates blobs, a tree based on the head's tree that changes only
@@ -484,7 +495,10 @@ read them.
 the entry retries with backoff and the previous live revision keeps rendering
 from PostgreSQL. Any other failure of one entry is handled the same way: the
 entry is logged and rescheduled with backoff, later entries for its widget wait
-behind it, and the other widgets' entries in the same pass still commit.
+behind it, and the other widgets' entries in the same pass still commit. So a
+later change never lands first and is then replaced or removed by the entry it
+came after, and an earlier write never brings back a widget a later delete
+removed.
 
 ### Ambiguity and conflict
 
@@ -494,9 +508,11 @@ behind it, and the other widgets' entries in the same pass still commit.
   parent touched the same widget directory, the person's commit wins. The
   revision becomes `conflicted` and the importer takes the person's version.
   The expected parent is the commit of the live revision the change was based
-  on. For a new widget it is the importer's cursor, after which every commit
-  is unimported. A person's version that the importer made live after the
-  change was queued also wins. A commit counts as the platform's only when its
+  on. For a new widget or a restore it is the importer's cursor, after which
+  every commit is unimported, so the imported delete a restore undoes is not a
+  newer change. A person's version that the importer made live after the
+  change was queued also wins, judged by the revision's own clock reading
+  rather than its queue place. A commit counts as the platform's only when its
   trailer names one of the principal's own revisions or a commit the outbox
   recorded, so a forged trailer does not hide a person's change.
 - **Lost response.** If the ref update's response is lost, the worker reads
@@ -531,7 +547,14 @@ which is theirs and already public.
 
 - **Delete.** Commits the directory's removal, then removes the widget from
   every layout and marks it `deleted`. Private settings remain until the purge
-  window (knob) passes.
+  window (knob) passes. While a removal is queued, including through its
+  backoff, any write, revert or restore of that widget is refused with
+  `removal_queued`, under the same row lock. The delete's approval card showed
+  an earlier revision, so a newer one must not be accepted and then removed
+  unseen. The refusal also covers a removal whose response was lost, which may
+  already be on the branch. Once the widget is deleted, the change can be made
+  again. A person's commit that wins over the removal also clears it from the
+  queue, as in Ambiguity and conflict.
 - **Restore.** Commits the last live package again, as a new commit, and
   reactivates it.
 - **Revert.** Selecting an earlier revision creates a new `revert` revision
@@ -705,7 +728,24 @@ Builder diagnostics are cut to the first ten, each at most 300 characters.
   interactive and any session that carries a schedule, a run kind, an
   operational email marker or a purpose.
 - **Approval view.** When an escalation produces an approval, the approval
-  view shows the file diff and the preview image.
+  view shows the file diff and the preview image. The preview image is still
+  required and the card does not carry it yet, an open item in
+  `docs/status/milestones.md`. The diff is the whole change against the newest
+  accepted revision, which may still be waiting for its commit: it is paged, a
+  long line continues on the next entry, it keeps every character a line split
+  would drop, and credential-shaped text is masked and counted rather than
+  hiding its line. A change past 400 entries cannot be shown whole, so its card
+  says approving publishes nothing, and the tool refuses it with
+  `cockpit.change_too_large`. A card whose diff could not be built is refused
+  with `cockpit.change_not_shown`. These refusals apply only to a write that
+  asked for approval. A create card compares against nothing, because a create
+  publishes the whole package. A delete or restore card names the revision it
+  shows, and any other revision, or a card that showed none, refuses it with
+  `cockpit.revision_changed`. These checks run under the widget row lock the
+  worker's activation takes. An empty file added or removed still gets its
+  file headers. `cockpit.install`
+  keeps its own summarized approval (ADR-0270), which names the source being
+  published without showing it.
 
 **`cockpit.read`** returns revision content with output trust derived from
 provenance:
@@ -724,9 +764,12 @@ registers `schedule.create` 1.6.0, whose `publish_cockpit_feed=true` asks for
 `cockpit.read` and `cockpit.write` for that schedule's runs and no others, and
 which offers the `INTERVAL` cadence to such a schedule (ADR-0254). It also
 registers `schedule.update` 1.1.0, which can move a feed schedule to an
-interval. Versions 1.5.0 and 1.4.0 stay registered for pinned runs, and a
-deployment without the flag offers 1.4.0 unchanged. Widget writes stay
-interactive only.
+interval. Versions 1.5.0 and 1.4.0 stay registered for pinned runs. ADR-0291's
+later versions add `use_mcp_servers` ([scheduling.md](scheduling.md)), so a
+feed's run can read the MCP servers its schedule names; widget code still only
+receives feeds. A Cockpit deployment now offers `schedule.create` 1.9.0 and one
+without the flag offers 1.8.0, which has no feed publishing.
+Widget writes stay interactive only.
 
 **Feed checks.** A feed's schema must be self-contained JSON Schema (draft
 2020-12) that names no location outside itself, and each of its references
@@ -915,7 +958,7 @@ interpolation.
     dark and night watch, Arrange, and the details panel's toggle. The left
     pane leads with the mode switch, then Needs you, the widgets with each
     one's freshness ("6 s", "Stale · 47 min") and This screen.
-  - The left pane (200 to 340 points, 260 to start) and the details panel
+  - The left pane (300 to 420 points, 320 to start) and the details panel
     (280 to 440, 320 to start) resize from their hairlines and keep their
     widths on this Mac; the board takes the rest, in three columns while the
     panel is open (the snapshot message's optional `columns`).
@@ -933,6 +976,10 @@ interpolation.
 - **iPad**
   - Uses the Mac layout at touch sizes, with a keep-screen-on toggle that
     sets the idle timer only while Cockpit is visible.
+  - The regular-width left pane starts at 320 points, resizes from 300 to
+    420 with a touch or pointer drag or VoiceOver adjustment, and shares its
+    device-local saved width with Chat and Email. The remaining content keeps
+    at least 360 points; narrowing the window never overwrites the saved width.
   - Widget details open as a sheet.
 - **iPhone**
   - Shows a compact single column in `compact` layout order.
@@ -1165,6 +1212,8 @@ and a runbook covering:
 14. **The stream resumes and resets.** The stream resumes from
     `Last-Event-ID` without loss or duplication, sends `stream.reset` past
     retention, heartbeats, closes at its lifetime, and never crosses tenants.
+    Settings saves completed after a native client connection reset cannot change
+    the new connection's feedback, toast or open detail.
     Registered as `gate.cockpit.stream_resume_and_reset`, case. **M35.**
 15. **Off means absent.** With `AGENT_COCKPIT_ENABLED=0` no Cockpit route,
     tool, builder manager, outbox, importer or projector exists, and the
@@ -1392,3 +1441,133 @@ bound to the PostgreSQL parity test, which runs every store suite's scenarios
 on PostgreSQL. The other gates stay pending until their server and native
 halves land.
 
+
+### Saved job implementation (ADR-0268)
+
+The jobs MVP stores an owner-scoped job record with a compare-and-set version,
+its immutable program revisions, its current revision pointer and its private
+grants. A revision records its public manifest and source, publication state,
+commit and creation time. Keeping the source locally makes pinned execution
+independent of GitHub availability. Archive hides the job from new runs without
+erasing its history; restore or revert publishes the selected source again.
+Archiving an archived job is refused when it is requested and queues nothing,
+since its package is already off the branch and a single pending revision blocks
+every later change to the job. A queued archive that finds no package at its
+parent or at the branch head settles as superseded without a commit, leaving the
+job archived and its current revision in place, so an entry queued before this
+refusal drains on its next flush with no repository or database repair.
+
+Publication follows the widget outbox protocol on the separate `cockpit/jobs`
+branch. The Git adapter shares its fast-forward and path checks, parameterized
+only for the fixed job namespace and its `job.json` and `main.py` files. Pending
+job commits use a separate outbox namespace. The existing privacy screen runs
+in the builder sandbox over both files and the fixed commit message. Inputs,
+exact host permissions, credential references, feed permissions and limits
+remain in private grants. The grant is immutable and names its job; an expanded
+request creates a new approval rather than editing an existing grant.
+
+A publication failure belongs to its entry and never stops the flush, so every
+other job's due entry still commits. A repository outage, a moved branch or a
+version conflict retries after thirty seconds. Any other error, such as an
+unavailable privacy screen or a refused path, is logged and retries after a delay
+that doubles from thirty seconds to fifteen minutes. The stored error names only
+the exception's type.
+
+A job's fifth broker call is `mcp.read` (ADR-0291). The grant's private
+`mcp_servers` list names what the job may read, and needs approval like a host;
+`job.json` declares only the call, because that file is public. The broker
+refuses a server outside the grant, counts the read against
+`maximum_requests`, and refuses an answer over `maximum_response_bytes`. The
+reader offers a tool only if its class is a read, low risk and read-only, the
+run holds its scopes, and the policy engine answers `allow`. It never waits for
+an approval: anything else is `job.mcp_refused`. A job schedule derives each
+granted server's `required_scopes`. An approval of a grant holding both servers
+and hosts names the hosts in `mcp_data_may_reach_hosts`.
+
+The per-execution broker admits each operation against that grant. HTTP reads
+resolve a permitted public hostname once and dial the checked address with the
+original TLS hostname. Explicit model completions offer no tools, reserve a
+conservative token cost before sending, and record usage through the ordinary
+run ledger. Trial feed publication applies the existing feed schema and size
+checks but does not change the live feed or its schema.
+
+`job.manage` and `job.run` are deferred builtins. The exact-name publication
+rule allows generic authoring in a clean owner turn and retains the existing
+trust overlay after external content. Only `job.manage` uses the derived jobs
+policy profile; other actions retain their existing policy identity and evidence
+bindings. Reusing a saved grant does not ask for
+approval again; expanded external access does. Model completions share the
+actual mutable run and its durable usage ledger with the surrounding tool
+pipeline, so the parent cannot overwrite the job's usage.
+
+A schedule task defaults to `agent_run`; its legacy serialized representation
+stays unchanged. A `job` task pins a slug, revision and grant. Materialization
+copies those pins into the occurrence session and uses the typed job runtime,
+which bypasses planning, recall preparation and final model synthesis. The
+existing cadence, admission, failure pause and notification paths remain in
+use. Feed grants select quiet-on-success reports. Disabling jobs fails typed
+runs explicitly without falling through to an agent run. See [the operator
+guide](../jobs.md) for activation and examples.
+
+### One approval for widget installation (ADR-0270)
+
+The owner authorized a single summarized approval at the end of widget
+creation on 2026-10-30. When Cockpit, jobs and scheduling are enabled, the
+agent prepares the whole package with `cockpit.prepare`, then uses
+`cockpit.install` instead of publishing and approving its components separately.
+Preparation checks widget and job packages, privacy (including proposed private
+inputs), input schemas, feed declarations, operator hosts and expected revisions.
+It creates no public revision, grant or schedule. Job reads and bounded trials
+need no per-step approval in an owner-directed interactive turn. Offline trials
+use fixtures; a live trial must use an existing owned grant, with unchanged
+private inputs and preview-only feeds. New access waits for installation.
+
+A successful preparation's persisted invocation is the immutable private plan.
+Installation names both its run and invocation identifiers and verifies the same
+owner and conversation. The approval headline shows the widget, collector,
+redacted private inputs, hosts, credential references, feeds, per-run limits,
+model budget and refresh interval. One exact approval covers public publication,
+the private grant and schedule. Changed contents need a new preparation and
+approval. The existing outboxes commit before activation; pending or failed
+components are reported rather than called complete. Identical resumes reuse
+that approval and component idempotency keys. A later conflicting edit is never
+overwritten. Collection starts at the next interval boundary, without an extra
+hidden run. Individual mutation tools retain their existing rules.
+
+### Refresh repair (ADR-0271)
+
+Widget upkeep is operational work. Every feed-keeping occurrence carries the
+reserved `cockpit_refresh` marker and stays out of Chat, including failed runs
+and refreshes triggered by entry. The schedule inbox retains its audit history;
+Apple clients also remove older cached refresh conversations.
+
+To replace a legacy model-driven collector, `schedule.update` may explicitly
+switch a feed-keeping agent task to a published job revision and an existing
+approved grant. It derives the job scopes and limits and preserves earlier
+occurrence pins. Writing `job.run` into the old instruction does not update its
+agent version or permissions. Use authenticated broker reads for structured
+GitHub acquisition; a public scraping provider's rejection is not evidence that
+a repository has no pull requests.
+
+## Widget diagnostics
+
+[ADR-0273](../adr/0273-cockpit-widget-diagnostics.md) specifies private fixture
+previews, publication diagnostics and reports from the owner's device. Use
+`cockpit.check` with `preview` to inspect what a synthetic fixture displays.
+Use `cockpit.read` with `diagnostics` and the widget slug to investigate a
+rejected, delayed or failing revision. Compare its revision with the live one
+and use `read_feed` to check the actual input and its age.
+
+Preview defaults to `fixtures/typical.json` and the first declared size.
+Pass `fixture` and `size` to select another combination. The Mac board
+uses the fixture clock. Chat receives the rendered text and an image
+reference, and the owner can open the private PNG attached to the reply.
+Only `cockpit.read` and `cockpit.check` advance to version 1.1.0. Runs pinned
+to 1.0.0 retain their original definitions.
+
+`cockpit.check` 1.2.0 ([ADR-0281](../adr/0281-veetbot-debugs-and-changes-its-own-code.md))
+adds `live: true`, which previews the submitted package with the owner's current
+declared feeds and settings instead of a fixture. It shows what a widget really
+displays. The values travel to the offline builder beside the package, never in
+it, so they reach neither the privacy screen nor the public branch. The rendered
+text and PNG are untrusted and private. A run's own failures are in `run.inspect`.

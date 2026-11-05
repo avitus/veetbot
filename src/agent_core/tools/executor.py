@@ -9,7 +9,7 @@ import logging
 import math
 import re
 from collections import Counter, deque
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -112,6 +112,7 @@ from agent_core.domain.tools import (
     ToolSpec,
     deferred_definition_text,
 )
+from agent_core.mcp.configuration import is_email_attachment_tool
 from agent_core.policy.revalidation import revalidation_denial_reason
 from agent_core.ports.artifacts import ArtifactWriterProvider
 from agent_core.ports.credentials import CredentialResolver, UnavailableCredentialResolver
@@ -312,10 +313,14 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
     # artifact.export is intentionally an in-process capability over a sandbox
     # workspace; its persisted object is nevertheless a sandbox export. Text the
     # model passed as `content` never touched the workspace (ADR-0122).
+    if tool.spec.name == "cockpit.check" and arguments.get("operation") == "preview":
+        return ArtifactOrigin.SANDBOX_EXPORT
     if tool.spec.name == "artifact.export":
         if arguments.get("content") is not None:
             return ArtifactOrigin.MODEL_OUTPUT
         return ArtifactOrigin.SANDBOX_EXPORT
+    if is_email_attachment_tool(tool.spec.server_id, tool.spec.name.rpartition(".")[2]):
+        return ArtifactOrigin.EMAIL_ATTACHMENT
     return ArtifactOrigin.TOOL_OUTPUT
 
 
@@ -435,8 +440,16 @@ def _research_not_covered(standing: StandingAuthorization | None) -> str | None:
     return reason if reason in RESEARCH_NOT_COVERED_REASONS else None
 
 
-def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive") -> TrustLevel:
-    """Conservatively taint writes when the active turn consumed external content."""
+def _turn_origin_trust(
+    checkpoint: RunCheckpoint,
+    run_kind: str = "interactive",
+    batch_results: Sequence[ToolResultItem] = (),
+) -> TrustLevel:
+    """Conservatively taint writes when the active turn consumed external content.
+
+    `batch_results` are the results earlier calls of the same serial batch
+    returned; the conversation receives them only when the batch ends.
+    """
 
     origin_trust = checkpoint.context_origin_trust
     active_turn: list[object] = []
@@ -463,7 +476,7 @@ def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive")
         for call_id, calls in calls_by_id.items()
         if len(calls) == 1 and calls[0].name == SKILL_LOAD_TOOL_NAME
     }
-    for active_item in active_turn:
+    for active_item in [*active_turn, *batch_results]:
         if isinstance(active_item, ToolResultItem) and active_item.trust in {
             TrustLevel.EXTERNAL_UNTRUSTED,
             TrustLevel.KNOWLEDGE,
@@ -490,6 +503,11 @@ def _argument_trust(
     anything external the turn read (`owner_grounded_statement`).
     """
 
+    # ADR-0268: code authored for a clean owner turn is eligible for the
+    # exact job.manage rule. External reads still taint the whole turn above;
+    # granting network/model access remains an independent approval decision.
+    if tool_name in {"job.manage", "job.run"} and _turn_origin_trust(checkpoint) is TrustLevel.USER:
+        return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
     current_user = next(
         (
@@ -793,11 +811,14 @@ class ToolPipeline:
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
         standing_authorizer: StandingAuthorizer | None = None,
         delegations: DelegationStarter | None = None,
+        job_model_factory: Callable[[Run, AgentSpec, WorkerLease | None], Awaitable[object]]
+        | None = None,
         before_effect: Callable[
             [Run, Principal, ToolInvocation, WorkerLease | None], Awaitable[None]
         ]
         | None = None,
     ) -> None:
+        """Compose tool validation, policy, execution, recovery, and typed work."""
         self._registry = registry
         self._uow_factory = uow_factory
         self._clock = clock
@@ -838,6 +859,7 @@ class ToolPipeline:
         self._standing_authorizer = standing_authorizer
         self._delegations = delegations
         self._before_effect = before_effect
+        self._job_model_factory = job_model_factory
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
         self._completed_traces: deque[PipelineTrace] = deque(maxlen=1_024)
@@ -914,6 +936,7 @@ class ToolPipeline:
                     token=token,
                     lease=lease,
                     parallel_group=None,
+                    batch_results=tuple(results),
                 )
             )
             token.raise_if_cancelled()
@@ -931,6 +954,7 @@ class ToolPipeline:
         token: CancellationToken,
         lease: WorkerLease | None,
         parallel_group: UUID | None,
+        batch_results: Sequence[ToolResultItem] = (),
     ) -> ToolResultItem:
         progress: list[int] = []
         through_index = False
@@ -1043,6 +1067,7 @@ class ToolPipeline:
             lease=lease,
             parallel_group=parallel_group,
             progress=progress,
+            batch_results=batch_results,
         )
         if not result_item.is_error and tuple(progress) == PIPELINE_STEP_SEQUENCE:
             self._completed_traces.append(
@@ -1107,6 +1132,7 @@ class ToolPipeline:
         prepared_candidate: ToolInvocation | None = None,
         prepared_decision: PolicyDecision | None = None,
         lock_acquired: bool = False,
+        batch_results: Sequence[ToolResultItem] = (),
     ) -> ToolResultItem:
         """Authorize, dispatch, and persist one invocation with effect accounting."""
         decision = prepared_decision
@@ -1132,7 +1158,7 @@ class ToolPipeline:
                 normalized_arguments_hash=arguments_hash,
                 effective_arguments_hash=arguments_hash,
                 idempotency_key=key,
-                origin_trust=_turn_origin_trust(checkpoint, run.kind.value),
+                origin_trust=_turn_origin_trust(checkpoint, run.kind.value, batch_results),
                 parallel_group=parallel_group,
                 created_at=now,
                 updated_at=now,
@@ -1519,6 +1545,10 @@ class ToolPipeline:
                         lease=lease,
                     )
 
+        # A script's earlier bridge results reach no conversation, so they join
+        # the batch's in the trust of each later bridge call (ADR-0277).
+        bridge_results: list[ToolResultItem] = []
+
         async def bridge_dispatch(
             name: str, bridge_arguments: dict[str, Any], bridge_call_id: str
         ) -> dict[str, Any]:
@@ -1545,11 +1575,13 @@ class ToolPipeline:
                         token=token,
                         lease=lease,
                         parallel_group=None,
+                        batch_results=(*batch_results, *bridge_results),
                     )
                     break
                 except ApprovalRequiredError:
                     await asyncio.sleep(approval_poll_seconds)
                     approval_poll_seconds = min(2.0, approval_poll_seconds * 2)
+            bridge_results.append(item)
             if not item.is_error:
                 return {
                     "status": "succeeded",
@@ -1600,6 +1632,7 @@ class ToolPipeline:
                 else None
             ),
             timeout_seconds=effective_timeout,
+            monotonic_deadline=monotonic_deadline,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
@@ -1636,6 +1669,11 @@ class ToolPipeline:
                 else self._credentials
             ),
             bridge_dispatch=(bridge_dispatch if tool.spec.target_kind == "sandbox" else None),
+            job_model=(
+                await self._job_model_factory(run, agent, lease)
+                if tool.spec.target_kind == "job" and self._job_model_factory is not None
+                else None
+            ),
             working_state=deepcopy(checkpoint.working_state),
             loaded_skills=tuple(body.model_dump(mode="json") for body in checkpoint.loaded_skills),
             available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),

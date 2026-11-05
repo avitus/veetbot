@@ -11,12 +11,15 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.job_grants import grant_covers_revision
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserProfileStatus
 from agent_core.domain.errors import ConflictError, NotFoundError, ScheduleValidationError
 from agent_core.domain.events import ProcessEvent
+from agent_core.domain.mcp import schedule_may_name
 from agent_core.domain.recurrence import RecurrenceCalculator
 from agent_core.domain.schedules import (
+    JobTask,
     OccurrenceCursor,
     Schedule,
     ScheduleCursor,
@@ -184,6 +187,7 @@ class ScheduleService:
         expected_revision: int,
         definition: ScheduleDefinition,
     ) -> ScheduleRecord:
+        """Replace future schedule settings while preserving only unchanged legacy job pins."""
         require_scope(principal, "schedule.write")
         async with self._uow_factory() as uow:
             current = await uow.schedules.get(schedule_id, principal)
@@ -192,11 +196,19 @@ class ScheduleService:
                 raise ConflictError(
                     "terminal schedule cannot be updated", reason="schedule.terminal"
                 )
-            await _reject_started_call_plan(
-                uow,
-                await uow.schedules.get_revision(schedule_id, current.current_revision, principal),
+            prior_revision = await uow.schedules.get_revision(
+                schedule_id, current.current_revision, principal
             )
-            await _validate_definition(uow, principal, definition, self._limits)
+            await _reject_started_call_plan(uow, prior_revision)
+            await _validate_definition(
+                uow,
+                principal,
+                definition,
+                self._limits,
+                existing_task=prior_revision.task
+                if isinstance(prior_revision.task, JobTask)
+                else None,
+            )
             now = self._clock.now()
             next_fire_at = (
                 RecurrenceCalculator.next_after(definition.cadence, now)
@@ -266,6 +278,7 @@ class ScheduleService:
         key: str,
         request_hash: str,
     ) -> tuple[ScheduleRecord, bool]:
+        """Store the patched revision in one transaction, or replay this key's earlier one."""
         async with self._uow_factory() as uow:
             existing = await uow.schedule_idempotency.get(
                 principal.tenant_id, principal.principal_id, key
@@ -294,9 +307,22 @@ class ScheduleService:
                     **({"title": patch.title} if patch.title is not None else {}),
                     **({"instruction": patch.instruction} if patch.instruction is not None else {}),
                     **({"cadence": patch.cadence} if patch.cadence is not None else {}),
+                    **(
+                        await _server_updates(uow, principal, current_definition, patch.mcp_servers)
+                        if patch.mcp_servers is not None
+                        else {}
+                    ),
                 }
             )
-            await _validate_definition(uow, principal, definition, self._limits)
+            await _validate_definition(
+                uow,
+                principal,
+                definition,
+                self._limits,
+                existing_task=current_revision.task
+                if isinstance(current_revision.task, JobTask)
+                else None,
+            )
             now = self._clock.now()
             if definition == current_definition:
                 await uow.schedule_idempotency.create(
@@ -526,6 +552,7 @@ def _revision(
         revision=schedule.current_revision,
         title=definition.title,
         instruction=definition.instruction,
+        task=definition.task,
         agent_id=definition.agent_id,
         agent_version=definition.agent_version,
         policy_profile=definition.policy_profile,
@@ -541,6 +568,7 @@ def _revision(
         created_by_principal_id=principal.principal_id,
         created_at=now,
         call_plan=definition.call_plan,
+        mcp_servers=definition.mcp_servers,
     )
 
 
@@ -557,10 +585,46 @@ async def _reject_started_call_plan(uow: RepositoryUnitOfWork, revision: Schedul
         )
 
 
+async def mcp_server_scopes(
+    uow: RepositoryUnitOfWork, tenant_id: str, servers: frozenset[str]
+) -> frozenset[str]:
+    """ADR-0291: what these servers require, refusing one a schedule or job cannot name.
+
+    Calling keeps its own flag (ADR-0213), and the schedule role can vouch only for
+    Gmail and Scale VP. An owner-added server requires no scope.
+    """
+    scopes: set[str] = set()
+    for server_id in sorted(servers):
+        row = await uow.mcp_servers.get(tenant_id, server_id)
+        if row is None or not row.enabled or not schedule_may_name(row):
+            raise ScheduleValidationError(
+                "schedule.mcp_server_unavailable",
+                f"MCP server {server_id!r} cannot be used by a schedule",
+            )
+        scopes.update(row.required_scopes)
+    return frozenset(scopes)
+
+
+async def _server_updates(
+    uow: RepositoryUnitOfWork,
+    principal: Principal,
+    definition: ScheduleDefinition,
+    servers: frozenset[str],
+) -> dict[str, frozenset[str]]:
+    """Replace a schedule's servers, dropping the scopes only the old ones needed."""
+    dropped = {f"mcp.{server_id}.use" for server_id in definition.mcp_servers}
+    return {
+        "mcp_servers": servers,
+        "requested_scopes": (definition.requested_scopes - dropped)
+        | await mcp_server_scopes(uow, principal.tenant_id, servers),
+    }
+
+
 def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
     return ScheduleDefinition(
         title=revision.title,
         instruction=revision.instruction,
+        task=revision.task,
         agent_id=revision.agent_id,
         agent_version=revision.agent_version,
         policy_profile=revision.policy_profile,
@@ -573,6 +637,7 @@ def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
         max_consecutive_failures=revision.max_consecutive_failures,
         call_plan=revision.call_plan,
         notify=revision.notify,
+        mcp_servers=revision.mcp_servers,
     )
 
 
@@ -581,7 +646,59 @@ async def _validate_definition(
     principal: Principal,
     definition: ScheduleDefinition,
     limits: ScheduleDefinitionLimits,
+    *,
+    existing_task: JobTask | None = None,
 ) -> None:
+    """Validate schedule authority, pinned resources, cadence, and deployment limits."""
+    if isinstance(definition.task, JobTask):
+        require_scope(principal, "jobs.run")
+        task = definition.task
+        job = await uow.jobs.get(principal, task.slug)
+        revision = job.revisions.get(str(task.revision_id))
+        grant = job.grants.get(str(task.grant_id))
+        if job.archived or revision is None or revision.commit_sha is None or grant is None:
+            raise ScheduleValidationError(
+                "schedule.job_unavailable",
+                "Select a published job revision and its approved grant.",
+            )
+        expected_scopes = (
+            {"jobs.run"}
+            | ({"cockpit.read", "cockpit.write"} if grant.access.feeds else set())
+            | await mcp_server_scopes(uow, principal.tenant_id, grant.access.mcp_servers)
+        )
+        if definition.requested_scopes != expected_scopes:
+            raise ScheduleValidationError(
+                "schedule.job_scopes", "Job schedule scopes must match its grant."
+            )
+        if not grant.access.feeds <= revision.manifest.feeds:
+            raise ScheduleValidationError(
+                "schedule.job_feeds", "The job revision must declare the grant's feeds."
+            )
+        if task != existing_task and not grant_covers_revision(grant, revision):
+            raise ScheduleValidationError(
+                "schedule.job_grant_revision",
+                "The grant must be approved for the selected job revision.",
+            )
+    if isinstance(definition.task, JobTask) and definition.mcp_servers:
+        raise ScheduleValidationError(
+            "schedule.job_mcp_servers", "A job reads the MCP servers its grant names."
+        )
+    if (
+        not await mcp_server_scopes(uow, principal.tenant_id, definition.mcp_servers)
+        <= definition.requested_scopes
+    ):
+        raise ScheduleValidationError(
+            "schedule.mcp_scope_required", "A schedule must request its MCP servers' scopes."
+        )
+    # ADR-0291: unlike call and Gmail schedules, nothing older holds this scope unnamed.
+    if (
+        not isinstance(definition.task, JobTask)
+        and "mcp.svp_read.use" in definition.requested_scopes
+        and "svp_read" not in definition.mcp_servers
+    ):
+        raise ScheduleValidationError(
+            "schedule.mcp_scope_unnamed", "A schedule must name Scale VP to hold its scope."
+        )
     if definition.browser_profile_id is not None:
         require_scope(principal, "browser.profile.read")
         if "browser.profile.read" not in definition.requested_scopes:

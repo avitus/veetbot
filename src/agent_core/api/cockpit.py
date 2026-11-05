@@ -8,20 +8,21 @@ buffering.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import suppress
 from typing import Annotated, Protocol, cast
 
 from fastapi import APIRouter, Depends, Header, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from agent_core.api.boundary import MalformedRequestError
-from agent_core.api.sse import encode_sse, heartbeat
+from agent_core.api.sse import EventStreamResponse, encode_sse, heartbeat
 from agent_core.application.services import CockpitService
 from agent_core.domain.agents import Principal
 from agent_core.domain.cockpit import DeviceClass
 from agent_core.domain.cockpit_views import (
     CockpitChangeView,
+    CockpitDeviceFailure,
     CockpitLayoutView,
     CockpitLayoutWrite,
     CockpitRefreshView,
@@ -78,7 +79,7 @@ def cockpit_router(
     async def stream(
         authenticated: Annotated[Principal, secured("cockpit.read")],
         last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
-    ) -> StreamingResponse:
+    ) -> EventStreamResponse:
         """Validate the resume point before sending any event bytes."""
         try:
             after = None if last_event_id is None else int(last_event_id)
@@ -87,7 +88,8 @@ def cockpit_router(
         if after is not None and after < 0:
             raise MalformedRequestError("Last-Event-ID must not be negative")
 
-        async def frames() -> AsyncIterator[bytes]:
+        async def frames() -> AsyncGenerator[bytes, None]:
+            """Emit events and idle heartbeats, cleaning up the stream when it closes."""
             iterator = cast(
                 AsyncGenerator[StreamFrame, None],
                 service.stream(authenticated, after).__aiter__(),
@@ -118,11 +120,7 @@ def cockpit_router(
                         await pending
                 await iterator.aclose()
 
-        return StreamingResponse(
-            frames(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": PRIVATE_NO_STORE, "X-Accel-Buffering": "no"},
-        )
+        return EventStreamResponse(frames(), headers={"Cache-Control": PRIVATE_NO_STORE})
 
     @router.get("/v1/cockpit/assets/{sha256}", openapi_extra={"required_scope": "cockpit.read"})
     async def asset(
@@ -149,6 +147,20 @@ def cockpit_router(
     ) -> CockpitWidgetDetailView:
         """Revisions with commit links, import failures and the settings schema."""
         return await service.widget(authenticated, slug)
+
+    @router.post(
+        "/v1/cockpit/widgets/{slug}/diagnostics",
+        status_code=204,
+        openapi_extra={"required_scope": "cockpit.write"},
+    )
+    async def report_failure(
+        slug: str,
+        request: CockpitDeviceFailure,
+        authenticated: Annotated[Principal, secured("cockpit.write")],
+    ) -> Response:
+        """Record a bounded device failure against an owned live revision."""
+        await service.report_failure(authenticated, slug, request)
+        return Response(status_code=204, headers={"Cache-Control": PRIVATE_NO_STORE})
 
     @router.put(
         "/v1/cockpit/widgets/{slug}/settings",

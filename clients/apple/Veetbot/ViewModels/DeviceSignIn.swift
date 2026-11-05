@@ -29,11 +29,18 @@ public struct DeviceSignInRequest: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Where a device sign-in started, so only that surface presents its window:
+/// the Website Access sheet, or the chat's own sign-in card (ADR-0280).
+public enum DeviceSignInSurface: Equatable, Sendable {
+    case websiteAccess
+    case chat
+}
+
 /// Why a device sign-in did not finish, in the owner's words.
 public struct DeviceSignInFailure: Equatable, Sendable {
     public let message: String
     public let canRetry: Bool
-    /// The remote browser is offered as the alternative for a new website.
+    /// The remote browser is offered as the alternative (ADR-0288).
     public let offersRemoteBrowser: Bool
 
     public init(message: String, canRetry: Bool, offersRemoteBrowser: Bool = false) {
@@ -65,6 +72,7 @@ public struct DeviceSignInTiming: Sendable {
 /// The fixed texts a device sign-in shows (0128-design §2.1, §2.3, §2.5).
 public enum DeviceSignInMessage {
     public static let couldNotStart = "Couldn't start the sign-in on this device."
+    public static let couldNotStartRemote = "Couldn't start the remote browser. Try again."
     public static let websiteInUse =
         "Veetbot is using this website in a chat right now. Try again when it finishes."
     public static let tooMuchData = "This website stores more data than Veetbot can save."

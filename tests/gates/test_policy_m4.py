@@ -134,12 +134,17 @@ class _RecordingTool:
     def __init__(self) -> None:
         self.observed: dict[str, object] | None = None
         self.observed_timeout: float | None = None
+        self.observed_seconds_to_deadline: float | None = None
 
     async def execute(
         self, arguments: dict[str, object], context: ToolExecutionContext
     ) -> ToolResult:
         self.observed = arguments
         self.observed_timeout = context.timeout_seconds
+        if context.monotonic_deadline is not None:
+            self.observed_seconds_to_deadline = (
+                context.monotonic_deadline - asyncio.get_running_loop().time()
+            )
         return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
 
 
@@ -757,6 +762,9 @@ async def test_standing_authorization_shares_the_execution_deadline(
     else:
         assert tool.observed_timeout is not None
         assert 0 < tool.observed_timeout <= tool.spec.timeout_seconds - 0.05
+        # The same deadline the pipeline enforces, for a tool that must finish inside it.
+        assert tool.observed_seconds_to_deadline is not None
+        assert 0 < tool.observed_seconds_to_deadline <= tool.observed_timeout
 
 
 @pytest.mark.parametrize(
@@ -1443,8 +1451,9 @@ async def test_prompt_not_authz() -> None:
 
 def test_scope_grammar() -> None:
     assert (
-        len(PLATFORM_SCOPES) == 48
-    )  # schedule.run under ADR-0225; records.* under ADR-0239; cockpit.* under ADR-0240
+        len(PLATFORM_SCOPES) == 52
+    )  # ADR-0268 added jobs.write and jobs.run; ADR-0281 adds code.read and code.write.
+    assert {"jobs.write", "jobs.run"} <= PLATFORM_SCOPES
     assert {
         "schedule.read",
         "schedule.write",

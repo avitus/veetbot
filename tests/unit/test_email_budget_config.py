@@ -36,6 +36,7 @@ def test_email_aggregate_defaults_are_versioned_configuration() -> None:
         "daily_cost": 20,
         "monthly_cost": 200,
         "unsubscribe_grace_days": 10,
+        "check_interval_seconds": 300,
     }
 
 

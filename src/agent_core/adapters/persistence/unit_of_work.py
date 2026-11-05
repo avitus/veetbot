@@ -19,6 +19,7 @@ from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.browser_task_grants import BrowserTaskGrantRepository
 from agent_core.ports.calls import CallStore
 from agent_core.ports.cockpit import CockpitEventLog, FeedStore, WidgetCommitOutbox, WidgetStore
+from agent_core.ports.code import CodeDraftRepository
 from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.device_channel import DeviceIngestStore, DeviceInvocationStore
 from agent_core.ports.devices import (
@@ -29,6 +30,8 @@ from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.email import EmailStore
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.folders import FolderStore
+from agent_core.ports.integration_secrets import IntegrationSecretStore
+from agent_core.ports.jobs import JobStore
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import IntegratedEpisodeStore, MemoryStore, TraceStore
@@ -124,6 +127,10 @@ class UnitOfWorkRepositories:
     calls: CallStore
     people: PeopleStore
     records: RecordStore
+    integration_secrets: IntegrationSecretStore
+    jobs: JobStore
+    code_drafts: CodeDraftRepository
+    job_outbox: WidgetCommitOutbox
     cockpit_widgets: WidgetStore
     cockpit_outbox: WidgetCommitOutbox
     cockpit_feeds: FeedStore
@@ -143,6 +150,7 @@ class UnitOfWorkRepositories:
     surfaces: SurfaceRepositories
     queue: RunQueue | None
     memory_transaction: Callable[[], AbstractAsyncContextManager[None]] | None = None
+    # The memory store. A PostgreSQL unit of work binds its own to the session.
 
 
 type PostgresRepositoryFactory = Callable[
@@ -200,6 +208,10 @@ class MemoryUnitOfWork:
         self.calls = repositories.calls
         self.people = repositories.people
         self.records = repositories.records
+        self.integration_secrets = repositories.integration_secrets
+        self.jobs = repositories.jobs
+        self.code_drafts = repositories.code_drafts
+        self.job_outbox = repositories.job_outbox
         self.cockpit_widgets = repositories.cockpit_widgets
         self.cockpit_outbox = repositories.cockpit_outbox
         self.cockpit_feeds = repositories.cockpit_feeds
@@ -342,6 +354,10 @@ class PostgresUnitOfWork:
         self.calls = repositories.calls
         self.people = repositories.people
         self.records = repositories.records
+        self.integration_secrets = repositories.integration_secrets
+        self.jobs = repositories.jobs
+        self.code_drafts = repositories.code_drafts
+        self.job_outbox = repositories.job_outbox
         self.cockpit_widgets = repositories.cockpit_widgets
         self.cockpit_outbox = repositories.cockpit_outbox
         self.cockpit_feeds = repositories.cockpit_feeds

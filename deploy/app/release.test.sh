@@ -7,6 +7,24 @@ TEST_ROOT="$(mktemp -d)"
 # Permission fixtures below close directories, so reopen them before removal.
 trap 'chmod -R u+rwX "$TEST_ROOT" 2>/dev/null || true; rm -rf -- "$TEST_ROOT"' EXIT
 
+# Exercise the fixed privileged verifier path in a disposable release-script copy.
+# Production has no caller-controlled privileged helper path.
+sed "s|/usr/local/sbin/veetbot-recall-handoff|$TEST_ROOT/recall-handoff|g" \
+  "$RELEASE_SCRIPT" >"$TEST_ROOT/release.sh"
+chmod +x "$TEST_ROOT/release.sh"
+RELEASE_SCRIPT="$TEST_ROOT/release.sh"
+cat >"$TEST_ROOT/recall-handoff" <<'SH'
+#!/usr/bin/env bash
+set -eu
+test -s "$VEETBOT_ROOT/releases/$1/.venv/recall-handoff-attempt"
+printf 'recall-handoff %s\n' "$1" >>"$VEETBOT_TEST_LOG"
+if [[ "${VEETBOT_TEST_STALE_RECALL:-0}" == 1 && "$2" == --commit && ! -e "$VEETBOT_ROOT/.expired-attempt" ]]; then
+  cp "$VEETBOT_ROOT/releases/$1/.venv/recall-handoff-attempt" "$VEETBOT_ROOT/.expired-attempt"
+  exit 75
+fi
+test "${VEETBOT_TEST_REFUSE_RECALL:-0}" != 1
+SH
+chmod +x "$TEST_ROOT/recall-handoff"
 BIN_DIR="$TEST_ROOT/bin"
 DEPLOY_ROOT="$TEST_ROOT/opt/veetbot"
 SYSTEMD_DIR="$TEST_ROOT/systemd"
@@ -206,6 +224,7 @@ write_stub rm '
 '
 write_stub sudo '
   printf "sudo %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  if [[ "${1:-}" == -n ]]; then shift; fi
   "$@"
 '
 write_stub systemctl '
@@ -290,6 +309,7 @@ make_stage() {
     "$stage/deploy/veetbot-call-ingress.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/execution/cockpit-builder.Dockerfile" \
+    "$stage/execution/code-sandbox.Dockerfile" \
     "$stage/scripts/check_schedule_database_permissions.py" \
     "$stage/scripts/check_surface_database_permissions.py" \
     "$stage/scripts/database_role_permissions.py" \
@@ -326,7 +346,7 @@ make_stage() {
     >"$stage/deploy/systemd/veetbot-surface.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
-  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nprintf "cockpit builder image %%s\\n" "${AGENT_COCKPIT_BUILDER_IMAGE:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "$*" == "-m scripts.check_schedule_database_permissions" ]]; then exit 1; fi\n' \
+  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\nprintf "cockpit builder image %%s\\n" "${AGENT_COCKPIT_BUILDER_IMAGE:-missing}" >>"$VEETBOT_TEST_LOG"\nprintf "code sandbox image %%s\\n" "${AGENT_CODE_SANDBOX_IMAGE:-missing}" >>"$VEETBOT_TEST_LOG"\nif [[ "${VEETBOT_TEST_FAIL_SCHEDULE_PERMISSION:-0}" == 1 && "$*" == "-m scripts.check_schedule_database_permissions" ]]; then exit 1; fi\n' \
     >"$stage/.venv/bin/python"
   chmod +x "$stage/.venv/bin/alembic" "$stage/.venv/bin/python"
   cat >>"$stage/.venv/bin/python" <<'PYTHON_STUB'
@@ -421,13 +441,18 @@ printf '%s\n' \
   20260809-120001-0000001 \
   20260809-120002-0000002 \
   20260809-120003-0000003 >"$DOCKER_IMAGES/veetbot-cockpit-builder"
+printf '%s\n' \
+  production \
+  20260809-120001-0000001 \
+  20260809-120002-0000002 \
+  20260809-120003-0000003 >"$DOCKER_IMAGES/veetbot-code-sandbox"
 running_images="$(printf '%s\n' \
   'veetbot-browser-profile-service:20260809-120001-0000001' \
   'agent-core-sandbox:production')"
 VEETBOT_TEST_UNPRUNABLE_RELEASE="$legacy_unprunable_id" \
   VEETBOT_TEST_RUNNING_IMAGES="$running_images" \
   VEETBOT_TEST_UNREMOVABLE_IMAGE="agent-core-sandbox:20260809-120002-0000002" \
-  run_release "$release_id" >"$TEST_ROOT/first.out" 2>&1
+  VEETBOT_TEST_STALE_RECALL=1 run_release "$release_id" >"$TEST_ROOT/first.out" 2>&1
 cat "$TEST_ROOT/first.out"
 
 # An old host must gain the shipped settings scopes without editing its file.
@@ -437,10 +462,21 @@ grep -Eq '(^|,)settings.read(,|$)' "$owner_scopes"
 grep -Eq '(^|,)settings.write(,|$)' "$owner_scopes"
 grep -Fxq 'AUTH_SCOPES=notification.read' "$ENV_FILE"
 grep -Fxq 'curl model-settings' "$LOG_FILE"
+grep -Fxq "recall-handoff $release_id" "$LOG_FILE"
+test -s "$DEPLOY_ROOT/releases/$release_id/.venv/recall-handoff-attempt"
+test -s "$DEPLOY_ROOT/.expired-attempt"
+comparison=0
+cmp -s "$DEPLOY_ROOT/.expired-attempt" "$DEPLOY_ROOT/releases/$release_id/.venv/recall-handoff-attempt" || comparison=$?
+if (( comparison != 1 )); then
+  printf 'Expected a different retry nonce; cmp returned %s.\n' "$comparison" >&2
+  exit 1
+fi
 
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
 grep -Fxq 'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
+  "$DEPLOY_ROOT/releases/$release_id/.release.env"
+grep -Fxq 'AGENT_CODE_SANDBOX_IMAGE=veetbot-code-sandbox:production' \
   "$DEPLOY_ROOT/releases/$release_id/.release.env"
 grep -Fq 'alembic upgrade head' "$LOG_FILE"
 # Services cannot write bytecode under ProtectSystem=strict, so the release
@@ -455,6 +491,12 @@ grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fxq \
   "docker build -f execution/cockpit-builder.Dockerfile -t veetbot-cockpit-builder:$release_id ." \
   "$LOG_FILE"
+grep -Fxq \
+  "docker build -f execution/code-sandbox.Dockerfile -t veetbot-code-sandbox:$release_id ." \
+  "$LOG_FILE"
+[[ "$(grep -Fnx "docker build -f execution/code-sandbox.Dockerfile -t veetbot-code-sandbox:$release_id ." \
+  "$LOG_FILE" | cut -d: -f1)" -lt \
+  "$(grep -Fn 'alembic upgrade head' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 # The Cockpit builder canary builds a reference widget offline under gVisor,
 # with the sandbox's isolation flags, before anything is migrated or promoted.
 builder_canary="docker run --rm --pull=never --runtime runsc --network none --read-only"
@@ -465,6 +507,7 @@ grep -Fxq "$builder_canary" "$LOG_FILE"
 [[ "$(grep -Fnx "$builder_canary" "$LOG_FILE" | cut -d: -f1)" -lt \
   "$(grep -Fn 'alembic upgrade head' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 grep -Fxq "cockpit builder image veetbot-cockpit-builder:$release_id" "$LOG_FILE"
+grep -Fxq "code sandbox image veetbot-code-sandbox:$release_id" "$LOG_FILE"
 # The board's runtime leaves the builder image for the artifact root, where the
 # API serves it by hash; a content-addressed asset already there is never
 # rewritten, and the manifest names this release's runtime.
@@ -482,6 +525,12 @@ grep -Fxq \
   "docker tag veetbot-cockpit-builder:$release_id veetbot-cockpit-builder:production" \
   "$LOG_FILE"
 [[ "$(grep -Fnx "docker tag veetbot-cockpit-builder:$release_id veetbot-cockpit-builder:production" \
+  "$LOG_FILE" | cut -d: -f1)" -lt \
+  "$(grep -Fn 'systemctl restart veetbot-execution' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
+grep -Fxq \
+  "docker tag veetbot-code-sandbox:$release_id veetbot-code-sandbox:production" \
+  "$LOG_FILE"
+[[ "$(grep -Fnx "docker tag veetbot-code-sandbox:$release_id veetbot-code-sandbox:production" \
   "$LOG_FILE" | cut -d: -f1)" -lt \
   "$(grep -Fn 'systemctl restart veetbot-execution' "$LOG_FILE" | head -1 | cut -d: -f1)" ]]
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
@@ -518,6 +567,12 @@ expected_builder_tags="$(printf '%s\n' production 20260809-120003-0000003 "$rele
   cat "$DOCKER_IMAGES/veetbot-cockpit-builder" >&2
   exit 1
 }
+expected_code_tags="$(printf '%s\n' production 20260809-120003-0000003 "$release_id")"
+[[ "$(cat "$DOCKER_IMAGES/veetbot-code-sandbox")" == "$expected_code_tags" ]] || {
+  printf 'unexpected code sandbox tags after retention:\n' >&2
+  cat "$DOCKER_IMAGES/veetbot-code-sandbox" >&2
+  exit 1
+}
 expected_profile_tags="$(printf '%s\n' \
   local 20260809-120001-0000001 20260809-120003-0000003 "$release_id")"
 [[ "$(cat "$DOCKER_IMAGES/veetbot-browser-profile-service")" == "$expected_profile_tags" ]] || {
@@ -530,6 +585,7 @@ grep -Fq 'docker image rm agent-core-sandbox:20260809-120001-0000001' "$LOG_FILE
 grep -Fq 'docker image rm veetbot-browser-profile-service:20260809-120002-0000002' "$LOG_FILE"
 assert_log_lacks 'docker image rm agent-core-sandbox:production'
 assert_log_lacks 'docker image rm veetbot-cockpit-builder:production'
+assert_log_lacks 'docker image rm veetbot-code-sandbox:production'
 assert_log_lacks 'docker image rm veetbot-browser-profile-service:local'
 assert_log_lacks 'docker image rm veetbot-browser-profile-service:20260809-120001-0000001'
 grep -Fq 'could not remove stale image agent-core-sandbox:20260809-120002-0000002' \
@@ -590,6 +646,7 @@ grep -Fq 'the Cockpit builder could not build its canary offline under runsc' \
 assert_log_lacks 'alembic upgrade'
 assert_log_lacks 'systemctl stop'
 assert_log_lacks "docker tag veetbot-cockpit-builder:$canary_id"
+assert_log_lacks "docker tag veetbot-code-sandbox:$canary_id"
 
 stale_id="20260809-010101-1234567"
 make_stage "$stale_id"
@@ -747,6 +804,7 @@ ln -s "$DEPLOY_ROOT/releases/$equal_timestamp_id" "$PROCESS_ROOT/4242/cwd"
 printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/agent-core-sandbox"
 printf '%s\n' "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-browser-profile-service"
 printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-cockpit-builder"
+printf '%s\n' production "$unhealthy_id" >"$DOCKER_IMAGES/veetbot-code-sandbox"
 : >"$LOG_FILE"
 # A release may switch device sign-in off (ADR-0128); compose reads the value.
 device_off_env="$TEST_ROOT/device-off.env"
@@ -849,6 +907,24 @@ fi
 grep -Fq \
   'schedule worker AGENT_COCKPIT_ENABLED must match the application environment' \
   "$TEST_ROOT/schedule-cockpit-mismatch.out"
+
+# Likewise a schedule that names Scale VP keeps its scope only under this flag.
+schedule_svp_mismatch_env="$TEST_ROOT/schedule-svp-mismatch.env"
+cp "$schedule_env" "$schedule_svp_mismatch_env"
+printf '%s\n' 'AGENT_SVP_ENABLED=1' >>"$schedule_svp_mismatch_env"
+schedule_svp_mismatch_id="20260810-152258-0000004"
+make_stage "$schedule_svp_mismatch_id"
+if VEETBOT_TEST_ENV_FILE="$schedule_svp_mismatch_env" \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_worker_env" \
+  run_release "$schedule_svp_mismatch_id" \
+  >"$TEST_ROOT/schedule-svp-mismatch.out" 2>&1; then
+  printf 'release with a mismatched schedule Scale VP flag unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ ! -e "$DEPLOY_ROOT/releases/$schedule_svp_mismatch_id" ]]
+grep -Fq \
+  'schedule worker AGENT_SVP_ENABLED must match the application environment' \
+  "$TEST_ROOT/schedule-svp-mismatch.out"
 
 surface_env="$TEST_ROOT/surface-enabled.env"
 surface_worker_env="$TEST_ROOT/veetbot-surface-enabled.env"
@@ -1053,7 +1129,9 @@ sed 's/^AGENT_CALL_INGRESS_ENABLED=1$/AGENT_CALL_INGRESS_ENABLED=0/' "$TEST_ROOT
   >"$TEST_ROOT/call-worker-only-role.env"
 VEETBOT_TEST_ENV_FILE="$TEST_ROOT/call-worker-only.env" \
   VEETBOT_TEST_CALL_ENV_FILE="$TEST_ROOT/call-worker-only-role.env" \
-  run_release "$worker_only_id" >/dev/null
+  VEETBOT_TEST_REFUSE_RECALL=1 run_release "$worker_only_id" >"$TEST_ROOT/recall-refused.out" 2>&1
+grep -Fq "Recall handoff refused for $worker_only_id" "$TEST_ROOT/recall-refused.out"
+test ! -e "$DEPLOY_ROOT/releases/$worker_only_id/.venv/recall-handoff-attempt"
 assert_log_lacks 'setfacl'
 assert_log_lacks 'systemctl restart veetbot-call-ingress'
 grep -Fxq 'sudo systemctl is-active --quiet veetbot-call' "$LOG_FILE"

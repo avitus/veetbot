@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/veetbot-recall-verifier/bin/python -I -m agent_core.operations.recall_handoff_observe "${0##*/}" "$@"

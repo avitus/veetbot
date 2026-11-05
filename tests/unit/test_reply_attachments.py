@@ -248,11 +248,15 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
     upload = _ref(ArtifactOrigin.UPLOAD, name="owner.pdf", sha="c", second=2)
     captured = _ref(ArtifactOrigin.TOOL_OUTPUT, name="web-fetch-output.json", sha="d", second=4)
 
-    chosen = reply_attachments([first, written, repeat, renamed, upload, captured])
-
-    assert {ArtifactOrigin.SANDBOX_EXPORT.value, ArtifactOrigin.MODEL_OUTPUT.value} == set(
-        REPLY_ATTACHMENT_ORIGINS
+    chosen = reply_attachments(
+        [first, written, repeat, renamed, upload, captured], now=datetime(2026, 9, 23, tzinfo=UTC)
     )
+
+    assert {
+        ArtifactOrigin.SANDBOX_EXPORT.value,
+        ArtifactOrigin.MODEL_OUTPUT.value,
+        ArtifactOrigin.EMAIL_ATTACHMENT.value,  # ADR-0296.
+    } == set(REPLY_ATTACHMENT_ORIGINS)
     assert [artifact.id for artifact in chosen] == [written.id, first.id, renamed.id]
     assert reply_file_reference(written) == FileReferencePart(
         artifact_id=written.id,
@@ -260,3 +264,27 @@ def test_only_exports_and_model_files_are_attached_once_each_in_creation_order()
         filename="notes.md",
         size_bytes=1,
     )
+
+
+def test_the_same_file_saved_from_two_emails_is_attached_for_each() -> None:
+    """Each saved copy follows its own email, so each needs its own link (ADR-0296)."""
+
+    def saved(message_id: str, second: int) -> ArtifactRef:
+        return _ref(
+            ArtifactOrigin.EMAIL_ATTACHMENT, name="a.pdf", sha="a", second=second
+        ).model_copy(update={"metadata": {"email_source": {"message_id": message_id}}})
+
+    first, second, repeat = saved("m1", 1), saved("m2", 2), saved("m1", 3)
+    now = datetime(2026, 9, 23, 13, tzinfo=UTC)
+    assert reply_attachments([first, second, repeat], now=now) == [first, second]
+
+
+def test_a_file_deleted_before_the_reply_is_not_attached() -> None:
+    # ADR-0277: deletion is an expiry; attaching would clear it and undo the delete.
+    kept = _ref(ArtifactOrigin.MODEL_OUTPUT, name="final.png", sha="a", second=1)
+    deleted = _ref(ArtifactOrigin.MODEL_OUTPUT, name="draft.png", sha="b", second=2)
+    deleted = deleted.model_copy(update={"expires_at": deleted.created_at})
+
+    chosen = reply_attachments([kept, deleted], now=deleted.created_at)
+
+    assert [artifact.id for artifact in chosen] == [kept.id]

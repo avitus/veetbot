@@ -296,6 +296,12 @@
   statement: "**Integrated release evidence** — All functional and quality gates, native platform lanes, cost/performance calibration and authorized two-account mailbox smoke pass; final-head hosted review and merged-revision production evidence remain required before milestone completion."
   check: tests/gates/pending.py::pending_gate
 # Canonical gate registry entries for Milestone 31 email unsubscribe assistance.
+- id: gate.email.experience_background_arrival_check
+  milestone: 26
+  kind: case
+  spec: docs/plan/email-experience.md#hard-gates
+  statement: "**Background arrival check** — A server check admits only when due, defers to a recent refresh of any scope, selects arrivals only, stops at its own spending limits without a client pause, widens its interval after failures, makes no model call and requests no formation when nothing changed, and sends no notification."
+  check: tests/gates/test_email_arrival_checks_m26.py::test_arrival_check_gate
 - id: gate.email.unsubscribe_read_contract
   milestone: 31
   kind: case

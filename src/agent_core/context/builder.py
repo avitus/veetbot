@@ -14,6 +14,12 @@ from zoneinfo import ZoneInfo
 
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.history import select_history, validate_tool_pairs
+from agent_core.context.knowledge_catalog import (
+    CATALOG_TOOL,
+    KnowledgeCatalogSource,
+    knowledge_catalog_item,
+    render_knowledge_catalog,
+)
 from agent_core.context.recall_budget import (
     FULL_ALLOWANCE,
     RecallAllowance,
@@ -63,7 +69,11 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.recall_execution import EXHAUSTED, RecallBudgetExceededError
+from agent_core.domain.recall_execution import (
+    EXHAUSTED,
+    RecallBudgetExceededError,
+    RecallSearchTimeoutError,
+)
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.domain.tool_output import content_bytes, context_view, output_excerpt
 from agent_core.domain.tools import ToolSpec, deferred_definition_text
@@ -106,6 +116,8 @@ TRUNCATION_WORKING_STATE_ADVICE = (
 
 # The shipped classes.records_catalog.max_items; composition passes the knob.
 CATALOG_MAX_SERIES = 16
+# The shipped classes.knowledge_catalog.max_items; composition passes the knob.
+KNOWLEDGE_CATALOG_MAX_DOCUMENTS = 12
 CATALOG_ZONE = ZoneInfo("UTC")
 RECALL_CACHE_CAPACITY = 1_024
 AUTOMATIC_RECALL_SECONDS = 10.0
@@ -130,6 +142,9 @@ class _RecallBundle:
     delta: str | None = None
     corrections: tuple[MemoryCorrection, ...] = ()
     rankings: tuple[RecallRankingBlock | None, ...] = ()
+    # Why the base read produced a limitation marker instead of memory, so the
+    # runtime can record that the turn went without recall (ADR-0282).
+    limitation: str | None = None
 
 
 def current_user_text(items: list[ConversationItem]) -> str | None:
@@ -508,12 +523,18 @@ class BudgetedContextBuilder:
         inline_output_bytes: int = 4096,
         catalog_source: RecordsCatalogSource | None = None,
         catalog_max_series: int = CATALOG_MAX_SERIES,
+        knowledge_catalog_source: KnowledgeCatalogSource | None = None,
+        knowledge_catalog_max_documents: int = KNOWLEDGE_CATALOG_MAX_DOCUMENTS,
     ) -> None:
         self._planner = planner
         self._catalog_source = catalog_source
         if catalog_max_series < 0:
             raise ValueError("records catalog series limit must be nonnegative")
         self._catalog_max_series = catalog_max_series
+        self._knowledge_catalog_source = knowledge_catalog_source
+        if knowledge_catalog_max_documents < 0:
+            raise ValueError("knowledge catalog document limit must be nonnegative")
+        self._knowledge_catalog_max_documents = knowledge_catalog_max_documents
         self._estimator = estimator
         self._clock = clock
         self._working_state = working_state
@@ -712,6 +733,15 @@ class BudgetedContextBuilder:
             # A shortened catalog misstates what exists; it yields whole.
             catalog_dropped = True
             catalog_items = []
+        knowledge_catalog_items = await self._knowledge_catalog_items(run, plan, principal)
+        knowledge_catalog_dropped = False
+        if knowledge_catalog_items and (
+            self._estimator.estimate(envelope_items(knowledge_catalog_items), plan.model_id)
+            > plan.budget.knowledge_catalog_tokens
+        ):
+            # Likewise: a catalog that names some documents misstates the corpus.
+            knowledge_catalog_dropped = True
+            knowledge_catalog_items = []
         active_with_context, active_prefix = _with_step_context(
             active,
             [
@@ -720,6 +750,7 @@ class BudgetedContextBuilder:
                 *recall_items,
                 *correction_items,
                 *catalog_items,
+                *knowledge_catalog_items,
                 runtime_item,
                 *note_items,
             ],
@@ -732,6 +763,26 @@ class BudgetedContextBuilder:
             # call recovers it.
             catalog_dropped = True
             catalog_items = []
+            active_with_context, active_prefix = _with_step_context(
+                active,
+                [
+                    *skill_items,
+                    *working_items,
+                    *recall_items,
+                    *correction_items,
+                    *knowledge_catalog_items,
+                    runtime_item,
+                    *note_items,
+                ],
+            )
+            fixed_body = [*summary_items, *active_with_context]
+            fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
+            fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
+        if knowledge_catalog_items and fixed_total > plan.budget.total_tokens:
+            # The documents on file yield next, still before recall trims: the
+            # corpus is unchanged and one knowledge.search reaches it (ADR-0299).
+            knowledge_catalog_dropped = True
+            knowledge_catalog_items = []
             active_with_context, active_prefix = _with_step_context(
                 active,
                 [
@@ -761,6 +812,7 @@ class BudgetedContextBuilder:
                     *working_items,
                     *correction_items,
                     *catalog_items,
+                    *knowledge_catalog_items,
                     runtime_item,
                     *note_items,
                 ],
@@ -803,6 +855,8 @@ class BudgetedContextBuilder:
             yield_steps.append("history")
         if recall_dropped:
             yield_steps.insert(0, "recall")
+        if knowledge_catalog_dropped:
+            yield_steps.insert(0, "knowledge_catalog")
         if catalog_dropped:
             yield_steps.insert(0, "records_catalog")
 
@@ -911,6 +965,11 @@ class BudgetedContextBuilder:
                     if plan.memory_snapshot or recall_items or correction_items
                     else TrustLevel.USER.value
                 ),
+                **(
+                    {}
+                    if recalled.limitation is None
+                    else {"recall_limitation": recalled.limitation}
+                ),
             },
             cache_hints=CacheHints(
                 session_key=session_cache_key(run.tenant_id, run.session_id),
@@ -957,6 +1016,46 @@ class BudgetedContextBuilder:
             return []
         text = render_records_catalog(catalog, zone=CATALOG_ZONE, now=self._clock.now())
         return [catalog_item(text)]
+
+    async def _knowledge_catalog_items(
+        self, run: Run, plan: ContextPlan, principal: Principal
+    ) -> list[ConversationItem]:
+        """Read the documents on file once per assembly, as one body item (ADR-0299).
+
+        Absent without a source, when the roster lacks `knowledge.search`
+        (the tool is the path, so a catalog without it names nothing the
+        run can reach), without a configured class (zero caps), or when the
+        store holds no document the run may read.
+        """
+
+        if (
+            self._knowledge_catalog_source is None
+            or (
+                CATALOG_TOOL not in plan.tool_names and CATALOG_TOOL not in plan.deferred_tool_names
+            )
+            or plan.budget.knowledge_catalog_tokens == 0
+            or self._knowledge_catalog_max_documents == 0
+        ):
+            return []
+        try:
+            scope = (
+                None if self._session_scope is None else await self._session_scope(run.session_id)
+            )
+            catalog = await self._knowledge_catalog_source.catalog(
+                principal,
+                current_scope=scope,
+                ceiling=Sensitivity.RESTRICTED,
+                max_documents=self._knowledge_catalog_max_documents,
+            )
+        except Exception as exc:
+            logger.warning(
+                "context_knowledge_catalog_failed",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
+            return []
+        if catalog is None or (not catalog.lines and not catalog.omitted):
+            return []
+        return [knowledge_catalog_item(render_knowledge_catalog(catalog))]
 
     async def _recall_once(
         self,
@@ -1117,8 +1216,19 @@ class BudgetedContextBuilder:
                 return _RecallBundle(corrections=tuple(exhausted_corrections))
             base = await recall(queries[0])
         except (RecallBudgetExceededError, TimeoutError) as error:
-            limitation = (
-                EXHAUSTED if isinstance(error, RecallBudgetExceededError) else RECALL_TIMED_OUT
+            # An admitted search that outlived the permit's deadline arrives as
+            # a budget error too; it is a timeout, not a spent slot.
+            exhausted = isinstance(error, RecallBudgetExceededError) and not isinstance(
+                error, RecallSearchTimeoutError
+            )
+            limitation = EXHAUSTED if exhausted else RECALL_TIMED_OUT
+            reason = "exhausted" if exhausted else "timed_out"
+            # A turn that goes without recall is a measurable outcome, not a
+            # silent one: the marker reaches the model, the log and the run's
+            # events (ADR-0282).
+            logger.warning(
+                "context_memory_recall_limited",
+                extra={"run_id": str(run.id), "reason": reason},
             )
             # Optional search exhaustion cannot hide mandatory frozen corrections.
             try:
@@ -1134,8 +1244,10 @@ class BudgetedContextBuilder:
                     "context_memory_recall_failed",
                     extra={"run_id": str(run.id), "error_class": type(exc).__name__},
                 )
-                return _RecallBundle(base=limitation)
-            return _RecallBundle(base=limitation, corrections=tuple(exhausted_corrections))
+                return _RecallBundle(base=limitation, limitation=reason)
+            return _RecallBundle(
+                base=limitation, corrections=tuple(exhausted_corrections), limitation=reason
+            )
         except Exception as exc:
             logger.warning(
                 "context_memory_recall_failed",

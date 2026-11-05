@@ -103,9 +103,9 @@ struct MacColumnWidthStore {
         return .standard
     }
 
-    /// Cockpit's left pane (MagicPath merrily-city-4157: 260 to start).
+    /// Cockpit's left pane (MagicPath merrily-city-4157: 320 to start).
     static func cockpitSidebar(defaults: UserDefaults = appDefaults) -> Self {
-        Self(key: "veetbot.cockpit.sidebarWidth", bounds: 200...340, defaultWidth: 260, defaults: defaults)
+        Self(key: "veetbot.cockpit.sidebarWidth", bounds: ModeSidebarLayout.bounds, defaultWidth: ModeSidebarLayout.defaultWidth, defaults: defaults)
     }
 
     /// Cockpit's widget details panel (the design's 320 to start).

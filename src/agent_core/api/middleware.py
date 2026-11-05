@@ -24,6 +24,8 @@ REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 def body_limit_message(limit_bytes: int) -> str:
+    if limit_bytes < 1024 * 1024:
+        return f"The request body exceeds the {limit_bytes // 1024} KiB limit."
     return f"The request body exceeds the {limit_bytes // (1024 * 1024)} MiB limit."
 
 
@@ -77,8 +79,11 @@ class RequestBoundaryMiddleware:
 
         method = str(scope.get("method", ""))
         path = str(scope.get("path", ""))
-        if path in {"/v1/email", "/v1/dreaming", "/v1/memory-reconsolidations"} or path.startswith(
-            ("/v1/email/", "/v1/dreaming/", "/v1/memory-reconsolidations/")
+        is_secret = path == "/v1/integration-secrets" or path.startswith("/v1/integration-secrets/")
+        if (
+            is_secret
+            or path in {"/v1/email", "/v1/dreaming", "/v1/memory-reconsolidations"}
+            or path.startswith(("/v1/email/", "/v1/dreaming/", "/v1/memory-reconsolidations/"))
         ):
             downstream_send = send
 
@@ -99,7 +104,7 @@ class RequestBoundaryMiddleware:
         is_upload = (
             self._uploads_enabled and method == "POST" and UPLOAD_PATH.fullmatch(path) is not None
         )
-        limit = UPLOAD_MAX_BYTES if is_upload else MAX_BODY_BYTES
+        limit = 8192 if is_secret else (UPLOAD_MAX_BYTES if is_upload else MAX_BODY_BYTES)
         too_large = body_limit_message(limit)
         if has_body and is_versioned_api:
             try:
@@ -174,10 +179,10 @@ class RequestBoundaryMiddleware:
                     if message["type"] != "http.request":
                         break
                     consumed += len(message.get("body", b""))
-                    if consumed > MAX_BODY_BYTES:
+                    if consumed > limit:
                         self._body_slots.release()
                         body_slot_acquired = False
-                        await _boundary_error(send, request_id, "payload_too_large", 413)
+                        await _boundary_error(send, request_id, "payload_too_large", 413, too_large)
                         return
                     if not message.get("more_body", False):
                         break

@@ -75,10 +75,10 @@ struct EmailInboxWidthStore {
 
 /// The mailbox sidebar width the owner chose by dragging its edge, kept on
 /// this Mac like the inbox width and never sent to the server. Before any
-/// drag it is the design's 260 points (MagicPath cozy-evening-6871).
+/// drag it is the design's 320 points (MagicPath cozy-evening-6871).
 struct EmailSidebarWidthStore {
     static let key = "veetbot.email.sidebarWidth"
-    static let bounds: ClosedRange<CGFloat> = 200...340
+    static let bounds: ClosedRange<CGFloat> = ModeSidebarLayout.bounds
     static var defaultWidth: CGFloat { A2Metrics.sidebarWidth }
     /// This launch's store: the owner's defaults, or a UI journey's own suite.
     static let app: EmailSidebarWidthStore = {
@@ -293,14 +293,31 @@ public struct EmailModeView: View {
                 #if os(macOS)
                 macColumns
                 #else
-                HStack(spacing: 0) {
-                    if showsMailboxSidebar { mailboxSidebar.frame(width: 232) }
+                TabletSidebarSplit(mode: .email) {
+                    if showsMailboxSidebar { mailboxSidebar }
+                } detail: {
                     VStack(spacing: 0) {
                         emailHeading
-                        HStack(spacing: 0) {
-                            inbox.frame(width: 300)
-                            HairlineDivider().frame(width: 1)
-                            detail.frame(maxWidth: .infinity)
+                        GeometryReader { geometry in
+                            if geometry.size.width >= 660 {
+                                HStack(spacing: 0) {
+                                    inbox.frame(width: 300)
+                                    HairlineDivider().frame(width: 1)
+                                    detail.frame(maxWidth: .infinity)
+                                }
+                            } else if model.selectedThreadID != nil {
+                                VStack(spacing: 0) {
+                                    Button { model.clearSelection() } label: {
+                                        Label("Inbox", systemImage: "chevron.left")
+                                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .accessibilityIdentifier("email.back-to-inbox")
+                                    detail
+                                }
+                            } else {
+                                inbox
+                            }
                         }
                     }
                 }
@@ -588,7 +605,10 @@ public struct EmailModeView: View {
             }
             Spacer()
             #if os(iOS)
-            if directSelection { EmailRefreshButton(model: model) }
+            if directSelection {
+                EmailRefreshButton(model: model)
+                ClientUtilitiesMenu(identifier: "email.more", mode: .email)
+            }
             #endif
             EmailAppearanceButton().buttonStyle(QuietCapsuleButtonStyle())
         }
@@ -690,10 +710,10 @@ public struct EmailModeView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
+                    ModeSegment(selected: .email, choose: openMode)
                     inboxHeader
                     Button(action: newChat) { Label("New chat", systemImage: "plus").frame(maxWidth: .infinity) }
                         .primaryCapsule().accessibilityIdentifier("email.new-chat")
-                    ModeSegment(selected: .email, choose: openMode)
                     if !chatAttention.isEmpty {
                         SidebarSectionLabel(title: "Needs you")
                         ForEach(chatAttention) { row in
@@ -743,14 +763,6 @@ public struct EmailModeView: View {
                     if let pause = model.budgetPauseMessage { budgetPause(pause) }
                 }.padding(12)
             }
-            HStack {
-                globalButton("Chat", "bubble.left", openChat)
-                globalButton("Memory", "brain", openMemory)
-                globalButton("People", "person.2", openPeople)
-                globalButton("Schedules", "calendar.badge.clock", openSchedules)
-                globalButton("Persona", "sparkles", openPersona)
-                globalButton("Settings", "gearshape", openSettings)
-            }.padding(10)
         }.background(AppTheme.paperDeep)
     }
 
@@ -1481,9 +1493,18 @@ private struct EmailThreadScreen: View {
             .help("Show the attachments in the panel")
             .accessibilityIdentifier("email.message.attachments")
         } else {
-            ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
-                Label("\(attachment.filename) · attachment not read", systemImage: "paperclip")
-                    .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+            ForEach(Array(attachments.enumerated()), id: \.offset) { index, attachment in
+                HStack(spacing: VeetSpace.s2) {
+                    Label("\(attachment.filename) · attachment not read", systemImage: "paperclip")
+                        .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                    Spacer(minLength: 0)
+                    if let threadID = model.thread?.id {
+                        EmailAttachmentSaveControl(
+                            model: model,
+                            key: EmailAttachmentKey(threadID: threadID, messageID: message.id, index: index),
+                            attachment: attachment)
+                    }
+                }
             }
         }
     }
@@ -1510,6 +1531,15 @@ private struct EmailThreadScreen: View {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
                         .veetType(.ui).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("email.action-error")
+                }
+                if let message = model.sendProgressMessage {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(message).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("email.send-progress")
                 }
                 if let message = model.styleExampleMessage {
                     Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
@@ -1594,7 +1624,7 @@ private struct EmailThreadScreen: View {
                     HairlineDivider()
                     envelopeField("Subject", path: \.subject, field: .subject)
                 }
-            }.disabled(!draft.canEdit || model.isPerformingAction)
+            }.disabled(!draft.canEdit || model.isPreparingSend)
             HairlineDivider()
             // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
             // no longer change (sending, sent, uncertain) renders as text instead of an editor.
@@ -1606,7 +1636,9 @@ private struct EmailThreadScreen: View {
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 180, idealHeight: 220)
                     .focused($focusedField, equals: .body)
-                    .disabled(model.isPerformingAction)
+                    // Only a send in progress freezes the text; feedback or a style
+                    // endorsement running elsewhere must not stop the owner typing.
+                    .disabled(model.isPreparingSend)
                     .accessibilityLabel("Reply body").accessibilityIdentifier("email.draft-body")
                     .padding(.horizontal, Self.wellInset - 5).padding(.vertical, 8)
             } else {
@@ -1634,9 +1666,19 @@ private struct EmailThreadScreen: View {
     /// wait behind one quiet menu at the trailing edge.
     private func draftActions(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         HStack(spacing: 10) {
-            Button("Review & Send") { Task { await model.prepareSend() } }
-                .primaryCapsule()
-                .disabled(!model.canReview).accessibilityIdentifier("email.review-send")
+            // One press is the owner's consent to this exact message (ADR-0279); the
+            // server parks it for the undo window shown in the notice above.
+            Button {
+                Task { await model.sendNow() }
+            } label: {
+                // The button itself says the press landed; a quiet button that waits
+                // on the request reads as a button that did nothing.
+                if model.isPreparingSend { ProgressView("Sending…") } else { Text("Send") }
+            }
+            .primaryCapsule()
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(!model.canReview).accessibilityIdentifier("email.send")
+            .help("Send this reply (⌘↩). You have a few seconds to undo.")
             Spacer(minLength: 0)
             Menu {
                 Button("Save now") { Task { await model.saveDraft() } }
@@ -1667,8 +1709,12 @@ private struct EmailThreadScreen: View {
     /// action that answers it beside the sentence.
     @ViewBuilder private func draftNotices(_ draft: EmailDraftView, edit: EmailDraftEdit) -> some View {
         if draft.stale {
-            draftDecision("New mail arrived", message: "Review the updated thread above before sending.") {
-                Button("I've reviewed the updated thread") { Task { await model.confirmCurrentSourceReviewed() } }
+            // Name the mail that stalled the reply: who wrote, when, and their first
+            // line, so the decision is made from the message rather than a revision.
+            let message = model.staleMailMessage()
+                ?? "Read the updated thread above, then confirm your reply still fits."
+            draftDecision("New mail arrived", message: message) {
+                Button("I've read it, keep my reply") { Task { await model.confirmCurrentSourceReviewed() } }
                     .primaryCapsule()
                     .disabled(model.conflict != nil || model.isSaving)
             }
@@ -1682,10 +1728,25 @@ private struct EmailThreadScreen: View {
         } else if draft.status == "sent" {
             Label("Sent", systemImage: "checkmark.circle.fill").veetType(.ui, weight: .medium)
                 .foregroundColor(AppTheme.tealText)
+        } else if model.canUndoSend {
+            // The window the server parked this send for; Undo takes it back whole.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let seconds = model.undoSecondsRemaining(at: context.date)
+                draftDecision(
+                    "Sending",
+                    message: "To \(draft.to.joined(separator: ", ")). You can still take it back for \(seconds) s."
+                ) {
+                    Button("Undo") { Task { await model.undoSend() } }
+                        .primaryCapsule()
+                        .keyboardShortcut("z", modifiers: .command)
+                        .disabled(model.isPerformingAction)
+                        .accessibilityIdentifier("email.send-undo")
+                }
+            }
         } else if draft.isProcessing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(draft.status == "sending" ? "Sending approved message…" : "Preparing your draft…")
+                Text(draft.status == "sending" ? "Sending…" : "Preparing your draft…")
                     .veetType(.ui).foregroundColor(AppTheme.inkSoft)
             }
             .accessibilityElement(children: .combine)
@@ -1915,6 +1976,29 @@ private struct EmailGistBlock: View {
     }
 }
 
+/// A message's own text, and the quoted chain ending it that the reading view folds.
+struct EmailReaderSections: Equatable {
+    let current: [MarkdownContentBlock]
+    let earlier: [MarkdownContentBlock]
+
+    /// Only a chain that ends the message and follows text of its own folds: a
+    /// reply written below a quote, or a message that is all quote, stays in view.
+    init(markdown: String) {
+        let blocks = MarkdownContentParser.parse(markdown)
+        let start = blocks.count - 2
+        if start > 0, case .paragraph(let line) = blocks[start],
+            case .blockquote = blocks[start + 1],
+            line.lowercased().hasPrefix("on "), line.lowercased().hasSuffix(" wrote:")
+        {
+            current = Array(blocks[..<start])
+            earlier = Array(blocks[start...])
+        } else {
+            current = blocks
+            earlier = []
+        }
+    }
+}
+
 /// Native text only: links open on a gesture; remote images and HTML never load.
 private struct EmailReadingView: View {
     let message: EmailMessageView
@@ -1922,6 +2006,7 @@ private struct EmailReadingView: View {
     /// its own Reading view and Show original switch.
     var showsOriginal: Bool? = nil
     @State private var showingOriginal = false
+    @State private var showingEarlier = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1941,21 +2026,45 @@ private struct EmailReadingView: View {
                 if showsOriginal ?? showingOriginal {
                     original
                 } else {
-                    MarkdownContentView(text: reader)
-                        .veetType(.ui).lineSpacing(5)
+                    reading(EmailReaderSections(markdown: reader))
                         .environment(\.openURL, OpenURLAction { url in
                             guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
                                   url.host != nil else { return .discarded }
                             return .systemAction
                         })
-                        .accessibilityIdentifier("email.reader.content")
                 }
             } else {
                 original
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: message.id) { showingOriginal = false }
+        .onChange(of: message.id) {
+            showingOriginal = false
+            showingEarlier = false
+        }
+    }
+
+    /// The message's own text, with any quoted chain of replies behind its button.
+    private func reading(_ sections: EmailReaderSections) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            markdown(sections.current).accessibilityIdentifier("email.reader.content")
+            if !sections.earlier.isEmpty {
+                Button(showingEarlier ? "Hide earlier replies" : "Show earlier replies") {
+                    showingEarlier.toggle()
+                }
+                .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+                .accessibilityIdentifier("email.reader.earlier")
+                if showingEarlier {
+                    markdown(sections.earlier).accessibilityIdentifier("email.reader.earlierContent")
+                }
+            }
+        }
+    }
+
+    private func markdown(_ blocks: [MarkdownContentBlock]) -> some View {
+        MarkdownBlocksView(blocks: blocks)
+            .textSelection(.enabled)
+            .veetType(.ui).lineSpacing(5)
     }
 
     private var original: some View {
@@ -2264,7 +2373,10 @@ struct EmailLearningScreen: View {
                             Button("Reset importance preferences", role: .destructive) { resetScope = "preferences" }
                             Button("Reset writing style", role: .destructive) { resetScope = "style" }
                             Button("Reset all email learning", role: .destructive) { resetScope = "all" }
-                        }.buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red))
+                            if model.isResettingLearning {
+                                ProgressView("Resetting…").controlSize(.small)
+                            }
+                        }.buttonStyle(QuietCapsuleButtonStyle(tint: AppTheme.red)).disabled(model.isResettingLearning)
                         DisclosureGroup("History by account") {
                             VStack(alignment: .leading, spacing: 16) {
                                 ForEach(model.accounts) { account in
@@ -2399,5 +2511,54 @@ struct EmailSendReview: View {
             }
         }.sheetFrame(minWidth: 300, macMinWidth: 520, idealWidth: 600, minHeight: 400, idealHeight: 660)
             .background(AppTheme.paper)
+    }
+}
+
+
+/// Save for one attachment, on the Mac panel and the iPhone and iPad message rows
+/// (ADR-0296). What it says is the only record of the press until the chat is opened.
+struct EmailAttachmentSaveControl: View {
+    @ObservedObject var model: EmailViewModel
+    let key: EmailAttachmentKey
+    let attachment: EmailAttachmentView
+
+    var body: some View {
+        switch model.attachmentSave(key) {
+        case .saving:
+            ProgressView().controlSize(.small)
+                .accessibilityLabel("Saving \(attachment.filename)")
+                .accessibilityIdentifier("email.attachment.saving")
+        case .saved:
+            Label("Saved to chat", systemImage: "checkmark")
+                .veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                .fixedSize()
+                .accessibilityIdentifier("email.attachment.saved")
+        case .failed(let message):
+            VStack(alignment: .trailing, spacing: 2) {
+                saveButton(title: "Retry")
+                Text(message).veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case nil:
+            if EmailAttachmentView.canSave(size: attachment.size) {
+                saveButton(title: "Save")
+            } else {
+                Text("Over 32 MB").veetType(.meta).foregroundColor(AppTheme.inkFaint)
+                    .fixedSize()
+                    .help("Too large to save. It stays in Gmail.")
+            }
+        }
+    }
+
+    private func saveButton(title: String) -> some View {
+        Button(title) {
+            Task { await model.saveAttachment(key, filename: attachment.filename) }
+        }
+        .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
+        .fixedSize()
+        .help("Keep a copy in this email's chat. A PDF or text file also becomes searchable.")
+        .accessibilityLabel("\(title) \(attachment.filename)")
+        .accessibilityIdentifier("email.attachment.save")
     }
 }

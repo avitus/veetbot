@@ -13,6 +13,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.errors import AuthorizationError, ConflictError, ScheduleValidationError
+from agent_core.domain.mcp import MCP_SERVER_ID_PATTERN
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
     AuthorizationTurn,
@@ -335,18 +336,32 @@ class ScheduleCreateTool:
         self._uow_factory = uow_factory
         self._calling_enabled = calling_enabled
 
+    async def _server_scopes(self, arguments: dict[str, Any], tenant_id: str) -> frozenset[str]:
+        """ADR-0291: what the named servers require. The service refuses one it cannot name."""
+        servers = arguments.get("use_mcp_servers")
+        if not servers or self._uow_factory is None:
+            return frozenset()
+        async with self._uow_factory() as uow:
+            rows = [await uow.mcp_servers.get(tenant_id, server) for server in servers]
+        return frozenset(scope for row in rows if row is not None for scope in row.required_scopes)
+
     async def approval_view(
         self,
         arguments: dict[str, Any],
         *,
         tenant_id: str,
     ) -> tuple[str, dict[str, Any]]:
-        del tenant_id
         title = str(arguments["title"])
+        scopes = _requested_scopes(arguments) | await self._server_scopes(arguments, tenant_id)
         proposal: dict[str, Any] = {
             "title": title,
             "instruction": str(arguments["instruction"]),
-            "requested_scopes": sorted(_requested_scopes(arguments)),
+            "requested_scopes": sorted(scopes),
+            **(
+                {"mcp_servers": sorted(arguments["use_mcp_servers"])}
+                if arguments.get("use_mcp_servers")
+                else {}
+            ),
             **({"use_website": True} if arguments.get("use_website") else {}),
             **({"place_call": True} if arguments.get("place_call") else {}),
             **({"publish_cockpit_feed": True} if arguments.get("publish_cockpit_feed") else {}),
@@ -454,7 +469,9 @@ class ScheduleCreateTool:
             title=str(arguments["title"]),
             instruction=str(arguments["instruction"]),
             cadence=cadence,
-            requested_scopes=_requested_scopes(arguments),
+            requested_scopes=_requested_scopes(arguments)
+            | await self._server_scopes(arguments, context.tenant_id),
+            mcp_servers=frozenset(arguments.get("use_mcp_servers", ())),
             browser_profile_id=UUID(selected_profile) if selected_profile else None,
             call_plan=call_plan,
             # ADR-0254: a feed's widget is its report, so its upkeep stays quiet.
@@ -651,54 +668,49 @@ class CockpitScheduleCreateTool(PreviousCockpitScheduleCreateTool):
     )
 
 
+# ADR-0291. Ids are checked against the owner's servers when the schedule is created.
+MCP_SERVERS_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "items": {"type": "string", "pattern": MCP_SERVER_ID_PATTERN},
+    "maxItems": 16,
+    "uniqueItems": True,
+}
+_MCP_SERVERS_NOTE = (
+    " To use MCP tools, list their servers in use_mcp_servers (the <server> of "
+    "mcp.<server>.<tool>); the run gets no others."
+)
+
+
+def with_mcp_servers(spec: ToolSpec, version: str) -> ToolSpec:
+    """A new version offering use_mcp_servers; earlier versions stay as pinned."""
+    return spec.model_copy(
+        update={
+            "version": version,
+            "description": spec.description + _MCP_SERVERS_NOTE,
+            "input_schema": {
+                **spec.input_schema,
+                "properties": {
+                    **spec.input_schema["properties"],
+                    "use_mcp_servers": MCP_SERVERS_INPUT_SCHEMA,
+                },
+            },
+        }
+    )
+
+
+class MCPScheduleCreateTool(ScheduleCreateTool):
+    """Version 1.8.0 (ADR-0291): a schedule names the MCP servers its runs may use."""
+
+    spec = with_mcp_servers(ScheduleCreateTool.spec, "1.8.0")
+
+
+class CockpitMCPScheduleCreateTool(CockpitScheduleCreateTool):
+    """Version 1.9.0 (ADR-0291): the same, where a feed-keeping run may need them."""
+
+    spec = with_mcp_servers(CockpitScheduleCreateTool.spec, "1.9.0")
+
+
 class SingleCallScheduleCreateTool(ScheduleCreateTool):
     """Retain version 1.3.0, whose call schedules had no call plan, for pinned runs."""
 
     spec = _SINGLE_CALL_SPEC
-
-
-class PreviousScheduleCreateTool(ScheduleCreateTool):
-    """Retain version 1.2.0, which had no call schedules, for already pinned runs."""
-
-    spec = _SINGLE_CALL_SPEC.model_copy(
-        update={
-            "version": "1.2.0",
-            "description": (
-                "Create one future one-time or recurring schedule. For recurrence, supply a "
-                "complete IANA-zone cadence; ask about ambiguous dates or times. For tasks "
-                "requiring a signed-in website, set use_website=true to pin this chat's selected "
-                "website. Connect Website Access first if missing; never promise authenticated "
-                "work without it."
-            ),
-            "input_schema": {
-                **SINGLE_CALL_INPUT_SCHEMA,
-                "properties": {
-                    key: value
-                    for key, value in SINGLE_CALL_INPUT_SCHEMA["properties"].items()
-                    if key != "place_call"
-                },
-            },
-        }
-    )
-
-
-class LegacyScheduleCreateTool(ScheduleCreateTool):
-    """Retain the closed input shown to already pinned runs."""
-
-    spec = _SINGLE_CALL_SPEC.model_copy(
-        update={
-            "version": "1.1.1",
-            "description": (
-                "Create one future one-time or recurring schedule. For recurrence, supply a "
-                "complete IANA-zone cadence; ask about ambiguous dates or times."
-            ),
-            "input_schema": {
-                **SINGLE_CALL_INPUT_SCHEMA,
-                "properties": {
-                    key: value
-                    for key, value in SINGLE_CALL_INPUT_SCHEMA["properties"].items()
-                    if key not in {"use_website", "place_call"}
-                },
-            },
-        }
-    )

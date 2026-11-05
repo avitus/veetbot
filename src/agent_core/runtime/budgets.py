@@ -12,7 +12,7 @@ from agent_core.domain.messages import (
     StopReason,
 )
 from agent_core.domain.persistence import ModelCallRecord, ModelErrorKind, WorkerLease
-from agent_core.domain.runs import BudgetScope, Run, RunUsage, Step
+from agent_core.domain.runs import BudgetScope, Run, RunKind, RunUsage, Step
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.repositories import RunRepository
@@ -29,9 +29,14 @@ def _restore_run_accounting(run: Run, snapshot: Run) -> None:
 
 
 def _check_before_operation(run: Run, scope: BudgetScope, clock: Clock) -> None:
+    """Enforce operation budgets while admitting jobs with zero model spend."""
     if run.deadline_at is not None and clock.now() >= run.deadline_at:
         raise BudgetExceededError("deadline_exceeded", "the run deadline elapsed")
-    if run.limits.max_cost is not None and run.usage.cost >= run.limits.max_cost:
+    if (
+        (run.kind is not RunKind.JOB or scope is BudgetScope.ATTEMPT)
+        and run.limits.max_cost is not None
+        and run.usage.cost >= run.limits.max_cost
+    ):
         raise BudgetExceededError("budget_exceeded", "the run cost limit was reached")
     if scope is BudgetScope.STEP and run.step_count >= run.limits.max_steps:
         raise BudgetExceededError("max_steps_exceeded", "the run step limit was reached")

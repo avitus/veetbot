@@ -142,7 +142,7 @@ is the same "zero rows updated means stop, not retry" discipline that
 An append that carries no state change has no guarded `UPDATE` to inspect and is
 not subject to the check. The diagnostic `run.fenced` is the case in point: a
 fenced worker performs no transition, no lease release, and no checkpoint write,
-and appends exactly one event, which must commit (`runtime-loop.md:918-927`).
+and appends exactly one event, which must commit (`runtime-loop.md:921-930`).
 
 ### Gaps are normal; missing writes are not
 
@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:992`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:998`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -358,7 +358,7 @@ Materializing into the artifact store rather than into a table is the whole
 of the decision, and it is made for four properties the store already has
 and a table would have to grow: content addressing by SHA-256, a key
 derived from platform-generated values rather than composed from caller
-input (`sandbox-isolation.md:1159`), an authorized read path that ADR-0028
+input (`sandbox-isolation.md:1164`), an authorized read path that ADR-0028
 already puts in front of both metadata and bytes, and `expires_at` with a
 sweeper behind it. Every one of those is load-bearing for a governed
 export. A second bytes-holding mechanism inside PostgreSQL would be a worse
@@ -414,7 +414,7 @@ captured and labeled distinctly — true by construction rather than by
 convention, and `failure` carries the classification without carrying the
 error text, which is the field most likely to have a path, a host, or a
 query string in it. Its three values are `RunStatus`'s terminal subset
-(`runtime-loop.md:276`) and not a vocabulary of the export's own, so a
+(`runtime-loop.md:279`) and not a vocabulary of the export's own, so a
 consumer filtering exported runs and a reader querying `runs.status` ask the
 same question in the same words.
 
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1301-1309`) run over every message body,
+   (`bootstrap-and-composition.md:1300-1308`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:154-156`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1314-1316`).
+(`bootstrap-and-composition.md:1313-1315`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -542,7 +542,7 @@ engineering one, named here so that nobody reads "consent-gated" as
 ### Retention, and why promotion is the durable step
 
 An export expires like any other artifact — thirty days by default, per the
-artifact retention this corpus already sets (`sandbox-isolation.md:1223`).
+artifact retention this corpus already sets (`sandbox-isolation.md:1228`).
 It is not special-cased to live longer, and the reason is that the two
 things Section 31.2 wants exports for do not actually want a long-lived
 export.
@@ -1666,3 +1666,17 @@ Both adapters apply this exception; all other events retain the monotonic
 timestamp update. The repair migration restores affected active sessions to
 the latest remaining event or creation time, preserves later independent
 writes and closed sessions, and retains every audit event.
+
+## Integration key persistence (ADR-0275)
+
+`integration_secrets` holds owner-bound metadata, AES-GCM ciphertext and
+permanent tombstones. Tenant RLS supplements tenant/principal predicates. The
+application serializes writes with a transaction-scoped owner advisory lock;
+this also enforces the 100-active-key cap. Immutable bindings and revision CAS
+prevent retargeting or stale writes. Retries compare the current decrypted value
+in memory only; no request hash or plaintext receipt is stored. Create, replace
+and delete append metadata-only `settings.integration_secrets.*` process events
+in the same transaction. Deletion clears ciphertext and increments revision.
+The additive `e8a270b10301` migration refuses downgrade while any row remains.
+Ciphertext AAD binds tenant, principal, ID, origin, scheme and revision. The host
+master key is kept outside the database and its backups.

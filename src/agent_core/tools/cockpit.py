@@ -11,20 +11,21 @@ untrusted wherever it is read.
 
 from __future__ import annotations
 
-import difflib
 import json
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.cockpit import CockpitPublication
+from agent_core.application.cockpit_diagnostics import diagnostics
 from agent_core.application.cockpit_feeds import CockpitFeedRefusedError, CockpitFeeds
 from agent_core.application.cockpit_views import CockpitBoard
 from agent_core.domain.agents import Principal
-from agent_core.domain.approvals import ApprovalPresentation
+from agent_core.domain.approvals import ApprovalPresentation, ApprovalRequest
+from agent_core.domain.argument_views import card_file_diff
 from agent_core.domain.cockpit import (
     FEED_ERROR_MAX_CHARS,
     WIDGET_FILE_MAX_BYTES,
@@ -45,7 +46,7 @@ from agent_core.domain.errors import (
     NotFoundError,
     RateLimitedError,
 )
-from agent_core.domain.messages import TextPart
+from agent_core.domain.messages import ImageReferencePart, TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.sessions import (
     SESSION_DEVICE_TRIAGE_METADATA_KEY,
@@ -61,9 +62,16 @@ from agent_core.domain.tools import (
     ToolResult,
     ToolSpec,
 )
+from agent_core.ports.artifacts import ArtifactWriter
 from agent_core.ports.cockpit import WidgetBuild, WidgetBuildFailedError
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.tools.approval_cards import (
+    CARD_DIFF_ENTRIES,
+    card_diff,
+    card_pages,
+    hidden_sentence,
+)
 
 COCKPIT_TOOL_NAMES = (
     "cockpit.read",
@@ -77,9 +85,12 @@ REASON_CODES = (
     "cockpit.not_found",
     "cockpit.kit_unknown",
     "cockpit.revision_changed",
+    "cockpit.change_too_large",
+    "cockpit.change_not_shown",
     "cockpit.expected_revision_required",
     "cockpit.widget_deleted",
     "cockpit.widget_not_deleted",
+    "cockpit.removal_queued",
     "cockpit.layout_changed",
     "cockpit.conflict",
     "cockpit.write_interactive_only",
@@ -111,9 +122,9 @@ _CONFLICT_CODES = {
     "widget_exists": "cockpit.revision_changed",
     "widget_deleted": "cockpit.widget_deleted",
     "widget_not_deleted": "cockpit.widget_not_deleted",
+    "removal_queued": "cockpit.removal_queued",
     "layout_changed": "cockpit.layout_changed",
 }
-_DIFF_MAX_LINES = 400
 # Every tool answer reaches the model inline up to 4 KiB (tools/limits.yaml), so the
 # kit, a widget's files and the diagnostics come in pieces that fit.
 _KIT_DETAIL_MAX = 4
@@ -123,7 +134,9 @@ _RECENT_REVISIONS = 5
 _FEED_HISTORY_READ = 10
 _DIAGNOSTICS_SHOWN = 10
 _DIAGNOSTIC_MAX_CHARS = 300
-_DIFF_LINE_MAX_CHARS = 240
+_DIFF_TOO_LARGE = "too_large"
+# A delete or restore names no revision in its arguments, so its card records the one it shows.
+_CARD_REVISION_KEYS = {"delete": "removes_revision", "restore": "restores_revision"}
 _FEED_NAME_PATTERN = r"^(agent\.)?[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$"
 _FEED_PREFIX = "agent."
 _OUTPUT_SCHEMA: dict[str, Any] = {"type": "object"}
@@ -268,7 +281,7 @@ class _CockpitTool:
         raise NotImplementedError
 
 
-class CockpitReadTool(_CockpitTool):
+class PreviousCockpitReadTool(_CockpitTool):
     spec = _spec(
         "cockpit.read",
         "Read the Cockpit. describe_kit lists the authoring rules and the kit's primitives; "
@@ -556,7 +569,33 @@ class CockpitReadTool(_CockpitTool):
         return _ok(f"Feed {feed_id}.", body, trust=TrustLevel.EXTERNAL_UNTRUSTED)
 
 
-class CockpitCheckTool(_CockpitTool):
+class CockpitReadTool(PreviousCockpitReadTool):
+    """Add revision diagnostics while preserving reads pinned to 1.0.0."""
+
+    spec = PreviousCockpitReadTool.spec.model_copy(
+        deep=True,
+        update={
+            "version": "1.1.0",
+            "description": PreviousCockpitReadTool.spec.description
+            + " Use diagnostics with slug and optional revision_id for build, import, "
+            "publication and device failures.",
+        },
+    )
+    spec.input_schema["properties"]["operation"]["enum"].append("diagnostics")
+    spec.input_schema["properties"].update({"revision_id": {"type": "string", "format": "uuid"}})
+
+    async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        if arguments["operation"] == "diagnostics":
+            if "slug" not in arguments:
+                return _invalid("Diagnostics requires a widget slug.")
+            revision = UUID(arguments["revision_id"]) if "revision_id" in arguments else None
+            async with self._toolset.uow_factory() as uow:
+                details = await diagnostics(uow, context.principal, arguments["slug"], revision)
+            return _ok("Widget diagnostics.", details, trust=TrustLevel.EXTERNAL_UNTRUSTED)
+        return await super()._run(arguments, context)
+
+
+class PreviousCockpitCheckTool(_CockpitTool):
     spec = _spec(
         "cockpit.check",
         "Check a widget package without publishing it: validate runs the same build and "
@@ -596,6 +635,196 @@ class CockpitCheckTool(_CockpitTool):
             else f"The package was rejected with {len(build.diagnostics)} diagnostics."
         )
         return _ok(sentence, body)
+
+
+class CockpitCheckTool(PreviousCockpitCheckTool):
+    """Render a checked fixture through WebKit and return its private artifact."""
+
+    spec = PreviousCockpitCheckTool.spec.model_copy(
+        deep=True,
+        update={
+            "version": "1.1.0",
+            "description": "Validate a widget or preview its fixture in WebKit as text and a PNG."
+            + _PUBLIC,
+        },
+    )
+    spec.input_schema["properties"].update(
+        {
+            "fixture": {"type": "string", "pattern": r"^fixtures/[a-z0-9][a-z0-9-]{0,31}\.json$"},
+            "size": {"type": "string", "enum": ["sm", "md", "tall", "lg", "wide"]},
+        }
+    )
+
+    async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Render a preview through the builder; every other operation is the parent's."""
+        if arguments["operation"] != "preview":
+            return await super()._run(arguments, context)
+        selection = {k: str(arguments[k]) for k in ("fixture", "size") if k in arguments}
+        if "_live" in arguments:
+            selection["live"] = str(arguments["_live"])
+        build = await self._toolset.publication.check(
+            context.principal,
+            str(arguments["slug"]),
+            dict(arguments["files"]),
+            preview=selection,
+        )
+        if build.ok:
+            rendered = build.preview
+            if rendered is None or not callable(getattr(type(context.artifacts), "create", None)):
+                return _failure(
+                    ToolFailureKind.UPSTREAM_ERROR,
+                    "cockpit.preview_unavailable",
+                    "The preview renderer or artifact store is unavailable.",
+                )
+
+            async def stream() -> AsyncIterator[bytes]:
+                yield rendered.png
+
+            case = rendered.fixture.split("/")[-1].removesuffix(".json")
+            name = f"{arguments['slug']}-{case}-{rendered.size}.png"
+            trust = TrustLevel.EXTERNAL_UNTRUSTED
+            ref = await cast(ArtifactWriter, context.artifacts).create(
+                stream(), name, "image/png", trust
+            )
+            result = _ok(
+                (
+                    "Rendered the current live data in WebKit."
+                    if rendered.fixture == "live"
+                    else "Rendered the synthetic fixture in WebKit."
+                ),
+                {
+                    "ok": True,
+                    "fixture": rendered.fixture,
+                    "size": rendered.size,
+                    "text": rendered.text,
+                    "artifact_id": str(ref.artifact_id),
+                },
+                trust=trust,
+            )
+            result.content.append(
+                ImageReferencePart(
+                    artifact_id=ref.artifact_id, media_type="image/png", filename=name
+                )
+            )
+            result.artifacts.append(
+                {
+                    "artifact_id": str(ref.artifact_id),
+                    "media_type": "image/png",
+                    "sha256": ref.sha256,
+                    "size_bytes": ref.size_bytes,
+                }
+            )
+            return result
+        return _ok(
+            "The widget could not be previewed.",
+            {
+                "ok": False,
+                "kit_api": build.kit_api,
+                "diagnostics": _diagnostics(build),
+            },
+            trust=TrustLevel.EXTERNAL_UNTRUSTED,
+        )
+
+
+class CockpitLiveCheckTool(CockpitCheckTool):
+    """Preview a widget with the owner's current feed values, in the offline builder (ADR-0281)."""
+
+    spec = CockpitCheckTool.spec.model_copy(
+        deep=True,
+        update={
+            "version": "1.2.0",
+            "description": (
+                "Validate a widget or preview it in WebKit as text and a PNG, with a fixture or "
+                "with live: true for the current feeds and settings, which stay private." + _PUBLIC
+            ),
+        },
+    )
+    spec.input_schema["properties"].update({"live": {"type": "boolean"}})
+
+    async def _run(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Add the owner's current feeds and settings to a preview that asks for live data."""
+        if not (arguments["operation"] == "preview" and arguments.get("live")):
+            return await super()._run(arguments, context)
+        if "fixture" in arguments:
+            return _failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "cockpit.preview_selection",
+                "Preview a fixture or live data, not both.",
+            )
+        return await super()._run(
+            {
+                **{key: value for key, value in arguments.items() if key != "live"},
+                "_live": await self._live_values(arguments, context),
+            },
+            context,
+        )
+
+    async def _live_values(self, arguments: dict[str, Any], context: ToolExecutionContext) -> str:
+        """The widget's declared feeds and settings, in the shape of a fixture."""
+        principal = context.principal
+        try:
+            manifest = json.loads(dict(arguments["files"]).get("widget.json", "{}"))
+        except ValueError:
+            manifest = {}
+        declared_feeds = manifest.get("feeds") if isinstance(manifest, dict) else None
+        feeds: dict[str, Any] = {}
+        # The builder reports a malformed manifest; reading values only skips what it cannot use.
+        for declared in declared_feeds if isinstance(declared_feeds, list) else []:
+            if not isinstance(declared, dict) or not isinstance(declared.get("id"), str):
+                continue
+            try:
+                reading = await self._toolset.feeds.read(
+                    principal, declared["id"], history=int(declared.get("history", 0))
+                )
+            except (OverflowError, TypeError, ValueError, NotFoundError):
+                continue
+            if reading.current is None:
+                continue
+            feeds[declared["id"]] = {
+                "observedAt": reading.current.observed_at.isoformat(),
+                "expectedIntervalSec": reading.current.expected_interval_seconds,
+                "error": reading.current.error,
+                "data": reading.current.data,
+                "history": [
+                    {"observedAt": item.observed_at.isoformat(), "data": item.data}
+                    for item in reading.history
+                ],
+            }
+        settings: dict[str, Any] = {}
+        async with self._toolset.uow_factory() as uow:
+            stored = await uow.cockpit_widgets.get_settings(principal, str(arguments["slug"]))
+        if stored is not None:
+            settings = dict(stored.values)
+        return json.dumps(
+            {
+                "now": self._toolset.clock.now().isoformat(),
+                "settings": settings,
+                "feeds": feeds,
+            }
+        )
+
+
+def _unshown_change_refusal(approval: ApprovalRequest | None) -> ToolResult | None:
+    """The refusal when this call's approval card did not show the owner the whole change.
+
+    A write that never asked has no approval and is unaffected. A card with no diff
+    either said the change was too large or fell back when its presenter failed.
+    """
+
+    if approval is None or "diff" in approval.arguments:
+        return None
+    if approval.arguments.get("diff_status") == _DIFF_TOO_LARGE:
+        return _invalid(
+            "This change was too large to show the owner whole, so nothing was published. "
+            "Make a smaller change, or tell the owner it can be asked for in a new chat "
+            "that reads no outside content.",
+            "cockpit.change_too_large",
+        )
+    return _invalid(
+        "The approval card could not show the owner this change, so nothing was published. "
+        "Tell the owner, and try again.",
+        "cockpit.change_not_shown",
+    )
 
 
 class CockpitWidgetWriteTool(_CockpitTool):
@@ -645,6 +874,19 @@ class CockpitWidgetWriteTool(_CockpitTool):
             return await self._outcome(principal, replayed.revision_id, operation)
         if operation in {"create", "update"} and "files" not in arguments:
             return _invalid(f"{operation} carries the package's files")
+        approval = await self._approval(context)
+        refusal = _unshown_change_refusal(approval)
+        if refusal is not None:
+            return refusal
+        shown: UUID | None = None
+        if approval is not None and operation in _CARD_REVISION_KEYS:
+            revision_on_card = approval.arguments.get(_CARD_REVISION_KEYS[operation])
+            if revision_on_card is None:
+                return _invalid(
+                    "The approval card showed no revision for this change, so nothing changed.",
+                    "cockpit.revision_changed",
+                )
+            shown = UUID(str(revision_on_card))
         expected: UUID | None = None
         if operation == "update":
             if "expected_revision" not in arguments:
@@ -654,11 +896,13 @@ class CockpitWidgetWriteTool(_CockpitTool):
             expected = UUID(str(arguments["expected_revision"]))
         await context.mark_effect_sent()
         if operation == "delete":
-            await publication.delete(principal, slug, request_key=context.idempotency_key)
+            await publication.delete(
+                principal, slug, request_key=context.idempotency_key, expected_head=shown
+            )
             return await self._removal(principal, slug)
         if operation == "restore":
             revision = await publication.restore(
-                principal, slug, request_key=context.idempotency_key
+                principal, slug, request_key=context.idempotency_key, expected_live=shown
             )
         else:
             revision = await publication.write(
@@ -670,6 +914,14 @@ class CockpitWidgetWriteTool(_CockpitTool):
                 request_key=context.idempotency_key,
             )
         return await self._outcome(principal, revision.id, operation)
+
+    async def _approval(self, context: ToolExecutionContext) -> ApprovalRequest | None:
+        """This write's own approval. A write that never asked has none, and neither does one
+        made by `cockpit.install`, whose single summarized approval has its own card."""
+
+        async with self._toolset.uow_factory() as uow:
+            approval = await uow.approvals.get_by_action(context.invocation_id)
+        return approval if approval and approval.tool_name == WIDGET_WRITE_TOOL else None
 
     async def _in_chat(self, context: ToolExecutionContext) -> bool:
         """The session filter withholds the tool elsewhere; a call by name is refused here."""
@@ -743,7 +995,7 @@ class CockpitWidgetWriteTool(_CockpitTool):
         turn: object,
         not_covered: object,
     ) -> ApprovalPresentation:
-        """The change as a bounded diff against the live files, in server-authored words."""
+        """The whole change against the live files, or why approving it publishes nothing."""
 
         del run, turn, not_covered
         operation = str(arguments.get("operation", ""))
@@ -759,23 +1011,26 @@ class CockpitWidgetWriteTool(_CockpitTool):
                     principal, widget.live_revision_id
                 )
                 live = dict(revision.files)
+        head = await self._toolset.publication.head_revision(principal, slug)
+        accepted = {} if head is None else dict(head.files)
+        files = dict(arguments.get("files") or {})
         if operation == "delete":
-            before, after = live, {}
+            before, after = accepted, {}
         elif operation == "restore":
             before, after = {}, live
+        elif operation == "create":
+            before, after = {}, files
         else:
-            before, after = live, dict(arguments.get("files") or {})
+            before, after = accepted, files
         changes = sorted(name for name in {*before, *after} if before.get(name) != after.get(name))
         lines: list[str] = []
         for name in changes:
             lines.extend(
-                line[:_DIFF_LINE_MAX_CHARS]
-                for line in difflib.unified_diff(
-                    before.get(name, "").splitlines(),
-                    after.get(name, "").splitlines(),
+                card_file_diff(
+                    before.get(name, ""),
+                    after.get(name, ""),
                     fromfile=f"a/{name}" if name in before else "/dev/null",
                     tofile=f"b/{name}" if name in after else "/dev/null",
-                    lineterm="",
                 )
             )
         verb = {
@@ -789,13 +1044,31 @@ class CockpitWidgetWriteTool(_CockpitTool):
             "operation": operation,
             "slug": slug,
             "file_changes": changes,
-            "diff": lines[:_DIFF_MAX_LINES],
-            "diff_truncated": len(lines) > _DIFF_MAX_LINES,
         }
         if "expected_revision" in arguments:
             view["expected_revision"] = arguments["expected_revision"]
+        if operation == "delete" and head is not None:
+            view[_CARD_REVISION_KEYS["delete"]] = str(head.id)
+        if operation == "restore" and widget is not None and widget.live_revision_id is not None:
+            view[_CARD_REVISION_KEYS["restore"]] = str(widget.live_revision_id)
+        summary = f"{verb} the Cockpit widget {slug} {where} the public branch"
+        entries, hidden = card_diff(lines)
+        if len(entries) > CARD_DIFF_ENTRIES:
+            view["diff_status"] = _DIFF_TOO_LARGE
+            return ApprovalPresentation(
+                summary=(
+                    f"{summary}: this change is too large to show here whole, so approving "
+                    "this publishes nothing. Ask Veetbot for a smaller change, or for this one "
+                    "in a new chat that reads no outside content."
+                ),
+                arguments=view,
+            )
+        view["diff"] = card_pages(entries)
+        if not hidden:
+            return ApprovalPresentation(summary=summary, arguments=view)
         return ApprovalPresentation(
-            summary=f"{verb} the Cockpit widget {slug} {where} the public branch", arguments=view
+            summary=f"{summary}. {hidden_sentence(hidden)}",
+            arguments={**view, "hidden_text_pieces": hidden},
         )
 
 
@@ -942,7 +1215,7 @@ class CockpitFeedPublishTool(_CockpitTool):
 def cockpit_tools(toolset: CockpitToolset) -> tuple[_CockpitTool, ...]:
     return (
         CockpitReadTool(toolset),
-        CockpitCheckTool(toolset),
+        CockpitLiveCheckTool(toolset),
         CockpitWidgetWriteTool(toolset),
         CockpitConfigureTool(toolset),
         CockpitFeedPublishTool(toolset),

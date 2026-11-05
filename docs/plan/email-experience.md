@@ -130,7 +130,9 @@ or deadline, the importance explanation, and an editable draft when one is
 appropriate. Render sanitized text initially; external images, tracking pixels,
 and active HTML do not load. Show attachment metadata and the fact that an
 attachment was not read. A draft that depends on an unread attachment requests
-the missing information rather than claiming to have reviewed it.
+the missing information rather than claiming to have reviewed it. Each attachment
+offers Save, which stores a copy in the thread's chat
+([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)).
 
 The reading view derives inert Markdown from each retained message on the scoped
 thread read, after source retention is enforced. It removes invisible preheader
@@ -142,10 +144,29 @@ postscripts remain. No link is fetched or resolved during cleanup. Only the
 reader makes a link, from an HTML anchor or a source URL whose destination it
 checked: brackets, angle brackets and backslashes in the sender's own text are
 escaped, so that text cannot author a Markdown link, image or markup, while its
-emphasis and lists still format. Native text renders the result at a
-comfortable line width, with external HTTP(S) links opened
-only by a user gesture and a **Show original** toggle for the unchanged retained
-body. This is presentation, not a summary or rewrite: it makes no model call,
+emphasis and lists still format.
+
+A mailer's plain-text part gets the same treatment at every quote level. A
+`text <url>` target links the word before it, unless that word is shaped like an
+address other than the destination, which then stays plain beside a link naming
+the real host. A phone number's percent-encoded target is removed. A line the
+mailer wrapped rejoins its sentence, judged by whether the next word would have
+fit within 70 columns; a line the writer ended keeps its break as a Markdown hard
+break, so a signature stays a stack of lines and a short answer stays two answers.
+A message containing a code fence keeps its lines as they are. A block of three or
+more lines that repeats an earlier block of the same message, however it wrapped,
+is shown once, which is how a signature quoted at every level appears. No other
+prose is removed for repeating.
+
+Native text renders the result at a comfortable line width, with external
+HTTP(S) links opened only by a user gesture and a **Show original** toggle for
+the unchanged retained body. A quoted chain folds behind **Show earlier replies**
+only when an `On … wrote:` line introduces it, it ends the message, and the
+message has text of its own above it. A reply written below a quote, a message
+that is all quote, and a quote the writer introduced some other way stay in view.
+Only English attributions are recognized.
+
+This is presentation, not a summary or rewrite: it makes no model call,
 stores no extra body copy, and never replaces drafting or memory evidence. The
 additive `reader_body` message field is absent on older servers; clients then show
 the original text. Source incompleteness and attachment notices remain visible in
@@ -223,12 +244,47 @@ An account awaiting its first update is shown as waiting; a recorded failure
 remains distinct even when that account has never completed synchronization.
 
 Each foreground request may admit a bounded slice. The server does not schedule
-the next slice itself: it requires a fresh active client request. On leaving
-Email, stop admitting new slices; an admitted slice may finish its bounded work
-and persist its checkpoint. Reopening resumes. This adds no recurring schedule,
-Gmail push subscription, notification digest, or general device-presence router.
-An explicitly requested email operation in Chat remains available through the
-ordinary agent independently of the Email refresh timer.
+the next foreground slice itself: it requires a fresh active client request. On
+leaving Email, stop admitting new foreground slices; an admitted slice may finish
+its bounded work and persist its checkpoint. Reopening resumes. This adds no
+schedule row, Gmail push subscription, notification digest, or general
+device-presence router. An explicitly requested email operation in Chat remains
+available through the ordinary agent independently of the Email refresh timer.
+
+### Server arrival checks
+
+Behind `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED`, off by default, the server also
+checks for new mail while Email is closed (ADR-0286). The maintenance worker
+admits a typed refresh with `scope` `arrivals` through the ordinary admission path,
+for its owner principal. A check is due when no refresh of any scope was created
+within `email.check_interval_seconds` (default 300), read from durable task
+records. Foreground requests therefore defer checks, and existing coalescing joins
+a request to any refresh already running.
+
+An arrival is an Inbox conversation with activity in the last seven days whose
+current source has not had a pass: never assessed, source changed, or its one
+promised retry pending. A conversation still being read waits until the read ends,
+because each page changes the stored source without new mail. A check reads Gmail
+changes with the usual eight reads per
+account, and a resynchronization's first Inbox page. It assesses at most four
+arrivals, newest first, after any retained window a change is waiting on. Each gets
+one pass, on its newest passage, which is enough to rank it; further passes of a long
+conversation wait for full slices (ADR-0298), except for a window the change is waiting on,
+whose unread mail cannot be reached until it is analyzed. A check prepares eligible automatic drafts
+only for conversations it assessed, and eligibility needs a finished analysis. It
+does not re-assess a conversation only because a profile, model or
+prompt revision changed, page further through the Inbox, advance the history pass,
+re-read expired bodies, verify unsubscribe evidence or write correspondence
+summaries. Foreground slices keep that work, within their scope (ADR-0298).
+
+A check is admitted only within 50% of the daily and 90% of the rolling thirty-day
+allowance. A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
+conservatively charged check doubles the wait, to 10, 20, 40 and at most 60 minutes;
+a completed refresh resets it. When Gmail reports no change and no arrival is
+waiting, the check loads no stored message content, makes no model call and
+requests no memory formation, and is marked empty. After seven days an empty check's
+session, events and task record are removed through session erasure. A check sends no
+notification; a failure surfaces through existing account status.
 
 ### Reliable synchronization
 
@@ -323,6 +379,9 @@ small sample.
 
 Approved admission bounds are 100 thread summaries per account per slice,
 10 full-thread reads per account per slice, and a 120-second execution deadline.
+That time starts at the first claim. A claim more than 300 seconds after admission
+gets only what remains of the slice plus those 300, and past that fails; an earlier
+deadline on the agent still applies (ADR-0295).
 These are upper bounds: inherited tool, output-byte, context, token, and cost
 limits may stop work sooner. Checkpoint between pages. Oversized threads need
 explicit continuation or a partial-content marker; truncation must never be
@@ -393,18 +452,24 @@ New mail keeps a reserved share (ADR-0256). A refresh is a full slice only
 while counted spending, live reservations and its reservation fit within 75% of
 both the daily and the rolling thirty-day allowance. Above that share and
 within both ceilings it is a new-mail slice: new Gmail changes take all eight
-full-thread reads, and only current Inbox conversations are assessed, newest
-activity first. A retained window that a change is waiting on is assessed
+full-thread reads, and only arrivals are assessed, under the rule in "Server
+arrival checks": at most four, newest activity first, one pass each (ADR-0298). A
+retained window that a change is waiting on is assessed
 ahead of them even outside the Inbox, since until it is analyzed the thread's
-newer messages cannot be read. Expired Inbox bodies, automatic drafts and unsubscribe
+newer messages cannot be read. Automatic drafts are prepared only for conversations
+the slice assessed, and need a finished analysis. Expired Inbox bodies and unsubscribe
 verification proceed as usual. The first page of an Inbox pass is also read;
-it holds the newest mail, so a resynchronization still recovers new mail. Later
+it holds the newest mail, so a resynchronization still recovers new mail. Re-assessment
+after a profile, model or prompt revision, further passes of a long conversation,
+assessment of mail older than the arrival window, later
 catch-up pages, the ninety-day history pass, other non-Inbox assessment and
 correspondence summaries wait until a refresh again passes the 75% admission
-check, counted spending and live reservations included. Owner-requested drafts
-and People imports use the full ceilings.
-Each refresh task records its admitted `scope`, `full` or `new_mail`; earlier
-tasks read as `full`.
+check, counted spending and live reservations included. A new-mail slice that found
+nothing makes no model call, requests no memory formation and is removed after seven
+days, as an empty check is. Owner-requested drafts and People imports use the full
+ceilings.
+Each refresh task records its admitted `scope`, `full`, `new_mail` or `arrivals`
+(ADR-0286); earlier tasks read as `full`.
 
 The shipped `runtime/limits.yaml` values `email.daily_cost` and
 `email.monthly_cost` hold these defaults. A reviewed operator overlay under
@@ -560,21 +625,52 @@ Autosave uses optimistic concurrency. A second device can continue from the
 latest saved revision; competing edits produce an explicit conflict preserving
 both versions. Unsaved local edits remain visible on a network error. New
 incoming mail marks the draft stale and requires review of the changed source
-before sending.
+before sending. The stale notice names who wrote and quotes the start of the
+newest message, so the owner decides from the message rather than from a
+revision number; refusals the server returns are written for the owner in the
+same plain terms. Send stays available while an autosave is in flight: the press
+waits for that save and freezes the settled revision.
 
 The send flow is:
 
-1. Review & Send freezes the exact current revision and presents From account,
-   To/Cc/Bcc where present, subject, and full body.
-2. Final Send explicitly resolves the ordinary approval for that exact action.
+1. Send is one press on the exact current revision (⌘↩ on the Mac). The press
+   is the owner's consent to that exact message — mailbox, recipients, subject,
+   body and thread — recorded with the durable send task as an authenticated
+   gesture, as the Archive gesture is (ADR-0095, ADR-0279). The client sends
+   the draft revision and the thread revision it displayed; the server derives
+   everything else from that immutable revision. A thread that moved on, a
+   stale draft, or a draft in another send state refuses the press in plain
+   words. It reads nothing from the mailbox first: the owner is waiting, so
+   the task joins the interactive class (ADR-0278).
+2. The task is parked for the undo window (`AGENT_EMAIL_SEND_UNDO_SECONDS`,
+   ten seconds by default). Undo within the window cancels the parked task
+   and returns the draft to editing with its text intact; once a worker has
+   claimed the task, Undo is refused and the send proceeds. The draft carries
+   `send_undo_until` so every device shows the same window. Undo must name
+   the run it takes back, so a late Undo cannot cancel a later press; the
+   in-memory composition's inline dispatcher parks the run in the background
+   for the same window, so the request returns at once.
 3. Perform a fresh governed Gmail thread read, then recheck account authority,
-   policy, draft/source revision, and action content. A failed freshness read
-   defers sending and preserves the draft. An observed new message, external
-   reply, edit, or recipient/account change invalidates the previous approval.
-   Atomically claim the frozen local action/draft revision for dispatch so a
-   concurrent local edit cannot slip between validation and the send claim.
+   policy, the consent, draft/source revision, and action content. A failed
+   freshness read defers sending and preserves the draft. An observed new
+   message, external reply, edit, or recipient/account change invalidates the
+   consent. Atomically claim the frozen local action/draft revision for
+   dispatch so a concurrent local edit cannot slip between validation and the
+   send claim. The send tool's `REQUIRE_APPROVAL` raises as usual; the consent
+   consumer resolves that approval once, only when its tool, arguments and
+   argument hash match the consented revision and the gesture event, and it
+   never notifies for a consent already given. The pre-effect dispatch guard
+   revalidates the consent again.
 4. Dispatch through the existing account-specific send MCP tool. Persist the
    confirmed result and update the thread and draft state across devices.
+
+The earlier two-step path — `send-proposal`, then Final Send on the pending
+approval — remains for older clients and for a draft already awaiting
+approval; the Email client's primary action no longer uses it.
+
+A send that ends without dispatch is reported beside the draft in the owner's
+terms (new mail arrived; Gmail could not be checked), never as a sheet that
+silently closed.
 
 Sending by value preserves the existing approval guarantee; an approval cannot
 point to a remotely mutable Gmail draft id. Cross-device double taps reuse one
@@ -625,9 +721,9 @@ records a content-free `email.semantic.skipped` event naming the reason, so
 memory diagnostics can explain why nothing formed. Importance assessment is
 unchanged, and the assessment prompt is not revised for this rule. Memories
 that bulk mail already formed leave through governed deletion of each derived
-belief; `agent email exclude-bulk` previews and, with `--confirm`, applies
-source exclusion across every census-indexed retained source, which is a
-coarser operation because it also drops those threads from the mailbox view.
+belief; the census-wide exclusion command ADR-0116 kept in reserve was never
+run and ADR-0266 withdrew it, because exclusion also drops those threads from
+the mailbox view.
 
 Each observed exchange in People history also carries a short generated
 summary (ADR-0126).
@@ -807,10 +903,12 @@ normal contract naming review:
 | `/v1/email/feedback` | Create, inspect, correct, undo scoped owner feedback and attention judgments. |
 | `/v1/email/learning` | Inspect profile/coverage, pause/resume learning, reset derived preferences or exclude a source. |
 | `/v1/email/threads/{id}/drafts` and draft detail | Start/refine a governed generation run; read/save revisions; discard internal proposals. |
-| `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references. |
+| `/v1/email/drafts/{id}/send` and `/send-undo` | Admit one consented send of an exact draft revision at the displayed thread revision (ADR-0279); cancel it while it is still parked in the undo window. |
+| `/v1/email/drafts/{id}/send-proposal` | Freeze an exact outbound action and return the existing run/approval references (older clients). |
 | `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
 | `/v1/email/threads/{id}/spam` and `/spam-flag` | Milestone 31 (ADR-0165), behind its flag: admit an owner's Report spam or Not spam with Archive's gesture; clear or restore a suspected-spam flag without a mailbox change. |
 | `/v1/email/threads/{id}/discussion`, `/dismiss`, and `/exclude` | Open the thread in Chat once (`email.discussion.opened`, which also needs `session.write`); set or clear handled state at the revision the client saw; exclude the thread as a learning source. |
+| `/v1/email/threads/{id}/attachments/save` | One press on Save for one listed attachment: a typed, model-free task in the thread's session whose reply carries the file (needs `email.write` and `artifact.write`; ADR-0296). |
 | Existing approval routes | Resolve every send once; no alternate direct-send HTTP route. |
 
 The exact platform scopes are `email.read` and `email.write` for application
@@ -861,7 +959,8 @@ Archive admission requires current `email.read`, `email.write`, `run.write`,
 scopes. The typed task performs no model work and consumes no automatic-email
 dollar reservation. The owner is waiting on the gesture, so the task is queued in
 the interactive class (event-log-and-persistence.md:698) and never waits behind
-refresh, draft or send work, which stays asynchronous. It uses the existing
+refresh or draft work, which stays asynchronous; a send proposal and its
+approved send share that class (ADR-0278). It uses the existing
 tool pipeline and approval floor, validating the immutable, expiring owner
 request against the exact pending action before ordinary one-time resolution. Preserve requested/resolved audit
 ordering, policy revalidation, worker fencing, and uncertain-effect rules.
@@ -943,7 +1042,7 @@ secret/material restrictions and policy gates remain mandatory.
 ## 9. Delivery sequence
 
 Owner approval authorizes this feature scope, not a silent declaration that
-earlier milestones have completed. Milestone 26 is assigned and its thirty-two gates are registered. Preserve the current verified
+earlier milestones have completed. Milestone 26 is assigned and its thirty-three gates are registered. Preserve the current verified
 milestone ceiling and record existing email activation gaps separately.
 
 | Phase | Deliverable | Exit evidence |
@@ -1080,7 +1179,7 @@ native editing and approved sending, and useful semantic email memories.
 
 It excludes another provider, self-service account onboarding, terminal UI work,
 autonomous sending, automatic Gmail writes, Gmail draft synchronization,
-background monitoring/digests, attachment processing, calendar operations,
+background monitoring beyond ADR-0286's arrival checks, digests, attachment processing, calendar operations,
 permanent mailbox deletion, offline-authoritative editing, a separate email
 persona, model routing changes, and a general learned memory policy. Existing
 Chat tools remain available under their existing contracts.
@@ -1115,7 +1214,7 @@ boundaries when the concrete work is ready.
 
 ## Hard gates
 
-These thirty-two blocking gates belong only to Milestone 26. Pending check
+These thirty-three blocking gates belong only to Milestone 26. Pending check
 references remain pending until matching implementation and verification exist.
 Private quality and owner-smoke evidence cannot be replaced by synthetic tests.
 
@@ -1183,6 +1282,8 @@ Private quality and owner-smoke evidence cannot be replaced by synthetic tests.
    `gate.email.experience_api_boundaries`. **M26.**
 32. **Integrated release evidence.** All functional and quality gates, native platform lanes, cost/performance calibration and authorized two-account mailbox smoke pass; final-head hosted review and merged-revision production evidence remain required before milestone completion. Registered as
    `gate.email.experience_release_evidence`. **M26.**
+33. **Background arrival check.** A server check admits only when due, defers to a recent refresh of any scope, selects arrivals only, stops at its own spending limits without a client pause, widens its interval after failures, makes no model call and requests no formation when nothing changed, and sends no notification. Registered as
+   `gate.email.experience_background_arrival_check`. **M26.**
 
 ## Persistence contract
 
@@ -1223,7 +1324,8 @@ maintenance sweep therefore cannot expose or renew an expired body.
 The owner-authorized email-source erasure operation is a narrow content-erasure
 exception to append-only event payloads. It preserves event identity, sequence,
 actor, time, tool/action identity, approval decisions, and argument hashes; it
-replaces only the selected source's content with an explicit erasure marker and
+replaces only the selected source's content, including a saved attachment's file name
+wherever its call recorded it (ADR-0296), with an explicit erasure marker and
 appends an `email.source.erased` audit event. It does not rewrite user messages
 or reinterpret an earlier action. The original Gmail account-to-server binding is
 server-owned session metadata and must never be refreshed from a later manifest.
@@ -1359,7 +1461,7 @@ reservation; its typed tasks follow the Archive task's interactive class,
 server preparation and owner-gesture consent; and its records are new kinds in
 `email_records` under this document's retention, source-erasure and privacy
 rules. Nothing in it monitors a mailbox or writes to Gmail without an owner
-act, so this milestone's exclusions and thirty-two gates are unchanged.
+act, so this milestone's exclusions and gates are unchanged.
 
 [ADR-0165](../adr/0165-suspected-spam-flag-and-thread-report-spam.md) extends
 that milestone into this one's assessment and projection. The assessment
@@ -1371,7 +1473,7 @@ zero and no reply needed, so it leaves the priority view and automatic
 drafts, and memory source validation treats it as bulk. Report spam on a
 thread is the Archive gesture above with a fixed `SPAM` delta. The rules are
 specified and gated in [email-unsubscribe.md](email-unsubscribe.md); this
-milestone's thirty-two gates are unchanged.
+milestone's gates are unchanged.
 
 ## Cheap junk screening
 
@@ -1408,8 +1510,8 @@ confers no authority, and Memory, Persona, Schedules and Settings stay global.
 
 The shell's two-way assumptions become exhaustive over three modes, and
 switching among the three preserves each mode's state. Email's retrieval rules
-are unchanged: Email still refreshes only while Email is visible, and Cockpit
-holds its own stream only while Cockpit is visible.
+are unchanged: clients still request Email refreshes only while Email is visible,
+and Cockpit holds its own stream only while Cockpit is visible.
 
 [cockpit.md](cockpit.md) owns the mode.
 

@@ -52,6 +52,7 @@ class ManifestWidgetBuilder:
         files: Mapping[str, str],
         *,
         screen: BuildScreen,
+        preview: Mapping[str, str] | None = None,
     ) -> WidgetBuild:
         del principal
         found: list[BuildDiagnostic] = []

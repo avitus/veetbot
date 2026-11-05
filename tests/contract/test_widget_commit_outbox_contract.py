@@ -29,13 +29,14 @@ def entry(
     revision_id: UUID | None = None,
     due_in_minutes: int = 0,
     created_minutes: int = 0,
+    operation: OutboxOperation = OutboxOperation.WRITE,
 ) -> CommitOutboxEntry:
     return CommitOutboxEntry(
         tenant_id=owner.tenant_id,
         principal_id=owner.principal_id,
         revision_id=revision_id or uuid4(),
         slug="weather",
-        operation=OutboxOperation.WRITE,
+        operation=operation,
         next_attempt_at=NOW + timedelta(minutes=due_in_minutes),
         expected_parent_sha=COMMIT_A,
         created_at=NOW + timedelta(minutes=created_minutes),
@@ -93,6 +94,9 @@ async def a_retry_is_rescheduled_and_completion_removes_it(
         last_error="github unavailable",
     )
     assert (retried.attempts, retried.last_error) == (1, "github unavailable")
+    assert await outbox.first_for_widget(owner, "weather") == retried
+    assert await outbox.first_for_widget(foreign(owner), "weather") is None
+    assert await outbox.first_for_widget(owner, "markets") is None
     assert await _due(outbox, owner, 1) == []
     assert await _due(outbox, owner, 2) == [queued.revision_id]
     with pytest.raises(NotFoundError):
@@ -106,6 +110,76 @@ async def a_retry_is_rescheduled_and_completion_removes_it(
     await outbox.complete(owner, queued.revision_id)
     await outbox.complete(owner, queued.revision_id)
     assert await _due(outbox, owner, 10) == []
+
+
+@scenario
+async def the_newest_operation_is_found_through_backoff_for_its_owner_and_widget(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    assert await outbox.newest_for_widget(owner, "weather") is None
+    oldest = await outbox.enqueue(entry(owner, created_minutes=1))
+    newest = await outbox.enqueue(entry(owner, due_in_minutes=5, created_minutes=2))
+    assert await outbox.newest_for_widget(owner, "weather") == newest
+    assert await outbox.newest_for_widget(foreign(owner), "weather") is None
+    assert await outbox.newest_for_widget(owner, "markets") is None
+    await outbox.complete(owner, newest.revision_id)
+    assert await outbox.newest_for_widget(owner, "weather") == oldest
+
+
+@scenario
+async def the_newest_write_is_found_behind_a_removal(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    removal = entry(owner, created_minutes=1, operation=OutboxOperation.REMOVE)
+    await outbox.enqueue(removal)
+    assert await outbox.newest_for_widget(owner, "weather", OutboxOperation.WRITE) is None
+    assert await outbox.newest_for_widget(owner, "weather", OutboxOperation.REMOVE) == removal
+    write = await outbox.enqueue(entry(owner))
+    assert await outbox.newest_for_widget(owner, "weather", OutboxOperation.WRITE) == write
+    assert await outbox.newest_for_widget(owner, "weather") == removal
+
+
+@scenario
+async def only_each_widgets_oldest_entry_is_due_and_the_limit_counts_only_those(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    """A waiting entry due before the one it waits on takes no place in the batch."""
+    retried = await outbox.enqueue(entry(owner, due_in_minutes=5, created_minutes=1))
+    for minutes in (2, 3):
+        await outbox.enqueue(entry(owner, created_minutes=minutes))
+    other = await outbox.enqueue(
+        entry(owner, created_minutes=4, due_in_minutes=1).model_copy(update={"slug": "markets"})
+    )
+    await outbox.enqueue(entry(foreign(owner), created_minutes=-1))
+
+    assert await outbox.due_heads(owner, now=NOW, limit=10) == []
+    assert await outbox.due_heads(owner, now=NOW + timedelta(minutes=1), limit=10) == [other]
+    later = NOW + timedelta(minutes=5)
+    assert await outbox.due_heads(owner, now=later, limit=10) == [other, retried]
+    assert await outbox.due_heads(owner, now=later, limit=1) == [other]
+
+
+@scenario
+async def a_removal_counts_as_queued_through_its_backoff_and_only_for_its_owner_and_widget(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    write = await outbox.enqueue(entry(owner))
+    assert not await outbox.removal_queued(owner, "weather")
+    removal = await outbox.enqueue(entry(owner, operation=OutboxOperation.REMOVE))
+    assert await outbox.removal_queued(owner, "weather")
+    await outbox.reschedule(
+        owner,
+        removal.revision_id,
+        attempts=1,
+        next_attempt_at=NOW + timedelta(hours=1),
+        last_error="github unavailable",
+    )
+    assert await outbox.removal_queued(owner, "weather")
+    assert not await outbox.removal_queued(foreign(owner), "weather")
+    assert not await outbox.removal_queued(owner, "markets")
+    await outbox.complete(owner, removal.revision_id)
+    assert not await outbox.removal_queued(owner, "weather")
+    await outbox.complete(owner, write.revision_id)
 
 
 @scenario
@@ -132,6 +206,22 @@ async def erasure_removes_only_the_owners_outbox(
     assert await _due(outbox, owner, 10) == []
     assert await outbox.import_failures(owner) == []
     assert await _due(outbox, foreign(owner), 10) == [kept.revision_id]
+
+
+@scenario
+async def principal_filter_precedes_limit_without_changing_tenant_wide_reads(
+    outbox: WidgetCommitOutbox, owner: Principal
+) -> None:
+    """A different owner's older entry cannot consume a principal-scoped page."""
+    other = owner.model_copy(update={"principal_id": f"other-{owner.principal_id}"})
+    earlier = await outbox.enqueue(entry(other, due_in_minutes=-60, created_minutes=-60))
+    mine = await outbox.enqueue(entry(owner))
+    assert await outbox.due(owner.tenant_id, principal_id=owner.principal_id, now=NOW, limit=1) == [
+        mine
+    ]
+    assert await outbox.due(owner.tenant_id, now=NOW, limit=1) == [earlier]
+    await outbox.complete(other, earlier.revision_id)
+    await outbox.complete(owner, mine.revision_id)
 
 
 @pytest.mark.parametrize("check", SCENARIOS, ids=lambda check: check.__name__)

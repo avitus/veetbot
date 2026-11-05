@@ -87,7 +87,16 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"   # new
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0296
 ```
+
+This sketch, like the one in [sandbox-isolation.md](sandbox-isolation.md), names the
+members. The stored values are lowercase, such as `email_attachment`, as
+`src/agent_core/domain/artifacts.py` defines them, so a filter compares against the
+lowercase value. A saved email attachment waits for its run to complete before intake,
+because a reply attaches the file by its origin and intake changes that origin. A file from
+a run that fails or is cancelled is refused with `run_not_completed` and keeps its 30-day
+expiry (ADR-0296).
 
 Ingestion writes `expires_at = None`, so the thirty-day sweeper does not collect it and
 the document owns the lifetime. Deletion writes `expires_at = now`, and the sweeper that
@@ -161,7 +170,12 @@ Two scans, and they behave differently on purpose.
 
 The **secret scan blocks.** A credential inside a retrievable corpus is a durable leak
 that no trust envelope mitigates, because the leak is the string itself. Ingestion
-fails, names the chunk, and stores nothing.
+fails and stores nothing. The title passes the platform's shared credential
+rule, `contains_credential`, a superset of the text scan's labeled rule
+(ADR-0299): every search result and the catalog render it, so it is as
+model-visible as the text. Both renderers apply the same rule again through
+`display_title`, so a title stored before the rule renders `untitled` in the
+catalog and in a passage's `doc` attribute alike.
 
 The **injection scan does not block.** It records `contains_instruction_like_text` on
 the chunk and surfaces it in the trace and in the rendered envelope. Two reasons. First,
@@ -178,7 +192,14 @@ Specified below. Deterministic under a `chunker_version`.
 
 ### 6. Index
 
-Postgres full-text search over the chunk text plus its heading path.
+Postgres full-text search over the chunk text plus its heading path. A PDF's
+bookmarks are written into its text as Markdown headings on the pages they
+open, so a manual's sections become its chunks' heading paths
+([ADR-0285](../adr/0285-knowledge-search-ranks-by-coverage.md)). When the
+semantic arm is on, each chunk is also embedded, heading path over text, before
+the transaction opens, and its vector is written beside it
+([ADR-0289](../adr/0289-knowledge-semantic-arm.md)); an embedding failure
+fails the ingest like any other step.
 
 ### 7. Commit
 
@@ -188,6 +209,15 @@ eleven sections is worse than a failed ingest, because nothing about the result
 announces that it is partial.
 
 ### Owner-sent attachments (ADR-0120)
+
+[ADR-0284](../adr/0284-chat-uploads-back-off-and-report-failed-ingestion.md):
+a failed automatic ingestion backs off one minute and then fifteen from the
+recorded failure before its next attempt (the sweep lists only chat uploads
+whose backoff has elapsed, so a waiting upload never holds a due one back),
+logs `upload_knowledge_ingest_failed` with the error class, is told to the
+model through the attachment marker's `failed` and `refused` knowledge
+states, and, once failed or refused, can be queued again with
+`agent knowledge retry`.
 
 A text, Markdown, or PDF file the owner attaches to a chat message is ingested
 automatically, and only that. Sending the message marks the attachment pending
@@ -203,6 +233,11 @@ above still applies, the secret scan included. A refusal records `refused` and a
 reason code on the artifact, a transient failure is retried at most three times,
 and neither reaches the conversation. Deleting the conversation deletes the
 document through the existing cascade on its source artifact.
+
+A readable text, Markdown, or PDF email attachment the owner saves takes the same path
+([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)). Pressing Save or approving
+Chat's request is the human admission, and it needs the same `knowledge.write`. Source
+erasure removes the file and its document; email cache expiry does not.
 
 ## Chunking
 
@@ -246,6 +281,48 @@ are more common against prose documents than against beliefs. The expectation is
 therefore that this arm turns on earlier here than it does for memory. It still has to
 earn it.
 
+The arm is built ([ADR-0289](../adr/0289-knowledge-semantic-arm.md)) and off by
+default in a fresh deployment. Ingestion embeds each chunk under a named text version,
+`knowledge-text@2`: one or more windows, each the heading path over a slice of the
+chunk text, packed under a token budget: the local encoder's capacity by its own
+tokenizer count, or, for the OpenAI route, a 128-token budget by the chunker's estimate
+applied only to chunks of 256 estimated tokens or more, since a whole 600-token chunk
+averages its one answering sentence away while cutting a short topical section only
+sharpens its distractors (ADR-0292 measured ranks 78 to 136 whole against 1 to 7
+windowed on the owner's manual). The vectors come from the provider the memory semantic index admitted and
+go to `knowledge_chunk_vectors`, one row per chunk, embedding space and window,
+cascading with the chunk; the in-memory store keeps the same rows, and a chunk's
+semantic score is its best window. A maintenance sweep embeds the chunks of the
+owner's current documents that lack a vector in the active space and, once that space
+is full, prunes vectors of any other space (ADR-0292), so an earlier document or encoder
+gains vectors without a new version and the old ones do not pile up. The provider is `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER`: `index` borrows the memory
+semantic index's admitted provider and reads its admission before every call; `openai`
+is the arm's own `text-embedding-3-small` on the `openai` credential, the model gate 13
+measured lift with, needing no index. A remote provider
+receives only public and internal text, the memory index's egress rule, so a restricted
+document stays lexical, and it embeds a question only from a run pinned to that same
+provider, the one that read the context the question was written from; a run on another
+provider, or a search outside a run, is lexical. Search
+embeds the question before the unit of work opens; a question the provider cannot embed
+is answered by the lexical arm alone, and the trace's policy version names the space and
+channel that answered. A semantic hit below a similarity floor is no candidate, as a
+chunk holding no query term is none for the lexical arm. Fusion is the domain's shared
+`reciprocal_rank_fusion`, the rule belief recall's `_rrf_fuse` calls. Two channels
+exist, memory's `semantic_channel` by name: `hybrid` fuses the arms by reciprocal rank
+and blends the result with the better arm score; `dense` orders candidates by the
+semantic arm, with the lexical arm reaching only the chunks the space has not seen, so
+a document ingested before the arm was on stays reachable. Gate 13 measured both
+against the ADR-0285 lexical arm and found that hybrid fusion lifts nothing: the lexical
+arm counts function words as coverage, so a document's other sections rank first
+lexically and near the top semantically, and reciprocal rank fusion rewards exactly that
+consensus. The dense channel placed every corpus member within the top two, so
+`AGENT_KNOWLEDGE_SEMANTIC_CHANNEL` defaults to `dense`. Re-recorded in the memory
+index's local space (ADR-0188's MiniLM tuple), the gate found no lift at any window
+budget: that encoder scores by shared words, so the arm runs in production on its own
+OpenAI provider under the owner's standing decision
+([ADR-0290](../adr/0290-standing-semantic-activation.md)), and the local miss stays
+recorded beside the lift.
+
 ## Scope and visibility
 
 This is the real divergence from memory, and it is the one a reader is most likely to
@@ -285,10 +362,21 @@ is every place it differs, because the differences are the design.
    recall delta, and no correction lines here — three mechanisms the memory spec needs
    that this one does not.
 2. **There is no structured arm.** A belief has a subject and a type to look up
-   directly. A passage has neither. Lexical is always on, semantic arrives on evidence,
-   and graph expansion is not applicable. The **query former is shared** with memory —
+   directly. A passage has neither. Lexical is always on, semantic is built and arrives
+   on evidence ([ADR-0289](../adr/0289-knowledge-semantic-arm.md), the Indexing section
+   above), and graph expansion is not applicable. The lexical arm ranks by **coverage**, the
+   number of distinct query terms a passage holds, before term density, and each term
+   matches any spelling that folds to its stem, the folding relevance recall uses
+   ([ADR-0285](../adr/0285-knowledge-search-ranks-by-coverage.md)); both stores score
+   a passage by the same formula, three quarters coverage with the document's authority
+   and scope affinity making up the rest. The **query former is shared** with memory —
    the same objective, the same active entities, the same aliasing — because the task
-   is the same task. The arms are not shared.
+   is the same task. The arms are not shared. Before either arm runs, the name of any
+   document the query may read, its title or file name as a contiguous phrase, drops
+   out of the question: a model aims a search by naming the document, and the name
+   matches the cover page ahead of the passage
+   ([ADR-0293](../adr/0293-knowledge-search-asks-the-corpus.md)); the trace keeps the
+   question as asked.
 3. **Knowledge has its own budget class**, and this is the most consequential decision
    in the document. A passage is up to 1,000 tokens against a belief's twenty-five. If
    knowledge drew from in-turn recall's 2,000-token allowance, a single retrieved
@@ -304,7 +392,10 @@ is every place it differs, because the differences are the design.
 5. **The tool is the path.** `knowledge.search` is how a run reaches the corpus in the
    first build step. Automatic pre-turn retrieval — the analogue of in-turn recall —
    is a later step, gated by evals, because retrieving into every turn against a corpus
-   that may be irrelevant to the whole session is the expensive default.
+   that may be irrelevant to the whole session is the expensive default. The context
+   tells the model what the path reaches: the knowledge catalog row names the documents
+   on file, so taking the path never depends on a belief surviving recall
+   ([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)).
 6. **Passages are quoted, never paraphrased**, and they are always cited. The rendered
    block carries the document title, the heading path, the chunk id, and the document's
    date.
@@ -313,7 +404,11 @@ is every place it differs, because the differences are the design.
    sources that disagree are a library, and resolving that at read time would be the
    retriever deciding which author is right. They are replaced by a **per-document cap
    of two passages**, which does the useful half of diversification — stopping one
-   verbose document from filling the budget — without adjudicating anything.
+   verbose document from filling the budget — without adjudicating anything. The cap
+   reserves room rather than capping the result: every document's first two passages
+   come before any document's third, and the rest of the budget fills by rank, so a
+   corpus of one document is not starved
+   ([ADR-0293](../adr/0293-knowledge-search-asks-the-corpus.md)).
 8. **Feedback is one-directional.** Citations are recorded for ranking evaluation and
    for the trace. They do not raise a document's authority, for the reason belief usage
    does not raise confidence: evidence must come from the world, not from the retriever
@@ -462,6 +557,35 @@ class Chunker(Protocol):
         self, text: str, title: str
     ) -> list[KnowledgeChunk]: ...
 
+class KnowledgeChunkEmbedding(BaseModel):     # ADR-0289; one per chunk and space
+    chunk_id: str
+    space: EmbeddingSpace
+    text_version: str                  # "knowledge-text@1"
+    vector: tuple[float, ...]
+
+class KnowledgeSemanticQuery(BaseModel):      # the question, embedded
+    space: EmbeddingSpace
+    vector: tuple[float, ...]
+    channel: str                       # hybrid | dense
+
+class KnowledgeCatalogQuery(BaseModel):       # the documents on file, ADR-0299
+    tenant_id: str
+    principal_id: str
+    current_scope: str | None
+    as_of: datetime
+    sensitivity_ceiling: Sensitivity
+    max_documents: int
+
+class KnowledgeCatalogLine(BaseModel):
+    title: str
+    doc_date: date | None
+    ingested_at: datetime
+    passages: int
+
+class KnowledgeCatalog(BaseModel):
+    lines: tuple[KnowledgeCatalogLine, ...]
+    omitted: int
+
 class KnowledgeStore(Protocol):
     async def ingest(
         self,
@@ -471,8 +595,10 @@ class KnowledgeStore(Protocol):
         principal: Principal,
     ) -> KnowledgeDocument: ...
     async def search(
-        self, query: KnowledgeQuery
+        self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
     ) -> list[RetrievedPassage]: ...
+    async def visible_titles(self, query: KnowledgeQuery) -> list[str]: ...
+    async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog: ...
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None: ...
     async def delete(
         self, document_id: UUID, principal: Principal
@@ -484,7 +610,11 @@ class KnowledgeStore(Protocol):
 One tool, returning `TrustLevel.KNOWLEDGE` data, plus the ingestion tool:
 
 - **`knowledge.search`** — text query, optional `as_of`, returns ranked passages with
-  their chunk ids and heading paths. `required_scopes` is empty, mirroring `skill.write`
+  their chunk ids and heading paths; the name of a visible document drops out of the
+  text first (ADR-0293). An omitted `scope` is the session's project scope, read
+  where `memory.search` reads it (ADR-0299), so a search that names none reaches
+  every document the catalog listed; a `scope` the model passes still wins. The
+  tool's spec is unchanged. `required_scopes` is empty, mirroring `skill.write`
   shipping without a `skill.read`: nothing in 0.1 could check a read scope, and an
   uncheckable scope is worse than a missing one.
 - **`knowledge.ingest`** — takes an `ArtifactRef`, a title, and a visibility. Requires
@@ -494,17 +624,99 @@ One tool, returning `TrustLevel.KNOWLEDGE` data, plus the ingestion tool:
 fourteen to fifteen. Both tools live in a new `knowledge` tool domain, registered at
 build time alongside the other builtin domains.
 
+## The document catalog in context
+
+The tool is the path to the corpus, and a model that does not know the corpus
+exists never takes it. The first fresh chat after ADR-0293 never called
+`knowledge.search`: nothing in its context said a manual was on file, and the
+only cue, a provisional belief that the owner had provided one, fell below
+in-turn recall's twenty-item cut behind the question's own echoes. The context
+therefore names the documents on file, as it names the owner's numeric series
+([owner-records.md](owner-records.md#the-records-catalog-in-context)), and the
+catalog is one platform-rendered body item
+([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)).
+
+**Content.** One line per current document the run may read, ordered by title
+then document id, each starting with the title:
+
+```text
+BMW Owner Manual.pdf: 401 passages, added 2026-11-02
+Deployment Guide: 12 passages, dated 2026-05-02, added 2026-07-28
+Garden note: 1 passage, added 2026-10-01
+```
+
+Never a passage. A title renders on one line whatever it holds: its line
+breaks and runs of whitespace collapse to one space, and a blank one, or one
+that resembles a credential under `contains_credential`, renders `untitled`,
+so no title can forge a second entry or show a secret. `dated` is the document's own
+date when it has one; `added` is the UTC day of ingestion. A single passage
+renders `1 passage`. A superseded
+document appears once, as its current version. When more than twelve documents
+exist the twelve earliest by title render and a last line says
+`N more documents; knowledge.search still reaches them`. A run that may read
+no document renders no bytes at all, so a session without documents is
+byte-identical to one built before the decision.
+
+**Which documents.** `KnowledgeStore.catalog(KnowledgeCatalogQuery)` on both
+stores applies the search's own predicate — tenant, validity at the query's
+instant, visibility against the session's project scope, the people-erasure
+fence and the sensitivity ceiling — and counts each document's chunks, so the
+catalog names exactly what a search could return. The query carries the four
+reader fields the passage query carries (`KnowledgeReader`), and the two
+stores share the rule through them.
+
+**Region, trust and envelope.** `ContextClass.KNOWLEDGE_CATALOG` maps to
+`ContextRegion.BODY`; the item enters the fixed assembly order of
+[context-engine.md](context-engine.md) as row 13b, after the records catalog
+and before the runtime metadata. It is a `UserMessage` labelled
+`trust=INTERNAL_TOOL` with `source="knowledge.catalog"`, rendered inside the
+ordinary envelope as a tool result would be; titles are the owner's own,
+scanned at ingestion and guarded again at rendering, and the row lowers
+neither the request's origin trust nor the executor's turn label.
+
+**Reading the catalog.** The builder reads it inside assembly through an
+injected `KnowledgeCatalogSource` (`context/knowledge_catalog.py`), with the
+run's `Principal`, the session's project scope, the constant `restricted`
+ceiling and the class's document limit; `KnowledgeCatalogReader`
+(`knowledge/catalog.py`) is that source, over the unit of work. The catalog is
+absent, and no store is read, when the session's roster lacks
+`knowledge.search`, when no source is injected, or when the class is absent
+(zero caps); a failed read logs `context_knowledge_catalog_failed` and
+assembles without it.
+
+**Budget and yield.** The cap is the `knowledge_catalog` class in
+`context/plan.yaml`, `max_items: 12` and `max_tokens: 400`, absolute caps with
+no scaling by the window; `ContextBudget` gains `knowledge_catalog_tokens`,
+and composition passes `max_items` to the builder as the document limit. A
+catalog over its token cap drops whole. Under pressure it yields whole and
+second, after the records catalog and before knowledge passages and in-turn
+recall, because a catalog that names some documents misstates the corpus and
+one `knowledge.search` reaches what it named.
+
+**The framing sentence.** Row 2 of the assembly order gains one fixed
+sentence of platform text:
+
+> A knowledge catalog, when present, lists the documents on file by title
+> with their dates and passage counts; it holds titles, never passages. When
+> a question falls within a listed document, search it with knowledge.search
+> before answering from general knowledge.
+
+The sentence is in every session's prefix whether or not a catalog renders,
+so it rotated the builder version to `context-builder@16`, and every earlier
+plan re-plans once through the ordinary logged epoch rotation.
+
 ## Failure modes and defenses
 
 | Failure | Defense |
 | --- | --- |
 | Injected content admitted as a permanent corpus entry | ingestion requires `USER` origin trust; an agent cannot admit what it fetched |
-| A credential lands in a retrievable corpus | the secret scan blocks the ingest and stores nothing |
+| A credential lands in a retrievable corpus | the secret scan blocks the ingest, title and text alike, and stores nothing |
 | A poisoned passage is followed as an instruction | `TrustLevel.KNOWLEDGE`, the rendered envelope, and `instruction_like` on the chunk |
 | Citations stop resolving after a chunker change | chunk ids are deterministic per `chunker_version`; re-chunking makes a new set beside the old |
 | A passage is quoted with words the source does not contain | verbatim after a closed normalization list; `content_sha256` on every chunk |
-| One document fills the retrieval budget | per-document cap of two passages, plus the relevance floor |
+| One document fills the retrieval budget | per-document cap of two passages reserving every other document's first two, plus the relevance floor |
 | Knowledge starves the belief budget | its own budget class, which yields before in-turn recall |
+| The model never searches because nothing says a document exists | the knowledge catalog row names every current document the run may read, in every session whose roster carries `knowledge.search` (ADR-0299) |
 | A truncated passage becomes a misquotation | passages drop whole; never truncated to fit |
 | Cross-tenant or cross-project leak | `tenant_id` and `visibility` are SQL predicates, never rank features |
 | Documents silently mined into beliefs | formation reads episodes only; asserted by a gate |
@@ -514,12 +726,12 @@ build time alongside the other builtin domains.
 
 ## Hard gates
 
-Twelve gates in a new fourteenth area, `knowledge`, all at Milestone 9.
+Thirteen gates in a new fourteenth area, `knowledge`, all at Milestone 9.
 
 1. **Ingestion trust** — an ingest attempted from a turn below `USER` origin trust is
    refused, and nothing is written. **M9.**
-2. **No secrets ingested** — a source containing a credential pattern fails the
-   ingest, and no `KnowledgeDocument`, chunk, index row, ingest event, or
+2. **No secrets ingested** — a source or title containing a credential pattern
+   fails the ingest, and no `KnowledgeDocument`, chunk, index row, ingest event, or
    newly created knowledge-source artifact survives the attempt. The caller's
    input artifact is untouched: `knowledge.ingest` is handed an existing
    `ArtifactRef` and must read it to scan it, so deleting it would destroy a
@@ -549,8 +761,13 @@ Twelve gates in a new fourteenth area, `knowledge`, all at Milestone 9.
    passages were rendered writes zero beliefs whose provenance is a document. **M9.**
 12. **Corpus retrieval** — a labelled corpus of questions and their answering passages,
    with a floor on passage recall@3 and a ceiling on noise ratio. A corpus gate. **M9.**
+13. **Paraphrase lift** — across a corpus of documents whose answering passage shares no
+   content word with its question, the semantic arm places that passage within the top
+   two passages `knowledge.search` returns, where lexical retrieval alone does not; the
+   gate replays vectors a real embedding model produced for the corpus. A corpus gate.
+   **M9.**
 
-That is eight case gates, three property gates, and one corpus gate.
+That is eight case gates, three property gates, and two corpus gates.
 
 ## Tracked metrics
 
@@ -585,7 +802,9 @@ That is eight case gates, three property gates, and one corpus gate.
 5. **Automatic pre-turn retrieval.** Knowledge retrieved without an explicit tool call,
    behind a relevance floor, enabled only if the corpus gate improves with it.
 6. **The semantic arm.** `pgvector` behind the existing RRF fusion, enabled on measured
-   lift.
+   lift. Built under ADR-0289 with gate 13 as the measurement; activated under
+   ADR-0290 on the arm's own OpenAI provider after the local encoder measured no
+   lift; off by default in a fresh deployment.
 7. **Later extractors.** PDF, HTML, and DOCX as `Extractor` adapters, each re-running
    ingestion over already-stored sources rather than asking for re-upload.
 
@@ -630,7 +849,8 @@ That is eight case gates, three property gates, and one corpus gate.
 - **Passages drop whole.** A truncated passage is a misquotation with a citation
   attached.
 - **No supersession collapse, no conflict surfacing, no per-subject cap.** Two sources
-  that disagree are a library. A per-document cap of two does the useful half.
+  that disagree are a library. A per-document cap of two does the useful half, and it
+  reserves rather than caps (ADR-0293).
 - **Ranking is four terms.** No confidence, no reinforcement, no utility — the agent is
   quoting, not believing, and `recency` reads the document's date rather than the
   ingestion date.

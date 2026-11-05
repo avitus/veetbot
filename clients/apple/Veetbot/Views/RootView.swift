@@ -48,7 +48,7 @@ struct VeetbotSceneRoot: View {
             }
         #endif
         #if os(macOS)
-            .frame(minWidth: 780, minHeight: 560)
+            .frame(minWidth: 812, minHeight: 560)
         #endif
     }
 }
@@ -79,6 +79,7 @@ public struct RootView: View {
     #if !os(macOS)
     @State private var showingSettings = false
     @State private var chatListPresented = false
+    @State private var contentWidth: CGFloat = .infinity
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
     @Environment(\.scenePhase) private var scenePhase
@@ -250,6 +251,7 @@ public struct RootView: View {
                 if coordinator.mode != .chat {
                     Menu {
                         Button("Memory") { showingGlobalMemory = true }
+                        Button("People") { globalPeopleLookup = PeopleLookup(text: "", asOf: nil) }
                         Button("Persona") { showingGlobalPersona = true }
                         Button("Schedules") { showingGlobalSchedules = true }
                         Button("Settings", action: presentSettings)
@@ -327,6 +329,10 @@ public struct RootView: View {
                 // Mounted navigation trees must fit the available window instead
                 // of moving the mode controls outside a smaller Mac window.
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                #if os(iOS)
+                .environment(\.horizontalSizeClass, usesDirectSidebarActivation ? .regular : .compact)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+                #endif
                 #if os(macOS)
                 // Too narrow a window collapses a mode's panel (ADR-0237).
                 .onAppear { inspector.windowWidthChanged(geometry.size.width) }
@@ -348,6 +354,15 @@ public struct RootView: View {
         // its own full-bleed paper, so the paper under them reaches the edge.
         .background(AppTheme.paper.ignoresSafeArea(edges: .bottom))
         .environment(\.activeClientMode, coordinator.mode)
+        #if os(iOS)
+        .environment(\.clientUtilities, ClientUtilities(
+            memory: { showingGlobalMemory = true },
+            people: { globalPeopleLookup = PeopleLookup(text: "", asOf: nil) },
+            schedules: { showingGlobalSchedules = true },
+            persona: { showingGlobalPersona = true },
+            settings: presentSettings
+        ))
+        #endif
         #if os(macOS)
         // One window-level owner prevents the hidden navigation tree from replacing active controls.
         .toolbar {
@@ -461,7 +476,7 @@ public struct RootView: View {
     @ViewBuilder
     private var chatContent: some View {
         #if os(iOS)
-        if horizontalSizeClass == .compact {
+        if !usesDirectSidebarActivation {
             compactChat
         } else {
             splitChat
@@ -488,12 +503,17 @@ public struct RootView: View {
         }
         .toolbarBackground(.hidden, for: .windowToolbar)
         #else
-        // UIKit owns the split view's adaptive visibility. The Mac-only Email
-        // toolbar binding must not replace that ownership on iPad.
-        NavigationSplitView {
+        TabletSidebarSplit(mode: .chat) {
             chatSidebar
         } detail: {
-            ChatView(model: model)
+            NavigationStack {
+                ChatView(model: model)
+                    .toolbar {
+                        ToolbarItem(placement: .primaryAction) {
+                            if coordinator.mode == .chat { ClientUtilitiesMenu(identifier: "chat.more", mode: .chat) }
+                        }
+                    }
+            }
         }
         #endif
     }
@@ -507,8 +527,8 @@ public struct RootView: View {
             chooseMode: { coordinator.mode = $0 }
         )
         .navigationSplitViewColumnWidth(
-            min: A2Metrics.sidebarWidth - VeetSpace.s7, ideal: A2Metrics.sidebarWidth,
-            max: A2Metrics.sidebarWidth + VeetSpace.s7 * 2
+            min: ModeSidebarLayout.bounds.lowerBound, ideal: A2Metrics.sidebarWidth,
+            max: ModeSidebarLayout.bounds.upperBound
         )
     }
 
@@ -607,7 +627,7 @@ public struct RootView: View {
         }
         #else
         switch coordinator.mode {
-        case .cockpit, .chat: true
+        case .cockpit, .chat: !usesDirectSidebarActivation
         case .email: !usesDirectSidebarActivation || !mailboxSidebarVisible
         }
         #endif
@@ -626,7 +646,7 @@ public struct RootView: View {
         #if os(macOS)
         true
         #else
-        horizontalSizeClass == .regular
+        horizontalSizeClass == .regular && contentWidth >= ModeSidebarLayout.minimumSplitWidth
         #endif
     }
 
@@ -919,14 +939,14 @@ private struct SessionSidebar: View {
 
     /// The top of the sidebar: search, and New chat as a teal compose
     /// button beside it.
-    /// On the Mac the mode switch leads the sidebar, above search and New
-    /// chat (MagicPath merry-moon-8243).
+    /// On Mac and regular-width iPad the mode switch leads the sidebar,
+    /// above search and New chat. Compact windows use the root mode bar.
     private var sidebarTop: some View {
         VStack(spacing: VeetSpace.s2) {
-            #if os(macOS)
-            ModeSegment(selected: .chat, choose: chooseMode)
-                .frame(maxWidth: .infinity)
-            #endif
+            if !inDrawer {
+                ModeSegment(selected: .chat, choose: chooseMode)
+                    .frame(maxWidth: .infinity)
+            }
             HStack(spacing: VeetSpace.s2) {
                 SidebarSearchField(text: $query)
                 newConversationButton
@@ -1735,36 +1755,43 @@ struct ConversationAgeSchedule: TimelineSchedule {
     }
 }
 
-/// Chat or Email: a two-way segment in a sunken field, the chosen one lifted
+/// Cockpit, Chat, Email in a sunken field, the chosen one lifted
 /// onto a white pill, as the reference draws it.
 struct ModeSegment: View {
     let selected: ClientMode
     let choose: (ClientMode) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.activeClientMode) private var activeMode
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(ClientMode.allCases) { mode in
-                Button { choose(mode) } label: {
-                    Label(mode.title, systemImage: mode.symbol)
-                        .labelStyle(.titleOnly)
-                        .veetType(.meta, weight: .medium)
-                        .foregroundColor(selected == mode ? AppTheme.ink : AppTheme.inkSoft)
-                        .padding(.horizontal, 18)
-                        .frame(minHeight: 24)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(selected == mode ? AppTheme.surface : Color.clear)
-                                .shadow(color: AppTheme.ink.opacity(selected == mode ? 0.14 : 0), radius: 1, y: 1)
-                        )
-                        .contentShape(Rectangle())
+        // The navigation trees stay mounted, but their stateless switches do
+        // not: iOS can flatten hidden ancestors after keyboard transitions.
+        if selected == activeMode {
+            HStack(spacing: 2) {
+                ForEach(ClientMode.allCases) { mode in
+                    Button { choose(mode) } label: {
+                        Label(mode.title, systemImage: mode.symbol)
+                            .labelStyle(.titleOnly)
+                            .veetType(.meta, weight: .medium)
+                            .foregroundColor(selected == mode ? AppTheme.ink : AppTheme.inkSoft)
+                            .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: true)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, minHeight: A2Metrics.controlHeight)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(selected == mode ? AppTheme.surface : Color.clear)
+                                    .shadow(color: AppTheme.ink.opacity(selected == mode ? 0.14 : 0), radius: 1, y: 1)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("mode.\(mode.rawValue)")
+                    .accessibilityAddTraits(selected == mode ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("mode.\(mode.rawValue)")
-                .accessibilityAddTraits(selected == mode ? .isSelected : [])
             }
+            .padding(2)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(AppTheme.field))
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(AppTheme.field))
     }
 }
 

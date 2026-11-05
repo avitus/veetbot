@@ -154,6 +154,48 @@ async def test_task_admission_query_preserves_unsettled_reservations() -> None:
     await assert_task_admission_query_preserves_unsettled_reservations(InMemoryEmailStore())
 
 
+async def assert_empty_check_query_finds_only_old_settled_free_checks(store: EmailStore) -> None:
+    """Only old, settled, free empty checks are found, in key order and for one owner."""
+    for key, age, empty, settled in (
+        ("found-mail", 400, False, "0"),
+        ("old", 400, True, "0"),
+        ("old-spelled-long", 40, True, "0.00"),
+        ("recent", 1, True, "0"),
+        ("still-running", 400, True, None),
+        ("cost-something", 400, True, "0.01"),
+    ):
+        await store.put(
+            record(key).model_copy(
+                update={
+                    "kind": "task",
+                    "payload": {
+                        "created_at": (NOW - timedelta(days=age)).isoformat(),
+                        "empty_check": empty,
+                        "settled_cost": settled,
+                    },
+                }
+            ),
+            expected_revision=0,
+        )
+    cutoff = NOW - timedelta(days=7)
+    rows = await store.list_empty_checks(principal(), created_before=cutoff)
+    assert [row.key for row in rows] == ["old", "old-spelled-long"]
+    rows = await store.list_empty_checks(principal(), created_before=cutoff, limit=1)
+    assert [row.key for row in rows] == ["old"]
+    assert (
+        await store.list_empty_checks(
+            principal().model_copy(update={"principal_id": "foreign"}), created_before=cutoff
+        )
+        == []
+    )
+
+
+async def test_empty_check_query_finds_only_old_settled_free_checks() -> None:
+    from agent_core.adapters.persistence.email import InMemoryEmailStore
+
+    await assert_empty_check_query_finds_only_old_settled_free_checks(InMemoryEmailStore())
+
+
 async def email_import_window_contract(store: EmailStore) -> None:
     for key, days, account in [
         ("late", 2, "work"),

@@ -25,7 +25,9 @@ from agent_core.domain.approvals import (
     approval_status_for,
 )
 from agent_core.domain.artifacts import (
+    AUTO_INGEST_ORIGINS,
     REPLY_ATTACHMENT_ORIGINS,
+    auto_ingest_due,
     auto_ingest_metadata,
     claimed_upload,
 )
@@ -82,6 +84,7 @@ from agent_core.domain.runs import (
 from agent_core.domain.sessions import (
     PEOPLE_OPERATIONAL_SESSION_PURPOSES,
     REGENERABLE_TITLE_SOURCES,
+    SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_EMAIL_THREAD_ID_METADATA_KEY,
     SESSION_PURPOSE_METADATA_KEY,
@@ -323,6 +326,7 @@ class InMemorySessionRepository:
         cursor: SessionCursor | None = None,
         exclude_operational: bool = False,
     ) -> list[Session]:
+        """List owned sessions, applying operational visibility before pagination."""
         async with self._lock:
             rows = [
                 session.model_copy(deep=True)
@@ -333,6 +337,7 @@ class InMemorySessionRepository:
                     not exclude_operational
                     or (
                         session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is not True
+                        and session.metadata.get(SESSION_COCKPIT_REFRESH_METADATA_KEY) is not True
                         and session.metadata.get(SESSION_PURPOSE_METADATA_KEY)
                         not in PEOPLE_OPERATIONAL_SESSION_PURPOSES
                         and (
@@ -1630,12 +1635,25 @@ class InMemoryArtifactRepository:
         artifacts.sort(key=lambda artifact: (artifact.created_at, artifact.id))
         return [artifact.model_copy(deep=True) for artifact in artifacts]
 
-    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+    async def retain_for_knowledge(
+        self,
+        artifact_id: UUID,
+        principal: Principal,
+        *,
+        now: datetime | None = None,
+        unchanged_from: ArtifactRef | None = None,
+    ) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)
             if artifact is None or (
                 artifact.tenant_id != principal.tenant_id
                 or artifact.principal_id != principal.principal_id
+                or (
+                    now is not None
+                    and artifact.expires_at is not None
+                    and artifact.expires_at <= now
+                )
+                or (unchanged_from is not None and artifact.expires_at != unchanged_from.expires_at)
             ):
                 raise NotFoundError("artifact not found")
             if artifact.origin != "upload" and artifact.run_id in self._people_erased_runs:
@@ -1737,14 +1755,20 @@ class InMemoryArtifactRepository:
             self._rows[artifact_id] = claimed
             return claimed.model_copy(deep=True)
 
-    async def pending_auto_ingest(self, principal: Principal, *, limit: int) -> list[ArtifactRef]:
+    async def pending_auto_ingest(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[ArtifactRef]:
         async with self._lock:
             pending = [
                 artifact
                 for artifact in self._rows.values()
                 if artifact.tenant_id == principal.tenant_id
                 and artifact.principal_id == principal.principal_id
+                and artifact.origin in AUTO_INGEST_ORIGINS
                 and artifact.metadata.get("auto_ingest") == "pending"
+                # A file deleted or erased while pending never reaches knowledge (ADR-0296).
+                and (artifact.expires_at is None or artifact.expires_at > now)
+                and auto_ingest_due(artifact.metadata, now)
             ]
         pending.sort(key=lambda artifact: (artifact.created_at, artifact.id))
         return [artifact.model_copy(deep=True) for artifact in pending[:limit]]
@@ -1757,6 +1781,7 @@ class InMemoryArtifactRepository:
         state: str,
         reason: str | None,
         attempts: int,
+        not_before: str | None = None,
     ) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)
@@ -1768,7 +1793,11 @@ class InMemoryArtifactRepository:
             recorded = artifact.model_copy(
                 update={
                     "metadata": auto_ingest_metadata(
-                        artifact.metadata, state=state, reason=reason, attempts=attempts
+                        artifact.metadata,
+                        state=state,
+                        reason=reason,
+                        attempts=attempts,
+                        not_before=not_before,
                     )
                 },
                 deep=True,

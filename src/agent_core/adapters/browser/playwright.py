@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
 import secrets
 import tempfile
 from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, NoReturn, Protocol, cast
 from urllib.parse import urlsplit
@@ -75,6 +77,11 @@ from agent_core.domain.browser_classification import (
     path_is_within_prefix,
 )
 from agent_core.domain.browser_diagnostics import browser_phase, browser_phase_call
+from agent_core.domain.browser_download import (
+    MAX_BROWSER_DOWNLOAD_BYTES,
+    BrowserDownload,
+    BrowserDownloadRefusal,
+)
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile
 from agent_core.domain.execution import EgressDestination, EgressMode, EgressPolicy
@@ -134,11 +141,23 @@ _CONTROL_SELECTOR = """(() => {
 })()"""
 # A page settles for at most this long after navigation or an action (ADR-0130).
 SETTLE_SECONDS = 2.0
+# ADR-0294: an approved click on a control that names a file waits this long for
+# the page to start it, and any started file this long to finish.
+DOWNLOAD_START_SECONDS = 10.0
+DOWNLOAD_READ_SECONDS = 8.0
+# The file wait ends this long after the act's window opened, however slow the click
+# was. browser.act's 30 seconds then still hold the observation, a postcondition of
+# up to 5 seconds, and storing the file.
+DOWNLOAD_ACT_BUDGET_SECONDS = 20.0
+_DOWNLOAD_POLL_SECONDS = 0.1
+_DOWNLOAD_CONTROL = re.compile(r"download|export|csv", re.IGNORECASE)
+_FILE_ACTION_KINDS = frozenset({BrowserActionKind.CLICK, BrowserActionKind.PRESS})
 # The DOM counts as quiet after this long without a mutation.
 DOM_QUIET_MILLISECONDS = 300
 # How long Playwright waits for an element to become actionable, such as for
 # its click point to reach the element itself, before an act fails.
 ACTION_TIMEOUT_MILLISECONDS = 30_000
+_CHALLENGE_POLL_SECONDS = 0.25
 # Leave the outer tool budget for validation, settling, and observation.
 CLICK_TIMEOUT_MILLISECONDS = 5_000
 # Headed Chromium lacks headless shell's new-window switch. A response policy
@@ -285,6 +304,52 @@ class VirtualDisplay(Protocol):
 VirtualDisplayFactory = Callable[[], VirtualDisplay | None]
 
 
+@dataclass(slots=True)
+class _DownloadWindow:
+    """One act's chance to save one file; it closes when the act returns (ADR-0294).
+
+    Only a click or key press no grant authorized is ``approved``, and only a file
+    from the login's origins takes the slot. Any other file is cancelled, and its
+    refusal is reported if nothing was saved.
+    """
+
+    approved: bool
+    deadline: float = math.inf
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+    download: Download | None = None
+    reading: asyncio.Task[BrowserDownload] | None = None
+    refusal: BrowserDownloadRefusal | None = None
+
+
+def _directory_bytes(path: str) -> int:
+    """What the browser has written so far, including a file still downloading."""
+
+    with suppress(OSError):
+        return sum(entry.stat().st_size for entry in os.scandir(path))
+    return 0
+
+
+async def _discard_download(download: Download) -> None:
+    """Stop a transfer, then remove its file; delete alone would wait for it to finish."""
+
+    with suppress(PlaywrightError):
+        await download.cancel()
+    with suppress(PlaywrightError):
+        await download.delete()
+
+
+async def _close_download_window(window: _DownloadWindow) -> None:
+    """Stop a file an act that ended early left unread; a finished read is untouched."""
+
+    if window.reading is None or window.download is None:
+        return
+    window.reading.cancel()
+    await asyncio.gather(window.reading, return_exceptions=True)
+    # A read cancelled before its first step never reached its own cleanup.
+    if window.reading.cancelled():
+        await _discard_download(window.download)
+
+
 def _origin_allowed(url: str, allowed_origins: tuple[str, ...]) -> bool:
     try:
         return browser_origin(url) in allowed_origins
@@ -372,6 +437,61 @@ class _ReadinessRequests:
         return True
 
 
+_FRAME_SCAN_SECONDS = 1.0
+# `autocomplete` is a case-insensitive token list, such as "section-login one-time-code".
+_CREDENTIAL_FIELDS = "input[type=password],input[autocomplete~='one-time-code' i]"
+
+
+async def _frame_is_visible(frame: Frame) -> bool:
+    """Report a frame visible only if every frame around it is; each answers for its own page."""
+    while (parent := frame.parent_frame) is not None:
+        owner = await frame.frame_element()
+        visible = await owner.is_visible()
+        await owner.dispose()
+        if not visible:
+            return False
+        frame = parent
+    return True
+
+
+async def _frame_shows_credential_field(frame: Frame) -> bool:
+    """Report a visible credential field in one visible frame; a detached frame shows none."""
+    with suppress(PlaywrightError):
+        if await _frame_is_visible(frame):
+            fields = frame.locator(_CREDENTIAL_FIELDS)
+            for index in range(await fields.count()):
+                if await fields.nth(index).is_visible():
+                    return True
+    return False
+
+
+async def _credential_field_in_frame(page: Page) -> bool:
+    """Report a visible password or one-time-code field in a visible frame of ``page``.
+
+    Some websites keep their whole sign-in form in a frame (ADR-0288). Only
+    credential fields count there: a CAPTCHA class or challenge wording inside
+    an embedded widget says nothing about this page. A frame that goes away or
+    stalls during the scan shows no field, so it cannot fail a typed key or a
+    verification load. Frames are scanned together, so a stalled one cannot
+    hide a field in another.
+    """
+    scans = [
+        asyncio.create_task(_frame_shows_credential_field(frame))
+        for frame in page.frames
+        if frame != page.main_frame
+    ]
+    try:
+        with suppress(TimeoutError):
+            for finished in asyncio.as_completed(scans, timeout=_FRAME_SCAN_SECONDS):
+                if await finished:
+                    return True
+    finally:
+        for scan in scans:
+            scan.cancel()
+        await asyncio.gather(*scans, return_exceptions=True)
+    return False
+
+
 class PythonPlaywrightRuntime:
     """Own one Chromium process, headed for every hosted use, and one non-persistent context."""
 
@@ -403,6 +523,8 @@ class PythonPlaywrightRuntime:
         self._known_draft: tuple[JSHandle, str, int] | None = None
         self._readiness_requests = _ReadinessRequests()
         self._disallowed_navigation = False
+        self._evidence_loaded_at: float | None = None
+        self._document_loaded_at: float | None = None
         self._dismissed_beforeunload = False
         self._document_session: CDPSession | None = None
         self._main_frame_id: str | None = None
@@ -413,6 +535,10 @@ class PythonPlaywrightRuntime:
         # refused the page's own document (ADR-0129).
         self._document_fence: tuple[str, str] | None = None
         self._fence_refused_page = False
+        self._download_window: _DownloadWindow | None = None
+        self._downloads_path = ""
+        # A reference names its revision, so a stale entry can never match.
+        self._file_controls: frozenset[str] = frozenset()
 
     @browser_phase_call("launch")
     async def start(
@@ -430,6 +556,8 @@ class PythonPlaywrightRuntime:
         self._headed_popup_policy = headed
         self._temporary_home = tempfile.TemporaryDirectory(prefix="veetbot-browser-")
         temporary_home = self._temporary_home.name
+        self._downloads_path = os.path.join(temporary_home, "downloads")
+        os.mkdir(self._downloads_path)
         environment: dict[str, str | float | bool] = {
             "HOME": temporary_home,
             "PATH": os.defpath,
@@ -449,6 +577,7 @@ class PythonPlaywrightRuntime:
         self._browser = await self._playwright.chromium.launch(
             headless=not headed,
             proxy={"server": proxy_url},
+            downloads_path=self._downloads_path,
             args=[
                 "--proxy-bypass-list=<-loopback>",
                 "--disable-quic",
@@ -481,7 +610,9 @@ class PythonPlaywrightRuntime:
         """The arguments of the one browser context; a test subclass may extend them."""
 
         return {
-            "accept_downloads": False,
+            # A file begins only to be cancelled unless an act's window admits it
+            # (ADR-0294); refusing here would refuse the approved one too.
+            "accept_downloads": True,
             "service_workers": "block",
             "storage_state": (None if storage_state is None else cast(StorageState, storage_state)),
         }
@@ -537,7 +668,7 @@ class PythonPlaywrightRuntime:
     def _attach_page(self, page: Page) -> None:
         """Install request tracking and page guards before navigation begins."""
         page.on("dialog", self._dismiss_dialog)
-        page.on("download", self._cancel_download)
+        page.on("download", self._handle_download)
         # Record refused navigation for failure classification; the CDP document
         # guard enforces redirect hops before dispatch.
         page.on("request", self._track_navigation)
@@ -546,6 +677,7 @@ class PythonPlaywrightRuntime:
         page.on("requestfinished", self._readiness_requests.ended)
         page.on("requestfailed", self._readiness_requests.ended)
         page.on("framenavigated", self._count_main_frame_navigation)
+        page.on("domcontentloaded", self._restart_document_clock)
         self._page = page
 
     def _count_main_frame_navigation(self, frame: Frame) -> None:
@@ -554,14 +686,19 @@ class PythonPlaywrightRuntime:
             self._main_frame_navigations += 1
             self._readiness_requests.reset()
 
+    def _restart_document_clock(self, _page: object = None) -> None:
+        """Start a new document's age afresh; a hash or history move is not a new document."""
+        self._document_loaded_at = asyncio.get_running_loop().time()
+
     def _track_navigation(self, request: Request) -> None:
         """Remember refused navigation origins for stable browser failure classification."""
         if not request.is_navigation_request():
             return
         frame = _request_frame(request)
-        if (frame is None or frame.parent_frame is None) and not _origin_allowed(
-            request.url, self._allowed_origins
-        ):
+        if frame is not None and frame.parent_frame is not None:
+            return
+        self._restart_document_clock()
+        if not _origin_allowed(request.url, self._allowed_origins):
             self._disallowed_navigation = True
 
     async def _route(self, route: Route) -> None:
@@ -642,8 +779,77 @@ class PythonPlaywrightRuntime:
             self._dismissed_beforeunload = True
         await dialog.dismiss()
 
-    async def _cancel_download(self, download: Download) -> None:
-        await download.cancel()
+    async def _handle_download(self, download: Download) -> None:
+        """Admit one file to an approved act's window and cancel every other (ADR-0294)."""
+        window = self._download_window
+        if window is not None and not window.approved:
+            window.refusal = "needs_approval"
+            window.started.set()
+        elif window is not None and window.reading is None:
+            if not _origin_allowed(download.url.removeprefix("blob:"), self._allowed_origins):
+                window.refusal = "origin_not_allowed"
+                await _discard_download(download)
+                return
+            if asyncio.get_running_loop().time() >= window.deadline:
+                # A key press can outlast the time the act keeps for a file.
+                window.refusal = "timed_out"
+                window.started.set()
+                await _discard_download(download)
+                return
+            window.download = download
+            window.reading = asyncio.create_task(self._read_download(download, window.deadline))
+            window.started.set()
+            return
+        await _discard_download(download)
+
+    async def _read_download(
+        self, download: Download, act_deadline: float = math.inf
+    ) -> BrowserDownload:
+        """Wait for the file within its time and size limits, then remove it from disk."""
+        loop = asyncio.get_running_loop()
+        deadline = min(loop.time() + DOWNLOAD_READ_SECONDS, act_deadline)
+        finished = asyncio.ensure_future(download.path())
+        try:
+            while not finished.done():
+                refusal: Literal["too_large", "timed_out"] | None = None
+                if _directory_bytes(self._downloads_path) > MAX_BROWSER_DOWNLOAD_BYTES:
+                    refusal = "too_large"
+                elif loop.time() >= deadline:
+                    refusal = "timed_out"
+                if refusal is not None:
+                    return BrowserDownload.refused(refusal)
+                await asyncio.wait({finished}, timeout=_DOWNLOAD_POLL_SECONDS)
+            path = finished.result()
+            if os.path.getsize(path) > MAX_BROWSER_DOWNLOAD_BYTES:
+                return BrowserDownload.refused("too_large")
+            data = await asyncio.to_thread(path.read_bytes)
+            return BrowserDownload.from_bytes(download.suggested_filename, data)
+        except (PlaywrightError, OSError):
+            return BrowserDownload.refused("failed")
+        finally:
+            finished.cancel()
+            await asyncio.gather(finished, return_exceptions=True)
+            await _discard_download(download)
+
+    def _control_names_a_file(self, ref: str) -> bool:
+        """Whether a click may take a moment to start a file; it never authorizes one.
+
+        A grant-authorized click waits too, so a late file is reported, not lost in silence.
+        """
+        facts = None if self._facts is None else self._facts.elements.get(ref)
+        return ref in self._file_controls or (facts is not None and facts.download)
+
+    async def _finish_download(
+        self, window: _DownloadWindow, *, names_a_file: bool
+    ) -> BrowserDownload | None:
+        """What this act's window saved or refused; None when the page offered no file."""
+        if names_a_file and window.reading is None:
+            with suppress(TimeoutError):
+                left = window.deadline - asyncio.get_running_loop().time()
+                await asyncio.wait_for(window.started.wait(), min(DOWNLOAD_START_SECONDS, left))
+        if window.reading is not None:
+            return await window.reading
+        return None if window.refusal is None else BrowserDownload.refused(window.refusal)
 
     async def _close_popup(self, page: Page) -> None:
         """Destroy a popup with interception intact, or end its browser session."""
@@ -681,6 +887,19 @@ class PythonPlaywrightRuntime:
     @browser_phase_call("navigation")
     async def navigate(self, url: str) -> BrowserObservation:
         """Navigate within the bound origin policy and preserve stable failure codes."""
+        page, readiness = await self._load(url)
+        observation = await self._observation(page)
+        return observation.model_copy(update={"readiness": readiness})
+
+    async def open_for_sign_in(self, url: str) -> None:
+        """Open a page for the owner, under ``navigate``'s origin policy and failure codes.
+
+        Reading a page for an agent fails while the page is still moving, which
+        says nothing about whether the owner can sign in on it.
+        """
+        await self._load(url)
+
+    async def _load(self, url: str) -> tuple[Page, Literal["dom_quiet", "bound_expired"]]:
         page = self._current_page()
         self._disallowed_navigation = False
         self._dismissed_beforeunload = False
@@ -711,8 +930,7 @@ class PythonPlaywrightRuntime:
         readiness = await self._settle(page, after_document=True)
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
-        observation = await self._observation(page)
-        return observation.model_copy(update={"readiness": readiness})
+        return page, readiness
 
     async def _settle(
         self,
@@ -784,6 +1002,7 @@ class PythonPlaywrightRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """Load one page and report where it landed and whether it asks to sign in.
 
@@ -815,6 +1034,8 @@ class PythonPlaywrightRuntime:
                     "tool.browser.provider_unavailable",
                     retryable=True,
                 ) from exc
+            self._evidence_loaded_at = asyncio.get_running_loop().time()
+            self._document_loaded_at = self._evidence_loaded_at
             on_stage(BrowserVerificationStage.IDLE)
             with suppress(PlaywrightError):
                 await page.wait_for_load_state("networkidle", timeout=5_000)
@@ -822,15 +1043,7 @@ class PythonPlaywrightRuntime:
                 on_stage(BrowserVerificationStage.INSPECT)
                 challenge_visible = await self._sign_in_challenge_visible(page)
                 confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
-                current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
-                if (
-                    _origin_allowed(page.url, self._allowed_origins)
-                    and (
-                        current_path == confirmed_path
-                        or current_path.startswith(confirmed_path + "/")
-                    )
-                    and not challenge_visible
-                ):
+                if self._on_confirmed_page(page, confirmed_path) and not challenge_visible:
                     # A challenge or a different path is already negative
                     # evidence. Background work on that page must not hold
                     # the signed-out control open. A possible positive result
@@ -839,16 +1052,84 @@ class PythonPlaywrightRuntime:
                     await wait_for_application()
                     on_stage(BrowserVerificationStage.REINSPECT)
                     challenge_visible = await self._sign_in_challenge_visible(page)
+                    if not challenge_visible and challenge_deadline is not None:
+                        challenge_visible = await self._challenge_by(
+                            page, confirmed_path=confirmed_path, deadline=challenge_deadline
+                        )
             except (PlaywrightError, TimeoutError) as exc:
                 raise BrowserProviderError(
                     "tool.browser.provider_unavailable",
                     retryable=True,
                 ) from exc
-            return BrowserPageEvidence(
-                on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
-                path=(urlsplit(page.url).path or "/")[:4096],
-                challenge_visible=challenge_visible,
+            return self._page_evidence_now(page, challenge_visible, self._evidence_loaded_at)
+
+    def _page_evidence_now(
+        self, page: Page, challenge_visible: bool, loaded_at: float | None
+    ) -> BrowserPageEvidence:
+        now = asyncio.get_running_loop().time()
+        return BrowserPageEvidence(
+            on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
+            path=(urlsplit(page.url).path or "/")[:4096],
+            challenge_visible=challenge_visible,
+            observed_seconds=0.0 if loaded_at is None else max(0.0, now - loaded_at),
+        )
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        """Report what the loaded page shows once it is ``observed_seconds`` old (ADR-0297).
+
+        Sooner if a form appears or the page leaves ``url``, and at ``deadline`` at the
+        latest, when the evidence says how long the page was really watched. A new
+        document starts its own age, so the time spent on the one before never counts.
+        """
+        page = self._current_page()
+        confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
+        challenge_visible = False
+        with suppress(PlaywrightError):
+            challenge_visible = await self._sign_in_challenge_visible(page)
+        while not challenge_visible:
+            loaded_at = self._document_loaded_at
+            old_enough = math.inf if loaded_at is None else loaded_at + observed_seconds
+            challenge_visible = await self._challenge_by(
+                page, confirmed_path=confirmed_path, deadline=min(old_enough, deadline)
             )
+            if self._document_loaded_at == loaded_at:
+                break
+        if not challenge_visible and self._on_confirmed_page(page, confirmed_path):
+            # Passing needs a reading that worked, not only time gone by: a failure here
+            # ends the check, because an unreadable page has not shown there is no form.
+            # A page that left while being read has already answered.
+            try:
+                challenge_visible = await self._sign_in_challenge_visible(page)
+            except PlaywrightError:
+                if self._on_confirmed_page(page, confirmed_path):
+                    raise
+        return self._page_evidence_now(page, challenge_visible, self._document_loaded_at)
+
+    def _on_confirmed_page(self, page: Page, confirmed_path: str) -> bool:
+        """Whether the page is still on an allowed origin at or below the confirmed path."""
+        current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
+        return _origin_allowed(page.url, self._allowed_origins) and (
+            current_path == confirmed_path or current_path.startswith(confirmed_path + "/")
+        )
+
+    async def _challenge_by(self, page: Page, *, confirmed_path: str, deadline: float) -> bool:
+        """Whether a signed-out page asks to sign in by ``deadline`` (ADR-0297).
+
+        Chase draws its framed form after its requests go quiet. Only the signed-out
+        control waits, so this adds no time to a page that does ask, and a page that
+        leaves the confirmed path has already told the session apart.
+        """
+        loop = asyncio.get_running_loop()
+        # A hash route keeps the path, and Chase moves its hash while it draws.
+        while loop.time() < deadline and self._on_confirmed_page(page, confirmed_path):
+            await asyncio.sleep(_CHALLENGE_POLL_SECONDS)
+            # A page redrawing between polls is not an answer, so ask again.
+            with suppress(PlaywrightError):
+                if await self._sign_in_challenge_visible(page):
+                    return True
+        return False
 
     def _readable_page(self) -> Page:
         """Require navigation for a blank page while preserving origin checks."""
@@ -859,6 +1140,11 @@ class PythonPlaywrightRuntime:
         if not _origin_allowed(page.url, self._allowed_origins):
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         return page
+
+    async def page_url(self) -> str:
+        """Where the current allowed page is, under ``observe``'s checks but without reading it."""
+
+        return self._readable_page().url
 
     async def observe(self) -> BrowserObservation:
         """Read the current allowed page, or report that it needs navigation."""
@@ -1096,6 +1382,11 @@ class PythonPlaywrightRuntime:
         self._text_cursor = observation.focus.text_cursor if observation.focus is not None else None
         self._elements = handles
         self._facts = observation_facts
+        self._file_controls = frozenset(
+            element.ref
+            for element in observation.elements
+            if _DOWNLOAD_CONTROL.search(element.name)
+        )
         self._element_offsets = {
             element.ref: candidate_index
             for (candidate_index, _), observed in zip(selected, captured, strict=True)
@@ -1220,6 +1511,14 @@ class PythonPlaywrightRuntime:
                     raise
 
         documents_before = self._main_frame_navigations
+        starts_files = action.kind in _FILE_ACTION_KINDS
+        names_a_file = starts_files and self._control_names_a_file(action.ref)
+        window = _DownloadWindow(
+            approved=constraint is None and starts_files,
+            deadline=asyncio.get_running_loop().time() + DOWNLOAD_ACT_BUDGET_SECONDS,
+        )
+        download: BrowserDownload | None = None
+        self._download_window = window
         # A refusal belongs to the act whose fence made it: every act starts
         # without one, and one that ends early, by an error or cancellation,
         # takes its refusal with it.
@@ -1250,20 +1549,23 @@ class PythonPlaywrightRuntime:
             readiness = await self._settle(
                 page, after_document=self._main_frame_navigations != documents_before
             )
+            download = await self._finish_download(window, names_a_file=names_a_file)
         finally:
+            self._download_window = None
             if draft_binding is not None:
                 with suppress(PlaywrightError):
                     await draft_binding.dispose()
             self._document_fence = None
             refused_page = self._fence_refused_page
             self._fence_refused_page = False
+            await _close_download_window(window)
         if refused_page:
             # The action sent the page toward a document outside the grant,
             # which never loaded; the page now shows the browser's error page.
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
         observation = await self._observation(page)
-        return observation.model_copy(update={"readiness": readiness})
+        return observation.model_copy(update={"readiness": readiness, "download": download})
 
     async def upload(self, action: BrowserAction, image: BrowserImageFile) -> BrowserObservation:
         """Select approved bytes in one main-document file control (ADR-0148)."""
@@ -1553,7 +1855,9 @@ class PythonPlaywrightRuntime:
         return cast(dict[str, object], await self._context.storage_state(indexed_db=True))
 
     async def check_automation_ready(self) -> None:
-        if await self._current_page().evaluate(AUTHENTICATION_SCRIPT):
+        """Refuse to act while the page shows a sign-in challenge, so the owner is asked."""
+        page = self._current_page()
+        if await page.evaluate(AUTHENTICATION_SCRIPT) or await _credential_field_in_frame(page):
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.needs_user", retryable=False)
 
@@ -1561,7 +1865,7 @@ class PythonPlaywrightRuntime:
     async def _sign_in_challenge_visible(page: Page) -> bool:
         """Report a password, one-time-code, CAPTCHA, passkey, MFA, or consent prompt."""
         intervention = page.locator(
-            "input[type=password],input[autocomplete=one-time-code],"
+            f"{_CREDENTIAL_FIELDS},"
             "iframe[src*='captcha' i],iframe[title*='captcha' i],"
             "[class*='captcha' i],[id*='captcha' i]"
         )
@@ -1578,7 +1882,7 @@ class PythonPlaywrightRuntime:
         for index in range(await interactive_text.count()):
             if await interactive_text.nth(index).is_visible():
                 return True
-        return False
+        return await _credential_field_in_frame(page)
 
     async def authentication_status(self) -> BrowserAuthenticationStatus:
         page = self._current_page()
@@ -1666,6 +1970,9 @@ class PythonPlaywrightRuntime:
             self._readiness_requests.reset()
             self._document_fence = None
             self._fence_refused_page = False
+            self._download_window = None
+            self._downloads_path = ""
+            self._file_controls = frozenset()
 
 
 @contextmanager

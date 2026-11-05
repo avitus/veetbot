@@ -50,6 +50,10 @@ class StatefulBrowserRuntime(Protocol):
 
     async def navigate(self, url: str) -> BrowserObservation: ...
 
+    async def open_for_sign_in(self, url: str) -> None: ...
+
+    async def page_url(self) -> str: ...
+
     async def observe(self) -> BrowserObservation: ...
 
     async def act(
@@ -65,9 +69,14 @@ class StatefulBrowserRuntime(Protocol):
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None],
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence: ...
 
     async def storage_state(self) -> dict[str, object]: ...
 
@@ -165,6 +174,21 @@ class HostedPlaywrightSessionRuntime:
                 retryable=True,
             ) from exc
 
+    async def open_for_sign_in(self, url: str) -> None:
+        """Open a page for the owner, preserving stable failure codes."""
+        try:
+            await self._runtime.open_for_sign_in(url)
+        except BrowserProviderError:
+            raise
+        except Exception as exc:
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
+
+    async def page_url(self) -> str:
+        return await self._runtime.page_url()
+
     async def observe(self) -> BrowserObservation:
         observation = await self._runtime.observe()
         await self._check_automation()
@@ -213,10 +237,29 @@ class HostedPlaywrightSessionRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """Load one confirmed page and report what it showed (ADR-0128)."""
         try:
-            return await self._runtime.load_page_evidence(url, on_stage=on_stage)
+            return await self._runtime.load_page_evidence(
+                url, on_stage=on_stage, challenge_deadline=challenge_deadline
+            )
+        except BrowserProviderError:
+            raise
+        except Exception as exc:
+            raise BrowserProviderError(
+                "tool.browser.provider_unavailable",
+                retryable=True,
+            ) from exc
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        """Report what the page already loaded shows once old enough (ADR-0297)."""
+        try:
+            return await self._runtime.look_again_by(
+                url, observed_seconds=observed_seconds, deadline=deadline
+            )
         except BrowserProviderError:
             raise
         except Exception as exc:

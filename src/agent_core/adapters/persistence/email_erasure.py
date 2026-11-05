@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.persistence import call_erasure
 from agent_core.adapters.persistence.sqlalchemy_models import (
+    ApprovalRow,
     ArtifactRow,
     CheckpointRow,
     EventRow,
@@ -29,12 +30,16 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ToolInvocationRow,
 )
 from agent_core.domain.agents import Principal
+from agent_core.domain.artifacts import EMAIL_SOURCE_METADATA_KEY, outlives_source_erasure
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY
+from agent_core.mcp.configuration import is_email_attachment_tool
 
 _ERASED = "[email source erased]"
 _IDENTITY_FIELDS = frozenset({"id", "message_id", "thread_id", "history_id", "internal_date"})
+# What makes a value a copy of a message; a saved file's receipt names it (ADR-0296).
+_SOURCE_CONTENT_KEYS = ("body", "from", "snippet", "filename")
 _UNFINISHED_INVOCATIONS = ("PROPOSED", "AUTHORIZED", "WAITING_FOR_APPROVAL", "RUNNING")
 
 
@@ -104,7 +109,7 @@ def erase_result(
         (source_thread == thread_id or (source_thread is None and "message_id" in value))
         and isinstance(message_id, str)
         and message_id in message_ids
-        and any(key in value for key in ("body", "from", "snippet"))
+        and any(key in value for key in _SOURCE_CONTENT_KEYS)
     )
     preview = source_thread == thread_id and message_id is None and "snippet" in value
     if target or preview:
@@ -114,7 +119,7 @@ def erase_result(
             "body_complete": False,
             "headers_complete": False,
         }
-    if isinstance(message_id, str) and any(key in value for key in ("body", "from", "snippet")):
+    if isinstance(message_id, str) and any(key in value for key in _SOURCE_CONTENT_KEYS):
         return value
     return {
         key: erase_result(item, thread_id, message_ids, source_thread, account_id=account_id)
@@ -157,7 +162,7 @@ def source_present(
         and message_id in message_ids
     ):
         return True
-    if isinstance(message_id, str) and any(key in value for key in ("body", "from", "snippet")):
+    if isinstance(message_id, str) and any(key in value for key in _SOURCE_CONTENT_KEYS):
         return False
     return any(
         source_present(item, thread_id, message_ids, current, account_id=account_id)
@@ -235,8 +240,48 @@ def read_server(metadata: dict[str, Any], account_id: str) -> str | None:
     return binding.get("read") if isinstance(binding, dict) else None
 
 
+def _saves_attachment(name: object) -> bool:
+    """A saved file's receipt carries its source's ids, in any session (ADR-0296).
+
+    A chat with no Gmail metadata can save too, so this cannot wait for the
+    session's account binding. Gmail ids do not repeat across a principal's
+    mailboxes, and a collision would erase more, never less.
+    """
+
+    if not isinstance(name, str):
+        return False
+    prefix, _, remote = name.rpartition(".")
+    return prefix.startswith("mcp.") and is_email_attachment_tool(prefix[4:], remote)
+
+
+def erase_attachment_names(value: Any, message_ids: frozenset[str]) -> Any:
+    """Remove a sender's file name wherever a call recorded it, keeping the call."""
+
+    if isinstance(value, str):
+        if "filename" not in value:
+            return value
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            return value
+        if not isinstance(decoded, (dict, list)):
+            return value
+        erased = erase_attachment_names(decoded, message_ids)
+        return json.dumps(erased, ensure_ascii=False) if erased != decoded else value
+    if isinstance(value, list):
+        return [erase_attachment_names(item, message_ids) for item in value]
+    if not isinstance(value, dict):
+        return value
+    source = value.get("message_id")
+    named = "filename" in value and isinstance(source, str) and source in message_ids
+    return {
+        key: _ERASED if named and key == "filename" else erase_attachment_names(item, message_ids)
+        for key, item in value.items()
+    }
+
+
 def source_tool(name: object, server: str | None) -> bool:
-    if name == "email.context":
+    if name == "email.context" or _saves_attachment(name):
         return True
     return (
         server is not None
@@ -255,8 +300,25 @@ def source_tool(name: object, server: str | None) -> bool:
     )
 
 
+def _erased_reply(content: Any, marker: str, kept_files: frozenset[str]) -> list[dict[str, Any]]:
+    """The reply's text goes; a file that outlives this erasure keeps its link (ADR-0296)."""
+
+    parts = content if isinstance(content, list) else []
+    return [
+        {"kind": "text", "text": marker},
+        *(
+            part
+            for part in parts
+            if isinstance(part, dict) and str(part.get("artifact_id")) in kept_files
+        ),
+    ]
+
+
 def derived_payload(
-    payload: dict[str, Any], event_type: str, marker: str = _ERASED
+    payload: dict[str, Any],
+    event_type: str,
+    marker: str = _ERASED,
+    kept_files: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     if marker == call_erasure.MARKER:
         return cast(dict[str, Any], call_erasure.erase_derived(payload))
@@ -264,7 +326,7 @@ def derived_payload(
     if event_type == "assistant.message.completed":
         message = copied.get("message")
         if isinstance(message, dict):
-            message["content"] = [{"type": "text", "text": marker}]
+            message["content"] = _erased_reply(message.get("content"), marker, kept_files)
         if "content" in copied:
             copied["content"] = marker
     elif event_type == "run.completed" and "final_message" in copied:
@@ -323,6 +385,13 @@ async def erase_postgres_source(
     affected_sessions: set[UUID] = set()
     affected_runs: set[UUID] = set()
     for row in event_rows:
+        # A denied save leaves no receipt, only the calls that named the file.
+        if row.actor_type != "principal" and (
+            erase_attachment_names(row.payload, message_ids) != row.payload
+        ):
+            affected_sessions.add(row.session_id)
+            if row.run_id is not None:
+                affected_runs.add(row.run_id)
         if row.actor_type != "runtime" or not source_tool(
             row.payload.get("name"), servers[row.session_id]
         ):
@@ -477,6 +546,23 @@ async def erase_postgres_source(
         )
     for trace_row, erased_trace in trace_changes:
         trace_row.trace = erased_trace
+    # Call erasure removes every file of the run, as it always has.
+    kept_files = (
+        frozenset()
+        if calling
+        else frozenset(
+            str(artifact.id)
+            for artifact in (
+                await session.scalars(
+                    select(ArtifactRow).where(
+                        ArtifactRow.run_id.in_(affected_runs),
+                        ArtifactRow.origin != "upload",
+                    )
+                )
+            ).all()
+            if outlives_source_erasure(artifact.metadata_json, message_ids)
+        )
+    )
     for row in event_rows:
         payload = changes.get(row.id)
         if payload is None and row.actor_type != "principal":
@@ -489,7 +575,14 @@ async def erase_postgres_source(
             and row.actor_type != "principal"
         ):
             payload = derived_payload(
-                row.payload, row.event_type, "[call source erased]" if calling else _ERASED
+                row.payload,
+                row.event_type,
+                "[call source erased]" if calling else _ERASED,
+                kept_files,
+            )
+        if row.actor_type != "principal":
+            payload = erase_attachment_names(
+                row.payload if payload is None else payload, message_ids
             )
         if payload is not None and payload != row.payload:
             row.payload = payload
@@ -518,16 +611,30 @@ async def erase_postgres_source(
                 )
             counts["invocations"] += 1
             continue
-        if not source_tool(invocation.tool_name, servers.get(invocation.session_id)):
-            continue
         changed = False
-        for field in ("result_item", "structured_result", "outcome"):
+        for field in ("raw_arguments", "arguments"):
             value = getattr(invocation, field)
-            erased = erase_result(value, thread_id, message_ids, account_id=account_id)
+            erased = erase_attachment_names(value, message_ids)
             if value != erased:
                 setattr(invocation, field, erased)
                 changed = True
+        if source_tool(invocation.tool_name, servers.get(invocation.session_id)):
+            for field in ("result_item", "structured_result", "outcome"):
+                value = getattr(invocation, field)
+                erased = erase_result(value, thread_id, message_ids, account_id=account_id)
+                if value != erased:
+                    setattr(invocation, field, erased)
+                    changed = True
         counts["invocations"] += int(changed)
+    # The owner's decision stands; only the name its card showed is source content.
+    # A call has no saved files, and the call worker's role may not read approvals.
+    if not calling:
+        for approval in (
+            await session.scalars(
+                select(ApprovalRow).where(ApprovalRow.session_id.in_(affected_sessions))
+            )
+        ).all():
+            approval.request = erase_attachment_names(approval.request, message_ids)
     checkpoint_ids = list(
         (
             await session.scalars(
@@ -570,7 +677,12 @@ async def erase_postgres_source(
                 source_event.run_id in affected_runs
                 and source_event.event_type == "assistant.message.completed"
             ):
-                history.item = {**history.item, "content": [{"type": "text", "text": _ERASED}]}
+                history.item = {
+                    **history.item,
+                    "content": _erased_reply(history.item.get("content"), _ERASED, kept_files),
+                }
+            if source_event.run_id in affected_runs:
+                history.item = erase_attachment_names(history.item, message_ids)
         episodes = list(
             (
                 await session.scalars(
@@ -586,16 +698,30 @@ async def erase_postgres_source(
             ):
                 await session.delete(episode)
                 counts["episodes"] += 1
-    artifacts = list(
-        (
+    artifacts = [
+        artifact
+        for artifact in (
             await session.scalars(
                 select(ArtifactRow).where(
-                    ArtifactRow.run_id.in_(affected_runs),
-                    ArtifactRow.origin != "upload",
+                    or_(
+                        and_(
+                            ArtifactRow.run_id.in_(affected_runs),
+                            ArtifactRow.origin != "upload",
+                        ),
+                        # A crash can lose a save's receipt, but not the file's own record.
+                        and_(
+                            ArtifactRow.tenant_id == principal.tenant_id,
+                            ArtifactRow.principal_id == principal.principal_id,
+                            ArtifactRow.metadata_json[EMAIL_SOURCE_METADATA_KEY][
+                                "message_id"
+                            ].astext.in_(sorted(message_ids)),
+                        ),
+                    )
                 )
             )
         ).all()
-    )
+        if str(artifact.id) not in kept_files
+    ]
     for artifact in artifacts:
         artifact.expires_at = erased_at
     if artifacts:
@@ -629,6 +755,13 @@ def erase_memory_source_locked(
     affected_runs: set[UUID] = set()
     for sid, server in servers.items():
         for event in repository._events._events.get(sid, []):
+            # A denied save leaves no receipt, only the calls that named the file.
+            if event.actor_type != "principal" and (
+                erase_attachment_names(event.payload, message_ids) != event.payload
+            ):
+                affected_sessions.add(sid)
+                if event.run_id is not None:
+                    affected_runs.add(event.run_id)
             if event.actor_type != "runtime" or not source_tool(event.payload.get("name"), server):
                 continue
             erased = erase_result(event.payload, thread_id, message_ids, account_id=account_id)
@@ -731,6 +864,18 @@ def erase_memory_source_locked(
         if retained != revisions:
             repository._memories._history[belief_id] = retained
     repository._traces._traces.update(trace_changes)
+    # Call erasure removes every file of the run, as it always has.
+    kept_files = (
+        frozenset()
+        if calling
+        else frozenset(
+            str(artifact.id)
+            for artifact in repository._artifacts._rows.values()
+            if artifact.run_id in affected_runs
+            and artifact.origin != "upload"
+            and outlives_source_erasure(artifact.metadata, message_ids)
+        )
+    )
     for sid in affected_sessions:
         updated = []
         for event in repository._events._events.get(sid, []):
@@ -745,7 +890,14 @@ def erase_memory_source_locked(
                 and event.actor_type != "principal"
             ):
                 payload = derived_payload(
-                    event.payload, event.event_type, "[call source erased]" if calling else _ERASED
+                    event.payload,
+                    event.event_type,
+                    "[call source erased]" if calling else _ERASED,
+                    kept_files,
+                )
+            if event.actor_type != "principal":
+                payload = erase_attachment_names(
+                    event.payload if payload is None else payload, message_ids
                 )
             replacement = (
                 event.model_copy(update={"payload": payload}, deep=True)
@@ -770,19 +922,27 @@ def erase_memory_source_locked(
             repository._invocations._invocations[key] = type(invocation).model_validate(value)
             counts["invocations"] += 1
             continue
-        if invocation.session_id not in servers or not source_tool(
-            invocation.tool_name, servers.get(invocation.session_id)
-        ):
+        if invocation.session_id not in servers:
             continue
         value = invocation.model_dump(mode="json")
         erased = dict(value)
-        for field in ("result_item", "structured_result", "outcome"):
-            erased[field] = erase_result(
-                value.get(field), thread_id, message_ids, account_id=account_id
-            )
+        for field in ("raw_arguments", "normalized_arguments"):
+            erased[field] = erase_attachment_names(value.get(field), message_ids)
+        if source_tool(invocation.tool_name, servers.get(invocation.session_id)):
+            for field in ("result_item", "structured_result", "outcome"):
+                erased[field] = erase_result(
+                    value.get(field), thread_id, message_ids, account_id=account_id
+                )
         if erased != value:
             repository._invocations._invocations[key] = type(invocation).model_validate(erased)
             counts["invocations"] += 1
+    # The owner's decision stands; only the name its card showed is source content.
+    # A call has no saved files, and the call worker's role may not read approvals.
+    for key, approval in list(repository._approvals._approvals.items()):
+        if not calling and approval.session_id in affected_sessions:
+            repository._approvals._approvals[key] = type(approval).model_validate(
+                erase_attachment_names(approval.model_dump(mode="json"), message_ids)
+            )
     for rid in affected_runs:
         checkpoints = repository._checkpoints._checkpoints.pop(rid, [])
         counts["checkpoints"] += len(checkpoints)
@@ -799,7 +959,16 @@ def erase_memory_source_locked(
             counts["episodes"] += 1
     expired_artifacts = set()
     for key, artifact in list(repository._artifacts._rows.items()):
-        if artifact.run_id in affected_runs and artifact.origin != "upload":
+        in_affected_run = artifact.run_id in affected_runs and artifact.origin != "upload"
+        # A crash can lose a save's receipt, but not the file's own record.
+        source = artifact.metadata.get(EMAIL_SOURCE_METADATA_KEY)
+        names_source = (
+            artifact.tenant_id == principal.tenant_id
+            and artifact.principal_id == principal.principal_id
+            and isinstance(source, dict)
+            and source.get("message_id") in message_ids
+        )
+        if (in_affected_run or names_source) and str(artifact.id) not in kept_files:
             repository._artifacts._rows[key] = artifact.model_copy(update={"expires_at": erased_at})
             expired_artifacts.add(artifact.id)
     for key, export in list(repository._trajectory_exports._rows.items()):

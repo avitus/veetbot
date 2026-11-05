@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -150,7 +151,7 @@ async def _append_event(
         )
 
 
-async def _complete_reply(context: RunContext, message: AssistantMessage) -> AssistantMessage:
+async def complete_reply(context: RunContext, message: AssistantMessage) -> AssistantMessage:
     """Record the final reply with every file the run exported (ADR-0122).
 
     One unit of work chooses the files, keeps them for the life of the
@@ -163,7 +164,8 @@ async def _complete_reply(context: RunContext, message: AssistantMessage) -> Ass
     reply = message
     async with context.uow_factory() as uow:
         exported = reply_attachments(
-            await uow.artifacts.list_for_run(context.run.id, context.principal)
+            await uow.artifacts.list_for_run(context.run.id, context.principal),
+            now=context.clock.now(),
         )
         if exported:
             retained = await uow.artifacts.retain_for_reply(
@@ -230,6 +232,15 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
                 context.principal,
             )
         pressure = assembled.pressure
+        limitation = assembled.request.metadata.get("recall_limitation")
+        if limitation is not None and pressure.fits:
+            # The turn went without automatic recall. The marker in context
+            # tells the model; this event tells the operator (ADR-0282).
+            await _append_event(
+                context,
+                "memory.recall.limited",
+                {"step_number": step.step_number, "reason": limitation},
+            )
         if pressure.yield_steps or not pressure.fits:
             await _append_event(
                 context,
@@ -281,6 +292,17 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         await checkpoint(context, "compaction")
 
 
+# Provider preparation (query vectors) and the searches it serves keep separate
+# clocks: preparation may take at most RECALL_PREPARATION_SECONDS, and the
+# searches get RECALL_SEARCH_SECONDS from the moment preparation returns. The
+# durable reservation bounds both together (ADR-0282; ADR-0190 and ADR-0196
+# set the original single ten-second deadline).
+logger = logging.getLogger(__name__)
+
+RECALL_PREPARATION_SECONDS = 5.0
+RECALL_SEARCH_SECONDS = 10.0
+
+
 async def prepare_recall(
     context: RunContext, *, pending_batch_budget: dict[str, int] | None = None
 ) -> None:
@@ -290,6 +312,7 @@ async def prepare_recall(
     context.token.raise_if_cancelled()
     started = context.clock.now()
     execution_bound = bool(getattr(context.prepare_recall, "execution_budget", False))
+    elapsed_time = context.recall_elapsed_time or (lambda: context.clock.now().timestamp())
     if execution_bound:
         context.recall_permit = RecallExecutionPermit(
             context.principal.tenant_id,
@@ -299,12 +322,16 @@ async def prepare_recall(
             0,
             started,
             context.clock.now,
-            context.recall_elapsed_time or (lambda: context.clock.now().timestamp()),
+            elapsed_time,
         )
     budget = context.checkpoint.recall_work
-    if budget is not None and (
-        budget.searches >= 4 or budget.rounds >= 2 or started >= budget.deadline_at
-    ):
+    deliberate = bool(context.checkpoint.pending_tool_calls)
+    # A later build step refreshes the automatic round already reserved for
+    # this run: fresh search clock, no new slots, no checkpoint write.
+    refresh = budget is not None and budget.automatic and not deliberate
+    if budget is not None and started >= budget.deadline_at:
+        return
+    if budget is not None and not refresh and (budget.searches >= 4 or budget.rounds >= 2):
         return
     try:
         async with asyncio.timeout(1):
@@ -313,39 +340,59 @@ async def prepare_recall(
         return  # Execution-bound planning failure retains the zero-search permit for this step.
     context.token.raise_if_cancelled()
     remaining = 4 - (0 if budget is None else budget.searches)
-    deadline = started + timedelta(seconds=10) if budget is None else budget.deadline_at
-    slots = len(queries) * (
-        2 if execution_bound and not context.checkpoint.pending_tool_calls else 1
+    reservation_seconds = (
+        RECALL_PREPARATION_SECONDS + RECALL_SEARCH_SECONDS if execution_bound else 10
     )
-    if not 1 <= slots <= remaining or context.clock.now() >= deadline:
-        return
-    context.checkpoint.recall_work = RecallWorkBudget(
-        searches=slots + (0 if budget is None else budget.searches),
-        rounds=1 + (0 if budget is None else budget.rounds),
-        deadline_at=deadline,
+    deadline = (
+        started + timedelta(seconds=reservation_seconds) if budget is None else budget.deadline_at
     )
-    # This write is authoritative and must not be swallowed as optional work.
-    await checkpoint(context, "memory_preparation", pending_batch_budget=pending_batch_budget)
+    slots = len(queries) * (2 if execution_bound and not deliberate else 1)
+    if refresh:
+        if not queries or context.clock.now() >= deadline:
+            return
+    else:
+        if not 1 <= slots <= remaining or context.clock.now() >= deadline:
+            return
+        context.checkpoint.recall_work = RecallWorkBudget(
+            searches=slots + (0 if budget is None else budget.searches),
+            rounds=(1 if deliberate else 0) + (0 if budget is None else budget.rounds),
+            deadline_at=deadline,
+            automatic=(not deliberate) or (budget is not None and budget.automatic),
+        )
+        # This write is authoritative and must not be swallowed as optional work.
+        await checkpoint(context, "memory_preparation", pending_batch_budget=pending_batch_budget)
+    try:
+        remaining_seconds = (deadline - context.clock.now()).total_seconds()
+        if remaining_seconds > 0:
+            # Preparation never spends the searches' own window. Existing
+            # cleanup may take three seconds; it cannot admit new work.
+            preparation_seconds = (
+                min(RECALL_PREPARATION_SECONDS, remaining_seconds)
+                if execution_bound
+                else remaining_seconds + 3
+            )
+            async with asyncio.timeout(preparation_seconds):
+                await context.prepare_recall.prepare(context.run, queries)
+    except TimeoutError:
+        logger.warning(
+            "recall_preparation_timed_out",
+            extra={"run_id": str(context.run.id), "step_number": context.run.step_count},
+        )
+    except Exception:
+        pass  # Sparse recall remains available; the reservation stays consumed.
+    context.token.raise_if_cancelled()
     if execution_bound:
+        # The searches' clock starts now, inside the durable reservation.
         context.recall_permit = RecallExecutionPermit(
             context.principal.tenant_id,
             context.principal.principal_id,
             context.run.session_id,
             context.run.id,
             slots,
-            deadline,
+            min(deadline, context.clock.now() + timedelta(seconds=RECALL_SEARCH_SECONDS)),
             context.clock.now,
-            context.recall_elapsed_time or (lambda: context.clock.now().timestamp()),
+            elapsed_time,
         )
-    try:
-        remaining_seconds = (deadline - context.clock.now()).total_seconds()
-        if remaining_seconds > 0:
-            # Existing cleanup may take three seconds; it cannot admit new work.
-            async with asyncio.timeout(remaining_seconds + 3):
-                await context.prepare_recall.prepare(context.run, queries)
-    except Exception:
-        pass  # Sparse recall remains available; the reservation stays consumed.
-    context.token.raise_if_cancelled()
 
 
 def _apply_context_origin_trust(checkpoint_state: RunCheckpoint, request: ModelRequest) -> None:
@@ -1021,6 +1068,7 @@ async def prepare_browser_connection_question(context: RunContext) -> None:
 async def suspend_for_browser_question(
     context: RunContext, error: UserInputRequiredError
 ) -> RunOutcome:
+    """Suspend on a runtime browser question; a sign-in pause carries ``sign_in`` (ADR-0280)."""
     question = str(context.checkpoint.pending_tool_calls[0]["arguments"]["question"])
     state = _record_open_question(context.checkpoint, question, context.add_open_question)
     context.checkpoint.working_state["outstanding_question_id"] = str(error.question_id)
@@ -1034,14 +1082,28 @@ async def suspend_for_browser_question(
         },
     )
     await checkpoint(context, "suspended")
-    return RunOutcome(
-        kind=OutcomeKind.SUSPENDED,
-        suspension={
-            "kind": "user",
-            "question_id": str(error.question_id),
-            "invocation_id": str(error.invocation_id),
-        },
-    )
+    suspension: dict[str, Any] = {
+        "kind": "user",
+        "question_id": str(error.question_id),
+        "invocation_id": str(error.invocation_id),
+    }
+    pending = context.checkpoint.pending_tool_calls[0]
+    if pending["name"] == "conversation.ask_user" and str(pending["call_id"]).startswith(
+        "browser-recovery:"
+    ):
+        # ADR-0280: the app shows a sign-in card from the trusted wait, not a question.
+        sign_in: dict[str, str] = {}
+        raw_wait = context.checkpoint.working_state.get("browser_auth_wait")
+        if raw_wait is not None:
+            wait = BrowserAuthenticationWait.model_validate(raw_wait)
+            sign_in["browser_profile_id"] = str(wait.profile_id)
+            if wait.resume_url is not None:
+                sign_in["origin"] = browser_origin(wait.resume_url)
+            sign_in["expires_at"] = wait.model_dump(mode="json")["expires_at"]
+        if context.run.deadline_at is not None:
+            sign_in["run_deadline_at"] = context.run.deadline_at.isoformat()
+        suspension["sign_in"] = sign_in
+    return RunOutcome(kind=OutcomeKind.SUSPENDED, suspension=suspension)
 
 
 async def _invoke_model(
@@ -1467,7 +1529,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
                     step,
                 )
             assert message is not None
-            message = await _complete_reply(context, message)
+            message = await complete_reply(context, message)
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
 
         guarded = guard_tool_turn(context, turn.tool_calls, step, loop_synthesis=loop_synthesis)

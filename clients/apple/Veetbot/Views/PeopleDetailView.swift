@@ -294,6 +294,9 @@ private struct PeopleProfile: View {
                     .primaryCapsule()
                 Button("Not the same") { Task { await model.resolveSuggestion(suggestion, decision: "separate", sessionID: sessionID) } }
                     .buttonStyle(SecondaryCapsuleButtonStyle())
+                if model.resolvingSuggestionID == suggestion.id {
+                    ProgressView().controlSize(.small).accessibilityLabel("Saving your answer")
+                }
             }
             .disabled(locked)
             .accessibilityIdentifier("people.detail.suggestion.\(suggestion.id.uuidString)")

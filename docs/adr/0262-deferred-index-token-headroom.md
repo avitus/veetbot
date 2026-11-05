@@ -6,6 +6,8 @@
 - Amends: ADR-0123 decision 1, which capped the deferred tool index at 2,000
   tokens
 - Detailed design: `docs/plan/context-engine.md`
+- Amended by: ADR-0267 (2026-10-29), which raises the index to fifty entries
+  and 3,000 tokens
 
 ## Context
 

@@ -21,6 +21,17 @@ import Testing
         #expect(sheet.contentMinSize.height >= 680)
     }
 
+    /// ADR-0280: the chat presents the sign-in window its sign-in card starts.
+    @Test func chatPresentsTheSignInWindowItsCardStarts() async throws {
+        let model = try await configuredChatModel()
+        let profile = try JSONDecoder.server.decode(BrowserProfileView.self, from: Data(Self.profileJSON.utf8))
+        #expect(model.beginDeviceSignIn(profile: profile, from: .chat) != nil)
+        let sheet = try await presentedSheetWindow {
+            Color.clear.deviceSignInPresentation(model: model, surface: .chat)
+        }
+        Self.expectResizable(sheet)
+    }
+
     @Test func websiteAccessSheetResizes() async throws {
         let model = try await configuredChatModel()
         let sheet = try await presentedSheetWindow {
@@ -88,6 +99,10 @@ import Testing
         #expect(await model.configure(baseURLString: "https://sheet-resize.test", token: "fixture"))
         return model
     }
+
+    private static let profileJSON = """
+    {"id":"00000000-0000-0000-0000-000000000301","allowed_origins":["https://example.org"],"status":"needs_user","generation":2,"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-30T00:00:00Z","last_used_at":null}
+    """
 
     private static let memoryJSON = """
     {"id":"00000000-0000-0000-0000-000000000201","subject":"owner","statement":"Prefers morning meetings.","belief_type":"preference","claim_kind":"preference","derivation":"direct","longevity":"durable","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"normal","confidence":0.9,"corroboration_count":1,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000203","source_event_ids":[10],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_evidence_at":"2026-08-15T00:00:00Z","last_used_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}

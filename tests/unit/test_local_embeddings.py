@@ -101,6 +101,21 @@ async def test_unverified_model_files_are_refused(
     assert state["calls"] == 0
 
 
+async def test_token_counts_match_what_inference_checks_against_capacity(
+    local_model: tuple[Any, ...],
+) -> None:
+    root, config, _ = local_model
+    provider = LocalEmbeddingProvider(root, config)
+    assert provider.maximum_tokens == config.maximum_tokens == 8
+    assert provider.count_tokens("breakfast early breakfast") == 3
+    text = "breakfast " * provider.maximum_tokens
+    assert provider.count_tokens(text) == 8
+    await provider.embed(EmbeddingRequest(space=config.space, texts=(text,)))
+    with pytest.raises(EmbeddingError):
+        await provider.embed(EmbeddingRequest(space=config.space, texts=(text + "early",)))
+    await provider.close()
+
+
 async def test_overlong_inputs_are_rejected_without_truncation(
     local_model: tuple[Any, ...],
 ) -> None:
@@ -178,3 +193,39 @@ async def test_tokenization_does_not_create_a_second_parallel_worker_pool(
         assert response.input_tokens == 3
     finally:
         await provider.close()
+
+
+@pytest.mark.parametrize("expected", [False, True])
+def test_native_model_load_distinguishes_invalid_assets_from_programming_errors(
+    local_model: tuple[Any, ...],
+    monkeypatch: pytest.MonkeyPatch,
+    expected: bool,
+) -> None:
+    from onnxruntime.capi.onnxruntime_pybind11_state import (  # type: ignore[import-untyped]
+        InvalidProtobuf,
+    )
+
+    root, config, _ = local_model
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        if expected:
+            raise InvalidProtobuf("Private model diagnostic")
+        raise RuntimeError("Unexpected native adapter implementation failure")
+
+    monkeypatch.setattr("onnxruntime.InferenceSession", fail)
+    error = EmbeddingError if expected else RuntimeError
+    with pytest.raises(error) as caught:
+        LocalEmbeddingProvider(root, config)
+    assert "Private model diagnostic" not in str(caught.value)
+
+
+@pytest.mark.parametrize("contents", [b"not JSON", b"\xff"])
+def test_malformed_tokenizer_is_expected_unavailability(
+    local_model: tuple[Any, ...],
+    contents: bytes,
+) -> None:
+    root, config, _ = local_model
+    (root / "tokenizer.json").write_bytes(contents)
+    config = config.model_copy(update={"tokenizer_sha256": hashlib.sha256(contents).hexdigest()})
+    with pytest.raises(EmbeddingError, match="tokenizer could not be loaded"):
+        LocalEmbeddingProvider(root, config)

@@ -16,7 +16,11 @@ from typing import Any
 import pytest
 import yaml
 
-from agent_core.context.budget import ContextBudgetAllocator, records_catalog_caps
+from agent_core.context.budget import (
+    ContextBudgetAllocator,
+    knowledge_catalog_caps,
+    records_catalog_caps,
+)
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.messages import ModelLimits, ResolvedModel
 
@@ -74,8 +78,9 @@ def test_shipped_plan_allocates_the_documented_caps_on_the_default_window() -> N
     assert budget.working_state_tokens == 1_000
     assert budget.knowledge_tokens == 3_000
     assert budget.records_catalog_tokens == 600
+    assert budget.knowledge_catalog_tokens == 400
     assert budget.tool_result_tokens == tool_results
-    # The records catalog is optional and yieldable: it is not subtracted from history.
+    # The catalogs are optional and yieldable: neither is subtracted from history.
     assert budget.history_tokens == usable - 1_000 - tool_results
     assert budget.history_tokens >= 8_000
     assert budget.safety_margin_ratio == pytest.approx(0.05)
@@ -98,6 +103,7 @@ def test_only_history_and_tool_results_grow_with_the_window() -> None:
         "working_state_tokens",
         "knowledge_tokens",
         "records_catalog_tokens",
+        "knowledge_catalog_tokens",
     )
     assert {name: getattr(large, name) for name in fixed} == {
         name: getattr(small, name) for name in fixed
@@ -168,11 +174,13 @@ def test_optional_persona_snapshot_and_catalog_classes_default_to_zero() -> None
     del config["classes"]["persona"]
     del config["classes"]["memory_snapshot"]
     del config["classes"]["records_catalog"]
+    del config["classes"]["knowledge_catalog"]
 
     budget = ContextBudgetAllocator(config).allocate(_model(), prefix_tokens=10_000)
 
     assert budget.persona_tokens == 0
     assert budget.records_catalog_tokens == 0
+    assert budget.knowledge_catalog_tokens == 0
     assert budget.retrieved_context_tokens == 2_000
 
 
@@ -224,3 +232,15 @@ def test_malformed_budget_configuration_is_refused(
 
     with pytest.raises(ValueError, match=message):
         allocator.allocate(_model(), prefix_tokens=10_000)
+
+
+def test_knowledge_catalog_caps_are_parsed_in_one_place() -> None:
+    config = _config()
+
+    assert knowledge_catalog_caps(config["classes"]) == (12, 400)
+    del config["classes"]["knowledge_catalog"]
+    assert knowledge_catalog_caps(config["classes"]) == (0, 0)
+    with pytest.raises(ValueError, match=r"classes\.knowledge_catalog must be a mapping"):
+        knowledge_catalog_caps({"knowledge_catalog": 12})
+    with pytest.raises(ValueError, match="max_items must be a nonnegative integer"):
+        knowledge_catalog_caps({"knowledge_catalog": {"max_items": -1, "max_tokens": 400}})

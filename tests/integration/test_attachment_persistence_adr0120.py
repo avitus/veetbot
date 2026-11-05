@@ -99,7 +99,9 @@ async def test_an_upload_is_stored_unclaimed_then_claimed_and_ingested(tmp_path:
         async with composition.uow_factory() as uow:
             image = await uow.artifacts.get(UUID(image_id), composition.principal)
             notes = await uow.artifacts.get(UUID(notes_id), composition.principal)
-            pending = await uow.artifacts.pending_auto_ingest(composition.principal, limit=10)
+            pending = await uow.artifacts.pending_auto_ingest(
+                composition.principal, now=composition.clock.now(), limit=10
+            )
         assert image.run_id == run_id and image.expires_at is None
         assert notes.run_id == run_id and notes.metadata["auto_ingest"] == "pending"
         assert [artifact.id for artifact in pending] == [UUID(notes_id)]
@@ -107,7 +109,9 @@ async def test_an_upload_is_stored_unclaimed_then_claimed_and_ingested(tmp_path:
         await cast(MaintenanceWorker, composition.maintenance_factory()).run_once()
         async with composition.uow_factory() as uow:
             ingested = await uow.artifacts.get(UUID(notes_id), composition.principal)
-            remaining = await uow.artifacts.pending_auto_ingest(composition.principal, limit=10)
+            remaining = await uow.artifacts.pending_auto_ingest(
+                composition.principal, now=composition.clock.now(), limit=10
+            )
         assert ingested.metadata["auto_ingest"] == "ingested"
         assert remaining == []
 

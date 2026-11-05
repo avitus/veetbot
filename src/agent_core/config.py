@@ -9,13 +9,14 @@ import json
 import os
 import re
 import stat
+import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -144,6 +145,14 @@ class Settings:
     memory_semantic_index_enabled: bool = False
     memory_semantic_index_evidence: Path | None = None
     memory_semantic_index_manifest: Path | None = None
+    # The knowledge semantic arm (ADR-0289): default off; needs the composed
+    # semantic index's embedding provider, so it never turns on alone.
+    knowledge_semantic_enabled: bool = False
+    knowledge_semantic_channel: Literal["hybrid", "dense"] = "dense"
+    # Whose vectors: the memory index's admitted provider, or OpenAI's embedding
+    # model on the arm's own credential (ADR-0290); the local encoder measured
+    # no paraphrase lift on gate 13.
+    knowledge_semantic_provider: Literal["index", "openai"] = "index"
     memory_reconsolidation_enabled: bool = False
     memory_reconsolidation_evidence: Path | None = None
     memory_reconsolidation_residency_provider: str | None = None
@@ -152,6 +161,13 @@ class Settings:
     thread_folders_api_enabled: bool = False
     delegation_enabled: bool = False
     records_enabled: bool = False
+    integration_secrets_enabled: bool = False
+    integration_secrets_key: SecretStr | None = None
+    jobs_enabled: bool = False
+    jobs_allowed_hosts: frozenset[str] | None = None
+    jobs_github_app_id: int | None = None
+    jobs_github_installation_id: int | None = None
+    jobs_github_key_file: Path | None = None
     cockpit_enabled: bool = False
     device_channel_enabled: bool = False
     device_sms_enabled: bool = False
@@ -184,6 +200,10 @@ class Settings:
     email_junk_filter_mode: EmailJunkMode = EmailJunkMode.OFF
     email_junk_filter_evidence: Path | None = None
     email_unsubscribe_enabled: bool = False
+    # Server checks for new mail while Email is closed (ADR-0286).
+    email_background_checks_enabled: bool = False
+    # The window in which a one-press send can still be undone (ADR-0279).
+    email_send_undo_seconds: int = 10
     attachment_uploads_enabled: bool = False
     email_semantic_evidence: Path | None = None
     email_account_ids: tuple[str, ...] = ()
@@ -199,6 +219,10 @@ class Settings:
     auth_scopes: frozenset[str] = frozenset()
     sandbox_image: str = "agent-core-sandbox:dev"
     cockpit_builder_image: str = "veetbot-cockpit-builder:dev"
+    code_tools_enabled: bool = False
+    code_source_root: Path | None = None
+    code_sandbox_image: str = "veetbot-code-sandbox:dev"
+    code_proposals_enabled: bool = False
     # The GitHub App that commits widgets; only the maintenance role sets the key file.
     cockpit_github_repository: str | None = None
     cockpit_github_branch: str = "cockpit/widgets"
@@ -329,6 +353,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "classes.in_turn_recall.max_tokens",
             "classes.records_catalog.max_items",
             "classes.records_catalog.max_tokens",
+            "classes.knowledge_catalog.max_items",
+            "classes.knowledge_catalog.max_tokens",
             "classes.tool_results.max_body_ratio",
             "classes.history.floor_tokens",
             "output.reserve_tokens",
@@ -694,12 +720,43 @@ def _parse_web_provider_allocations(
     return tuple(allocations)
 
 
+def _job_hosts(values: Mapping[str, str]) -> frozenset[str] | None:
+    """Parse the optional operator superset as validated exact public hostnames."""
+    from agent_core.domain.jobs import JobAccess
+
+    raw = values.get("AGENT_JOBS_ALLOWED_HOSTS", "").strip()
+    if not raw:
+        return None
+    hosts = frozenset(host.strip() for host in raw.split(","))
+    try:
+        JobAccess({}, dict.fromkeys(hosts))
+    except ValueError as exc:
+        raise ConfigurationError(
+            "AGENT_JOBS_ALLOWED_HOSTS needs exact public DNS hostnames"
+        ) from exc
+    return hosts
+
+
 def _parse_flag(values: Mapping[str, str], name: str, *, default: bool = False) -> bool:
     """Parse a strict deployment boolean, preserving the feature-specific default."""
     raw = values.get(name, "1" if default else "0").strip()
     if raw not in {"0", "1"}:
         raise ConfigurationError(f"{name} must be 0 or 1")
     return raw == "1"
+
+
+def _parse_knowledge_semantic_channel(values: Mapping[str, str]) -> Literal["hybrid", "dense"]:
+    raw = values.get("AGENT_KNOWLEDGE_SEMANTIC_CHANNEL", "").strip().lower() or "dense"
+    if raw not in ("hybrid", "dense"):
+        raise ConfigurationError("AGENT_KNOWLEDGE_SEMANTIC_CHANNEL must be 'hybrid' or 'dense'")
+    return "hybrid" if raw == "hybrid" else "dense"
+
+
+def _parse_knowledge_semantic_provider(values: Mapping[str, str]) -> Literal["index", "openai"]:
+    raw = values.get("AGENT_KNOWLEDGE_SEMANTIC_PROVIDER", "").strip().lower() or "index"
+    if raw not in ("index", "openai"):
+        raise ConfigurationError("AGENT_KNOWLEDGE_SEMANTIC_PROVIDER must be 'index' or 'openai'")
+    return "openai" if raw == "openai" else "index"
 
 
 def _optional_uuid(values: Mapping[str, str], name: str) -> UUID | None:
@@ -758,6 +815,71 @@ def _read_private_surface_secret_file(raw_path: str, name: str) -> str:
 
 MCP_OAUTH_CALLBACK_PATH = "/v1/mcp-oauth/callback"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _private_integration_key(
+    fd: int, metadata: os.stat_result, path: Path, credentials_directory: str
+) -> bool:
+    """Recognize a private owner file or systemd's root-and-unit-reader copy."""
+    mode = stat.S_IMODE(metadata.st_mode)
+    uid = os.geteuid()
+    if metadata.st_uid == uid and mode in {0o400, 0o600}:
+        return True
+    if (
+        metadata.st_uid != 0
+        or mode != 0o440
+        or not credentials_directory
+        or path != Path(credentials_directory) / "integration-secrets"
+    ):
+        return False
+    getxattr = getattr(os, "getxattr", None)
+    if getxattr is None:
+        return False
+    # Linux POSIX ACL xattr v2, in canonical kernel order. Match the complete
+    # ACL on the opened file so an extra reader, group or malformed entry fails.
+    undefined = 0xFFFFFFFF
+    entries = (
+        (0x01, 4, undefined),  # Owner (root) can read.
+        (0x02, 4, uid),  # This unit's user can read.
+        (0x04, 0, undefined),  # Owning group has no access.
+        (0x10, 4, undefined),  # Group-class mask permits read.
+        (0x20, 0, undefined),  # Others have no access.
+    )
+    expected = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    acl: bytes = getxattr(fd, "system.posix_acl_access")
+    return acl == expected
+
+
+def _integration_secrets_key(values: Mapping[str, str], enabled_role: bool) -> SecretStr | None:
+    if not enabled_role:
+        if values.get("INTEGRATION_SECRETS_KEY_FILE", "").strip():
+            raise ConfigurationError("This role must not receive INTEGRATION_SECRETS_KEY_FILE")
+        return None
+    if not _parse_flag(values, "AGENT_INTEGRATION_SECRETS_ENABLED"):
+        return None
+    path = Path(values.get("INTEGRATION_SECRETS_KEY_FILE", ""))
+    try:
+        if not path.is_absolute():
+            raise ValueError
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_size != 32
+                or not _private_integration_key(
+                    stream.fileno(), metadata, path, values.get("CREDENTIALS_DIRECTORY", "")
+                )
+            ):
+                raise ValueError
+            key = stream.read(33)
+            if len(key) != 32:
+                raise ValueError
+    except (OSError, ValueError):
+        raise ConfigurationError(
+            "Integration keys require a private owner-held 32-byte key file"
+        ) from None
+    return SecretStr(base64.urlsafe_b64encode(key).decode("ascii"))
 
 
 def _mcp_servers_settings(
@@ -1645,6 +1767,8 @@ def load_schedule_worker_settings(
         load_email_credentials=False,
         load_provider_credentials=True,
         load_surface_credentials=False,
+        # ADR-0291: this role mirrors the flag to vouch for the scope, never the grant.
+        requires_svp_credential=False,
     )
 
 
@@ -1686,6 +1810,7 @@ def _load_settings(
     require_execution_environment: bool,
     load_email_credentials: bool,
     load_provider_credentials: bool,
+    requires_svp_credential: bool = True,
     load_surface_credentials: bool,
     load_call_credentials: bool | None = None,
     load_call_webhook_secret: bool = False,
@@ -1757,25 +1882,17 @@ def _load_settings(
     skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
     policy_advisory_observe_enabled = _parse_flag(values, "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED")
-    raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
-    legacy_memory_enablement = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip()
-    if raw_memory_mode and legacy_memory_enablement:
+    if values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip():
         raise ConfigurationError(
-            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE and the legacy enablement flag "
-            "are mutually exclusive"
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED is retired; "
+            "set AGENT_MEMORY_PROVIDER_EXTRACTION_MODE explicitly"
         )
-    if legacy_memory_enablement:
-        memory_provider_extraction_mode = (
-            MemoryProviderExtractionMode.REQUIRED
-            if _parse_flag(values, "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED")
-            else MemoryProviderExtractionMode.OFF
-        )
-    else:
-        memory_provider_extraction_mode = _parse_enum(
-            MemoryProviderExtractionMode,
-            raw_memory_mode or MemoryProviderExtractionMode.AUTO.value,
-            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE",
-        )
+    raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
+    memory_provider_extraction_mode = _parse_enum(
+        MemoryProviderExtractionMode,
+        raw_memory_mode or MemoryProviderExtractionMode.AUTO.value,
+        "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE",
+    )
     raw_memory_evidence = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE", "").strip()
     memory_provider_extraction_evidence = (
         Path(raw_memory_evidence).expanduser().resolve() if raw_memory_evidence else None
@@ -1887,7 +2004,11 @@ def _load_settings(
         raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
     svp_enabled = _parse_flag(values, "AGENT_SVP_ENABLED")
     raw_svp_credential_file = values.get("SVP_CREDENTIAL_FILE", "").strip()
-    if svp_enabled and load_provider_credentials:
+    if (
+        svp_enabled
+        and load_provider_credentials
+        and (requires_svp_credential or raw_svp_credential_file)
+    ):
         # The platform holds the grant's path; only the bridge reads or rewrites
         # the rotating grant itself (ADR-0153).
         if "svp_read" in credentials:
@@ -1915,6 +2036,19 @@ def _load_settings(
             "AGENT_EMAIL_UNSUBSCRIBE_ENABLED=1 requires AGENT_EMAIL_ENABLED=1 "
             "and AGENT_EMAIL_MODE_ENABLED=1"
         )
+    email_background_checks_enabled = _parse_flag(values, "AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED")
+    if email_background_checks_enabled and not (email_enabled and email_mode_enabled):
+        raise ConfigurationError(
+            "AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED=1 requires AGENT_EMAIL_ENABLED=1 "
+            "and AGENT_EMAIL_MODE_ENABLED=1"
+        )
+    undo_text = values.get("AGENT_EMAIL_SEND_UNDO_SECONDS", "").strip()
+    try:
+        email_send_undo_seconds = int(undo_text) if undo_text else 10
+    except ValueError as exc:
+        raise ConfigurationError("AGENT_EMAIL_SEND_UNDO_SECONDS must be an integer") from exc
+    if not 0 <= email_send_undo_seconds <= 60:
+        raise ConfigurationError("AGENT_EMAIL_SEND_UNDO_SECONDS must be between 0 and 60")
     attachment_uploads_enabled = _parse_flag(values, "AGENT_ATTACHMENT_UPLOADS_ENABLED")
     raw_email_semantic_evidence = values.get("AGENT_EMAIL_SEMANTIC_EVIDENCE", "").strip()
     email_semantic_evidence = (
@@ -1990,6 +2124,23 @@ def _load_settings(
     sandbox_image = values.get("AGENT_SANDBOX_IMAGE", "agent-core-sandbox:dev").strip()
     if not sandbox_image:
         raise ConfigurationError("AGENT_SANDBOX_IMAGE must not be empty")
+    code_tools_enabled = _parse_flag(values, "AGENT_CODE_TOOLS_ENABLED")
+    code_source_root = (
+        Path(values["AGENT_CODE_SOURCE_ROOT"]) if values.get("AGENT_CODE_SOURCE_ROOT") else None
+    )
+    if code_tools_enabled and code_source_root is None:
+        raise ConfigurationError("AGENT_CODE_TOOLS_ENABLED requires AGENT_CODE_SOURCE_ROOT")
+    code_sandbox_image = values.get("AGENT_CODE_SANDBOX_IMAGE", "veetbot-code-sandbox:dev").strip()
+    if not code_sandbox_image:
+        raise ConfigurationError("AGENT_CODE_SANDBOX_IMAGE must not be empty")
+    if _parse_flag(values, "AGENT_CODE_PROPOSALS_ENABLED") and not (
+        code_tools_enabled and cockpit_enabled
+    ):
+        # The Cockpit's maintenance sweep holds the GitHub key that opens the pull request.
+        raise ConfigurationError(
+            "AGENT_CODE_PROPOSALS_ENABLED requires AGENT_CODE_TOOLS_ENABLED and "
+            "AGENT_COCKPIT_ENABLED"
+        )
     cockpit_builder_image = values.get(
         "AGENT_COCKPIT_BUILDER_IMAGE", "veetbot-cockpit-builder:dev"
     ).strip()
@@ -2133,6 +2284,9 @@ def _load_settings(
             if values.get("AGENT_MEMORY_SEMANTIC_INDEX_MANIFEST", "").strip()
             else None
         ),
+        knowledge_semantic_enabled=_parse_flag(values, "AGENT_KNOWLEDGE_SEMANTIC_ENABLED"),
+        knowledge_semantic_channel=_parse_knowledge_semantic_channel(values),
+        knowledge_semantic_provider=_parse_knowledge_semantic_provider(values),
         memory_reconsolidation_enabled=_parse_flag(values, "AGENT_MEMORY_RECONSOLIDATION_ENABLED"),
         memory_reconsolidation_evidence=(
             Path(values["AGENT_MEMORY_RECONSOLIDATION_EVIDENCE"]).expanduser()
@@ -2148,6 +2302,18 @@ def _load_settings(
         thread_folders_api_enabled=thread_folders_api_enabled,
         delegation_enabled=delegation_enabled,
         records_enabled=records_enabled,
+        integration_secrets_enabled=_parse_flag(values, "AGENT_INTEGRATION_SECRETS_ENABLED")
+        and require_execution_environment,
+        integration_secrets_key=_integration_secrets_key(values, require_execution_environment),
+        jobs_enabled=_parse_flag(values, "AGENT_JOBS_ENABLED"),
+        jobs_allowed_hosts=_job_hosts(values),
+        jobs_github_app_id=_optional_positive_int(values, "AGENT_JOBS_GITHUB_APP_ID"),
+        jobs_github_installation_id=_optional_positive_int(
+            values, "AGENT_JOBS_GITHUB_INSTALLATION_ID"
+        ),
+        jobs_github_key_file=Path(values["AGENT_JOBS_GITHUB_KEY_FILE"])
+        if values.get("AGENT_JOBS_GITHUB_KEY_FILE")
+        else None,
         cockpit_enabled=cockpit_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,
@@ -2179,6 +2345,8 @@ def _load_settings(
         email_junk_filter_mode=email_junk_filter_mode,
         email_junk_filter_evidence=email_junk_filter_evidence,
         email_unsubscribe_enabled=email_unsubscribe_enabled,
+        email_background_checks_enabled=email_background_checks_enabled,
+        email_send_undo_seconds=email_send_undo_seconds,
         attachment_uploads_enabled=attachment_uploads_enabled,
         email_semantic_evidence=email_semantic_evidence,
         email_account_ids=email_account_ids,
@@ -2194,6 +2362,11 @@ def _load_settings(
         auth_scopes=auth_scopes,
         sandbox_image=sandbox_image,
         cockpit_builder_image=cockpit_builder_image,
+        code_tools_enabled=code_tools_enabled,
+        code_source_root=code_source_root,
+        code_sandbox_image=code_sandbox_image,
+        code_proposals_enabled=code_tools_enabled
+        and _parse_flag(values, "AGENT_CODE_PROPOSALS_ENABLED"),
         cockpit_github_repository=cockpit_github_repository,
         cockpit_github_branch=cockpit_github_branch,
         cockpit_github_app_id=cockpit_github_app_id,

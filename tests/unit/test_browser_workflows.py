@@ -1,6 +1,7 @@
 """Reviewed recipes still cross the ordinary action-approval and effect boundary."""
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -11,10 +12,12 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserDispatchConstraint,
     BrowserObservation,
+    BrowserProfileStatus,
     BrowserProviderError,
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.views import TextContentBlock
 from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_config import base_environment
@@ -392,3 +395,97 @@ async def test_later_untrusted_input_cannot_reactivate_an_older_owner_recipe(
         )
         await app.runs.submit("Read my saved report.", session.id)
         assert provider.navigations == []
+
+
+async def test_a_chat_whose_website_login_was_deleted_still_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deleting a login leaves its chats bound to it; a message must not end their runs."""
+
+    def load(settings: Any, relative: str) -> dict[str, Any]:
+        return (
+            CATALOG
+            if relative == "runtime/browser-workflows.yaml"
+            else load_config_document(settings, relative)
+        )
+
+    monkeypatch.setattr(bootstrap, "load_config_document", load)
+    async with bootstrap.build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[ScriptedTurn(text="Which website?")]),
+        enabled_tools=["browser.navigate", "browser.observe", "browser.act"],
+        browser_provider_override=FakeBrowserProvider(),
+    ) as app:
+        await seed_browser_authority(app)
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        async with app.uow_factory() as uow:
+            profile = await uow.browser_profiles.get(PROFILE_ID, app.principal)
+            revoked = await uow.browser_profiles.transition(
+                PROFILE_ID,
+                app.principal,
+                expected_generation=profile.generation,
+                status=BrowserProfileStatus.REVOKED,
+                updated_at=app.clock.now(),
+            )
+            await uow.browser_profiles.delete(
+                PROFILE_ID, app.principal, expected_generation=revoked.generation
+            )
+
+        run_id = await app.runs.submit("I am signed in now.", session.id)
+
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+
+
+async def test_a_follow_request_in_a_chat_whose_login_was_deleted_is_not_a_crash() -> None:
+    """The message is admitted without a follow, and the chat is not rebound to another login."""
+    async with bootstrap.build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[ScriptedTurn(text="Which account?")]),
+        enabled_tools=["browser.navigate", "browser.observe", "browser.act"],
+        browser_provider_override=FakeBrowserProvider(),
+    ) as app:
+        await seed_browser_authority(app)
+        principal = app.principal.model_copy(
+            update={"scopes": {*app.principal.scopes, "browser.profile.read"}}
+        )
+        session = await app.services.sessions.create(
+            principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        async with app.uow_factory() as uow:
+            profile = await uow.browser_profiles.get(PROFILE_ID, app.principal)
+            revoked = await uow.browser_profiles.transition(
+                PROFILE_ID,
+                app.principal,
+                expected_generation=profile.generation,
+                status=BrowserProfileStatus.REVOKED,
+                updated_at=app.clock.now(),
+            )
+            await uow.browser_profiles.delete(
+                PROFILE_ID, app.principal, expected_generation=revoked.generation
+            )
+            # The one X login this request would otherwise have picked up.
+            await uow.browser_profiles.create(
+                profile.model_copy(
+                    update={
+                        "id": UUID(int=0xF0110),
+                        "provider_ref": "opaque-x-reference",
+                        "allowed_origins": ("https://x.com",),
+                    }
+                )
+            )
+
+        submitted = await app.services.runs.submit(
+            principal, session.id, [TextContentBlock(text="Follow @mitsuhiko")], None, None
+        )
+
+        assert (await app.runs.wait_terminal(submitted.run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            bound = await uow.sessions.get(session.id, principal)
+            message = await uow.events.latest_before(
+                session.id, (1 << 63) - 1, "user.message.created", principal
+            )
+        assert bound.metadata["browser_profile_id"] == str(PROFILE_ID)
+        assert message is not None
+        assert "browser_follow_target" not in message.payload

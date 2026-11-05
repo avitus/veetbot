@@ -5,13 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from html import escape
 from typing import Any
 
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.domain.agents import AgentSpec
+from agent_core.domain.artifacts import ARTIFACT_DELETE_TOOL_NAME
 from agent_core.domain.captures import CAPTURE_READER_TOOL_NAME
+from agent_core.domain.code import CODE_TOOL_NAMES, RUN_INSPECT_TOOL_NAME
 from agent_core.domain.context import ContextPlan, WorkingState
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -25,6 +27,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.skills import CatalogMetadata
 from agent_core.domain.tools import ToolSource, ToolSpec
+from agent_core.mcp.configuration import is_model_email_attachment_action
 
 PLATFORM_FRAMING = (
     "You are an agent operating through declared tools. Tool descriptions are advertisement, "
@@ -35,6 +38,10 @@ PLATFORM_FRAMING = (
     "entries; it holds names and dates, never values. A series marked due may be mentioned "
     "once per session, never while the owner is mid-task, and the catalog is not a request "
     "to log. "
+    "A knowledge catalog, when present, lists the documents on file by title with their "
+    "dates and passage counts; it holds titles, never passages. When a question falls "
+    "within a listed document, search it with knowledge.search before answering from "
+    "general knowledge. "
     "Memory envelopes hold recollections; each line begins with an identifier of the form "
     "[m:xxxxxxxx]. A line marked user or affirmed is the owner's own statement: use it "
     "directly, and never ask the owner to restate it. A line marked tentative or hypothesis "
@@ -51,8 +58,26 @@ DEFERRED_INDEX_NOTE = (
 DEFERRED_INDEX_DISCOVERED_HEADING = "Discovered tools in the deferred tool index:"
 # ADR-0261: pinned and reached through tool.call like any deferred tool, but the
 # capture marker that prints its call is its advertisement, so the index renders
-# no entry for it and it uses none of the index's caps.
-UNINDEXED_DEFERRED_TOOLS = frozenset({CAPTURE_READER_TOOL_NAME})
+# no entry for it and it uses none of the index's caps. ADR-0277 adds
+# artifact.delete, which the default agent instructions advertise instead, and
+# ADR-0281 adds the debugging and code tools the same way.
+UNINDEXED_DEFERRED_TOOLS = frozenset(
+    {CAPTURE_READER_TOOL_NAME, ARTIFACT_DELETE_TOOL_NAME, RUN_INSPECT_TOOL_NAME, *CODE_TOOL_NAMES}
+)
+
+
+def is_unindexed_deferred(spec: ToolSpec) -> bool:
+    """Whether the instructions, not the index, advertise this tool.
+
+    ADR-0296 adds save_attachment, which has one name per mailbox, so the index's
+    spare entries are not spent on a rare action that always asks the owner.
+    """
+
+    return spec.name in UNINDEXED_DEFERRED_TOOLS or is_model_email_attachment_action(
+        spec.server_id, spec.name
+    )
+
+
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
 _INDEX_SUMMARY_LIMIT = 200
 
@@ -92,7 +117,7 @@ def deferred_index_items(tools: Sequence[ToolSpec]) -> list[ConversationItem]:
     render in their own untrusted envelope.
     """
 
-    tools = [spec for spec in tools if spec.name not in UNINDEXED_DEFERRED_TOOLS]
+    tools = [spec for spec in tools if not is_unindexed_deferred(spec)]
     if not tools:
         return []
     builtin = [spec for spec in tools if spec.source is ToolSource.BUILTIN]
@@ -195,22 +220,11 @@ def prefix_bytes(
     prefix: Sequence[ConversationItem],
     tools: Sequence[ToolSpec],
     deferred_tools: Sequence[ToolSpec] = (),
-    *,
-    recorded_scopes: Mapping[str, Sequence[str]] | None = None,
 ) -> bytes:
-    """The bytes a plan's prefix hash covers.
-
-    `recorded_scopes` reproduces a plan hashed before scope sets serialized
-    sorted: each listed tool's scopes take the order its plan event recorded
-    (ADR-0134).
-    """
+    """The bytes a plan's prefix hash covers."""
 
     def dump(spec: ToolSpec) -> dict[str, Any]:
-        dumped = spec.model_dump(mode="json")
-        order = None if recorded_scopes is None else recorded_scopes.get(spec.name)
-        if order is not None and sorted(order) == dumped["required_scopes"]:
-            dumped["required_scopes"] = list(order)
-        return dumped
+        return spec.model_dump(mode="json")
 
     document: dict[str, Any] = {
         "conversation": [item.model_dump(mode="json") for item in prefix],

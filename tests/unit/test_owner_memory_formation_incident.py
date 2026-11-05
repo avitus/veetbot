@@ -1,8 +1,10 @@
 """Synthetic write-path regressions; names and model numbers are fabricated."""
 
+from datetime import timedelta
+
 import pytest
 
-from agent_core.domain.memory import BeliefType, MemoryStatus
+from agent_core.domain.memory import BeliefType, MemoryAuthority, MemoryLongevity, MemoryStatus
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from tests.contract.memory_fixtures import formation_stack
 from tests.contract.support import principal
@@ -142,3 +144,207 @@ def test_provider_possession_is_an_attribute_while_frozen_policy_stays_unchanged
         candidate, by_sequence=events, scope="general"
     )
     assert frozen.belief_type is BeliefType.PROCEDURE_POINTER
+
+
+async def test_the_same_possession_stated_in_another_chat_corroborates() -> None:
+    """ADR-0283: an owner who names the same car in three chats has one active car."""
+    from uuid import UUID
+
+    from agent_core.domain.events import NewEvent
+    from tests.contract.support import PRINCIPAL_ID, session
+
+    _, factory, service, _ = await formation_stack()
+    first = await _form(
+        factory,
+        service,
+        "User has a 2027 Aster S8.",
+        subject="2027 Aster S8",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        explicit=False,
+    )
+    other_session = UUID("00000000-0000-0000-0000-000000000021")
+    async with factory() as uow:
+        await uow.sessions.create(session().model_copy(update={"id": other_session}))
+        event = await uow.events.append(
+            NewEvent(
+                session_id=other_session,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=PRINCIPAL_ID,
+                payload={"content": "I have a new 2027 Aster S8."},
+            )
+        )
+    second = await service.remember(
+        session_id=other_session,
+        run_id=None,
+        statement="User has a new 2027 Aster S8.",
+        subject="new 2027 Aster S8",
+        scope="project-a",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        portability=None,
+        source_event_ids=[event.sequence],
+        explicit=False,
+        authority=first.authority,
+        confidence=None,
+    )
+    assert second.id == first.id, "A restated possession from another chat is the same belief"
+    assert second.status is MemoryStatus.ACTIVE
+    assert second.corroboration_count == 2
+    assert sorted(second.origin_scopes) == ["project-a"]
+    # Event sequences are per session: the other chat's event must not be read
+    # as one of the first chat's, so provenance stays with the first session
+    # and the corroboration still counts as evidence.
+    assert second.source_session_id == first.source_session_id
+    assert second.source_event_ids == first.source_event_ids
+    assert second.evidence_count == first.evidence_count + 1
+
+    # Replaying the other chat's event is a no-op: the corroboration left a
+    # receipt, so the same evidence never counts twice.
+    replayed = await service.remember(
+        session_id=other_session,
+        run_id=None,
+        statement="User has a new 2027 Aster S8.",
+        subject="new 2027 Aster S8",
+        scope="project-a",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        portability=None,
+        source_event_ids=[event.sequence],
+        explicit=False,
+        authority=first.authority,
+        confidence=None,
+    )
+    assert replayed.id == first.id
+    assert replayed.corroboration_count == 2
+    assert replayed.evidence_count == second.evidence_count
+    assert replayed.confidence == second.confidence
+
+    # Later evidence in the first chat adds to the count instead of resetting
+    # it to the length of that chat's source list.
+    async with factory() as uow:
+        later = await uow.events.append(
+            NewEvent(
+                session_id=first.source_session_id,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=PRINCIPAL_ID,
+                payload={"content": "Still driving the 2027 Aster S8."},
+            )
+        )
+    third = await service.remember(
+        session_id=first.source_session_id,
+        run_id=None,
+        statement="User has a 2027 Aster S8.",
+        subject="2027 Aster S8",
+        scope="project-a",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        portability=None,
+        source_event_ids=[later.sequence],
+        explicit=False,
+        authority=first.authority,
+        confidence=None,
+    )
+    assert third.id == first.id
+    assert third.source_event_ids == sorted({*first.source_event_ids, later.sequence})
+    assert third.evidence_count == second.evidence_count + 1
+    assert third.corroboration_count == 3
+
+
+async def test_merge_possessions_folds_legacy_duplicates_and_retires_placeholders() -> None:
+    """ADR-0283: three provisional copies of one car become one active belief."""
+    from uuid import UUID
+
+    from tests.contract.support import principal
+
+    _, factory, service, _ = await formation_stack()
+    newest = await _form(
+        factory,
+        service,
+        "User has a 2027 Aster S8.",
+        subject="2027 Aster S8",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        explicit=False,
+    )
+    placeholder = await _form(
+        factory,
+        service,
+        "User has a X.",
+        subject="X",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        explicit=False,
+    )
+    other = await _form(
+        factory,
+        service,
+        "User has a lawn mower.",
+        subject="lawn mower",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        explicit=False,
+    )
+    # The pre-ADR store: the same car formed twice more under other subjects,
+    # each its own provisional belief.
+    async with factory() as uow:
+        legacy = []
+        for index, (statement, subject) in enumerate(
+            [
+                ("User has a new 2027 Aster S8.", "new 2027 Aster S8"),
+                ("User has a 2027 Aster S8.", "car"),
+            ]
+        ):
+            copy = newest.model_copy(
+                update={
+                    "id": UUID(int=9000 + index),
+                    "statement": statement,
+                    "subject": subject,
+                    "store_position": newest.store_position - 1 - index,
+                    # The oldest copy was the owner's own, durable record.
+                    "authority": MemoryAuthority.USER if index == 1 else newest.authority,
+                    "longevity": MemoryLongevity.DURABLE,
+                    "expires_at": None,
+                },
+                deep=True,
+            )
+            legacy.append(await uow.memories.upsert_belief(copy))
+        # The newest copy, the one the repair keeps, was inferred and expiring.
+        newest = await uow.memories.reinforce(
+            newest.model_copy(
+                update={
+                    "authority": MemoryAuthority.INFERRED,
+                    "longevity": MemoryLongevity.ONGOING,
+                    "expires_at": newest.valid_from + timedelta(days=90),
+                },
+                deep=True,
+            )
+        )
+    dry = await service.merge_possessions(confirm=False)
+    assert dry.model_dump() == {
+        "groups_examined": 1,
+        "beliefs_merged": 2,
+        "promoted": 1,
+        "placeholders_retired": 1,
+        "dry_run": True,
+    }
+    async with factory() as uow:
+        untouched = await uow.memories.get(newest.id, principal())
+    assert untouched.status is MemoryStatus.PROVISIONAL, "A dry run writes nothing"
+    committed = await service.merge_possessions(confirm=True)
+    assert committed.dry_run is False and committed.beliefs_merged == 2
+    async with factory() as uow:
+        canonical = await uow.memories.get(newest.id, principal())
+        folded = [await uow.memories.get(record.id, principal()) for record in legacy]
+        gone = await uow.memories.get(placeholder.id, principal())
+        kept = await uow.memories.get(other.id, principal())
+    assert canonical.status is MemoryStatus.ACTIVE
+    assert canonical.corroboration_count == 3
+    # The canonical belief keeps the group's strongest authority and its durability.
+    assert canonical.authority is MemoryAuthority.USER
+    assert canonical.longevity is MemoryLongevity.DURABLE
+    assert canonical.expires_at is None
+    assert canonical.confidence == pytest.approx(min(1.0, newest.confidence + 0.2))
+    assert all(record.status is MemoryStatus.SUPERSEDED for record in folded)
+    assert all(record.superseded_by == canonical.id for record in folded)
+    assert gone.status is MemoryStatus.RETIRED
+    assert kept.status is MemoryStatus.PROVISIONAL, "A lone possession is left alone"
+    again = await service.merge_possessions(confirm=True)
+    assert again.beliefs_merged == 0 and again.placeholders_retired == 0, "The repair is idempotent"

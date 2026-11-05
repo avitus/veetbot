@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -20,23 +21,42 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "upload"
     TRAJECTORY_EXPORT = "trajectory_export"
     KNOWLEDGE_SOURCE = "knowledge_source"
+    # ADR-0296: a file saved from an email; the owner's press or approval admits it.
+    EMAIL_ATTACHMENT = "email_attachment"
 
+
+# ADR-0277: deletes files Chat generated in a chat; an unindexed deferral that
+# the default instructions name.
+ARTIFACT_DELETE_TOOL_NAME = "artifact.delete"
 
 # ADR-0122: every file a run exports rides on its final reply. Tool-output
-# captures and the owner's own uploads are never re-attached.
+# captures and the owner's own uploads are never re-attached. ADR-0296: so does
+# an email attachment the run saved.
 REPLY_ATTACHMENT_ORIGINS = frozenset(
-    {ArtifactOrigin.SANDBOX_EXPORT.value, ArtifactOrigin.MODEL_OUTPUT.value}
+    {
+        ArtifactOrigin.SANDBOX_EXPORT.value,
+        ArtifactOrigin.MODEL_OUTPUT.value,
+        ArtifactOrigin.EMAIL_ATTACHMENT.value,
+    }
 )
 
 
-def reply_attachments(artifacts: list[ArtifactRef]) -> list[ArtifactRef]:
-    """Choose a run's exported files in creation order, once per name and content."""
+def reply_attachments(artifacts: list[ArtifactRef], *, now: datetime) -> list[ArtifactRef]:
+    """Choose a run's exported files in creation order, once per name and content.
+
+    Copies saved from different emails stay separate, because each follows its own
+    email through erasure (ADR-0296).
+
+    A file already expired, such as one `artifact.delete` removed earlier in the
+    run (ADR-0277), is left off: attaching it would clear the expiry.
+    """
 
     chosen: list[ArtifactRef] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str | None]] = set()
     for artifact in sorted(artifacts, key=lambda item: (item.created_at, item.id)):
-        key = (artifact.name, artifact.sha256)
-        if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen:
+        key = (artifact.name, artifact.sha256, saved_from(artifact.metadata))
+        expired = artifact.expires_at is not None and artifact.expires_at <= now
+        if artifact.origin not in REPLY_ATTACHMENT_ORIGINS or key in seen or expired:
             continue
         seen.add(key)
         chosen.append(artifact)
@@ -81,12 +101,15 @@ class StoredArtifactRef:
 # kept on the artifact row, and every one of them is visible in ArtifactView.
 ATTACHMENT_METADATA_KEY = "attachment"
 AUTO_INGEST_KEY = "auto_ingest"
+EMAIL_SOURCE_METADATA_KEY = "email_source"
 AUTO_INGEST_REASON_KEY = "auto_ingest_reason"
 AUTO_INGEST_ATTEMPTS_KEY = "auto_ingest_attempts"
 AUTO_INGEST_PENDING = "pending"
 AUTO_INGEST_INGESTED = "ingested"
 AUTO_INGEST_REFUSED = "refused"
 AUTO_INGEST_FAILED = "failed"
+# When the next ingestion attempt may run; a failed attempt backs off (ADR-0284).
+AUTO_INGEST_NOT_BEFORE_KEY = "auto_ingest_not_before"
 UPLOAD_UNCLAIMED_TTL = timedelta(hours=24)
 
 
@@ -95,6 +118,8 @@ class KnowledgeState(StrEnum):
 
     PENDING = AUTO_INGEST_PENDING
     INGESTED = AUTO_INGEST_INGESTED
+    REFUSED = AUTO_INGEST_REFUSED
+    FAILED = AUTO_INGEST_FAILED
 
 
 def claimed_upload(artifact: ArtifactRef, *, run_id: UUID, auto_ingest: bool) -> ArtifactRef:
@@ -110,19 +135,63 @@ def claimed_upload(artifact: ArtifactRef, *, run_id: UUID, auto_ingest: bool) ->
     return artifact.model_copy(update=update, deep=True)
 
 
+# The origins a principal's press or approval admits to knowledge (ADRs 0120, 0293).
+AUTO_INGEST_ORIGINS = frozenset(
+    {ArtifactOrigin.UPLOAD.value, ArtifactOrigin.EMAIL_ATTACHMENT.value}
+)
+
+
+def retry_refusal(artifact: ArtifactRef) -> str | None:
+    """Why `knowledge retry` must not reopen this artifact, or None when it may.
+
+    Only a chat upload or saved email attachment whose automatic ingestion failed
+    or was refused goes back to pending; anything else would send another kind of
+    file to the knowledge service or re-extract a document already in knowledge
+    (ADR-0284).
+    """
+
+    if artifact.origin not in AUTO_INGEST_ORIGINS:
+        return "only a chat upload can be retried"
+    state = artifact.metadata.get(AUTO_INGEST_KEY)
+    if state in {AUTO_INGEST_FAILED, AUTO_INGEST_REFUSED}:
+        return None
+    if state == AUTO_INGEST_INGESTED:
+        return "the upload is already in knowledge"
+    return "the upload is still pending ingestion"
+
+
+def auto_ingest_due(metadata: dict[str, Any], now: datetime) -> bool:
+    """Whether a pending upload's backoff, if any, has elapsed (ADR-0284)."""
+
+    recorded = metadata.get(AUTO_INGEST_NOT_BEFORE_KEY)
+    if not isinstance(recorded, str):
+        return True
+    try:
+        return datetime.fromisoformat(recorded) <= now
+    except ValueError:
+        return True
+
+
 def auto_ingest_metadata(
-    metadata: dict[str, Any], *, state: str, reason: str | None, attempts: int
+    metadata: dict[str, Any],
+    *,
+    state: str,
+    reason: str | None,
+    attempts: int,
+    not_before: str | None = None,
 ) -> dict[str, Any]:
     recorded = {
         key: value
         for key, value in metadata.items()
-        if key not in {AUTO_INGEST_REASON_KEY, AUTO_INGEST_ATTEMPTS_KEY}
+        if key not in {AUTO_INGEST_REASON_KEY, AUTO_INGEST_ATTEMPTS_KEY, AUTO_INGEST_NOT_BEFORE_KEY}
     }
     recorded[AUTO_INGEST_KEY] = state
     if reason is not None:
         recorded[AUTO_INGEST_REASON_KEY] = reason
     if attempts:
         recorded[AUTO_INGEST_ATTEMPTS_KEY] = attempts
+    if not_before is not None:
+        recorded[AUTO_INGEST_NOT_BEFORE_KEY] = not_before
     return recorded
 
 
@@ -147,6 +216,7 @@ class AttachmentRead:
 
     artifact_id: UUID
     max_bytes: int
+    inspection_call: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,3 +226,23 @@ class AttachmentContent:
     artifact_id: UUID
     data: bytes
     truncated: bool = False
+
+
+def saved_from(metadata: Mapping[str, Any]) -> str | None:
+    """The message a saved file was copied from, when its record can say."""
+
+    source = metadata.get(EMAIL_SOURCE_METADATA_KEY)
+    message_id = source.get("message_id") if isinstance(source, Mapping) else None
+    return message_id if isinstance(message_id, str) and message_id else None
+
+
+def outlives_source_erasure(metadata: Mapping[str, Any], message_ids: frozenset[str]) -> bool:
+    """A saved file copies its own email, whatever else its run read (ADR-0296).
+
+    Its bytes come from Gmail, so erasing a different source in the same run
+    leaves it alone, before or after knowledge takes it over. A source nobody
+    can read is treated as the one being erased.
+    """
+
+    message_id = saved_from(metadata)
+    return message_id is not None and message_id not in message_ids

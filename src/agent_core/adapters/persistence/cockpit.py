@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, delete, func, insert, select, update
+from sqlalchemy import ColumnElement, Select, delete, func, insert, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -129,7 +129,8 @@ class InMemoryWidgetStore:
             owned[widget.slug] = widget
             return widget
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget:
+    async def get_widget(self, principal: Principal, slug: str, *, lock: bool = False) -> Widget:
+        del lock  # No in-memory call suspends, so a caller's check and write are one step.
         async with self._lock:
             return self._widget(principal, slug)
 
@@ -157,13 +158,18 @@ class InMemoryWidgetStore:
             return self._revision(principal, revision_id)
 
     async def list_revisions(
-        self, principal: Principal, slug: str, *, limit: int
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        limit: int,
+        states: Sequence[RevisionState] | None = None,
     ) -> list[WidgetRevision]:
         async with self._lock:
             revisions = [
                 item
                 for item in self._revisions.get(_owner(principal), {}).values()
-                if item.slug == slug
+                if item.slug == slug and (states is None or item.state in states)
             ]
             revisions.sort(key=lambda item: (item.created_at, str(item.id)), reverse=True)
             return revisions[:limit]
@@ -304,17 +310,82 @@ class InMemoryWidgetCommitOutbox:
             self._entries[key] = entry
             return entry
 
-    async def due(self, tenant_id: str, *, now: datetime, limit: int) -> list[CommitOutboxEntry]:
+    async def first_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        owned = _owner(principal)
+        async with self._lock:
+            return min(
+                (
+                    entry
+                    for key, entry in self._entries.items()
+                    if key[:2] == owned and entry.slug == slug
+                ),
+                key=lambda e: (e.created_at, str(e.revision_id)),
+                default=None,
+            )
+
+    async def newest_for_widget(
+        self, principal: Principal, slug: str, operation: OutboxOperation | None = None
+    ) -> CommitOutboxEntry | None:
+        owned = _owner(principal)
+        async with self._lock:
+            return max(
+                (
+                    entry
+                    for key, entry in self._entries.items()
+                    if key[:2] == owned
+                    and entry.slug == slug
+                    and (operation is None or entry.operation is operation)
+                ),
+                key=lambda e: (e.created_at, str(e.revision_id)),
+                default=None,
+            )
+
+    async def removal_queued(self, principal: Principal, slug: str) -> bool:
+        owned = _owner(principal)
+        async with self._lock:
+            return any(
+                key[:2] == owned
+                and entry.slug == slug
+                and entry.operation is OutboxOperation.REMOVE
+                for key, entry in self._entries.items()
+            )
+
+    async def due(
+        self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
+    ) -> list[CommitOutboxEntry]:
+        """Select due requests, applying optional owner scope before the batch limit."""
         async with self._lock:
             due = [
                 entry
                 for entry in self._entries.values()
-                if entry.tenant_id == tenant_id and entry.next_attempt_at <= now
+                if entry.tenant_id == tenant_id
+                and (principal_id is None or entry.principal_id == principal_id)
+                and entry.next_attempt_at <= now
             ]
             due.sort(
                 key=lambda item: (item.next_attempt_at, item.created_at, str(item.revision_id))
             )
             return due[:limit]
+
+    async def due_heads(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[CommitOutboxEntry]:
+        owned = _owner(principal)
+        async with self._lock:
+            heads: dict[str, CommitOutboxEntry] = {}
+            for key, entry in self._entries.items():
+                if key[:2] != owned:
+                    continue
+                head = heads.get(entry.slug)
+                if head is None or (entry.created_at, str(entry.revision_id)) < (
+                    head.created_at,
+                    str(head.revision_id),
+                ):
+                    heads[entry.slug] = entry
+            return sorted(
+                (head for head in heads.values() if head.next_attempt_at <= now),
+                key=lambda item: (item.next_attempt_at, item.created_at, str(item.revision_id)),
+            )[:limit]
 
     async def reschedule(
         self,
@@ -352,16 +423,21 @@ class InMemoryWidgetCommitOutbox:
             return failure
 
     async def import_failures(
-        self, principal: Principal, *, unseen_only: bool = False
+        self,
+        principal: Principal,
+        *,
+        unseen_only: bool = False,
+        slug: str | None = None,
+        limit: int | None = None,
     ) -> list[ImportFailure]:
         async with self._lock:
             failures = [
                 item
                 for item in self._failures.get(_owner(principal), {}).values()
-                if not (unseen_only and item.seen)
+                if not (unseen_only and item.seen) and (slug is None or item.slug == slug)
             ]
             failures.sort(key=lambda item: (item.created_at, str(item.id)), reverse=True)
-            return failures
+            return failures[:limit]
 
     async def mark_seen(self, principal: Principal, failure_ids: Sequence[UUID]) -> int:
         async with self._lock:
@@ -676,8 +752,8 @@ class PostgresWidgetStore:
         )
         return widget
 
-    async def get_widget(self, principal: Principal, slug: str) -> Widget:
-        return _widget_from_row(await self._widget_row(principal, slug))
+    async def get_widget(self, principal: Principal, slug: str, *, lock: bool = False) -> Widget:
+        return _widget_from_row(await self._widget_row(principal, slug, lock=lock))
 
     async def list_widgets(
         self, principal: Principal, *, include_deleted: bool = False
@@ -702,14 +778,25 @@ class PostgresWidgetStore:
         return _revision_from_row(await self._revision_row(principal, revision_id))
 
     async def list_revisions(
-        self, principal: Principal, slug: str, *, limit: int
+        self,
+        principal: Principal,
+        slug: str,
+        *,
+        limit: int,
+        states: Sequence[RevisionState] | None = None,
     ) -> list[WidgetRevision]:
+        narrowed = (
+            ()
+            if states is None
+            else (CockpitWidgetRevisionRow.state.in_([state.value for state in states]),)
+        )
         rows = (
             await self._session.execute(
                 select(CockpitWidgetRevisionRow)
                 .where(
                     *_owned_by(CockpitWidgetRevisionRow, principal),
                     CockpitWidgetRevisionRow.slug == slug,
+                    *narrowed,
                 )
                 .order_by(
                     CockpitWidgetRevisionRow.created_at.desc(), CockpitWidgetRevisionRow.id.desc()
@@ -965,14 +1052,20 @@ def _failure_from_row(row: CockpitImportFailureRow) -> ImportFailure:
 
 
 class PostgresWidgetCommitOutbox:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, package_kind: str = "widget") -> None:
+        """Bind publication persistence to a database session and fixed package namespace."""
         self._session = session
+        if package_kind not in {"widget", "job"}:
+            raise ValueError("Unknown publication namespace.")
+        self._kind = package_kind
 
     async def enqueue(self, entry: CommitOutboxEntry) -> CommitOutboxEntry:
+        """Persist a publication request in this adapter's package namespace."""
         try:
             async with self._session.begin_nested():
                 await self._session.execute(
                     insert(CockpitCommitOutboxRow).values(
+                        package_kind=self._kind,
                         tenant_id=entry.tenant_id,
                         principal_id=entry.principal_id,
                         revision_id=entry.revision_id,
@@ -991,13 +1084,103 @@ class PostgresWidgetCommitOutbox:
             ) from error
         return entry
 
-    async def due(self, tenant_id: str, *, now: datetime, limit: int) -> list[CommitOutboxEntry]:
+    async def first_for_widget(self, principal: Principal, slug: str) -> CommitOutboxEntry | None:
+        row = await self._session.scalar(
+            select(CockpitCommitOutboxRow)
+            .where(
+                CockpitCommitOutboxRow.package_kind == self._kind,
+                CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                CockpitCommitOutboxRow.principal_id == principal.principal_id,
+                CockpitCommitOutboxRow.slug == slug,
+            )
+            .order_by(CockpitCommitOutboxRow.created_at, CockpitCommitOutboxRow.revision_id)
+            .limit(1)
+        )
+        return _entry_from_row(row) if row else None
+
+    async def newest_for_widget(
+        self, principal: Principal, slug: str, operation: OutboxOperation | None = None
+    ) -> CommitOutboxEntry | None:
+        row = await self._session.scalar(
+            select(CockpitCommitOutboxRow)
+            .where(
+                CockpitCommitOutboxRow.package_kind == self._kind,
+                CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                CockpitCommitOutboxRow.principal_id == principal.principal_id,
+                CockpitCommitOutboxRow.slug == slug,
+                *(
+                    ()
+                    if operation is None
+                    else (CockpitCommitOutboxRow.operation == operation.value,)
+                ),
+            )
+            .order_by(
+                CockpitCommitOutboxRow.created_at.desc(), CockpitCommitOutboxRow.revision_id.desc()
+            )
+            .limit(1)
+        )
+        return _entry_from_row(row) if row else None
+
+    async def removal_queued(self, principal: Principal, slug: str) -> bool:
+        row = await self._session.scalar(
+            select(CockpitCommitOutboxRow.revision_id)
+            .where(
+                CockpitCommitOutboxRow.package_kind == self._kind,
+                CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                CockpitCommitOutboxRow.principal_id == principal.principal_id,
+                CockpitCommitOutboxRow.slug == slug,
+                CockpitCommitOutboxRow.operation == OutboxOperation.REMOVE.value,
+            )
+            .limit(1)
+        )
+        return row is not None
+
+    async def due(
+        self, tenant_id: str, *, now: datetime, limit: int, principal_id: str | None = None
+    ) -> list[CommitOutboxEntry]:
+        """List due requests, applying namespace and optional owner scope before the limit."""
+        query = select(CockpitCommitOutboxRow).where(
+            CockpitCommitOutboxRow.package_kind == self._kind,
+            CockpitCommitOutboxRow.tenant_id == tenant_id,
+            CockpitCommitOutboxRow.next_attempt_at <= now,
+        )
+        if principal_id is not None:
+            query = query.where(CockpitCommitOutboxRow.principal_id == principal_id)
+        rows = (
+            await self._session.execute(
+                query.order_by(
+                    CockpitCommitOutboxRow.next_attempt_at,
+                    CockpitCommitOutboxRow.created_at,
+                    CockpitCommitOutboxRow.revision_id,
+                ).limit(limit)
+            )
+        ).scalars()
+        return [_entry_from_row(row) for row in rows]
+
+    async def due_heads(
+        self, principal: Principal, *, now: datetime, limit: int
+    ) -> list[CommitOutboxEntry]:
+        older = aliased(CockpitCommitOutboxRow)
         rows = (
             await self._session.execute(
                 select(CockpitCommitOutboxRow)
                 .where(
-                    CockpitCommitOutboxRow.tenant_id == tenant_id,
+                    CockpitCommitOutboxRow.package_kind == self._kind,
+                    CockpitCommitOutboxRow.tenant_id == principal.tenant_id,
+                    CockpitCommitOutboxRow.principal_id == principal.principal_id,
                     CockpitCommitOutboxRow.next_attempt_at <= now,
+                    ~select(older.revision_id)
+                    .where(
+                        older.package_kind == CockpitCommitOutboxRow.package_kind,
+                        older.tenant_id == CockpitCommitOutboxRow.tenant_id,
+                        older.principal_id == CockpitCommitOutboxRow.principal_id,
+                        older.slug == CockpitCommitOutboxRow.slug,
+                        tuple_(older.created_at, older.revision_id)
+                        < tuple_(
+                            CockpitCommitOutboxRow.created_at, CockpitCommitOutboxRow.revision_id
+                        ),
+                    )
+                    .exists(),
                 )
                 .order_by(
                     CockpitCommitOutboxRow.next_attempt_at,
@@ -1018,11 +1201,13 @@ class PostgresWidgetCommitOutbox:
         next_attempt_at: datetime,
         last_error: str | None,
     ) -> CommitOutboxEntry:
+        """Update retry timing for an owned request in this package namespace."""
         row = (
             await self._session.execute(
                 update(CockpitCommitOutboxRow)
                 .where(
                     *_owned_by(CockpitCommitOutboxRow, principal),
+                    CockpitCommitOutboxRow.package_kind == self._kind,
                     CockpitCommitOutboxRow.revision_id == revision_id,
                 )
                 .values(attempts=attempts, next_attempt_at=next_attempt_at, last_error=last_error)
@@ -1037,13 +1222,16 @@ class PostgresWidgetCommitOutbox:
         await self._session.execute(
             delete(CockpitCommitOutboxRow).where(
                 *_owned_by(CockpitCommitOutboxRow, principal),
+                CockpitCommitOutboxRow.package_kind == self._kind,
                 CockpitCommitOutboxRow.revision_id == revision_id,
             )
         )
 
     async def record_import_failure(self, failure: ImportFailure) -> ImportFailure:
+        """Store an owned import diagnostic without mixing package namespaces."""
         await self._session.execute(
             insert(CockpitImportFailureRow).values(
+                package_kind=self._kind,
                 tenant_id=failure.tenant_id,
                 principal_id=failure.principal_id,
                 id=failure.id,
@@ -1057,11 +1245,22 @@ class PostgresWidgetCommitOutbox:
         return failure
 
     async def import_failures(
-        self, principal: Principal, *, unseen_only: bool = False
+        self,
+        principal: Principal,
+        *,
+        unseen_only: bool = False,
+        slug: str | None = None,
+        limit: int | None = None,
     ) -> list[ImportFailure]:
+        """List the owner's import diagnostics for this package namespace."""
         query = select(CockpitImportFailureRow).where(
-            *_owned_by(CockpitImportFailureRow, principal)
+            *_owned_by(CockpitImportFailureRow, principal),
+            CockpitImportFailureRow.package_kind == self._kind,
         )
+        if slug is not None:
+            query = query.where(CockpitImportFailureRow.slug == slug)
+        if limit is not None:
+            query = query.limit(limit)
         if unseen_only:
             query = query.where(CockpitImportFailureRow.seen.is_(False))
         rows = (
@@ -1074,12 +1273,14 @@ class PostgresWidgetCommitOutbox:
         return [_failure_from_row(row) for row in rows]
 
     async def mark_seen(self, principal: Principal, failure_ids: Sequence[UUID]) -> int:
+        """Acknowledge an owned import diagnostic in this package namespace."""
         if not failure_ids:
             return 0
         result = await self._session.execute(
             update(CockpitImportFailureRow)
             .where(
                 *_owned_by(CockpitImportFailureRow, principal),
+                CockpitImportFailureRow.package_kind == self._kind,
                 CockpitImportFailureRow.id.in_(list(failure_ids)),
                 CockpitImportFailureRow.seen.is_(False),
             )
@@ -1088,10 +1289,15 @@ class PostgresWidgetCommitOutbox:
         return _rowcount(result)
 
     async def erase_principal(self, principal: Principal) -> int:
+        """Erase the owner's publication records only within this package namespace."""
         removed = 0
         for table in (CockpitCommitOutboxRow, CockpitImportFailureRow):
             removed += _rowcount(
-                await self._session.execute(delete(table).where(*_owned_by(table, principal)))
+                await self._session.execute(
+                    delete(table).where(
+                        *_owned_by(table, principal), table.package_kind == self._kind
+                    )
+                )
             )
         return removed
 

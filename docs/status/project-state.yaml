@@ -1,3 +1,68 @@
+# ADR-0298: On 2026-11-04 the owner chose to stop Email refreshes above the 75%
+# share paying for the re-rating backlog: a new-mail slice assesses and drafts only
+# arrivals, under ADR-0286's rule, and one that found nothing is an empty look.
+# Accepted; no milestone or gate moves.
+# ADR-0296: On 2026-11-03 the owner asked to add email attachments to Veetbot's
+# file storage, and chose the email's chat, a Save button plus an approval-gated
+# Chat tool, and knowledge on every save. Implemented, not yet tried on a real
+# mailbox. No milestone or gate moves.
+# ADR-0295: On 2026-11-04 the owner reported email refreshes failing and chose
+# both repairs: an email slice's 120 seconds start at its first claim rather than
+# at admission, and the async role runs two processes. Accepted; no milestone or
+# gate moves.
+# ADR-0294: On 2026-11-03 the owner asked that Chat be able to download the CSV
+# Chase offered, which the browser cancelled. An individually approved click may
+# now save one bounded text file as a capture of the chat, read through
+# artifact.read_capture; every other file is still cancelled. browser.act moves
+# to 1.8.0 with 1.7.0 kept for pinned chats. Proposed until the owner's production
+# check on Chase passes. No milestone or gate moves.
+# ADR-0291: On 2026-11-03 the owner asked for MCP tools in scheduled runs and
+# Cockpit widgets, and chose per-schedule servers plus read-only MCP calls from
+# saved jobs. Each schedule names its servers, the approval lists them, and a
+# job's grant names what it may read. Implemented, not yet delivered: the schedule
+# environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0290: On 2026-11-03 the owner directed that semantic retrieval be
+# activated and stay on ("turned on and off for many months now and we are
+# failing to make progress"). A standing owner admission
+# (recall-standing-admission@1) carries the instruction with no expiry and no
+# release census, hard-bound only to the local encoder tuple; knowledge chunks
+# embed in windows under the encoder's capacity (knowledge-text@2) with a
+# maintenance backfill; gate 13 re-recorded in the local space found no lift,
+# so the knowledge arm runs on its own OpenAI provider
+# (AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai). Accepted; a recorded deviation
+# from the plan's activation evidence. No milestone or gate moves.
+# ADR-0289: On 2026-11-02 the owner's question about valve-like sounds from
+# the parked car missed the manual's passage under coverage ranking, and the
+# owner asked for the knowledge semantic arm the design defers on measured
+# lift. Built default-off behind AGENT_KNOWLEDGE_SEMANTIC_ENABLED with gate 13
+# (gate.knowledge.paraphrase_lift) as the measurement: the dense channel lifts
+# every corpus member into the top two, hybrid reciprocal-rank fusion with the
+# ADR-0285 lexical arm lifts none. Proposed; activation needs the gate
+# re-recorded with the production embedding space. No milestone or gate moves.
+# ADR-0281: On 2026-11-01 the owner asked for first-class coding and debugging
+# power and chose power up to opening pull requests: run.inspect, code.read,
+# code.draft, code.test and code.propose, which never merge or deploy. The widget
+# watchdog stops counting sleep and hidden pages against a widget. Accepted; no
+# milestone or gate moves.
+# ADR-0279: On 2026-10-31 the owner authorized one-press Send with Undo: the
+# press is the owner's consent to the exact draft revision at the thread
+# revision on screen (the Archive gesture pattern), the task is parked for
+# AGENT_EMAIL_SEND_UNDO_SECONDS, Undo cancels it, and the consent consumer
+# resolves the ordinary REQUIRE_APPROVAL once with no second notification.
+# The review sheet remains only for drafts already awaiting approval.
+# Accepted; no milestone or gate moves.
+# ADR-0278: On 2026-10-31 the owner asked for a quicker, clearer email reply
+# flow and chose its repairs ahead of a one-press send: send tasks join the
+# interactive queue class, the mailbox is read once (after Final Send), owner
+# refusals read as plain English, and the Apple client keeps Review & Send
+# available during autosave, reports an unsent send and names the new mail
+# that stalled a draft. Proposed; no milestone or gate moves.
+# ADR-0268: On 2026-10-29 the owner accepted the agent-written jobs MVP and
+# instructed implementation: saved Python programs combine code and explicit
+# model calls as appropriate, run once or through the existing scheduler, and
+# publish existing Cockpit feeds. PR 210 delivered the implementation; the owner
+# authorized production activation on 2026-10-30. Jobs and the repository-scoped
+# reader are enabled; full production acceptance remains pending. No gate moves.
 # ADR-0240: Owner authorized Milestone 35, Cockpit mode and agent-authored
 # widgets, on 2026-10-22; design and pending gates only. The verified ceiling
 # does not move.
@@ -25,6 +90,18 @@
 # plural or third-person "-s" (retrieval@8), and probes can check delivered
 # names. Delivered in PR 206, merged 2026-10-28; the production
 # `agent people link-kinship` repair run is pending. No milestone or gate moves.
+# ADR-0264/0265: On 2026-10-28 the owner's family question omitted their
+# mother (parents sat on overview page 2 behind the household) and the owner's
+# correction formed a duplicate person (an owner-stated name never matched
+# email-context aliases). An owner-stated name now selects the one person the
+# owner is already tied to, and a first overview page reaches the first member
+# of every family tier, three to eight people (+owner-overview@3). Proposed;
+# no milestone or gate moves.
+# ADR-0266: On 2026-10-28 the owner retired five spent one-time repairs after
+# read-only production queries: the ADR-0134 plan re-key and builder@11
+# equivalence, fourteen retained previous tool versions, `agent memory
+# reshape`, `agent email exclude-bulk`, and the legacy extraction-flag shim.
+# No milestone or gate moves.
 # ADR-0251: Owner accepted on 2026-10-25 an app-offered card that connects an
 # unconnected chat to an owned website the owner names; a match never connects
 # by itself, and an offer expires at the next owner message or after 24 hours.
@@ -54,6 +131,12 @@
 # 2,000 to 2,500 tokens so a website-bound chat skips no Gmail write; the
 # prefix ceiling rises to 24,500. Implemented with gate tests; delivery is
 # pending. No milestone, gate or policy profile moves.
+# ADR-0267: Owner asked on 2026-10-29 to raise the deferred tool index to
+# fifty entries and 3,000 tokens, after the fullest production chat filled
+# all forty entries; the prefix ceiling rises to 25,000, and a gate keeps ten
+# entries and 500 tokens free. The owner accepted ADR-0253 the same day.
+# Implemented with gate tests; delivery is pending. No milestone, gate or
+# policy profile moves.
 schema_version: 1
 
 project:
@@ -142,7 +225,8 @@ project:
   # verification job whose exact source tree already passed it.
   # ADR-0116 records the owner's non-milestone repair on 2026-09-22: bulk mail
   # never forms communication memory; the census and the bulk verdict gate
-  # formation and `agent email exclude-bulk` erases what already formed.
+  # formation; what already formed left through governed deletion (the
+  # census-wide exclusion command was withdrawn unused by ADR-0266).
   # ADR-0117 records the owner's non-milestone extension on 2026-09-22: memory
   # review and deletion over HTTP under memory.write, superseding ADR-0070
   # decision 3, with the native review actions and the flagged filter.
@@ -324,6 +408,138 @@ project:
     - 35
 
 
+generated_file_deletion:
+  adr: docs/adr/0277-chat-deletes-files-it-generated.md
+  authorized_on: '2026-10-31'
+  status: implemented_pending_delivery
+  evidence: tests/unit/test_artifact_delete.py
+  scope: Chat deletes files it generated in the current chat at the owner's request.
+
+public_photo_inspection:
+  adr: docs/adr/0276-public-image-inspection.md
+  authorized_on: '2026-10-31'
+  status: implemented_pending_delivery
+  evidence: tests/unit/test_web_inspect_image.py
+  scope: Public image URLs and selected SmugMug photos reach the model as verified tool results.
+
+integration_secrets_mvp:
+  adr: docs/adr/0275-in-app-integration-secrets.md
+  authorized_on: '2026-10-30'
+  status: in_progress
+  authorized_scope:
+  - Owner-entered integration keys in Settings, sealed in PostgreSQL
+  - Existing credential broker and approved jobs as the first consumer
+  - A separate host-held master key and manual off-host recovery
+  - PR to main, CodeRabbit review, final hosted verification, merge and production activation authorized on 2026-10-31
+  implementation_status: implemented_default_off_pending_review_and_delivery
+  implementation_evidence:
+  - tests/unit/test_integration_secrets_api.py
+  - tests/unit/test_integration_secrets_security.py
+  - tests/unit/test_integration_secret_jobs.py
+  - tests/contract/test_integration_secret_store_contract.py
+  - tests/integration/test_integration_secrets_postgres.py
+  - clients/apple/Tests/VeetbotCoreTests/IntegrationSecretsTests.swift
+  verification:
+    reading_lane: A
+    diff_minimum_reading_lane: A
+    static: 'Full frozen-code partition: 9037 passed, one skipped; the sole failure was the workflow test asserting two workers under the four-worker invocation, all 12 tests in that module passed when rerun with defaults'
+    focused: '200 API, secret-store, jobs and architecture checks passed after the failure-path fixes'
+    initial_run: 'The initial full run overlapped source edits, invalidating cached release-evidence fingerprints; a synthetic userinfo URL also triggered the scanner. Source was frozen and the fixture constructed at runtime before the rerun; none of those failures remained'
+    checks: 'Lint, mypy, citation repair, docs-check and git diff --check passed'
+    contract: 'circleci testsuite run contract: 2012 passed; includes the unchanged MCP sealing contract'
+    postgres: 'circleci testsuite run integration: 24 passed across secret store, jobs, migration and MCP persistence atoms on an isolated disposable PostgreSQL 16 cluster'
+    native: 'make test-apple: 1040 core tests and four contrast tests passed'
+    security_evidence: 'Owner/RLS isolation, ciphertext AAD/tamper/wrong-key refusal, transaction rollback, concurrent CAS/cap/retries, tombstones, fresh worker processes after replacement/deletion, and synthetic ciphertext snapshot restore with a separately supplied key'
+    boundary_evidence: 'Metadata-only authenticated API, content-free validation/errors/logging, no-store failures, dedicated transient native input, stable retry identity, grant-bound composed HTTP reads and encoded-echo refusal'
+    red_tests:
+    - 'circleci testsuite run static -t test_integration_secrets_api: expected PUT 200 initially returned 404'
+    - 'circleci testsuite run contract -t test_integration_secret_store_contract: expected the composed repository; it was absent'
+    - 'circleci testsuite run static -t test_integration_secret_jobs: stored reference initially rejected by JobAccess'
+    - 'make test-apple: Integration keys was absent from the Settings sections'
+    - 'Additional regressions first reproduced wrong-key overwrite, incorrect 503 mapping, missing no-store on 500, lowercase URL-escape and numeric JSON echoes, and noncanonical origins'
+    activation_preflight: '2026-10-31: Confirmed the nightly backup takes a database dump and state tar. Verified the master-key exclusion with a synthetic archive. Escrowed the new key in the owner-designated off-host login Keychain and successfully recovered a synthetic row through pg_dump/pg_restore into a separate database with a fresh escrow read. A wrong key failed.'
+    review_regression: 'The loader initially rejected the root-owned 0440 ACL-backed credential from the production systemd version. The corrected loader admitted a synthetic unit-only credential on that host and refused foreign, group-readable, missing-ACL and ordinary-path variants in tests.'
+    production_evidence: 'Hosted final CI, merged delivery and live enablement pending at PR submission.'
+  implementation_authorized: true
+  production_activation_authorized: true
+  remaining_work:
+  - Complete review, final hosted verification and merged delivery
+  - Enable trusted roles, verify the live Settings lifecycle and keep provider permissions scoped
+
+agent_jobs_mvp:
+  adr: docs/adr/0268-agent-written-jobs.md
+  authorized_on: '2026-10-29'
+  status: in_progress
+  authorized_scope:
+  - Agent-authored public Python packages with private inputs and approved access
+  - Code-only and mixed code/model workflows through four broker operations
+  - One-time runs, real trials under approved access, and existing scheduler integration
+  - GitHub PR monitoring through the existing Cockpit widget and feed
+  - One final summarized widget installation approval, authorized 2026-10-30 (ADR-0270)
+  implementation_status: deployed_and_activated_pending_production_acceptance
+  recall_coexistence_repair:
+    adr: docs/adr/0272-jobs-and-semantic-recall-coexist.md
+    authorized_on: '2026-10-30'
+    status: implemented_pending_delivery
+    scope: 'Keep jobs enabled; bind external grants to code; screen proposed inputs and queued publication; refuse supported encoded credential echoes; assess exact jobs-enabled semantic admission before restoration.'
+    operational_boundary: 'The owner requires no human pushes to cockpit/jobs. An App-only branch update/creation ruleset is installed; history protections remain separate.'
+    limitation: 'Semantic recall is not restored by these development changes. Final release assessment, root installation and independent readback remain required.'
+  approval_workflow_repair:
+    adr: docs/adr/0270-one-approval-for-a-widget-installation.md
+    authorized_on: '2026-10-30'
+    status: implemented_pending_delivery
+    checks: 'Static: 9022 passed and one skipped across 542 atoms. Focused workflow/jobs: 46 passed across four atoms. Contracts: 2011 passed across 190 atoms. PostgreSQL: five passed across four selected atoms. Lint, typecheck, citation repair and docs-check passed. Production remains unchanged.'
+    evidence:
+    - tests/unit/test_cockpit_installation.py
+    - tests/unit/test_job_authorization.py
+    verification: 'The initial regression reproduced approval for owner-directed reads and trials. The composed workflow now prepares without publication, requests one summarized approval, resumes pending installation without another prompt, and creates one widget, grant and schedule. Denied, altered and foreign proposals have no installation authority; malformed preparation returns untrusted repair feedback.'
+  implementation_evidence:
+  - tests/unit/test_job_program_process.py
+  - tests/contract/test_job_runner_contract.py
+  - tests/contract/test_job_screen_contract.py
+  - tests/contract/test_job_repository_contract.py
+  - tests/contract/test_job_store_contract.py
+  - tests/integration/test_job_store_postgres.py
+  - tests/unit/test_job_publication.py
+  - tests/unit/test_job_http.py
+  - tests/unit/test_job_broker.py
+  - tests/unit/test_job_model.py
+  - tests/unit/test_job_execution.py
+  - tests/unit/test_job_feed_preview.py
+  - tests/unit/test_job_tools.py
+  - tests/unit/test_job_authorization.py
+  - tests/unit/test_job_schedule.py
+  - tests/unit/test_job_composition.py
+  - tests/unit/test_job_examples.py
+  verification:
+    reading_lane: A
+    diff_minimum_reading_lane: A
+    production_delivery: 'PR 210 merged as 35c708a15b818711332200d4ade53660049227f5. CircleCI workflow c4c262be-deb1-4051-ae79-84935563f3f1 passed application, documentation, website and TestFlight delivery; public release identities matched 20261030-024932-35c708a.'
+    production_activation: 'On 2026-10-30, using release 20261030-062542-d70fac7, the owner selected two repositories and approved the read-only reader App installation. Publication rules admit cockpit/jobs while retaining branch history protections. Application and scheduler jobs flags are enabled; only run workers receive the reader key through LoadCredential. All five restarted application/scheduler services are active.'
+    production_trial: 'A fresh interactive chat discovered job.manage and job.run. The sandbox sum trial returned 10 with zero broker calls. The agent-authored github-pr-count package published on cockpit/jobs; private repository inputs are absent from its public source.'
+    production_grant_reuse: 'Interactive run a695b1f2-0b1a-4c35-a342-e78b09a70784 completed two successful executions of revision 695ce313-5375-4832-965d-bd7fdafd76a4 with the same grant. Each used two HTTP broker calls and no model operation. The authoring chat used normal model calls. An unsupported proposed response limit was refused; the agent corrected it before execution.'
+    main_base_static: 'circleci testsuite run static: 8969 passed, one skipped across all 542 atoms after the PR review fix batches'
+    pre_rebase_static: 'circleci testsuite run static: 8933 passed, one skipped, one pre-existing failure across all 540 atoms on the original dev-based branch'
+    original_base_failure: 'tests/unit/test_owner_recall_probes.py::test_family_probe_checks_the_names_the_overview_delivers; reproduced on untouched bbbb1282 before jobs implementation'
+    contract: 'circleci testsuite run contract: 2008 passed across all 190 test atoms on the main-based PR branch'
+    postgres: 'circleci testsuite run integration: 17 passed across five selected job, Cockpit and schedule atoms; 115 atoms excluded'
+    final_workflow: 'circleci testsuite run static -t ^tests/unit/test_job_composition.py$: 12 passed, including external approval/resume and reuse; 539 atoms excluded'
+    checks: 'Lint, typecheck, Cockpit lint/typecheck, citation repair and docs-check passed'
+    review_regressions: 'Five reproduced defects now pass: first-feed approval, stable manifest bytes across hash seeds, invalid cost feedback, model-limit feedback and cleanup continuation; 44 focused cases passed'
+    review_summary_regressions: 'Five new regression cases first failed on replay classification, a missing trial watermark, and repeated failed model requests; all 95 job unit cases and 19 job contract cases now pass. Failed billed usage is persisted and stops execution; existing recovery preserves uncertain effects.'
+    publication_recovery_regressions: 'Seven cases first failed on schedule replay and lost publication receipts overriding later imported deletions or edits (including identical files); all 102 job unit cases and 19 job contract cases pass after preserving import precedence and uncertain schedule updates.'
+    imported_restore_regressions: 'Two cases first failed on imported-deletion restoration or its missing archive parent. Imported deletions now retain a dedicated archived revision at the deletion commit; all 104 job unit cases and 19 job contract cases pass.'
+    outbox_owner_regression: 'The owner publication test first failed with 100 earlier foreign-owner requests. Owner filtering now precedes the batch limit; 105 job unit cases, the full 2008-case contract partition and four PostgreSQL job/Cockpit integration cases pass, including the shared outbox contract.'
+    red_test:
+      command: 'circleci testsuite run contract -t ^tests/contract/test_job_runner_contract.py$'
+      expected_failure: 'Catching the broker call limit incorrectly returned success instead of JobExecutionError'
+      resolution: 'The runner retains the bridge limit failure; the regression and complete contract partition pass'
+  remaining_work:
+  - Deliver and verify the single-approval widget installation repair (ADR-0270)
+  - Adapt the generic collector mapping to the existing live widget feed schema
+  - Mixed code/model smoke workflow in production
+  - Observe the live widget for a day against ADR-0268 freshness and zero-model-cost criteria
+
 milestones:
   '35':
     title: Cockpit mode and agent-authored widgets
@@ -372,7 +588,8 @@ milestones:
     open_items:
     - 'Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image'
     - 'Build step 10 remainder: the discuss intent, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19''s preflight rebuild of live widgets'
-    - 'Build step 11: preview rendering'
+    - 'ADR-0273: Verify the fixture preview and a device failure report after releasing the production builder and Apple client.'
+    - "The widget write approval view's preview image: the design calls for it, and the card so far carries only the whole diff"
     - "Activation: the owner's GitHub App, rulesets, credential and flag; the cockpit.widget.write tool_rules entry with one formation evidence regeneration on the new policy version (deferred here by the owner on 2026-10-24), which binds gate 10; the assistant's seed widgets; then the activation release (build steps 2 to 10 reached main in pull requests 186, 187, 188, 193, 195 and 200 by 2026-10-26)"
     deferred_scope:
     - Deterministic collectors that fetch outside data without a model run, and their egress allowlist
@@ -2422,7 +2639,7 @@ milestones:
     authorized_on: 2026-09-11
     design: docs/plan/email-experience.md
     adr: docs/adr/0092-client-modes-and-email-experience.md
-    gates_registered: 32
+    gates_registered: 33
     authorized_scope:
       - shared Chat and Email presentation on iPhone, iPad and Mac
       - owner-requested archive and move-to-Inbox actions for one exact thread in the originating Gmail account
@@ -2436,8 +2653,9 @@ milestones:
       - a separate seven-day owner-reviewed work-account Jev pilot, capped at fifty new bypasses per UTC day; implementation and production activation explicitly approved 2026-10-14 (ADR-0204)
       - standing owner-reviewed work-account junk filtering authorized 2026-10-24 after 198 confirmed bypasses; same protections and daily cap, no calendar expiry (ADR-0244)
       - an offline, non-activating importance replay comparing the production assessor with a typed-judgment arm (ADR-0110); it cannot satisfy or waive a Milestone 26 gate
+      - default-off server arrival checks every five minutes, limited to 50% of the daily and 90% of the rolling allowance; owner accepted and authorized implementation 2026-11-01 (ADR-0286)
     deferred_scope:
-      - unattended monitoring, Gmail push, scheduled digests and interval scheduling
+      - other unattended monitoring, Gmail push, scheduled digests and schedule-row interval scheduling
       - autonomous sending, automatic Gmail writes and Gmail draft synchronization
       - another provider, self-service OAuth, attachments and calendar operations
       - offline-authoritative editing, separate email persona and model routing
@@ -2446,7 +2664,7 @@ milestones:
       - Calibrate aggregate cost and performance with authorized representative mailbox work
       - Execute frozen private importance, reply relevance and writing-style evaluations with the owner
       - Pass private semantic precision, recall and usefulness evaluation before activating the exact policy tuple
-      - Pass all thirty-two Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
+      - Pass all thirty-three Milestone 26 gates and relevant local, PostgreSQL, native and private quality evaluations
       - Record authorized two-account real-mailbox acceptance and final-head hosted review and production delivery evidence
     evidence:
       - check: reply drafting after the retained body expires
@@ -2803,6 +3021,8 @@ milestones:
     gates_registered: 12
     implementation_status: authorized_cross_category_recovery_and_combined_release_in_progress
     implementation_evidence:
+      - tests/unit/test_recall_release_handoff.py
+      - tests/unit/test_recall_handoff_observations.py
       - tests/contract/test_runtime_semantic_queries_contract.py
       - tests/contract/test_context_recall_freshness.py
       - tests/unit/test_context_recall_cache.py
@@ -2908,6 +3128,7 @@ milestones:
       - external memory services, arbitrary graph inference, training and RL
       - automatic historical re-extraction and unattended dreaming activation
     open_items:
+      - Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
       - Complete the staged implementation and comparative activation evidence
       - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
   "34":
@@ -3182,5 +3403,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
   documents_required_before_coding_reaches_them: []
 
-last_updated: '2026-10-28T07:00:00Z'
+last_updated: '2026-10-29T21:00:09Z'
 last_reviewed_commit: 3295faf8

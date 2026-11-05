@@ -1,7 +1,7 @@
 # ADR-0253: A configured tool past the token cap is deferred, not fatal
 
-- Status: Proposed (a production repair the owner asked for on 2026-10-25; the
-  owner has not yet reviewed the decision)
+- Status: Accepted by the owner on 2026-10-29, after shipping on 2026-10-25 as
+  a production repair the owner asked for
 - Date: 2026-10-25
 - Related: ADR-0105, ADR-0130, ADR-0239, ADR-0240
 - Amends: ADR-0123 decision 4, which deferred configured tools past the item

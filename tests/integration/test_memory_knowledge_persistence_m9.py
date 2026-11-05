@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -16,6 +17,7 @@ from agent_core.config import Settings
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.events import NewEvent
 from agent_core.domain.knowledge import (
+    KnowledgeCatalogQuery,
     KnowledgeIngestRequest,
     KnowledgeQuery,
     KnowledgeVisibility,
@@ -275,3 +277,89 @@ async def test_postgres_and_memory_knowledge_stores_agree_on_any_term_matching(
 
     assert found["memory"], found
     assert found["postgres"] == found["memory"]
+
+
+async def test_postgres_and_memory_knowledge_stores_reserve_rather_than_cap(
+    tmp_path: Path,
+) -> None:
+    """Both stores give a lone document its third passage and list its title (ADR-0293)."""
+
+    sections = (
+        "# Garden\n\n## Morning\n\nWater the tomatoes at dawn.\n\n"
+        "## Evening\n\nWater the tomatoes at dusk.\n\n"
+        "## Never\n\nNever water the tomatoes at noon."
+    )
+    stores: tuple[tuple[Literal["memory", "postgres"], Settings], ...] = (
+        ("memory", replace(memory_settings(), artifact_root=tmp_path / "memory")),
+        ("postgres", replace(database_settings(), artifact_root=tmp_path / "postgres")),
+    )
+    catalogs: dict[str, list[tuple[str, int]]] = {}
+    for storage, settings in stores:
+        async with build(settings=settings, storage=storage) as composition:
+            await _ingested(composition, sections)
+            query = KnowledgeQuery(
+                tenant_id=composition.principal.tenant_id,
+                principal_id=composition.principal.principal_id,
+                current_scope=None,
+                text='"garden.md" when to water the tomatoes',
+                budget_tokens=2_000,
+                max_passages=3,
+                min_score=0.1,
+            )
+            result = await composition.knowledge.search(
+                query, session_id=await composition.sessions.create()
+            )
+            assert len(result.passages) == 3, storage
+            async with composition.uow_factory() as uow:
+                assert await uow.knowledge.visible_titles(query) == ["garden.md"], storage
+                # ADR-0299: both stores list the document once with its passage count.
+                catalog = await uow.knowledge.catalog(
+                    KnowledgeCatalogQuery(
+                        tenant_id=query.tenant_id,
+                        principal_id=query.principal_id,
+                        current_scope=None,
+                        as_of=datetime.now(UTC),
+                        max_documents=12,
+                    )
+                )
+            catalogs[storage] = [(line.title, line.passages) for line in catalog.lines]
+            assert catalog.omitted == 0, storage
+    assert catalogs["postgres"] == catalogs["memory"]
+    assert [title for title, _passages in catalogs["memory"]] == ["garden.md"]
+    assert catalogs["memory"][0][1] >= 3
+
+
+async def test_postgres_and_memory_knowledge_stores_reserve_past_the_first_sixty_four(
+    tmp_path: Path,
+) -> None:
+    """A later document's first passage is reserved however many chunks rank above it (ADR-0293)."""
+
+    filler = " ".join(f"word{index}" for index in range(120))
+    verbose = "\n\n".join(
+        f"## Step {index}\n\nWater the tomatoes in step {index}. {filler}" for index in range(70)
+    )
+    # One query term only, so every step of the verbose document outranks it.
+    other = "## Other\n\nAlso water the garden beds, once, the other way."
+    stores: tuple[tuple[Literal["memory", "postgres"], Settings], ...] = (
+        ("memory", replace(memory_settings(), artifact_root=tmp_path / "memory")),
+        ("postgres", replace(database_settings(), artifact_root=tmp_path / "postgres")),
+    )
+    for storage, settings in stores:
+        async with build(settings=settings, storage=storage) as composition:
+            await _ingested(composition, "# Garden\n\n" + verbose)
+            await _ingested(composition, "# Note\n\n" + other)
+            result = await composition.knowledge.search(
+                KnowledgeQuery(
+                    tenant_id=composition.principal.tenant_id,
+                    principal_id=composition.principal.principal_id,
+                    current_scope=None,
+                    text="water the tomatoes",
+                    budget_tokens=3_000,
+                    max_passages=8,
+                    max_per_document=3,
+                    min_score=0.1,
+                ),
+                session_id=await composition.sessions.create(),
+            )
+            headings = [item.heading_path[-1] for item in result.passages]
+            assert "Other" in headings[:4], (storage, headings)

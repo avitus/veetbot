@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import unicodedata
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import suppress
 from datetime import datetime
 from enum import StrEnum
@@ -27,6 +27,7 @@ from agent_core.api.dreaming import dreaming_router
 from agent_core.api.email import email_router
 from agent_core.api.email_subscriptions import email_subscriptions_router
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
+from agent_core.api.integration_secrets import integration_secrets_router
 from agent_core.api.mcp_servers import mcp_servers_router
 from agent_core.api.middleware import (
     PayloadTooLargeError,
@@ -36,7 +37,7 @@ from agent_core.api.middleware import (
 from agent_core.api.model_settings import model_settings_router
 from agent_core.api.people import people_router
 from agent_core.api.reconsolidation import reconsolidation_router
-from agent_core.api.sse import encode_sse, heartbeat
+from agent_core.api.sse import EventStreamResponse, encode_sse, heartbeat
 from agent_core.application.errors import (
     BrowserLoginURLValidationError,
     EmailFeedbackTargetError,
@@ -617,7 +618,13 @@ def _error_response(
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     if request.url.path.startswith(
-        ("/v1/email/", "/v1/calls", "/v1/dreaming", "/v1/memory-reconsolidations")
+        (
+            "/v1/email/",
+            "/v1/calls",
+            "/v1/dreaming",
+            "/v1/memory-reconsolidations",
+            "/v1/integration-secrets",
+        )
     ):
         # Unhandled errors are rendered outside the ordinary request middleware.
         headers = {**(headers or {}), "Cache-Control": PRIVATE_NO_STORE}
@@ -684,7 +691,7 @@ def create_app(
         # version-bump decision this handler does not make (rule 3).
         """Report invalid field locations without exposing submitted values."""
         locations: list[str] = []
-        for error in exc.errors():
+        for error in [] if request.url.path.startswith("/v1/integration-secrets") else exc.errors():
             location = ".".join(str(part) for part in error["loc"])
             if location and location not in locations:
                 locations.append(location)
@@ -926,7 +933,7 @@ def create_app(
         run_id: UUID,
         authenticated: Annotated[Principal, secured("run.read")],
         last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
-    ) -> StreamingResponse:
+    ) -> EventStreamResponse:
         """Validate stream access and replay position before sending any event bytes."""
         try:
             after = None if last_event_id is None else int(last_event_id)
@@ -934,10 +941,10 @@ def create_app(
             raise MalformedRequestError("Last-Event-ID must be an integer") from exc
         if after is not None and after < 0:
             raise MalformedRequestError("Last-Event-ID must not be negative")
-        # Complete all checks before StreamingResponse sends its first byte.
+        # Complete all checks before the response sends its first byte.
         await services.runs.get(authenticated, run_id)
 
-        async def frames() -> AsyncIterator[bytes]:
+        async def frames() -> AsyncGenerator[bytes, None]:
             """Emit events and idle heartbeats, cleaning up the stream on disconnect."""
             iterator = cast(
                 AsyncGenerator[StreamFrame, None],
@@ -970,11 +977,7 @@ def create_app(
                         await pending
                 await iterator.aclose()
 
-        return StreamingResponse(
-            frames(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return EventStreamResponse(frames(), headers={"Cache-Control": "no-cache"})
 
     @app.post(
         "/v1/runs/{run_id}/cancel",
@@ -2260,6 +2263,9 @@ def create_app(
     task_grants = getattr(services, "browser_task_grants", None)
     if settings.browser_task_grants_enabled and task_grants is not None:
         app.include_router(browser_task_grants_router(task_grants, secured))
+    integration_secrets = getattr(services, "integration_secrets", None)
+    if settings.integration_secrets_enabled and integration_secrets is not None:
+        app.include_router(integration_secrets_router(integration_secrets, secured))
     owner_mcp_servers = getattr(services, "mcp_servers", None)
     if settings.mcp_servers_enabled and owner_mcp_servers is not None:
         app.include_router(mcp_servers_router(owner_mcp_servers, secured))

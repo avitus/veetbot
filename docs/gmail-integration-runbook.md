@@ -722,19 +722,48 @@ above and needs no new Google permission.
    `email.read` and `email.write` grants ship in `deploy/veetbot.env.example`,
    so every release provisions them (ADR-0149); no `AUTH_SCOPES` edit is
    needed. The flag grants no authority; the scopes and the existing account
-   authority do.
+   authority do. One-press Send parks each reply for
+   `AGENT_EMAIL_SEND_UNDO_SECONDS` (default 10, 0–60) before the worker sends
+   it; Undo within that window cancels it (ADR-0279).
 3. Automatic email work spends at most USD 20 per UTC day and USD 200 per
    rolling 30 days. A reviewed `runtime/limits.yaml` overlay under
    `AGENT_CONFIG_DIR` can set other finite `email.daily_cost` and
    `email.monthly_cost` allowances. Each refresh slice reserves USD 1 against
    that aggregate allowance, and new mail keeps the remaining quarter of it:
    once the usual full refresh would pass 75% of either ceiling, a refresh is
-   admitted as a new-mail slice until the full ceiling (ADR-0256).
+   admitted as a new-mail slice until the full ceiling (ADR-0256), which spends
+   only on mail that arrived (ADR-0298).
 4. Restart `veetbot-api`, `veetbot-worker`, `veetbot-async-worker`, and
    `veetbot-maintenance`, confirm each is active, then open Email in the app
    and confirm each account reports a completed update.
 
 Set the flag back to `0` and restart the same services to turn it off.
+
+## Milestone 26 — Activate server email checks
+
+Server checks for new mail are off until `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED=1`.
+They need both existing email flags, no new Google permission and no credential.
+They read mail and prepare internal drafts while Email is closed, and they send and
+notify nothing. The contract is ADR-0286.
+
+1. Append the flag with `tee -a` so `/etc/veetbot/veetbot.env` keeps its
+   `0640 root:veetbot` mode:
+
+   ```bash
+   echo 'AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED=1' | sudo tee -a /etc/veetbot/veetbot.env >/dev/null
+   ```
+
+2. Restart `veetbot-maintenance`, and confirm it is active. Only this unit admits
+   checks; the async worker runs them. A later rollback of the application must
+   first set the flag to `0` and wait for no `arrivals` task to remain within thirty
+   days, because earlier releases cannot read that task scope.
+3. Keep the flag on after the first week only if the median wait from mail activity
+   to stored conversation is 10 minutes or less, check spending stayed within its
+   daily limit, no-change checks made no model calls, and scheduled-run queue time
+   did not rise materially. Report check spending, no-change duration, event count
+   and database growth to the owner.
+
+To stop checks, set the flag to `0` and restart `veetbot-maintenance`.
 
 ## Milestone 31 — Activate and smoke unsubscribe assistance
 

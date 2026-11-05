@@ -88,6 +88,7 @@ def _profile_view(profile: BrowserProfile) -> BrowserProfileView:
         created_at=profile.created_at,
         updated_at=profile.updated_at,
         last_used_at=profile.last_used_at,
+        last_sign_in_mode=profile.last_sign_in_mode,
     )
 
 
@@ -396,6 +397,7 @@ class BrowserProfileManagementService:
                 # generation that grants pin, in the unit of work that records
                 # the ceremony, so a failed begin changes nothing.
                 await self._advance_generation(uow, principal, profile, updated_at=now)
+                await uow.browser_profiles.record_sign_in_mode(profile_id, principal, mode)
                 record = BrowserAuthenticationRecord(
                     id=launched.id,
                     tenant_id=principal.tenant_id,

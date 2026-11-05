@@ -29,6 +29,7 @@ from agent_core.domain.artifacts import ArtifactOrigin, StoredArtifactRef
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import (
     KnowledgeDocument,
+    KnowledgeIngestPrepared,
     KnowledgeIngestRequest,
     KnowledgeQuery,
     KnowledgeVisibility,
@@ -44,7 +45,16 @@ from agent_core.knowledge.service import KnowledgeService
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.profiles import TraceProfile
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
-from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal, tool_context
+from agent_core.tools.knowledge_search import KnowledgeSearchTool
+from tests.contract.memory_fixtures import prepared_knowledge
+from tests.contract.support import (
+    RUN_ID,
+    SESSION_ID,
+    memory_stack,
+    principal,
+    run,
+    tool_context,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -216,6 +226,25 @@ async def test_ingest_rejects_oversized_metadata_before_open(
             origin_trust=TrustLevel.USER,
         )
     assert opened is False
+
+
+async def test_no_secrets_in_a_title(tmp_path: Path) -> None:
+    """ADR-0299: the catalog and search both render the title, so it passes the
+    same secret scan as the text."""
+
+    stack = await _stack(tmp_path)
+    source = await stack.artifact("Deployment notes without any credential.")
+    with pytest.raises(ToolValidationError, match="secret scan"):
+        await stack.service.ingest(
+            KnowledgeIngestRequest(
+                source=source,
+                title="deployment token=super-secret-value",
+                visibility=KnowledgeVisibility.PRINCIPAL,
+            ),
+            origin_trust=TrustLevel.USER,
+        )
+    async with stack.factory() as uow:
+        assert not await uow.knowledge.visible_titles(_query("deployment", current_scope=None))
 
 
 async def test_no_secrets(tmp_path: Path) -> None:
@@ -503,3 +532,68 @@ async def test_corpus_recall(tmp_path: Path) -> None:
     noise_ratio = noise / max(1, returned)
     assert recall_at_3 >= 0.9
     assert noise_ratio <= 0.34
+
+
+async def test_search_without_a_scope_reads_the_sessions_project(tmp_path: Path) -> None:
+    """ADR-0299: the catalog lists the session's project documents, so a search
+    that names no scope reads under that same scope and reaches them."""
+
+    stack = await _stack(tmp_path)
+    scoped_session = UUID(int=868)
+    scoped_run = UUID(int=869)
+    async with stack.factory() as uow:
+        session = await uow.sessions.get(SESSION_ID, principal())
+        await uow.sessions.create(
+            session.model_copy(
+                update={"id": scoped_session, "metadata": {"project_scope": "project-a"}}
+            )
+        )
+        await uow.runs.create(
+            run().model_copy(update={"id": scoped_run, "session_id": scoped_session})
+        )
+    await _ingest(
+        stack,
+        "The valve-like ticking after parking is the standby state settling.",
+        visibility=KnowledgeVisibility.PROJECT,
+        project_scope="project-a",
+    )
+    context = replace(tool_context(), session_id=scoped_session, run_id=scoped_run)
+    tool = KnowledgeSearchTool(stack.service, factory=stack.factory)
+
+    found = await tool.execute({"text": "valve-like ticking after parking"}, context)
+    assert found.structured is not None
+    assert found.structured["chunk_ids"], found.content
+
+    # An explicit scope still wins over the session's.
+    elsewhere = await tool.execute(
+        {"text": "valve-like ticking after parking", "scope": "project-b"}, context
+    )
+    assert elsewhere.structured is not None
+    assert elsewhere.structured["chunk_ids"] == []
+
+
+async def test_a_legacy_credential_like_title_renders_untitled_in_search(tmp_path: Path) -> None:
+    """ADR-0299: a title stored before the ingestion scan is guarded where the
+    search envelope renders it, as the catalog guards it."""
+
+    stack = await _stack(tmp_path)
+    legacy = prepared_knowledge().document.model_copy(
+        update={"title": "deploy token=not-a-real-value"}
+    )
+    chunks = DeterministicChunker().chunk(
+        "# Operations\n\nRestart the service safely after deployment.",
+        legacy.title,
+        document_row_id=legacy.row_id,
+        document_id=legacy.document_id,
+        version=legacy.version,
+    )
+    async with stack.factory() as uow:
+        await uow.knowledge.ingest(KnowledgeIngestPrepared(document=legacy, chunks=chunks))
+
+    result = await stack.service.search(
+        _query("restart the service safely", current_scope=None), session_id=SESSION_ID
+    )
+
+    assert result.passages
+    assert 'doc="untitled"' in result.rendered
+    assert "not-a-real-value" not in result.rendered

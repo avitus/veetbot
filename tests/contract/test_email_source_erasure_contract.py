@@ -1,16 +1,22 @@
 """The same selective erasure contract runs against memory and PostgreSQL."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from agent_core.bootstrap import build
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import MemoryAuthority
-from agent_core.domain.messages import TextPart, ToolResultItem
+from agent_core.domain.messages import (
+    AssistantMessage,
+    FileReferencePart,
+    TextPart,
+    ToolResultItem,
+)
 from agent_core.domain.policies import RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
@@ -19,6 +25,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.memory_fixtures import memory, recalled, trace
 from tests.contract.semantic_memory_cases import SPACE
 from tests.contract.support import NOW, principal, run, session
+from tests.contract.test_approval_repository_contract import request as approval_request
 from tests.integration.m2_support import memory_settings
 
 
@@ -362,6 +369,303 @@ async def assert_email_source_erasure(factory: UnitOfWorkFactory) -> None:
                 principal(), "work", "t1", frozenset({"m1"}), NOW
             )
         )["pending_artifacts"] == 0
+
+
+async def assert_saved_attachment_erased(factory: UnitOfWorkFactory) -> None:
+    """A plain chat has no Gmail metadata, and the file name is in its calls (ADR-0296)."""
+    sid, rid, iid, aid = uuid4(), uuid4(), uuid4(), uuid4()
+    other_iid, kept_aid, unreceipted_rid, unreceipted_aid, unknown_aid = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
+    promoted_aid, promoted_erased_aid = uuid4(), uuid4()
+
+    def chip(artifact_id: Any) -> FileReferencePart:
+        return FileReferencePart(
+            artifact_id=artifact_id, media_type="application/pdf", filename="chip.pdf"
+        )
+
+    name = "mcp.gmail_read.save_attachment"
+    arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}
+    other = {"message_id": "m2", "attachment_index": 0, "filename": "keep.pdf"}
+    receipt = {"thread_id": "t1", **arguments, "artifact_id": str(aid)}
+    item = ToolResultItem(
+        call_id="c1",
+        content=[TextPart(text=json.dumps(receipt))],
+        trust=TrustLevel.EXTERNAL_UNTRUSTED,
+    )
+    wrapped = {"name": name, "arguments": arguments}
+
+    def invocation(identifier: Any, raw: dict[str, Any], **extra: Any) -> ToolInvocation:
+        return ToolInvocation(
+            id=identifier,
+            run_id=rid,
+            session_id=sid,
+            step_number=1,
+            call_id=str(identifier),
+            tool_name=name,
+            tool_version="1",
+            side_effect=SideEffectClass.NETWORK_READ,
+            risk=RiskLevel.LOW,
+            status=ToolInvocationStatus.SUCCEEDED,
+            raw_arguments=json.dumps(raw),
+            idempotency_key=str(identifier),
+            created_at=NOW,
+            updated_at=NOW,
+            **extra,
+        )
+
+    async with factory() as uow:
+        await uow.sessions.create(session().model_copy(update={"id": sid}))
+        await uow.runs.create(
+            run(status=RunStatus.COMPLETED).model_copy(update={"id": rid, "session_id": sid})
+        )
+        for event_type, payload in (
+            (
+                "model.response.completed",
+                {"conversation_items": [], "tool_calls": [{"name": "tool.call", **wrapped}]},
+            ),
+            ("tool.call.proposed", {"name": "tool.call", "arguments": wrapped}),
+            ("tool.call.completed", {"name": name, "result_item": item.model_dump(mode="json")}),
+            (
+                "assistant.message.completed",
+                {
+                    "message": AssistantMessage(
+                        content=[
+                            TextPart(text="Saved invoice.pdf and keep.pdf"),
+                            chip(aid),
+                            chip(kept_aid),
+                            chip(promoted_aid),
+                        ]
+                    ).model_dump(mode="json")
+                },
+            ),
+        ):
+            await uow.events.append(
+                NewEvent(
+                    session_id=sid,
+                    run_id=rid,
+                    event_type=event_type,
+                    actor_type="runtime",
+                    payload=payload,
+                )
+            )
+        await uow.invocations.create(
+            invocation(iid, arguments, result_item=item, structured_result=receipt)
+        )
+        await uow.invocations.create(invocation(other_iid, other))
+        # A crash can lose the receipt, so this run names no file at all.
+        await uow.runs.create(
+            run(status=RunStatus.COMPLETED).model_copy(
+                update={"id": unreceipted_rid, "session_id": sid}
+            )
+        )
+        saved_files: list[tuple[Any, Any, dict[str, Any], Any]] = [
+            (
+                aid,
+                rid,
+                {"auto_ingest": "pending", "email_source": {"message_id": "m1"}},
+                "email_attachment",
+            ),
+            # One run can save from two emails; this file is the other email's.
+            (
+                kept_aid,
+                rid,
+                {"auto_ingest": "pending", "email_source": {"message_id": "m2"}},
+                "email_attachment",
+            ),
+            (
+                unreceipted_aid,
+                unreceipted_rid,
+                {"email_source": {"message_id": "m1"}},
+                "email_attachment",
+            ),
+            # A source nobody can read is treated as the email being erased.
+            (unknown_aid, rid, {}, "email_attachment"),
+            # Knowledge taking a file over changes its origin, not its source.
+            (promoted_aid, rid, {"email_source": {"message_id": "m2"}}, "knowledge_source"),
+            (
+                promoted_erased_aid,
+                unreceipted_rid,
+                {"email_source": {"message_id": "m1"}},
+                "knowledge_source",
+            ),
+        ]
+        for artifact_id, artifact_run, metadata, origin in saved_files:
+            await uow.artifacts.create(
+                ArtifactRef(
+                    id=artifact_id,
+                    tenant_id=principal().tenant_id,
+                    principal_id=principal().principal_id,
+                    session_id=sid,
+                    run_id=artifact_run,
+                    name="invoice.pdf",
+                    media_type="application/pdf",
+                    storage_uri=f"memory://{artifact_id}",
+                    sha256="a" * 64,
+                    size_bytes=1,
+                    origin=origin,
+                    trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                    expires_at=None,
+                    created_at=NOW,
+                    metadata=metadata,
+                )
+            )
+        await uow.approvals.create(
+            approval_request().model_copy(
+                update={
+                    "session_id": sid,
+                    "run_id": rid,
+                    "action_id": iid,
+                    "tool_invocation_id": iid,
+                    "tool_name": name,
+                    "arguments": arguments,
+                }
+            )
+        )
+    async with factory() as uow:
+        await uow.history.catch_up(sid)
+    async with factory() as uow:
+        pending = await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
+    assert {item.id for item in pending} == {aid, kept_aid}
+    # What an intake already under way read before this erasure.
+    read_before_erasure = next(item for item in pending if item.id == aid)
+    async with factory() as uow:
+        counts = await uow.session_deletions.erase_email_source(
+            principal(), "work", "t1", frozenset({"m1"}), NOW
+        )
+    assert counts["pending_artifacts"] == 4
+    # An erased file must not come back through a knowledge intake still pending.
+    async with factory() as uow:
+        assert [
+            item.id
+            for item in await uow.artifacts.pending_auto_ingest(principal(), now=NOW, limit=9)
+        ] == [kept_aid]
+    with pytest.raises(NotFoundError):
+        async with factory() as uow:
+            await uow.artifacts.retain_for_knowledge(aid, principal(), now=NOW)
+    # A cutoff sampled just before the erasure must not bring the file back.
+    with pytest.raises(NotFoundError):
+        async with factory() as uow:
+            await uow.artifacts.retain_for_knowledge(
+                aid,
+                principal(),
+                now=NOW - timedelta(seconds=1),
+                unchanged_from=read_before_erasure,
+            )
+    async with factory() as uow:
+        events = await uow.events.list_after(sid, 0, principal())
+        recorded = {item.id: item for item in await uow.invocations.list_for_run(rid, principal())}
+        expired = await uow.artifacts.list_expired(NOW, limit=100)
+        approval = await uow.approvals.get_by_action(iid)
+    assert approval is not None and "invoice.pdf" not in approval.model_dump_json()
+    assert len(events) == 4
+    for event in events:
+        assert "invoice.pdf" not in json.dumps(event.payload)
+    # The reply's text goes; a file that outlives this erasure keeps its link.
+    reply = events[3].payload["message"]["content"]
+    assert [part.get("artifact_id") for part in reply] == [None, str(kept_aid), str(promoted_aid)]
+    assert reply[0]["kind"] == "text"
+    assert "keep.pdf" not in json.dumps(reply)
+    async with factory() as uow:
+        history = await uow.history.read(sid)
+    [cached] = [entry for entry in history.items if isinstance(entry, AssistantMessage)]
+    assert [getattr(part, "artifact_id", None) for part in cached.content] == [
+        None,
+        kept_aid,
+        promoted_aid,
+    ]
+    # The call is still identifiable; only the sender's name is gone.
+    assert "save_attachment" in json.dumps(events[0].payload)
+    assert '"m1"' in json.dumps(events[0].payload)
+    assert "invoice.pdf" not in recorded[iid].model_dump_json()
+    assert json.loads(recorded[other_iid].raw_arguments)["filename"] == "keep.pdf"
+    expired_ids = {artifact.id for artifact in expired}
+    assert {aid, unreceipted_aid, unknown_aid, promoted_erased_aid} <= expired_ids
+    assert not {kept_aid, promoted_aid} & expired_ids
+
+
+async def assert_denied_save_erased(factory: UnitOfWorkFactory) -> None:
+    """A denied save leaves no receipt, only the calls that named the file (ADR-0296)."""
+    sid, rid, iid = uuid4(), uuid4(), uuid4()
+    name = "mcp.gmail_read.save_attachment"
+    arguments = {"message_id": "m1", "attachment_index": 0, "filename": "invoice.pdf"}
+    async with factory() as uow:
+        await uow.sessions.create(session().model_copy(update={"id": sid}))
+        await uow.runs.create(
+            run(status=RunStatus.COMPLETED).model_copy(
+                update={"id": rid, "session_id": sid, "final_message": "invoice.pdf was denied"}
+            )
+        )
+        await uow.events.append(
+            NewEvent(
+                session_id=sid,
+                run_id=rid,
+                event_type="model.response.completed",
+                actor_type="runtime",
+                payload={"tool_calls": [{"name": "tool.call", "arguments": json.dumps(arguments)}]},
+            )
+        )
+        await uow.invocations.create(
+            ToolInvocation(
+                id=iid,
+                run_id=rid,
+                session_id=sid,
+                step_number=1,
+                call_id="denied",
+                tool_name=name,
+                tool_version="1",
+                side_effect=SideEffectClass.NETWORK_READ,
+                risk=RiskLevel.LOW,
+                status=ToolInvocationStatus.DENIED,
+                raw_arguments=json.dumps(arguments),
+                idempotency_key=str(iid),
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        await uow.approvals.create(
+            approval_request().model_copy(
+                update={
+                    "session_id": sid,
+                    "run_id": rid,
+                    "action_id": iid,
+                    "tool_invocation_id": iid,
+                    "tool_name": name,
+                    "arguments": arguments,
+                }
+            )
+        )
+    async with factory() as uow:
+        await uow.session_deletions.erase_email_source(
+            principal(), "work", "t1", frozenset({"m1"}), NOW
+        )
+    async with factory() as uow:
+        [event] = await uow.events.list_after(sid, 0, principal())
+        [invocation] = await uow.invocations.list_for_run(rid, principal())
+        approval = await uow.approvals.get_by_action(iid)
+        finished = await uow.runs.get(rid, principal())
+    assert "invoice.pdf" not in json.dumps(event.payload)
+    assert "invoice.pdf" not in invocation.model_dump_json()
+    assert approval is not None and "invoice.pdf" not in approval.model_dump_json()
+    assert finished.final_message is None
+
+
+async def test_memory_denied_save_erasure_contract() -> None:
+    async with build(
+        settings=memory_settings(), storage="memory", principal=principal()
+    ) as composition:
+        await assert_denied_save_erased(composition.uow_factory)
+
+
+async def test_memory_saved_attachment_erasure_contract() -> None:
+    async with build(
+        settings=memory_settings(), storage="memory", principal=principal()
+    ) as composition:
+        await assert_saved_attachment_erased(composition.uow_factory)
 
 
 async def test_memory_source_erasure_contract() -> None:

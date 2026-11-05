@@ -14,8 +14,8 @@ enum A2Metrics {
     /// The sidebar's side gutter.
     static var sidebarGutter: CGFloat { value(mac: 12, iPad: 16, iPhone: 20) }
     static var rowRadius: CGFloat { value(mac: 6, iPad: 10, iPhone: 12) }
-    /// The sidebar column: 260 on the Mac, 300 on the iPad.
-    static var sidebarWidth: CGFloat { value(mac: 260, iPad: 300, iPhone: 300) }
+    /// Room for all three mode names at the standard text sizes.
+    static var sidebarWidth: CGFloat { value(mac: 320, iPad: 320, iPhone: 300) }
     static var fieldRadius: CGFloat { value(mac: 8, iPad: 10, iPhone: 12) }
     /// The transcript's side padding: 32 on the Mac and iPad, 16 on the iPhone.
     static var transcriptSidePadding: CGFloat {
@@ -494,3 +494,153 @@ extension View {
             .listRowSeparatorTint(AppTheme.hairline)
     }
 }
+
+/// Shared navigation dimensions. Window constraints affect the displayed width,
+/// never the owner's saved preference.
+enum ModeSidebarLayout {
+    static let bounds: ClosedRange<CGFloat> = 300...420
+    static let defaultWidth: CGFloat = 320
+    static let dividerWidth: CGFloat = 12
+    static let minimumSplitWidth: CGFloat = bounds.lowerBound + 360 + dividerWidth
+
+    static func clamped(_ width: CGFloat) -> CGFloat {
+        guard width.isFinite else { return defaultWidth }
+        return min(max(width, bounds.lowerBound), bounds.upperBound)
+    }
+
+    static func preference(saved: CGFloat, displayed: CGFloat, proposed: CGFloat, available: CGFloat) -> CGFloat {
+        let adjusted = shown(proposed, available: available)
+        return adjusted == displayed ? saved : adjusted
+    }
+
+    static func shown(_ width: CGFloat, available: CGFloat) -> CGFloat {
+        min(clamped(width), max(bounds.lowerBound, available - 360 - dividerWidth))
+    }
+}
+
+#if os(iOS)
+/// Only preferences live here; conversation and mail state remain in their models.
+private enum TabletSidebarPreferences {
+    static let defaults: UserDefaults = {
+        #if DEBUG && !SWIFT_PACKAGE
+        if ProcessInfo.processInfo.arguments.contains(ConversationNavigationUITestFixture.launchArgument) {
+            let name = "com.veetbot.apple.ui-tests.tablet-sidebar"
+            let defaults = UserDefaults(suiteName: name)!
+            if ProcessInfo.processInfo.environment["VEETBOT_UI_TEST_KEEP_TABLET_WIDTH"] != "1" {
+                defaults.removePersistentDomain(forName: name)
+            }
+            return defaults
+        }
+        #endif
+        return .standard
+    }()
+}
+
+/// Regular-width iPad chrome. Its detail keeps a useful reading width, while
+/// compact windows continue to use the existing navigation stacks and drawer.
+struct TabletSidebarSplit<Sidebar: View, Detail: View>: View {
+    let mode: ClientMode
+    @ViewBuilder let sidebar: () -> Sidebar
+    @ViewBuilder let detail: () -> Detail
+    @AppStorage("veetbot.tablet.sidebarWidth", store: TabletSidebarPreferences.defaults)
+    private var savedWidth: Double = Double(ModeSidebarLayout.defaultWidth)
+    @State private var dragWidth: CGFloat?
+    @State private var dragStart: CGFloat?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = ModeSidebarLayout.shown(dragWidth ?? CGFloat(savedWidth), available: geometry.size.width)
+            HStack(spacing: 0) {
+                sidebar().frame(width: width).frame(maxHeight: .infinity)
+                divider(width: width, available: geometry.size.width)
+                detail().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func divider(width: CGFloat, available: CGFloat) -> some View {
+        Color.clear
+            .overlay { Rectangle().fill(AppTheme.paperDeep).frame(width: ModeSidebarLayout.dividerWidth) }
+            .overlay { Rectangle().fill(AppTheme.hairline).frame(width: 1) }
+            .overlay { Capsule().fill(AppTheme.inkFaint).frame(width: 3, height: 32) }
+            .frame(width: 44)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                .onChanged { value in
+                    if dragStart == nil { dragStart = width }
+                    dragWidth = ModeSidebarLayout.shown((dragStart ?? width) + value.translation.width, available: available)
+                }
+                .onEnded { _ in
+                    if let dragWidth {
+                        savedWidth = Double(ModeSidebarLayout.preference(
+                            saved: CGFloat(savedWidth), displayed: dragStart ?? width,
+                            proposed: dragWidth, available: available))
+                    }
+                    dragStart = nil
+                    dragWidth = nil
+                })
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                savedWidth = Double(ModeSidebarLayout.defaultWidth)
+            })
+            .padding(.horizontal, (ModeSidebarLayout.dividerWidth - 44) / 2)
+            .zIndex(1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Sidebar width")
+            .accessibilityValue("\(Int(width)) points")
+            .accessibilityHint("Swipe up or down to resize. Double tap to reset.")
+            .accessibilityAdjustableAction { direction in
+                let delta: CGFloat = direction == .increment ? 20 : -20
+                savedWidth = Double(ModeSidebarLayout.preference(
+                    saved: CGFloat(savedWidth), displayed: width,
+                    proposed: width + delta, available: available))
+            }
+            .accessibilityAction { savedWidth = Double(ModeSidebarLayout.defaultWidth) }
+            .accessibilityIdentifier("\(mode.rawValue).sidebar.resize")
+    }
+}
+
+struct ClientUtilities {
+    var memory: () -> Void = {}
+    var people: () -> Void = {}
+    var schedules: () -> Void = {}
+    var persona: () -> Void = {}
+    var settings: () -> Void = {}
+}
+
+private struct ClientUtilitiesKey: EnvironmentKey {
+    static let defaultValue = ClientUtilities()
+}
+
+extension EnvironmentValues {
+    var clientUtilities: ClientUtilities {
+        get { self[ClientUtilitiesKey.self] }
+        set { self[ClientUtilitiesKey.self] = newValue }
+    }
+}
+
+/// The same top-right utilities in every regular-width iPad mode.
+struct ClientUtilitiesMenu: View {
+    let identifier: String
+    let mode: ClientMode
+    @Environment(\.activeClientMode) private var activeMode
+    @Environment(\.clientUtilities) private var actions
+
+    var body: some View {
+        if activeMode == mode {
+            Menu {
+                Button("Memory", systemImage: "brain.head.profile", action: actions.memory)
+                Button("People", systemImage: "person.2", action: actions.people)
+                Button("Schedules", systemImage: "calendar", action: actions.schedules)
+                Button("Persona", systemImage: "sparkles", action: actions.persona)
+                Button("Settings", systemImage: "gearshape", action: actions.settings)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundColor(AppTheme.inkSoft)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("More")
+            .accessibilityIdentifier(identifier)
+        }
+    }
+}
+#endif

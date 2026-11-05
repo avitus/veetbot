@@ -8,7 +8,16 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PositiveInt, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
 from agent_core.domain.policies import TrustLevel
@@ -29,6 +38,7 @@ class RunStatus(StrEnum):
 
 class RunKind(StrEnum):
     INTERACTIVE = "interactive"
+    JOB = "job"
     SKILL_REVIEW = "skill_review"
     DELEGATED = "delegated"
 
@@ -63,6 +73,18 @@ class RunLimits(BaseModel):
     synthesis_reserve_model_calls: int = Field(default=0, ge=0)
     synthesis_reserve_tool_calls: int = Field(default=0, ge=0)
     synthesis_reserve_cost: Decimal = Field(default=Decimal("0"), ge=0)
+    # Seconds of work counted from the first claim, inside deadline_at. The claim
+    # turns this into the deadline and clears it, so a reclaim keeps that deadline
+    # (ADR-0295).
+    execution_seconds: int | None = Field(default=None, gt=0, le=86_400)
+
+    @model_serializer(mode="wrap")
+    def omit_unset_execution_window(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Keep the serialized form, and every digest over it, as it was without a window."""
+        data: dict[str, Any] = handler(self)
+        if self.execution_seconds is None:
+            data.pop("execution_seconds", None)
+        return data
 
     @model_validator(mode="after")
     def synthesis_reserve_fits(self) -> RunLimits:
@@ -144,12 +166,21 @@ class ProviderContinuation(BaseModel):
 
 
 class RecallWorkBudget(BaseModel):
-    """Content-free, nonrefundable optional preparation allowance for one run."""
+    """Content-free, nonrefundable optional preparation allowance for one run.
+
+    `searches` counts every reserved slot: the automatic round's two, then one
+    per deliberate search. `rounds` counts deliberate batches only; the
+    automatic round is reserved once per run and refreshed on later build
+    steps without new slots (ADR-0282). Reservations written before that
+    decision counted the automatic round as a round, which `automatic` cannot
+    see; they keep their stricter accounting.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     searches: int = Field(ge=1, le=4)
-    rounds: int = Field(ge=1, le=2)
+    rounds: int = Field(ge=0, le=2)
     deadline_at: AwareDatetime
+    automatic: bool = False
 
 
 class RunCheckpoint(BaseModel):
