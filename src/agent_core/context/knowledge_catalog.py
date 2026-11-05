@@ -11,11 +11,10 @@ from datetime import UTC
 from typing import Protocol
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.knowledge import KnowledgeCatalog, KnowledgeCatalogLine
+from agent_core.domain.knowledge import KnowledgeCatalog, KnowledgeCatalogLine, display_title
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import TextPart, UserMessage
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.security import contains_credential
 
 CATALOG_SOURCE = "knowledge.catalog"
 # The tool is the path to the corpus; a roster without it gets no catalog.
@@ -35,21 +34,6 @@ class KnowledgeCatalogSource(Protocol):
         ...
 
 
-def _title(title: str) -> str:
-    """One line whatever the title holds, and never a credential.
-
-    A title is the owner's own text; a line break inside it must not read as a
-    second, nonexistent document, so breaks and whitespace runs become one
-    space. Ingestion scans titles with the shared credential rule; a title
-    stored before that scan is guarded here, where it is rendered.
-    """
-
-    collapsed = " ".join(title.split())
-    if not collapsed or contains_credential(collapsed):
-        return "untitled"
-    return collapsed
-
-
 def _line(line: KnowledgeCatalogLine) -> str:
     """Render one document: title, passage count, its own date, the day added."""
 
@@ -58,7 +42,7 @@ def _line(line: KnowledgeCatalogLine) -> str:
     if line.doc_date is not None:
         parts.append(f"dated {line.doc_date.isoformat()}")
     parts.append(f"added {line.ingested_at.astimezone(UTC).date().isoformat()}")
-    return f"{_title(line.title)}: {', '.join(parts)}"
+    return f"{display_title(line.title)}: {', '.join(parts)}"
 
 
 def render_knowledge_catalog(catalog: KnowledgeCatalog) -> str:

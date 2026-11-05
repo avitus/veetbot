@@ -29,6 +29,7 @@ from agent_core.domain.artifacts import ArtifactOrigin, StoredArtifactRef
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import (
     KnowledgeDocument,
+    KnowledgeIngestPrepared,
     KnowledgeIngestRequest,
     KnowledgeQuery,
     KnowledgeVisibility,
@@ -45,6 +46,7 @@ from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.profiles import TraceProfile
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
+from tests.contract.memory_fixtures import prepared_knowledge
 from tests.contract.support import (
     RUN_ID,
     SESSION_ID,
@@ -568,3 +570,30 @@ async def test_search_without_a_scope_reads_the_sessions_project(tmp_path: Path)
     )
     assert elsewhere.structured is not None
     assert elsewhere.structured["chunk_ids"] == []
+
+
+async def test_a_legacy_credential_like_title_renders_untitled_in_search(tmp_path: Path) -> None:
+    """ADR-0299: a title stored before the ingestion scan is guarded where the
+    search envelope renders it, as the catalog guards it."""
+
+    stack = await _stack(tmp_path)
+    legacy = prepared_knowledge().document.model_copy(
+        update={"title": "deploy token=1f3a9c7e2b4d6e8f0a1b2c3d"}
+    )
+    chunks = DeterministicChunker().chunk(
+        "# Operations\n\nRestart the service safely after deployment.",
+        legacy.title,
+        document_row_id=legacy.row_id,
+        document_id=legacy.document_id,
+        version=legacy.version,
+    )
+    async with stack.factory() as uow:
+        await uow.knowledge.ingest(KnowledgeIngestPrepared(document=legacy, chunks=chunks))
+
+    result = await stack.service.search(
+        _query("restart the service safely", current_scope=None), session_id=SESSION_ID
+    )
+
+    assert result.passages
+    assert 'doc="untitled"' in result.rendered
+    assert "1f3a9c7e" not in result.rendered

@@ -23,6 +23,7 @@ from agent_core.domain.knowledge import (
     KnowledgeResult,
     KnowledgeSemanticQuery,
     RetrievedPassage,
+    display_title,
     knowledge_question_without_document_names,
 )
 from agent_core.domain.memory import (
@@ -445,7 +446,7 @@ def _passage_xml(passage: RetrievedPassage) -> str:
     date_value = "" if passage.doc_date is None else passage.doc_date.isoformat()
     path = " > ".join(passage.heading_path)
     return (
-        f'<passage doc="{html.escape(passage.title, quote=True)}" '
+        f'<passage doc="{html.escape(display_title(passage.title), quote=True)}" '
         f'path="{html.escape(path, quote=True)}" chunk="{passage.chunk_id}" '
         f'doc_date="{date_value}" instruction_like="{str(passage.instruction_like).lower()}">'
         f"{html.escape(passage.text)}</passage>"

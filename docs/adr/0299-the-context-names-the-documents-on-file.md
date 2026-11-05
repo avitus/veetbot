@@ -84,9 +84,10 @@ for a slot.
 5. **The item is `INTERNAL_TOOL` data with `source="knowledge.catalog"`**,
    rendered inside the ordinary envelope exactly as a tool result would be.
    Titles are the owner's own and pass the shared credential rule at
-   ingestion, since search results and the catalog both render them; the
-   catalog applies the rule again when it renders, so a title stored before
-   the rule renders `untitled`. The row lowers
+   ingestion, since search results and the catalog both render them; both
+   renderers apply the rule again through `display_title`, so a title stored
+   before the rule renders `untitled` in the catalog and in a passage's `doc`
+   attribute alike. The row lowers
    neither the request's origin trust nor the executor's turn label. A title
    renders on one line whatever it holds, its line breaks and whitespace runs
    collapsed to one space, so no title can forge a second entry.
@@ -112,7 +113,8 @@ for a slot.
 
 - `tests/unit/test_knowledge_catalog.py`: the rendering, byte for byte, a
   title with line breaks on one line, and a stored credential-like title
-  rendered `untitled`.
+  rendered `untitled`; `tests/gates/test_knowledge_m9.py` shows the search
+  envelope doing the same.
 - `tests/gates/test_knowledge_m9.py`: a search without a scope reaches the
   session's project documents, and a passed scope wins; a credential-bearing
   title fails the ingest.

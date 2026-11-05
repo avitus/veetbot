@@ -170,11 +170,12 @@ Two scans, and they behave differently on purpose.
 
 The **secret scan blocks.** A credential inside a retrievable corpus is a durable leak
 that no trust envelope mitigates, because the leak is the string itself. Ingestion
-fails, names the chunk, and stores nothing. The title passes the platform's
-shared credential rule, `contains_credential`, a superset of the text scan's
-labeled rule (ADR-0299): every search result and the catalog render it, so it
-is as model-visible as the text. The catalog applies the same rule again when
-it renders, so a title stored before the rule renders `untitled`.
+fails and stores nothing. The title passes the platform's shared credential
+rule, `contains_credential`, a superset of the text scan's labeled rule
+(ADR-0299): every search result and the catalog render it, so it is as
+model-visible as the text. Both renderers apply the same rule again through
+`display_title`, so a title stored before the rule renders `untitled` in the
+catalog and in a passage's `doc` attribute alike.
 
 The **injection scan does not block.** It records `contains_instruction_like_text` on
 the chunk and surfaces it in the trace and in the rendered envelope. Two reasons. First,

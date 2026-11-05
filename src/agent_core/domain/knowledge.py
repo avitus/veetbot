@@ -18,6 +18,7 @@ from agent_core.domain.retrieval_fusion import (
     blend_with_arm_score,
     reciprocal_rank_fusion,
 )
+from agent_core.domain.security import contains_credential
 from agent_core.domain.semantic_memory import EmbeddingSpace, checked_vector
 from agent_core.domain.trajectory import ArtifactRef
 
@@ -373,6 +374,23 @@ def _name_extent(text: str, first: int, last: int) -> tuple[int, int]:
     while last > first and text[last - 1] in _NAME_EDGE:
         last -= 1
     return first, last
+
+
+def display_title(title: str) -> str:
+    """A document title as the model may see it: one line, and never a credential.
+
+    A title is the owner's own text. Line breaks and whitespace runs become
+    one space so a title cannot forge a second catalog entry; a blank title,
+    or one that resembles a credential, renders `untitled`. Ingestion scans
+    titles with the same shared rule; a title stored before that scan is
+    guarded here, where the catalog and the search envelope render it
+    (ADR-0299).
+    """
+
+    collapsed = " ".join(title.split())
+    if not collapsed or contains_credential(collapsed):
+        return "untitled"
+    return collapsed
 
 
 def knowledge_question_without_document_names(text: str, titles: Iterable[str]) -> str:
