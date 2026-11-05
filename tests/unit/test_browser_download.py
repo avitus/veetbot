@@ -618,6 +618,8 @@ def test_without_room_for_the_guidance_the_page_stays() -> None:
     assert isinstance(projected[0], TextPart)
     assert '"observation_omitted"' not in projected[0].text
     assert '"reason":"timed_out"' in projected[0].text
+    # Nothing the page could keep without the guidance was cut to make room for it.
+    assert '"url":"https://example.org/a"' in projected[0].text
 
 
 def test_act_gains_the_report_and_a_pinned_chat_keeps_its_exact_spec() -> None:
