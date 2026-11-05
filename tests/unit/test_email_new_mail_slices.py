@@ -11,9 +11,10 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.bootstrap import Composition
-from agent_core.domain.email import EmailBudgetLimits
+from agent_core.domain.email import EmailBudgetLimits, EmailThread
 from agent_core.domain.messages import ScriptedTurn
 from agent_core.domain.runs import RunStatus
+from agent_core.runtime.email_tasks import _TaskIO
 from tests.gates.test_email_arrival_checks_m26 import (
     FORMATION,
     NOW,
@@ -115,6 +116,44 @@ async def test_a_new_mail_slice_assesses_only_arrivals() -> None:
         async with app.uow_factory() as uow:
             assert await uow.email.get(app.principal, "assessment", str(arrival.id)) is not None
             assert await uow.email.get(app.principal, "assessment", str(old.id)) is None
+
+
+async def test_a_new_mail_slice_assesses_the_four_newest_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fifth arrival waits, and the newest go first whatever order they were stored in."""
+    clock = FixedClock(NOW)
+    turns = [_assessment_turn() for _ in range(5)]
+    async with _app(clock, await _mailbox([], []), *turns) as app:
+        await _caught_up(app)
+        service = app.services.email
+        session = await app.sessions.create()
+        by_age = {
+            age: await service.import_thread(
+                app.principal,
+                "default",
+                _thread_page(f"arrival-{age}", NOW - timedelta(minutes=age)),
+                session,
+            )
+            for age in (2, 0, 4, 1, 3)
+        }
+        assessed: list[str] = []
+        original = _TaskIO.assess
+
+        async def record(self: _TaskIO, thread: EmailThread, learning: dict[str, Any]) -> None:
+            assessed.append(str(thread.id))
+            await original(self, thread, learning)
+
+        monkeypatch.setattr(_TaskIO, "assess", record)
+        await _above_the_share(app)
+        clock.advance(timedelta(minutes=1))
+
+        run = await _new_mail_slice(app)
+
+        assert assessed == [str(by_age[age].id) for age in range(4)]
+        assert run.model_call_count == 4
+        async with app.uow_factory() as uow:
+            assert await uow.email.get(app.principal, "assessment", str(by_age[4].id)) is None
 
 
 async def test_a_long_conversation_gets_one_pass_until_a_full_slice() -> None:
