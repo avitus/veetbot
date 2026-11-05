@@ -37,7 +37,7 @@ from playwright.async_api import (
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from agent_core.adapters.browser.csv_export import CsvExportObserver
+from agent_core.adapters.browser.csv_export import observe_csv_export
 from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
 from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
@@ -1599,7 +1599,7 @@ class PythonPlaywrightRuntime:
                         window.started.set()
                         return True
 
-                    observer = CsvExportObserver(
+                    observer = observe_csv_export(
                         csv_session, self._main_frame_id, window.export_origin, reserve
                     )
                     await observer.start()

@@ -141,3 +141,13 @@ class CsvExportObserver:
             return BrowserDownload.from_bytes(filename, data)
         except (ValueError, PlaywrightError):
             return BrowserDownload.refused("failed")
+
+
+def observe_csv_export(
+    session: CDPSession,
+    frame_id: str,
+    origin: str,
+    reserve: Callable[[asyncio.Task[BrowserDownload]], bool],
+) -> CsvExportObserver:
+    """The runtime's observer for one approved export act (ADR-0300 decision 2)."""
+    return CsvExportObserver(session, frame_id, origin, reserve)

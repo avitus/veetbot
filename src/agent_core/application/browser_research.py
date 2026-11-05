@@ -115,8 +115,11 @@ class BrowserResearchAuthorizer:
         # ADR-0129 G5: a turn that called any non-browser tool (mail, memory,
         # search) could type what it read, so it keeps ordinary approval.
         bookkeeping = not turn_is_browser_only(turn)
+        # ADR-0300: run bookkeeping and a clock read add nothing a page could be
+        # typed from, and admit only the card activity exception below.
         if bookkeeping and not turn.tool_names <= BROWSER_TOOL_NAMES | {
-            "context.update_working_state"
+            "context.update_working_state",
+            "system.current_time",
         }:
             return _refused("turn_not_browser_only")
         if self._now() >= action_deadline:

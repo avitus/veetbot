@@ -11,10 +11,11 @@ path: Chase serves its activity and other views under the same authenticated
 dashboard path. The individually approved final Download click completed without
 a saved file or refusal. The available event does not establish what Chase sent.
 
-1. The platform clock adds no outside information to a browser turn. Run
-   bookkeeping still counts as a non-browser tool in general. An interactive
+1. The platform clock adds no outside information to a browser turn, but a
+   clock read and run bookkeeping still count as non-browser tools in general,
+   as the Milestone 10 gate requires. An interactive
    principal's selected Chase profile may authorize a closed list of activity
-   controls even after run bookkeeping, but never after a mail, memory, web or
+   controls even after run bookkeeping or a clock read, but never after a mail, memory, web or
    other outside read in the turn. This exception requires the exact HTTPS
    origin, dashboard path and recognized card summary or transactions fragment.
    The worker and isolated browser check the control again. Only activity

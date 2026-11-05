@@ -186,7 +186,8 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
             newest_user_trust=TrustLevel.USER, tool_names=frozenset({other, "browser.act"})
         )
     if problem in {"dashboard_bookkeeping", "dashboard_after_mail", "bookkeeping_elsewhere"}:
-        names = {"browser.act", "context.update_working_state"}
+        # ADR-0300: the agent checks the clock to choose a date range.
+        names = {"browser.act", "context.update_working_state", "system.current_time"}
         if problem == "dashboard_after_mail":
             names.add("email.read")
         turn = AuthorizationTurn(newest_user_trust=TrustLevel.USER, tool_names=frozenset(names))
