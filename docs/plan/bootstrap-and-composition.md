@@ -289,7 +289,7 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **224 configuration knobs** across the specifications;
+The corpus now declares **226 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
@@ -340,13 +340,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-224 falls out.
+226 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-224 tuning knobs in YAML.
+226 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -354,7 +354,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 224 knobs live, at the values the
+    module that owns it. This is where all 226 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -432,7 +432,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 224. Schema versions, profile names, rule identifiers,
+and asserts the total is 226. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -440,14 +440,14 @@ or invariants rather than knobs and are not counted.
 | --- | ---: |
 | `policy/default.yaml` | 23 |
 | `models/policies.yaml` | 4 |
-| `context/plan.yaml` | 34 |
+| `context/plan.yaml` | 36 |
 | `tools/limits.yaml` | 27 |
 | `runtime/limits.yaml` | 65 |
 | `memory/profiles.yaml` | 47 |
 | `folders/profiles.yaml` | 9 |
 | `titles/profiles.yaml` | 5 |
 | `cockpit/profiles.yaml` | 10 |
-| **Total** | **224** |
+| **Total** | **226** |
 
 Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
 where its knob count moves from seventeen to twenty-eight: the memory lifecycle

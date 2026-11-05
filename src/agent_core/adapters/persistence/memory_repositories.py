@@ -77,11 +77,15 @@ from agent_core.domain.erasure import erased_rejection, memory_erasure_tombstone
 from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledError
 from agent_core.domain.knowledge import (
     DocumentAuthority,
+    KnowledgeCatalog,
+    KnowledgeCatalogLine,
+    KnowledgeCatalogQuery,
     KnowledgeChunk,
     KnowledgeChunkEmbedding,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
+    KnowledgeReader,
     KnowledgeSemanticQuery,
     KnowledgeVisibility,
     RetrievedPassage,
@@ -1664,7 +1668,7 @@ class PostgresTraceStore:
                 row.trace = updated.model_dump(mode="json")
 
 
-def _knowledge_eligible(query: KnowledgeQuery, as_of: datetime) -> tuple[ColumnElement[bool], ...]:
+def _knowledge_eligible(query: KnowledgeReader, as_of: datetime) -> tuple[ColumnElement[bool], ...]:
     """The documents a knowledge query may read: tenant, validity, sensitivity, visibility."""
 
     visibility = or_(
@@ -2033,6 +2037,44 @@ class PostgresKnowledgeStore:
             )
         ).all()
         return [str(title) for title in titles]
+
+    async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog:
+        """The readable current documents by title, each with its chunk count."""
+
+        counted = (
+            select(
+                KnowledgeChunkRow.document_row_id.label("document_row_id"),
+                func.count().label("passages"),
+            )
+            .group_by(KnowledgeChunkRow.document_row_id)
+            .subquery()
+        )
+        rows = (
+            await self._session.execute(
+                select(
+                    KnowledgeDocumentRow.title,
+                    KnowledgeDocumentRow.doc_date,
+                    KnowledgeDocumentRow.ingested_at,
+                    func.coalesce(counted.c.passages, 0),
+                )
+                .outerjoin(counted, counted.c.document_row_id == KnowledgeDocumentRow.row_id)
+                .where(*_knowledge_eligible(query, query.as_of))
+                .order_by(KnowledgeDocumentRow.title, KnowledgeDocumentRow.document_id)
+            )
+        ).all()
+        lines = [
+            KnowledgeCatalogLine(
+                title=str(title),
+                doc_date=doc_date,
+                ingested_at=ingested_at,
+                passages=int(passages),
+            )
+            for title, doc_date, ingested_at, passages in rows
+        ]
+        return KnowledgeCatalog(
+            lines=tuple(lines[: query.max_documents]),
+            omitted=max(0, len(lines) - query.max_documents),
+        )
 
     async def chunks_without_vectors(
         self,
