@@ -1959,6 +1959,8 @@ import UserNotifications
             /// While set, an offer read waits here after choosing its answer.
             var heldRead: DispatchSemaphore?
             var heldReadReturned = false
+            /// The offer a held read returns, when it differs from the current one.
+            var heldOfferID: UUID?
             var answered = false
         }
         let log = Log()
@@ -2018,9 +2020,13 @@ import UserNotifications
                 if failing {
                     return (503, #"{"error":{"code":"unavailable","message":"Try again"}}"#, [:])
                 }
+                let staleID = held == nil ? nil : lock.withLock { log.heldOfferID }
                 held?.wait()
                 if held != nil { lock.withLock { log.heldReadReturned = true } }
-                return (200, closed ? #"{"offer":null}"# : offerBody, [:])
+                let body = staleID.map {
+                    offerBody.replacingOccurrences(of: offerID.uuidString, with: $0.uuidString)
+                } ?? offerBody
+                return (200, closed ? #"{"offer":null}"# : body, [:])
             case ("GET", "/v1/browser-profiles"):
                 return (200, profilesBody, [:])
             case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
@@ -2296,6 +2302,34 @@ import UserNotifications
         try await Task.sleep(nanoseconds: 200_000_000)
 
         #expect(model.websiteOffer == nil)
+    }
+
+    @Test
+    func testAnOfferReadFromAReplacedSelectionShowsNoCard() async throws {
+        var server = WebsiteOfferServer()
+        server.waitsForAnswer = true
+        let held = DispatchSemaphore(value: 0)
+        server.log.heldRead = held
+        server.log.heldOfferID = UUID()
+        let model = try await websiteOfferModel(server, concurrentRequests: true, settle: false)
+        defer { model.newSession() }
+        for _ in 0..<5_000 where server.offerReads == 0 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        // Reopening the chat starts a new watch, which reads the current offer.
+        await model.selectSession(try #require(model.history.first))
+        for _ in 0..<5_000 where model.websiteOffer?.offerID != server.offerID {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(model.websiteOffer?.offerID == server.offerID)
+        held.signal()
+        for _ in 0..<5_000 where !server.lock.withLock({ server.log.heldReadReturned }) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        #expect(model.websiteOffer?.offerID == server.offerID)
     }
 
     @Test

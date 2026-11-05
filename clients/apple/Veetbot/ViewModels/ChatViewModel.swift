@@ -2825,10 +2825,12 @@ public final class ChatViewModel: ObservableObject {
             websiteOffer = nil
             return
         }
+        // A read from a replaced selection, or begun before an answer, is stale.
         let generation = websiteOfferGeneration
+        let selection = selectionRequestID
         let offer = try? await api.websiteOffer(sessionID: sessionID)
         guard !Task.isCancelled, selectedSessionID == sessionID,
-            generation == websiteOfferGeneration
+            selectionRequestID == selection, generation == websiteOfferGeneration
         else { return }
         websiteOffer = offer.flatMap { dismissedWebsiteOfferIDs.contains($0.offerID) ? nil : $0 }
     }
