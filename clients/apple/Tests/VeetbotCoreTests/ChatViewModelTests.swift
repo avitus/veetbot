@@ -1954,6 +1954,12 @@ import UserNotifications
             var offerReads = 0
             var sourceReplays = 0
             var accepted = false
+            /// Offer reads that fail with a 503 before one succeeds.
+            var offerFailures = 0
+            /// While set, an offer read waits here after choosing its answer.
+            var heldRead: DispatchSemaphore?
+            var heldReadReturned = false
+            var answered = false
         }
         let log = Log()
 
@@ -2001,11 +2007,20 @@ import UserNotifications
             case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
                 return (200, #"{"items":[],"next_cursor":null}"#, [:])
             case ("GET", "/v1/sessions/\(sessionID.uuidString)/website-offer"):
-                let accepted = lock.withLock {
+                let (closed, failing, held) = lock.withLock {
                     log.offerReads += 1
-                    return log.accepted
+                    let failing = log.offerFailures > 0
+                    if failing { log.offerFailures -= 1 }
+                    let held = log.heldRead
+                    log.heldRead = nil
+                    return (log.accepted || log.answered, failing, held)
                 }
-                return (200, accepted ? #"{"offer":null}"# : offerBody, [:])
+                if failing {
+                    return (503, #"{"error":{"code":"unavailable","message":"Try again"}}"#, [:])
+                }
+                held?.wait()
+                if held != nil { lock.withLock { log.heldReadReturned = true } }
+                return (200, closed ? #"{"offer":null}"# : offerBody, [:])
             case ("GET", "/v1/browser-profiles"):
                 return (200, profilesBody, [:])
             case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
@@ -2021,7 +2036,10 @@ import UserNotifications
                 let continued = continuesSourceRun ? sourceRunID : runID
                 return (200, "{\"run_id\":\"\(continued.uuidString)\"}", [:])
             case ("POST", "/v1/runs/\(sourceRunID.uuidString)/input"):
-                lock.withLock { log.answers.append(request) }
+                lock.withLock {
+                    log.answers.append(request)
+                    log.answered = true
+                }
                 return (202, "{\"run_id\":\"\(sourceRunID.uuidString)\",\"status\":\"QUEUED\"}", [:])
             case ("GET", "/v1/runs/\(runID.uuidString)/events"):
                 return (200, "", ["Content-Type": "text/event-stream"])
@@ -2051,8 +2069,10 @@ import UserNotifications
         }
     }
 
-    private func websiteOfferModel(_ server: WebsiteOfferServer) async throws -> ChatViewModel {
-        let model = try configuredModel { request in
+    private func websiteOfferModel(
+        _ server: WebsiteOfferServer, concurrentRequests: Bool = false, settle: Bool = true
+    ) async throws -> ChatViewModel {
+        let model = try configuredModel(concurrentRequests: concurrentRequests) { request in
             guard let (status, body, headers) = server.answer(request) else {
                 return try response(for: request, statusCode: 404, body: #"{"error":{"code":"not_found","message":"Not found"}}"#)
             }
@@ -2060,7 +2080,7 @@ import UserNotifications
         }
         #expect(await model.configure(baseURLString: "https://veetbot.test", token: "test-token"))
         await model.selectSession(try #require(model.history.first))
-        try await settleWebsiteOffer(model, server)
+        if settle { try await settleWebsiteOffer(model, server) }
         return model
     }
 
@@ -2241,6 +2261,41 @@ import UserNotifications
         #expect(model.runState.clarifyingQuestion != nil)
         #expect(model.showsWebsiteOffer)
         #expect(model.websiteOffer?.offerID == server.offerID)
+    }
+
+    @Test
+    func testAWaitingStreamRetriesAnOfferReadTheServerCouldNotAnswer() async throws {
+        var server = WebsiteOfferServer()
+        server.waitsForAnswer = true
+        server.log.offerFailures = 2
+        let model = try await websiteOfferModel(server)
+        defer { model.newSession() }
+
+        #expect(model.websiteOffer?.offerID == server.offerID)
+        #expect(server.offerReads == 3)
+    }
+
+    @Test
+    func testAnOfferReadThatFinishesAfterTheAnswerShowsNoCard() async throws {
+        var server = WebsiteOfferServer()
+        server.waitsForAnswer = true
+        let held = DispatchSemaphore(value: 0)
+        server.log.heldRead = held
+        let model = try await websiteOfferModel(server, concurrentRequests: true, settle: false)
+        defer { model.newSession() }
+        for _ in 0..<5_000 where model.runState.clarifyingQuestion == nil || server.offerReads == 0 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let question = try #require(model.runState.clarifyingQuestion)
+
+        #expect(await model.answerQuestion(question, answer: "Not now"))
+        held.signal()
+        for _ in 0..<5_000 where !server.lock.withLock({ server.log.heldReadReturned }) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        #expect(model.websiteOffer == nil)
     }
 
     @Test

@@ -1099,6 +1099,7 @@ def test_research_only_covers_recognized_dashboard_read_controls(
         option_texts=(),
         disabled=False,
         facts=facts(field_kind=BrowserFieldKind.TEXT if value else BrowserFieldKind.NONE),
+        card_activity=True,
     )
     assert result.covered == allowed
 
@@ -1145,3 +1146,34 @@ def test_dashboard_permission_is_rechecked_against_the_live_view_and_target() ->
             disabled=False,
         )
         assert coverage.covered == allowed
+
+
+def test_research_approved_off_activity_never_gains_the_activity_exemption() -> None:
+    """A research grant issued off the activity page cannot reach its controls later.
+
+    The page may move to card activity by a same-document route change after
+    the approval; only an approval that saw the activity page carries its rules.
+    """
+    origin = "https://secure.chase.com"
+    constraint = BrowserDispatchConstraint(
+        grant_kind="research",
+        card_activity_only=False,
+        origins=(origin,),
+        not_after=NOW + timedelta(seconds=30),
+        consequence_ceiling="unknown",
+        max_text_characters=256,
+    )
+    coverage = dispatch_constraint_coverage(
+        constraint,
+        action=click(),
+        page_url=origin + "/web/auth/dashboard#/dashboard/transactions/123/CARD/BAC",
+        role="button",
+        labels=["See all transactions"],
+        facts=facts(),
+        option_texts=[],
+        runtime_origins=(origin,),
+        now=NOW,
+        disabled=False,
+    )
+    assert not coverage.covered
+    assert coverage.reason == "sensitive_path"

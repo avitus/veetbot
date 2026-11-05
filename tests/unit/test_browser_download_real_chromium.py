@@ -375,3 +375,32 @@ async def test_a_child_frames_csv_is_not_the_approved_export(
         after = await runtime.act(_click(before.revision, before.elements[0].ref))
     assert fetched.is_set()
     assert after.download is not None and after.download.reason == "timed_out"
+
+
+async def test_an_export_whose_observer_cannot_start_says_so_in_the_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A local capture failure is told apart from a site that sent no file."""
+    from playwright.async_api import Error as PlaywrightError
+
+    from agent_core.adapters.browser import playwright as adapter
+    from agent_core.adapters.browser.csv_export import CsvExportObserver
+
+    monkeypatch.setattr(adapter, "DOWNLOAD_ACT_BUDGET_SECONDS", 2.0)
+
+    async def refuse(self: object) -> None:
+        raise PlaywrightError("Target page, context or browser has been closed")
+
+    monkeypatch.setattr(CsvExportObserver, "start", refuse)
+
+    async def home(request: Request) -> Response:
+        return html('<button id="go">Download</button>', script="go.onclick = () => 0")
+
+    caplog.set_level("WARNING", logger=adapter.__name__)
+    async with browsing([Route("/", home)]) as (site, runtime):
+        before = await runtime.navigate(site.url("/"))
+        after = await runtime.act(_click(before.revision, before.elements[0].ref))
+    assert after.download is not None and after.download.reason == "timed_out"
+    records = [r for r in caplog.records if r.name == adapter.__name__]
+    assert [r.getMessage() for r in records] == ["browser.csv_export.observer_unavailable"]
+    assert "closed" not in caplog.text

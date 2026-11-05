@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import os
 import re
@@ -96,6 +97,8 @@ from agent_core.ports.browser import (
     extract_browser_observation,
 )
 from agent_core.ports.browser_upload import upload_browser_image
+
+_LOGGER = logging.getLogger(__name__)
 
 MAXIMUM_ELEMENTS = 256
 # Candidates scanned for visibility before the element cap applies (ADR-0130).
@@ -1581,7 +1584,7 @@ class PythonPlaywrightRuntime:
             if window.export_origin and self._main_frame_id:
                 # The observer gets its own bounded Network buffer; it does not
                 # intercept requests or change the document guard's CDP session.
-                with suppress(PlaywrightError):
+                try:
                     csv_session = await page.context.new_cdp_session(page)
 
                     def reserve(task: asyncio.Task[BrowserDownload]) -> bool:
@@ -1601,6 +1604,11 @@ class PythonPlaywrightRuntime:
                     )
                     await observer.start()
                     observer.armed = True
+                except PlaywrightError:
+                    # The export still runs and times out as before; this tells a
+                    # local capture failure from a site that sent no file. The
+                    # error's text can carry page data, so it is not logged.
+                    _LOGGER.warning("browser.csv_export.observer_unavailable")
             await self._dispatch(page, handle, action, guards, relied_copies=relied_copies)
             if draft_binding is not None and self._main_frame_navigations == documents_before:
                 await self._forget_draft()

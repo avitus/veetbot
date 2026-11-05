@@ -142,6 +142,8 @@ public final class ChatViewModel: ObservableObject {
     /// ADR-0251: the open chat's offer to connect a website the owner named.
     @Published public private(set) var websiteOffer: WebsiteOffer?
     private var dismissedWebsiteOfferIDs: Set<UUID> = []
+    /// Advances when an answer closes the offer, so a read begun before it is discarded.
+    private var websiteOfferGeneration = 0
     private var pendingWebsiteOffer: (offerID: UUID, profileID: UUID, sessionID: UUID)?
     @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
     /// The one-time launch capability of the in-flight ceremony. It is held only
@@ -1723,6 +1725,7 @@ public final class ChatViewModel: ObservableObject {
             )
             // The answer is the owner's next message, which closes the offer.
             websiteOffer = nil
+            websiteOfferGeneration += 1
             runState.begin(runID: result.runID, status: result.status)
             try await touchSelectedHistory(lastRunID: result.runID)
             // The existing SSE connection remains open while the run is suspended.
@@ -2822,8 +2825,11 @@ public final class ChatViewModel: ObservableObject {
             websiteOffer = nil
             return
         }
+        let generation = websiteOfferGeneration
         let offer = try? await api.websiteOffer(sessionID: sessionID)
-        guard !Task.isCancelled, selectedSessionID == sessionID else { return }
+        guard !Task.isCancelled, selectedSessionID == sessionID,
+            generation == websiteOfferGeneration
+        else { return }
         websiteOffer = offer.flatMap { dismissedWebsiteOfferIDs.contains($0.offerID) ? nil : $0 }
     }
 
@@ -3188,7 +3194,8 @@ public final class ChatViewModel: ObservableObject {
                     // Load the offer now so accepting it can be that answer.
                     if offerAnnounced, frame.event == "run.waiting_for_user",
                         self.runState.clarifyingQuestion != nil {
-                        await self.refreshWebsiteOffer()
+                        // Read beside the stream: a retried read must not hold later frames.
+                        Task { await self.refreshWebsiteOffer() }
                     }
                     if ["run.completed", "run.failed", "run.cancelled"].contains(frame.event),
                         self.runState.activeRunID == runID {

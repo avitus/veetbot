@@ -181,6 +181,7 @@ class BrowserResearchAuthorizer:
             origin=origin,
             path_prefix=None,
             disabled=view.element.disabled,
+            card_activity=card_activity,
         )
         if not covered.covered:
             return _refused(covered.reason or "facts_unavailable")

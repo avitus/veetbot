@@ -169,9 +169,11 @@ public struct VeetbotAPIClient: Sendable {
 
     /// ADR-0251: the chat's open offer to connect a website the owner named.
     public func websiteOffer(sessionID: UUID) async throws -> WebsiteOffer? {
+        // A waiting run reads this once, so a brief outage would hide the card.
         let envelope: WebsiteOfferEnvelope = try await transport.send(
             TransportRequest(
-                method: .get, path: "/v1/sessions/\(sessionID.uuidString)/website-offer"
+                method: .get, path: "/v1/sessions/\(sessionID.uuidString)/website-offer",
+                retryAttempts: 3
             )
         )
         return envelope.offer

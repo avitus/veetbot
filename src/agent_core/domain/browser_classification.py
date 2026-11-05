@@ -652,11 +652,15 @@ def task_grant_coverage(
     origin: str,
     path_prefix: str | None,
     disabled: bool,
+    card_activity: bool = False,
 ) -> BrowserCoverage:
     """Whether a task grant for ``origin`` and ``path_prefix`` covers ``action``.
 
     Research authorization uses ``None`` for the prefix, retaining the same
     origin, sensitive-path and consequence exclusions across ordinary pages.
+    ``card_activity`` is whether the approval itself was for the card activity
+    page; only then do its read controls pass, so a page that moves there after
+    an ordinary approval gains nothing.
 
     Rules run in the design's order and the first that fails names the reason.
     The worker and the isolated runtime run the same rules. ``disabled`` is
@@ -678,7 +682,8 @@ def task_grant_coverage(
     if path_prefix is not None and not path_is_within_prefix(path, path_prefix):
         return _refused(consequence, "outside_prefix")
     activity = (
-        path_prefix is None
+        card_activity
+        and path_prefix is None
         and chase_card_activity(page_url)
         and _activity_control(action, role, labels)
     )
@@ -839,6 +844,7 @@ def dispatch_constraint_coverage(
             origin=constraint.origins[0],
             path_prefix=constraint.path_prefix,
             disabled=disabled,
+            card_activity=constraint.card_activity_only,
         )
     if constraint.grant_kind == "standing":
         return standing_ceiling_coverage(
