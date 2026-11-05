@@ -2,8 +2,9 @@
 
 - Status: Accepted — the owner accepted this decision, including both spending
   limits, and authorized its implementation on 2026-11-01. Amended 2026-11-03: see
-  the amendment below. ADR-0298 applies its arrival rule to new-mail slices, so the
-  work it leaves to foreground slices now waits for a full slice within the share.
+  the amendment below. ADR-0298 applies its arrival rule to new-mail slices, so
+  re-assessment after a revision and further passes of a long conversation, unless a
+  change is waiting on its window, now wait for a full slice within the share.
 - Date: 2026-11-01
 - Related: ADR-0092, ADR-0096, ADR-0103, ADR-0104, ADR-0173, ADR-0244, ADR-0256
 - Amends: ADR-0092 decision 3 (refresh is foreground-request-driven)
