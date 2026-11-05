@@ -606,7 +606,10 @@ One tool, returning `TrustLevel.KNOWLEDGE` data, plus the ingestion tool:
 
 - **`knowledge.search`** — text query, optional `as_of`, returns ranked passages with
   their chunk ids and heading paths; the name of a visible document drops out of the
-  text first (ADR-0293). `required_scopes` is empty, mirroring `skill.write`
+  text first (ADR-0293). An omitted `scope` is the session's project scope, read
+  where `memory.search` reads it (ADR-0299), so a search that names none reaches
+  every document the catalog listed; a `scope` the model passes still wins. The
+  tool's spec is unchanged. `required_scopes` is empty, mirroring `skill.write`
   shipping without a `skill.read`: nothing in 0.1 could check a read scope, and an
   uncheckable scope is worse than a missing one.
 - **`knowledge.ingest`** — takes an `ArtifactRef`, a title, and a visibility. Requires
@@ -637,8 +640,11 @@ Deployment Guide: 12 passages, dated 2026-05-02, added 2026-07-28
 Garden note: 1 passage, added 2026-10-01
 ```
 
-Never a passage. `dated` is the document's own date when it has one; `added`
-is the UTC day of ingestion. A single passage renders `1 passage`. A superseded
+Never a passage. A title renders on one line whatever it holds: its line
+breaks and runs of whitespace collapse to one space, and a blank one renders
+`untitled`, so no title can forge a second entry. `dated` is the document's own
+date when it has one; `added` is the UTC day of ingestion. A single passage
+renders `1 passage`. A superseded
 document appears once, as its current version. When more than twelve documents
 exist the twelve earliest by title render and a last line says
 `N more documents; knowledge.search still reaches them`. A run that may read

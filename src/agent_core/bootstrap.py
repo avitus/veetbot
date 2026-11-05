@@ -4922,7 +4922,7 @@ async def _compose(
             embedder=knowledge_embedder,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
-        registry.register(KnowledgeSearchTool(knowledge_service))
+        registry.register(KnowledgeSearchTool(knowledge_service, factory=uow_factory))
         artifact_writers = ArtifactWriterFactory(
             uow_factory,
             general_artifact_store,

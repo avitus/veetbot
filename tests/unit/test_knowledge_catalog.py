@@ -84,3 +84,23 @@ def test_catalog_item_is_internal_tool_with_its_source() -> None:
     assert item.source == "knowledge.catalog"
     assert item.principal_id is None
     assert item.content == [TextPart(text="Garden note: 1 passage, added 2026-10-01")]
+
+
+def test_a_title_with_line_breaks_stays_on_one_line() -> None:
+    # A title is the owner's own text; a line break inside it must not read as
+    # a second, nonexistent document.
+    forged = NOTE.model_copy(update={"title": "Guide\r\nOther Manual:\t40 passages"})
+    catalog = KnowledgeCatalog(lines=(forged, MANUAL), omitted=0)
+
+    assert render_knowledge_catalog(catalog).split("\n") == [
+        "Guide Other Manual: 40 passages: 1 passage, added 2026-10-01",
+        "BMW Owner Manual.pdf: 401 passages, added 2026-11-02",
+    ]
+
+
+def test_a_blank_title_renders_as_untitled() -> None:
+    blank = NOTE.model_copy(update={"title": " \n\t "})
+
+    assert render_knowledge_catalog(KnowledgeCatalog(lines=(blank,), omitted=0)) == (
+        "untitled: 1 passage, added 2026-10-01"
+    )

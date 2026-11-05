@@ -60,7 +60,10 @@ for a slot.
    (zero caps), or when the store holds no document the run may read. A
    session without documents is byte-identical to one built before this
    decision. A failed read logs `context_knowledge_catalog_failed` and
-   assembles without the row.
+   assembles without the row. A `knowledge.search` that names no `scope`
+   reads under the session's project scope, as `memory.search` does, so one
+   search reaches every document the catalog listed; a passed `scope` still
+   wins, and the tool's spec is unchanged.
 3. **Its own budget class, dropping whole.** `classes.knowledge_catalog`
    in `context/plan.yaml`, twelve documents and 400 tokens, absolute caps;
    `ContextBudget` gains `knowledge_catalog_tokens`. The twelve earliest by
@@ -81,7 +84,9 @@ for a slot.
 5. **The item is `INTERNAL_TOOL` data with `source="knowledge.catalog"`**,
    rendered inside the ordinary envelope exactly as a tool result would be.
    Titles are the owner's own, scanned at ingestion, and the row lowers
-   neither the request's origin trust nor the executor's turn label.
+   neither the request's origin trust nor the executor's turn label. A title
+   renders on one line whatever it holds, its line breaks and whitespace runs
+   collapsed to one space, so no title can forge a second entry.
 
 ## Consequences
 
@@ -102,7 +107,10 @@ for a slot.
 
 ## Evidence
 
-- `tests/unit/test_knowledge_catalog.py`: the rendering, byte for byte.
+- `tests/unit/test_knowledge_catalog.py`: the rendering, byte for byte, and
+  a title with line breaks on one line.
+- `tests/gates/test_knowledge_m9.py`: a search without a scope reaches the
+  session's project documents, and a passed scope wins.
 - `tests/unit/test_knowledge_catalog_context.py`: row 13b's bytes, trust and
   position; absence without a source, a roster entry or documents; the
   whole-row yield ahead of recall and behind the records catalog; the reader

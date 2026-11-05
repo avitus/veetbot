@@ -44,7 +44,15 @@ from agent_core.knowledge.service import KnowledgeService
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.profiles import TraceProfile
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
-from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal, tool_context
+from agent_core.tools.knowledge_search import KnowledgeSearchTool
+from tests.contract.support import (
+    RUN_ID,
+    SESSION_ID,
+    memory_stack,
+    principal,
+    run,
+    tool_context,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -503,3 +511,41 @@ async def test_corpus_recall(tmp_path: Path) -> None:
     noise_ratio = noise / max(1, returned)
     assert recall_at_3 >= 0.9
     assert noise_ratio <= 0.34
+
+
+async def test_search_without_a_scope_reads_the_sessions_project(tmp_path: Path) -> None:
+    """ADR-0299: the catalog lists the session's project documents, so a search
+    that names no scope reads under that same scope and reaches them."""
+
+    stack = await _stack(tmp_path)
+    scoped_session = UUID(int=868)
+    scoped_run = UUID(int=869)
+    async with stack.factory() as uow:
+        session = await uow.sessions.get(SESSION_ID, principal())
+        await uow.sessions.create(
+            session.model_copy(
+                update={"id": scoped_session, "metadata": {"project_scope": "project-a"}}
+            )
+        )
+        await uow.runs.create(
+            run().model_copy(update={"id": scoped_run, "session_id": scoped_session})
+        )
+    await _ingest(
+        stack,
+        "The valve-like ticking after parking is the standby state settling.",
+        visibility=KnowledgeVisibility.PROJECT,
+        project_scope="project-a",
+    )
+    context = replace(tool_context(), session_id=scoped_session, run_id=scoped_run)
+    tool = KnowledgeSearchTool(stack.service, factory=stack.factory)
+
+    found = await tool.execute({"text": "valve-like ticking after parking"}, context)
+    assert found.structured is not None
+    assert found.structured["chunk_ids"], found.content
+
+    # An explicit scope still wins over the session's.
+    elsewhere = await tool.execute(
+        {"text": "valve-like ticking after parking", "scope": "project-b"}, context
+    )
+    assert elsewhere.structured is not None
+    assert elsewhere.structured["chunk_ids"] == []

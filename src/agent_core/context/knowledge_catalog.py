@@ -32,13 +32,23 @@ class KnowledgeCatalogSource(Protocol):
     ) -> KnowledgeCatalog | None: ...
 
 
+def _title(title: str) -> str:
+    """One line whatever the title holds: breaks and whitespace runs become one space.
+
+    A title is the owner's own text; a line break inside it must not read as a
+    second, nonexistent document.
+    """
+
+    return " ".join(title.split()) or "untitled"
+
+
 def _line(line: KnowledgeCatalogLine) -> str:
     noun = "passage" if line.passages == 1 else "passages"
     parts = [f"{line.passages} {noun}"]
     if line.doc_date is not None:
         parts.append(f"dated {line.doc_date.isoformat()}")
     parts.append(f"added {line.ingested_at.astimezone(UTC).date().isoformat()}")
-    return f"{line.title}: {', '.join(parts)}"
+    return f"{_title(line.title)}: {', '.join(parts)}"
 
 
 def render_knowledge_catalog(catalog: KnowledgeCatalog) -> str:
