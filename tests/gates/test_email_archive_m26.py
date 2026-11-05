@@ -86,6 +86,11 @@ async def test_archive_and_restore_use_one_exact_owner_approval_without_model_or
                 run = await app.runs.get(UUID(result.json()["run_id"]))
                 assert run.status is RunStatus.COMPLETED, run.failure
                 assert run.model_call_count == 0
+                # The gesture's consent lapses in 120 s, so its run has no queue
+                # allowance to outlast it (ADR-0295).
+                assert run.limits.execution_seconds is None
+                assert run.deadline_at is not None
+                assert (run.deadline_at - run.created_at).total_seconds() == 120
                 latest = await app.services.email.thread(app.principal, thread.id)
                 assert latest["in_inbox"] is not archived
                 assert latest["revision"] == thread.revision

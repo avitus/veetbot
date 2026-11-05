@@ -356,6 +356,7 @@ from agent_core.application.device_management import (
     NotificationInboxService,
 )
 from agent_core.application.email import EmailExperienceService
+from agent_core.application.email_attachments import EmailAttachmentSaver
 from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.application.job_execution import JobExecution
@@ -758,6 +759,7 @@ from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
     BrowserActTool,
+    PinnedBrowserActTool,
 )
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
@@ -1238,7 +1240,11 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "your reply automatically. Never say a file is attached unless its export or "
     "generation tool succeeded. To delete files you generated in this chat when the owner "
     "asks, call artifact.delete through tool.call with their artifact ids; it never deletes "
-    "the owner's uploads. When a schedule, job or widget fails, find the cause before answering, "
+    "the owner's uploads. To keep an email attachment as a file when the owner asks, call "
+    "mcp.gmail_read.save_attachment through tool.call (each account's read server has one) "
+    "with the message id, its zero-based attachment_index and filename from get_thread; it "
+    "asks the owner first, and your reply carries the file. "
+    "When a schedule, job or widget fails, find the cause before answering, "
     "never asking the owner for errors you can read: call run.inspect through tool.call, and "
     "cockpit.read's diagnostics for a widget. A tile showing Paused is the device's watchdog, "
     "not a paused schedule. Where enabled, code.read, code.draft, code.test and code.propose "
@@ -3675,17 +3681,15 @@ async def _compose(
             )
         # ADR-0129: the approval card describes the action whatever the flag;
         # it offers a task grant only when task grants are enabled.
-        registry.register(
-            BrowserActTool(
-                browser_provider,
-                presenter=BrowserActApprovalPresenter(
-                    browser_provider,
-                    context_reader=_task_grant_context_reader(uow_factory, clock),
-                    enabled=_task_grants_composed(settings, browser_provider),
-                    now=clock.now,
-                ),
-            )
+        act_presenter = BrowserActApprovalPresenter(
+            browser_provider,
+            context_reader=_task_grant_context_reader(uow_factory, clock),
+            enabled=_task_grants_composed(settings, browser_provider),
+            now=clock.now,
         )
+        # ADR-0294: a chat pinned to the earlier spec keeps it; the latest is offered.
+        registry.register(PinnedBrowserActTool(browser_provider, presenter=act_presenter))
+        registry.register(BrowserActTool(browser_provider, presenter=act_presenter))
     if settings.delegation_enabled:
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
@@ -4776,6 +4780,7 @@ async def _compose(
             warmup_retry_seconds=float(warmup_limits["warmup_retry_seconds"]),
             warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
+            email_attachment_saver=EmailAttachmentSaver(SignatureAttachmentInspector()),
             access_tokens=owner_mcp_servers,
             owner_servers_enabled=settings.mcp_servers_enabled,
         )

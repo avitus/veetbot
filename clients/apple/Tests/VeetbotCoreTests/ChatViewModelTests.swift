@@ -1944,6 +1944,8 @@ import UserNotifications
         var offered = true
         /// Whether accepting continues the source run parked on a question.
         var continuesSourceRun = false
+        /// How the offered login's latest sign-in began (ADR-0297).
+        var lastSignIn: String?
 
         final class Log: @unchecked Sendable {
             var connections: [URLRequest] = []
@@ -1978,8 +1980,10 @@ import UserNotifications
             #"{"offer":{"offer_id":"\#(offerID.uuidString)","source_sequence":50,"connected_origin":null,"websites":[{"profile_id":"\#(profileID.uuidString)","origins":["https://mychart.example-health.org"],"status":"\#(status)"}],"expires_at":"2026-10-26T17:14:49Z"}}"#
         }
 
+        var lastSignInJSON: String { lastSignIn.map { "\"\($0)\"" } ?? "null" }
+
         var profilesBody: String {
-            #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://mychart.example-health.org"],"status":"\#(listedStatus ?? status)","generation":7,"created_at":"2026-10-21T05:04:11Z","updated_at":"2026-10-21T17:04:59Z","last_used_at":null}],"next_cursor":null}"#
+            #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://mychart.example-health.org"],"status":"\#(listedStatus ?? status)","generation":7,"created_at":"2026-10-21T05:04:11Z","updated_at":"2026-10-21T17:04:59Z","last_used_at":null,"last_sign_in_mode":\#(lastSignInJSON)}],"next_cursor":null}"#
         }
 
         /// Answers a request as (status, body, extra headers), or nil for a 404.
@@ -1999,6 +2003,9 @@ import UserNotifications
                 return (200, accepted ? #"{"offer":null}"# : offerBody, [:])
             case ("GET", "/v1/browser-profiles"):
                 return (200, profilesBody, [:])
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                let ceremony = #"{"id":"\#(UUID().uuidString)","profile_id":"\#(profileID.uuidString)","status":"needs_user","expires_at":"2099-01-01T00:00:00Z","launch_url":"https://browser.example/authentication/1#token"}"#
+                return (201, ceremony, [:])
             case ("GET", "/v1/browser-task-grants"):
                 return (200, #"{"items":[],"next_cursor":null}"#, [:])
             case ("PUT", "/v1/sessions/\(sessionID.uuidString)/website"):
@@ -2124,6 +2131,22 @@ import UserNotifications
         await model.acceptWebsiteOffer(website)
 
         #expect(model.deviceSignInRequest?.profileID == server.profileID)
+        #expect(server.connections.isEmpty)
+    }
+
+    @Test
+    func testAWebsiteLastSignedInRemotelyStartsThereBeforeConnecting() async throws {
+        var server = WebsiteOfferServer()
+        server.status = "needs_user"
+        server.lastSignIn = "remote"
+        let model = try await websiteOfferModel(server)
+        let website = try #require(model.websiteOffer?.websites.first)
+
+        await model.acceptWebsiteOffer(website)
+
+        #expect(model.deviceSignInRequest == nil)
+        #expect(model.websiteAuthenticationLaunchURL != nil)
+        #expect(model.isWebsiteAccessPresented)
         #expect(server.connections.isEmpty)
     }
 

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
-from collections.abc import Awaitable, Callable
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -28,8 +30,18 @@ from agent_core.domain.browser_act_views import (
     session_is_task_grant_eligible,
     task_grant_offer,
 )
+from agent_core.domain.browser_download import BrowserDownload
 from agent_core.domain.browser_follow import profile_handle
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
+from agent_core.domain.captures import (
+    CAPTURE_LITERAL_KEY,
+    CAPTURE_METADATA_KEY,
+    CAPTURE_READER_TOOL_NAME,
+    CaptureSections,
+    capture_text,
+    reader_call,
+)
+from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
     AuthorizationTurn,
     IdempotencyClass,
@@ -39,6 +51,7 @@ from agent_core.domain.policies import (
 )
 from agent_core.domain.runs import Run
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
+from agent_core.ports.artifacts import ArtifactWriter
 from agent_core.ports.browser import (
     GRANT_NOT_APPLICABLE,
     BrowserProvider,
@@ -47,13 +60,22 @@ from agent_core.ports.browser import (
 )
 from agent_core.tools.browser_conditions import browser_condition_schema, check_browser_condition
 from agent_core.tools.browser_results import (
+    ACT_OUTPUT_SCHEMA,
     OUTPUT_SCHEMA,
     browser_failure,
     observation_result,
+    serialized_observation,
 )
+from agent_core.tools.tool_call import TOOL_CALL_TOOL_NAME
+
+logger = logging.getLogger(__name__)
 
 _CONDITION_SCHEMA = browser_condition_schema()
 _CONDITION_DEFINITIONS = _CONDITION_SCHEMA.pop("$defs")
+# Room in a result for the saved-file note, whatever the page's size.
+_SAVED_FILE_NOTE_BYTES = 1024
+# Storing a file gives up this long before the tool's limit, to report the click.
+_RESULT_RESERVE_SECONDS = 1.0
 
 INPUT_SCHEMA: dict[str, Any] = {
     "$defs": _CONDITION_DEFINITIONS,
@@ -158,7 +180,7 @@ class BrowserActApprovalPresenter:
 class BrowserActTool:
     spec = ToolSpec(
         name="browser.act",
-        version="1.7.0",
+        version="1.8.0",
         description=(
             "Act once with approval: current revision+elements[].ref, including scroll; "
             "regions[].ref is read-only. Returns settled page/fresh refs. "
@@ -166,7 +188,7 @@ class BrowserActTool:
             "Never replay uncertain writes; success is not causal proof."
         ),
         input_schema=INPUT_SCHEMA,
-        output_schema=OUTPUT_SCHEMA,
+        output_schema=ACT_OUTPUT_SCHEMA,
         side_effect=SideEffectClass.EXTERNAL_WRITE,
         risk=RiskLevel.HIGH,
         idempotency=IdempotencyClass.NON_IDEMPOTENT,
@@ -176,6 +198,8 @@ class BrowserActTool:
         target_kind="browser_provider",
         output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
     )
+
+    _reports_downloads = True
 
     def __init__(
         self, provider: BrowserProvider, *, presenter: BrowserActApprovalPresenter | None = None
@@ -197,6 +221,12 @@ class BrowserActTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Dispatch one action, check its postcondition, and report any file it saved."""
+
+        call_deadline = context.monotonic_deadline
+        if call_deadline is None:
+            call_deadline = asyncio.get_running_loop().time() + context.timeout_seconds
+        store_deadline = call_deadline - _RESULT_RESERVE_SECONDS
         try:
             if set(arguments) - set(self.spec.input_schema["properties"]):
                 raise ValueError("unknown action fields")
@@ -234,6 +264,8 @@ class BrowserActTool:
             observation = await _act(self._provider, action, constraint)
         except BrowserProviderError as error:
             return browser_failure(error)
+        # A postcondition read returns a new observation, which has no file.
+        download = observation.download if self._reports_downloads else None
         if observation.interruption is not None:
             interrupted = browser_failure(
                 BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
@@ -265,7 +297,80 @@ class BrowserActTool:
             return browser_failure(
                 BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
             )
-        return observation_result(self._provider, observation, self.spec.maximum_output_bytes)
+        result = observation_result(
+            self._provider,
+            observation,
+            self.spec.maximum_output_bytes - (0 if download is None else _SAVED_FILE_NOTE_BYTES),
+        )
+        if download is None or not result.ok or result.structured is None:
+            return result
+        saved_file = await self._saved_file(download, context, store_deadline)
+        structured = {**result.structured, "saved_file": saved_file}
+        return result.model_copy(
+            update={
+                "content": [TextPart(text=serialized_observation(structured))],
+                "structured": structured,
+            }
+        )
+
+    async def _saved_file(
+        self, download: BrowserDownload, context: ToolExecutionContext, deadline: float
+    ) -> dict[str, Any]:
+        """Store an admitted file as a capture of this chat and describe it to the model."""
+
+        if download.status == "refused":
+            return {"status": "refused", "reason": download.reason}
+        reachable = {CAPTURE_READER_TOOL_NAME, TOOL_CALL_TOOL_NAME} <= context.available_tools
+        create = getattr(context.artifacts, "create", None)
+        if not reachable or create is None or download.filename is None:
+            return {"status": "refused", "reason": "reader_unavailable"}
+        data = download.data()
+        media_type = str(download.media_type)
+        writer = cast(ArtifactWriter, context.artifacts)
+        try:
+            async with asyncio.timeout_at(deadline):
+                ref = await writer.create(
+                    _single(data),
+                    download.filename,
+                    media_type,
+                    TrustLevel.EXTERNAL_UNTRUSTED,
+                    metadata={
+                        CAPTURE_METADATA_KEY: {
+                            "tool": self.spec.name,
+                            "required_scopes": sorted(self.spec.required_scopes),
+                            CAPTURE_LITERAL_KEY: True,
+                        }
+                    },
+                )
+        except Exception:
+            # The click already ran, so a lost file must not cost it its result.
+            logger.exception("browser_download_capture_failed", extra={"size_bytes": len(data)})
+            return {"status": "refused", "reason": "failed"}
+        sections = CaptureSections(
+            capture_text(data, literal=True), artifact_id=ref.artifact_id, tool=self.spec.name
+        ).count
+        return {
+            "status": "saved",
+            "artifact": str(ref.artifact_id),
+            "filename": download.filename,
+            "media_type": media_type,
+            "size_bytes": ref.size_bytes,
+            "sections": sections,
+            "read_with": f"tool.call {reader_call(ref.artifact_id)}",
+        }
+
+
+class PinnedBrowserActTool(BrowserActTool):
+    """The published 1.7.0 spec, for a chat pinned to it; it reports no file (ADR-0294)."""
+
+    spec = BrowserActTool.spec.model_copy(
+        update={"version": "1.7.0", "output_schema": OUTPUT_SCHEMA}
+    )
+    _reports_downloads = False
+
+
+async def _single(data: bytes) -> AsyncIterator[bytes]:
+    yield data
 
 
 def _checked_constraint(

@@ -731,7 +731,8 @@ above and needs no new Google permission.
    `email.monthly_cost` allowances. Each refresh slice reserves USD 1 against
    that aggregate allowance, and new mail keeps the remaining quarter of it:
    once the usual full refresh would pass 75% of either ceiling, a refresh is
-   admitted as a new-mail slice until the full ceiling (ADR-0256).
+   admitted as a new-mail slice until the full ceiling (ADR-0256), which spends
+   only on mail that arrived (ADR-0298).
 4. Restart `veetbot-api`, `veetbot-worker`, `veetbot-async-worker`, and
    `veetbot-maintenance`, confirm each is active, then open Email in the app
    and confirm each account reports a completed update.

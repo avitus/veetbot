@@ -130,7 +130,9 @@ or deadline, the importance explanation, and an editable draft when one is
 appropriate. Render sanitized text initially; external images, tracking pixels,
 and active HTML do not load. Show attachment metadata and the fact that an
 attachment was not read. A draft that depends on an unread attachment requests
-the missing information rather than claiming to have reviewed it.
+the missing information rather than claiming to have reviewed it. Each attachment
+offers Save, which stores a copy in the thread's chat
+([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)).
 
 The reading view derives inert Markdown from each retained message on the scoped
 thread read, after source retention is enforced. It removes invisible preheader
@@ -267,13 +269,13 @@ changes with the usual eight reads per
 account, and a resynchronization's first Inbox page. It assesses at most four
 arrivals, newest first, after any retained window a change is waiting on. Each gets
 one pass, on its newest passage, which is enough to rank it; further passes of a long
-conversation wait for foreground slices, except for a window the change is waiting on,
+conversation wait for full slices (ADR-0298), except for a window the change is waiting on,
 whose unread mail cannot be reached until it is analyzed. A check prepares eligible automatic drafts
 only for conversations it assessed, and eligibility needs a finished analysis. It
 does not re-assess a conversation only because a profile, model or
 prompt revision changed, page further through the Inbox, advance the history pass,
 re-read expired bodies, verify unsubscribe evidence or write correspondence
-summaries. Foreground slices keep that work.
+summaries. Foreground slices keep that work, within their scope (ADR-0298).
 
 A check is admitted only within 50% of the daily and 90% of the rolling thirty-day
 allowance. A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
@@ -377,6 +379,9 @@ small sample.
 
 Approved admission bounds are 100 thread summaries per account per slice,
 10 full-thread reads per account per slice, and a 120-second execution deadline.
+That time starts at the first claim. A claim more than 300 seconds after admission
+gets only what remains of the slice plus those 300, and past that fails; an earlier
+deadline on the agent still applies (ADR-0295).
 These are upper bounds: inherited tool, output-byte, context, token, and cost
 limits may stop work sooner. Checkpoint between pages. Oversized threads need
 explicit continuation or a partial-content marker; truncation must never be
@@ -447,16 +452,22 @@ New mail keeps a reserved share (ADR-0256). A refresh is a full slice only
 while counted spending, live reservations and its reservation fit within 75% of
 both the daily and the rolling thirty-day allowance. Above that share and
 within both ceilings it is a new-mail slice: new Gmail changes take all eight
-full-thread reads, and only current Inbox conversations are assessed, newest
-activity first. A retained window that a change is waiting on is assessed
+full-thread reads, and only arrivals are assessed, under the rule in "Server
+arrival checks": at most four, newest activity first, one pass each (ADR-0298). A
+retained window that a change is waiting on is assessed
 ahead of them even outside the Inbox, since until it is analyzed the thread's
-newer messages cannot be read. Expired Inbox bodies, automatic drafts and unsubscribe
+newer messages cannot be read. Automatic drafts are prepared only for conversations
+the slice assessed, and need a finished analysis. Expired Inbox bodies and unsubscribe
 verification proceed as usual. The first page of an Inbox pass is also read;
-it holds the newest mail, so a resynchronization still recovers new mail. Later
+it holds the newest mail, so a resynchronization still recovers new mail. Re-assessment
+after a profile, model or prompt revision, further passes of a long conversation,
+assessment of mail older than the arrival window, later
 catch-up pages, the ninety-day history pass, other non-Inbox assessment and
 correspondence summaries wait until a refresh again passes the 75% admission
-check, counted spending and live reservations included. Owner-requested drafts
-and People imports use the full ceilings.
+check, counted spending and live reservations included. A new-mail slice that found
+nothing makes no model call, requests no memory formation and is removed after seven
+days, as an empty check is. Owner-requested drafts and People imports use the full
+ceilings.
 Each refresh task records its admitted `scope`, `full`, `new_mail` or `arrivals`
 (ADR-0286); earlier tasks read as `full`.
 
@@ -897,6 +908,7 @@ normal contract naming review:
 | `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
 | `/v1/email/threads/{id}/spam` and `/spam-flag` | Milestone 31 (ADR-0165), behind its flag: admit an owner's Report spam or Not spam with Archive's gesture; clear or restore a suspected-spam flag without a mailbox change. |
 | `/v1/email/threads/{id}/discussion`, `/dismiss`, and `/exclude` | Open the thread in Chat once (`email.discussion.opened`, which also needs `session.write`); set or clear handled state at the revision the client saw; exclude the thread as a learning source. |
+| `/v1/email/threads/{id}/attachments/save` | One press on Save for one listed attachment: a typed, model-free task in the thread's session whose reply carries the file (needs `email.write` and `artifact.write`; ADR-0296). |
 | Existing approval routes | Resolve every send once; no alternate direct-send HTTP route. |
 
 The exact platform scopes are `email.read` and `email.write` for application
@@ -1312,7 +1324,8 @@ maintenance sweep therefore cannot expose or renew an expired body.
 The owner-authorized email-source erasure operation is a narrow content-erasure
 exception to append-only event payloads. It preserves event identity, sequence,
 actor, time, tool/action identity, approval decisions, and argument hashes; it
-replaces only the selected source's content with an explicit erasure marker and
+replaces only the selected source's content, including a saved attachment's file name
+wherever its call recorded it (ADR-0296), with an explicit erasure marker and
 appends an `email.source.erased` audit event. It does not rewrite user messages
 or reinterpret an earlier action. The original Gmail account-to-server binding is
 server-owned session metadata and must never be refreshed from a later manifest.

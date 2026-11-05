@@ -7,7 +7,9 @@ import httpx
 import pytest
 
 from agent_core.api import create_app
+from agent_core.application.email import save_value
 from agent_core.bootstrap import Composition
+from agent_core.domain.email import EmailAttachment
 from agent_core.domain.runs import RunStatus
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
@@ -100,6 +102,18 @@ COMMANDS = (
         "email.write",
         {"expected_revision": 1, "archived": False, "idempotency_key": "restore-request"},
     ),
+    Command(
+        "save_attachment",
+        "POST",
+        "/v1/email/threads/{t}/attachments/save",
+        "email.write",
+        {
+            "message_id": "{m}",
+            "attachment_index": 0,
+            "filename": "invoice.pdf",
+            "idempotency_key": "save-request",
+        },
+    ),
     Command("discard", "DELETE", "/v1/email/drafts/{d}?expected_revision=1", "email.write"),
     Command(
         "exclude", "POST", "/v1/email/threads/{t}/exclude", "email.write", {"expected_revision": 1}
@@ -119,6 +133,19 @@ async def _request(
 ) -> tuple[str, dict[str, object] | None]:
     """Seed the state each command needs and return its concrete request payload."""
     thread, draft = await seed_mail(app)
+    if command.name == "save_attachment":
+        app.principal.scopes.add("artifact.write")
+        listed = EmailAttachment(filename="invoice.pdf", mime_type="application/pdf", size=10)
+        messages = [m.model_copy(update={"attachments": [listed]}) for m in thread.messages]
+        async with app.uow_factory() as uow, uow.email.lock(app.principal):
+            await save_value(
+                uow.email,
+                app.principal,
+                "thread",
+                str(thread.id),
+                thread.model_copy(update={"messages": messages}),
+                app.clock.now(),
+            )
     if command.name in {"archive", "restore", "send_now"}:
         app.principal.scopes.update({"approval.resolve", "mcp.gmail_write.use"})
         app.services.email.account_servers[thread.account_id]["write"] = "gmail_write"
@@ -130,7 +157,7 @@ async def _request(
         return None
 
     app.services.email.dispatch = dispatch
-    identities = {"t": thread.id, "d": draft.id, "f": uuid4(), "o": uuid4()}
+    identities = {"t": thread.id, "d": draft.id, "f": uuid4(), "o": uuid4(), "m": "m1"}
     if command.name == "unhandle":
         response = await client.post(
             f"/v1/email/threads/{thread.id}/dismiss", json={"expected_revision": 1}
@@ -213,7 +240,7 @@ async def _succeed_and_retry_without_duplicate_actions(command: Command) -> None
     async with email_client() as (app, client):
         path, body = await _request(app, client, command)
         headers = {"Idempotency-Key": f"retry-{command.name}"}
-        if command.name in {"archive", "restore", "send_now"}:
+        if command.name in {"archive", "restore", "send_now", "save_attachment"}:
             body = {**(body or {}), "idempotency_key": headers["Idempotency-Key"]}
         first = await client.request(command.method, path, json=body, headers=headers)
         assert first.status_code == 200, first.text
@@ -221,7 +248,15 @@ async def _succeed_and_retry_without_duplicate_actions(command: Command) -> None
         assert second.status_code == 200, second.text
         for response in (first, second):
             assert response.headers["cache-control"] == "private, no-store"
-        if command.name in {"refresh", "generate", "send", "send_now", "archive", "restore"}:
+        if command.name in {
+            "refresh",
+            "generate",
+            "send",
+            "send_now",
+            "archive",
+            "restore",
+            "save_attachment",
+        }:
             assert first.json()["run_id"] == second.json()["run_id"]
         if command.name in {"feedback", "discuss", "edit", "endorse", "undo", "discard"}:
             assert first.json() == second.json()

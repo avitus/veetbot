@@ -78,6 +78,29 @@ public struct EmailAttachmentView: Codable, Equatable, Sendable {
         case filename, size
         case mimeType = "mime_type"
     }
+
+    /// The server's limit (ADR-0296). An unknown size is left for the server to judge.
+    public static let saveLimitBytes = 32 * 1024 * 1024
+    public static func canSave(size: Int?) -> Bool { (size ?? 0) <= saveLimitBytes }
+}
+
+/// One attachment by what the server addresses it with: the message and its listed position.
+public struct EmailAttachmentKey: Hashable, Sendable {
+    public let threadID: UUID
+    public let messageID: String
+    public let index: Int
+    public init(threadID: UUID, messageID: String, index: Int) {
+        self.threadID = threadID
+        self.messageID = messageID
+        self.index = index
+    }
+}
+
+/// Where one press on Save has got to. A saved file is on the email's chat.
+public enum EmailAttachmentSaveState: Equatable, Sendable {
+    case saving
+    case saved
+    case failed(String)
 }
 
 public struct EmailMessageView: Codable, Identifiable, Equatable, Sendable {

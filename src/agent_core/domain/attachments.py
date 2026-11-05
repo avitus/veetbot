@@ -14,6 +14,22 @@ _FORBIDDEN_NAME_CHARACTERS = frozenset({'"', "/", "\\"})
 _FORBIDDEN_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
+def stored_email_attachment_name(name: str) -> str:
+    """A sender's file name made safe to store; it is repaired, never refused (ADR-0296)."""
+
+    cleaned = "".join(
+        "_"
+        if character in _FORBIDDEN_NAME_CHARACTERS
+        or unicodedata.category(character) in _FORBIDDEN_NAME_CATEGORIES
+        else character
+        for character in name
+    ).strip()
+    encoded = cleaned.encode("utf-8")
+    if len(encoded) > UPLOAD_NAME_MAX_BYTES:
+        cleaned = encoded[-UPLOAD_NAME_MAX_BYTES:].decode("utf-8", errors="ignore").strip()
+    return cleaned or "attachment"
+
+
 def upload_name(name: str) -> str:
     """Accept a file name that is safe to quote in a Content-Disposition header.
 

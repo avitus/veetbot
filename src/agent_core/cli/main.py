@@ -9,6 +9,7 @@ import math
 import os
 import signal
 import socket
+import sys
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import aclosing
 from datetime import datetime, timedelta
@@ -47,7 +48,8 @@ from agent_core.bootstrap import sequence_ids as sequence_ids
 from agent_core.bootstrap import system_clock as system_clock
 from agent_core.cli.people import app as people_app
 from agent_core.cli.people import configure as configure_people
-from agent_core.config import ConfigurationError
+from agent_core.cli.worker_slots import supervise_worker_slots
+from agent_core.config import ConfigurationError, load_config_document, load_settings
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest
 from agent_core.domain.errors import (
@@ -108,6 +110,12 @@ class WorkerRole(StrEnum):
     SCHEDULE = "schedule"
     NOTIFY = "notify"
     SURFACE = "surface"
+
+
+def _async_worker_slots() -> int:
+    """Read how many processes the async role runs from the reviewed limits."""
+    limits = load_config_document(load_settings(), "runtime/limits.yaml")
+    return int(limits["worker"]["reserved_async_slots"])
 
 
 class QueuedRunTimeoutError(TimeoutError):
@@ -910,14 +918,24 @@ def worker_command(
             ),
         ),
     ] = WorkerRole.WORKER,
+    single_slot: Annotated[
+        bool,
+        typer.Option("--single-slot", hidden=True, help="Serve one slot of the async role."),
+    ] = False,
 ) -> None:
     """Execute an interactive, async, maintenance, schedule, notify, surface, or legacy role."""
 
     try:
-        asyncio.run(_serve_worker(role))
+        slots = 1 if single_slot or role is not WorkerRole.ASYNC else _async_worker_slots()
+        if slots == 1:
+            asyncio.run(_serve_worker(role))
+            return
+        slot = [sys.argv[0], "worker", "--role", role.value, "--single-slot"]
+        status = asyncio.run(supervise_worker_slots([slot] * slots))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
+    raise typer.Exit(status)
 
 
 async def _serve_api() -> None:

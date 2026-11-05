@@ -65,6 +65,14 @@ MAXIMUM_LEASE_LIFETIME_SECONDS = MAXIMUM_BROWSER_LEASE_LIFETIME_SECONDS
 AUTHENTICATION_CEREMONY_SECONDS = 5 * 60
 # A device handoff's two verification loads end within this budget (ADR-0128).
 DEVICE_VERIFICATION_SECONDS = 30.0
+# The signed-out control stops looking for a sign-in form this long before the
+# check's limit, which leaves the time to read the session it is checking (ADR-0297).
+SIGNED_OUT_CONTROL_RESERVE_SECONDS = 5.0
+# A pair passes only if the signed-in page has been watched for this much longer
+# than the control's page was, each measured from its own load (ADR-0297).
+SIGNED_IN_EXTRA_OBSERVATION_SECONDS = 3.0
+# Reading the session being saved still has to fit inside the check's limit.
+SIGNED_IN_SECOND_LOOK_RESERVE_SECONDS = 2.0
 # Headed browsers alive at once, each budgeted a third of the container (ADR-0145).
 MAXIMUM_LIVE_BROWSERS = 3
 # Element facts beside one observation are cut to this many serialized bytes.
@@ -204,9 +212,14 @@ class BrowserSessionRuntime(Protocol):
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None],
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence: ...
 
     def facts(self, revision: str) -> BrowserObservationFacts | None: ...
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence: ...
 
     async def storage_state(self) -> bytes: ...
 
@@ -698,12 +711,12 @@ class HostedProfileSessionService:
                     # The sweep is still deciding it, and its outcome is the answer.
                     return _ceremony_view(state)
             async with _verifying(state):
-                async with asyncio.timeout(self._verification_seconds):
+                async with asyncio.timeout(self._verification_seconds) as budget:
                     status = await runtime.authentication_status()
                     sealed = None
                     if status is BrowserAuthenticationStatus.READY:
                         try:
-                            sealed = await self._verify_remote_material(state)
+                            sealed = await self._verify_remote_material(state, _limit_of(budget))
                         except DeviceSessionRejected as rejected:
                             _log_unconfirmed(rejected)
                             status = BrowserAuthenticationStatus.NEEDS_USER
@@ -737,7 +750,7 @@ class HostedProfileSessionService:
                     state.status = status
                     return _ceremony_view(state)
 
-    async def _verify_remote_material(self, state: _CeremonyState) -> bytes:
+    async def _verify_remote_material(self, state: _CeremonyState, limit: float) -> bytes:
         """A preliminary READY claim is insufficient: confirm against an empty session."""
         runtime = state.runtime
         if runtime is None:
@@ -747,20 +760,22 @@ class HostedProfileSessionService:
         if browser_origin(page) not in state.identity.allowed_origins:
             raise DeviceSessionRejected("session_signed_out")
         material = await runtime.storage_state()
-        return await self._verified_material(state, material, page)
+        return await self._verified_material(state, material, page, limit)
 
-    async def _verified_material(self, state: _CeremonyState, material: bytes, page: str) -> bytes:
+    async def _verified_material(
+        self, state: _CeremonyState, material: bytes, page: str, limit: float
+    ) -> bytes:
         async with self._lock:
             self._admit_browsers_locked(2)
             self._verification_browsers += 2
         try:
-            return await self._remote_verification_loads(state, material, page)
+            return await self._remote_verification_loads(state, material, page, limit)
         finally:
             async with self._lock:
                 self._verification_browsers -= 2
 
     async def _remote_verification_loads(
-        self, state: _CeremonyState, material: bytes, page: str
+        self, state: _CeremonyState, material: bytes, page: str, limit: float
     ) -> bytes:
         origins = state.identity.allowed_origins
         definition = self._site_definition(state)
@@ -781,15 +796,23 @@ class HostedProfileSessionService:
                     origins,
                     page,
                     _VerificationLoad("without_session"),
+                    challenge_deadline=_control_deadline(definition, limit),
                 )
             ),
         ]
         try:
-            async with asyncio.timeout(self._verification_seconds):
+            async with asyncio.timeout_at(limit):
                 with_session, without_session = await asyncio.gather(*loads)
-                await self._verify_page_pair(
-                    definition, signed_in, signed_out, with_session, without_session, page
+                with_session = await _after_second_look(
+                    definition, signed_in, with_session, without_session, page, limit
                 )
+                try:
+                    await self._verify_page_pair(
+                        definition, signed_in, signed_out, with_session, without_session, page
+                    )
+                except DeviceSessionRejected as rejected:
+                    _log_rejected_evidence(rejected.code, with_session, without_session, page)
+                    raise
                 return await signed_in.storage_state()
         finally:
             for load in loads:
@@ -908,7 +931,7 @@ class HostedProfileSessionService:
                     ):
                         return
                 try:
-                    sealed = await self._verify_remote_material(state)
+                    sealed = await self._verify_remote_material(state, _limit_of(budget))
                 except DeviceSessionRejected as rejected:
                     _log_unconfirmed(rejected)
                     return
@@ -1017,16 +1040,27 @@ class HostedProfileSessionService:
         progress = (_VerificationLoad("with_session"), _VerificationLoad("without_session"))
         clock = asyncio.get_running_loop().time
         began = clock()
+        limit = began + self._verification_seconds
         loads = [
             asyncio.create_task(_page_evidence(signed_in, material, origins, page, progress[0])),
             asyncio.create_task(
-                _page_evidence(signed_out, _NO_SESSION_MATERIAL, origins, page, progress[1])
+                _page_evidence(
+                    signed_out,
+                    _NO_SESSION_MATERIAL,
+                    origins,
+                    page,
+                    progress[1],
+                    challenge_deadline=_control_deadline(definition, limit),
+                )
             ),
         ]
         try:
             try:
-                async with asyncio.timeout(self._verification_seconds):
+                async with asyncio.timeout_at(limit):
                     with_session, without_session = await asyncio.gather(*loads)
+                    with_session = await _after_second_look(
+                        definition, signed_in, with_session, without_session, page, limit
+                    )
                     await self._verify_page_pair(
                         definition, signed_in, signed_out, with_session, without_session, page
                     )
@@ -1380,12 +1414,16 @@ async def _page_evidence(
     origins: tuple[str, ...],
     url: str,
     progress: _VerificationLoad,
+    *,
+    challenge_deadline: float | None = None,
 ) -> BrowserPageEvidence:
     try:
         # Both loads use the browser a lease will use, so the control is fair (ADR-0145).
         runtime.set_interactive_authentication()
         await runtime.start(material, origins, headed=True)
-        evidence = await runtime.load_page_evidence(url, on_stage=progress.enter)
+        evidence = await runtime.load_page_evidence(
+            url, on_stage=progress.enter, challenge_deadline=challenge_deadline
+        )
     except Exception:
         # The deadline arrives as a cancellation, which is not a failure of this load.
         progress.failed = True
@@ -1415,6 +1453,71 @@ def _log_unfinished_verification(
     )
 
 
+def _control_deadline(definition: BrowserSiteVerification | None, limit: float) -> float | None:
+    """How long the signed-out control may wait for a form; a configured site never does.
+
+    A site definition rejects a control showing the same account markers unless it shows
+    a challenge, so a form found by waiting would excuse the markers (ADR-0297).
+    """
+    return None if definition is not None else limit - SIGNED_OUT_CONTROL_RESERVE_SECONDS
+
+
+def _limit_of(budget: asyncio.Timeout) -> float:
+    """The event-loop time a running budget ends, for everything inside it to share."""
+    limit = budget.when()
+    if limit is None:
+        raise RuntimeError("a verification budget always has a limit")
+    return limit
+
+
+async def _after_second_look(
+    definition: BrowserSiteVerification | None,
+    signed_in: BrowserSessionRuntime,
+    with_session: BrowserPageEvidence,
+    without_session: BrowserPageEvidence,
+    page: str,
+    limit: float,
+) -> BrowserPageEvidence:
+    """Look again at a signed-in copy the control's late answer alone would prove (ADR-0297).
+
+    The control may wait for a form or a move that the signed-in load finished too
+    early to see, and the two browsers may load at different speeds, so ``_decide``
+    requires the signed-in page to have been watched for longer than the control's,
+    each from its own load. A site definition reads the page's own content, so it
+    needs no second look.
+    """
+    if definition is not None:
+        return with_session
+    try:
+        _tells_the_session_apart(with_session, without_session, urlsplit(page).path)
+    except DeviceSessionRejected:
+        return with_session
+    return await signed_in.look_again_by(
+        page,
+        observed_seconds=without_session.observed_seconds + SIGNED_IN_EXTRA_OBSERVATION_SECONDS,
+        deadline=limit - SIGNED_IN_SECOND_LOOK_RESERVE_SECONDS,
+    )
+
+
+def _log_rejected_evidence(
+    code: str,
+    with_session: BrowserPageEvidence,
+    without_session: BrowserPageEvidence,
+    page: str,
+) -> None:
+    """Say what a remote sign-in's two loads saw, in yes or no, and never a page's address."""
+    confirmed = _normalized_path(urlsplit(page).path)
+    _LOGGER.info(
+        "session check rejected (%s): with_session challenge=%s stayed=%s; "
+        "without_session challenge=%s stayed=%s",
+        code,
+        with_session.challenge_visible,
+        _stays(with_session, confirmed),
+        without_session.challenge_visible,
+        _stays(without_session, confirmed),
+    )
+
+
 def _normalized_path(path: str) -> str:
     """Strip one trailing slash, except from the root; case-sensitive."""
     path = path or "/"
@@ -1432,7 +1535,20 @@ def _decide(
     *,
     confirmed_path: str,
 ) -> None:
-    """Ready only when the site tells the session apart (ADR-0128 section 4.4)."""
+    """Ready only when the site tells the session apart, on comparable evidence (ADR-0297)."""
+    _tells_the_session_apart(with_session, without_session, confirmed_path)
+    required = without_session.observed_seconds + SIGNED_IN_EXTRA_OBSERVATION_SECONDS
+    if with_session.observed_seconds < required:
+        # There was no time to watch it for as long, so this proves nothing either way.
+        raise DeviceSessionRejected("session_unconfirmed")
+
+
+def _tells_the_session_apart(
+    with_session: BrowserPageEvidence,
+    without_session: BrowserPageEvidence,
+    confirmed_path: str,
+) -> None:
+    """ADR-0128 section 4.4: what each load showed, however long it was watched."""
     confirmed = _normalized_path(confirmed_path)
     if with_session.challenge_visible or not _stays(with_session, confirmed):
         raise DeviceSessionRejected("session_signed_out")

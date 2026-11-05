@@ -128,6 +128,9 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var learning: EmailLearningState?
     @Published public private(set) var revisions: [EmailDraftView] = []
     @Published public private(set) var archiveErrors: [UUID: String] = [:]
+    @Published private var attachmentSaves: [EmailAttachmentKey: EmailAttachmentSaveState] = [:]
+    /// A press whose outcome is still unknown, so Retry recovers it instead of saving twice.
+    private var attachmentRequests: [EmailAttachmentKey: (idempotencyKey: String, operationID: UUID?)] = [:]
     @Published private var archiveSubmitting: Set<UUID> = []
     @Published private var archiveUnsupportedAccounts: Set<String> = []
     @Published private var archiveUnavailableThreads: Set<UUID> = []
@@ -371,6 +374,9 @@ public final class EmailViewModel: ObservableObject {
         archiveTasks = [:]
         archiveRequests = [:]
         archiveErrors = [:]
+        attachmentSaves = [:]
+        // Kept: signing in again resets this for the same account, and a save the server
+        // admitted must not become a second copy. A finished save removes its own entry.
         archiveSubmitting = []
         archiveHiddenThreads = []
         archiveUnsupportedAccounts = []
@@ -1088,6 +1094,65 @@ public final class EmailViewModel: ObservableObject {
             await loadReview(activation: nil)
         } catch { if generation == connection { report(error, draft: true) } }
     }
+
+    public func attachmentSave(_ key: EmailAttachmentKey) -> EmailAttachmentSaveState? {
+        attachmentSaves[key]
+    }
+
+    /// One press on Save. The file lands on the email's chat, so a saved one needs no
+    /// second copy. A press after a known failure is a new request; after a lost answer
+    /// it repeats the same one, which the server replays.
+    public func saveAttachment(_ key: EmailAttachmentKey, filename: String) async {
+        guard let api = makeAPIClient() else { return }
+        switch attachmentSaves[key] {
+        case .saving, .saved: return
+        case .failed, nil: break
+        }
+        let connection = generation
+        attachmentSaves[key] = .saving
+        let request = attachmentRequests[key] ?? (UUID().uuidString, nil)
+        attachmentRequests[key] = request
+        do {
+            var operationID = request.operationID
+            var status: RunStatus?
+            if operationID == nil {
+                let operation = try await api.saveEmailAttachment(
+                    key, filename: filename, idempotencyKey: request.idempotencyKey)
+                guard generation == connection else { return }
+                operationID = operation.operationID
+                status = operation.status
+                attachmentRequests[key]?.operationID = operation.operationID
+            }
+            guard let operationID else { return }
+            // A slice lasts two minutes; past this the file may yet arrive in the chat.
+            for _ in 0..<150 where status?.isTerminal != true {
+                if status != nil { try await Task.sleep(nanoseconds: pollNanoseconds) }
+                guard generation == connection else { return }
+                status = try await api.emailOperation(operationID).status
+            }
+            guard generation == connection else { return }
+            guard let status, status.isTerminal else {
+                attachmentSaves[key] = .failed(Self.attachmentStillSavingMessage)
+                return
+            }
+            attachmentRequests[key] = nil
+            attachmentSaves[key] = status == .completed ? .saved : .failed(Self.attachmentNotSavedMessage)
+        } catch {
+            guard generation == connection, !(error is CancellationError) else { return }
+            if attachmentRequests[key]?.operationID == nil,
+               case HTTPTransportError.api(let failure) = error,
+               let code = failure.statusCode, (400...499).contains(code), code != 408, code != 429 {
+                // The server refused the request: nothing was admitted, so nothing can be replayed.
+                attachmentRequests[key] = nil
+            }
+            attachmentSaves[key] = .failed(error.localizedDescription)
+            if case HTTPTransportError.reauthenticationRequired = error { report(error) }
+        }
+    }
+
+    private static let attachmentNotSavedMessage = "This attachment could not be saved. Try again."
+    private static let attachmentStillSavingMessage =
+        "This is taking a while. Check the email's chat before trying again."
 
     /// Follows a draft or send run the owner is waiting on. A send that completes without
     /// sending is reported; one that outlasts the local wait is marked for a later read to open.

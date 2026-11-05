@@ -4,7 +4,12 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserProfileStatus
-from agent_core.domain.errors import AuthorizationError, ConflictError, InvalidStateTransition
+from agent_core.domain.errors import (
+    AuthorizationError,
+    ConflictError,
+    InvalidStateTransition,
+    NotFoundError,
+)
 from agent_core.domain.events import NewEvent
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.ports.persistence import RepositoryUnitOfWork
@@ -82,7 +87,11 @@ async def prepare_follow_request(
         return session, None
     selected = session.metadata.get("browser_profile_id")
     if selected is not None:
-        profile = await uow.browser_profiles.get(UUID(str(selected)), principal)
+        try:
+            profile = await uow.browser_profiles.get(UUID(str(selected)), principal)
+        except NotFoundError:
+            # Its login was deleted (ADR-0297); following needs the owner to connect one.
+            return session, None
         if "https://x.com" in profile.allowed_origins:
             return session, handle
         raise ConflictError(

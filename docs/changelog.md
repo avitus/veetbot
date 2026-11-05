@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-04 — Email refreshes above the budget share spend on new mail (ADR-0298)
+
+- Once spending passes 75% of a limit, a refresh with Email open rates only mail that
+  has arrived. With nothing new it makes no model call. Before, each one spent about
+  USD 0.37 re-rating older mail, about USD 11 an hour with Email open.
+- Until spending falls below that share, older mail keeps its rating after a preference
+  change, and a long thread is ranked on its newest part with its automatic draft waiting.
+
 ## 2026-11-03 — Server checks for new mail spend on new mail (ADR-0286)
 
 - A check now gives each conversation one pass, which is enough to rank it, and leaves

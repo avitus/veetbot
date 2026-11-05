@@ -69,6 +69,14 @@ extension VeetbotAPIClient {
                      "idempotency_key": .string(idempotencyKey)], key: idempotencyKey)
     }
 
+    /// One press on Save: a copy of this listed attachment goes to the thread's chat (ADR-0296).
+    public func saveEmailAttachment(_ key: EmailAttachmentKey, filename: String, idempotencyKey: String) async throws -> EmailOperationView {
+        try await emailCommand(path: "/threads/\(key.threadID.uuidString)/attachments/save",
+            values: ["message_id": .string(key.messageID), "attachment_index": .number(Double(key.index)),
+                     "filename": .string(filename), "idempotency_key": .string(idempotencyKey)],
+            key: idempotencyKey)
+    }
+
     /// Archive's gesture with the Spam delta: `true` reports the conversation, `false` restores it.
     public func reportEmailThreadSpam(_ thread: EmailThreadView, spam: Bool, idempotencyKey: String) async throws -> EmailOperationView {
         try await emailCommand(path: "/threads/\(thread.id.uuidString)/spam",

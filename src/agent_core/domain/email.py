@@ -19,6 +19,9 @@ from agent_core.domain.email_subscriptions import EmailSubscriptionConsent
 
 EMAIL_POLICY_VERSION = "email-experience@1"
 EMAIL_SLICE_RESERVATION = Decimal("1")
+# How long a refresh or draft may wait for a worker before its slice starts (ADR-0295):
+# long enough for one scheduled run, whose usual deadline is five minutes.
+EMAIL_QUEUE_ALLOWANCE_SECONDS = 300
 # Background learning stops here; new mail keeps the rest of each ceiling (ADR-0256).
 EMAIL_LEARNING_SHARE = Decimal("0.75")
 # A server check stops here, leaving the rest for when the owner is in Email (ADR-0286).
@@ -327,13 +330,21 @@ class EmailOperation(EmailValue):
     replayed: bool = False
 
 
+class EmailAttachmentSelection(EmailValue):
+    """One attachment of one message, by listed position and name (ADR-0296)."""
+
+    message_id: str = Field(min_length=1, max_length=256)
+    attachment_index: int = Field(ge=0, le=1000, strict=True)
+    filename: str = Field(min_length=1, max_length=1024)
+
+
 class EmailTask(EmailValue):
     """Typed server-owned intent; never synthesized owner conversation text."""
 
     id: UUID
     run_id: UUID
     session_id: UUID
-    kind: Literal["refresh", "draft", "send", "archive", "subscription"]
+    kind: Literal["refresh", "draft", "send", "archive", "subscription", "attachment"]
     account_ids: list[str]
     thread_id: UUID | None = None
     draft_id: UUID | None = None
@@ -342,6 +353,7 @@ class EmailTask(EmailValue):
     archive_consent: EmailArchiveConsent | None = None
     subscription_consent: EmailSubscriptionConsent | None = None
     send_consent: EmailSendConsent | None = None
+    attachment: EmailAttachmentSelection | None = None
     created_at: datetime
     reservation: Decimal = Decimal("0")
     settled_cost: Decimal | None = None

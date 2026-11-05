@@ -244,6 +244,8 @@ public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
     public let lastUsedAt: Date?
+    /// How its latest sign-in began; nil before its first (ADR-0297).
+    public let lastSignInMode: BrowserAuthenticationMode?
 
     enum CodingKeys: String, CodingKey {
         case id, status, generation
@@ -251,6 +253,7 @@ public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case lastUsedAt = "last_used_at"
+        case lastSignInMode = "last_sign_in_mode"
     }
 }
 
