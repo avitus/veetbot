@@ -51,7 +51,7 @@ class KnowledgeStore(Protocol):
         """The reader's current documents in title order, capped, with the rest counted.
 
         The same visibility, tenancy, validity and sensitivity predicate as a
-        search; one line per document, its current version only (ADR-0294).
+        search; one line per document, its current version only (ADR-0299).
         """
         ...
 

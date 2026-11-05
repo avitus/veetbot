@@ -306,7 +306,7 @@ def _catalog_query(**changes: object) -> KnowledgeCatalogQuery:
 
 
 async def test_catalog_lists_current_visible_documents_with_their_passage_counts() -> None:
-    """ADR-0294: the catalog follows the search visibility rule and counts passages."""
+    """ADR-0299: the catalog follows the search visibility rule and counts passages."""
 
     store = await _store(
         _document(1, "# Mine\n\nA rollback procedure.\n\n## Second\n\nAnother passage."),

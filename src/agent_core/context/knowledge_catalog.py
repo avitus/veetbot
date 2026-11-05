@@ -2,7 +2,7 @@
 
 The catalog names each current document the run may read, with its dates
 and how many passages it holds. It never carries a passage. Rendering is
-pure: the same catalog always produces the same bytes (ADR-0294).
+pure: the same catalog always produces the same bytes (ADR-0299).
 """
 
 from __future__ import annotations

@@ -39,7 +39,7 @@ class ContextClass(StrEnum):
     KNOWLEDGE = "knowledge"
     RECALL = "recall"
     RECORDS_CATALOG = "records_catalog"
-    # ADR-0294: the documents on file, row 13b.
+    # ADR-0299: the documents on file, row 13b.
     KNOWLEDGE_CATALOG = "knowledge_catalog"
     RUNTIME_METADATA = "runtime_metadata"
     CURRENT_USER = "current_user"

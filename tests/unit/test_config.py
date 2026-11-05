@@ -1208,7 +1208,7 @@ def test_all_226_versioned_knobs_are_present_and_non_null() -> None:
         "context/plan.yaml:classes.records_catalog.max_items",
         "context/plan.yaml:classes.records_catalog.max_tokens",
     } <= qualified_paths
-    # ADR-0294 adds the knowledge catalog's two class caps.
+    # ADR-0299 adds the knowledge catalog's two class caps.
     assert {
         "context/plan.yaml:classes.knowledge_catalog.max_items",
         "context/plan.yaml:classes.knowledge_catalog.max_tokens",

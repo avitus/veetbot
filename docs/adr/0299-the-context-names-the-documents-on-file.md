@@ -1,4 +1,4 @@
-# ADR-0294: The context names the documents on file
+# ADR-0299: The context names the documents on file
 
 - Status: Accepted (continues the owner's direction of ADR-0290, 2026-11-04)
 - Date: 2026-11-04

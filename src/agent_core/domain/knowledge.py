@@ -135,7 +135,7 @@ class KnowledgeReader(Protocol):
 
     Both the passage query and the catalog query carry these four fields;
     visibility, tenancy and the sensitivity ceiling are the same predicate
-    for a search and for the catalog (ADR-0294).
+    for a search and for the catalog (ADR-0299).
     """
 
     @property

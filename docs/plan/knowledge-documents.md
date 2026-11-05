@@ -376,7 +376,7 @@ is every place it differs, because the differences are the design.
    that may be irrelevant to the whole session is the expensive default. The context
    tells the model what the path reaches: the knowledge catalog row names the documents
    on file, so taking the path never depends on a belief surviving recall
-   ([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)).
+   ([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)).
 6. **Passages are quoted, never paraphrased**, and they are always cited. The rendered
    block carries the document title, the heading path, the chunk id, and the document's
    date.
@@ -549,7 +549,7 @@ class KnowledgeSemanticQuery(BaseModel):      # the question, embedded
     vector: tuple[float, ...]
     channel: str                       # hybrid | dense
 
-class KnowledgeCatalogQuery(BaseModel):       # the documents on file, ADR-0294
+class KnowledgeCatalogQuery(BaseModel):       # the documents on file, ADR-0299
     tenant_id: str
     principal_id: str
     current_scope: str | None
@@ -612,7 +612,7 @@ in-turn recall's twenty-item cut behind the question's own echoes. The context
 therefore names the documents on file, as it names the owner's numeric series
 ([owner-records.md](owner-records.md#the-records-catalog-in-context)), and the
 catalog is one platform-rendered body item
-([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)).
+([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)).
 
 **Content.** One line per current document the run may read, ordered by title
 then document id, each starting with the title:
@@ -690,7 +690,7 @@ plan re-plans once through the ordinary logged epoch rotation.
 | A passage is quoted with words the source does not contain | verbatim after a closed normalization list; `content_sha256` on every chunk |
 | One document fills the retrieval budget | per-document cap of two passages reserving every other document's first two, plus the relevance floor |
 | Knowledge starves the belief budget | its own budget class, which yields before in-turn recall |
-| The model never searches because nothing says a document exists | the knowledge catalog row names every current document the run may read, in every session whose roster carries `knowledge.search` (ADR-0294) |
+| The model never searches because nothing says a document exists | the knowledge catalog row names every current document the run may read, in every session whose roster carries `knowledge.search` (ADR-0299) |
 | A truncated passage becomes a misquotation | passages drop whole; never truncated to fit |
 | Cross-tenant or cross-project leak | `tenant_id` and `visibility` are SQL predicates, never rank features |
 | Documents silently mined into beliefs | formation reads episodes only; asserted by a gate |

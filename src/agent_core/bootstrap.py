@@ -4883,7 +4883,7 @@ async def _compose(
             inline_output_bytes=inline_output_bytes,
             catalog_source=records_service,
             catalog_max_series=records_catalog_max_series,
-            # ADR-0294: the documents on file, read through the store's own rule.
+            # ADR-0299: the documents on file, read through the store's own rule.
             knowledge_catalog_source=KnowledgeCatalogReader(uow_factory, clock),
             knowledge_catalog_max_documents=knowledge_catalog_caps(context_classes)[0],
         )

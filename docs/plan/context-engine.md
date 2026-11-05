@@ -143,7 +143,7 @@ its retriever, and absent, with no bytes, when the flag is off, the principal
 lacks `records.read`, or the owner has no series. Row 2's framing gains one
 fixed sentence for it, the same in every session whether or not the catalog
 is present. Row 13b is added by
-[ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md) and owned by
+[ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md) and owned by
 [knowledge-documents.md](knowledge-documents.md#the-document-catalog-in-context):
 the documents on file, a `UserMessage` with `trust=INTERNAL_TOOL` and
 `source="knowledge.catalog"`, read through an injected `KnowledgeCatalogSource`,
@@ -681,7 +681,7 @@ the cheapest and most recoverable loss first:
    catalog that names some documents misstates the corpus, and one
    `knowledge.search` reaches what it named; `knowledge_catalog` is the
    second entry a pressure event records
-   ([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)).
+   ([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)).
 1. **Knowledge passages drop, lowest-ranked first.** They are dropped whole and
    never truncated, because a passage shortened to fit is a misquotation of a
    document the model is about to cite. They go first because the corpus is still
@@ -887,7 +887,7 @@ Three properties matter:
   last entries, holds names and dates and never values, may mention a due series
   once per session and never while the owner is mid-task, and is not a request to
   log ([owner-records.md](owner-records.md#the-records-catalog-in-context) gives
-  the text). Since [ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)
+  the text). Since [ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)
   it carries one more on the knowledge catalog: it lists the documents on file
   by title with their dates and passage counts, holds titles and never
   passages, and a question that falls within a listed document is searched
@@ -1390,7 +1390,7 @@ pressure and the prefix snapshot are not in it.
 Context builder identity advances to `context-builder@16` when row 2's
 framing gains the knowledge catalog sentence of
 [knowledge-documents.md](knowledge-documents.md#the-document-catalog-in-context)
-([ADR-0294](../adr/0294-the-context-names-the-documents-on-file.md)). The
+([ADR-0299](../adr/0299-the-context-names-the-documents-on-file.md)). The
 sentence is in every session's prefix whether or not a catalog renders, so
 every `context-builder@15` plan fails its stored prefix-hash recheck and
 re-plans once through the ordinary logged epoch rotation. The fifty-turn

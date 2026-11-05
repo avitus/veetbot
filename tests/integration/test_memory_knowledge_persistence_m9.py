@@ -312,7 +312,7 @@ async def test_postgres_and_memory_knowledge_stores_reserve_rather_than_cap(
             assert len(result.passages) == 3, storage
             async with composition.uow_factory() as uow:
                 assert await uow.knowledge.visible_titles(query) == ["garden.md"], storage
-                # ADR-0294: both stores list the document once with its passage count.
+                # ADR-0299: both stores list the document once with its passage count.
                 catalog = await uow.knowledge.catalog(
                     KnowledgeCatalogQuery(
                         tenant_id=query.tenant_id,

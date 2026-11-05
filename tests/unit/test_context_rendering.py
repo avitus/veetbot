@@ -33,7 +33,7 @@ def test_platform_framing_tells_the_model_to_cite_recollections() -> None:
 
 
 def test_platform_framing_names_the_knowledge_catalog_and_the_tool_that_reads_it() -> None:
-    """ADR-0294: the model is told what the catalog holds and to search a listed document."""
+    """ADR-0299: the model is told what the catalog holds and to search a listed document."""
 
     assert "knowledge catalog" in PLATFORM_FRAMING
     assert "knowledge.search" in PLATFORM_FRAMING

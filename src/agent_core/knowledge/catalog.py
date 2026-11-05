@@ -1,4 +1,4 @@
-"""The knowledge catalog source the context builder reads (ADR-0294)."""
+"""The knowledge catalog source the context builder reads (ADR-0299)."""
 
 from __future__ import annotations
 

@@ -780,7 +780,7 @@ class BudgetedContextBuilder:
             fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
         if knowledge_catalog_items and fixed_total > plan.budget.total_tokens:
             # The documents on file yield next, still before recall trims: the
-            # corpus is unchanged and one knowledge.search reaches it (ADR-0294).
+            # corpus is unchanged and one knowledge.search reaches it (ADR-0299).
             knowledge_catalog_dropped = True
             knowledge_catalog_items = []
             active_with_context, active_prefix = _with_step_context(
@@ -1020,7 +1020,7 @@ class BudgetedContextBuilder:
     async def _knowledge_catalog_items(
         self, run: Run, plan: ContextPlan, principal: Principal
     ) -> list[ConversationItem]:
-        """Read the documents on file once per assembly, as one body item (ADR-0294).
+        """Read the documents on file once per assembly, as one body item (ADR-0299).
 
         Absent without a source, when the roster lacks `knowledge.search`
         (the tool is the path, so a catalog without it names nothing the

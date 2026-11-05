@@ -1,6 +1,6 @@
 """The knowledge catalog in context: row 13b, its trust, its absence rules and its yield.
 
-knowledge-documents.md ("The document catalog in context", ADR-0294): the
+knowledge-documents.md ("The document catalog in context", ADR-0299): the
 builder reads the catalog through an injected source, renders it as one
 `INTERNAL_TOOL` item with `source="knowledge.catalog"` after the records
 catalog and before the runtime metadata, never touches the prefix, leaves it
@@ -131,7 +131,7 @@ def _builder(
         tool_names=tuple(spec.name for spec in specs),
         tool_specs=specs,
         tool_schema_sha256=hashlib.sha256(b"[]").hexdigest(),
-        policy_version="adr-0294-test",
+        policy_version="adr-0299-test",
         builder_version="context-builder@16",
         budget=_budget().model_copy(
             update={
