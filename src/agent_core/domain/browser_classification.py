@@ -15,6 +15,7 @@ letters that look Latin read as the Latin letters.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from collections.abc import Iterable, Sequence
 from datetime import datetime
@@ -593,6 +594,53 @@ def _target_inside(target: BrowserTargetFacts, path_prefix: str | None) -> bool:
     )
 
 
+# These are views of card activity inside one authenticated SPA, not an
+# exception for arbitrary /auth paths. The bank puts the view in its fragment.
+def chase_card_activity(url: str) -> bool:
+    parsed = urlsplit(url)
+    return (
+        _origin_of(url) == "https://secure.chase.com"
+        and not parsed.query
+        and parsed.path == "/web/auth/dashboard"
+        and re.fullmatch(
+            r"/dashboard/(?:summary(?:/details)?|transactions(?:/downloads)?)(?:/[0-9]+/CARD/BAC)?",
+            parsed.fragment,
+        )
+        is not None
+    )
+
+
+_ACTIVITY_CONTROLS = {
+    "see all transactions",
+    "showing activity since last statement",
+    "specific date range specific date range",
+    "search",
+    "activity previous selection including filters",
+    "choose a date range choose a date range",
+    "all transactions all transactions",
+    "next",
+    "previous",
+}
+
+
+def _activity_control(action: BrowserAction, role: str, labels: Sequence[str]) -> bool:
+    if not labels:
+        return False
+    name = normalize_text(labels[0])
+    if action.kind is BrowserActionKind.CLICK:
+        return role in {"button", "link", "option"} and name in _ACTIVITY_CONTROLS
+    if action.kind is not BrowserActionKind.TYPE or role != "textbox" or name not in {"from", "to"}:
+        return False
+    value = action.value or ""
+    if not re.fullmatch(r"[0-9]{2}/[0-9]{2}/[0-9]{4}", value):
+        return False
+    try:
+        datetime.strptime(value, "%m/%d/%Y")
+    except ValueError:
+        return False
+    return True
+
+
 def task_grant_coverage(
     *,
     action: BrowserAction,
@@ -629,7 +677,12 @@ def task_grant_coverage(
     path = urlsplit(page_url).path
     if path_prefix is not None and not path_is_within_prefix(path, path_prefix):
         return _refused(consequence, "outside_prefix")
-    if path_is_sensitive(path):
+    activity = (
+        path_prefix is None
+        and chase_card_activity(page_url)
+        and _activity_control(action, role, labels)
+    )
+    if path_is_sensitive(path) and not activity:
         return _refused(consequence, "sensitive_path")
     kind = action.kind
     if kind is not BrowserActionKind.SCROLL and not any(
@@ -654,10 +707,17 @@ def task_grant_coverage(
         value = action.value or ""
         if len(value) > MAXIMUM_COVERED_TEXT_CHARACTERS:
             return _refused(consequence, "text_too_long")
-        if not typed_text_allowed(value):
+        if not (typed_text_allowed(value) or activity):
             return _refused(consequence, "text_not_covered")
     link = facts.link_target
-    if kind in _NAVIGATING_KINDS and link is not None and not _target_inside(link, path_prefix):
+    if (
+        kind in _NAVIGATING_KINDS
+        and link is not None
+        and not (
+            _target_inside(link, path_prefix)
+            or (activity and link.same_origin and link.same_document_activity_link)
+        )
+    ):
         return _refused(consequence, "link_outside_prefix")
     # Any click may land on a submit button, whatever its role or its field
     # kind, so every click on an element with a form counts as a submission.
@@ -760,6 +820,12 @@ def dispatch_constraint_coverage(
             consequence=C.PUBLICATION,
             reason=None if covered else "different_follow_target",
         )
+    if (
+        constraint.grant_kind == "research"
+        and constraint.card_activity_only
+        and not chase_card_activity(page_url)
+    ):
+        return _refused(C.UNKNOWN, "sensitive_path")
     if constraint.grant_kind == "research" or (
         constraint.grant_kind == "task" and constraint.path_prefix is not None
     ):

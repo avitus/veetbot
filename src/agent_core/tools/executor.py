@@ -335,7 +335,7 @@ def _action_kind(tool: Tool) -> ActionKind:
 # ADR-0263: calls whose results bring nothing a page could be typed from, so
 # G5 does not count them: a file export, which reports platform identifiers,
 # and a question once the owner or the platform has answered it.
-_G5_EXEMPT_TOOL_NAMES = frozenset({"artifact.export"})
+_G5_EXEMPT_TOOL_NAMES = frozenset({"artifact.export", "system.current_time"})
 _G5_EXEMPT_ANSWER_TRUSTS = frozenset({TrustLevel.USER, TrustLevel.PLATFORM})
 
 

@@ -9,6 +9,14 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+EXPORT_TIMEOUT_GUIDANCE = (
+    "The export click ran, but no readable file arrived. Inspect the page for a validation "
+    "message, date limits, or a ready-file link before another click. If the site limits rows, "
+    "use smaller nonoverlapping date ranges. If no export is available, continue the review "
+    "from visible activity pages and report any missing coverage. "
+    "Do not repeat the same export blindly."
+)
+
 MAX_BROWSER_DOWNLOAD_BYTES = 2 * 1024 * 1024
 MAX_BROWSER_DOWNLOAD_NAME_CHARACTERS = 96
 _DEFAULT_NAME = "download.txt"

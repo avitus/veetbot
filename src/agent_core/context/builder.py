@@ -1436,15 +1436,15 @@ def _website_offer_field(raw: object) -> str:
             "the owner connects one from Website Access in this chat)"
         )
     shown = ",".join(offered[:MAXIMUM_RENDERED_BROWSER_ORIGINS])
-    if isinstance(connected, str):
-        where = f"this chat is connected to {connected} instead"
-        button = "a Switch button that moves this chat to it"
-    else:
-        where = "not connected to this chat"
-        button = "a Connect button that connects it to this chat"
+    where = (
+        f"this chat is connected to {connected} instead"
+        if isinstance(connected, str)
+        else "not connected to this chat"
+    )
     return (
         f"; website_offer={shown} (a saved website login the owner named; {where}; "
-        f"the app shows the owner {button} and continues this request)"
+        'the website card above the message box offers "Connect and continue", or '
+        '"Sign in and continue" if sign-in is needed, to continue this request)'
     )
 
 

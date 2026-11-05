@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent_core.domain.browser import BrowserObservation
+from agent_core.domain.browser_download import EXPORT_TIMEOUT_GUIDANCE
 from agent_core.domain.messages import ContentPart, FileReferencePart, TextPart
 from agent_core.domain.tool_output import content_bytes
 
@@ -48,6 +49,8 @@ def browser_context_projection(
     # ADR-0294: the note is how the model reaches a saved file, so it is never omitted.
     if isinstance(structured.get("saved_file"), dict):
         payload["saved_file"] = structured["saved_file"]
+        if structured["saved_file"].get("reason") == "timed_out":
+            payload["export_recovery"] = EXPORT_TIMEOUT_GUIDANCE
     if observation.interruption is not None:
         payload["interruption"] = observation.interruption
     if observation.readiness is not None:
@@ -220,6 +223,8 @@ def browser_context_projection(
     if "extraction" in payload and not fits():
         payload.pop("extraction")
         payload["coverage"]["omitted_fields"].append("extraction")
+    if not fits():
+        payload.pop("export_recovery", None)
     if not fits():
         payload = {
             "observation_omitted": True,

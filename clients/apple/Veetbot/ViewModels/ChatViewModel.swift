@@ -2823,7 +2823,7 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         let offer = try? await api.websiteOffer(sessionID: sessionID)
-        guard selectedSessionID == sessionID else { return }
+        guard !Task.isCancelled, selectedSessionID == sessionID else { return }
         websiteOffer = offer.flatMap { dismissedWebsiteOfferIDs.contains($0.offerID) ? nil : $0 }
     }
 
@@ -3184,6 +3184,12 @@ public final class ChatViewModel: ObservableObject {
                         continue
                     }
                     self.runState.reduce(frame)
+                    // A question keeps this stream open until the owner answers.
+                    // Load the offer now so accepting it can be that answer.
+                    if offerAnnounced, frame.event == "run.waiting_for_user",
+                        self.runState.clarifyingQuestion != nil {
+                        await self.refreshWebsiteOffer()
+                    }
                     if ["run.completed", "run.failed", "run.cancelled"].contains(frame.event),
                         self.runState.activeRunID == runID {
                         self.observedTerminalNotificationRunID = runID

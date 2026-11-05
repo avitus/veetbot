@@ -13,6 +13,7 @@ from agent_core.domain.browser import (
     browser_origin,
 )
 from agent_core.domain.browser_act_views import (
+    BROWSER_TOOL_NAMES,
     RESEARCH_AUTHORIZATION_KIND,
     RESEARCH_REASON_PREFIX,
     describe_browser_action,
@@ -20,7 +21,7 @@ from agent_core.domain.browser_act_views import (
     option_texts,
     turn_is_browser_only,
 )
-from agent_core.domain.browser_classification import task_grant_coverage
+from agent_core.domain.browser_classification import chase_card_activity, task_grant_coverage
 from agent_core.domain.browser_task_grants import RESEARCH_NOT_COVERED_REASONS
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.policies import (
@@ -113,7 +114,10 @@ class BrowserResearchAuthorizer:
             return _refused("untrusted_turn")
         # ADR-0129 G5: a turn that called any non-browser tool (mail, memory,
         # search) could type what it read, so it keeps ordinary approval.
-        if not turn_is_browser_only(turn):
+        bookkeeping = not turn_is_browser_only(turn)
+        if bookkeeping and not turn.tool_names <= BROWSER_TOOL_NAMES | {
+            "context.update_working_state"
+        }:
             return _refused("turn_not_browser_only")
         if self._now() >= action_deadline:
             return _refused("deadline_passed")
@@ -162,6 +166,11 @@ class BrowserResearchAuthorizer:
         origin = browser_origin(view.observation.url)
         if origin not in profile.allowed_origins:
             return _refused("outside_profile_origin")
+        card_activity = chase_card_activity(view.observation.url)
+        if card_activity and seed.actor_type != "principal":
+            return _refused("not_owner_seed")
+        if bookkeeping and not card_activity:
+            return _refused("turn_not_browser_only")
         covered = task_grant_coverage(
             action=browser_action,
             page_url=view.observation.url,
@@ -191,6 +200,7 @@ class BrowserResearchAuthorizer:
             authorization_view=approval_argument_view(view.arguments),
             dispatch_constraint=BrowserDispatchConstraint(
                 grant_kind="research",
+                card_activity_only=card_activity,
                 origins=(origin,),
                 not_after=action_deadline,
                 consequence_ceiling="unknown",

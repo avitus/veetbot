@@ -594,3 +594,11 @@ async def test_a_pinned_chat_never_reports_a_file_its_schema_cannot_carry() -> N
     validate_output(result.structured, PinnedBrowserActTool.spec.output_schema)
     assert "saved_file" not in result.structured
     assert writer.created == []
+
+
+async def test_the_final_export_button_never_reports_silent_success_without_a_file() -> None:
+    window = _DownloadWindow(
+        approved=True, export_origin="https://site.test", deadline=asyncio.get_running_loop().time()
+    )
+    result = await PythonPlaywrightRuntime()._finish_download(window, names_a_file=True)
+    assert result == BrowserDownload.refused("timed_out")

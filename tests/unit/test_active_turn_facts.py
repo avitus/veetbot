@@ -157,3 +157,15 @@ def test_a_pending_or_untrusted_answer_still_counts() -> None:
 
     assert pending.tool_names == frozenset({"conversation.ask_user", "browser.act"})
     assert untrusted.tool_names == frozenset({"conversation.ask_user", "browser.act"})
+
+
+def test_clock_is_exempt_but_bookkeeping_still_requires_a_restricted_action() -> None:
+    facts = _active_turn_facts(
+        checkpoint(
+            user("Review the past year's card transactions"),
+            call("system.current_time", {}, 0),
+            call("context.update_working_state", {"next_action": "Choose a date range"}, 1),
+            call("browser.act", {"kind": "click"}, 2),
+        )
+    )
+    assert facts.tool_names == frozenset({"browser.act", "context.update_working_state"})

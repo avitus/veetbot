@@ -1944,6 +1944,7 @@ import UserNotifications
         var offered = true
         /// Whether accepting continues the source run parked on a question.
         var continuesSourceRun = false
+        var waitsForAnswer = false
         /// How the offered login's latest sign-in began (ADR-0297).
         var lastSignIn: String?
 
@@ -1966,13 +1967,17 @@ import UserNotifications
         }
 
         var sourceRunBody: String {
-            #"{"id":"\#(sourceRunID.uuidString)","session_id":"\#(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-25T17:14:49Z","updated_at":"2026-10-25T17:15:06Z"}"#
+            let status = waitsForAnswer ? "WAITING_FOR_USER" : "COMPLETED"
+            return #"{"id":"\#(sourceRunID.uuidString)","session_id":"\#(sessionID.uuidString)","parent_run_id":null,"status":"\#(status)","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-25T17:14:49Z","updated_at":"2026-10-25T17:15:06Z"}"#
         }
 
         var sourceEvents: String {
             let offer = offered
                 ? "id: 52\nevent: session.browser.offered\ndata: {\"run_id\":\"\(sourceRunID.uuidString)\",\"offer_id\":\"\(offerID.uuidString)\"}\n\n"
                 : ""
+            if waitsForAnswer {
+                return offer + "id: 60\nevent: run.waiting_for_user\ndata: {\"run_id\":\"\(sourceRunID.uuidString)\",\"question_id\":\"\(offerID.uuidString)\",\"question\":\"Connect your saved login?\"}\n\n"
+            }
             return offer + "id: 60\nevent: run.completed\ndata: {\"run_id\":\"\(sourceRunID.uuidString)\"}\n\n"
         }
 
@@ -2026,7 +2031,8 @@ import UserNotifications
                 return (200, sourceRunBody, [:])
             case ("GET", "/v1/runs/\(sourceRunID.uuidString)/events"):
                 lock.withLock { log.sourceReplays += 1 }
-                return (200, sourceEvents, ["Content-Type": "text/event-stream"])
+                let reconnect = request.value(forHTTPHeaderField: "Last-Event-ID") != nil
+                return (200, reconnect ? "" : sourceEvents, ["Content-Type": "text/event-stream"])
             default:
                 return nil
             }
@@ -2221,6 +2227,20 @@ import UserNotifications
                 ]
             )
         )
+    }
+
+    @Test
+    func testAWaitingStreamShowsTheWebsiteOfferBeforeTheRunEnds() async throws {
+        var server = WebsiteOfferServer()
+        server.waitsForAnswer = true
+        let model = try await websiteOfferModel(server)
+        defer { model.newSession() }
+        for _ in 0..<5_000 where model.runState.clarifyingQuestion == nil {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(model.runState.clarifyingQuestion != nil)
+        #expect(model.showsWebsiteOffer)
+        #expect(model.websiteOffer?.offerID == server.offerID)
     }
 
     @Test

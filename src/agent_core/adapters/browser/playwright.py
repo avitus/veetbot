@@ -36,6 +36,7 @@ from playwright.async_api import (
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from agent_core.adapters.browser.csv_export import CsvExportObserver
 from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
 from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
@@ -71,6 +72,7 @@ from agent_core.domain.browser import (
     normalize_browser_origin,
 )
 from agent_core.domain.browser_classification import (
+    chase_card_activity,
     dispatch_constraint_coverage,
     label_reads_as,
     path_is_sensitive,
@@ -315,6 +317,7 @@ class _DownloadWindow:
 
     approved: bool
     deadline: float = math.inf
+    export_origin: str | None = None
     started: asyncio.Event = field(default_factory=asyncio.Event)
     download: Download | None = None
     reading: asyncio.Task[BrowserDownload] | None = None
@@ -341,12 +344,12 @@ async def _discard_download(download: Download) -> None:
 async def _close_download_window(window: _DownloadWindow) -> None:
     """Stop a file an act that ended early left unread; a finished read is untouched."""
 
-    if window.reading is None or window.download is None:
+    if window.reading is None:
         return
     window.reading.cancel()
     await asyncio.gather(window.reading, return_exceptions=True)
     # A read cancelled before its first step never reached its own cleanup.
-    if window.reading.cancelled():
+    if window.reading.cancelled() and window.download is not None:
         await _discard_download(window.download)
 
 
@@ -533,11 +536,13 @@ class PythonPlaywrightRuntime:
         # While a task-grant act runs and settles, the origin and path prefix
         # every document load and ping must stay inside, and whether the fence
         # refused the page's own document (ADR-0129).
+        self._card_activity_fence = False
         self._document_fence: tuple[str, str] | None = None
         self._fence_refused_page = False
         self._download_window: _DownloadWindow | None = None
         self._downloads_path = ""
         # A reference names its revision, so a stale entry can never match.
+        self._export_controls: frozenset[str] = frozenset()
         self._file_controls: frozenset[str] = frozenset()
 
     @browser_phase_call("launch")
@@ -762,6 +767,10 @@ class PythonPlaywrightRuntime:
         the page hid from the facts, the act cannot submit or navigate
         anywhere else.
         """
+        if self._card_activity_fence:
+            # These controls operate inside the current SPA document. Neither
+            # a document navigation nor a hyperlink ping is covered.
+            return False
         fence = self._document_fence
         if fence is None:
             return True
@@ -843,13 +852,25 @@ class PythonPlaywrightRuntime:
         self, window: _DownloadWindow, *, names_a_file: bool
     ) -> BrowserDownload | None:
         """What this act's window saved or refused; None when the page offered no file."""
+        final_export = window.export_origin is not None
         if names_a_file and window.reading is None:
             with suppress(TimeoutError):
                 left = window.deadline - asyncio.get_running_loop().time()
-                await asyncio.wait_for(window.started.wait(), min(DOWNLOAD_START_SECONDS, left))
+                await asyncio.wait_for(
+                    window.started.wait(),
+                    left if final_export else min(DOWNLOAD_START_SECONDS, left),
+                )
         if window.reading is not None:
-            return await window.reading
-        return None if window.refusal is None else BrowserDownload.refused(window.refusal)
+            try:
+                async with asyncio.timeout_at(
+                    min(window.deadline, asyncio.get_running_loop().time() + DOWNLOAD_READ_SECONDS)
+                ):
+                    return await window.reading
+            except TimeoutError:
+                return BrowserDownload.refused("timed_out")
+        if window.refusal is not None:
+            return BrowserDownload.refused(window.refusal)
+        return BrowserDownload.refused("timed_out") if final_export else None
 
     async def _close_popup(self, page: Page) -> None:
         """Destroy a popup with interception intact, or end its browser session."""
@@ -1387,6 +1408,13 @@ class PythonPlaywrightRuntime:
             for element in observation.elements
             if _DOWNLOAD_CONTROL.search(element.name)
         )
+        self._export_controls = frozenset(
+            element.ref
+            for element in observation.elements
+            if element.role in {"button", "link"}
+            and element.name.strip().casefold()
+            in {"download", "download csv", "export", "export csv", "download as csv"}
+        )
         self._element_offsets = {
             element.ref: candidate_index
             for (candidate_index, _), observed in zip(selected, captured, strict=True)
@@ -1515,6 +1543,14 @@ class PythonPlaywrightRuntime:
         names_a_file = starts_files and self._control_names_a_file(action.ref)
         window = _DownloadWindow(
             approved=constraint is None and starts_files,
+            export_origin=(
+                _origin_or_none(page.url)
+                if constraint is None
+                and starts_files
+                and action.ref in self._export_controls
+                and _origin_allowed(page.url, self._allowed_origins)
+                else None
+            ),
             deadline=asyncio.get_running_loop().time() + DOWNLOAD_ACT_BUDGET_SECONDS,
         )
         download: BrowserDownload | None = None
@@ -1527,6 +1563,7 @@ class PythonPlaywrightRuntime:
             self._document_fence = (constraint.origins[0], constraint.path_prefix)
         elif constraint is not None and constraint.grant_kind == "research":
             self._document_fence = (constraint.origins[0], "/")
+        self._card_activity_fence = constraint is not None and constraint.card_activity_only
         draft_binding = None
         if approved_editable:
             # Chromium can split inherited editable descendants while typing newlines.
@@ -1539,7 +1576,31 @@ class PythonPlaywrightRuntime:
                 }
                 return new WeakRef(node);
             }""")
+        csv_session: CDPSession | None = None
         try:
+            if window.export_origin and self._main_frame_id:
+                # The observer gets its own bounded Network buffer; it does not
+                # intercept requests or change the document guard's CDP session.
+                with suppress(PlaywrightError):
+                    csv_session = await page.context.new_cdp_session(page)
+
+                    def reserve(task: asyncio.Task[BrowserDownload]) -> bool:
+                        if (
+                            self._download_window is not window
+                            or _origin_or_none(page.url) != window.export_origin
+                            or window.reading is not None
+                            or asyncio.get_running_loop().time() >= window.deadline
+                        ):
+                            return False
+                        window.reading = task
+                        window.started.set()
+                        return True
+
+                    observer = CsvExportObserver(
+                        csv_session, self._main_frame_id, window.export_origin, reserve
+                    )
+                    await observer.start()
+                    observer.armed = True
             await self._dispatch(page, handle, action, guards, relied_copies=relied_copies)
             if draft_binding is not None and self._main_frame_navigations == documents_before:
                 await self._forget_draft()
@@ -1556,9 +1617,13 @@ class PythonPlaywrightRuntime:
                 with suppress(PlaywrightError):
                     await draft_binding.dispose()
             self._document_fence = None
+            self._card_activity_fence = False
             refused_page = self._fence_refused_page
             self._fence_refused_page = False
             await _close_download_window(window)
+            if csv_session is not None:
+                with suppress(PlaywrightError):
+                    await csv_session.detach()
         if refused_page:
             # The action sent the page toward a document outside the grant,
             # which never loaded; the page now shows the browser's error page.
@@ -1969,10 +2034,12 @@ class PythonPlaywrightRuntime:
             self._main_frame_navigations = 0
             self._readiness_requests.reset()
             self._document_fence = None
+            self._card_activity_fence = False
             self._fence_refused_page = False
             self._download_window = None
             self._downloads_path = ""
             self._file_controls = frozenset()
+            self._export_controls = frozenset()
 
 
 @contextmanager
@@ -2692,6 +2759,12 @@ def _target_facts(url: str, *, page_url: str) -> BrowserTargetFacts:
             first if first is not None and TASK_GRANT_PATH_SEGMENT.fullmatch(first) else None
         ),
         sensitive_path=path_is_sensitive(path),
+        same_document_activity_link=(
+            same_origin
+            and chase_card_activity(page_url)
+            and chase_card_activity(url)
+            and _without_fragment(url) == _without_fragment(page_url)
+        ),
     )
 
 
@@ -2715,6 +2788,8 @@ def _link_target(metadata: dict[str, Any], *, page_url: str) -> BrowserTargetFac
     if (not raw or raw.startswith("#")) and _without_fragment(resolved) == _without_fragment(
         page_url
     ):
+        if chase_card_activity(page_url) and raw not in {"", "#"}:
+            return _target_facts(resolved, page_url=page_url)
         return None
     return _target_facts(resolved, page_url=page_url)
 
@@ -2796,6 +2871,7 @@ def _meet(targets: list[BrowserTargetFacts]) -> BrowserTargetFacts | None:
         same_origin=all(target.same_origin for target in targets),
         first_segment=(first if all(target.first_segment == first for target in targets) else None),
         sensitive_path=any(target.sensitive_path for target in targets),
+        same_document_activity_link=all(target.same_document_activity_link for target in targets),
     )
 
 

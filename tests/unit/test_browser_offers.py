@@ -245,7 +245,8 @@ async def test_the_source_run_is_told_the_named_website_awaits_a_connect_button(
 
     assert "; website_offer=https://example.org (" in row
     assert "not connected to this chat" in row
-    assert "Connect button" in row
+    assert "Connect and continue" in row
+    assert "Sign in and continue" in row
     assert "website=none" not in row
     assert str(PROFILE_ID) not in row
 
@@ -263,6 +264,9 @@ async def test_a_switch_offer_names_the_website_the_chat_uses() -> None:
 
     assert "; website_offer=https://example.org (" in row
     assert "connected to https://x.com instead" in row
+    assert "Connect and continue" in row
+    assert "Sign in and continue" in row
+    assert "Switch button" not in row
     assert str(PROFILE_ID) not in row and str(OTHER) not in row
 
 

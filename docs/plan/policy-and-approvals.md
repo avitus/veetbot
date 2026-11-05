@@ -679,6 +679,8 @@ constraint. The isolated browser repeats ordinary-interaction checks before
 sending an effect. Named consequences, untrusted inputs and denials remain
 excluded. The authorization receipt is independent of compiled policy, like
 existing standing grants; setting the flag to `0` restores ordinary approvals.
+ADR-0300 scopes the Chase activity-view exception to known read controls and valid
+filter dates on that exact view; bookkeeping does not grant general browser access.
 
 ADR-0213 adds a second application authorization, for a call the owner asked
 for: `start_call`, or `schedule.create` with `place_call=true`, from the
