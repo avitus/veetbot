@@ -362,7 +362,7 @@ the loader's precedence is unchanged: `.env` first, then the process
 environment. Production is unaffected; its units read
 `/etc/veetbot/veetbot.env`.
 
-### Remote validation on a sidecar
+### Optional remote validation on a sidecar
 
 `.chunk/config.json` lets the CircleCI `chunk` CLI run the same gate on a
 disposable Linux sidecar. `chunk validate` runs `install` (`make install` and
@@ -374,8 +374,8 @@ from. Active-sidecar and validation-pool files under `.chunk/` are
 per-developer and ignored. The sidecar adds no command, so a passing remote
 `make check` satisfies the same criterion as a local run. Run `chunk validate` rather than `chunk sidecar sync`
 from a git worktree: plain sync copies the worktree's `.git` pointer file,
-while validate sends a git bundle into a real repository. Xcode suites
-(`make test-apple`, `make test-apple-ui`) need macOS and stay local.
+while validate sends a git bundle into a real repository. Use Chunk only at the owner’s request. For development, run Linux tests via
+`scripts/run_in_linux_container.sh` and Apple package and Mac UI tests via `scripts/run_apple_ui_macos_vm.sh` in the local Tart guest.
 
 A change is verified in full once, on the final head proposed for `main`, by
 the requested hosted run (ADR-0257); that run's jobs cover everything

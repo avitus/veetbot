@@ -108,17 +108,19 @@ checks it per commit; no trailer means lane A.
 
 ## Verification
 
-While iterating, run focused tests plus lint, typecheck, and docs-check for the change; no sidecar `make check`.
-The one full run is hosted CI on the final head before merging (step 4, ADR-0257); `make check` is the fallback.
-Use `make docs-check` for standalone documentation verification, and `make citations-fix` to repair moved citations before the final verification.
-Measure each verification stage and report durations, total wall-clock time, overlap, and the slowest checks before each commit; label estimates explicitly.
+Always run development tests in the local sandbox. Use `scripts/run_apple_ui_macos_vm.sh` for Apple tests
+(including `make test-apple`) and `scripts/run_in_linux_container.sh` for Linux tests. If unavailable, report the
+blocker. Never run tests on the host desktop. Use Chunk only at the owner's explicit request.
 
-Specifications cite each other by line number through the citation ledger. Review the `make citations-fix` diff: a
-citation whose text is gone or ambiguous is reported, not guessed, for a human. Write line references as
-`file.md:LINE` or `file.md:LO-HI`; the ledger cannot see a prose "line 1408", and `make docs-check` rejects it in a spec.
+Run focused tests, lint, typecheck and docs-check while iterating. Run full hosted CI once on the final head
+before merging (step 4, ADR-0257). Keep `make check` as the fallback. Never run sidecar `make check` while iterating.
+Before each commit report stage durations, total wall time, overlap and slowest checks. Label estimates.
 
-This section and `make check` must grow formatting, linting, type checking,
-and tests as tooling lands. Do not claim a command works unless it exists here.
+Use `make docs-check` for standalone docs verification. Run `make citations-fix` before final verification and
+review its diff. The ledger reports missing or ambiguous text for human review. Write `file.md:LINE` or
+`file.md:LO-HI`; `make docs-check` rejects prose line numbers in specs.
+
+Extend this section and `make check` as formatting, lint, typing and tests land. Verify commands exist.
 
 ## Test-driven development
 
