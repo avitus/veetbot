@@ -55,7 +55,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@15"
+BUILDER_VERSION = "context-builder@16"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 # In priority order: the adapter keeps the earliest a model's breakpoint budget
 # allows. The history window is placed per request by the builder (Section 10.1).

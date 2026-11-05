@@ -7,7 +7,7 @@ import unicodedata
 from collections.abc import Callable, Iterable
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
@@ -18,6 +18,7 @@ from agent_core.domain.retrieval_fusion import (
     blend_with_arm_score,
     reciprocal_rank_fusion,
 )
+from agent_core.domain.security import contains_credential
 from agent_core.domain.semantic_memory import EmbeddingSpace, checked_vector
 from agent_core.domain.trajectory import ArtifactRef
 
@@ -128,6 +129,58 @@ class KnowledgeQuery(BaseModel):
     max_per_document: PositiveInt = 2
     min_score: float = Field(ge=0, le=1)
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
+
+
+class KnowledgeReader(Protocol):
+    """What the stores need to decide which documents a reader may see.
+
+    Both the passage query and the catalog query carry these four fields;
+    visibility, tenancy and the sensitivity ceiling are the same predicate
+    for a search and for the catalog (ADR-0299).
+    """
+
+    @property
+    def tenant_id(self) -> str: ...
+
+    @property
+    def principal_id(self) -> str: ...
+
+    @property
+    def current_scope(self) -> str | None: ...
+
+    @property
+    def sensitivity_ceiling(self) -> Sensitivity: ...
+
+
+class KnowledgeCatalogQuery(BaseModel):
+    """The documents on file for a reader at an instant, capped by count."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tenant_id: str
+    principal_id: str
+    current_scope: str | None
+    as_of: datetime
+    sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
+    max_documents: int = Field(ge=0)
+
+
+class KnowledgeCatalogLine(BaseModel):
+    """One current document: its title, its dates and how many passages it holds."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    title: str = Field(min_length=1, max_length=1024)
+    doc_date: date | None
+    ingested_at: datetime
+    passages: int = Field(ge=0)
+
+
+class KnowledgeCatalog(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lines: tuple[KnowledgeCatalogLine, ...]
+    omitted: int = Field(ge=0)
 
 
 class RetrievedPassage(BaseModel):
@@ -321,6 +374,23 @@ def _name_extent(text: str, first: int, last: int) -> tuple[int, int]:
     while last > first and text[last - 1] in _NAME_EDGE:
         last -= 1
     return first, last
+
+
+def display_title(title: str) -> str:
+    """A document title as the model may see it: one line, and never a credential.
+
+    A title is the owner's own text. Line breaks and whitespace runs become
+    one space so a title cannot forge a second catalog entry; a blank title,
+    or one that resembles a credential, renders `untitled`. Ingestion scans
+    titles with the same shared rule; a title stored before that scan is
+    guarded here, where the catalog and the search envelope render it
+    (ADR-0299).
+    """
+
+    collapsed = " ".join(title.split())
+    if not collapsed or contains_credential(collapsed):
+        return "untitled"
+    return collapsed
 
 
 def knowledge_question_without_document_names(text: str, titles: Iterable[str]) -> str:

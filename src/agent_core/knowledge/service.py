@@ -23,6 +23,7 @@ from agent_core.domain.knowledge import (
     KnowledgeResult,
     KnowledgeSemanticQuery,
     RetrievedPassage,
+    display_title,
     knowledge_question_without_document_names,
 )
 from agent_core.domain.memory import (
@@ -34,6 +35,7 @@ from agent_core.domain.memory import (
     TracedPassage,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.security import contains_credential
 from agent_core.knowledge.chunking import (
     MAX_KNOWLEDGE_SOURCE_BYTES,
     DeterministicChunker,
@@ -115,6 +117,10 @@ class KnowledgeService:
             raise ToolValidationError("knowledge source has no extractable text")
         if _SECRET.search(normalized) is not None:
             raise ToolValidationError("knowledge source failed the secret scan")
+        # ADR-0299: the title is as model-visible as the text, in every search
+        # result and in the catalog, so it passes the shared credential rule.
+        if contains_credential(request.title):
+            raise ToolValidationError("knowledge title failed the secret scan")
         document_id = request.document_id or self._ids.new_id()
         # Chunk texts do not depend on the row that will hold them, so the
         # provider call happens here, before any unit of work is open.
@@ -440,7 +446,7 @@ def _passage_xml(passage: RetrievedPassage) -> str:
     date_value = "" if passage.doc_date is None else passage.doc_date.isoformat()
     path = " > ".join(passage.heading_path)
     return (
-        f'<passage doc="{html.escape(passage.title, quote=True)}" '
+        f'<passage doc="{html.escape(display_title(passage.title), quote=True)}" '
         f'path="{html.escape(path, quote=True)}" chunk="{passage.chunk_id}" '
         f'doc_date="{date_value}" instruction_like="{str(passage.instruction_like).lower()}">'
         f"{html.escape(passage.text)}</passage>"

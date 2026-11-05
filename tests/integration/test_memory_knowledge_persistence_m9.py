@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -16,6 +17,7 @@ from agent_core.config import Settings
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.events import NewEvent
 from agent_core.domain.knowledge import (
+    KnowledgeCatalogQuery,
     KnowledgeIngestRequest,
     KnowledgeQuery,
     KnowledgeVisibility,
@@ -291,6 +293,7 @@ async def test_postgres_and_memory_knowledge_stores_reserve_rather_than_cap(
         ("memory", replace(memory_settings(), artifact_root=tmp_path / "memory")),
         ("postgres", replace(database_settings(), artifact_root=tmp_path / "postgres")),
     )
+    catalogs: dict[str, list[tuple[str, int]]] = {}
     for storage, settings in stores:
         async with build(settings=settings, storage=storage) as composition:
             await _ingested(composition, sections)
@@ -309,6 +312,21 @@ async def test_postgres_and_memory_knowledge_stores_reserve_rather_than_cap(
             assert len(result.passages) == 3, storage
             async with composition.uow_factory() as uow:
                 assert await uow.knowledge.visible_titles(query) == ["garden.md"], storage
+                # ADR-0299: both stores list the document once with its passage count.
+                catalog = await uow.knowledge.catalog(
+                    KnowledgeCatalogQuery(
+                        tenant_id=query.tenant_id,
+                        principal_id=query.principal_id,
+                        current_scope=None,
+                        as_of=datetime.now(UTC),
+                        max_documents=12,
+                    )
+                )
+            catalogs[storage] = [(line.title, line.passages) for line in catalog.lines]
+            assert catalog.omitted == 0, storage
+    assert catalogs["postgres"] == catalogs["memory"]
+    assert [title for title, _passages in catalogs["memory"]] == ["garden.md"]
+    assert catalogs["memory"][0][1] >= 3
 
 
 async def test_postgres_and_memory_knowledge_stores_reserve_past_the_first_sixty_four(
