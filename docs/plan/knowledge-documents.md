@@ -170,9 +170,11 @@ Two scans, and they behave differently on purpose.
 
 The **secret scan blocks.** A credential inside a retrievable corpus is a durable leak
 that no trust envelope mitigates, because the leak is the string itself. Ingestion
-fails, names the chunk, and stores nothing. The title passes the same scan
-(ADR-0299): every search result and the catalog render it, so it is as
-model-visible as the text.
+fails, names the chunk, and stores nothing. The title passes the platform's
+shared credential rule, `contains_credential`, a superset of the text scan's
+labeled rule (ADR-0299): every search result and the catalog render it, so it
+is as model-visible as the text. The catalog applies the same rule again when
+it renders, so a title stored before the rule renders `untitled`.
 
 The **injection scan does not block.** It records `contains_instruction_like_text` on
 the chunk and surfaces it in the trace and in the rendered envelope. Two reasons. First,
@@ -643,8 +645,9 @@ Garden note: 1 passage, added 2026-10-01
 ```
 
 Never a passage. A title renders on one line whatever it holds: its line
-breaks and runs of whitespace collapse to one space, and a blank one renders
-`untitled`, so no title can forge a second entry. `dated` is the document's own
+breaks and runs of whitespace collapse to one space, and a blank one, or one
+that resembles a credential under `contains_credential`, renders `untitled`,
+so no title can forge a second entry or show a secret. `dated` is the document's own
 date when it has one; `added` is the UTC day of ingestion. A single passage
 renders `1 passage`. A superseded
 document appears once, as its current version. When more than twelve documents
@@ -666,8 +669,8 @@ stores share the rule through them.
 [context-engine.md](context-engine.md) as row 13b, after the records catalog
 and before the runtime metadata. It is a `UserMessage` labelled
 `trust=INTERNAL_TOOL` with `source="knowledge.catalog"`, rendered inside the
-ordinary envelope as a tool result would be; titles are the owner's own and
-passed the secret scan at ingestion as the text did, and the row lowers
+ordinary envelope as a tool result would be; titles are the owner's own,
+scanned at ingestion and guarded again at rendering, and the row lowers
 neither the request's origin trust nor the executor's turn label.
 
 **Reading the catalog.** The builder reads it inside assembly through an

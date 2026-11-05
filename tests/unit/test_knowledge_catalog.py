@@ -104,3 +104,13 @@ def test_a_blank_title_renders_as_untitled() -> None:
     assert render_knowledge_catalog(KnowledgeCatalog(lines=(blank,), omitted=0)) == (
         "untitled: 1 passage, added 2026-10-01"
     )
+
+
+def test_a_stored_title_that_resembles_a_credential_renders_as_untitled() -> None:
+    # Ingestion scans titles now; a title stored before that scan is guarded
+    # where it is rendered, so the catalog never shows a credential.
+    stored = NOTE.model_copy(update={"title": "deploy token=1f3a9c7e2b4d6e8f0a1b2c3d"})
+
+    assert render_knowledge_catalog(KnowledgeCatalog(lines=(stored,), omitted=0)) == (
+        "untitled: 1 passage, added 2026-10-01"
+    )

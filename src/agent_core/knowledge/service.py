@@ -34,6 +34,7 @@ from agent_core.domain.memory import (
     TracedPassage,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.security import contains_credential
 from agent_core.knowledge.chunking import (
     MAX_KNOWLEDGE_SOURCE_BYTES,
     DeterministicChunker,
@@ -116,8 +117,8 @@ class KnowledgeService:
         if _SECRET.search(normalized) is not None:
             raise ToolValidationError("knowledge source failed the secret scan")
         # ADR-0299: the title is as model-visible as the text, in every search
-        # result and in the catalog, so it passes the same scan.
-        if _SECRET.search(request.title) is not None:
+        # result and in the catalog, so it passes the shared credential rule.
+        if contains_credential(request.title):
             raise ToolValidationError("knowledge title failed the secret scan")
         document_id = request.document_id or self._ids.new_id()
         # Chunk texts do not depend on the row that will hold them, so the

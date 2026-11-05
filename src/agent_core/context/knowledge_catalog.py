@@ -15,6 +15,7 @@ from agent_core.domain.knowledge import KnowledgeCatalog, KnowledgeCatalogLine
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import TextPart, UserMessage
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.security import contains_credential
 
 CATALOG_SOURCE = "knowledge.catalog"
 # The tool is the path to the corpus; a roster without it gets no catalog.
@@ -35,13 +36,18 @@ class KnowledgeCatalogSource(Protocol):
 
 
 def _title(title: str) -> str:
-    """One line whatever the title holds: breaks and whitespace runs become one space.
+    """One line whatever the title holds, and never a credential.
 
     A title is the owner's own text; a line break inside it must not read as a
-    second, nonexistent document.
+    second, nonexistent document, so breaks and whitespace runs become one
+    space. Ingestion scans titles with the shared credential rule; a title
+    stored before that scan is guarded here, where it is rendered.
     """
 
-    return " ".join(title.split()) or "untitled"
+    collapsed = " ".join(title.split())
+    if not collapsed or contains_credential(collapsed):
+        return "untitled"
+    return collapsed
 
 
 def _line(line: KnowledgeCatalogLine) -> str:
