@@ -223,16 +223,30 @@ def browser_context_projection(
     if "extraction" in payload and not fits():
         payload.pop("extraction")
         payload["coverage"]["omitted_fields"].append("extraction")
-    if not fits():
-        payload.pop("export_recovery", None)
-    if not fits():
-        payload = {
+
+    def omitted(guidance: bool) -> dict[str, Any]:
+        note: dict[str, Any] = {
             "observation_omitted": True,
             "reason": "inline_budget_too_small",
             "elements": [],
         }
         if isinstance(structured.get("saved_file"), dict):
-            payload["saved_file"] = structured["saved_file"]
+            note["saved_file"] = structured["saved_file"]
+            if guidance:
+                note["export_recovery"] = EXPORT_TIMEOUT_GUIDANCE
+        return note
+
+    if not fits() and "export_recovery" in payload:
+        # ADR-0300 decision 3: a timed-out export's guidance outranks the page,
+        # which a later read restores. Without room for both, the page stays.
+        page = payload
+        payload = omitted(guidance=True)
+        if fits():
+            return content()
+        payload = page
+        payload.pop("export_recovery")
+    if not fits():
+        payload = omitted(guidance=False)
         return content() if fits() else None
 
     if "extraction" in payload and observation.extraction is not None:
