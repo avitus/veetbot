@@ -50,6 +50,7 @@ def test_browser_profiles_schema_contains_metadata_only() -> None:
         "created_at",
         "updated_at",
         "last_used_at",
+        "last_sign_in_mode",
     }
     forbidden = {"cookies", "tokens", "storage_state", "credential", "material", "blob"}
     assert forbidden.isdisjoint(table.columns.keys())
@@ -57,6 +58,7 @@ def test_browser_profiles_schema_contains_metadata_only() -> None:
         "ck_browser_profiles_generation_nonnegative",
         "ck_browser_profiles_status_closed",
         "ck_browser_profiles_binding_consistent",
+        "ck_browser_profiles_last_sign_in_mode_closed",
     }
 
 

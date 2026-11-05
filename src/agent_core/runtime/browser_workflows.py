@@ -15,7 +15,7 @@ from agent_core.domain.browser import (
     browser_origin,
 )
 from agent_core.domain.browser_workflows import BrowserWorkflowCatalog, BrowserWorkflowRecipe
-from agent_core.domain.errors import ConflictError, UserInputRequiredError
+from agent_core.domain.errors import ConflictError, NotFoundError, UserInputRequiredError
 from agent_core.domain.messages import TextPart, ToolCallItem, ToolResultItem, UserMessage
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import BudgetScope, RunOutcome, Step
@@ -74,7 +74,15 @@ class BrowserWorkflowRunner:
                 if state is not None:
                     raise ConflictError("the browser workflow profile is no longer selected")
                 return None
-            profile = await uow.browser_profiles.get(UUID(selected), context.principal)
+            try:
+                profile = await uow.browser_profiles.get(UUID(selected), context.principal)
+            except NotFoundError:
+                # Deleting a login leaves its chats bound to it; such a chat has no website.
+                if state is not None:
+                    raise ConflictError(
+                        "the browser workflow profile is no longer selected"
+                    ) from None
+                return None
         if state is None:
             latest_input = next(
                 (

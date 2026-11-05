@@ -372,3 +372,50 @@ async def test_curated_verification_requires_unique_complete_account_and_protect
         assert lease.lease_ref
         assert await sessions.authentication_status(ceremony_id, principal()) == status
         await sessions.close(lease.lease_ref)
+
+
+@pytest.mark.parametrize("mode", ["device", "remote"])
+async def test_a_configured_site_never_waits_for_a_late_form(tmp_path: Path, mode: str) -> None:
+    """ADR-0297: a late form on the control must not excuse markers it also shows."""
+    catalog = BrowserVerificationCatalog.model_validate(
+        {
+            "sites": [
+                {
+                    "id": "fixture-account",
+                    "version": 1,
+                    "profile_id": str(PROFILE_ID),
+                    "origin": "https://example.org",
+                    "protected_path": "/current",
+                    "ready": {"kind": "text", "text": "Account ready"},
+                    "account": {
+                        "kind": "region",
+                        "region_kind": "heading",
+                        "text": "Account: Owner",
+                    },
+                }
+            ]
+        }
+    )
+    observed = BrowserObservation(
+        url="https://example.org/current",
+        revision="fresh",
+        text="Account ready",
+        regions=(BrowserSemanticRegion(ref="account", kind="heading", text="Account: Owner"),),
+        region_coverage=BrowserRegionCoverage(scanned_nodes=5),
+    )
+    lifecycle, sessions, runtimes, _times = services(
+        tmp_path, scenario=HandoffScenario(with_observation=observed), verification=catalog
+    )
+    await provision(lifecycle)
+    if mode == "device":
+        ceremony_id, capability = await begin_device(sessions)
+        await sessions.accept_device_session(ceremony_id, capability, device_handoff())
+    else:
+        ceremony = await sessions.begin_authentication(
+            PROFILE_ID, principal(), PROVIDER_REF, login_url="https://example.org/login"
+        )
+        await sessions.refresh_authentication(ceremony.id, principal())
+
+    deadlines = [deadline for runtime in runtimes for deadline in runtime.challenge_deadlines]
+    assert deadlines == [None, None]
+    assert all(runtime.later_looks == [] for runtime in runtimes)

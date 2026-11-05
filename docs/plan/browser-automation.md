@@ -968,7 +968,15 @@ embedded page, does not hold verification until the full-page `load` event.
 The five-second network wait expiring does not make a pending authentication
 request safe to ignore: documents, scripts, stylesheets, XHR and fetch requests
 must finish and remain idle for 500 ms before the path and challenge evidence
-below can be positive. A fetch or XHR event stream with HTTP 200 and media
+below can be positive. A signed-out control whose page still reads as signed in
+then keeps looking for a sign-in field until five seconds before that limit, or
+until it leaves the confirmed path, because a site such as Chase draws its framed
+form after its requests go quiet. A pair then passes only if the signed-in page has been
+watched for at least three seconds longer than the control's page, each from its own load:
+it keeps looking until then, a form or a move away there ends `session_signed_out`, and too
+little time left ends `session_unconfirmed`. A new document on the signed-in copy restarts
+its age. A configured site definition neither waits
+nor looks again (ADR-0297). A fetch or XHR event stream with HTTP 200 and media
 type `text/event-stream` instead counts as established when its response
 headers arrive (ADR-0147); its continuing body does not hold the wait open.
 The media type is case-insensitive and may have parameters. An unanswered
@@ -1094,7 +1102,10 @@ allowed origin from that URL and opens the full URL, preserving its path, query,
 and fragment. It signs in on the device by default and offers the remote
 browser as the alternative, and any profile that is not revoked can be signed
 in again on the device or, from that window, through the remote browser, where
-backing out keeps the profile (ADR-0288). Website scripts, stylesheets, images, fonts,
+backing out keeps the profile (ADR-0288). A profile remembers how its latest
+sign-in began (`last_sign_in_mode`), and Sign in again, the chat's sign-in card
+and the website offer reopen that way; a profile last signed in through the
+remote browser keeps **Use this device** on its row (ADR-0297). Website scripts, stylesheets, images, fonts,
 cross-origin APIs, and embedded verification frames load automatically without
 CDN configuration. This resource permission also applies when an existing
 profile is reused. A resource origin cannot authorize top-level navigation or an

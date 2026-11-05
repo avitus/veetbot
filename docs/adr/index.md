@@ -343,3 +343,4 @@ implementation without one.
 - [ADR-0294: An approved click can save a text file into the chat (Proposed)](0294-approved-browser-file-download.md)
 - [ADR-0295: An email slice's time starts at its first claim, and the async role runs two processes (Accepted)](0295-execution-window-and-async-slots.md)
 - [ADR-0296: Save an email attachment into the email's chat (Accepted)](0296-save-email-attachments-to-the-chat.md)
+- [ADR-0297: A saved login signs in again the way it last began (Accepted)](0297-sign-in-reopens-the-way-it-last-began.md)

@@ -98,6 +98,7 @@ from agent_core.domain.browser import (
     ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS,
     ALLOWED_BROWSER_PROFILE_TRANSITIONS,
     BrowserActionKind,
+    BrowserAuthenticationMode,
     BrowserAuthenticationRecord,
     BrowserAuthenticationStatus,
     BrowserGrant,
@@ -1883,6 +1884,11 @@ def _browser_profile_to_domain(row: BrowserProfileRow) -> BrowserProfile:
         created_at=row.created_at,
         updated_at=row.updated_at,
         last_used_at=row.last_used_at,
+        last_sign_in_mode=(
+            None
+            if row.last_sign_in_mode is None
+            else BrowserAuthenticationMode(row.last_sign_in_mode)
+        ),
     )
 
 
@@ -1905,6 +1911,9 @@ class PostgresBrowserProfileRepository:
             "created_at": profile.created_at,
             "updated_at": profile.updated_at,
             "last_used_at": profile.last_used_at,
+            "last_sign_in_mode": (
+                None if profile.last_sign_in_mode is None else profile.last_sign_in_mode.value
+            ),
         }
 
     async def create(self, profile: BrowserProfile) -> BrowserProfile:
@@ -2084,6 +2093,25 @@ class PostgresBrowserProfileRepository:
         ).one_or_none()
         if row is None:
             raise ConcurrencyConflict("browser profile generation changed")
+        return _browser_profile_to_domain(row)
+
+    async def record_sign_in_mode(
+        self, profile_id: UUID, principal: Principal, mode: BrowserAuthenticationMode
+    ) -> BrowserProfile:
+        row = (
+            await self._session.scalars(
+                update(BrowserProfileRow)
+                .where(
+                    BrowserProfileRow.id == profile_id,
+                    BrowserProfileRow.tenant_id == principal.tenant_id,
+                    BrowserProfileRow.principal_id == principal.principal_id,
+                )
+                .values(last_sign_in_mode=mode.value)
+                .returning(BrowserProfileRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("browser profile not found")
         return _browser_profile_to_domain(row)
 
     async def advance_generation(

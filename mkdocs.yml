@@ -433,4 +433,5 @@ nav:
       - "ADR-0294: An approved click can save a text file": adr/0294-approved-browser-file-download.md
       - "ADR-0295: Email slice time starts at claim, and two async processes": adr/0295-execution-window-and-async-slots.md
       - "ADR-0296: Save an email attachment into the email's chat": adr/0296-save-email-attachments-to-the-chat.md
+      - "ADR-0297: A saved login signs in again the way it last began": adr/0297-sign-in-reopens-the-way-it-last-began.md
   - Changelog: changelog.md
