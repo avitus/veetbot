@@ -578,7 +578,7 @@ async def test_a_legacy_credential_like_title_renders_untitled_in_search(tmp_pat
 
     stack = await _stack(tmp_path)
     legacy = prepared_knowledge().document.model_copy(
-        update={"title": "deploy token=1f3a9c7e2b4d6e8f0a1b2c3d"}
+        update={"title": "deploy token=not-a-real-value"}
     )
     chunks = DeterministicChunker().chunk(
         "# Operations\n\nRestart the service safely after deployment.",
@@ -596,4 +596,4 @@ async def test_a_legacy_credential_like_title_renders_untitled_in_search(tmp_pat
 
     assert result.passages
     assert 'doc="untitled"' in result.rendered
-    assert "1f3a9c7e" not in result.rendered
+    assert "not-a-real-value" not in result.rendered
