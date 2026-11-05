@@ -22,6 +22,8 @@ API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 # Every unit restarts at once; on the production host the API has needed more
 # than a minute of contended CPU before it binds.
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-180}"
+ROUTE_CHECK_ATTEMPTS=5
+ROUTE_CHECK_PAUSE_SECS=2
 CALL_SETTLE_SECS="${VEETBOT_CALL_SETTLE_SECS:-90}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
 EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock
@@ -662,27 +664,36 @@ rm -f -- "$HEALTH_HEADERS"
 HEALTH_HEADERS=""
 (( healthy == 1 )) || fail "the local readiness probe did not report $RELEASE_ID"
 
-if ! session_index_status="$(
-  printf 'Authorization: %s %s\n' Bearer "$AUTH_TOKEN" \
-    | curl --silent --show-error \
-      --connect-timeout 2 --max-time 5 --header @- --output /dev/null \
-      --write-out '%{http_code}' "$API_BASE_URL/v1/sessions?limit=1"
-)"; then
-  fail "the promoted API does not expose the authoritative session index"
-fi
-[[ "$session_index_status" =~ ^2[0-9][0-9]$ ]] || fail \
-  "the promoted API session index returned HTTP $session_index_status"
+# Readiness can pass before the API's first database request answers in time.
+# A slow or unavailable answer gets a short retry; any other answer is final.
+route_status=""
+check_route() {
+  local attempt
+  for ((attempt = 1; attempt <= ROUTE_CHECK_ATTEMPTS; attempt++)); do
+    (( attempt == 1 )) || sleep "$ROUTE_CHECK_PAUSE_SECS"
+    if route_status="$(
+      printf 'Authorization: %s %s\n' Bearer "$AUTH_TOKEN" \
+        | curl --silent --show-error \
+          --connect-timeout 2 --max-time 5 --header @- --output /dev/null \
+          --write-out '%{http_code}' "$API_BASE_URL$1"
+    )"; then
+      [[ "$route_status" == 5?? ]] || return 0
+    else
+      route_status=""
+    fi
+  done
+  [[ -n "$route_status" ]]
+}
 
-if ! settings_status="$(
-  printf 'Authorization: %s %s\n' Bearer "$AUTH_TOKEN" \
-    | curl --silent --show-error \
-      --connect-timeout 2 --max-time 5 --header @- --output /dev/null \
-      --write-out '%{http_code}' "$API_BASE_URL/v1/settings/models"
-)"; then
-  fail "the promoted API does not expose model settings"
-fi
-[[ "$settings_status" == 200 ]] || fail \
-  "the promoted API model settings returned HTTP $settings_status"
+check_route "/v1/sessions?limit=1" || fail \
+  "the promoted API does not expose the authoritative session index"
+[[ "$route_status" =~ ^2[0-9][0-9]$ ]] || fail \
+  "the promoted API session index returned HTTP $route_status"
+
+check_route "/v1/settings/models" || fail \
+  "the promoted API does not expose model settings"
+[[ "$route_status" == 200 ]] || fail \
+  "the promoted API model settings returned HTTP $route_status"
 
 for unit in "${UNITS[@]}"; do
   sudo systemctl is-active --quiet "$unit" || fail "$unit is not active"

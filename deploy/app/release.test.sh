@@ -270,13 +270,32 @@ write_stub curl '
       "$VEETBOT_TEST_READY_RELEASE" >"$headers"
   else
     cat >"$VEETBOT_TEST_AUTH_HEADERS"
+    # Standard input is spent on each attempt, so a retry must send the token again.
+    if ! grep -Fq "Authorization: Bearer " "$VEETBOT_TEST_AUTH_HEADERS"; then
+      printf "401"
+      exit 0
+    fi
     if [[ "$request_url" == */v1/settings/models ]]; then
       printf "curl model-settings\n" >>"$VEETBOT_TEST_LOG"
+      attempt="$(grep -cFx "curl model-settings" "$VEETBOT_TEST_LOG")"
+      if (( attempt <= ${VEETBOT_TEST_SETTINGS_TIMEOUTS:-0} )); then
+        printf "000"
+        exit 28
+      fi
       printf "%s" "${VEETBOT_TEST_SETTINGS_STATUS:-200}"
       exit 0
     fi
     printf "curl session-index %s\n" "$request_url" >>"$VEETBOT_TEST_LOG"
     if [[ "${VEETBOT_TEST_FAIL_SESSION_INDEX:-0}" == 1 ]]; then exit 1; fi
+    attempt="$(grep -cF "curl session-index" "$VEETBOT_TEST_LOG")"
+    if (( attempt <= ${VEETBOT_TEST_SESSION_TIMEOUTS:-0} )); then
+      printf "000"
+      exit 28
+    fi
+    if (( attempt <= ${VEETBOT_TEST_SESSION_UNAVAILABLE:-0} )); then
+      printf "503"
+      exit 0
+    fi
     printf "%s" "${VEETBOT_TEST_SESSION_STATUS:-200}"
   fi
 '
@@ -1401,5 +1420,80 @@ if VEETBOT_TEST_SETTINGS_STATUS=403 run_release "$settings_failure_id" \
   exit 1
 fi
 grep -Fq 'model settings returned HTTP 403' "$TEST_ROOT/settings-failure.out"
+
+# Readiness can pass before the API's first database request answers in time. A
+# slow or unavailable answer gets a short retry; a release that stays that way,
+# or answers anything else, still fails.
+route_check_release() {
+  local release_id="$1"
+  make_stage "$release_id"
+  rm -f -- "$PROCESS_ROOT/4242/cwd"
+  ln -s "$DEPLOY_ROOT/releases/$release_id" "$PROCESS_ROOT/4242/cwd"
+  : >"$LOG_FILE"
+  run_release "$release_id"
+}
+route_attempts() {
+  grep -cF "curl $1" "$LOG_FILE" || true
+}
+expect_refused() {
+  local name="$1"
+  local release_id="$2"
+  local message="$3"
+  if route_check_release "$release_id" >"$TEST_ROOT/$name.out" 2>&1; then
+    printf 'release unexpectedly succeeded: %s\n' "$name" >&2
+    exit 1
+  fi
+  grep -Fq "$message" "$TEST_ROOT/$name.out"
+}
+
+if ! VEETBOT_TEST_SESSION_TIMEOUTS=4 route_check_release 20260813-152233-abcdef2 \
+  >"$TEST_ROOT/slow-index.out" 2>&1; then
+  tail -n 5 "$TEST_ROOT/slow-index.out" >&2
+  printf 'release failed on a session index that answered in time on the last attempt\n' >&2
+  exit 1
+fi
+[[ "$(route_attempts session-index)" == 5 ]]
+[[ "$(grep -cFx 'sleep 2' "$LOG_FILE")" == 4 ]]
+
+if ! VEETBOT_TEST_SESSION_UNAVAILABLE=2 route_check_release 20260813-152234-abcdef3 \
+  >"$TEST_ROOT/unavailable-index.out" 2>&1; then
+  tail -n 5 "$TEST_ROOT/unavailable-index.out" >&2
+  printf 'release failed on a session index that recovered from HTTP 503\n' >&2
+  exit 1
+fi
+[[ "$(route_attempts session-index)" == 3 ]]
+
+if ! VEETBOT_TEST_SETTINGS_TIMEOUTS=2 route_check_release 20260813-152235-abcdef4 \
+  >"$TEST_ROOT/slow-settings.out" 2>&1; then
+  tail -n 5 "$TEST_ROOT/slow-settings.out" >&2
+  printf 'release failed on model settings that recovered from a slow answer\n' >&2
+  exit 1
+fi
+[[ "$(route_attempts model-settings)" == 3 ]]
+
+VEETBOT_TEST_FAIL_SESSION_INDEX=1 expect_refused timed-out-index \
+  20260813-152236-abcdef5 'promoted API does not expose the authoritative session index'
+[[ "$(route_attempts session-index)" == 5 ]]
+
+VEETBOT_TEST_SESSION_TIMEOUTS=5 expect_refused always-slow-index \
+  20260813-152237-abcdef6 'promoted API does not expose the authoritative session index'
+[[ "$(route_attempts session-index)" == 5 ]]
+
+VEETBOT_TEST_SESSION_STATUS=503 expect_refused unavailable-index-stays \
+  20260813-152238-abcdef7 'promoted API session index returned HTTP 503'
+[[ "$(route_attempts session-index)" == 5 ]]
+
+VEETBOT_TEST_SETTINGS_TIMEOUTS=5 expect_refused always-slow-settings \
+  20260813-152239-abcdef8 'promoted API does not expose model settings'
+[[ "$(route_attempts model-settings)" == 5 ]]
+
+# An answer that will not change is not retried.
+VEETBOT_TEST_SESSION_STATUS=401 expect_refused unauthorized-index \
+  20260813-152240-abcdef9 'promoted API session index returned HTTP 401'
+[[ "$(route_attempts session-index)" == 1 ]]
+
+VEETBOT_TEST_SETTINGS_STATUS=403 expect_refused forbidden-settings \
+  20260813-152241-abcdefa 'model settings returned HTTP 403'
+[[ "$(route_attempts model-settings)" == 1 ]]
 
 printf 'release script tests passed\n'
