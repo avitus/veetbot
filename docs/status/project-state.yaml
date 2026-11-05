@@ -1,3 +1,7 @@
+# ADR-0298: On 2026-11-04 the owner chose to stop Email refreshes above the 75%
+# share paying for the re-rating backlog: a new-mail slice assesses and drafts only
+# arrivals, under ADR-0286's rule, and one that found nothing is an empty look.
+# Accepted; no milestone or gate moves.
 # ADR-0295: On 2026-11-04 the owner reported email refreshes failing and chose
 # both repairs: an email slice's 120 seconds start at its first claim rather than
 # at admission, and the async role runs two processes. Accepted; no milestone or

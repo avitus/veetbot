@@ -342,3 +342,4 @@ implementation without one.
 - [ADR-0293: A knowledge search asks the corpus, not the catalogue (Accepted)](0293-knowledge-search-asks-the-corpus.md)
 - [ADR-0294: An approved click can save a text file into the chat (Proposed)](0294-approved-browser-file-download.md)
 - [ADR-0295: An email slice's time starts at its first claim, and the async role runs two processes (Accepted)](0295-execution-window-and-async-slots.md)
+- [ADR-0298: A new-mail slice assesses only arrivals (Accepted)](0298-new-mail-slices-assess-only-arrivals.md)
