@@ -56,6 +56,7 @@ from agent_core.domain.errors import (
     BudgetExceededError,
     ChildRunRequiredError,
     ConflictError,
+    DatabaseCapacityError,
     DelegationValidationError,
     NotFoundError,
     RunCancelledError,
@@ -1810,7 +1811,7 @@ class ToolPipeline:
                         retryable=False,
                     ),
                 )
-            except (RunCancelledError, BudgetExceededError, NotFoundError):
+            except (RunCancelledError, BudgetExceededError, DatabaseCapacityError, NotFoundError):
                 raise
             # Tool implementation failures are deliberately normalized at this boundary.
             except Exception as exc:

@@ -1874,7 +1874,9 @@ the executor's conservative pre-tool effect watermark or authentication checks.
 
 A stale observation failure permits one separately audited fresh read, at most
 three automatic recovery reads per run, within tool and run budgets and deadlines.
-It never permits action replay. The original failure remains visible alongside
+When a worker recovers a dispatched `browser.act` whose outcome was never recorded,
+it uses one of these reads to inspect the page. The invocation stays uncertain.
+Recovery never permits action replay. The original failure remains visible alongside
 any fresh read evidence. Authentication challenges discard references and require
 owner-controlled sign-in. The runtime may suspend for that owner action twice;
 the failed call is already complete and is not replayed on resume. Existing

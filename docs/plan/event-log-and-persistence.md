@@ -1628,6 +1628,11 @@ The bounded reaper also terminalizes already exhausted queued rows, emitting
 that case, so a claim filter cannot strand a run indefinitely. Waiting runs
 remain excluded; fencing, deadlines, budgets and effect recovery are unchanged.
 
+If PostgreSQL refuses a new transaction because its connections are exhausted
+(SQLSTATE `53300`), a durable worker abandons the attempt and stops renewing
+its lease. The lease reaper applies the same crash allowance and backoff as
+for worker loss. This applies while executing and while persisting the outcome.
+
 The additive migration backfills from durable maintenance `run.requeued` and
 lease-exhaustion `run.failed` events, never from total claims. It preserves
 actual crash history and never reopens terminal runs. Existing queued
