@@ -335,11 +335,12 @@ class RestlessSignInSite:
 
 async def first_frame(service: ProfileService, ceremony_id: UUID, capability: str) -> bytes:
     """Fetch a frame as the owner's page does, which retries one Chromium fails to capture."""
-    for _ in range(100):
-        with suppress(PlaywrightError):
-            return await service.sessions.authentication_frame(ceremony_id, capability)
-        await asyncio.sleep(0.1)
-    return await service.sessions.authentication_frame(ceremony_id, capability)
+    # One capture can wait 30 seconds, so a count of tries would not bound the whole wait.
+    async with asyncio.timeout(30):
+        while True:
+            with suppress(PlaywrightError):
+                return await service.sessions.authentication_frame(ceremony_id, capability)
+            await asyncio.sleep(0.1)
 
 
 @pytest.mark.parametrize("path", ["/routing", "/replacing"])
@@ -362,6 +363,7 @@ async def test_a_remote_sign_in_opens_a_page_that_keeps_moving(tmp_path: Path, p
 
 
 async def test_a_remote_sign_in_finishes_on_a_page_that_keeps_moving(tmp_path: Path) -> None:
+    """A sign-in finishes when typing starts a redirect the page is still making."""
     require_real_browser()
     async with (
         local_https_site(RestlessSignInSite().app) as site,
@@ -386,6 +388,10 @@ async def test_a_remote_sign_in_finishes_on_a_page_that_keeps_moving(tmp_path: P
                     ceremony.id, capability, BrowserInteractiveEvent(kind="text", text="s")
                 )
             await asyncio.sleep(0.1)
+        else:
+            # The last key may have finished the sign-in, so read the result once more.
+            refreshed = await service.sessions.refresh_authentication(ceremony.id, OWNER)
+            status = refreshed.status
 
     assert status is BrowserAuthenticationStatus.READY
 
