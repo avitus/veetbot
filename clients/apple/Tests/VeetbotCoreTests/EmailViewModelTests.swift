@@ -15,6 +15,67 @@ import SwiftUI
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
     #if os(macOS)
+    @Test func testMacImportantRequestsFullPages() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if !request.url!.path.hasSuffix("threads") { return (200, self.threadJSON()) }
+            requests.append(request)
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            let limit = Int(query.first { $0.name == "limit" }!.value!)!
+            let start = Int(query.first { $0.name == "cursor" }?.value ?? "0")!
+            let end = min(start + limit, 107)
+            let rows = (start..<end).map { i in
+                let row = self.threadJSON().replacingOccurrences(of: self.threadID.uuidString,
+                    with: String(format: "00000000-0000-0000-0000-%012d", 801 + i))
+                // During refresh the last conversation receives mail and moves to the top.
+                return i == 106 && requests.snapshot.count > 2
+                    ? row.replacingOccurrences(of: "2026-09-11", with: "2026-09-12") : row
+            }.joined(separator: ",")
+            return (200, "{\"items\":[\(rows)],\"next_cursor\":\(end < 107 ? "\"\(end)\"" : "null"),\"total_count\":107}")
+        }
+        defer { model.resetConnection() }
+        model.setListView("priority")
+        for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.items.count == 100)
+        #expect(model.listTotal == 107)
+        await model.openThread(threadID)
+        // Exercise the live SwiftUI scroll view, including the automatic next page.
+        let frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+        let host = NSHostingView(rootView: EmailModeView(model: model, discussInChat: {}))
+        let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        host.frame = frame
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+
+        func inboxScroll(in view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, let document = scroll.documentView,
+               document.frame.height > frame.height * 3 { return scroll }
+            return view.subviews.lazy.compactMap { inboxScroll(in: $0) }.first
+        }
+        let scroll = try #require(inboxScroll(in: host))
+        #expect(model.items.count == 100, "Opening Important should not fetch the next page")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.documentView!.bounds.height - scroll.contentView.bounds.height))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        for _ in 0..<200 where model.items.count == 100 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.items.count == 107)
+        #expect(!model.hasMore)
+        #expect(requests.snapshot.map { URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)!
+            .queryItems!.first { $0.name == "limit" }!.value } == ["100", "100"])
+        try await Task.sleep(for: .milliseconds(150))
+        let visible = try #require(model.importantScrollAnchor)
+        #expect(visible != threadID)
+        await model.reload(preserveOrder: true)
+        #expect(model.items.first?.id == UUID(uuidString: "00000000-0000-0000-0000-000000000907"))
+        try await Task.sleep(for: .milliseconds(120))
+        for _ in 0..<100 where model.importantScrollAnchor != visible { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.importantScrollAnchor == visible)
+        #expect(model.items.count == 107)
+        #expect(model.selectedThreadID == threadID)
+    }
+
     /// Renders real AppKit list geometry without desktop automation or private mailbox data.
     @Test func testEmailInboxRenderedLayout() async throws {
         let rows = variedInboxRows()

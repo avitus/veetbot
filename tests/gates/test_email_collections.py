@@ -28,6 +28,13 @@ async def test_collections_count_before_paging_and_keep_handled_distinct_from_ar
             if view == "handled":
                 assert data["items"][0]["id"] == str(first.id)
                 assert data["items"][0]["in_inbox"] is True
+        for params, total in (
+            ({"view": "priority", "cursor": "1"}, 5),
+            ({"view": "priority", "account_id": "hidden"}, 0),
+            ({"view": "priority", "text": "no match"}, 0),
+        ):
+            response = await client.get("/v1/email/threads", params={**params, "limit": 1})
+            assert response.json()["total_count"] == total
         response = await client.get("/v1/email/threads", params={"view": "needs_you"})
         ids = {row["id"] for row in response.json()["items"]}
         # Low-ranked reply requests belong to Needs you, even outside the priority selection.

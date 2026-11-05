@@ -386,11 +386,13 @@ public struct EmailThreadPage: Codable, Sendable {
     public let items: [EmailThreadView]
     public let nextCursor: String?
     public let collectionCounts: EmailCollectionCounts?
+    public let totalCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case items
         case nextCursor = "next_cursor"
         case collectionCounts = "collection_counts"
+        case totalCount = "total_count"
     }
 }
 

@@ -718,7 +718,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let offset = max(0, Int(query.first { $0.name == "cursor" }?.value ?? "0") ?? 0)
             let page = Array(selected.dropFirst(offset).prefix(limit))
             let cursor: Any = offset + limit < selected.count ? String(offset + limit) : NSNull()
-            let payload: [String: Any] = ["items": page, "next_cursor": cursor, "collection_counts": counts]
+            let payload: [String: Any] = ["items": page, "next_cursor": cursor, "collection_counts": counts,
+                                          "total_count": selected.count]
             body = String(data: try! JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!
 
         case ("GET", "/v1/email/threads/00000000-0000-0000-0000-000000000899"):
