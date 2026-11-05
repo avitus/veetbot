@@ -1961,6 +1961,8 @@ import UserNotifications
             var heldReadReturned = false
             /// The offer a held read returns, when it differs from the current one.
             var heldOfferID: UUID?
+            /// Whether a held read ends in a failure the transport does not retry.
+            var heldReadFails = false
             var answered = false
         }
         let log = Log()
@@ -2021,8 +2023,10 @@ import UserNotifications
                     return (503, #"{"error":{"code":"unavailable","message":"Try again"}}"#, [:])
                 }
                 let staleID = held == nil ? nil : lock.withLock { log.heldOfferID }
+                let heldFails = held != nil && lock.withLock { log.heldReadFails }
                 held?.wait()
                 if held != nil { lock.withLock { log.heldReadReturned = true } }
+                if heldFails { return nil }
                 let body = staleID.map {
                     offerBody.replacingOccurrences(of: offerID.uuidString, with: $0.uuidString)
                 } ?? offerBody
@@ -2322,6 +2326,30 @@ import UserNotifications
         for _ in 0..<5_000 where model.websiteOffer?.offerID != server.offerID {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
+        #expect(model.websiteOffer?.offerID == server.offerID)
+        held.signal()
+        for _ in 0..<5_000 where !server.lock.withLock({ server.log.heldReadReturned }) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        #expect(model.websiteOffer?.offerID == server.offerID)
+    }
+
+    @Test
+    func testAnOlderOfferReadThatFailsLateLeavesTheNewerCard() async throws {
+        var server = WebsiteOfferServer()
+        server.waitsForAnswer = true
+        let held = DispatchSemaphore(value: 0)
+        server.log.heldRead = held
+        server.log.heldReadFails = true
+        let model = try await websiteOfferModel(server, concurrentRequests: true, settle: false)
+        defer { model.newSession() }
+        for _ in 0..<5_000 where server.offerReads == 0 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        await model.refreshWebsiteOffer()
         #expect(model.websiteOffer?.offerID == server.offerID)
         held.signal()
         for _ in 0..<5_000 where !server.lock.withLock({ server.log.heldReadReturned }) {

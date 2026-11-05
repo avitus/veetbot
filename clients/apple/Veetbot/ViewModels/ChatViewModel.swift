@@ -144,6 +144,8 @@ public final class ChatViewModel: ObservableObject {
     private var dismissedWebsiteOfferIDs: Set<UUID> = []
     /// Advances when an answer closes the offer, so a read begun before it is discarded.
     private var websiteOfferGeneration = 0
+    /// Advances with every offer read, so only the latest one is applied.
+    private var websiteOfferReadSequence = 0
     private var pendingWebsiteOffer: (offerID: UUID, profileID: UUID, sessionID: UUID)?
     @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
     /// The one-time launch capability of the in-flight ceremony. It is held only
@@ -2821,16 +2823,20 @@ public final class ChatViewModel: ObservableObject {
     /// Reads the open chat's offer. The card is optional, so a failed read
     /// (an older server without the route, say) shows none.
     public func refreshWebsiteOffer() async {
+        websiteOfferReadSequence += 1
+        let read = websiteOfferReadSequence
         guard let api, let sessionID = selectedSessionID else {
             websiteOffer = nil
             return
         }
-        // A read from a replaced selection, or begun before an answer, is stale.
+        // A read from a replaced selection, begun before an answer, or
+        // overtaken by a newer read is stale; a late failure must not clear its card.
         let generation = websiteOfferGeneration
         let selection = selectionRequestID
         let offer = try? await api.websiteOffer(sessionID: sessionID)
         guard !Task.isCancelled, selectedSessionID == sessionID,
-            selectionRequestID == selection, generation == websiteOfferGeneration
+            selectionRequestID == selection, generation == websiteOfferGeneration,
+            read == websiteOfferReadSequence
         else { return }
         websiteOffer = offer.flatMap { dismissedWebsiteOfferIDs.contains($0.offerID) ? nil : $0 }
     }
