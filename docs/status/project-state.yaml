@@ -1,3 +1,7 @@
+# ADR-0298: On 2026-11-04 the owner chose to stop Email refreshes above the 75%
+# share paying for the re-rating backlog: a new-mail slice assesses and drafts only
+# arrivals, under ADR-0286's rule, and one that found nothing is an empty look.
+# Accepted; no milestone or gate moves.
 # ADR-0296: On 2026-11-03 the owner asked to add email attachments to Veetbot's
 # file storage, and chose the email's chat, a Save button plus an approval-gated
 # Chat tool, and knowledge on every save. Implemented, not yet tried on a real

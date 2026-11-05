@@ -269,13 +269,13 @@ changes with the usual eight reads per
 account, and a resynchronization's first Inbox page. It assesses at most four
 arrivals, newest first, after any retained window a change is waiting on. Each gets
 one pass, on its newest passage, which is enough to rank it; further passes of a long
-conversation wait for foreground slices, except for a window the change is waiting on,
+conversation wait for full slices (ADR-0298), except for a window the change is waiting on,
 whose unread mail cannot be reached until it is analyzed. A check prepares eligible automatic drafts
 only for conversations it assessed, and eligibility needs a finished analysis. It
 does not re-assess a conversation only because a profile, model or
 prompt revision changed, page further through the Inbox, advance the history pass,
 re-read expired bodies, verify unsubscribe evidence or write correspondence
-summaries. Foreground slices keep that work.
+summaries. Foreground slices keep that work, within their scope (ADR-0298).
 
 A check is admitted only within 50% of the daily and 90% of the rolling thirty-day
 allowance. A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
@@ -452,16 +452,22 @@ New mail keeps a reserved share (ADR-0256). A refresh is a full slice only
 while counted spending, live reservations and its reservation fit within 75% of
 both the daily and the rolling thirty-day allowance. Above that share and
 within both ceilings it is a new-mail slice: new Gmail changes take all eight
-full-thread reads, and only current Inbox conversations are assessed, newest
-activity first. A retained window that a change is waiting on is assessed
+full-thread reads, and only arrivals are assessed, under the rule in "Server
+arrival checks": at most four, newest activity first, one pass each (ADR-0298). A
+retained window that a change is waiting on is assessed
 ahead of them even outside the Inbox, since until it is analyzed the thread's
-newer messages cannot be read. Expired Inbox bodies, automatic drafts and unsubscribe
+newer messages cannot be read. Automatic drafts are prepared only for conversations
+the slice assessed, and need a finished analysis. Expired Inbox bodies and unsubscribe
 verification proceed as usual. The first page of an Inbox pass is also read;
-it holds the newest mail, so a resynchronization still recovers new mail. Later
+it holds the newest mail, so a resynchronization still recovers new mail. Re-assessment
+after a profile, model or prompt revision, further passes of a long conversation,
+assessment of mail older than the arrival window, later
 catch-up pages, the ninety-day history pass, other non-Inbox assessment and
 correspondence summaries wait until a refresh again passes the 75% admission
-check, counted spending and live reservations included. Owner-requested drafts
-and People imports use the full ceilings.
+check, counted spending and live reservations included. A new-mail slice that found
+nothing makes no model call, requests no memory formation and is removed after seven
+days, as an empty check is. Owner-requested drafts and People imports use the full
+ceilings.
 Each refresh task records its admitted `scope`, `full`, `new_mail` or `arrivals`
 (ADR-0286); earlier tasks read as `full`.
 

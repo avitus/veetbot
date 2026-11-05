@@ -344,3 +344,4 @@ implementation without one.
 - [ADR-0295: An email slice's time starts at its first claim, and the async role runs two processes (Accepted)](0295-execution-window-and-async-slots.md)
 - [ADR-0296: Save an email attachment into the email's chat (Accepted)](0296-save-email-attachments-to-the-chat.md)
 - [ADR-0297: A saved login signs in again the way it last began (Accepted)](0297-sign-in-reopens-the-way-it-last-began.md)
+- [ADR-0298: A new-mail slice assesses only arrivals (Accepted)](0298-new-mail-slices-assess-only-arrivals.md)

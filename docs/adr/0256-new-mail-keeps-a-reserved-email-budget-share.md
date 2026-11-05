@@ -1,6 +1,7 @@
 # ADR-0256: New mail keeps a reserved share of the Email budget
 
-- Status: Accepted (the owner asked for it on 2026-10-26)
+- Status: Accepted (the owner asked for it on 2026-10-26). Amended by ADR-0298:
+  a new-mail slice assesses and drafts only arrivals.
 - Date: 2026-10-26
 - Related: ADR-0092, ADR-0096, ADR-0173
 - Amends: ADR-0096's budget refusal, which paused every refresh at the ceiling

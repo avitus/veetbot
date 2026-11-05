@@ -292,7 +292,7 @@ class _TaskIO:
         self.imported: dict[UUID, EmailThread] = {}
         # Provider threads whose retained window this slice's discovery waited on.
         self.window_waiting: set[tuple[str, str]] = set()
-        # Anything a server check saw that makes it more than an empty look (ADR-0286).
+        # Anything a new-mail slice or server check saw that makes it more than an empty look.
         self.found_work = False
         counts = context.checkpoint.working_state.setdefault("email_read_counts", {})
         if not isinstance(counts, dict):
@@ -907,8 +907,8 @@ class _TaskIO:
     async def refresh(self) -> None:
         """Advance bounded discovery, assessment, and eligible automatic drafts."""
         c = self.context
-        # Above the learning share only new mail is read and ranked (ADR-0256).
-        # A server check goes further and handles only arrivals (ADR-0286).
+        # Above the learning share only new mail is read and ranked (ADR-0256, ADR-0298).
+        # A server check also skips expired bodies and unsubscribe evidence (ADR-0286).
         arrival_check = self.task.scope == "arrivals"
         new_mail_only = self.task.scope != "full"
         for account_id in self.task.account_ids:
@@ -1021,8 +1021,13 @@ class _TaskIO:
                     ),
                     sync,
                 )
-        if arrival_check:
-            await self._assess_arrivals()
+        if new_mail_only:
+            # Without new mail a slice above the learning share has nothing to pay for (ADR-0298).
+            assessed = await self._assess_arrivals()
+            if not arrival_check:
+                await self._verify_subscriptions()
+            if not (assessed or self.found_work or self.imported or any(self.full_reads.values())):
+                await self._record_empty_look()
             return
         # Cached mail also reranks after a profile change without another Gmail read.
         cutoff = body_cutoff(c.clock.now())
@@ -1122,11 +1127,11 @@ class _TaskIO:
         if not new_mail_only:
             await self._summarize_correspondence()
 
-    async def _assess_arrivals(self) -> None:
-        """Assess and draft only mail with new evidence, then record an empty look (ADR-0286).
+    async def _assess_arrivals(self) -> bool:
+        """Assess and draft only mail with new evidence, and say whether any was (ADR-0286).
 
         A profile, model or prompt revision alone leaves a conversation for
-        foreground slices, so a check's cost follows arriving mail, not the backlog.
+        full slices, so the cost follows arriving mail, not the backlog (ADR-0298).
         """
         c = self.context
         now = c.clock.now()
@@ -1137,7 +1142,7 @@ class _TaskIO:
             return (thread.account_id, thread.provider_thread_id) in self.window_waiting
 
         def arrival(thread: EmailThread, prior: EmailRecord | None, reading: bool) -> bool:
-            """One pass per source ranks a conversation; later passes wait for Email.
+            """One pass per source ranks a conversation; later passes wait for a full slice.
 
             Each page read changes the fingerprint without new mail, so a read under way
             waits for its end, when the newest message is there to rank. A full window a
@@ -1201,17 +1206,21 @@ class _TaskIO:
                     raise
         if assessed:
             await self._draft_assessed(assessed, cutoff)
-        elif not (self.found_work or self.imported or any(self.full_reads.values())):
-            async with c.uow_factory() as uow, uow.email.lock(c.principal):
-                await self._write_fence(uow)
-                await save_value(
-                    uow.email,
-                    c.principal,
-                    "task",
-                    str(c.run.id),
-                    self.task.model_copy(update={"empty_check": True}),
-                    c.clock.now(),
-                )
+        return bool(assessed)
+
+    async def _record_empty_look(self) -> None:
+        """Mark a slice that found nothing, so it forms no memory and is later removed."""
+        c = self.context
+        async with c.uow_factory() as uow, uow.email.lock(c.principal):
+            await self._write_fence(uow)
+            await save_value(
+                uow.email,
+                c.principal,
+                "task",
+                str(c.run.id),
+                self.task.model_copy(update={"empty_check": True}),
+                c.clock.now(),
+            )
 
     async def _draft_assessed(self, assessed: list[UUID], cutoff: datetime) -> None:
         """Prepare automatic drafts for this check's own conversations only."""
@@ -1361,6 +1370,7 @@ class _TaskIO:
                         or limits.max_steps - c.run.step_count <= 2
                     ):
                         return
+                    self.found_work = True
                     block = await self.call(
                         account_id, "get_unsubscribe", {"message_id": message_id}
                     )
