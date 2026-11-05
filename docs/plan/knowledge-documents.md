@@ -170,7 +170,9 @@ Two scans, and they behave differently on purpose.
 
 The **secret scan blocks.** A credential inside a retrievable corpus is a durable leak
 that no trust envelope mitigates, because the leak is the string itself. Ingestion
-fails, names the chunk, and stores nothing.
+fails, names the chunk, and stores nothing. The title passes the same scan
+(ADR-0299): every search result and the catalog render it, so it is as
+model-visible as the text.
 
 The **injection scan does not block.** It records `contains_instruction_like_text` on
 the chunk and surfaces it in the trace and in the rendered envelope. Two reasons. First,
@@ -665,8 +667,8 @@ stores share the rule through them.
 and before the runtime metadata. It is a `UserMessage` labelled
 `trust=INTERNAL_TOOL` with `source="knowledge.catalog"`, rendered inside the
 ordinary envelope as a tool result would be; titles are the owner's own and
-were scanned at ingestion, and the row lowers neither the request's origin
-trust nor the executor's turn label.
+passed the secret scan at ingestion as the text did, and the row lowers
+neither the request's origin trust nor the executor's turn label.
 
 **Reading the catalog.** The builder reads it inside assembly through an
 injected `KnowledgeCatalogSource` (`context/knowledge_catalog.py`), with the
@@ -704,7 +706,7 @@ plan re-plans once through the ordinary logged epoch rotation.
 | Failure | Defense |
 | --- | --- |
 | Injected content admitted as a permanent corpus entry | ingestion requires `USER` origin trust; an agent cannot admit what it fetched |
-| A credential lands in a retrievable corpus | the secret scan blocks the ingest and stores nothing |
+| A credential lands in a retrievable corpus | the secret scan blocks the ingest, title and text alike, and stores nothing |
 | A poisoned passage is followed as an instruction | `TrustLevel.KNOWLEDGE`, the rendered envelope, and `instruction_like` on the chunk |
 | Citations stop resolving after a chunker change | chunk ids are deterministic per `chunker_version`; re-chunking makes a new set beside the old |
 | A passage is quoted with words the source does not contain | verbatim after a closed normalization list; `content_sha256` on every chunk |
@@ -724,8 +726,8 @@ Thirteen gates in a new fourteenth area, `knowledge`, all at Milestone 9.
 
 1. **Ingestion trust** — an ingest attempted from a turn below `USER` origin trust is
    refused, and nothing is written. **M9.**
-2. **No secrets ingested** — a source containing a credential pattern fails the
-   ingest, and no `KnowledgeDocument`, chunk, index row, ingest event, or
+2. **No secrets ingested** — a source or title containing a credential pattern
+   fails the ingest, and no `KnowledgeDocument`, chunk, index row, ingest event, or
    newly created knowledge-source artifact survives the attempt. The caller's
    input artifact is untouched: `knowledge.ingest` is handed an existing
    `ArtifactRef` and must read it to scan it, so deleting it would destroy a

@@ -226,6 +226,25 @@ async def test_ingest_rejects_oversized_metadata_before_open(
     assert opened is False
 
 
+async def test_no_secrets_in_a_title(tmp_path: Path) -> None:
+    """ADR-0299: the catalog and search both render the title, so it passes the
+    same secret scan as the text."""
+
+    stack = await _stack(tmp_path)
+    source = await stack.artifact("Deployment notes without any credential.")
+    with pytest.raises(ToolValidationError, match="secret scan"):
+        await stack.service.ingest(
+            KnowledgeIngestRequest(
+                source=source,
+                title="deployment token=super-secret-value",
+                visibility=KnowledgeVisibility.PRINCIPAL,
+            ),
+            origin_trust=TrustLevel.USER,
+        )
+    async with stack.factory() as uow:
+        assert not await uow.knowledge.visible_titles(_query("deployment", current_scope=None))
+
+
 async def test_no_secrets(tmp_path: Path) -> None:
     stack = await _stack(tmp_path)
     source = await stack.artifact("deployment token=super-secret-value")

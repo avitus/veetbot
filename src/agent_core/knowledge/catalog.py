@@ -13,6 +13,8 @@ class KnowledgeCatalogReader:
     """List the documents a principal may read now, through the store's own rule."""
 
     def __init__(self, uow_factory: UnitOfWorkFactory, clock: Clock) -> None:
+        """Read catalogs through the unit of work, as of the clock's now."""
+
         self._uow_factory = uow_factory
         self._clock = clock
 
@@ -24,6 +26,8 @@ class KnowledgeCatalogReader:
         ceiling: Sensitivity,
         max_documents: int,
     ) -> KnowledgeCatalog | None:
+        """List what the principal may read now, or None when there is nothing."""
+
         query = KnowledgeCatalogQuery(
             tenant_id=principal.tenant_id,
             principal_id=principal.principal_id,

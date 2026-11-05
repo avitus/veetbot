@@ -2039,6 +2039,8 @@ class PostgresKnowledgeStore:
         return [str(title) for title in titles]
 
     async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog:
+        """The readable current documents by title, each with its chunk count."""
+
         counted = (
             select(
                 KnowledgeChunkRow.document_row_id.label("document_row_id"),

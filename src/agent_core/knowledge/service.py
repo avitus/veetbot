@@ -115,6 +115,10 @@ class KnowledgeService:
             raise ToolValidationError("knowledge source has no extractable text")
         if _SECRET.search(normalized) is not None:
             raise ToolValidationError("knowledge source failed the secret scan")
+        # ADR-0299: the title is as model-visible as the text, in every search
+        # result and in the catalog, so it passes the same scan.
+        if _SECRET.search(request.title) is not None:
+            raise ToolValidationError("knowledge title failed the secret scan")
         document_id = request.document_id or self._ids.new_id()
         # Chunk texts do not depend on the row that will hold them, so the
         # provider call happens here, before any unit of work is open.

@@ -83,7 +83,8 @@ for a slot.
    through the ordinary logged epoch rotation.
 5. **The item is `INTERNAL_TOOL` data with `source="knowledge.catalog"`**,
    rendered inside the ordinary envelope exactly as a tool result would be.
-   Titles are the owner's own, scanned at ingestion, and the row lowers
+   Titles are the owner's own and pass the secret scan at ingestion as the
+   text does, since search results and the catalog both render them; the row lowers
    neither the request's origin trust nor the executor's turn label. A title
    renders on one line whatever it holds, its line breaks and whitespace runs
    collapsed to one space, so no title can forge a second entry.
@@ -110,7 +111,8 @@ for a slot.
 - `tests/unit/test_knowledge_catalog.py`: the rendering, byte for byte, and
   a title with line breaks on one line.
 - `tests/gates/test_knowledge_m9.py`: a search without a scope reaches the
-  session's project documents, and a passed scope wins.
+  session's project documents, and a passed scope wins; a credential-bearing
+  title fails the ingest.
 - `tests/unit/test_knowledge_catalog_context.py`: row 13b's bytes, trust and
   position; absence without a source, a roster entry or documents; the
   whole-row yield ahead of recall and behind the records catalog; the reader

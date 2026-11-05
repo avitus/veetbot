@@ -55,10 +55,14 @@ class KnowledgeSearchTool:
     def __init__(
         self, service: KnowledgeService, *, factory: UnitOfWorkFactory | None = None
     ) -> None:
+        """Search through the service; the factory supplies a session's scope."""
+
         self._service = service
         self._factory = factory
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Run one governed search and render its passages for the model."""
+
         scope: str | None = arguments.get("scope")
         if "scope" not in arguments and self._factory is not None:
             # ADR-0299: the catalog lists the session's project documents, so a

@@ -29,7 +29,9 @@ class KnowledgeCatalogSource(Protocol):
         current_scope: str | None,
         ceiling: Sensitivity,
         max_documents: int,
-    ) -> KnowledgeCatalog | None: ...
+    ) -> KnowledgeCatalog | None:
+        """The documents this principal may read in this scope, or None when none."""
+        ...
 
 
 def _title(title: str) -> str:
@@ -43,6 +45,8 @@ def _title(title: str) -> str:
 
 
 def _line(line: KnowledgeCatalogLine) -> str:
+    """Render one document: title, passage count, its own date, the day added."""
+
     noun = "passage" if line.passages == 1 else "passages"
     parts = [f"{line.passages} {noun}"]
     if line.doc_date is not None:
@@ -63,6 +67,8 @@ def render_knowledge_catalog(catalog: KnowledgeCatalog) -> str:
 
 
 def knowledge_catalog_item(text: str) -> UserMessage:
+    """Wrap the rendered catalog as internal-tool data from `knowledge.catalog`."""
+
     return UserMessage(
         content=[TextPart(text=text)],
         trust=TrustLevel.INTERNAL_TOOL,

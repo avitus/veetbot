@@ -1151,6 +1151,8 @@ class InMemoryKnowledgeStore:
         return sorted(titles)
 
     async def catalog(self, query: KnowledgeCatalogQuery) -> KnowledgeCatalog:
+        """The readable current documents by title, each with its chunk count."""
+
         async with self._lock:
             counts = Counter(chunk.document_row_id for chunk in self._chunks.values())
             lines = sorted(
@@ -1325,6 +1327,8 @@ def _reserve_per_document(
 
 
 def _visible(document: KnowledgeDocument, query: KnowledgeReader) -> bool:
+    """Whether the document's visibility admits this reader in this scope."""
+
     if document.visibility.value == "tenant":
         return True
     if document.visibility.value == "principal":
