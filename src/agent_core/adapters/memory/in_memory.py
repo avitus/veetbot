@@ -17,6 +17,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError, RunCancelledE
 from agent_core.domain.knowledge import (
     DocumentAuthority,
     KnowledgeChunk,
+    KnowledgeChunkEmbedding,
     KnowledgeDocument,
     KnowledgeIngestPrepared,
     KnowledgeQuery,
@@ -965,19 +966,24 @@ class InMemoryKnowledgeStore:
         self._clock = clock
         self._documents: dict[UUID, KnowledgeDocument] = {}
         self._chunks: dict[str, KnowledgeChunk] = {}
-        # chunk id -> embedding space key -> unit vector; the PostgreSQL
-        # store's `knowledge_chunk_vectors` rows.
-        self._vectors: dict[str, dict[str, tuple[float, ...]]] = {}
+        # chunk id -> embedding space key -> window -> unit vector; the
+        # PostgreSQL store's `knowledge_chunk_vectors` rows.
+        self._vectors: dict[str, dict[str, dict[int, tuple[float, ...]]]] = {}
         self._people_erased_runs: dict[UUID, datetime] = {}
         self._lock = asyncio.Lock()
+
+    def _source_erased(self, document: KnowledgeDocument) -> bool:
+        """The PostgreSQL store's source fence: a non-upload source of a people-erased run."""
+
+        return (
+            document.source_ref.origin != "upload"
+            and document.source_ref.run_id in self._people_erased_runs
+        )
 
     async def ingest(self, prepared: KnowledgeIngestPrepared) -> None:
         async with self._lock:
             document = prepared.document
-            if (
-                document.source_ref.origin != "upload"
-                and document.source_ref.run_id in self._people_erased_runs
-            ):
+            if self._source_erased(document):
                 raise RunCancelledError("People erasure fenced knowledge ingestion")
             if document.row_id in self._documents:
                 raise ConflictError("knowledge document row already exists")
@@ -1007,9 +1013,9 @@ class InMemoryKnowledgeStore:
             for chunk in prepared.chunks:
                 self._chunks[chunk.chunk_id] = chunk.model_copy(deep=True)
             for embedding in prepared.embeddings:
-                self._vectors.setdefault(embedding.chunk_id, {})[embedding.space.key] = (
-                    checked_vector(embedding.vector, embedding.space)
-                )
+                self._vectors.setdefault(embedding.chunk_id, {}).setdefault(
+                    embedding.space.key, {}
+                )[embedding.window] = checked_vector(embedding.vector, embedding.space)
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None:
         async with self._lock:
@@ -1044,7 +1050,7 @@ class InMemoryKnowledgeStore:
                     document.valid_to is not None and document.valid_to <= as_of
                 ):
                     continue
-                if not _visible(document, query):
+                if not _visible(document, query) or self._source_erased(document):
                     continue
                 if (
                     SENSITIVITY_ORDER[document.sensitivity]
@@ -1052,7 +1058,7 @@ class InMemoryKnowledgeStore:
                 ):
                     continue
                 eligible[chunk.chunk_id] = (chunk, document)
-                vector = (
+                windows = (
                     None
                     if semantic is None
                     else self._vectors.get(chunk.chunk_id, {}).get(semantic.space.key)
@@ -1060,17 +1066,22 @@ class InMemoryKnowledgeStore:
                 # Under the dense channel the lexical arm reaches only the
                 # chunks the space has not seen, so an older document stays
                 # reachable (ADR-0289).
-                if semantic is None or semantic.channel == "hybrid" or vector is None:
+                if semantic is None or semantic.channel == "hybrid" or not windows:
                     match = _coverage(forms, f"{' '.join(chunk.heading_path)} {chunk.text}")
                     if match > 0:
                         lexical.append((chunk.chunk_id, match))
-                if semantic is not None and vector is not None:
-                    similarity = sum(a * b for a, b in zip(semantic.vector, vector, strict=True))
+                if semantic is not None and windows:
+                    # A chunk scores by its best window, as the PostgreSQL
+                    # store takes the least distance over a chunk's rows.
+                    similarity = max(
+                        sum(a * b for a, b in zip(semantic.vector, vector, strict=True))
+                        for vector in windows.values()
+                    )
                     semantic_arm.append((chunk.chunk_id, max(-1.0, min(1.0, similarity))))
-        limit = max(query.max_passages * 8, 64)
+        # Neither arm is cut before the per-document reservation sees every
+        # document's first passages (ADR-0293); `max_passages` bounds the result.
         lexical.sort(key=lambda item: (-item[1], _passage_score(eligible, query, item), item[0]))
         semantic_arm.sort(key=lambda item: (-round(item[1], 7), item[0]))
-        semantic_arm = semantic_arm[:limit]
         if semantic is None:
             matches = {chunk_id: (match, ["lexical"]) for chunk_id, match in lexical}
         else:
@@ -1102,22 +1113,93 @@ class InMemoryKnowledgeStore:
                     ),
                 )
             )
-        result: list[RetrievedPassage] = []
-        for _match, passage in sorted(
-            scored, key=lambda item: (-item[0], -item[1].score, item[1].chunk_id)
-        ):
-            if per_document[passage.document_id] >= query.max_per_document:
-                continue
-            per_document[passage.document_id] += 1
-            result.append(passage)
-            if len(result) >= query.max_passages:
-                break
-        return result
+        ranked = [
+            passage
+            for _match, passage in sorted(
+                scored, key=lambda item: (-item[0], -item[1].score, item[1].chunk_id)
+            )
+        ]
+        return _reserve_per_document(ranked, query, per_document)
+
+    async def visible_titles(self, query: KnowledgeQuery) -> list[str]:
+        as_of = query.as_of or self._clock.now()
+        async with self._lock:
+            titles = {
+                document.title
+                for document in self._documents.values()
+                if document.tenant_id == query.tenant_id
+                and document.valid_from <= as_of
+                and (document.valid_to is None or document.valid_to > as_of)
+                and _visible(document, query)
+                and not self._source_erased(document)
+                and SENSITIVITY_ORDER[document.sensitivity]
+                <= SENSITIVITY_ORDER[query.sensitivity_ceiling]
+            }
+        return sorted(titles)
 
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
         async with self._lock:
             chunk = self._chunks.get(chunk_id)
             return None if chunk is None else chunk.model_copy(deep=True)
+
+    async def chunks_without_vectors(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        space_key: str,
+        *,
+        sensitivities: Sequence[Sensitivity],
+        limit: int,
+    ) -> list[KnowledgeChunk]:
+        allowed = set(sensitivities)
+        async with self._lock:
+            current = {
+                row.row_id
+                for row in self._documents.values()
+                if row.tenant_id == tenant_id
+                and row.ingested_by_principal_id == principal_id
+                and row.valid_to is None
+                and row.sensitivity in allowed
+            }
+            waiting = sorted(
+                (
+                    chunk
+                    for chunk in self._chunks.values()
+                    if chunk.document_row_id in current
+                    and not self._vectors.get(chunk.chunk_id, {}).get(space_key)
+                ),
+                key=lambda chunk: (chunk.document_row_id.int, chunk.ordinal),
+            )
+            return [chunk.model_copy(deep=True) for chunk in waiting[:limit]]
+
+    async def remove_embeddings_outside(
+        self, tenant_id: str, principal_id: str, space_key: str
+    ) -> int:
+        async with self._lock:
+            owned = {
+                row.row_id
+                for row in self._documents.values()
+                if row.tenant_id == tenant_id and row.ingested_by_principal_id == principal_id
+            }
+            removed = 0
+            for chunk_id, spaces in list(self._vectors.items()):
+                chunk = self._chunks.get(chunk_id)
+                if chunk is None or chunk.document_row_id not in owned:
+                    continue
+                for key in [key for key in spaces if key != space_key]:
+                    removed += len(spaces.pop(key))
+                if not spaces:
+                    del self._vectors[chunk_id]
+            return removed
+
+    async def add_embeddings(self, embeddings: Sequence[KnowledgeChunkEmbedding]) -> None:
+        async with self._lock:
+            for embedding in embeddings:
+                if embedding.chunk_id not in self._chunks:
+                    raise NotFoundError("knowledge chunk not found")
+                self._vectors.setdefault(embedding.chunk_id, {}).setdefault(
+                    embedding.space.key, {}
+                ).setdefault(embedding.window, checked_vector(embedding.vector, embedding.space))
 
     async def delete(self, document_id: UUID, principal: Principal) -> list[ArtifactRef]:
         async with self._lock:
@@ -1185,6 +1267,27 @@ def _coverage(forms: list[tuple[str, ...]], text: str) -> float:
                 matched += 1
                 break
     return matched / len(forms)
+
+
+def _reserve_per_document(
+    ranked: list[RetrievedPassage], query: KnowledgeQuery, per_document: defaultdict[UUID, int]
+) -> list[RetrievedPassage]:
+    """Every document's first `max_per_document` passages, then the rest by rank (ADR-0293).
+
+    The cap reserves room for each document rather than capping the result:
+    a verbose document cannot crowd another's first passages out, and a
+    corpus of one document still fills the budget.
+    """
+
+    within: list[RetrievedPassage] = []
+    beyond: list[RetrievedPassage] = []
+    for passage in ranked:
+        if per_document[passage.document_id] < query.max_per_document:
+            per_document[passage.document_id] += 1
+            within.append(passage)
+        else:
+            beyond.append(passage)
+    return (within + beyond)[: query.max_passages]
 
 
 def _visible(document: KnowledgeDocument, query: KnowledgeQuery) -> bool:

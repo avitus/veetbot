@@ -14,9 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_serializer
 
 from agent_core.domain.cockpit import FEED_ID_PATTERN, WIDGET_SLUG_PATTERN
 from agent_core.domain.integration_secrets import secret_id
+from agent_core.domain.mcp import MCP_SERVER_ID_PATTERN
 from agent_core.domain.web import is_public_https_url
 
-JOB_CALLS = frozenset({"http.request", "model.complete", "feed.publish", "log"})
+JOB_CALLS = frozenset({"http.request", "mcp.read", "model.complete", "feed.publish", "log"})
 JOB_SOURCE_BYTES = 64 * 1024
 JOB_INPUT_BYTES = 64 * 1024
 JOB_RESULT_BYTES = 64 * 1024
@@ -57,6 +58,8 @@ class JobAccess:
     maximum_requests: int = 50
     maximum_response_bytes: int = 48 * 1024
     model_cost: str = "0"
+    # ADR-0291: servers this grant may read. Private, so job.json never names them.
+    mcp_servers: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         """Validate private inputs, destinations, feed authority, and execution limits."""
@@ -92,6 +95,11 @@ class JobAccess:
             for feed in self.feeds
         ):
             raise ValueError("Jobs publish only declared agent feeds.")
+        if any(
+            not re.fullmatch(MCP_SERVER_ID_PATTERN, server) or server.startswith("bland_")
+            for server in self.mcp_servers
+        ):
+            raise ValueError("A job may not read that MCP server.")
         if len(json.dumps(self.inputs, allow_nan=False).encode()) > JOB_INPUT_BYTES:
             raise ValueError("Job inputs exceed 64 KiB.")
 
@@ -181,6 +189,13 @@ class JobRecord(BaseModel):
             if revision is None or revision.commit_sha is None:
                 raise ValueError("A live job must have a locally stored committed revision.")
         return self
+
+
+def access_is_external(access: JobAccess) -> bool:
+    """Whether a grant reaches beyond its own computation, so it binds to approved code."""
+    return bool(
+        access.hosts or access.feeds or access.mcp_servers or Decimal(access.model_cost) > 0
+    )
 
 
 def parse_job_access(value: Any) -> JobAccess:

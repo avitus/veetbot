@@ -356,6 +356,7 @@ from agent_core.application.device_management import (
     NotificationInboxService,
 )
 from agent_core.application.email import EmailExperienceService
+from agent_core.application.email_attachments import EmailAttachmentSaver
 from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.application.job_execution import JobExecution
@@ -518,6 +519,7 @@ from agent_core.domain.code import (
     CODE_WRITE_TOOL_NAMES,
     RUN_INSPECT_TOOL_NAME,
 )
+from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
@@ -531,8 +533,18 @@ from agent_core.domain.execution import (
     ResourceLimits,
 )
 from agent_core.domain.failures import log_failure
+from agent_core.domain.knowledge import (
+    KNOWLEDGE_OPENAI_SPACE,
+    KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+    KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+)
 from agent_core.domain.local_embeddings import LocalEmbeddingConfig
-from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
+from agent_core.domain.mcp import (
+    MCPServerConfig,
+    MCPTransport,
+    ScriptedMCPServer,
+    is_email_server_id,
+)
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.messages import (
     Capability,
@@ -601,6 +613,7 @@ from agent_core.folders.grouping import ModelAssistedThreadGrouper
 from agent_core.folders.matching import JudgmentFolderMatcher
 from agent_core.folders.profiles import FolderProfiles
 from agent_core.folders.proposals import FolderProposalPass
+from agent_core.knowledge.backfill import KnowledgeVectorBackfill
 from agent_core.knowledge.chunking import (
     MAX_KNOWLEDGE_SOURCE_BYTES,
     PlainTextExtractor,
@@ -612,10 +625,10 @@ from agent_core.knowledge.uploads import UploadAutoIngest
 from agent_core.mcp.configuration import (
     calling_server_configs,
     email_server_configs,
-    is_email_server_id,
     svp_server_configs,
     validate_mcp_config,
 )
+from agent_core.mcp.job_reads import JobMCPReads
 from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.bounded_recall_admission import BoundedAdmission
 from agent_core.memory.communication_sources import AttributedCommunicationCandidateExtractor
@@ -656,6 +669,8 @@ from agent_core.memory.retrieval import (
     HybridMemoryRetriever,
 )
 from agent_core.memory.semantic_deployment import (
+    DOCUMENT,
+    IndexProfiles,
     SemanticCompositionInputs,
     SemanticServices,
     compose_indexing,
@@ -743,6 +758,7 @@ from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
     BrowserActTool,
+    PinnedBrowserActTool,
 )
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
@@ -782,12 +798,20 @@ from agent_core.tools.device_tools import DEVICE_SMS_SEND_TOOL_NAME, DeviceToolR
 from agent_core.tools.email_context import EmailContextTool, EmailFeedbackTool
 from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsubscribeTool
 from agent_core.tools.executor import ToolPipeline
-from agent_core.tools.job_schedules import JobScheduleCreateTool, JobScheduleUpdateTool
+from agent_core.tools.job_schedules import (
+    JobScheduleCreateTool,
+    JobScheduleUpdateTool,
+    MCPJobScheduleCreateTool,
+    MCPJobScheduleUpdateTool,
+)
 from agent_core.tools.jobs import (
     JOB_TOOL_NAMES,
     JobManageTool,
     JobRunTool,
     JobToolset,
+    MCPJobManageTool,
+    MCPJobRunTool,
+    MCPStoredKeyJobRunTool,
     StoredKeyJobRunTool,
 )
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
@@ -823,7 +847,9 @@ from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
     COCKPIT_FEED_SCOPES,
     SCHEDULE_CREATE_TOOL_NAME,
+    CockpitMCPScheduleCreateTool,
     CockpitScheduleCreateTool,
+    MCPScheduleCreateTool,
     PreviousCockpitScheduleCreateTool,
     ScheduleCreateTool,
     SingleCallScheduleCreateTool,
@@ -834,7 +860,9 @@ from agent_core.tools.schedule_lifecycle import (
     SCHEDULE_PAUSE_TOOL_NAME,
     SCHEDULE_RESUME_TOOL_NAME,
     SCHEDULE_UPDATE_TOOL_NAME,
+    CockpitMCPScheduleUpdateTool,
     CockpitScheduleUpdateTool,
+    MCPScheduleUpdateTool,
     PreviousScheduleListTool,
     ScheduleCancelTool,
     ScheduleListTool,
@@ -1211,7 +1239,11 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "your reply automatically. Never say a file is attached unless its export or "
     "generation tool succeeded. To delete files you generated in this chat when the owner "
     "asks, call artifact.delete through tool.call with their artifact ids; it never deletes "
-    "the owner's uploads. When a schedule, job or widget fails, find the cause before answering, "
+    "the owner's uploads. To keep an email attachment as a file when the owner asks, call "
+    "mcp.gmail_read.save_attachment through tool.call (each account's read server has one) "
+    "with the message id, its zero-based attachment_index and filename from get_thread; it "
+    "asks the owner first, and your reply carries the file. "
+    "When a schedule, job or widget fails, find the cause before answering, "
     "never asking the owner for errors you can read: call run.inspect through tool.call, and "
     "cockpit.read's diagnostics for a widget. A tile showing Paused is the device's watchdog, "
     "not a paused schedule. Where enabled, code.read, code.draft, code.test and code.propose "
@@ -1584,6 +1616,162 @@ def default_fake_script() -> FakeModelScript:
             ),
             ScriptedTurn(text="391", stop_reason=StopReason.END_TURN),
         ]
+    )
+
+
+async def prepare_standing_admission(
+    *,
+    instruction: str,
+    reference: str,
+    rollback_build_ref: str,
+    out: Path,
+    supersedes: str | None,
+    decided_at: datetime | None,
+) -> dict[str, Any]:
+    """Write the two standing-admission files from the live composition (ADR-0290).
+
+    The dependency digests come from the same composition the API runs,
+    stopped before any model or provider is built; a remote profile or a
+    configuration without query preparation is refused with the reason.
+    """
+
+    from agent_core.memory.standing_recall_admission import write_standing_admission
+
+    settings = load_settings()
+    profiles = IndexProfiles.model_validate(load_config_document(settings, DOCUMENT))
+    if len(profiles.configurations) != 1:
+        raise ConfigurationError("the semantic index needs one explicit configuration")
+    profile = profiles.configurations[0]
+    if profile.local is None:
+        raise ConfigurationError(
+            "a standing admission needs the local encoder; the configured index is remote"
+        )
+    captured: list[SemanticCompositionInputs] = []
+
+    class _CapturedError(Exception):
+        pass
+
+    def capture(inputs: SemanticCompositionInputs) -> None:
+        captured.append(inputs)
+        raise _CapturedError
+
+    # The live digests come from the same composition the API runs, stopped
+    # before any model or provider is built.
+    try:
+        async with build(
+            settings=settings,
+            storage="postgres",
+            model_metadata_only=True,
+            recall_capture=capture,
+        ):
+            raise ConfigurationError("composition capture exposed a runtime")
+    except _CapturedError:
+        pass
+    inputs = captured[0]
+    retrieval = inputs.configuration.get("memory", {}).get("retrieval", {})
+    if retrieval.get("semantic_enabled") is not True:
+        raise ConfigurationError(
+            "a standing admission needs memory.retrieval.semantic_enabled true "
+            "in the effective configuration"
+        )
+    # The same conditions composition refuses a bounded admission under,
+    # checked here so the operator learns before any file is written.
+    if profile.reader_sha256 is None:
+        raise ConfigurationError(
+            "a standing admission needs the reviewed reader in the semantic index configuration"
+        )
+    if settings.memory_reconsolidation_enabled:
+        raise ConfigurationError(
+            "a standing admission refuses unattended reconsolidation; disable it first"
+        )
+    dependencies = inputs.dependencies(profile)
+    owner = inputs.configuration["principal"]
+    evidence_path, manifest_path = write_standing_admission(
+        out,
+        tenant_id=str(owner["tenant"]),
+        principal_id=str(owner["owner"]),
+        instruction=instruction,
+        reference=reference,
+        rollback_build_ref=rollback_build_ref,
+        dependencies=dependencies,
+        activated_at=system_clock().now(),
+        decided_at=decided_at,
+        supersedes=supersedes,
+    )
+    return {
+        "evidence": str(evidence_path),
+        "evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
+        "manifest": str(manifest_path),
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "embedding_space_key": profile.embedding.space.key,
+        "embedding_configuration_sha256": dependencies["embedding_configuration_sha256"],
+        "tenant_id": str(owner["tenant"]),
+        "principal_id": str(owner["owner"]),
+    }
+
+
+async def _knowledge_embedder(
+    settings: Settings,
+    index: SemanticServices | None,
+    credentials: CredentialResolver,
+) -> KnowledgeEmbedder | None:
+    """The knowledge semantic arm's embedder, or None when search stays lexical.
+
+    ADR-0289 borrowed the memory index's admitted provider. ADR-0290 adds the
+    arm's own OpenAI provider on the `openai` credential, the model gate 13
+    measured lift with, because the local encoder measured none; a missing
+    credential, like a missing index, leaves search lexical and says so once.
+    """
+
+    if not settings.knowledge_semantic_enabled:
+        return None
+    if settings.knowledge_semantic_provider == "openai":
+        if settings.memory_semantic_index_enabled and index is None:
+            # The index is configured but its admission was rejected at
+            # startup (withdrawn files, ADR-0269's fallback): the knowledge
+            # arm's egress stays withdrawn with it rather than composing on
+            # the flag alone.
+            logger.warning(
+                "knowledge_semantic_unavailable_using_lexical", extra={"reason": "admission"}
+            )
+            return None
+        key = ""
+        with suppress(PermissionError):
+            key = (await credentials.resolve(CredentialRef("openai"))).reveal()
+        if not key:
+            logger.warning(
+                "knowledge_semantic_unavailable_using_lexical", extra={"reason": "credential"}
+            )
+            return None
+        # The arm's egress follows the semantic index's admission when one is
+        # composed, so withdrawing the standing files stops it as well; with
+        # no index the flag alone turns it off.
+        # A question reaches the provider only from a run pinned to it; the
+        # service reads the run's pin at search (ADR-0290).
+        # Whole chunks average their one answering sentence away; windows
+        # under the measured budget keep it reachable (ADR-0290).
+        return KnowledgeEmbedder(
+            OpenAIEmbeddingProvider(key),
+            KNOWLEDGE_OPENAI_SPACE,
+            channel=settings.knowledge_semantic_channel,
+            admitted=(lambda: True) if index is None else (index.admitted or (lambda: True)),
+            window_tokens=KNOWLEDGE_OPENAI_WINDOW_TOKENS,
+            whole_tokens=KNOWLEDGE_OPENAI_WHOLE_TOKENS,
+        )
+    if index is None:
+        logger.warning("knowledge_semantic_unavailable_using_lexical", extra={"reason": "index"})
+        return None
+    # A local encoder admits fewer tokens than a chunk holds, so chunks are
+    # embedded in windows its own tokenizer sizes.
+    local_encoder = index.local_provider
+    return KnowledgeEmbedder(
+        index.provider,
+        index.space,
+        channel=settings.knowledge_semantic_channel,
+        local=local_encoder is not None,
+        admitted=index.admitted or (lambda: True),
+        window_tokens=None if local_encoder is None else local_encoder.maximum_tokens,
+        count_tokens=None if local_encoder is None else local_encoder.count_tokens,
     )
 
 
@@ -2170,13 +2358,19 @@ def _schedule_principal(settings: Settings) -> Principal:
         for row in calling_server_configs(settings.auth_tenant_id, enabled=settings.call_enabled)
         for scope in row.required_scopes
     }
+    # ADR-0291: a schedule that names Scale VP keeps its scope; the worker holds the grant.
+    svp_scopes = {
+        scope
+        for row in svp_server_configs(settings.auth_tenant_id, enabled=settings.svp_enabled)
+        for scope in row.required_scopes
+    }
     # ADR-0254: a feed-keeping schedule's occurrence keeps its Cockpit scopes.
     feed_scopes = COCKPIT_FEED_SCOPES if settings.cockpit_enabled else ()
     return Principal(
         tenant_id=settings.auth_tenant_id,
         principal_id=settings.auth_principal_id,
         roles=set(settings.auth_roles),
-        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *feed_scopes},
+        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *svp_scopes, *feed_scopes},
     )
 
 
@@ -3409,9 +3603,13 @@ async def _compose(
     if job_publication is not None and job_execution is not None:
         job_toolset = JobToolset(job_publication, job_execution)
         registry.register(JobManageTool(job_toolset))
+        registry.register(MCPJobManageTool(job_toolset))
         registry.register(JobRunTool(job_toolset))
         if integration_secrets is not None:
             registry.register(StoredKeyJobRunTool(job_toolset))
+        registry.register(MCPJobRunTool(job_toolset))
+        if integration_secrets is not None:
+            registry.register(MCPStoredKeyJobRunTool(job_toolset))
     registry.register(RunInspectTool(uow_factory))
     if settings.code_tools_enabled and settings.code_source_root is not None:
         source_tree = FilesystemSourceTree(
@@ -3482,17 +3680,15 @@ async def _compose(
             )
         # ADR-0129: the approval card describes the action whatever the flag;
         # it offers a task grant only when task grants are enabled.
-        registry.register(
-            BrowserActTool(
-                browser_provider,
-                presenter=BrowserActApprovalPresenter(
-                    browser_provider,
-                    context_reader=_task_grant_context_reader(uow_factory, clock),
-                    enabled=_task_grants_composed(settings, browser_provider),
-                    now=clock.now,
-                ),
-            )
+        act_presenter = BrowserActApprovalPresenter(
+            browser_provider,
+            context_reader=_task_grant_context_reader(uow_factory, clock),
+            enabled=_task_grants_composed(settings, browser_provider),
+            now=clock.now,
         )
+        # ADR-0294: a chat pinned to the earlier spec keeps it; the latest is offered.
+        registry.register(PinnedBrowserActTool(browser_provider, presenter=act_presenter))
+        registry.register(BrowserActTool(browser_provider, presenter=act_presenter))
     if settings.delegation_enabled:
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
@@ -3515,7 +3711,10 @@ async def _compose(
             )
         )
         if settings.cockpit_enabled:
-            for cockpit_create in (PreviousCockpitScheduleCreateTool, CockpitScheduleCreateTool):
+            for cockpit_create in (
+                PreviousCockpitScheduleCreateTool,
+                CockpitScheduleCreateTool,
+            ):
                 registry.register(
                     cockpit_create(
                         schedule_service,
@@ -3525,11 +3724,29 @@ async def _compose(
                         calling_enabled=settings.call_enabled,
                     )
                 )
+        # ADR-0291: the deployment's newest versions register last, so they are offered.
+        # The one without Cockpit stays for a run pinned before Cockpit was turned on.
+        for mcp_create in (
+            MCPScheduleCreateTool,
+            *((CockpitMCPScheduleCreateTool,) if settings.cockpit_enabled else ()),
+        ):
+            registry.register(
+                mcp_create(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
         registry.register(PreviousScheduleListTool(schedule_service))
         registry.register(ScheduleListTool(schedule_service))
         registry.register(ScheduleUpdateTool(schedule_service))
         if settings.cockpit_enabled:
             registry.register(CockpitScheduleUpdateTool(schedule_service))
+        registry.register(MCPScheduleUpdateTool(schedule_service))
+        if settings.cockpit_enabled:
+            registry.register(CockpitMCPScheduleUpdateTool(schedule_service))
         if settings.jobs_enabled:
             registry.register(
                 JobScheduleCreateTool(
@@ -3541,7 +3758,21 @@ async def _compose(
                 )
             )
             registry.register(
+                MCPJobScheduleCreateTool(
+                    schedule_service,
+                    agent,
+                    schedule_definition_limits,
+                    uow_factory=uow_factory,
+                    calling_enabled=settings.call_enabled,
+                )
+            )
+            registry.register(
                 JobScheduleUpdateTool(
+                    schedule_service, uow_factory, agent, schedule_definition_limits
+                )
+            )
+            registry.register(
+                MCPJobScheduleUpdateTool(
                     schedule_service, uow_factory, agent, schedule_definition_limits
                 )
             )
@@ -4548,6 +4779,7 @@ async def _compose(
             warmup_retry_seconds=float(warmup_limits["warmup_retry_seconds"]),
             warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
+            email_attachment_saver=EmailAttachmentSaver(SignatureAttachmentInspector()),
             access_tokens=owner_mcp_servers,
             owner_servers_enabled=settings.mcp_servers_enabled,
         )
@@ -4664,21 +4896,11 @@ async def _compose(
         general_artifact_store = FilesystemArtifactStore(
             artifact_root, maximum_bytes=artifact_maximum_bytes
         )
-        knowledge_embedder: KnowledgeEmbedder | None = None
-        if settings.knowledge_semantic_enabled:
-            # ADR-0289: the knowledge semantic arm embeds chunks and questions
-            # with the semantic index's admitted provider; without one, search
-            # stays lexical and says so once at startup.
-            if semantic_index_pass is None:
-                logger.warning("knowledge_semantic_unavailable_using_lexical")
-            else:
-                knowledge_embedder = KnowledgeEmbedder(
-                    semantic_index_pass.provider,
-                    semantic_index_pass.space,
-                    channel=settings.knowledge_semantic_channel,
-                    local=semantic_index_pass.local_provider is not None,
-                    admitted=semantic_index_pass.admitted or (lambda: True),
-                )
+        # ADR-0289 and ADR-0290: the knowledge semantic arm's provider, or
+        # lexical search that says so once at startup.
+        knowledge_embedder = await _knowledge_embedder(
+            settings, semantic_index_pass, credential_resolver
+        )
         knowledge_service = KnowledgeService(
             uow_factory,
             general_artifact_store,
@@ -4912,6 +5134,16 @@ async def _compose(
                 ids=ids,
             ).complete
 
+        if job_execution is not None:
+            # ADR-0291: a job's reads face the same engine as a tool call.
+            job_execution.mcp = JobMCPReads(
+                runtime=mcp_runtime,
+                registry=registry,
+                policy=policy_engine,
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+            )
         pipeline = ToolPipeline(
             registry,
             uow_factory,
@@ -6063,6 +6295,16 @@ async def _compose(
                         principal=principal,
                         clock=clock,
                     ).sweep_once,
+                    sweep_knowledge_vectors=(
+                        None
+                        if knowledge_embedder is None
+                        else KnowledgeVectorBackfill(
+                            uow_factory=uow_factory,
+                            embedder=knowledge_embedder,
+                            principal=principal,
+                            clock=clock,
+                        ).sweep_once
+                    ),
                     folder_proposal_interval_seconds=folder_profiles.proposals.interval_seconds,
                     sweep_device_invocations=(
                         sweep_device_invocations if device_flags_enabled else None

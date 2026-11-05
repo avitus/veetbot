@@ -1,3 +1,36 @@
+# ADR-0298: On 2026-11-04 the owner chose to stop Email refreshes above the 75%
+# share paying for the re-rating backlog: a new-mail slice assesses and drafts only
+# arrivals, under ADR-0286's rule, and one that found nothing is an empty look.
+# Accepted; no milestone or gate moves.
+# ADR-0296: On 2026-11-03 the owner asked to add email attachments to Veetbot's
+# file storage, and chose the email's chat, a Save button plus an approval-gated
+# Chat tool, and knowledge on every save. Implemented, not yet tried on a real
+# mailbox. No milestone or gate moves.
+# ADR-0295: On 2026-11-04 the owner reported email refreshes failing and chose
+# both repairs: an email slice's 120 seconds start at its first claim rather than
+# at admission, and the async role runs two processes. Accepted; no milestone or
+# gate moves.
+# ADR-0294: On 2026-11-03 the owner asked that Chat be able to download the CSV
+# Chase offered, which the browser cancelled. An individually approved click may
+# now save one bounded text file as a capture of the chat, read through
+# artifact.read_capture; every other file is still cancelled. browser.act moves
+# to 1.8.0 with 1.7.0 kept for pinned chats. Proposed until the owner's production
+# check on Chase passes. No milestone or gate moves.
+# ADR-0291: On 2026-11-03 the owner asked for MCP tools in scheduled runs and
+# Cockpit widgets, and chose per-schedule servers plus read-only MCP calls from
+# saved jobs. Each schedule names its servers, the approval lists them, and a
+# job's grant names what it may read. Implemented, not yet delivered: the schedule
+# environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0290: On 2026-11-03 the owner directed that semantic retrieval be
+# activated and stay on ("turned on and off for many months now and we are
+# failing to make progress"). A standing owner admission
+# (recall-standing-admission@1) carries the instruction with no expiry and no
+# release census, hard-bound only to the local encoder tuple; knowledge chunks
+# embed in windows under the encoder's capacity (knowledge-text@2) with a
+# maintenance backfill; gate 13 re-recorded in the local space found no lift,
+# so the knowledge arm runs on its own OpenAI provider
+# (AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai). Accepted; a recorded deviation
+# from the plan's activation evidence. No milestone or gate moves.
 # ADR-0289: On 2026-11-02 the owner's question about valve-like sounds from
 # the parked car missed the manual's passage under coverage ranking, and the
 # owner asked for the knowledge semantic arm the design defers on measured

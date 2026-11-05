@@ -87,7 +87,16 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"   # new
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0296
 ```
+
+This sketch, like the one in [sandbox-isolation.md](sandbox-isolation.md), names the
+members. The stored values are lowercase, such as `email_attachment`, as
+`src/agent_core/domain/artifacts.py` defines them, so a filter compares against the
+lowercase value. A saved email attachment waits for its run to complete before intake,
+because a reply attaches the file by its origin and intake changes that origin. A file from
+a run that fails or is cancelled is refused with `run_not_completed` and keeps its 30-day
+expiry (ADR-0296).
 
 Ingestion writes `expires_at = None`, so the thirty-day sweeper does not collect it and
 the document owns the lifetime. Deletion writes `expires_at = now`, and the sweeper that
@@ -220,6 +229,11 @@ reason code on the artifact, a transient failure is retried at most three times,
 and neither reaches the conversation. Deleting the conversation deletes the
 document through the existing cascade on its source artifact.
 
+A readable text, Markdown, or PDF email attachment the owner saves takes the same path
+([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)). Pressing Save or approving
+Chat's request is the human admission, and it needs the same `knowledge.write`. Source
+erasure removes the file and its document; email cache expiry does not.
+
 ## Chunking
 
 Structure first, size second. Headings are the primary boundary, paragraphs the
@@ -263,12 +277,27 @@ therefore that this arm turns on earlier here than it does for memory. It still 
 earn it.
 
 The arm is built ([ADR-0289](../adr/0289-knowledge-semantic-arm.md)) and off by
-default. Ingestion embeds each chunk's heading path over its text under a named text
-version, `knowledge-text@1`, with the provider the memory semantic index admitted, and
-stores the vector in `knowledge_chunk_vectors`, one row per chunk and embedding space,
-cascading with the chunk; the in-memory store keeps the same rows. A remote provider
+default in a fresh deployment. Ingestion embeds each chunk under a named text version,
+`knowledge-text@2`: one or more windows, each the heading path over a slice of the
+chunk text, packed under a token budget: the local encoder's capacity by its own
+tokenizer count, or, for the OpenAI route, a 128-token budget by the chunker's estimate
+applied only to chunks of 256 estimated tokens or more, since a whole 600-token chunk
+averages its one answering sentence away while cutting a short topical section only
+sharpens its distractors (ADR-0292 measured ranks 78 to 136 whole against 1 to 7
+windowed on the owner's manual). The vectors come from the provider the memory semantic index admitted and
+go to `knowledge_chunk_vectors`, one row per chunk, embedding space and window,
+cascading with the chunk; the in-memory store keeps the same rows, and a chunk's
+semantic score is its best window. A maintenance sweep embeds the chunks of the
+owner's current documents that lack a vector in the active space and, once that space
+is full, prunes vectors of any other space (ADR-0292), so an earlier document or encoder
+gains vectors without a new version and the old ones do not pile up. The provider is `AGENT_KNOWLEDGE_SEMANTIC_PROVIDER`: `index` borrows the memory
+semantic index's admitted provider and reads its admission before every call; `openai`
+is the arm's own `text-embedding-3-small` on the `openai` credential, the model gate 13
+measured lift with, needing no index. A remote provider
 receives only public and internal text, the memory index's egress rule, so a restricted
-document stays lexical, and the index's admission is read before every call. Search
+document stays lexical, and it embeds a question only from a run pinned to that same
+provider, the one that read the context the question was written from; a run on another
+provider, or a search outside a run, is lexical. Search
 embeds the question before the unit of work opens; a question the provider cannot embed
 is answered by the lexical arm alone, and the trace's policy version names the space and
 channel that answered. A semantic hit below a similarity floor is no candidate, as a
@@ -282,9 +311,12 @@ against the ADR-0285 lexical arm and found that hybrid fusion lifts nothing: the
 arm counts function words as coverage, so a document's other sections rank first
 lexically and near the top semantically, and reciprocal rank fusion rewards exactly that
 consensus. The dense channel placed every corpus member within the top two, so
-`AGENT_KNOWLEDGE_SEMANTIC_CHANNEL` defaults to `dense`, and
-`AGENT_KNOWLEDGE_SEMANTIC_ENABLED` stays off until the gate is re-recorded with the
-production embedding space and the owner has accepted where chunk text goes.
+`AGENT_KNOWLEDGE_SEMANTIC_CHANNEL` defaults to `dense`. Re-recorded in the memory
+index's local space (ADR-0188's MiniLM tuple), the gate found no lift at any window
+budget: that encoder scores by shared words, so the arm runs in production on its own
+OpenAI provider under the owner's standing decision
+([ADR-0290](../adr/0290-standing-semantic-activation.md)), and the local miss stays
+recorded beside the lift.
 
 ## Scope and visibility
 
@@ -334,7 +366,12 @@ is every place it differs, because the differences are the design.
    a passage by the same formula, three quarters coverage with the document's authority
    and scope affinity making up the rest. The **query former is shared** with memory —
    the same objective, the same active entities, the same aliasing — because the task
-   is the same task. The arms are not shared.
+   is the same task. The arms are not shared. Before either arm runs, the name of any
+   document the query may read, its title or file name as a contiguous phrase, drops
+   out of the question: a model aims a search by naming the document, and the name
+   matches the cover page ahead of the passage
+   ([ADR-0293](../adr/0293-knowledge-search-asks-the-corpus.md)); the trace keeps the
+   question as asked.
 3. **Knowledge has its own budget class**, and this is the most consequential decision
    in the document. A passage is up to 1,000 tokens against a belief's twenty-five. If
    knowledge drew from in-turn recall's 2,000-token allowance, a single retrieved
@@ -359,7 +396,11 @@ is every place it differs, because the differences are the design.
    sources that disagree are a library, and resolving that at read time would be the
    retriever deciding which author is right. They are replaced by a **per-document cap
    of two passages**, which does the useful half of diversification — stopping one
-   verbose document from filling the budget — without adjudicating anything.
+   verbose document from filling the budget — without adjudicating anything. The cap
+   reserves room rather than capping the result: every document's first two passages
+   come before any document's third, and the rest of the budget fills by rank, so a
+   corpus of one document is not starved
+   ([ADR-0293](../adr/0293-knowledge-search-asks-the-corpus.md)).
 8. **Feedback is one-directional.** Citations are recorded for ranking evaluation and
    for the trace. They do not raise a document's authority, for the reason belief usage
    does not raise confidence: evidence must come from the world, not from the retriever
@@ -541,7 +582,8 @@ class KnowledgeStore(Protocol):
 One tool, returning `TrustLevel.KNOWLEDGE` data, plus the ingestion tool:
 
 - **`knowledge.search`** — text query, optional `as_of`, returns ranked passages with
-  their chunk ids and heading paths. `required_scopes` is empty, mirroring `skill.write`
+  their chunk ids and heading paths; the name of a visible document drops out of the
+  text first (ADR-0293). `required_scopes` is empty, mirroring `skill.write`
   shipping without a `skill.read`: nothing in 0.1 could check a read scope, and an
   uncheckable scope is worse than a missing one.
 - **`knowledge.ingest`** — takes an `ArtifactRef`, a title, and a visibility. Requires
@@ -560,7 +602,7 @@ build time alongside the other builtin domains.
 | A poisoned passage is followed as an instruction | `TrustLevel.KNOWLEDGE`, the rendered envelope, and `instruction_like` on the chunk |
 | Citations stop resolving after a chunker change | chunk ids are deterministic per `chunker_version`; re-chunking makes a new set beside the old |
 | A passage is quoted with words the source does not contain | verbatim after a closed normalization list; `content_sha256` on every chunk |
-| One document fills the retrieval budget | per-document cap of two passages, plus the relevance floor |
+| One document fills the retrieval budget | per-document cap of two passages reserving every other document's first two, plus the relevance floor |
 | Knowledge starves the belief budget | its own budget class, which yields before in-turn recall |
 | A truncated passage becomes a misquotation | passages drop whole; never truncated to fit |
 | Cross-tenant or cross-project leak | `tenant_id` and `visibility` are SQL predicates, never rank features |
@@ -647,8 +689,9 @@ That is eight case gates, three property gates, and two corpus gates.
 5. **Automatic pre-turn retrieval.** Knowledge retrieved without an explicit tool call,
    behind a relevance floor, enabled only if the corpus gate improves with it.
 6. **The semantic arm.** `pgvector` behind the existing RRF fusion, enabled on measured
-   lift. Built default-off under ADR-0289, with gate 13 as the measurement; activation
-   needs the gate re-recorded with the production embedding space.
+   lift. Built under ADR-0289 with gate 13 as the measurement; activated under
+   ADR-0290 on the arm's own OpenAI provider after the local encoder measured no
+   lift; off by default in a fresh deployment.
 7. **Later extractors.** PDF, HTML, and DOCX as `Extractor` adapters, each re-running
    ingestion over already-stored sources rather than asking for re-upload.
 
@@ -693,7 +736,8 @@ That is eight case gates, three property gates, and two corpus gates.
 - **Passages drop whole.** A truncated passage is a misquotation with a citation
   attached.
 - **No supersession collapse, no conflict surfacing, no per-subject cap.** Two sources
-  that disagree are a library. A per-document cap of two does the useful half.
+  that disagree are a library. A per-document cap of two does the useful half, and it
+  reserves rather than caps (ADR-0293).
 - **Ranking is four terms.** No confidence, no reinforcement, no utility — the agent is
   quoting, not believing, and `recency` reads the document's date rather than the
   ingestion date.

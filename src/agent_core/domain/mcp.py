@@ -22,6 +22,16 @@ MAXIMUM_OWNER_MCP_SERVERS = 16
 MAXIMUM_OWNER_MCP_URL_LENGTH = 2048
 
 
+_EMAIL_SERVER_ID = re.compile(r"^gmail_(?:[a-z][a-z0-9_]{0,31}_)?(?:read|write|send)$")
+MCP_SERVER_ID_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
+
+
+def is_email_server_id(server_id: str | None) -> bool:
+    """Return whether an id belongs to a first-party Gmail mode triplet."""
+
+    return server_id is not None and _EMAIL_SERVER_ID.fullmatch(server_id) is not None
+
+
 def validate_owner_server_url(url: str) -> str:
     """An owner-added server is public HTTPS on port 443 (ADR-0255 decision 2)."""
 
@@ -244,6 +254,19 @@ OWNER_ACCESS_CLASSIFICATIONS: dict[
         IdempotencyClass.NON_IDEMPOTENT,
     ),
 }
+
+
+def schedule_may_name(config: MCPServerConfig) -> bool:
+    """ADR-0291: what a schedule or job may name; calling keeps its own flag (ADR-0213).
+
+    The schedule role vouches only for Gmail and Scale VP, and an owner-added
+    server needs no scope to vouch for.
+    """
+    return (
+        config.owner_managed
+        or is_email_server_id(config.server_id)
+        or config.server_id == "svp_read"
+    )
 
 
 def server_access(config: MCPServerConfig) -> MCPServerAccess:

@@ -224,7 +224,10 @@ means the sweep that fails overdue runs would be a full scan. The
 indexing. It is computed once at run creation and never recomputed; a run
 that pauses for a human approval for six hours is still bound by the
 deadline set when it was submitted, which is the behaviour the state machine
-already implies by listing deadline as a cause of `FAILED`.
+already implies by listing deadline as a cause of `FAILED`. One exception
+(ADR-0295): a run with `RunLimits.execution_seconds` has `deadline_at` set once
+more at its first claim, to the sooner of the claim plus that window and the
+creation deadline, so time spent queued does not spend the window.
 
 **`failure` gets a type.** `runs.failure JSONB` exists in Section 15 with no
 domain counterpart, and `failure.reason = "max_attempts_exceeded"` is
@@ -1224,7 +1227,7 @@ and never an error, per ADR-0002.
 
 A completed turn's text is not always the whole reply. ADR-0122 attaches every
 file the run exported: in one unit of work under the run's lease, the loop lists
-the run's `sandbox_export` and `model_output` artifacts, keeps one per name and
+the run's `sandbox_export`, `model_output` and `email_attachment` artifacts, keeps one per name and
 content in creation order, clears their expiry so they live with the
 conversation, appends a `file` part for each to the final message, and records
 `assistant.message.completed`. That augmented message replaces the turn's copy

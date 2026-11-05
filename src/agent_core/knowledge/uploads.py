@@ -19,6 +19,7 @@ from agent_core.domain.artifacts import (
     AUTO_INGEST_INGESTED,
     AUTO_INGEST_PENDING,
     AUTO_INGEST_REFUSED,
+    ArtifactOrigin,
 )
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import (
@@ -28,6 +29,7 @@ from agent_core.domain.knowledge import (
 )
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.ports.determinism import Clock
@@ -39,6 +41,8 @@ MAX_INGEST_ATTEMPTS = 3
 # A failed attempt waits before the next one: a transient cause gets time to
 # clear instead of three tries in thirty seconds (ADR-0284).
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=15))
+# How soon a saved file whose run is still working gets another look (ADR-0296).
+RUN_WAIT = timedelta(minutes=1)
 _REFUSAL_CODES = (
     ("secret scan", "secret_scan"),
     ("encrypted", "encrypted"),
@@ -93,8 +97,40 @@ class UploadAutoIngest:
         admitted = 0
         for artifact in pending:
             attempts = int(artifact.metadata.get(AUTO_INGEST_ATTEMPTS_KEY, 0)) + 1
+            # The owner may delete the file, or erase its source, during this batch.
+            try:
+                async with self._uow_factory() as uow:
+                    current = await uow.artifacts.get(artifact.id, self._principal)
+                    source_run = (
+                        await uow.runs.get(current.run_id, self._principal)
+                        if current.origin == ArtifactOrigin.EMAIL_ATTACHMENT.value
+                        and current.run_id is not None
+                        else None
+                    )
+            except NotFoundError:
+                continue
+            # A reply attaches a saved file by its origin, which this would change,
+            # and a terminal status is recorded after the reply.
+            if source_run is not None and source_run.status not in TERMINAL_RUN_STATUSES:
+                # Deferred, it leaves the batch and cannot block a file that is due.
+                await self._record(
+                    artifact,
+                    AUTO_INGEST_PENDING,
+                    None,
+                    attempts - 1,
+                    not_before=(self._clock.now() + RUN_WAIT).isoformat(),
+                )
+                continue
+            if current.expires_at is not None and current.expires_at <= self._clock.now():
+                await self._record(artifact, AUTO_INGEST_REFUSED, "not_found", attempts)
+                continue
+            # Only a reply ends a file's 30 days (ADR-0122), and this would end them too.
+            if source_run is not None and source_run.status is not RunStatus.COMPLETED:
+                await self._record(artifact, AUTO_INGEST_REFUSED, "run_not_completed", attempts)
+                continue
             request = KnowledgeIngestRequest(
-                source=artifact,
+                # The current read: a reply may have kept the file since the batch listed it.
+                source=current,
                 title=artifact.name,
                 visibility=KnowledgeVisibility.PRINCIPAL,
                 document_id=upload_document_id(artifact),

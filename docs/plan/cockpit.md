@@ -89,7 +89,7 @@ The owner decided these on 2026-10-22:
   (`email-experience.md:52-53`), and that a mode confers no authority.
 - **The execution service.** It runs gVisor containers with a read-only root,
   networking off, an empty environment and run leases. Its one-image
-  assumption is an open question in `sandbox-isolation.md:1760-1764`. This
+  assumption is an open question in `sandbox-isolation.md:1765-1769`. This
   design answers it for exactly one additional, platform-owned image.
 - **The tool pipeline.** Classification decides policy, and a `tool_rules`
   entry can allow one tool by exact name. The trust overlay escalates an
@@ -764,9 +764,12 @@ registers `schedule.create` 1.6.0, whose `publish_cockpit_feed=true` asks for
 `cockpit.read` and `cockpit.write` for that schedule's runs and no others, and
 which offers the `INTERVAL` cadence to such a schedule (ADR-0254). It also
 registers `schedule.update` 1.1.0, which can move a feed schedule to an
-interval. Versions 1.5.0 and 1.4.0 stay registered for pinned runs, and a
-deployment without the flag offers 1.4.0 unchanged. Widget writes stay
-interactive only.
+interval. Versions 1.5.0 and 1.4.0 stay registered for pinned runs. ADR-0291's
+later versions add `use_mcp_servers` ([scheduling.md](scheduling.md)), so a
+feed's run can read the MCP servers its schedule names; widget code still only
+receives feeds. A Cockpit deployment now offers `schedule.create` 1.9.0 and one
+without the flag offers 1.8.0, which has no feed publishing.
+Widget writes stay interactive only.
 
 **Feed checks.** A feed's schema must be self-contained JSON Schema (draft
 2020-12) that names no location outside itself, and each of its references
@@ -1469,6 +1472,17 @@ version conflict retries after thirty seconds. Any other error, such as an
 unavailable privacy screen or a refused path, is logged and retries after a delay
 that doubles from thirty seconds to fifteen minutes. The stored error names only
 the exception's type.
+
+A job's fifth broker call is `mcp.read` (ADR-0291). The grant's private
+`mcp_servers` list names what the job may read, and needs approval like a host;
+`job.json` declares only the call, because that file is public. The broker
+refuses a server outside the grant, counts the read against
+`maximum_requests`, and refuses an answer over `maximum_response_bytes`. The
+reader offers a tool only if its class is a read, low risk and read-only, the
+run holds its scopes, and the policy engine answers `allow`. It never waits for
+an approval: anything else is `job.mcp_refused`. A job schedule derives each
+granted server's `required_scopes`. An approval of a grant holding both servers
+and hosts names the hosts in `mcp_data_may_reach_hosts`.
 
 The per-execution broker admits each operation against that grant. HTTP reads
 resolve a permitted public hostname once and dial the checked address with the

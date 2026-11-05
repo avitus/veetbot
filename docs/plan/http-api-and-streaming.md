@@ -411,6 +411,7 @@ is not an authorization input.
 | `POST /v1/approvals/{id}/resolve` | `approval.resolve` |
 | `GET /v1/artifacts/{id}` | `artifact.read` |
 | `GET /v1/artifacts/{id}/content` | `artifact.read` |
+| `POST /v1/email/threads/{id}/attachments/save` | `email.write`, and `artifact.write` in the service (ADR-0296) |
 | `POST /v1/browser-profiles` | `browser.profile.write` |
 | `GET /v1/browser-profiles` | `browser.profile.read` |
 | `GET /v1/browser-profiles/{id}` | `browser.profile.read` |
@@ -1493,6 +1494,15 @@ has begun the status is already `200` and cannot be revised, so every
 check that can fail — authentication, scope, tenancy, existence —
 happens before the first byte of the stream.
 
+A client can also leave at any moment, and the stream gives back what it
+holds when it does. Each stream owns one dedicated PostgreSQL `LISTEN`
+connection, and a dropped client cancels the request's scope, which is
+delivered again at every later await. So `EventStreamResponse` closes the
+stream shielded from that scope rather than leaving it to garbage collection,
+and the broadcaster ends the connection without awaiting. On 2026-11-03, one
+long chat reconnecting used up PostgreSQL's 100 connections in about three
+minutes because neither held.
+
 ### Overflow
 
 A client that reads slower than the run produces will eventually fill
@@ -1515,6 +1525,11 @@ This is the fourth non-inference and the reason it is safe to state so
 briefly: **a client must not treat the stream as the source of truth.**
 The event log is. The stream is a fast path to it, and every failure
 mode of the fast path resolves to reading the log.
+
+The same holds on the client. Its read waits while the consumer is behind,
+so a long replay is slowed by TCP rather than torn down and reconnected, and a
+run waiting on the owner loads its approvals from `GET /v1/approvals` whether
+or not its stream connects.
 
 ### What the payloads may not contain
 

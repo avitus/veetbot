@@ -15,10 +15,13 @@ import json
 from pathlib import Path
 
 from agent_core.domain.embeddings import EmbeddingError, EmbeddingRequest, EmbeddingResponse
+from agent_core.domain.knowledge import KnowledgeSemanticChannel
 from agent_core.domain.semantic_memory import EmbeddingSpace
+from agent_core.knowledge.embedding import KnowledgeEmbedder
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "evals/fixtures/embeddings/knowledge_paraphrase.json"
+LOCAL_FIXTURE = ROOT / "evals/fixtures/embeddings/knowledge_paraphrase.onnx.json"
 
 
 def text_key(text: str) -> str:
@@ -33,7 +36,37 @@ class RecordedEmbeddingProvider:
             key: tuple(float(value) for value in vector)
             for key, vector in document["vectors"].items()
         }
+        # A local recording carries the encoder's capacity and every token
+        # count the windowing asked for, so replay cuts the same windows
+        # without the tokenizer (ADR-0290).
+        self.window_tokens: int | None = document.get("window_tokens")
+        self.whole_tokens: int | None = document.get("whole_tokens")
+        self._counts: dict[str, int] = {
+            key: int(value) for key, value in document.get("token_counts", {}).items()
+        }
         self.calls: list[EmbeddingRequest] = []
+
+    def count_tokens(self, text: str) -> int:
+        count = self._counts.get(text_key(text))
+        if count is None:
+            raise EmbeddingError("text is not in the recorded token counts")
+        return count
+
+    def embedder(self, *, channel: KnowledgeSemanticChannel = "dense") -> KnowledgeEmbedder:
+        """An embedder that cuts the windows the recording was made with."""
+
+        if self.window_tokens is None:
+            return KnowledgeEmbedder(self, self.space, channel=channel)
+        # A local recording replays its tokenizer's counts; an OpenAI recording
+        # was windowed by the chunker's estimate, which needs no counts.
+        return KnowledgeEmbedder(
+            self,
+            self.space,
+            channel=channel,
+            window_tokens=self.window_tokens,
+            count_tokens=self.count_tokens if self._counts else None,
+            whole_tokens=self.whole_tokens,
+        )
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         self.calls.append(request)

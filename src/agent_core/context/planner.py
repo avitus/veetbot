@@ -13,10 +13,10 @@ from weakref import WeakValueDictionary
 from agent_core.context.budget import ContextBudgetAllocator
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.rendering import (
-    UNINDEXED_DEFERRED_TOOLS,
     build_prefix,
     deferred_index_items,
     envelope_items,
+    is_unindexed_deferred,
     prefix_bytes,
 )
 from agent_core.domain.agents import DEFERRED_TOOLS_METADATA_KEY, AgentSpec, Principal
@@ -42,6 +42,7 @@ from agent_core.domain.sessions import (
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
     SESSION_RUN_KIND_METADATA_KEY,
     SESSION_SCHEDULE_ID_METADATA_KEY,
+    SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY,
     Session,
     project_scope,
 )
@@ -160,6 +161,16 @@ def _cache_breakpoints(session: Session) -> tuple[CacheBreakpoint, ...]:
         item.model_copy(update={"ttl": ttl} if item.boundary in _PREFIX_BOUNDARIES else {})
         for item in CACHE_BREAKPOINTS
     )
+
+
+def _named_owner_tools(session: Session, tools: Sequence[ToolSpec]) -> list[ToolSpec]:
+    """ADR-0291: scheduled work is offered only the owner-added servers it names."""
+    metadata = session.metadata
+    named = metadata.get(SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY)
+    if SESSION_SCHEDULE_ID_METADATA_KEY not in metadata and named is None:
+        return list(tools)
+    servers = frozenset(named) if isinstance(named, list) else frozenset()
+    return [tool for tool in tools if tool.server_id in servers]
 
 
 def _has_tool_surface(session: Session) -> bool:
@@ -522,9 +533,10 @@ class EventContextPlanner:
         )
         if owner_tools:
             tools = [tool for tool in tools if tool not in owner_tools]
+            owner_tools = _named_owner_tools(session, owner_tools)
         # ADR-0261: an unindexed deferral never competes for a definition or an
         # index entry; it is pinned behind tool.call or recorded as skipped.
-        unindexed = [tool for tool in tools if tool.name in UNINDEXED_DEFERRED_TOOLS]
+        unindexed = [tool for tool in tools if is_unindexed_deferred(tool)]
         if unindexed:
             tools = [tool for tool in tools if tool not in unindexed]
         if (

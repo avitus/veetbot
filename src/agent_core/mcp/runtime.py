@@ -48,7 +48,7 @@ from agent_core.domain.tools import (
     ToolSource,
     ToolSpec,
 )
-from agent_core.mcp.configuration import build_stdio_environment
+from agent_core.mcp.configuration import build_stdio_environment, is_email_attachment_tool
 from agent_core.mcp.mapping import MCPMappingReport, map_discovered_tools
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
@@ -64,6 +64,15 @@ type CallInterceptor = Callable[
         ToolExecutionContext,
         str,
         str,
+        dict[str, Any],
+        Callable[[dict[str, Any]], Awaitable[MCPCallResult]],
+    ],
+    Awaitable[MCPCallResult],
+]
+# ADR-0296: stores the file a call returns and hands back a receipt.
+type EmailAttachmentSaver = Callable[
+    [
+        ToolExecutionContext,
         dict[str, Any],
         Callable[[dict[str, Any]], Awaitable[MCPCallResult]],
     ],
@@ -144,6 +153,10 @@ class MCPTool:
         self.spec = spec
         self._remote_name = remote_name
 
+    @property
+    def remote_name(self) -> str:
+        return self._remote_name
+
     async def execute(
         self,
         arguments: dict[str, Any],
@@ -192,6 +205,7 @@ class MCPRuntime:
         warmup_retry_seconds: float = 60,
         warmup_attempts: int = 5,
         call_interceptor: CallInterceptor | None = None,
+        email_attachment_saver: EmailAttachmentSaver | None = None,
         access_tokens: MCPAccessTokens | None = None,
         owner_servers_enabled: bool = False,
     ) -> None:
@@ -232,6 +246,7 @@ class MCPRuntime:
         self._preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_PREPARATIONS)
         self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
         self._call_interceptor = call_interceptor
+        self._email_attachment_saver = email_attachment_saver
         # ADR-0255: owner-added rows, and the sealed sign-ins their tokens come from.
         self._access_tokens = access_tokens
         self._owner_servers_enabled = owner_servers_enabled
@@ -823,6 +838,21 @@ class MCPRuntime:
                         remote_name, values
                     ),
                 )
+            if is_email_attachment_tool(spec.server_id, remote_name):
+                # The file's bytes stop here: nothing past this point may record them.
+                if self._email_attachment_saver is None:
+                    return MCPCallResult(
+                        content=("gmail.attachment_saver_unavailable",),
+                        is_error=True,
+                        structured={"effect_status": "not_applied"},
+                    )
+                return await self._email_attachment_saver(
+                    context,
+                    arguments,
+                    lambda values: self._connected_client(connection).call_tool(
+                        remote_name, values
+                    ),
+                )
             return await self._connected_client(connection).call_tool(remote_name, arguments)
 
         return await self._invoke(
@@ -831,6 +861,27 @@ class MCPRuntime:
             operation,
             remote_name=remote_name,
         )
+
+    async def read_for_job(
+        self,
+        session_id: UUID,
+        tenant_id: str,
+        tool: MCPTool,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        """ADR-0291: one read a job's broker checked, on the run session's connection."""
+        spec = tool.spec
+        if spec.server_id is None:
+            raise ConflictError("MCP tool has no server id")
+        connection = self._connection(session_id, spec.server_id)
+        if connection.config.tenant_id != tenant_id:
+            raise MCPUnavailableError("tool.server_unreachable")
+        remote_name = tool.remote_name
+
+        async def operation() -> MCPCallResult:
+            return await self._connected_client(connection).call_tool(remote_name, arguments)
+
+        return await self._invoke(connection, spec, operation, remote_name=remote_name)
 
     async def read_resource(
         self,

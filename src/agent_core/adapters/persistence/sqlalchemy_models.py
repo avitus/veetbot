@@ -421,6 +421,10 @@ class BrowserProfileRow(Base):
             "AND encryption_key_version IS NOT NULL)",
             name="binding_consistent",
         ),
+        CheckConstraint(
+            "last_sign_in_mode IS NULL OR last_sign_in_mode IN ('remote','device')",
+            name="last_sign_in_mode_closed",
+        ),
         Index(
             "ix_browser_profiles_tenant_principal_created",
             "tenant_id",
@@ -448,6 +452,7 @@ class BrowserProfileRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sign_in_mode: Mapped[str | None] = mapped_column(Text)
 
 
 class BrowserGrantRow(Base):
@@ -1426,6 +1431,9 @@ class KnowledgeChunkVectorRow(Base):
         Text, ForeignKey("knowledge_chunks.chunk_id", ondelete="CASCADE"), primary_key=True
     )
     space_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    # Which window of the chunk the vector embeds; a chunk the encoder admits
+    # whole has one, zero. A reserved word in SQL, quoted by the dialect.
+    window: Mapped[int] = mapped_column(Integer, primary_key=True, server_default=text("0"))
     space: Mapped[dict[str, Any]] = mapped_column(JSONB)
     text_version: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(VECTOR())

@@ -426,4 +426,13 @@ nav:
       - "ADR-0287: The device sign-in window asks before adding an address": adr/0287-device-sign-in-allows-another-address.md
       - "ADR-0288: A saved login can sign in again through the remote browser": adr/0288-saved-login-signs-in-through-the-remote-browser.md
       - "ADR-0289: Knowledge semantic arm": adr/0289-knowledge-semantic-arm.md
+      - "ADR-0290: Standing semantic activation": adr/0290-standing-semantic-activation.md
+      - "ADR-0291: MCP servers for schedules and jobs": adr/0291-mcp-servers-for-schedules-and-jobs.md
+      - "ADR-0292: Knowledge windows and the prune of a superseded space": adr/0292-knowledge-windows-and-prune.md
+      - "ADR-0293: A knowledge search asks the corpus, not the catalogue": adr/0293-knowledge-search-asks-the-corpus.md
+      - "ADR-0294: An approved click can save a text file": adr/0294-approved-browser-file-download.md
+      - "ADR-0295: Email slice time starts at claim, and two async processes": adr/0295-execution-window-and-async-slots.md
+      - "ADR-0296: Save an email attachment into the email's chat": adr/0296-save-email-attachments-to-the-chat.md
+      - "ADR-0297: A saved login signs in again the way it last began": adr/0297-sign-in-reopens-the-way-it-last-began.md
+      - "ADR-0298: A new-mail slice assesses only arrivals": adr/0298-new-mail-slices-assess-only-arrivals.md
   - Changelog: changelog.md

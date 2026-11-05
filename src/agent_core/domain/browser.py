@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agent_core.domain.browser_download import BrowserDownload
 from agent_core.domain.browser_evidence import BrowserEvidence, BrowserSimpleEvidence
 from agent_core.domain.browser_extraction import BrowserExtractionResult
 from agent_core.domain.errors import AgentCoreError
@@ -173,6 +174,8 @@ class BrowserPageEvidence(BaseModel):
     on_allowed_origin: bool
     path: str = Field(max_length=4096, repr=False)
     challenge_visible: bool
+    # How long the page had been loaded when this was read (ADR-0297).
+    observed_seconds: float = Field(default=0.0, ge=0.0)
 
 
 class BrowserVerificationStage(StrEnum):
@@ -267,6 +270,8 @@ class BrowserProfile(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime | None = None
+    # How its latest sign-in began; None when it has never begun one (ADR-0297).
+    last_sign_in_mode: BrowserAuthenticationMode | None = None
 
     @field_validator("allowed_origins")
     @classmethod
@@ -317,6 +322,7 @@ class BrowserProfileView(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime | None = None
+    last_sign_in_mode: BrowserAuthenticationMode | None = None
 
 
 # The hosted service caps each lease request at fifteen minutes and a lease's
@@ -681,6 +687,9 @@ class BrowserObservation(BaseModel):
     regions: tuple[BrowserSemanticRegion, ...] = Field(default=(), max_length=32)
     region_coverage: BrowserRegionCoverage | None = None
     extraction: BrowserExtractionResult | None = None
+    # ADR-0294: what the click that produced this observation saved. The tool
+    # stores it and never copies it into a result.
+    download: BrowserDownload | None = None
 
     @model_validator(mode="after")
     def region_evidence_is_distinct(self) -> BrowserObservation:

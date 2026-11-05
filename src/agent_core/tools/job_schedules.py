@@ -4,7 +4,11 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from agent_core.application.schedule_service import ScheduleService, _definition_from_revision
+from agent_core.application.schedule_service import (
+    ScheduleService,
+    _definition_from_revision,
+    mcp_server_scopes,
+)
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.errors import AgentCoreError
@@ -21,8 +25,15 @@ from agent_core.domain.tools import ToolExecutionContext, ToolResult
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.scheduling.defaults import derived_definition, schedule_run_limits
 from agent_core.tools.jobs import _failure
-from agent_core.tools.schedule_create import CockpitScheduleCreateTool, parse_cadence
-from agent_core.tools.schedule_lifecycle import CockpitScheduleUpdateTool
+from agent_core.tools.schedule_create import (
+    CockpitScheduleCreateTool,
+    parse_cadence,
+    with_mcp_servers,
+)
+from agent_core.tools.schedule_lifecycle import (
+    CockpitScheduleUpdateTool,
+    _update_with_mcp_servers,
+)
 
 
 async def pin_job(
@@ -36,6 +47,8 @@ async def pin_job(
     if saved.archived or grant is None or revision is None or revision.commit_sha is None:
         raise ValueError("Select a published revision and its approved grant.")
     access = grant.access
+    async with factory() as uow:
+        server_scopes = await mcp_server_scopes(uow, principal.tenant_id, access.mcp_servers)
     cost = min(Decimal(access.model_cost), definition.limits.max_cost or Decimal(access.model_cost))
     limits = definition.limits.model_copy(
         update={
@@ -55,7 +68,10 @@ async def pin_job(
             "limits": limits,
             "run_timeout_seconds": min(definition.run_timeout_seconds, access.timeout_seconds),
             "requested_scopes": {"jobs.run"}
-            | ({"cockpit.read", "cockpit.write"} if access.feeds else set()),
+            | ({"cockpit.read", "cockpit.write"} if access.feeds else set())
+            | server_scopes,
+            # A job reads what its grant names, so a feed schedule's own servers go.
+            "mcp_servers": frozenset(),
             "notify": ScheduleNotify.ATTENTION_ONLY if access.feeds else definition.notify,
             "browser_profile_id": None,
             "call_plan": None,
@@ -107,7 +123,13 @@ class JobScheduleCreateTool(CockpitScheduleCreateTool):
         try:
             if any(
                 arguments.get(key)
-                for key in ("use_website", "place_call", "call_plan", "publish_cockpit_feed")
+                for key in (
+                    "use_website",
+                    "place_call",
+                    "call_plan",
+                    "publish_cockpit_feed",
+                    "use_mcp_servers",
+                )
             ):
                 raise ValueError("A job uses its grant, without agent-run flags.")
             assert self._uow_factory is not None
@@ -202,6 +224,8 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
         if "task" not in arguments:
             return await super().execute(arguments, context)
         try:
+            if "use_mcp_servers" in arguments:
+                raise ValueError("A job reads the MCP servers its grant names.")
             current = await self._service.get(context.principal, UUID(arguments["schedule_id"]))
             if (
                 not isinstance(current.revision.task, JobTask)
@@ -253,3 +277,16 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
             )
         except (ValueError, KeyError, AgentCoreError) as exc:
             return _failure("schedule.job_invalid", str(exc))
+
+
+class MCPJobScheduleCreateTool(JobScheduleCreateTool):
+    """Version 1.10.0 (ADR-0291): an agent-run schedule names its MCP servers."""
+
+    spec = with_mcp_servers(JobScheduleCreateTool.spec, "1.10.0")
+
+
+class MCPJobScheduleUpdateTool(JobScheduleUpdateTool):
+    """Version 1.5.0 (ADR-0291): an agent-run schedule's servers may be replaced."""
+
+    offers_mcp_servers = True
+    spec = _update_with_mcp_servers(JobScheduleUpdateTool.spec, "1.5.0")

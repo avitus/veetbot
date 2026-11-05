@@ -9,6 +9,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    BrowserAuthenticationMode,
     BrowserProfile,
     BrowserProfileProvisioning,
     BrowserProfileStatus,
@@ -80,6 +81,16 @@ class BrowserProfileRepository(Protocol):
         one stop matching. ``NotFoundError`` for a missing or foreign row,
         ``ConcurrencyConflict`` on a generation mismatch, ``ConflictError`` for a
         provisioning or revoked profile or an update time that moves backwards.
+        """
+        ...
+
+    async def record_sign_in_mode(
+        self, profile_id: UUID, principal: Principal, mode: BrowserAuthenticationMode
+    ) -> BrowserProfile:
+        """Remember how the latest sign-in began (ADR-0297).
+
+        A fact for the app, so it moves neither the generation grants pin nor the
+        update time. ``NotFoundError`` for a missing or foreign row.
         """
         ...
 

@@ -149,6 +149,10 @@ class Settings:
     # semantic index's embedding provider, so it never turns on alone.
     knowledge_semantic_enabled: bool = False
     knowledge_semantic_channel: Literal["hybrid", "dense"] = "dense"
+    # Whose vectors: the memory index's admitted provider, or OpenAI's embedding
+    # model on the arm's own credential (ADR-0290); the local encoder measured
+    # no paraphrase lift on gate 13.
+    knowledge_semantic_provider: Literal["index", "openai"] = "index"
     memory_reconsolidation_enabled: bool = False
     memory_reconsolidation_evidence: Path | None = None
     memory_reconsolidation_residency_provider: str | None = None
@@ -744,6 +748,13 @@ def _parse_knowledge_semantic_channel(values: Mapping[str, str]) -> Literal["hyb
     if raw not in ("hybrid", "dense"):
         raise ConfigurationError("AGENT_KNOWLEDGE_SEMANTIC_CHANNEL must be 'hybrid' or 'dense'")
     return "hybrid" if raw == "hybrid" else "dense"
+
+
+def _parse_knowledge_semantic_provider(values: Mapping[str, str]) -> Literal["index", "openai"]:
+    raw = values.get("AGENT_KNOWLEDGE_SEMANTIC_PROVIDER", "").strip().lower() or "index"
+    if raw not in ("index", "openai"):
+        raise ConfigurationError("AGENT_KNOWLEDGE_SEMANTIC_PROVIDER must be 'index' or 'openai'")
+    return "openai" if raw == "openai" else "index"
 
 
 def _optional_uuid(values: Mapping[str, str], name: str) -> UUID | None:
@@ -1754,6 +1765,8 @@ def load_schedule_worker_settings(
         load_email_credentials=False,
         load_provider_credentials=True,
         load_surface_credentials=False,
+        # ADR-0291: this role mirrors the flag to vouch for the scope, never the grant.
+        requires_svp_credential=False,
     )
 
 
@@ -1795,6 +1808,7 @@ def _load_settings(
     require_execution_environment: bool,
     load_email_credentials: bool,
     load_provider_credentials: bool,
+    requires_svp_credential: bool = True,
     load_surface_credentials: bool,
     load_call_credentials: bool | None = None,
     load_call_webhook_secret: bool = False,
@@ -1988,7 +2002,11 @@ def _load_settings(
         raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
     svp_enabled = _parse_flag(values, "AGENT_SVP_ENABLED")
     raw_svp_credential_file = values.get("SVP_CREDENTIAL_FILE", "").strip()
-    if svp_enabled and load_provider_credentials:
+    if (
+        svp_enabled
+        and load_provider_credentials
+        and (requires_svp_credential or raw_svp_credential_file)
+    ):
         # The platform holds the grant's path; only the bridge reads or rewrites
         # the rotating grant itself (ADR-0153).
         if "svp_read" in credentials:
@@ -2266,6 +2284,7 @@ def _load_settings(
         ),
         knowledge_semantic_enabled=_parse_flag(values, "AGENT_KNOWLEDGE_SEMANTIC_ENABLED"),
         knowledge_semantic_channel=_parse_knowledge_semantic_channel(values),
+        knowledge_semantic_provider=_parse_knowledge_semantic_provider(values),
         memory_reconsolidation_enabled=_parse_flag(values, "AGENT_MEMORY_RECONSOLIDATION_ENABLED"),
         memory_reconsolidation_evidence=(
             Path(values["AGENT_MEMORY_RECONSOLIDATION_EVIDENCE"]).expanduser()

@@ -22,8 +22,9 @@ from agent_core.domain.knowledge import (
     KnowledgeSemanticQuery,
     RetrievedPassage,
 )
+from agent_core.domain.memory import Sensitivity
 from agent_core.domain.semantic_memory import EmbeddingSpace
-from tests.contract.support import NOW, principal
+from tests.contract.support import NOW, PRINCIPAL_ID, TENANT, principal
 from tests.contract.test_knowledge_passage_search_contract import _document, _query
 
 SPACE = EmbeddingSpace(provider="fixture", model="semantic", revision="v1", dimensions=3)
@@ -150,6 +151,103 @@ async def test_deleting_the_document_removes_its_vectors() -> None:
     assert store._vectors == {}
 
 
+def _windowed(number: int = 1) -> KnowledgeIngestPrepared:
+    """The fan chunk in two windows: the first far from the question, the second by it."""
+
+    prepared = _document(number, TEXT)
+    embeddings: list[KnowledgeChunkEmbedding] = []
+    for chunk in prepared.chunks:
+        if chunk.heading_path[-1] == "Fans":
+            embeddings.append(
+                KnowledgeChunkEmbedding(
+                    chunk_id=chunk.chunk_id, space=SPACE, window=0, vector=(0.0, 0.0, 1.0)
+                )
+            )
+            embeddings.append(
+                KnowledgeChunkEmbedding(
+                    chunk_id=chunk.chunk_id, space=SPACE, window=1, vector=(1.0, 0.0, 0.0)
+                )
+            )
+        else:
+            embeddings.append(
+                KnowledgeChunkEmbedding(
+                    chunk_id=chunk.chunk_id, space=SPACE, vector=(0.0, 1.0, 0.0)
+                )
+            )
+    return KnowledgeIngestPrepared(
+        document=prepared.document, chunks=prepared.chunks, embeddings=tuple(embeddings)
+    )
+
+
+async def test_a_chunk_is_scored_by_its_best_window() -> None:
+    store = await _store(_windowed())
+    passages = await store.search(_query(text="lunch menu"), semantic=_semantic("dense"))
+    assert _headings(passages) == ["Fans"]
+    assert passages[0].arms == ["semantic"]
+    assert passages[0].score == pytest.approx(0.75 * 1.0 + 0.15 * 0.7 + 0.1 * 1.0)
+
+
+async def test_chunks_without_a_vector_in_the_space_are_listed_for_backfill() -> None:
+    store = await _store(_prepared(1, with_vectors=False), _prepared(2))
+    waiting = await store.chunks_without_vectors(
+        TENANT, PRINCIPAL_ID, SPACE.key, sensitivities=(Sensitivity.INTERNAL,), limit=10
+    )
+    assert {chunk.document_id for chunk in waiting} == {UUID(int=2_001)}
+    assert [chunk.ordinal for chunk in waiting] == [0, 1, 2]
+    # Another principal's documents, a sensitivity the encoder may not see,
+    # and a superseded version are not backfilled.
+    assert (
+        await store.chunks_without_vectors(
+            TENANT, "principal-b", SPACE.key, sensitivities=(Sensitivity.INTERNAL,), limit=10
+        )
+        == []
+    )
+    assert (
+        await store.chunks_without_vectors(
+            TENANT, PRINCIPAL_ID, SPACE.key, sensitivities=(Sensitivity.PUBLIC,), limit=10
+        )
+        == []
+    )
+    limited = await store.chunks_without_vectors(
+        TENANT, PRINCIPAL_ID, OTHER_SPACE.key, sensitivities=(Sensitivity.INTERNAL,), limit=2
+    )
+    assert len(limited) == 2
+    newer = _document(1, "# Guide\n\n## Rollback\n\nA newer rollback.", valid_from=NOW)
+    newer = KnowledgeIngestPrepared(
+        document=newer.document.model_copy(update={"row_id": UUID(int=1_900), "version": 2}),
+        chunks=[
+            chunk.model_copy(update={"document_row_id": UUID(int=1_900), "version": 2})
+            for chunk in newer.chunks
+        ],
+    )
+    await store.ingest(newer)
+    waiting = await store.chunks_without_vectors(
+        TENANT, PRINCIPAL_ID, SPACE.key, sensitivities=(Sensitivity.INTERNAL,), limit=10
+    )
+    assert [chunk.document_row_id for chunk in waiting] == [UUID(int=1_900)]
+
+
+async def test_added_vectors_are_searched_and_repeating_them_is_harmless() -> None:
+    store = await _store(_prepared(with_vectors=False))
+    chunks = await store.chunks_without_vectors(
+        TENANT, PRINCIPAL_ID, SPACE.key, sensitivities=(Sensitivity.INTERNAL,), limit=10
+    )
+    fans = next(chunk for chunk in chunks if chunk.heading_path[-1] == "Fans")
+    added = (
+        KnowledgeChunkEmbedding(chunk_id=fans.chunk_id, space=SPACE, window=0, vector=(0, 0, 1.0)),
+        KnowledgeChunkEmbedding(chunk_id=fans.chunk_id, space=SPACE, window=1, vector=(1.0, 0, 0)),
+    )
+    await store.add_embeddings(added)
+    await store.add_embeddings(added)
+    passages = await store.search(_query(text="lunch menu"), semantic=_semantic("dense"))
+    assert _headings(passages) == ["Fans", "Notes"]
+    assert passages[0].arms == ["semantic"] and passages[1].arms == ["lexical"]
+    left = await store.chunks_without_vectors(
+        TENANT, PRINCIPAL_ID, SPACE.key, sensitivities=(Sensitivity.INTERNAL,), limit=10
+    )
+    assert fans.chunk_id not in {chunk.chunk_id for chunk in left} and len(left) == 2
+
+
 def test_prepared_ingest_rejects_vectors_for_unknown_chunks() -> None:
     prepared = _prepared(with_vectors=False)
     stray = KnowledgeChunkEmbedding(
@@ -165,3 +263,58 @@ def test_prepared_ingest_rejects_vectors_for_unknown_chunks() -> None:
         KnowledgeIngestPrepared(
             document=prepared.document, chunks=prepared.chunks, embeddings=(twice, twice)
         )
+    # Another window of the same chunk in the same space is a second vector, not a repeat.
+    second = twice.model_copy(update={"window": 1})
+    assert (
+        len(
+            KnowledgeIngestPrepared(
+                document=prepared.document, chunks=prepared.chunks, embeddings=(twice, second)
+            ).embeddings
+        )
+        == 2
+    )
+
+
+async def test_semantic_reservation_reaches_past_a_verbose_document() -> None:
+    """A later document's first passage is reserved however many chunks rank above it (ADR-0293).
+
+    Neither arm is cut to a candidate limit before the per-document
+    reservation: a document of seventy chunks nearer the question than
+    another document's only passage does not hide that passage.
+    """
+
+    filler = " ".join(f"word{index}" for index in range(120))
+    verbose = _document(
+        1,
+        "\n\n".join(
+            f"# Step {index}\n\nStep {index} of the procedure. {filler}" for index in range(70)
+        ),
+    )
+    verbose = verbose.model_copy(
+        update={
+            "embeddings": tuple(
+                KnowledgeChunkEmbedding(
+                    chunk_id=chunk.chunk_id, space=SPACE, vector=(1.0, 0.0, 0.0)
+                )
+                for chunk in verbose.chunks
+            )
+        }
+    )
+    other = _document(2, "# Other\n\nThe other way, once.")
+    other = other.model_copy(
+        update={
+            "embeddings": tuple(
+                KnowledgeChunkEmbedding(
+                    chunk_id=chunk.chunk_id, space=SPACE, vector=(0.9, 0.436, 0.0)
+                )
+                for chunk in other.chunks
+            )
+        }
+    )
+    assert len(verbose.chunks) == 70
+    store = await _store(verbose, other)
+    passages = await store.search(
+        _query(text="procedure", max_passages=8, max_per_document=3), semantic=_semantic("dense")
+    )
+    assert "Other" in _headings(passages)[:4]
+    assert len(passages) == 8

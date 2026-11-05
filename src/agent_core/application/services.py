@@ -1008,6 +1008,17 @@ class EmailService(Protocol):
 
     async def operation(self, principal: Principal, operation_id: UUID) -> EmailOperation: ...
 
+    async def save_attachment(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        *,
+        message_id: str,
+        attachment_index: int,
+        filename: str,
+        idempotency_key: str,
+    ) -> EmailOperation: ...
+
     async def send(
         self,
         principal: Principal,

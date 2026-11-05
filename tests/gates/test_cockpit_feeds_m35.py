@@ -49,7 +49,7 @@ async def test_without_cockpit_schedule_create_keeps_its_current_version() -> No
         settings=_settings(cockpit=False), script=FakeModelScript(turns=[])
     ) as composition:
         spec = composition.tool_pipeline._registry.get("schedule.create").spec
-    assert spec.version == "1.4.0"
+    assert spec.version == "1.8.0"
     assert "publish_cockpit_feed" not in spec.input_schema["properties"]
 
 
@@ -82,7 +82,7 @@ async def test_a_schedule_created_to_publish_a_feed_asks_for_the_cockpit_scopes(
         completed = await composition.runs.wait_terminal(run_id)
         page = await composition.schedules.list(composition.principal, 10, None)
 
-    assert current.version == "1.6.0"
+    assert current.version == "1.9.0"
     assert current.input_schema["properties"]["publish_cockpit_feed"] == {"type": "boolean"}
     assert "publish_cockpit_feed" not in pinned.input_schema["properties"]
     assert approval.arguments["requested_scopes"] == ["cockpit.read", "cockpit.write"]

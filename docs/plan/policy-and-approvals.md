@@ -380,7 +380,7 @@ joined by dots, of which the last is the action. The four `browser.` scopes
 have three; the other forty-two have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1436` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1439` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -1640,6 +1640,12 @@ unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent
 consumer ADR-0095 introduced, never through a standing authorization, and a
 Chat proposal parks in the ordinary queue.
+
+[ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md) adds one more arm:
+`save_attachment` on a Gmail read server, which the default matrix would allow
+as a network read. The profile is unchanged. The application-only
+`fetch_attachment` stays out of the arm, since the model cannot call it and the
+owner's press on Save is the request.
 
 
 ADR-0143 adds the exact `notification.write` scope for the bounded notification

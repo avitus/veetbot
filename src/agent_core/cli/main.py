@@ -9,9 +9,10 @@ import math
 import os
 import signal
 import socket
+import sys
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import aclosing
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
@@ -47,7 +48,8 @@ from agent_core.bootstrap import sequence_ids as sequence_ids
 from agent_core.bootstrap import system_clock as system_clock
 from agent_core.cli.people import app as people_app
 from agent_core.cli.people import configure as configure_people
-from agent_core.config import ConfigurationError
+from agent_core.cli.worker_slots import supervise_worker_slots
+from agent_core.config import ConfigurationError, load_config_document, load_settings
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest
 from agent_core.domain.errors import (
@@ -108,6 +110,12 @@ class WorkerRole(StrEnum):
     SCHEDULE = "schedule"
     NOTIFY = "notify"
     SURFACE = "surface"
+
+
+def _async_worker_slots() -> int:
+    """Read how many processes the async role runs from the reviewed limits."""
+    limits = load_config_document(load_settings(), "runtime/limits.yaml")
+    return int(limits["worker"]["reserved_async_slots"])
 
 
 class QueuedRunTimeoutError(TimeoutError):
@@ -910,14 +918,24 @@ def worker_command(
             ),
         ),
     ] = WorkerRole.WORKER,
+    single_slot: Annotated[
+        bool,
+        typer.Option("--single-slot", hidden=True, help="Serve one slot of the async role."),
+    ] = False,
 ) -> None:
     """Execute an interactive, async, maintenance, schedule, notify, surface, or legacy role."""
 
     try:
-        asyncio.run(_serve_worker(role))
+        slots = 1 if single_slot or role is not WorkerRole.ASYNC else _async_worker_slots()
+        if slots == 1:
+            asyncio.run(_serve_worker(role))
+            return
+        slot = [sys.argv[0], "worker", "--role", role.value, "--single-slot"]
+        status = asyncio.run(supervise_worker_slots([slot] * slots))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
+    raise typer.Exit(status)
 
 
 async def _serve_api() -> None:
@@ -1393,6 +1411,77 @@ def memory_merge_possessions(
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(result.model_dump_json())
+
+
+async def _memory_standing_admission(
+    instruction_file: Path,
+    reference: str,
+    rollback_build_ref: str,
+    out: Path,
+    supersedes: str | None,
+    decided_at: datetime | None,
+) -> dict[str, Any]:
+    from agent_core.bootstrap import prepare_standing_admission
+
+    return await prepare_standing_admission(
+        instruction=instruction_file.read_text(encoding="utf-8").strip(),
+        reference=reference,
+        rollback_build_ref=rollback_build_ref,
+        out=out,
+        supersedes=supersedes,
+        decided_at=decided_at,
+    )
+
+
+@memory_app.command("standing-admission")
+def memory_standing_admission(
+    instruction_file: Annotated[
+        Path,
+        typer.Option("--instruction-file", help="A file holding the owner's words, verbatim."),
+    ],
+    reference: Annotated[
+        str, typer.Option("--reference", help="Where the owner said it (a message reference).")
+    ],
+    rollback_build_ref: Annotated[
+        str,
+        typer.Option("--rollback-build-ref", help="The retained release commit (40 hex)."),
+    ],
+    out: Annotated[Path, typer.Option("--out", help="An empty directory for the two files.")],
+    supersedes: Annotated[
+        str | None, typer.Option("--supersedes", help="The prior trial this replaces.")
+    ] = None,
+    decided_at: Annotated[
+        str | None,
+        typer.Option("--decided-at", help="When the owner decided (ISO 8601 with an offset)."),
+    ] = None,
+) -> None:
+    """Write the owner's standing semantic admission from the live composition (ADR-0290).
+
+    Reads the four live dependency digests exactly as composition does, then
+    writes `standing-evidence.json` and `standing-admission.json` into the
+    directory. Root installs them and points the semantic index settings at
+    them; the admission then holds until a file changes or the flag is off.
+    """
+
+    decided: datetime | None = None
+    if decided_at is not None:
+        try:
+            decided = datetime.fromisoformat(decided_at)
+        except ValueError:
+            decided = None
+        if decided is None or decided.tzinfo is None:
+            typer.echo("--decided-at must be ISO 8601 with a timezone offset", err=True)
+            raise typer.Exit(1)
+    try:
+        result = asyncio.run(
+            _memory_standing_admission(
+                instruction_file, reference, rollback_build_ref, out, supersedes, decided
+            )
+        )
+    except (ConfigurationError, OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result))
 
 
 @memory_app.command("delete")

@@ -1,6 +1,6 @@
 # ADR-0289: The knowledge semantic arm is built, measured, and off by default
 
-- Status: Proposed (owner direction on 2026-11-02; activation needs the production space measured)
+- Status: Accepted (owner direction on 2026-11-02; activated in the local space under ADR-0290 on 2026-11-03)
 - Date: 2026-11-02
 - Related: ADR-0033, ADR-0178, ADR-0285
 - Detailed design: `docs/plan/knowledge-documents.md`

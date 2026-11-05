@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from agent_core.application.cockpit_feeds import CockpitFeedRefusedError, CockpitFeeds
@@ -19,6 +19,19 @@ from agent_core.ports.jobs import JobRunner
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 logger = logging.getLogger(__name__)
+
+
+class MCPReadsPort(Protocol):
+    async def read(
+        self,
+        *,
+        principal: Principal,
+        run_id: UUID,
+        tool: str,
+        arguments: dict[str, Any],
+        maximum_response_bytes: int,
+        call_id: str,
+    ) -> dict[str, Any]: ...
 
 
 class JobExecution:
@@ -43,6 +56,8 @@ class JobExecution:
         self.http_for_access = http_for_access
         self.feeds = feeds
         self.enabled = enabled
+        # ADR-0291: composed once the MCP runtime exists; without it reads are unavailable.
+        self.mcp: MCPReadsPort | None = None
 
     async def run(
         self,
@@ -180,7 +195,21 @@ class JobExecution:
             return result
 
         http = self.http_for_access(principal, access) if self.http_for_access else self.http
-        broker = JobBroker(access, http=http, model=model, feed=feed, log=log, trial=trial)
+        reader = self.mcp
+
+        async def mcp(**arguments: Any) -> dict[str, Any]:
+            assert reader is not None
+            return await reader.read(principal=principal, run_id=run_id, **arguments)
+
+        broker = JobBroker(
+            access,
+            http=http,
+            model=model,
+            feed=feed,
+            log=log,
+            trial=trial,
+            mcp=None if reader is None else mcp,
+        )
 
         async def dispatch(call: str, arguments: dict[str, Any], call_id: str) -> dict[str, Any]:
             """Run one broker call, recording its outcome and time but never its arguments."""
