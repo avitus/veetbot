@@ -92,10 +92,22 @@ class FakeStatefulRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         on_stage(BrowserVerificationStage.NAVIGATE)
         return BrowserPageEvidence(
             on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        del deadline
+        return BrowserPageEvidence(
+            on_allowed_origin=True,
+            path=urlsplit(url).path or "/",
+            challenge_visible=False,
+            observed_seconds=observed_seconds,
         )
 
     async def storage_state(self) -> dict[str, object]:
@@ -296,10 +308,13 @@ async def test_hosted_runtime_forwards_page_evidence_and_normalizes_failures() -
             url: str,
             *,
             on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+            challenge_deadline: float | None = None,
         ) -> BrowserPageEvidence:
             if self.error is not None:
                 raise self.error
-            return await super().load_page_evidence(url, on_stage=on_stage)
+            return await super().load_page_evidence(
+                url, on_stage=on_stage, challenge_deadline=challenge_deadline
+            )
 
     low_level = FailingEvidenceRuntime()
     runtime = HostedPlaywrightSessionRuntime(

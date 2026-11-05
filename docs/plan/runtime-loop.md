@@ -1227,7 +1227,7 @@ and never an error, per ADR-0002.
 
 A completed turn's text is not always the whole reply. ADR-0122 attaches every
 file the run exported: in one unit of work under the run's lease, the loop lists
-the run's `sandbox_export` and `model_output` artifacts, keeps one per name and
+the run's `sandbox_export`, `model_output` and `email_attachment` artifacts, keeps one per name and
 content in creation order, clears their expiry so they live with the
 conversation, appends a `file` part for each to the final message, and records
 `assistant.message.completed`. That augmented message replaces the turn's copy

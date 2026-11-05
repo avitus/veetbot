@@ -6,4 +6,10 @@ enum WebsiteAccessActions {
     static func offersSignInAgain(_ status: BrowserProfileStatus) -> Bool {
         status != .revoked
     }
+
+    /// Sign in again opens the remote browser for a login last signed in that way,
+    /// so the row keeps the device window within reach (ADR-0297).
+    static func offersDeviceSignIn(_ profile: BrowserProfileView) -> Bool {
+        offersSignInAgain(profile.status) && profile.lastSignInMode == .remote
+    }
 }

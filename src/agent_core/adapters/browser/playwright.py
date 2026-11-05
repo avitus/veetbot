@@ -157,6 +157,7 @@ DOM_QUIET_MILLISECONDS = 300
 # How long Playwright waits for an element to become actionable, such as for
 # its click point to reach the element itself, before an act fails.
 ACTION_TIMEOUT_MILLISECONDS = 30_000
+_CHALLENGE_POLL_SECONDS = 0.25
 # Leave the outer tool budget for validation, settling, and observation.
 CLICK_TIMEOUT_MILLISECONDS = 5_000
 # Headed Chromium lacks headless shell's new-window switch. A response policy
@@ -522,6 +523,8 @@ class PythonPlaywrightRuntime:
         self._known_draft: tuple[JSHandle, str, int] | None = None
         self._readiness_requests = _ReadinessRequests()
         self._disallowed_navigation = False
+        self._evidence_loaded_at: float | None = None
+        self._document_loaded_at: float | None = None
         self._dismissed_beforeunload = False
         self._document_session: CDPSession | None = None
         self._main_frame_id: str | None = None
@@ -674,6 +677,7 @@ class PythonPlaywrightRuntime:
         page.on("requestfinished", self._readiness_requests.ended)
         page.on("requestfailed", self._readiness_requests.ended)
         page.on("framenavigated", self._count_main_frame_navigation)
+        page.on("domcontentloaded", self._restart_document_clock)
         self._page = page
 
     def _count_main_frame_navigation(self, frame: Frame) -> None:
@@ -682,14 +686,19 @@ class PythonPlaywrightRuntime:
             self._main_frame_navigations += 1
             self._readiness_requests.reset()
 
+    def _restart_document_clock(self, _page: object = None) -> None:
+        """Start a new document's age afresh; a hash or history move is not a new document."""
+        self._document_loaded_at = asyncio.get_running_loop().time()
+
     def _track_navigation(self, request: Request) -> None:
         """Remember refused navigation origins for stable browser failure classification."""
         if not request.is_navigation_request():
             return
         frame = _request_frame(request)
-        if (frame is None or frame.parent_frame is None) and not _origin_allowed(
-            request.url, self._allowed_origins
-        ):
+        if frame is not None and frame.parent_frame is not None:
+            return
+        self._restart_document_clock()
+        if not _origin_allowed(request.url, self._allowed_origins):
             self._disallowed_navigation = True
 
     async def _route(self, route: Route) -> None:
@@ -993,6 +1002,7 @@ class PythonPlaywrightRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """Load one page and report where it landed and whether it asks to sign in.
 
@@ -1024,6 +1034,8 @@ class PythonPlaywrightRuntime:
                     "tool.browser.provider_unavailable",
                     retryable=True,
                 ) from exc
+            self._evidence_loaded_at = asyncio.get_running_loop().time()
+            self._document_loaded_at = self._evidence_loaded_at
             on_stage(BrowserVerificationStage.IDLE)
             with suppress(PlaywrightError):
                 await page.wait_for_load_state("networkidle", timeout=5_000)
@@ -1031,15 +1043,7 @@ class PythonPlaywrightRuntime:
                 on_stage(BrowserVerificationStage.INSPECT)
                 challenge_visible = await self._sign_in_challenge_visible(page)
                 confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
-                current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
-                if (
-                    _origin_allowed(page.url, self._allowed_origins)
-                    and (
-                        current_path == confirmed_path
-                        or current_path.startswith(confirmed_path + "/")
-                    )
-                    and not challenge_visible
-                ):
+                if self._on_confirmed_page(page, confirmed_path) and not challenge_visible:
                     # A challenge or a different path is already negative
                     # evidence. Background work on that page must not hold
                     # the signed-out control open. A possible positive result
@@ -1048,16 +1052,84 @@ class PythonPlaywrightRuntime:
                     await wait_for_application()
                     on_stage(BrowserVerificationStage.REINSPECT)
                     challenge_visible = await self._sign_in_challenge_visible(page)
+                    if not challenge_visible and challenge_deadline is not None:
+                        challenge_visible = await self._challenge_by(
+                            page, confirmed_path=confirmed_path, deadline=challenge_deadline
+                        )
             except (PlaywrightError, TimeoutError) as exc:
                 raise BrowserProviderError(
                     "tool.browser.provider_unavailable",
                     retryable=True,
                 ) from exc
-            return BrowserPageEvidence(
-                on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
-                path=(urlsplit(page.url).path or "/")[:4096],
-                challenge_visible=challenge_visible,
+            return self._page_evidence_now(page, challenge_visible, self._evidence_loaded_at)
+
+    def _page_evidence_now(
+        self, page: Page, challenge_visible: bool, loaded_at: float | None
+    ) -> BrowserPageEvidence:
+        now = asyncio.get_running_loop().time()
+        return BrowserPageEvidence(
+            on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
+            path=(urlsplit(page.url).path or "/")[:4096],
+            challenge_visible=challenge_visible,
+            observed_seconds=0.0 if loaded_at is None else max(0.0, now - loaded_at),
+        )
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        """Report what the loaded page shows once it is ``observed_seconds`` old (ADR-0297).
+
+        Sooner if a form appears or the page leaves ``url``, and at ``deadline`` at the
+        latest, when the evidence says how long the page was really watched. A new
+        document starts its own age, so the time spent on the one before never counts.
+        """
+        page = self._current_page()
+        confirmed_path = (urlsplit(url).path or "/").removesuffix("/") or "/"
+        challenge_visible = False
+        with suppress(PlaywrightError):
+            challenge_visible = await self._sign_in_challenge_visible(page)
+        while not challenge_visible:
+            loaded_at = self._document_loaded_at
+            old_enough = math.inf if loaded_at is None else loaded_at + observed_seconds
+            challenge_visible = await self._challenge_by(
+                page, confirmed_path=confirmed_path, deadline=min(old_enough, deadline)
             )
+            if self._document_loaded_at == loaded_at:
+                break
+        if not challenge_visible and self._on_confirmed_page(page, confirmed_path):
+            # Passing needs a reading that worked, not only time gone by: a failure here
+            # ends the check, because an unreadable page has not shown there is no form.
+            # A page that left while being read has already answered.
+            try:
+                challenge_visible = await self._sign_in_challenge_visible(page)
+            except PlaywrightError:
+                if self._on_confirmed_page(page, confirmed_path):
+                    raise
+        return self._page_evidence_now(page, challenge_visible, self._document_loaded_at)
+
+    def _on_confirmed_page(self, page: Page, confirmed_path: str) -> bool:
+        """Whether the page is still on an allowed origin at or below the confirmed path."""
+        current_path = (urlsplit(page.url).path or "/").removesuffix("/") or "/"
+        return _origin_allowed(page.url, self._allowed_origins) and (
+            current_path == confirmed_path or current_path.startswith(confirmed_path + "/")
+        )
+
+    async def _challenge_by(self, page: Page, *, confirmed_path: str, deadline: float) -> bool:
+        """Whether a signed-out page asks to sign in by ``deadline`` (ADR-0297).
+
+        Chase draws its framed form after its requests go quiet. Only the signed-out
+        control waits, so this adds no time to a page that does ask, and a page that
+        leaves the confirmed path has already told the session apart.
+        """
+        loop = asyncio.get_running_loop()
+        # A hash route keeps the path, and Chase moves its hash while it draws.
+        while loop.time() < deadline and self._on_confirmed_page(page, confirmed_path):
+            await asyncio.sleep(_CHALLENGE_POLL_SECONDS)
+            # A page redrawing between polls is not an answer, so ask again.
+            with suppress(PlaywrightError):
+                if await self._sign_in_challenge_visible(page):
+                    return True
+        return False
 
     def _readable_page(self) -> Page:
         """Require navigation for a blank page while preserving origin checks."""

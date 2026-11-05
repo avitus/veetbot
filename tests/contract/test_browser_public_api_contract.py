@@ -854,6 +854,29 @@ async def test_device_begin_after_a_rejected_handoff_is_409_until_cancelled() ->
     assert [body.get("mode") for body in service.begun] == ["device", "device"]
 
 
+async def test_a_login_reports_the_way_it_last_began_signing_in() -> None:
+    """ADR-0297: the app reopens the way the owner last chose, on any of their devices."""
+
+    service = DeviceCeremonyService()
+    provider, client = await _device_begin_client(service)
+    async with provider, client:
+        profile_url = f"/v1/browser-profiles/{PROFILE_ID}"
+        unused = await client.get(profile_url)
+        device = await client.post(CEREMONIES, json=DEVICE_BEGIN)
+        after_device = await client.get(profile_url)
+        await client.post(f"/v1/browser-authentication-ceremonies/{device.json()['id']}/cancel")
+        remote = await client.post(
+            CEREMONIES, json={"login_url": "https://www.example.org/", "mode": "remote"}
+        )
+        after_remote = await client.get(profile_url)
+
+    assert unused.json()["last_sign_in_mode"] is None
+    assert device.status_code == 201, device.text
+    assert after_device.json()["last_sign_in_mode"] == "device"
+    assert remote.status_code == 201, remote.text
+    assert after_remote.json()["last_sign_in_mode"] == "remote"
+
+
 async def test_device_begin_after_reading_a_cancelled_status_is_admitted() -> None:
     service = DeviceCeremonyService()
     service.reject_handoffs = True

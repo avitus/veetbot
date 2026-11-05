@@ -87,7 +87,16 @@ class ArtifactOrigin(StrEnum):
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"   # new
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0296
 ```
+
+This sketch, like the one in [sandbox-isolation.md](sandbox-isolation.md), names the
+members. The stored values are lowercase, such as `email_attachment`, as
+`src/agent_core/domain/artifacts.py` defines them, so a filter compares against the
+lowercase value. A saved email attachment waits for its run to complete before intake,
+because a reply attaches the file by its origin and intake changes that origin. A file from
+a run that fails or is cancelled is refused with `run_not_completed` and keeps its 30-day
+expiry (ADR-0296).
 
 Ingestion writes `expires_at = None`, so the thirty-day sweeper does not collect it and
 the document owns the lifetime. Deletion writes `expires_at = now`, and the sweeper that
@@ -219,6 +228,11 @@ above still applies, the secret scan included. A refusal records `refused` and a
 reason code on the artifact, a transient failure is retried at most three times,
 and neither reaches the conversation. Deleting the conversation deletes the
 document through the existing cascade on its source artifact.
+
+A readable text, Markdown, or PDF email attachment the owner saves takes the same path
+([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)). Pressing Save or approving
+Chat's request is the human admission, and it needs the same `knowledge.write`. Source
+erasure removes the file and its document; email cache expiry does not.
 
 ## Chunking
 

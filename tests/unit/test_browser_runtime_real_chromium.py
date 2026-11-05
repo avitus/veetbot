@@ -525,6 +525,100 @@ async def test_verification_sees_a_sign_in_form_in_a_frame() -> None:
     assert evidence.challenge_visible
 
 
+async def test_a_signed_out_page_that_draws_its_form_late_still_reads_as_signed_out() -> None:
+    """Chase draws its framed form after its requests go quiet; the control must see it."""
+
+    async def late(request: Request) -> Response:
+        del request
+        return html(
+            "<p>Loading</p>",
+            script="""
+            setTimeout(() => { location.hash = '#/logon'; }, 1000);
+            setTimeout(() => {
+                const frame = document.createElement('iframe');
+                frame.srcdoc = '<input type="password">';
+                document.body.appendChild(frame);
+            }, 3000);
+            """,
+        )
+
+    async with browsing([Route("/late", late)]) as (site, runtime):
+        without_waiting = await runtime.load_page_evidence(site.url("/late"))
+        waiting = await runtime.load_page_evidence(
+            site.url("/late"), challenge_deadline=asyncio.get_running_loop().time() + 10
+        )
+
+    assert not without_waiting.challenge_visible
+    assert waiting.challenge_visible
+
+
+async def test_a_signed_out_page_that_moves_deeper_before_its_form_still_reads_as_signed_out() -> (
+    None
+):
+    """A move inside the confirmed page is not leaving it, so the control keeps looking."""
+
+    async def late(request: Request) -> Response:
+        del request
+        return html(
+            "<p>Loading</p>",
+            script="""
+            setTimeout(() => history.pushState({}, '', '/late/sign-in'), 1000);
+            setTimeout(() => {
+                const frame = document.createElement('iframe');
+                frame.srcdoc = '<input type="password">';
+                document.body.appendChild(frame);
+            }, 3000);
+            """,
+        )
+
+    async with browsing([Route("/late", late)]) as (site, runtime):
+        evidence = await runtime.load_page_evidence(
+            site.url("/late"), challenge_deadline=asyncio.get_running_loop().time() + 10
+        )
+
+    assert evidence.path == "/late/sign-in"
+    assert evidence.challenge_visible
+
+
+async def test_a_second_look_sees_a_form_the_load_finished_too_early_for() -> None:
+    async def late(request: Request) -> Response:
+        del request
+        return html(
+            "<p>Loading</p>",
+            script="""
+            setTimeout(() => {
+                const frame = document.createElement('iframe');
+                frame.srcdoc = '<input type="password">';
+                document.body.appendChild(frame);
+            }, 3000);
+            """,
+        )
+
+    async def members(request: Request) -> Response:
+        del request
+        return html("<p>Your account</p>")
+
+    async with browsing([Route("/late", late), Route("/members", members)]) as (site, runtime):
+        loaded = await runtime.load_page_evidence(site.url("/late"))
+        appeared = await runtime.look_again_by(
+            site.url("/late"),
+            observed_seconds=20,
+            deadline=asyncio.get_running_loop().time() + 10,
+        )
+        await runtime.load_page_evidence(site.url("/members"))
+        stayed_signed_in = await runtime.look_again_by(
+            site.url("/members"),
+            observed_seconds=2,
+            deadline=asyncio.get_running_loop().time() + 10,
+        )
+
+    assert not loaded.challenge_visible
+    assert appeared.challenge_visible
+    assert not stayed_signed_in.challenge_visible
+    assert stayed_signed_in.path == "/members"
+    assert 2 <= stayed_signed_in.observed_seconds < 6
+
+
 async def test_a_lease_stops_at_a_sign_in_form_in_a_frame() -> None:
     """A signed-out lease must pause for the owner instead of reading the sign-in page."""
 

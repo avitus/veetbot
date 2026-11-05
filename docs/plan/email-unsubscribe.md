@@ -96,7 +96,7 @@ not find it here should find the reason here.
    reports, or archives without an owner act for those exact senders or that
    exact thread; a suspected-spam flag is not such an act.
 4. **Background or scheduled cleanup.** The census advances only inside
-   foreground refresh slices (email-experience.md:202-207). There is no
+   foreground refresh slices (email-experience.md:204-209). There is no
    monitor, digest, or notification about subscriptions.
 5. **Gmail filters and blocked senders.** Both need the
    `gmail.settings.basic` OAuth scope and a new consent ceremony. No new
@@ -113,14 +113,14 @@ not find it here should find the reason here.
 
 - **The first-party Gmail servers.** `gmail_mcp` stays the only code that
   speaks to Google, still dials exactly its two fixed endpoints
-  (email-integration.md:334-342), and still imports nothing from
+  (email-integration.md:342-350), and still imports nothing from
   `agent_core`. It already fetches complete headers; it projects a closed
   allowlist of them, and this milestone widens that projection by one closed
   block. It never dials a sender.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:956-959).
+  (email-experience.md:959-962).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -137,7 +137,7 @@ not find it here should find the reason here.
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
   exclusion of Spam and Trash, apply unchanged
-  (email-experience.md:354-368).
+  (email-experience.md:356-370).
 
 Nothing in the platform dials an arbitrary public host today. `web.fetch`
 hands its URL to a hosted provider, which owns resolution and redirects
@@ -282,7 +282,7 @@ without any of them carrying it.
 ### How records form
 
 The refresh task already pages thread summaries for each account, up to 100
-per slice (email-experience.md:378-386). The census reads the `bulk` block on
+per slice (email-experience.md:380-388). The census reads the `bulk` block on
 the summaries refresh was already reading. It issues no query of its own and
 adds no page. A summary whose block says anything but `none`, or that carries
 a `List-Id`, creates or updates its subscription; owner-sent mail, Spam, and
@@ -540,7 +540,7 @@ unsub@lists.example.org* — because a tap that sends mail must say so and say
 where. Dispatch is the account's ordinary send server under Milestone 18's
 rules without exception: `NON_IDEMPOTENT`, and an outcome lost after
 dispatch is `uncertain`, shown as *Send status unknown*, and never sent again
-automatically (email-integration.md:381-394).
+automatically (email-integration.md:390-403).
 
 **Report spam** applies `SPAM` and removes `INBOX`. It is what the interface
 offers when a sender has no safe mechanism, when it failed authentication,
@@ -579,7 +579,7 @@ Gmail's own filter already holds back most spam, and Spam is excluded from
 refresh, so the target is junk that reached the Inbox anyway.
 
 **The verdict.** The importance assessment
-(email-experience.md:505-528) gains one boolean, `spam`, beside `bulk`. Spam
+(email-experience.md:507-530) gains one boolean, `spam`, beside `bulk`. Spam
 is unsolicited mail that is deceptive or unwanted and comes from a party with
 no relationship to the owner: phishing, scams, fake invoices and account
 notices, and mass cold marketing. Mail the owner signed up for is `bulk`, not
@@ -627,7 +627,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:954-974): the owner names one thread and the
+delta (email-experience.md:957-977): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.

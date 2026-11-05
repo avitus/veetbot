@@ -1750,7 +1750,7 @@ public final class ChatViewModel: ObservableObject {
             runState.clarifyingQuestion?.questionID == prompt.questionID
         else { return }
         guard let profile = browserProfiles.first(where: { $0.id == profileID }),
-            beginDeviceSignIn(profile: profile, startOrigin: prompt.signIn?.origin, from: .chat) != nil
+            await beginSignIn(profile: profile, startOrigin: prompt.signIn?.origin, from: .chat)
         else {
             isWebsiteAccessPresented = true
             return
@@ -2308,6 +2308,40 @@ public final class ChatViewModel: ObservableObject {
         return request
     }
 
+    /// Signs a saved login in again the way its latest sign-in began (ADR-0297): a
+    /// site such as Chase refuses the device window, so a login saved through the
+    /// remote browser goes back there. Returns whether a sign-in opened.
+    @discardableResult
+    public func beginSignIn(
+        profile: BrowserProfileView, startOrigin: String? = nil, from surface: DeviceSignInSurface = .websiteAccess
+    ) async -> Bool {
+        guard profile.lastSignInMode == .remote else {
+            return beginDeviceSignIn(profile: profile, startOrigin: startOrigin, from: surface) != nil
+        }
+        guard api != nil, profile.status != .revoked,
+            let origin = startOrigin.flatMap({ profile.allowedOrigins.contains($0) ? $0 : nil })
+                ?? profile.allowedOrigins.first
+        else { return false }
+        websiteConnectionSessionID = selectedSessionID
+        return await beginRemoteSignIn(profileID: profile.id, loginURL: origin + "/", from: surface) != nil
+    }
+
+    private func rememberDeviceSignIn(for profileID: UUID) {
+        browserProfiles = browserProfiles.map { profile in
+            guard profile.id == profileID else { return profile }
+            return BrowserProfileView(
+                id: profile.id,
+                allowedOrigins: profile.allowedOrigins,
+                status: profile.status,
+                generation: profile.generation,
+                createdAt: profile.createdAt,
+                updatedAt: profile.updatedAt,
+                lastUsedAt: profile.lastUsedAt,
+                lastSignInMode: .device
+            )
+        }
+    }
+
     /// The owner tapped I'm signed in: create the profile if it is new, begin
     /// a device ceremony, hand the session over once and learn the outcome
     /// (0128-design §5.2). The launch URL and its capability exist only in
@@ -2432,6 +2466,8 @@ public final class ChatViewModel: ObservableObject {
         case .success(let begun):
             ceremony = begun
             openCeremonyID = begun.id
+            // Beginning recorded this on the server; a failure below reloads nothing (ADR-0297).
+            rememberDeviceSignIn(for: profileID)
         case .failure(let error):
             return await settle(failure(error.message))
         }
@@ -2744,7 +2780,7 @@ public final class ChatViewModel: ObservableObject {
             try? await reloadBrowserProfiles(using: api)
         }
         guard let profile = browserProfiles.first(where: { $0.id == website.profileID }),
-            beginDeviceSignIn(profile: profile, from: .chat) != nil
+            await beginSignIn(profile: profile, from: .chat)
         else {
             pendingWebsiteOffer = nil
             return

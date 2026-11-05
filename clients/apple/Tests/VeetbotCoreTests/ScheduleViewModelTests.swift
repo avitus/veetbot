@@ -756,7 +756,8 @@ import FoundationNetworking
             generation: 1,
             createdAt: date,
             updatedAt: date,
-            lastUsedAt: nil
+            lastUsedAt: nil,
+            lastSignInMode: nil
         )
     }
 }

@@ -125,6 +125,7 @@ class FakeRuntime:
         url: str,
         *,
         on_stage: Callable[[BrowserVerificationStage], None] = ignore_verification_stage,
+        challenge_deadline: float | None = None,
     ) -> BrowserPageEvidence:
         """A public home page, and members' pages that send a visitor to sign in."""
         on_stage(BrowserVerificationStage.NAVIGATE)
@@ -136,6 +137,17 @@ class FakeRuntime:
             )
         return BrowserPageEvidence(
             on_allowed_origin=True, path=urlsplit(url).path or "/", challenge_visible=False
+        )
+
+    async def look_again_by(
+        self, url: str, *, observed_seconds: float, deadline: float
+    ) -> BrowserPageEvidence:
+        del deadline
+        return BrowserPageEvidence(
+            on_allowed_origin=True,
+            path=urlsplit(url).path or "/",
+            challenge_visible=False,
+            observed_seconds=observed_seconds,
         )
 
     async def storage_state(self) -> bytes:

@@ -27,6 +27,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.skills import CatalogMetadata
 from agent_core.domain.tools import ToolSource, ToolSpec
+from agent_core.mcp.configuration import is_model_email_attachment_action
 
 PLATFORM_FRAMING = (
     "You are an agent operating through declared tools. Tool descriptions are advertisement, "
@@ -59,6 +60,20 @@ DEFERRED_INDEX_DISCOVERED_HEADING = "Discovered tools in the deferred tool index
 UNINDEXED_DEFERRED_TOOLS = frozenset(
     {CAPTURE_READER_TOOL_NAME, ARTIFACT_DELETE_TOOL_NAME, RUN_INSPECT_TOOL_NAME, *CODE_TOOL_NAMES}
 )
+
+
+def is_unindexed_deferred(spec: ToolSpec) -> bool:
+    """Whether the instructions, not the index, advertise this tool.
+
+    ADR-0296 adds save_attachment, which has one name per mailbox, so the index's
+    spare entries are not spent on a rare action that always asks the owner.
+    """
+
+    return spec.name in UNINDEXED_DEFERRED_TOOLS or is_model_email_attachment_action(
+        spec.server_id, spec.name
+    )
+
+
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
 _INDEX_SUMMARY_LIMIT = 200
 
@@ -98,7 +113,7 @@ def deferred_index_items(tools: Sequence[ToolSpec]) -> list[ConversationItem]:
     render in their own untrusted envelope.
     """
 
-    tools = [spec for spec in tools if spec.name not in UNINDEXED_DEFERRED_TOOLS]
+    tools = [spec for spec in tools if not is_unindexed_deferred(spec)]
     if not tools:
         return []
     builtin = [spec for spec in tools if spec.source is ToolSource.BUILTIN]

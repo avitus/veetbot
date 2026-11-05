@@ -130,7 +130,9 @@ or deadline, the importance explanation, and an editable draft when one is
 appropriate. Render sanitized text initially; external images, tracking pixels,
 and active HTML do not load. Show attachment metadata and the fact that an
 attachment was not read. A draft that depends on an unread attachment requests
-the missing information rather than claiming to have reviewed it.
+the missing information rather than claiming to have reviewed it. Each attachment
+offers Save, which stores a copy in the thread's chat
+([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)).
 
 The reading view derives inert Markdown from each retained message on the scoped
 thread read, after source retention is enforced. It removes invisible preheader
@@ -906,6 +908,7 @@ normal contract naming review:
 | `/v1/email/threads/{id}/archive` | Admit an explicitly requested archive or move-to-Inbox operation for one account-bound thread. |
 | `/v1/email/threads/{id}/spam` and `/spam-flag` | Milestone 31 (ADR-0165), behind its flag: admit an owner's Report spam or Not spam with Archive's gesture; clear or restore a suspected-spam flag without a mailbox change. |
 | `/v1/email/threads/{id}/discussion`, `/dismiss`, and `/exclude` | Open the thread in Chat once (`email.discussion.opened`, which also needs `session.write`); set or clear handled state at the revision the client saw; exclude the thread as a learning source. |
+| `/v1/email/threads/{id}/attachments/save` | One press on Save for one listed attachment: a typed, model-free task in the thread's session whose reply carries the file (needs `email.write` and `artifact.write`; ADR-0296). |
 | Existing approval routes | Resolve every send once; no alternate direct-send HTTP route. |
 
 The exact platform scopes are `email.read` and `email.write` for application
@@ -1321,7 +1324,8 @@ maintenance sweep therefore cannot expose or renew an expired body.
 The owner-authorized email-source erasure operation is a narrow content-erasure
 exception to append-only event payloads. It preserves event identity, sequence,
 actor, time, tool/action identity, approval decisions, and argument hashes; it
-replaces only the selected source's content with an explicit erasure marker and
+replaces only the selected source's content, including a saved attachment's file name
+wherever its call recorded it (ADR-0296), with an explicit erasure marker and
 appends an `email.source.erased` audit event. It does not rewrite user messages
 or reinterpret an earlier action. The original Gmail account-to-server binding is
 server-owned session metadata and must never be refreshed from a later manifest.
