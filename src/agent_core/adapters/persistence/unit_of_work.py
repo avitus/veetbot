@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from types import TracebackType
 
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.functions import func
 
+from agent_core.domain.errors import DatabaseCapacityError
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
@@ -312,11 +314,19 @@ class PostgresUnitOfWork:
 
     async def __aenter__(self) -> PostgresUnitOfWork:
         session = self._maker()
+        try:
+            await session.execute(
+                select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
+            )
+            repositories = self._repository_factory(session, self._rollback_callbacks.append)
+        except BaseException as exc:
+            # A failed __aenter__ never reaches __aexit__.
+            await session.close()
+            driver_error = exc.orig if isinstance(exc, DBAPIError) else exc
+            if getattr(driver_error, "sqlstate", None) == "53300":
+                raise DatabaseCapacityError("PostgreSQL connection capacity exhausted") from exc
+            raise
         self._session = session
-        await session.execute(
-            select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
-        )
-        repositories = self._repository_factory(session, self._rollback_callbacks.append)
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
