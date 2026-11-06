@@ -1730,6 +1730,8 @@ public final class EmailViewModel: ObservableObject {
             EmailConversationCache.remove(threadID: thread.id)
             guard generation == connection else { return }
             edits = edits.filter { $0.value.base.threadID != thread.id }
+            // The row goes now: a failed reload must not leave the excluded summary in view.
+            inboxItems.removeAll { $0.id == thread.id }
             clearSelection()
             await reload(preserveOrder: true)
         } catch { if generation == connection { report(error, draft: true) } }

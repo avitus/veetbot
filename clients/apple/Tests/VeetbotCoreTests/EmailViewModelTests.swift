@@ -1250,6 +1250,28 @@ import SwiftUI
         #expect(EmailConversationCache.parses(of: threadID) == 0)
     }
 
+    /// An accepted exclusion removes the thread's row even when the list
+    /// reload after it fails, so its summary never stays in view.
+    @Test func testExcludedThreadLeavesTheListWhenTheReloadFails() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("exclude") { return (200, "{}") }
+            let excluded = requests.snapshot.contains { $0.url!.path.hasSuffix("exclude") }
+            if request.url!.path.hasSuffix("threads") {
+                return excluded ? (503, Self.error("service_unavailable", "Try again.")) : (200, self.pageJSON())
+            }
+            return (200, self.threadJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        #expect(model.items.contains { $0.id == threadID })
+        await model.excludeSelectedThread()
+        #expect(model.items.contains { $0.id == threadID } == false)
+    }
+
     /// Counts come from the whole server collection, never the visible first page.
     @Test func testCollectionCountsAndSwitchPreserveUnsentDraft() async throws {
         let requests = EmailRequestRecorder()
