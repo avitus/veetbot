@@ -362,7 +362,58 @@ the loader's precedence is unchanged: `.env` first, then the process
 environment. Production is unaffected; its units read
 `/etc/veetbot/veetbot.env`.
 
-### Remote validation on a sidecar
+### Local test sandboxes
+
+Development tests run inside a local VM or container. Apple package tests use
+`scripts/run_apple_ui_macos_vm.sh make test-apple`. For Apple UI tests, run the
+platform targets sequentially inside the guest to avoid nesting Tart runners:
+
+```sh
+scripts/run_apple_ui_macos_vm.sh /bin/sh -c 'make test-apple-ui-macos && make test-apple-ui-ios'
+```
+
+Linux Python, browser, website and Cockpit tests use
+`scripts/run_in_linux_container.sh <command>`. Its image includes the locked
+Python dependencies, Chromium/WebKit with Xvfb, Node/npm, Pandoc and the Docker CLI.
+Use a local Docker context backed by a dedicated test VM for Docker-dependent
+tests. Explicitly grant that runner access to the VM's Docker daemon:
+
+```sh
+VEETBOT_TEST_DOCKER=1 scripts/run_in_linux_container.sh make test-sandbox
+```
+
+That opt-in mounts the selected engine's socket, allowing the test process to
+build images and manage containers and volumes in that VM. Use it only for
+trusted repository tests in the dedicated test engine.
+
+For PostgreSQL integration tests, create a separate network and disposable
+database in that same engine. Supply both the network and the explicit reset
+opt-in to the runner. The hostname is the database container's network alias:
+
+```sh
+(
+set -e
+docker build -f deploy/postgres.Dockerfile -t veetbot-postgres:test .
+test_network="veetbot-test-$(date +%s)-$$"
+docker network create "$test_network"
+test_password=$(openssl rand -hex 16)
+test_credentials="test:$test_password"
+test_database=$(docker run -d --rm --network "$test_network" --network-alias postgres \
+  -e POSTGRES_USER=test -e "POSTGRES_PASSWORD=$test_password" -e POSTGRES_DB=test veetbot-postgres:test)
+trap 'docker stop "$test_database"; docker network rm "$test_network"' EXIT
+until docker exec "$test_database" pg_isready -h 127.0.0.1 -U test -d test; do sleep 1; done
+VEETBOT_TEST_NETWORK="$test_network" VEETBOT_TEST_DATABASE_DISPOSABLE=1 \
+  DATABASE_URL="postgresql+asyncpg://${test_credentials}@postgres:5432/test" \
+  scripts/run_in_linux_container.sh 'uv run alembic upgrade head && make test-integration'
+)
+```
+
+The runner forwards the database variables only with a requested network and
+the exact disposable opt-in. The existing destructive-reset guard still checks
+that opt-in inside the container. A shared development or production database
+must never be used for this workflow.
+
+### Optional remote validation on a sidecar
 
 `.chunk/config.json` lets the CircleCI `chunk` CLI run the same gate on a
 disposable Linux sidecar. `chunk validate` runs `install` (`make install` and
@@ -374,8 +425,8 @@ from. Active-sidecar and validation-pool files under `.chunk/` are
 per-developer and ignored. The sidecar adds no command, so a passing remote
 `make check` satisfies the same criterion as a local run. Run `chunk validate` rather than `chunk sidecar sync`
 from a git worktree: plain sync copies the worktree's `.git` pointer file,
-while validate sends a git bundle into a real repository. Xcode suites
-(`make test-apple`, `make test-apple-ui`) need macOS and stay local.
+while validate sends a git bundle into a real repository. Use Chunk only at the owner’s request. For development, run Linux tests via
+`scripts/run_in_linux_container.sh` and Apple package and Mac UI tests via `scripts/run_apple_ui_macos_vm.sh` in the local Tart guest.
 
 A change is verified in full once, on the final head proposed for `main`, by
 the requested hosted run (ADR-0257); that run's jobs cover everything

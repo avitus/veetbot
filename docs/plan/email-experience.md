@@ -54,11 +54,11 @@ presentation module; this feature does not build a dynamic plugin system.
 
 ### Priority inbox
 
-The priority view combines both accounts and normally displays **up to five
-threads**. ADR-0231 makes Inbox the A2 initial collection, still paged five
-threads at a time; the relevance threshold below applies to priority selection. It displays fewer when fewer meet the relevance threshold. Account
-badges and an account filter make the source clear without dividing the
-assistant's knowledge.
+The priority view combines both accounts. On macOS, Important shows the total
+number of qualifying threads and initially loads up to 100. On touch it opens
+with up to five. Inbox is the A2 initial collection and pages five threads at
+a time (ADR-0231). Account badges and an account filter identify the source
+of each conversation.
 
 Each row shows the correspondent, subject, a concise statement of what needs
 attention, and a state such as Needs reply, Draft ready, or For your attention.
@@ -68,9 +68,12 @@ expandable explanation in the conversation gives the strongest supported
 reasons for inclusion; the row does not repeat it (ADR-0234).
 Numeric ranking scores and internal model details stay out of the main flow.
 
-The list is a selection, not a quota. There is no obligation to fill five slots.
-If more threads clear the threshold, a More important action expands the view
-to ten, then provides pagination over the remaining qualifying threads. Find
+Only threads that meet the relevance threshold appear in Important.
+On macOS, scrolling near the end fetches the next page automatically. Refresh
+preserves the visible thread and the selected conversation independently.
+It can fetch later pages to retain an eligible displaced thread, but does not
+chase an anchor already confirmed handled, archived, or in Spam.
+On touch, More important expands to ten, then pages through the rest. Find
 mail and Review other mail make false negatives discoverable without cluttering
 the default list. Rows are ordered by each conversation's latest activity,
 newest first, whatever ranking selected them; ties keep the server's order
@@ -934,7 +937,9 @@ existing `priority|other|all` views. It returns additive `collection_counts`
 snapshot as the page, before the view and pagination filters. Account and text
 filters apply to both counts and rows. Older clients ignore the new field;
 clients receiving no counts show no count rather than inferring one from a page.
-The API default remains `priority`; A2 clients explicitly request `inbox`.
+The additive `total_count` counts the threads matching the requested view before
+pagination. Older servers can omit it, in which case the Mac labels the loaded
+count as such. The API default remains `priority`; A2 clients explicitly request `inbox`.
 
 `POST /v1/email/threads/{id}/dismiss` accepts `expected_revision` and an optional
 strict boolean `dismissed` (default `true` for existing clients). `true` marks

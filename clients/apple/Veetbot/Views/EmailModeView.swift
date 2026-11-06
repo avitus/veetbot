@@ -238,6 +238,7 @@ public struct EmailModeView: View {
     /// False once the Mac window's sidebar button hides the sidebar.
     var mailboxSidebarVisible = true
     #if os(macOS)
+    @State private var nearImportantListEnd = false
     var inboxWidth = EmailInboxWidthStore.app
     var sidebarStore = EmailSidebarWidthStore.app
     #endif
@@ -459,68 +460,8 @@ public struct EmailModeView: View {
             if !directSelection { emailHeading }
             if !showsMailboxSidebar { inboxHeader.fixedSize(horizontal: false, vertical: true) }
             HairlineDivider()
-            List {
-                if model.unavailable {
-                    EmailEmptyState(
-                        symbol: "envelope.badge", title: "Email isn’t available",
-                        message: "This server does not support Email mode yet."
-                    )
-                    .emailHideSeparator()
-                } else if let error = model.errorMessage {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Mail couldn’t be updated", systemImage: "exclamationmark.circle").veetType(.ui, weight: .semibold)
-                        Text(error).veetType(.ui).foregroundColor(AppTheme.inkSoft)
-                        Button("Try again") {
-                            Task {
-                                await model.reload()
-                                await model.refresh()
-                            }
-                        }
-                        .buttonStyle(SecondaryCapsuleButtonStyle())
-                    }.padding(.vertical, 16).emailHideSeparator()
-                }
-                if !showsMailboxSidebar, let pause = model.budgetPauseMessage {
-                    budgetPause(pause)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                        .emailHideSeparator()
-                }
-                if model.isLoading && model.items.isEmpty {
-                    ProgressView("Finding your mail…").padding(.vertical, 32)
-                        .frame(maxWidth: .infinity).emailHideSeparator()
-                } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil && model.budgetPauseMessage == nil {
-                    emptyInbox.emailHideSeparator()
-                }
-                ForEach(model.items) { thread in
-                    HStack(alignment: .top, spacing: 10) {
-                        EmailHandledCircle(model: model, thread: thread, accessibilityID: "email.handled.\(thread.id.uuidString)")
-                        VStack(alignment: .leading, spacing: EmailType.rowSpacing) {
-                            threadRow(thread)
-                                .accessibilityIdentifier("email.thread.\(thread.id.uuidString)")
-                            // Beside the row's button, not inside its label: AppKit folds a
-                            // button's label into one element, and the journeys read this text.
-                            EmailArchiveStatus(model: model, thread: thread)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .modifier(EmailArrivalWash(model: model, threadID: thread.id))
-                    // An arrival slides down into its place; a row that leaves fades.
-                    .transition(reduceMotion ? .opacity : .asymmetric(
-                        insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
-                    .modifier(EmailRowChrome(selected: thread.id == model.selectedThreadID))
-                }
-                if model.hasMore {
-                    Button(model.listView == "priority" ? "More important" : "More mail") {
-                        Task { await model.loadMore() }
-                    }
-                    .buttonStyle(QuietCapsuleButtonStyle())
-                    .disabled(model.isLoading).padding(.vertical, 8)
-                    .emailHideSeparator()
-                }
-            }
-            .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15), value: model.items.map(\.id))
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .frame(minHeight: 0, maxHeight: .infinity)
+            inboxList
+                .frame(minHeight: 0, maxHeight: .infinity)
             if !visibleAccounts.isEmpty {
                 HairlineDivider()
                 DisclosureGroup {
@@ -595,6 +536,126 @@ public struct EmailModeView: View {
         #endif
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("email.inbox")
+    }
+
+    @ViewBuilder private var inboxList: some View {
+        #if os(macOS)
+        if model.scrollsImportantMail {
+            importantList
+        } else {
+            pagedList
+        }
+        #else
+        pagedList
+        #endif
+    }
+
+    private var pagedList: some View {
+        List {
+            inboxNotices
+            ForEach(model.items) { thread in
+                inboxRow(thread)
+                    .modifier(EmailRowChrome(selected: thread.id == model.selectedThreadID))
+            }
+            if model.hasMore {
+                Button(model.listView == "priority" ? "More important" : "More mail") {
+                    Task { await model.loadMore() }
+                }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                .disabled(model.isLoading).padding(.vertical, 8)
+                .emailHideSeparator()
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15), value: model.items.map(\.id))
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    #if os(macOS)
+    private var importantList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    inboxNotices
+                    ForEach(model.items) { thread in
+                        inboxRow(thread)
+                            .padding(.horizontal, 10).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 10)
+                                .fill(thread.id == model.selectedThreadID ? AppTheme.selected : .clear))
+                            .padding(.horizontal, 6)
+                            .id(thread.id)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .onScrollTargetVisibilityChange(idType: UUID.self, threshold: 0.01) { visible in
+                model.importantScrollAnchor = visible.first
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.visibleRect.maxY + 180 >= geometry.contentSize.height
+            } action: { _, nearEnd in nearImportantListEnd = nearEnd }
+            .onChange(of: nearImportantListEnd && model.hasMore && !model.isLoading && !model.pagingFailed,
+                      initial: true) { _, shouldLoad in
+                if shouldLoad { Task { if model.scrollsImportantMail { await model.loadMore() } } }
+            }
+            .onReceive(model.restoreImportantAnchor) { id in
+                // Apply the new row order before positioning the conversation back at the top.
+                DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
+            }
+        }
+    }
+    #endif
+
+    @ViewBuilder private var inboxNotices: some View {
+        if model.unavailable {
+            EmailEmptyState(
+                symbol: "envelope.badge", title: "Email isn’t available",
+                message: "This server does not support Email mode yet."
+            )
+            .emailHideSeparator()
+        } else if let error = model.errorMessage {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Mail couldn’t be updated", systemImage: "exclamationmark.circle").veetType(.ui, weight: .semibold)
+                Text(error).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                Button("Try again") {
+                    Task {
+                        await model.reload(preserveOrder: model.scrollsImportantMail)
+                        await model.refresh()
+                    }
+                }
+                .buttonStyle(SecondaryCapsuleButtonStyle())
+            }.padding(.vertical, 16).emailHideSeparator()
+        }
+        if !showsMailboxSidebar, let pause = model.budgetPauseMessage {
+            budgetPause(pause)
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .emailHideSeparator()
+        }
+        if model.isLoading && model.items.isEmpty {
+            ProgressView("Finding your mail…").padding(.vertical, 32)
+                .frame(maxWidth: .infinity).emailHideSeparator()
+        } else if model.items.isEmpty && !model.unavailable && model.errorMessage == nil && model.budgetPauseMessage == nil {
+            emptyInbox.emailHideSeparator()
+        }
+    }
+
+    /// Build the shared selectable row used by the Important and other mailbox lists.
+    private func inboxRow(_ thread: EmailThreadView) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            EmailHandledCircle(model: model, thread: thread, accessibilityID: "email.handled.\(thread.id.uuidString)")
+            VStack(alignment: .leading, spacing: EmailType.rowSpacing) {
+                threadRow(thread)
+                    .accessibilityIdentifier("email.thread.\(thread.id.uuidString)")
+                // Beside the row's button, not inside its label: AppKit folds a
+                // button's label into one element, and the journeys read this text.
+                EmailArchiveStatus(model: model, thread: thread)
+            }
+        }
+        .buttonStyle(.plain)
+        .modifier(EmailArrivalWash(model: model, threadID: thread.id))
+        // An arrival slides down into its place; a row that leaves fades.
+        .transition(reduceMotion ? .opacity : .asymmetric(
+            insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
     }
 
     private var emailHeading: some View {
@@ -2277,6 +2338,7 @@ struct EmailToolbarTitle: View {
     }
 
     private var title: String {
+        if model.listView == "priority" { return model.searchText.isEmpty ? "Important" : "Search results" }
         if model.listView == "other" { return "Other mail" }
         switch model.collection {
         case .inbox: return "Inbox"
@@ -2287,6 +2349,10 @@ struct EmailToolbarTitle: View {
 
     /// Prefers the server's count across pages; older servers describe only the loaded rows.
     private var detail: String {
+        if model.listView == "priority" {
+            if let total = model.listTotal { return "\(total) \(total == 1 ? "thread" : "threads")" }
+            return model.isLoading && model.items.isEmpty ? "Loading…" : "\(model.items.count) loaded"
+        }
         let needing = model.collectionCounts?.count(for: .needsYou)
             ?? model.items.filter { $0.needsReply && !$0.isHandled && !$0.isArchived }.count
         if needing > 0 { return "\(needing) need\(needing == 1 ? "s" : "") you" }

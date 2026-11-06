@@ -25,7 +25,19 @@ tar -cf - pyproject.toml uv.lock deploy/browser-test.Dockerfile \
 # A worktree's .git names the shared git directory by absolute path; mount it
 # read-only at that path so the gate report can record the revision.
 git_common=$(cd "$(git rev-parse --git-common-dir)" && pwd)
-exec docker run --rm --init --platform linux/amd64 --shm-size=2g \
+# Service access is opt-in and stays inside the selected local Docker VM.
+docker_run=(docker run)
+if [[ -n "${VEETBOT_TEST_NETWORK:-}" ]]; then
+  docker_run+=(--network "$VEETBOT_TEST_NETWORK")
+  if [[ "${VEETBOT_TEST_DATABASE_DISPOSABLE:-}" == 1 ]]; then
+    : "${DATABASE_URL:?set the disposable database URL}"
+    docker_run+=(-e DATABASE_URL -e VEETBOT_TEST_DATABASE_DISPOSABLE)
+  fi
+fi
+if [[ "${VEETBOT_TEST_DOCKER:-0}" == 1 ]]; then
+  docker_run+=(-v /var/run/docker.sock:/var/run/docker.sock)
+fi
+exec "${docker_run[@]}" --rm --init --platform linux/amd64 --shm-size=2g \
   -v "$root:$root" -w "$root" \
   -v "$git_common:$git_common:ro" \
   -e HOST_OS=Linux \
