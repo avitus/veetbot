@@ -1035,3 +1035,145 @@ def test_adding_an_excluded_word_never_makes_an_action_covered(
 
     assert not covered
     assert consequence not in {C.ROUTINE, C.UNKNOWN}
+
+
+@pytest.mark.parametrize(
+    ("origin", "path", "role", "label", "value", "allowed"),
+    [
+        (
+            "https://secure.chase.com",
+            "/web/auth/dashboard",
+            "button",
+            "See all transactions",
+            None,
+            True,
+        ),
+        (
+            "https://secure.chase.com",
+            "/web/auth/dashboard",
+            "option",
+            "Choose a date range Choose a date range",
+            None,
+            True,
+        ),
+        ("https://secure.chase.com", "/web/auth/dashboard", "textbox", "From", "11/05/2024", True),
+        (
+            "https://secure.chase.com",
+            "/web/auth/dashboard",
+            "button",
+            "Make a payment",
+            None,
+            False,
+        ),
+        ("https://secure.chase.com", "/web/auth/dashboard", "button", "Download", None, False),
+        ("https://secure.chase.com", "/web/auth/dashboard", "textbox", "To", "12/99/2025", False),
+        (
+            "https://secure.chase.com",
+            "/web/auth/login",
+            "button",
+            "See all transactions",
+            None,
+            False,
+        ),
+        (
+            "https://example.org",
+            "/web/auth/dashboard",
+            "button",
+            "See all transactions",
+            None,
+            False,
+        ),
+    ],
+)
+def test_research_only_covers_recognized_dashboard_read_controls(
+    origin: str, path: str, role: str, label: str, value: str | None, allowed: bool
+) -> None:
+    action = click() if value is None else click(kind=BrowserActionKind.TYPE, value=value)
+    result = task_grant_coverage(
+        action=action,
+        page_url=origin + path + "#/dashboard/transactions/123/CARD/BAC",
+        origin=origin,
+        path_prefix=None,
+        role=role,
+        labels=(label,),
+        option_texts=(),
+        disabled=False,
+        facts=facts(field_kind=BrowserFieldKind.TEXT if value else BrowserFieldKind.NONE),
+        card_activity=True,
+    )
+    assert result.covered == allowed
+
+
+def test_dashboard_permission_is_rechecked_against_the_live_view_and_target() -> None:
+    origin = "https://secure.chase.com"
+    constraint = BrowserDispatchConstraint(
+        grant_kind="research",
+        card_activity_only=True,
+        origins=(origin,),
+        not_after=NOW + timedelta(seconds=30),
+        consequence_ceiling="unknown",
+        max_text_characters=256,
+    )
+    for location, label, destination, allowed in (
+        (
+            "/web/auth/dashboard#/dashboard/transactions/123/CARD/BAC",
+            "See all transactions",
+            BrowserTargetFacts(
+                same_origin=True, sensitive_path=True, same_document_activity_link=True
+            ),
+            True,
+        ),
+        (
+            "/web/auth/dashboard#/dashboard/transactions/123/CARD/BAC",
+            "See all transactions",
+            BrowserTargetFacts(same_origin=False, sensitive_path=False),
+            False,
+        ),
+        ("/web/auth/dashboard#/dashboard/payments", "See all transactions", None, False),
+        ("/public", "See all transactions", None, False),
+        ("/web/auth/dashboard#/dashboard/transactions/123/CARD/BAC", "Transfer funds", None, False),
+    ):
+        coverage = dispatch_constraint_coverage(
+            constraint,
+            action=click(),
+            page_url=origin + location,
+            role="link",
+            labels=[label],
+            facts=facts(link_target=destination),
+            option_texts=[],
+            runtime_origins=(origin,),
+            now=NOW,
+            disabled=False,
+        )
+        assert coverage.covered == allowed
+
+
+def test_research_approved_off_activity_never_gains_the_activity_exemption() -> None:
+    """A research grant issued off the activity page cannot reach its controls later.
+
+    The page may move to card activity by a same-document route change after
+    the approval; only an approval that saw the activity page carries its rules.
+    """
+    origin = "https://secure.chase.com"
+    constraint = BrowserDispatchConstraint(
+        grant_kind="research",
+        card_activity_only=False,
+        origins=(origin,),
+        not_after=NOW + timedelta(seconds=30),
+        consequence_ceiling="unknown",
+        max_text_characters=256,
+    )
+    coverage = dispatch_constraint_coverage(
+        constraint,
+        action=click(),
+        page_url=origin + "/web/auth/dashboard#/dashboard/transactions/123/CARD/BAC",
+        role="button",
+        labels=["See all transactions"],
+        facts=facts(),
+        option_texts=[],
+        runtime_origins=(origin,),
+        now=NOW,
+        disabled=False,
+    )
+    assert not coverage.covered
+    assert coverage.reason == "sensitive_path"

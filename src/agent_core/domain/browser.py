@@ -798,6 +798,7 @@ class BrowserTargetFacts(BaseModel):
     same_origin: bool
     first_segment: str | None = Field(default=None, max_length=64)
     sensitive_path: bool = True
+    same_document_activity_link: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class BrowserElementFacts(BaseModel):
@@ -858,6 +859,7 @@ class BrowserDispatchConstraint(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    card_activity_only: bool = Field(default=False, exclude_if=lambda value: not value)
     grant_kind: Literal["task", "standing", "follow", "research"]
     origins: tuple[str, ...] = Field(min_length=1, max_length=64)
     path_prefix: str | None = None
@@ -910,6 +912,10 @@ class BrowserDispatchConstraint(BaseModel):
                 and self.max_text_characters is None
                 and self.path_prefix is None
             )
+        if self.card_activity_only and (
+            self.grant_kind != "research" or self.origins != ("https://secure.chase.com",)
+        ):
+            valid = False
         if not valid or (self.grant_kind != "follow" and self.follow_handle is not None):
             raise ValueError("dispatch constraint fields do not match its grant kind")
         return self

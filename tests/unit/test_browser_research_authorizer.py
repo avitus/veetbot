@@ -49,6 +49,8 @@ REFUSAL_REASONS = {
     "cross_origin_link": "link_outside_prefix",
     "typed_text_after_email": "turn_not_browser_only",
     "after_other_tool": "turn_not_browser_only",
+    "bookkeeping_elsewhere": "turn_not_browser_only",
+    "dashboard_after_mail": "turn_not_browser_only",
 }
 
 
@@ -79,6 +81,9 @@ REFUSAL_REASONS = {
         "typed_text",
         "typed_text_after_email",
         "after_other_tool",
+        "bookkeeping_elsewhere",
+        "dashboard_bookkeeping",
+        "dashboard_after_mail",
     ],
 )
 async def test_research_permission_boundaries(problem: str | None) -> None:
@@ -86,6 +91,12 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
     page = snapshot()
     profile_update: dict[str, Any] = {}
     metadata = None
+    if problem in {"dashboard_bookkeeping", "dashboard_after_mail"}:
+        profile_update["allowed_origins"] = ("https://secure.chase.com",)
+        page = snapshot(
+            url="https://secure.chase.com/web/auth/dashboard#/dashboard/transactions/123/CARD/BAC",
+            name="See all transactions",
+        )
     if problem == "missing_binding":
         metadata = {}
     if problem == "scheduler":
@@ -174,6 +185,12 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
         turn = AuthorizationTurn(
             newest_user_trust=TrustLevel.USER, tool_names=frozenset({other, "browser.act"})
         )
+    if problem in {"dashboard_bookkeeping", "dashboard_after_mail", "bookkeeping_elsewhere"}:
+        # ADR-0300: the agent checks the clock to choose a date range.
+        names = {"browser.act", "context.update_working_state", "system.current_time"}
+        if problem == "dashboard_after_mail":
+            names.add("email.read")
+        turn = AuthorizationTurn(newest_user_trust=TrustLevel.USER, tool_names=frozenset(names))
     if problem == "stale_page":
         action.arguments["expected_revision"] = "old"
     if problem == "policy_changed":
@@ -194,7 +211,9 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
         action_deadline=WHEN if problem == "expired" else WHEN + timedelta(seconds=30),
         turn=turn,
     )
-    assert result.allowed is (problem in {None, "scheduler", "dated_post_link", "typed_text"})
+    assert result.allowed is (
+        problem in {None, "scheduler", "dated_post_link", "typed_text", "dashboard_bookkeeping"}
+    )
     if not result.allowed:
         # ADR-0263: each refusal names its closed, content-free reason.
         assert problem is not None
@@ -204,5 +223,8 @@ async def test_research_permission_boundaries(problem: str | None) -> None:
         assert result.dispatch_constraint is not None
         assert result.dispatch_constraint.grant_kind == "research"
         assert result.dispatch_constraint.path_prefix is None
-        assert result.dispatch_constraint.origins == (ORIGIN,)
+        assert result.dispatch_constraint.card_activity_only == (problem == "dashboard_bookkeeping")
+        assert result.dispatch_constraint.origins == (
+            ("https://secure.chase.com",) if problem == "dashboard_bookkeeping" else (ORIGIN,)
+        )
         assert result.authorization_ref is not None

@@ -2702,3 +2702,23 @@ async def test_document_change_during_title_capture_cannot_publish_a_revision() 
         await runtime._observation(page)
     assert runtime._revision is None and runtime._continuation is None
     handle.dispose.assert_awaited_once()
+
+
+def test_activity_hash_links_cannot_hide_a_payment_view_or_a_second_unsafe_target() -> None:
+    dashboard = "https://secure.chase.com/web/auth/dashboard"
+    page = dashboard + "#/dashboard/summary"
+
+    def target(fragment: str) -> BrowserTargetFacts:
+        value = playwright_adapter._link_target(
+            {"linkHref": fragment, "link": dashboard + fragment}, page_url=page
+        )
+        assert value is not None
+        return value
+
+    ordinary = target("#/dashboard/transactions/123/CARD/BAC")
+    payment = target("#/dashboard/payments")
+    assert ordinary.same_document_activity_link and not payment.same_document_activity_link
+    assert payment.sensitive_path
+    assert playwright_adapter._meet([ordinary]) == ordinary
+    mixed = playwright_adapter._meet([ordinary, payment])
+    assert mixed is not None and not mixed.same_document_activity_link

@@ -165,8 +165,8 @@ Such a session still learns how to get one (ADR-0251). When the owner's typed
 text names one of their own saved website logins, admission records an offer
 and never connects the chat. The source run's runtime metadata row then carries
 `website_offer=<origins>` with facts only: the login is saved, the chat is not
-connected to it (or is connected to another origin), and the app shows the
-owner a Connect or Switch button that connects it and continues the request.
+connected to it (or is connected to another origin), and the card offers
+“Connect and continue”, or “Sign in and continue” if the login needs it.
 An unconnected chat with no match carries `website=none` and the place to
 connect one, Website Access in that chat. The row never names a profile ID and
 sits outside the frozen prefix. Matching reads only the message's typed text:
@@ -177,7 +177,7 @@ label of seven or more letters other than `www`; or one word of five or more
 letters that begins a domain label of five or more. At most three profiles are
 offered, longest matched text first. The app reads the offer only when the
 source run's stream carries `session.browser.offered`, and shows the card once
-that run has ended or while it waits for the owner's answer to a question. The
+that run has ended or when it asks the owner a question, before the stream ends. The
 native card connects the chat and admits one continuation run, or answers the
 waiting source run's question in that run, through
 [http-api-and-streaming.md](http-api-and-streaming.md); "Not now" hides an
@@ -281,6 +281,12 @@ finish. The wait ends 20 seconds after the act's window opened, however slow the
 was, and a file that starts after that is refused as `timed_out`, so the tool's 30 seconds still hold the observation, a postcondition of up to 5
 seconds and storing the file, which gives up 1 second before the limit. The name decides only whether to wait,
 never whether to admit. A later file is cancelled and unreported.
+
+For a final Download or Export control, ADR-0300 also admits one same-origin
+main-frame CSV response fetched by that page during the individually approved act.
+The observer does not make a request. Its Chromium buffer and decoded byte budget
+are both 2 MiB. The final control waits within the existing overall deadline;
+no file produces an explicit timeout rather than a successful empty result.
 
 The bytes cross the service boundary once, in base64, on the act's own observation
 (`BrowserObservation.download`); the worker's session response limit allows for
@@ -1161,7 +1167,13 @@ otherwise; custom unconditional approval or deny rules retain their behavior.
 ADR-0263 narrows G5's non-browser tools. Two calls do not count:
 `conversation.ask_user` once its result has `user` or `platform` trust (the
 owner's answer, or the server-authored sign-in resumption), and `artifact.export`,
-whose result holds only platform identifiers. A refusal names a closed,
+whose result holds only platform identifiers. ADR-0300 also exempts the platform
+clock. A principal's interactive review on the selected Chase card activity
+dashboard has a narrower permission for named navigation, date filters and search
+after run bookkeeping; the isolated browser checks the same view and controls
+again and disallows document navigation and pings during that action. Other site
+paths, named consequences and other non-browser tools remain excluded.
+A refusal names a closed,
 content-free reason, `browser.research.<reason>`. The approval record keeps it
 as `research_not_covered`.
 
@@ -1874,7 +1886,9 @@ the executor's conservative pre-tool effect watermark or authentication checks.
 
 A stale observation failure permits one separately audited fresh read, at most
 three automatic recovery reads per run, within tool and run budgets and deadlines.
-It never permits action replay. The original failure remains visible alongside
+When a worker recovers a dispatched `browser.act` whose outcome was never recorded,
+it uses one of these reads to inspect the page. The invocation stays uncertain.
+Recovery never permits action replay. The original failure remains visible alongside
 any fresh read evidence. Authentication challenges discard references and require
 owner-controlled sign-in. The runtime may suspend for that owner action twice;
 the failed call is already complete and is not replayed on resume. Existing

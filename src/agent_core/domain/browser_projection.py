@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent_core.domain.browser import BrowserObservation
+from agent_core.domain.browser_download import EXPORT_TIMEOUT_GUIDANCE
 from agent_core.domain.messages import ContentPart, FileReferencePart, TextPart
 from agent_core.domain.tool_output import content_bytes
 
@@ -48,6 +49,8 @@ def browser_context_projection(
     # ADR-0294: the note is how the model reaches a saved file, so it is never omitted.
     if isinstance(structured.get("saved_file"), dict):
         payload["saved_file"] = structured["saved_file"]
+        if structured["saved_file"].get("reason") == "timed_out":
+            payload["export_recovery"] = EXPORT_TIMEOUT_GUIDANCE
     if observation.interruption is not None:
         payload["interruption"] = observation.interruption
     if observation.readiness is not None:
@@ -121,6 +124,29 @@ def browser_context_projection(
 
     def fits() -> bool:
         return len(content_bytes(content())) <= budget
+
+    def omitted(guidance: bool) -> dict[str, Any]:
+        note: dict[str, Any] = {
+            "observation_omitted": True,
+            "reason": "inline_budget_too_small",
+            "elements": [],
+        }
+        if isinstance(structured.get("saved_file"), dict):
+            note["saved_file"] = structured["saved_file"]
+            if guidance:
+                note["export_recovery"] = EXPORT_TIMEOUT_GUIDANCE
+        return note
+
+    # ADR-0300 decision 3: a timed-out export's guidance outranks the page, which a
+    # later read restores, but only where the omitted note can carry it. Decide that
+    # before any page field is cut, so a page that must drop it loses nothing else.
+    if "export_recovery" in payload:
+        page = payload
+        payload = omitted(guidance=True)
+        guidance_fits = fits()
+        payload = page
+        if not guidance_fits:
+            payload.pop("export_recovery")
 
     # Keep scope, version, all limits and omission counts inline. Detailed
     # scan counters live in the canonical artifact at small budgets (ADR-0163).
@@ -220,14 +246,13 @@ def browser_context_projection(
     if "extraction" in payload and not fits():
         payload.pop("extraction")
         payload["coverage"]["omitted_fields"].append("extraction")
+
+    if not fits() and "export_recovery" in payload:
+        # The guidance outranks the page, and it was kept only if this note fits.
+        payload = omitted(guidance=True)
+        return content()
     if not fits():
-        payload = {
-            "observation_omitted": True,
-            "reason": "inline_budget_too_small",
-            "elements": [],
-        }
-        if isinstance(structured.get("saved_file"), dict):
-            payload["saved_file"] = structured["saved_file"]
+        payload = omitted(guidance=False)
         return content() if fits() else None
 
     if "extraction" in payload and observation.extraction is not None:

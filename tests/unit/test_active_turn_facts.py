@@ -157,3 +157,18 @@ def test_a_pending_or_untrusted_answer_still_counts() -> None:
 
     assert pending.tool_names == frozenset({"conversation.ask_user", "browser.act"})
     assert untrusted.tool_names == frozenset({"conversation.ask_user", "browser.act"})
+
+
+def test_a_clock_read_still_counts_as_another_tool_in_the_turn() -> None:
+    """The Milestone 10 gate: only the card activity exception admits a clock read."""
+    facts = _active_turn_facts(
+        checkpoint(
+            user("Review the past year's card transactions"),
+            call("system.current_time", {}, 0),
+            call("context.update_working_state", {"next_action": "Choose a date range"}, 1),
+            call("browser.act", {"kind": "click"}, 2),
+        )
+    )
+    assert facts.tool_names == frozenset(
+        {"browser.act", "context.update_working_state", "system.current_time"}
+    )
