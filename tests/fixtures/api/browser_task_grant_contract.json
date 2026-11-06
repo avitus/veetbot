@@ -50,7 +50,8 @@
           "summary": "Clicks and typing on www.duolingo.com/lesson for 30 minutes, up to 200 actions. Passwords and one-time codes are never typed. Veetbot recognises payments, purchases, subscriptions and trials, account and settings changes, messages and posts, deletions, and signing out by the website's labels, and asks again for those. Stop this at any time."
         },
         "task_grant_id": null,
-        "task_grant_not_covered": null
+        "task_grant_not_covered": null,
+        "request_grant_offer": null
       }
     },
     {
@@ -101,7 +102,8 @@
           "summary": "Clicks and typing on www.duolingo.com/lesson for 30 minutes, up to 200 actions. Passwords and one-time codes are never typed. Veetbot recognises payments, purchases, subscriptions and trials, account and settings changes, messages and posts, deletions, and signing out by the website's labels, and asks again for those. Stop this at any time."
         },
         "task_grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
-        "task_grant_not_covered": null
+        "task_grant_not_covered": null,
+        "request_grant_offer": null
       }
     },
     {
@@ -141,7 +143,8 @@
         "task_grant_not_covered": {
           "grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
           "reason": "browser.task_grant.excluded.payment"
-        }
+        },
+        "request_grant_offer": null
       }
     },
     {
@@ -177,7 +180,8 @@
         "decision": null,
         "task_grant_offer": null,
         "task_grant_id": null,
-        "task_grant_not_covered": null
+        "task_grant_not_covered": null,
+        "request_grant_offer": null
       }
     },
     {
@@ -204,7 +208,8 @@
         "decision": null,
         "task_grant_offer": null,
         "task_grant_id": null,
-        "task_grant_not_covered": null
+        "task_grant_not_covered": null,
+        "request_grant_offer": null
       }
     }
   ],

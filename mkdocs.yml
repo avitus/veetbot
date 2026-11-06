@@ -438,4 +438,5 @@ nav:
       - "ADR-0299: The context names the documents on file": adr/0299-the-context-names-the-documents-on-file.md
       - "ADR-0300: Card activity reads and CSV exports": adr/0300-card-activity-reads-and-csv-exports.md
       - "ADR-0301: Email threads read as conversations": adr/0301-email-threads-read-as-conversations.md
+      - "ADR-0302: One approval for a website request": adr/0302-one-approval-for-a-website-request.md
   - Changelog: changelog.md

@@ -1500,6 +1500,44 @@ async def test_text_sent_while_no_challenge_is_visible_is_not_sign_in_evidence()
     page.keyboard.type.assert_awaited_once_with("synthetic-entry")
 
 
+async def test_once_sign_in_entry_is_recorded_later_keys_skip_the_page_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scan only sets a mark that stays set, so repeating it per key only slows typing."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    runtime = ceremony_runtime(page)
+    scans = 0
+
+    async def challenge_visible(_: object) -> bool:
+        nonlocal scans
+        scans += 1
+        return True
+
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", challenge_visible)
+
+    for character in "abc":
+        await runtime.interactive_event(BrowserInteractiveEvent(kind="text", text=character))
+
+    assert scans == 1
+    assert runtime._sign_in_entered is True
+    assert [call.args for call in page.keyboard.type.await_args_list] == [("a",), ("b",), ("c",)]
+
+
+async def test_the_remote_view_frame_is_a_compressed_picture_of_the_page() -> None:
+    """A lossless frame of a whole page was slow to make and to send once a second."""
+    page = FakeCeremonyPage("https://www.duolingo.com/?isLoggingIn=true")
+    page.screenshot = AsyncMock(return_value=b"\xff\xd8synthetic")  # type: ignore[attr-defined]
+    runtime = ceremony_runtime(page)
+
+    frame = await runtime.interactive_frame()
+
+    assert frame == b"\xff\xd8synthetic"
+    options = page.screenshot.await_args.kwargs  # type: ignore[attr-defined]
+    assert options["type"] == "jpeg"
+    assert 70 <= options["quality"] <= 90
+    assert options["scale"] == "css"
+
+
 async def test_sent_text_reaches_the_page_as_key_presses_not_a_paste() -> None:
     """Websites score a login whose fields fill with no keyboard events as automated.
 

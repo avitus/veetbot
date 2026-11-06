@@ -2386,7 +2386,8 @@ written by the process that received it. A role that refuses provider
 credentials refuses `SVP_CREDENTIAL_FILE`.
 
 **The state file.** One JSON object with exactly `version` (1), `client_id`,
-`client_secret`, `refresh_token`, `access_token` and `expires_at`. The package
+`refresh_token`, `access_token` and `expires_at`, plus `client_secret` only
+for a confidential client registered before 2026-11-06. The package
 refuses a file that is linked, readable by group or other, larger than 64 KiB,
 or shaped differently, with `svp.credential_invalid`. Its directory must be
 writable by the service user, because the package creates a lock file and a
@@ -2460,10 +2461,13 @@ untrusted.
 **The ceremony.** `python -m svp_mcp bootstrap --output-file <new absolute
 path>` prints a data-use notice and continues only on the exact input
 `CONTINUE`; until then nothing is sent to the service. It then registers a
-confidential client for the loopback redirect
-`http://127.0.0.1:8791/callback`, opens the authorization page with a PKCE
-S256 challenge, a random state and the service's resource indicator, and
-exchanges the code. It then fetches the OpenAPI document with the new token,
+public client (`token_endpoint_auth_method` `none`, no secret) for the
+loopback redirect `http://127.0.0.1:8791/callback`; since 2026-11-06 the
+service registers only public and `private_key_jwt` clients, and PKCE is
+what binds the code to the ceremony. A secret the service still issues is
+kept and sent with every grant request. It opens the authorization page with
+a PKCE S256 challenge, a random state and the service's resource indicator,
+and exchanges the code. It then fetches the OpenAPI document with the new token,
 and writes the state file, owner-only and never over an existing path, only
 if the service issued a refresh token and the API neither refused the token
 nor failed. It prints the path and the number of read operations, and nothing

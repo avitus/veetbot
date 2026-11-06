@@ -359,7 +359,8 @@ async def test_a_remote_sign_in_opens_a_page_that_keeps_moving(tmp_path: Path, p
         frame = await first_frame(service, ceremony.id, capability)
         await service.sessions.cancel_authentication(ceremony.id, OWNER)
 
-    assert frame.startswith(b"\x89PNG")
+    # The surface's frames are JPEG, smaller and quicker to make than PNG.
+    assert frame.startswith(b"\xff\xd8\xff")
 
 
 async def test_a_remote_sign_in_finishes_on_a_page_that_keeps_moving(tmp_path: Path) -> None:

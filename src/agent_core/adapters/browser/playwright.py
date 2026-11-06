@@ -313,9 +313,10 @@ VirtualDisplayFactory = Callable[[], VirtualDisplay | None]
 class _DownloadWindow:
     """One act's chance to save one file; it closes when the act returns (ADR-0294).
 
-    Only a click or key press no grant authorized is ``approved``, and only a file
-    from the login's origins takes the slot. Any other file is cancelled, and its
-    refusal is reported if nothing was saved.
+    Only a click or key press with no constraint, or one a request grant
+    authorized (ADR-0302), is ``approved``; a task or research grant never is.
+    Only a file from the login's origins takes the slot. Any other file is
+    cancelled, and its refusal is reported if nothing was saved.
     """
 
     approved: bool
@@ -540,7 +541,9 @@ class PythonPlaywrightRuntime:
         # every document load and ping must stay inside, and whether the fence
         # refused the page's own document (ADR-0129).
         self._card_activity_fence = False
-        self._document_fence: tuple[str, str] | None = None
+        # The origins and path prefix a grant-authorized act may load documents
+        # in; a prefix of None (ADR-0302 request grant) allows any path.
+        self._document_fence: tuple[frozenset[str], str | None] | None = None
         self._fence_refused_page = False
         self._download_window: _DownloadWindow | None = None
         self._downloads_path = ""
@@ -777,9 +780,12 @@ class PythonPlaywrightRuntime:
         fence = self._document_fence
         if fence is None:
             return True
-        origin, path_prefix = fence
-        if _origin_or_none(url) != origin:
+        origins, path_prefix = fence
+        if _origin_or_none(url) not in origins:
             return False
+        if path_prefix is None:
+            # ADR-0302: a request grant covers the login's sites, any path.
+            return True
         path = urlsplit(url).path
         return (
             path_prefix == "/" or path_is_within_prefix(path, path_prefix)
@@ -1544,11 +1550,14 @@ class PythonPlaywrightRuntime:
         documents_before = self._main_frame_navigations
         starts_files = action.kind in _FILE_ACTION_KINDS
         names_a_file = starts_files and self._control_names_a_file(action.ref)
+        # ADR-0294 and ADR-0302: an individually approved act, or one the
+        # owner allowed for the whole request, may save one file.
+        file_approved = constraint is None or constraint.grant_kind == "request"
         window = _DownloadWindow(
-            approved=constraint is None and starts_files,
+            approved=file_approved and starts_files,
             export_origin=(
                 _origin_or_none(page.url)
-                if constraint is None
+                if file_approved
                 and starts_files
                 and action.ref in self._export_controls
                 and _origin_allowed(page.url, self._allowed_origins)
@@ -1563,9 +1572,11 @@ class PythonPlaywrightRuntime:
         # takes its refusal with it.
         self._fence_refused_page = False
         if constraint is not None and constraint.path_prefix is not None:
-            self._document_fence = (constraint.origins[0], constraint.path_prefix)
+            self._document_fence = (frozenset({constraint.origins[0]}), constraint.path_prefix)
         elif constraint is not None and constraint.grant_kind == "research":
-            self._document_fence = (constraint.origins[0], "/")
+            self._document_fence = (frozenset({constraint.origins[0]}), "/")
+        elif constraint is not None and constraint.grant_kind == "request":
+            self._document_fence = (frozenset(constraint.origins), None)
         self._card_activity_fence = constraint is not None and constraint.card_activity_only
         draft_binding = None
         if approved_editable:
@@ -1973,8 +1984,13 @@ class PythonPlaywrightRuntime:
         return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
 
     async def interactive_frame(self) -> bytes:
+        """One JPEG frame of the page for the owner's remote sign-in surface."""
+
+        # A compressed frame is several times smaller and quicker to make than a
+        # lossless one, which the surface redraws several times a second.
         return await self._current_page().screenshot(
-            type="png",
+            type="jpeg",
+            quality=80,
             animations="disabled",
             caret="initial",
             scale="css",
@@ -1988,8 +2004,9 @@ class PythonPlaywrightRuntime:
         elif event.kind == "text":
             assert event.text is not None
             # Checked before the text lands so a failed check loses no input.
-            # Only the fact of entry is kept, never the text itself.
-            if await self._sign_in_challenge_visible(page):
+            # Only the fact of entry is kept, never the text itself. The mark stays
+            # set until the runtime closes, so once set no later key repeats the scan.
+            if not self._sign_in_entered and await self._sign_in_challenge_visible(page):
                 self._sign_in_entered = True
             # The user typed each character, so each arrives as a key press;
             # a field filled with no keyboard events is scored as automated.

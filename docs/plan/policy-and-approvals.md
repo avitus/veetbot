@@ -184,8 +184,17 @@ something unwelcome.
 class ApprovalResolutionType(str, Enum):
     APPROVE_ONCE = "approve_once"
     APPROVE_FOR_TASK = "approve_for_task"
+    APPROVE_FOR_REQUEST = "approve_for_request"
     DENY = "deny"
 ```
+
+`APPROVE_FOR_REQUEST` (ADR-0302) is valid only for a `browser.act` approval
+that carries a `request_grant_offer`. It resolves the approval to `APPROVED`,
+and the approval itself becomes the grant for the rest of its run on the
+chat's signed-in website, as specified in
+[browser-automation.md](browser-automation.md). It requires
+`browser.grant.write` as well as `approval.resolve`, and no table or route is
+added.
 
 `APPROVE_FOR_TASK` (ADR-0129, accepted by the owner 2026-09-25) is valid only
 for a `browser.act` approval that carries a server-authored task-grant offer
@@ -1337,6 +1346,8 @@ call the same methods are Milestone 4.
 
 ADR-0129 later added one optional body field, `task_grant`, which repeats the
 offered origin and path prefix and is accepted only with `approve_for_task`.
+ADR-0302 added `request_grant`, which repeats the offered profile id and is
+accepted only with `approve_for_request`.
 That decision also requires `browser.grant.write`, checked by the application
 service before any read; the route's declared scope stays `approval.resolve`.
 
@@ -1636,7 +1647,7 @@ policy remain enforced. An uncertain write is not automatically repeated.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
 arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
 and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
-matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:624);
+matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:633);
 the arm holds that decision under every profile, so no profile can turn an
 unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent

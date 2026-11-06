@@ -25,7 +25,6 @@ from svp_mcp.constants import (
 from svp_mcp.credential import read_state
 
 NOW = 1_800_000_000.0
-SECRET = "-".join(("client", "value"))
 DOCUMENT: dict[str, Any] = {
     "paths": {"/v1/a": {"get": {}}, "/v1/b": {"get": {}, "post": {}}, "/v1/c": {"post": {}}}
 }
@@ -48,7 +47,9 @@ class Service:
         self.requests.append(request)
         url = str(request.url)
         if url == REGISTRATION_ENDPOINT:
-            return httpx.Response(201, json={"client_id": "client-1", "client_secret": SECRET})
+            return httpx.Response(
+                201, json={"client_id": "client-1", "token_endpoint_auth_method": "none"}
+            )
         if url == TOKEN_ENDPOINT:
             grant: dict[str, object] = {
                 "access_token": "access-1",
@@ -108,11 +109,11 @@ def test_the_ceremony_registers_signs_in_proves_the_grant_then_writes_it(tmp_pat
     assert authorization["redirect_uri"] == LOOPBACK_REDIRECT_URI
     assert len(authorization["state"]) >= 32
     assert exchange["code"] == "code-1"
+    assert "client_secret" not in exchange
     assert service.requests[2].headers["authorization"].split() == ["Bearer", "access-1"]
     assert read_state(output) == {
         "version": 1,
         "client_id": "client-1",
-        "client_secret": SECRET,
         "refresh_token": "refresh-1",
         "access_token": "access-1",
         "expires_at": NOW + 3600,
@@ -255,7 +256,8 @@ def test_the_bootstrap_command_prints_no_secret(
     text = printed.out + printed.err
     assert str(output) in text and "2 read operations" in text
     state = json.loads(output.read_text(encoding="utf-8"))
-    for secret in (state["client_secret"], state["refresh_token"], state["access_token"]):
+    assert "client_secret" not in state
+    for secret in (state["refresh_token"], state["access_token"]):
         assert secret not in text
 
 

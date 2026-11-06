@@ -1450,19 +1450,21 @@ memory.recall.limited        context-engine.md, ADR-0282
 knowledge.document.ingested  knowledge-documents.md
 browser.task_grant.created   browser-automation.md, ADR-0129
 browser.task_grant.ended     browser-automation.md, ADR-0129
+browser.request_grant.created  browser-automation.md, ADR-0302
 records.series.created       owner-records.md, ADR-0239
 records.entry.appended       owner-records.md, ADR-0239
 records.entry.deleted        owner-records.md, ADR-0239
 records.series.deleted       owner-records.md, ADR-0239
 ```
 
-Twenty-four in Section 6.8 plus these thirty-eight is the whole vocabulary
-of session-scoped events: sixty-two persisted event types. One of them,
+Twenty-four in Section 6.8 plus these thirty-nine is the whole vocabulary
+of session-scoped events: sixty-three persisted event types. One of them,
 `memory.recall.limited`, was introduced by ADR-0282 and is appended by the
 loop when a build step goes without automatic recall; every other one
 arrived with the document that owns it. The four `records.*` types arrived
 with Milestone 34 and are appended to the run's session in the same unit of
-work as the record write.
+work as the record write. `browser.request_grant.created` (ADR-0302) is
+appended with `approval.resolved` when the owner allows a request.
 
 Two of the original eighteen were declared after this consolidation was written and
 never folded into it. `mcp.server.reauthenticated` sits in the same
@@ -1481,8 +1483,8 @@ the run, under a span root that is explicitly not `agent.run`. A harness
 event has no session, and `events.session_id` is `NOT NULL`. They are event
 types by every other measure and they cannot be rows in `events` as the
 schema stands — the same wall `multi-device-and-surfaces.md` hits for
-device lifecycle events and leaves open. Sixty-two plus these four is
-sixty-six declared types, of which sixty-two have somewhere to be
+device lifecycle events and leaves open. Sixty-three plus these four is
+sixty-seven declared types, of which sixty-three have somewhere to be
 stored.
 
 Two ownership assignments close gaps that were nobody's:

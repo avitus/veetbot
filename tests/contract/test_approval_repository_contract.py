@@ -11,6 +11,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
+from agent_core.domain.browser_request_grants import BrowserRequestGrantOffer
 from agent_core.domain.browser_task_grants import task_grant_id_for_approval
 from agent_core.domain.policies import (
     ActionKind,
@@ -153,11 +154,52 @@ async def assert_approve_for_task_resolves_to_approved(
     assert once.state is ApprovalResolutionState.ALREADY_RESOLVED_DIFFERENTLY
 
 
+REQUEST_OFFER = BrowserRequestGrantOffer(
+    profile_id=UUID(int=93),
+    profile_generation=2,
+    origins=("https://secure.example",),
+    summary="Allow Veetbot to keep working on secure.example for this request.",
+)
+
+
+async def assert_approve_for_request_keeps_its_offer(
+    repository: ApprovalRepository, approval_id: UUID, owner: Principal
+) -> None:
+    """ADR-0302: the stored offer and the approve_for_request resolution
+    survive a reload, and the approval is the grant, so it names no task grant."""
+
+    first = await repository.resolve(
+        approval_id, owner, ApprovalResolutionType.APPROVE_FOR_REQUEST, None
+    )
+    stored = await repository.get(approval_id, owner)
+    same = await repository.resolve(
+        approval_id, owner, ApprovalResolutionType.APPROVE_FOR_REQUEST, None
+    )
+
+    assert first.state is ApprovalResolutionState.APPLIED
+    assert (stored.status, stored.resolution, stored.task_grant_id) == (
+        ApprovalStatus.APPROVED,
+        ApprovalResolutionType.APPROVE_FOR_REQUEST,
+        None,
+    )
+    assert stored.request_grant_offer == REQUEST_OFFER
+    assert same.state is ApprovalResolutionState.ALREADY_RESOLVED_IDENTICALLY
+
+
 async def test_approve_for_task_resolves_to_approved() -> None:
     repository = InMemoryApprovalRepository(FixedClock(NOW))
     created = await repository.create(request())
 
     await assert_approve_for_task_resolves_to_approved(repository, created.id, principal())
+
+
+async def test_approve_for_request_keeps_its_offer() -> None:
+    repository = InMemoryApprovalRepository(FixedClock(NOW))
+    created = await repository.create(
+        request().model_copy(update={"request_grant_offer": REQUEST_OFFER})
+    )
+
+    await assert_approve_for_request_keeps_its_offer(repository, created.id, principal())
 
 
 async def test_approve_once_records_no_task_grant() -> None:

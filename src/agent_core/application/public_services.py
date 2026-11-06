@@ -28,6 +28,7 @@ from agent_core.application.browser_offers import (
     prepare_website_offer,
     record_website_offer,
 )
+from agent_core.application.browser_request_grants import RequestGrantResolution
 from agent_core.application.browser_task_grants import (
     TaskGrantResolution,
     read_task_grant_context,
@@ -73,6 +74,11 @@ from agent_core.domain.browser import (
     sign_in_outcome_unrecorded,
 )
 from agent_core.domain.browser_act_views import session_allows_task_grant
+from agent_core.domain.browser_request_grants import (
+    REQUEST_GRANT_CREATED_EVENT,
+    REQUEST_GRANT_DURATION,
+    RequestGrantEcho,
+)
 from agent_core.domain.browser_task_grants import (
     TASK_GRANT_DURATION,
     TASK_GRANT_MAX_ACTIONS,
@@ -293,6 +299,7 @@ def _approval_view(approval: ApprovalRequest) -> ApprovalView:
         task_grant_offer=approval.task_grant_offer,
         task_grant_id=approval.task_grant_id,
         task_grant_not_covered=approval.task_grant_not_covered,
+        request_grant_offer=approval.request_grant_offer,
     )
 
 
@@ -1823,6 +1830,7 @@ class PublicApprovalService:
         resume_waiting_run: ResumeWaitingRun,
         self_approval_enabled: bool,
         task_grants: TaskGrantResolution | None = None,
+        request_grants: RequestGrantResolution | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
@@ -1830,6 +1838,7 @@ class PublicApprovalService:
         self._self_approval_enabled = self_approval_enabled
         # ADR-0129: composed only when BROWSER_TASK_GRANTS_ENABLED is set.
         self._task_grants = task_grants
+        self._request_grants = request_grants
 
     async def list(
         self,
@@ -1874,9 +1883,19 @@ class PublicApprovalService:
         reason: str | None,
         *,
         task_grant: TaskGrantEcho | None = None,
+        request_grant: RequestGrantEcho | None = None,
         lease: WorkerLease | None = None,
     ) -> ApprovalView:
         require_scope(principal, "approval.resolve")
+        if decision is ApprovalResolutionType.APPROVE_FOR_REQUEST:
+            # ADR-0302: allowing the request needs the grant scope too, checked
+            # before any read; with no request grants composed nothing is read.
+            require_scope(principal, "browser.grant.write")
+            if self._request_grants is None or request_grant is None:
+                raise _request_grant_unavailable(approval_id)
+            return await self._resolve_for_request(
+                principal, approval_id, reason, request_grant, self._request_grants
+            )
         if decision is ApprovalResolutionType.APPROVE_FOR_TASK:
             # ADR-0129: creating a task grant needs the grant scope too, checked
             # before any read; with no task grants composed nothing is read.
@@ -2099,6 +2118,130 @@ class PublicApprovalService:
             await self._dispatcher.resume(dispatch_run)
         return _approval_view(outcome.approval)
 
+    async def _resolve_for_request(
+        self,
+        principal: Principal,
+        approval_id: UUID,
+        reason: str | None,
+        echo: RequestGrantEcho,
+        resolution: RequestGrantResolution,
+    ) -> ApprovalView:
+        """ADR-0302: approve the action once and record the request grant in one
+        unit of work; any refusal leaves the approval pending."""
+
+        dispatch_run: UUID | None = None
+        async with self._uow_factory() as uow:
+            visible = await uow.approvals.get(approval_id, principal)
+            if visible.principal_id != principal.principal_id:
+                # Only the chat's owner can allow its request.
+                raise NotFoundError("approval not found")
+            if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
+                raise ConflictError(
+                    "The approval is no longer pending.",
+                    details={"status": visible.status.value},
+                )
+            if not self._self_approval_enabled:
+                raise AuthorizationError("approval requires a distinct resolver")
+            offer = visible.request_grant_offer
+            if visible.status is not ApprovalStatus.PENDING:
+                return self._already_resolved_for_request(visible, echo)
+            owner = Principal(tenant_id=visible.tenant_id, principal_id=visible.principal_id)
+            run = await uow.runs.get(visible.run_id, owner)
+            now = resolution.clock.now()
+            context = await read_task_grant_context(uow, visible.session_id, principal, now=now)
+            session, profile = context.session, context.profile
+            sign_in_open = profile is not None and sign_in_outcome_unrecorded(
+                await uow.browser_authentications.list(principal, profile_id=profile.id)
+            )
+            if (
+                visible.tool_name != "browser.act"
+                or offer is None
+                or session is None
+                or run.status is not RunStatus.WAITING_FOR_APPROVAL
+                or not session_allows_task_grant(
+                    run,
+                    session_tenant_id=session.tenant_id,
+                    session_principal_id=session.principal_id,
+                    session_metadata=session.metadata,
+                    owner_run_id=context.owner_run_id,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                )
+                or profile is None
+                or profile.id != offer.profile_id
+                or profile.status is not BrowserProfileStatus.READY
+                or profile.generation != offer.profile_generation
+                or not set(offer.origins) <= set(profile.allowed_origins)
+                or sign_in_open
+            ):
+                raise _request_grant_unavailable(approval_id)
+            if echo.profile_id != offer.profile_id:
+                raise _request_grant_offer_mismatch(approval_id)
+            outcome = await uow.approvals.resolve(
+                approval_id,
+                principal,
+                ApprovalResolutionType.APPROVE_FOR_REQUEST,
+                reason,
+            )
+            if outcome.state is not ApprovalResolutionState.APPLIED:
+                return self._already_resolved_for_request(outcome.approval, echo)
+            resolved_at = outcome.approval.resolved_at or now
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="approval.resolved",
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload={
+                        "approval_id": str(approval_id),
+                        "resolution": ApprovalResolutionType.APPROVE_FOR_REQUEST.value,
+                    },
+                )
+            )
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type=REQUEST_GRANT_CREATED_EVENT,
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload={
+                        "approval_id": str(approval_id),
+                        "profile_id": str(offer.profile_id),
+                        "origins": list(offer.origins),
+                        "expires_at": (resolved_at + REQUEST_GRANT_DURATION).isoformat(),
+                    },
+                )
+            )
+            if run.status is RunStatus.WAITING_FOR_APPROVAL:
+                await self._resume_waiting_run(uow, run)
+                dispatch_run = run.id
+        if dispatch_run is not None:
+            await self._dispatcher.resume(dispatch_run)
+        return _approval_view(outcome.approval)
+
+    @staticmethod
+    def _already_resolved_for_request(
+        approval: ApprovalRequest, echo: RequestGrantEcho
+    ) -> ApprovalView:
+        """A retry of the same allow returns the stored view; anything else
+        conflicts, naming why."""
+
+        if approval.resolution is ApprovalResolutionType.APPROVE_FOR_REQUEST:
+            offer = approval.request_grant_offer
+            if offer is not None and offer.profile_id == echo.profile_id:
+                return _approval_view(approval)
+            raise _request_grant_offer_mismatch(approval.id)
+        raise ConflictError(
+            "The approval was already resolved differently.",
+            reason="approval_already_resolved",
+            details={
+                "approval_id": str(approval.id),
+                "decision": None if approval.resolution is None else approval.resolution.value,
+            },
+        )
+
     @staticmethod
     def _already_resolved_for_task(approval: ApprovalRequest, echo: TaskGrantEcho) -> ApprovalView:
         """A retry of the same allow returns the stored view; anything else
@@ -2122,6 +2265,26 @@ def _task_grant_unavailable(approval_id: UUID) -> ConflictError:
     return ConflictError(
         "Allow for this task is not available.",
         reason="task_grant_unavailable",
+        details={"approval_id": str(approval_id)},
+    )
+
+
+def _request_grant_unavailable(approval_id: UUID) -> ConflictError:
+    """The approval carries no request offer to accept."""
+
+    return ConflictError(
+        "Allow for this request is not available.",
+        reason="request_grant_unavailable",
+        details={"approval_id": str(approval_id)},
+    )
+
+
+def _request_grant_offer_mismatch(approval_id: UUID) -> ConflictError:
+    """The echoed profile is not the one the approval offered."""
+
+    return ConflictError(
+        "The request permission does not match the one offered.",
+        reason="request_grant_offer_mismatch",
         details={"approval_id": str(approval_id)},
     )
 

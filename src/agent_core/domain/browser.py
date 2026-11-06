@@ -851,7 +851,9 @@ class BrowserDispatchConstraint(BaseModel):
     """What a grant-authorized act may do; the runtime uses it only to refuse.
 
     The grant kind fixes the other fields: a task grant has one origin, a path
-    prefix, an ``unknown`` ceiling and a 256-character text cap; a standing
+    prefix, an ``unknown`` ceiling and a 256-character text cap; a request
+    grant (ADR-0302) has the login's origins, no prefix, an ``unknown`` ceiling,
+    a 256-character text cap and whether free text may be typed; a standing
     grant has a ``routine`` ceiling and neither prefix nor text cap. Specific
     Follow consent has the exact X origin, handle and profile path. Other field
     combinations are invalid and the isolated service answers with ``400``.
@@ -860,13 +862,16 @@ class BrowserDispatchConstraint(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     card_activity_only: bool = Field(default=False, exclude_if=lambda value: not value)
-    grant_kind: Literal["task", "standing", "follow", "research"]
+    grant_kind: Literal["task", "standing", "follow", "research", "request"]
     origins: tuple[str, ...] = Field(min_length=1, max_length=64)
     path_prefix: str | None = None
     not_after: AwareDatetime
     consequence_ceiling: Literal["routine", "unknown"]
     follow_handle: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,15}$")
     max_text_characters: Literal[256] | None
+    # ADR-0302: a request grant whose turn made no outside read may type free
+    # text; otherwise it types only dates, numbers and short searches.
+    free_text: bool = Field(default=False, exclude_if=lambda value: not value)
 
     @field_validator("origins")
     @classmethod
@@ -906,6 +911,14 @@ class BrowserDispatchConstraint(BaseModel):
                 and self.path_prefix is not None
                 and len(self.origins) == 1
             )
+        elif self.grant_kind == "request":
+            # ADR-0302: the login's origins, any path, inbound downloads; the
+            # coverage rules, not the ceiling, admit the file transfer.
+            valid = (
+                self.consequence_ceiling == "unknown"
+                and self.max_text_characters == 256
+                and self.path_prefix is None
+            )
         else:
             valid = (
                 self.consequence_ceiling == "routine"
@@ -915,6 +928,8 @@ class BrowserDispatchConstraint(BaseModel):
         if self.card_activity_only and (
             self.grant_kind != "research" or self.origins != ("https://secure.chase.com",)
         ):
+            valid = False
+        if self.free_text and self.grant_kind != "request":
             valid = False
         if not valid or (self.grant_kind != "follow" and self.follow_handle is not None):
             raise ValueError("dispatch constraint fields do not match its grant kind")

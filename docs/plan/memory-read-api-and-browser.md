@@ -193,7 +193,7 @@ because its corrections belong to reconsolidation (ADR-0224).
 the supplied ceiling, that belongs to another principal or another tenant, or
 that does not exist at all is uniformly `not_found` with status 404. This
 extends the existing cross-tenant-404 rule
-(http-api-and-streaming.md:333-351) to the ceiling, because the alternative
+(http-api-and-streaming.md:336-354) to the ceiling, because the alternative
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
@@ -327,7 +327,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1783-1800) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1794-1811) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text

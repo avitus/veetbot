@@ -244,7 +244,8 @@ public struct VeetbotAPIClient: Sendable {
         _ approvalID: UUID,
         decision: ApprovalDecision,
         reason: String? = nil,
-        taskGrant: TaskGrantEcho? = nil
+        taskGrant: TaskGrantEcho? = nil,
+        requestGrant: RequestGrantEcho? = nil
     ) async throws -> ApprovalView {
         // Approval resolution is first-decision-wins. A replay returns the
         // stored conflict, which ChatViewModel reconciles by reloading the item.
@@ -253,7 +254,10 @@ public struct VeetbotAPIClient: Sendable {
                 method: .post,
                 path: "/v1/approvals/\(approvalID.uuidString)/resolve",
                 body: try JSONEncoder.server.encode(
-                    ResolveApprovalBody(decision: decision, reason: reason, taskGrant: taskGrant)
+                    ResolveApprovalBody(
+                        decision: decision, reason: reason, taskGrant: taskGrant,
+                        requestGrant: requestGrant
+                    )
                 ),
                 retryAttempts: 2
             )
@@ -1344,16 +1348,19 @@ private struct InputBody: Encodable {
     }
 }
 
-/// `task_grant` is sent exactly with `approve_for_task` and omitted otherwise
-/// (0129-design section 15).
+/// `task_grant` is sent exactly with `approve_for_task` and `request_grant`
+/// exactly with `approve_for_request`; each is omitted otherwise
+/// (0129-design section 15, ADR-0302).
 private struct ResolveApprovalBody: Encodable {
     let decision: ApprovalDecision
     let reason: String?
     let taskGrant: TaskGrantEcho?
+    let requestGrant: RequestGrantEcho?
 
     enum CodingKeys: String, CodingKey {
         case decision, reason
         case taskGrant = "task_grant"
+        case requestGrant = "request_grant"
     }
 }
 

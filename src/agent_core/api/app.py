@@ -79,6 +79,7 @@ from agent_core.domain.browser import (
     BrowserProfileView,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_request_grants import RequestGrantEcho
 from agent_core.domain.browser_task_grants import TaskGrantEcho
 from agent_core.domain.derived_memory import DerivedMemoryView
 from agent_core.domain.devices import (
@@ -356,6 +357,9 @@ class ResolveApprovalRequest(BaseModel):
     # ADR-0129: the offer's origin and prefix, repeated exactly when the owner
     # allows the action for the task.
     task_grant: TaskGrantEcho | None = None
+    # ADR-0302: the offer's profile, repeated exactly when the owner allows
+    # the rest of the request.
+    request_grant: RequestGrantEcho | None = None
 
     @model_validator(mode="after")
     def _task_grant_only_with_approve_for_task(self) -> "ResolveApprovalRequest":
@@ -363,6 +367,10 @@ class ResolveApprovalRequest(BaseModel):
             self.decision is ApprovalResolutionType.APPROVE_FOR_TASK
         ):
             raise ValueError("task_grant is required exactly with approve_for_task")
+        if (self.request_grant is not None) != (
+            self.decision is ApprovalResolutionType.APPROVE_FOR_REQUEST
+        ):
+            raise ValueError("request_grant is required exactly with approve_for_request")
         return self
 
 
@@ -1050,6 +1058,14 @@ def create_app(
         authenticated: Annotated[Principal, secured("approval.resolve")],
     ) -> ApprovalView:
         """Resolve the exact approval through the governed decision service."""
+        if body.request_grant is not None:
+            return await services.approvals.resolve(
+                authenticated,
+                approval_id,
+                body.decision,
+                body.reason,
+                request_grant=body.request_grant,
+            )
         return await services.approvals.resolve(
             authenticated, approval_id, body.decision, body.reason, task_grant=body.task_grant
         )

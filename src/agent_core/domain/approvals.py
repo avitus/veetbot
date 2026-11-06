@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agent_core.domain.browser_request_grants import BrowserRequestGrantOffer
 from agent_core.domain.browser_task_grants import (
     RESEARCH_NOT_COVERED_REASONS,
     BrowserTaskGrantOffer,
@@ -30,12 +31,19 @@ class ApprovalResolutionType(StrEnum):
     # ADR-0129: approve the pending browser action once and create a
     # session-bound task grant from the approval's offer.
     APPROVE_FOR_TASK = "approve_for_task"
+    # ADR-0302: approve the pending browser action and allow the rest of the
+    # request on the chat's signed-in website; the approval is the grant.
+    APPROVE_FOR_REQUEST = "approve_for_request"
     DENY = "deny"
 
 
 # Resolutions that approve the pending action. Every other resolution denies.
 APPROVING_RESOLUTIONS = frozenset(
-    {ApprovalResolutionType.APPROVE_ONCE, ApprovalResolutionType.APPROVE_FOR_TASK}
+    {
+        ApprovalResolutionType.APPROVE_ONCE,
+        ApprovalResolutionType.APPROVE_FOR_TASK,
+        ApprovalResolutionType.APPROVE_FOR_REQUEST,
+    }
 )
 
 
@@ -100,6 +108,9 @@ class ApprovalRequest(BaseModel):
     task_grant_offer: BrowserTaskGrantOffer | None = None
     task_grant_not_covered: TaskGrantNotCovered | None = None
     task_grant_id: UUID | None = None
+    # ADR-0302: the request-approval offer on a browser.act card. Older
+    # records carry none.
+    request_grant_offer: BrowserRequestGrantOffer | None = None
     # ADR-0263: why research authorization refused the action, from a closed
     # content-free list. Stored for diagnosis; responses do not carry it.
     research_not_covered: str | None = None
@@ -125,6 +136,7 @@ class ApprovalPresentation(BaseModel):
     summary: str
     arguments: dict[str, Any]
     task_grant_offer: BrowserTaskGrantOffer | None = None
+    request_grant_offer: BrowserRequestGrantOffer | None = None
 
 
 class ApprovalResolutionOutcome(BaseModel):
