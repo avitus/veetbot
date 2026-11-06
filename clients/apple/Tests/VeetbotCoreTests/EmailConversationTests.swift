@@ -271,7 +271,7 @@ struct EmailThreadModeTests {
 @MainActor
 struct EmailConversationCacheTests {
     /// A two-message thread at a fixed revision.
-    private static func thread(body: String, complete: Bool) throws -> EmailThreadView {
+    private static func thread(body: String, complete: Bool, revision: Int = 4) throws -> EmailThreadView {
         let message: (String) -> [String: Any] = { id in
             [
                 "id": id, "sender": "Dana <dana@example.test>", "to": ["owner@example.test"], "cc": [],
@@ -281,7 +281,7 @@ struct EmailConversationCacheTests {
         }
         let payload: [String: Any] = [
             "id": "00000000-0000-0000-0000-000000000901", "account_id": "work", "subject": "Plan",
-            "senders": ["dana@example.test"], "updated_at": "2026-11-02T10:00:00Z", "revision": 4,
+            "senders": ["dana@example.test"], "updated_at": "2026-11-02T10:00:00Z", "revision": revision,
             "summary": "", "reason": "", "needs_reply": false, "priority": 0.5, "complete": complete,
             "messages": [message("c1"), message("c2")],
         ]
@@ -299,14 +299,23 @@ struct EmailConversationCacheTests {
         #expect(after.entries[0].own != before.entries[0].own)
     }
 
+    /// A new revision replaces the thread's older parse instead of keeping both.
+    @Test func testANewRevisionReplacesTheOlderParse() throws {
+        let older = try Self.thread(body: "First.", complete: true, revision: 7)
+        _ = EmailConversationCache.conversation(for: older, ownerAddress: "owner@example.test")
+        _ = EmailConversationCache.conversation(
+            for: try Self.thread(body: "Second.", complete: true, revision: 8), ownerAddress: "owner@example.test")
+        #expect(EmailConversationCache.parses(of: older.id) == 1)
+    }
+
     /// Resetting the Email connection drops every parsed conversation with the
     /// rest of the old connection's mail.
     @Test func testResettingTheConnectionDropsCachedConversations() throws {
         let thread = try Self.thread(body: "Kept only while connected.", complete: true)
         _ = EmailConversationCache.conversation(for: thread, ownerAddress: "owner@example.test")
-        #expect(EmailConversationCache.holds(threadID: thread.id))
+        #expect(EmailConversationCache.parses(of: thread.id) == 1)
         EmailViewModel(makeAPIClient: { nil }).resetConnection()
-        #expect(EmailConversationCache.holds(threadID: thread.id) == false)
+        #expect(EmailConversationCache.parses(of: thread.id) == 0)
     }
 }
 

@@ -1230,6 +1230,26 @@ import SwiftUI
         #expect(model.thread?.isHandled == true)
     }
 
+    /// Excluding a thread drops its parsed conversation with the selection, so
+    /// no copy of the excluded mail stays in the client (ADR-0301).
+    @Test func testExcludingAThreadDropsItsCachedConversation() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("exclude") { return (200, "{}") }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            return (200, self.threadJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        let thread = try #require(model.thread)
+        _ = EmailConversationCache.conversation(for: thread, ownerAddress: nil)
+        #expect(EmailConversationCache.parses(of: threadID) == 1)
+        await model.excludeSelectedThread()
+        #expect(model.thread == nil)
+        #expect(EmailConversationCache.parses(of: threadID) == 0)
+    }
+
     /// Counts come from the whole server collection, never the visible first page.
     @Test func testCollectionCountsAndSwitchPreserveUnsentDraft() async throws {
         let requests = EmailRequestRecorder()

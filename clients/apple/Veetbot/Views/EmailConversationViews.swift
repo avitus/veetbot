@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// Builds a thread's conversation once per revision: the thread screen
-/// re-renders on every draft keystroke and the parse is not free.
+/// re-renders on every draft keystroke and the parse is not free. It holds one
+/// parse per thread, for nine threads at most, and gives up a thread's parse
+/// when the thread changes, is excluded, or the connection resets.
 @MainActor
 enum EmailConversationCache {
     private static var built: [String: (messages: [EmailMessageView], conversation: EmailConversation)] = [:]
@@ -12,6 +14,7 @@ enum EmailConversationCache {
         let messages = thread.messages ?? []
         let key = "\(thread.id)|\(thread.revision)|\(messages.count)|\(ownerAddress ?? "")"
         if let cached = built[key], cached.messages == messages { return cached.conversation }
+        remove(threadID: thread.id)
         if built.count > 8 { built.removeAll() }
         let conversation = EmailConversation(messages: messages, ownerAddresses: Set([ownerAddress].compactMap { $0 }))
         built[key] = (messages, conversation)
@@ -21,8 +24,11 @@ enum EmailConversationCache {
     /// Drops every parse, so no mail text outlives the connection that read it.
     static func removeAll() { built.removeAll() }
 
-    /// Whether any parse of this thread is held.
-    static func holds(threadID: UUID) -> Bool { built.keys.contains { $0.hasPrefix("\(threadID)|") } }
+    /// Drops every parse of one thread, whatever its revision.
+    static func remove(threadID: UUID) { built = built.filter { !$0.key.hasPrefix("\(threadID)|") } }
+
+    /// How many parses of this thread are held: one at most.
+    static func parses(of threadID: UUID) -> Int { built.keys.filter { $0.hasPrefix("\(threadID)|") }.count }
 }
 
 /// One muted ink per writer, in the order they first wrote, with a dark-mode partner.

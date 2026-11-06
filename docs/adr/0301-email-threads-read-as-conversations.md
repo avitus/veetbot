@@ -107,8 +107,10 @@ complexity".
 - The Mac panel's thread-wide **Show original** shows the conversation with
   every message's original body, even on a complex thread, and the switch to
   **Brief** waits until it is turned off.
-- The client keeps parsed conversations for at most nine threads, reuses one
-  only while its messages are unchanged, and drops them all when the Email
-  connection resets, so no mail text outlives the connection that read it.
+- The client keeps one parsed conversation per thread for at most nine
+  threads. It reuses one only while its messages are unchanged and replaces
+  it when the thread changes. It drops a thread's parse when the owner
+  excludes the thread, and every parse when the Email connection resets, so
+  no excluded mail or old connection's mail stays in the client.
 - The owner's copies of earlier messages in the thread decide the owner's
   address when the account has no verified address yet.

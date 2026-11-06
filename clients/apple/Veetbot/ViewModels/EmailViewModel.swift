@@ -1726,6 +1726,8 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         do {
             try await api.excludeEmailThread(thread, idempotencyKey: UUID().uuidString)
+            // The excluded mail leaves the client too, even if the connection moved on.
+            EmailConversationCache.remove(threadID: thread.id)
             guard generation == connection else { return }
             edits = edits.filter { $0.value.base.threadID != thread.id }
             clearSelection()
