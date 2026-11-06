@@ -163,11 +163,49 @@ prose is removed for repeating.
 
 Native text renders the result at a comfortable line width, with external
 HTTP(S) links opened only by a user gesture and a **Show original** toggle for
-the unchanged retained body. A quoted chain folds behind **Show earlier replies**
-only when an `On … wrote:` line introduces it, it ends the message, and the
-message has text of its own above it. A reply written below a quote, a message
+the unchanged retained body. Quoted history folds behind **Show earlier replies**
+when the message has text of its own above it and the history starts one of four
+ways: an `On … wrote:` line followed only by quoted blocks; an Outlook header
+block, a paragraph that begins `From:` and continues with a `Sent:` or `Date:`
+line and a `To:` or `Subject:` line; a `-----Original Message-----` line; or an
+unquoted `On … wrote:` line that names an address, or a clock time on a date. A reply written below a Gmail quote, a message
 that is all quote, and a quote the writer introduced some other way stay in view.
-Only English attributions are recognized.
+Only English attributions and header words are recognized
+([ADR-0301](../adr/0301-email-threads-read-as-conversations.md)).
+
+A thread of two or more messages reads as a conversation (ADR-0301). Each message
+is a bubble: the owner's own mail (only messages marked `direction: sent`) on
+the right; any other mail claiming the owner's address on the left under the
+raw address with a warning that it is not in the owner's sent mail; and
+everyone else's on the left under an initials avatar and name, with day
+dividers. A bubble shows the message's own words. Its
+quoted history folds by the rule above, and trailing paragraphs repeated in the
+same writer's other messages fold too (sign-offs and signatures), as does a
+trailing confidentiality disclaimer and a forwarded copy below the writer's note.
+**Show full email** opens the whole reading text. The audience of a message is
+its sender, To, Cc and the owner. The thread's everyone is the union of the
+audiences of messages that left nobody out, so a person reached only through a
+side conversation never joins it. A message that leaves out part of everyone
+starts a side conversation: an
+amber marker names who it was addressed to and who it was not, and each of its
+bubbles carries an "Addressed to" line; none claims who can see it, and a caveat
+says Bcc recipients and mailing-list members are not shown. Markers also say who added whom and when the thread
+returns to everyone. Bcc and mailing-list members are invisible to this rule. A message
+without reader text shows its raw body as typed, never as Markdown.
+Chips above the conversation name each writer with a count and fade the other
+writers' messages when pressed; the people only copied are counted in one line.
+
+A thread is complex when three or more people wrote and it has a side
+conversation or at least eight messages. A complex thread opens on **Brief**,
+with a Conversation | Brief switch. The brief shows Veetbot's summary, each
+writer's latest point (the first non-greeting paragraph of their latest message,
+verbatim), the side conversations and who is not in each, every file sent with
+its sender, and the people only copied. Pressing a side conversation opens
+Conversation filtered to it. A thread of one message keeps the prose reader.
+
+The conversation and the brief are presentation as well: they make no model
+call, store nothing and change no route. Their stances and figures in play,
+drawn on the design, would need a model and a decision of their own.
 
 This is presentation, not a summary or rewrite: it makes no model call,
 stores no extra body copy, and never replaces drafting or memory evidence. The
