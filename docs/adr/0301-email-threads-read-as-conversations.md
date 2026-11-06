@@ -30,10 +30,10 @@ complexity".
 ## Decisions
 
 1. **A thread of two or more messages reads as a conversation.** Each message
-   is a bubble. The owner's own mail sits on the right: the server marks it
-   `direction: sent`, and a sender matching the account's address counts as
-   the owner too unless the server marks that message `direction: received`.
-   Received mail claiming the owner's address is never shown as the owner's:
+   is a bubble. The owner's own mail sits on the right: only a message the
+   server marks `direction: sent` counts as the owner's. Mail claiming the
+   owner's address with any other direction, missing included, is never
+   shown as the owner's:
    it sits on the left under the raw address with an amber warning that it
    is not in the owner's sent mail, and the brief's card for that writer
    carries the same warning. Everyone else's mail sits on the left, with an initials

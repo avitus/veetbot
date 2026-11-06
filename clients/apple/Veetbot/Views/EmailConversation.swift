@@ -100,8 +100,8 @@ struct EmailConversation {
         let briefLine: String
         /// The message had no reader text, so its raw body shows as typed, never as Markdown.
         let isPlainText: Bool
-        /// Received mail whose From is the owner's address: the server never saw
-        /// the owner send it, so it is shown as someone else's, with a warning.
+        /// Mail whose From is the owner's address but that the server did not mark
+        /// sent (received, missing or unknown): shown as someone else's, with a warning.
         let unverifiedOwner: Bool
         var id: String { message.id }
     }
@@ -218,7 +218,7 @@ struct EmailConversation {
             // The audience counts the sender as written; the side and the name
             // trust the owner only for mail the server saw the owner send.
             let sender = person(message.sender)
-            let unverifiedOwner = sender.isOwner && message.direction == "received"
+            let unverifiedOwner = sender.isOwner && message.direction != "sent"
             let author: EmailPerson
             if unverifiedOwner {
                 let claimed = EmailPerson(envelope: message.sender).address

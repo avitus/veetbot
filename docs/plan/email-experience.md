@@ -174,11 +174,11 @@ Only English attributions and header words are recognized
 ([ADR-0301](../adr/0301-email-threads-read-as-conversations.md)).
 
 A thread of two or more messages reads as a conversation (ADR-0301). Each message
-is a bubble: the owner's own mail (`direction: sent`, or a sender matching the
-account's address on a message not marked `direction: received`) on the right;
-received mail claiming the owner's address sits on the left under the raw
-address with a warning that it is not in the owner's sent mail; and everyone
-else's on the left under an initials avatar and name, with day dividers. A bubble shows the message's own words. Its
+is a bubble: the owner's own mail (only messages marked `direction: sent`) on
+the right; any other mail claiming the owner's address on the left under the
+raw address with a warning that it is not in the owner's sent mail; and
+everyone else's on the left under an initials avatar and name, with day
+dividers. A bubble shows the message's own words. Its
 quoted history folds by the rule above, and trailing paragraphs repeated in the
 same writer's other messages fold too (sign-offs and signatures), as does a
 trailing confidentiality disclaimer and a forwarded copy below the writer's note.

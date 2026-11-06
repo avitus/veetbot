@@ -241,6 +241,24 @@ struct EmailConversationTests {
         #expect(View.continuesGroup(entries[3], after: entries[3], newDay: false, marker: nil), "A writer's run still groups")
     }
 
+    /// The owner's side needs the server to say the owner sent it: a missing
+    /// or unrecognized direction on the owner's address is unverified too.
+    @Test(arguments: [nil, "draft"] as [String?])
+    func testOnlyExplicitlySentMailIsTheOwners(direction: String?) throws {
+        var unknown = Self.message("u1", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Unclear origin.")
+        unknown["direction"] = direction.map { $0 as Any } ?? NSNull()
+        let entries = EmailConversation(
+            messages: try Self.decode([
+                Self.message("u0", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Sent.", sent: true),
+                unknown,
+            ]),
+            ownerAddresses: [Self.owner]
+        ).entries
+        #expect(entries[0].isOwner)
+        #expect(entries[1].isOwner == false)
+        #expect(entries[1].unverifiedOwner)
+    }
+
     /// Names and addresses parse from the usual envelope forms.
     @Test func testPeopleParseFromEnvelopeForms() {
         #expect(EmailPerson(envelope: "\"Shalev, Yoav\" <Yoav@Meridian.example>").address == "yoav@meridian.example")
