@@ -347,3 +347,4 @@ implementation without one.
 - [ADR-0298: A new-mail slice assesses only arrivals (Accepted)](0298-new-mail-slices-assess-only-arrivals.md)
 - [ADR-0299: The context names the documents on file (Accepted)](0299-the-context-names-the-documents-on-file.md)
 - [ADR-0300: Read card activity without per-click approval and capture an approved CSV export (Proposed)](0300-card-activity-reads-and-csv-exports.md)
+- [ADR-0301: Email threads read as conversations, with a brief for complex ones (Accepted)](0301-email-threads-read-as-conversations.md)

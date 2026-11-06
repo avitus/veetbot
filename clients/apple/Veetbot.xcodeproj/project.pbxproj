@@ -108,6 +108,8 @@
 		10000000000000000000E002 /* InspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E002 /* InspectorPanel.swift */; };
 		10000000000000000000E003 /* ChatInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E003 /* ChatInspectorPanel.swift */; };
 		10000000000000000000E004 /* EmailInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E004 /* EmailInspectorPanel.swift */; };
+		10000000000000000000E302 /* EmailConversationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E302 /* EmailConversationViews.swift */; };
+		10000000000000000000E301 /* EmailConversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000E301 /* EmailConversation.swift */; };
 		10000000000000000000C351 /* ClientMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000C351 /* ClientMode.swift */; };
 		100000000000000000005100 /* CockpitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000005100 /* CockpitModels.swift */; };
 		10000000000000000000C352 /* CockpitModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000C352 /* CockpitModeView.swift */; };
@@ -237,6 +239,8 @@
 		20000000000000000000E002 /* InspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorPanel.swift; sourceTree = "<group>"; };
 		20000000000000000000E003 /* ChatInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInspectorPanel.swift; sourceTree = "<group>"; };
 		20000000000000000000E004 /* EmailInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailInspectorPanel.swift; sourceTree = "<group>"; };
+		20000000000000000000E302 /* EmailConversationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailConversationViews.swift; sourceTree = "<group>"; };
+		20000000000000000000E301 /* EmailConversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailConversation.swift; sourceTree = "<group>"; };
 		20000000000000000000C351 /* ClientMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientMode.swift; sourceTree = "<group>"; };
 		200000000000000000005100 /* CockpitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitModels.swift; sourceTree = "<group>"; };
 		20000000000000000000C352 /* CockpitModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitModeView.swift; sourceTree = "<group>"; };
@@ -437,6 +441,8 @@
 				20000000000000000000E002 /* InspectorPanel.swift */,
 				20000000000000000000E003 /* ChatInspectorPanel.swift */,
 				20000000000000000000E004 /* EmailInspectorPanel.swift */,
+				20000000000000000000E302 /* EmailConversationViews.swift */,
+				20000000000000000000E301 /* EmailConversation.swift */,
 				20000000000000000000C352 /* CockpitModeView.swift */,
 				200000000000000000005105 /* CockpitDetailView.swift */,
 				200000000000000000005104 /* CockpitWebView.swift */,
@@ -580,6 +586,8 @@
 				10000000000000000000E002 /* InspectorPanel.swift in Sources */,
 				10000000000000000000E003 /* ChatInspectorPanel.swift in Sources */,
 				10000000000000000000E004 /* EmailInspectorPanel.swift in Sources */,
+				10000000000000000000E302 /* EmailConversationViews.swift in Sources */,
+				10000000000000000000E301 /* EmailConversation.swift in Sources */,
 				10000000000000000000C351 /* ClientMode.swift in Sources */,
 				100000000000000000005100 /* CockpitModels.swift in Sources */,
 				10000000000000000000C352 /* CockpitModeView.swift in Sources */,

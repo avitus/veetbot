@@ -1,3 +1,8 @@
+# ADR-0301: On 2026-11-05 the owner asked for long email threads to be
+# readable and chose MagicPath direction A, a two-sided conversation that
+# shows each writer's own words and marks audience changes, with direction C,
+# a brief, for complex threads. Presentation only, in the Apple client; no
+# model call or route change. No milestone or gate moves.
 # ADR-0300: On 2026-11-05 the owner requested fewer approval prompts for
 # signed-in activity reads and a working Chase CSV export. The repair scopes
 # known card-activity controls to their view and admits an individually approved

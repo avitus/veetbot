@@ -905,9 +905,15 @@ under it, with the Archive in Gmail capsule and the thread menu on the line
 above. On a compact iPhone, where the thread is pushed, Archive (as an icon)
 and the thread menu join the back button in a paper navigation bar instead,
 so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
-its reason; the messages follow as prose, each under its sender's line and
-parted by hairlines, with View in People and Message details kept beside the
-sender. The Mac thread is a clean reader instead (ADR-0237; MagicPath
+its reason; a single message follows as prose under its sender's line, with
+View in People and Message details kept beside the sender. Two or more messages
+follow as a conversation (ADR-0301; MagicPath peaceful-flood-7871): the owner's
+bubbles on the right, others' on the left under an initials avatar, each showing
+only the writer's own words with **Show full email** for the rest, writer chips
+that fade the other writers, and amber markers where a side conversation leaves
+people out. A complex thread opens on **Brief** (smartly-flood-5857) with a
+Conversation | Brief switch: each writer's latest point, the side conversations,
+the files and who was only copied. The Mac thread is a clean reader instead (ADR-0237; MagicPath
 cozy-evening-6871): the account, the gist and state line, View in People,
 Message details, each message's Reading view switch, the attachment names,
 Unsubscribe and the spam flag leave it for the right panel's **Context** tab.

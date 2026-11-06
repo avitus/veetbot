@@ -1217,7 +1217,7 @@ private struct EmailThreadScreen: View {
                                 Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
                                     .accessibilityIdentifier("email.read-error")
                             }
-                            conversation(thread)
+                            conversation(thread, proxy: proxy)
                             if describesInline {
                                 EmailTeachCard(model: model, explanationFocused: $feedbackFocused)
                             }
@@ -1399,8 +1399,35 @@ private struct EmailThreadScreen: View {
         .disabled(model.isPerformingAction)
     }
 
+    /// Two or more messages read as a conversation, and a complex thread opens
+    /// on its brief (ADR-0301); a single message stays prose.
+    @ViewBuilder private func conversation(_ thread: EmailThreadView, proxy: ScrollViewProxy) -> some View {
+        if (thread.messages ?? []).count >= 2 {
+            let owner = model.accounts.first { $0.id == thread.accountID }?.emailAddress
+            EmailThreadConversationView(
+                thread: thread,
+                conversation: EmailConversationCache.conversation(for: thread, ownerAddress: owner),
+                showsOriginal: inspectorReveal?.showsOriginal,
+                showsSummary: !describesInline,
+                proxy: proxy,
+                onName: { message in
+                    if let inspectorReveal {
+                        inspectorReveal.message(message)
+                    } else {
+                        peopleLookup = .correspondent(message.sender, at: message.sentAt)
+                    }
+                },
+                onFiles: inspectorReveal.map { reveal in { reveal.attachments() } },
+                attachmentLine: { attachmentLine($0) }
+            )
+            .id(thread.id)
+        } else {
+            proseConversation(thread)
+        }
+    }
+
     /// Each message as prose under its sender's line; a hairline parts them.
-    private func conversation(_ thread: EmailThreadView) -> some View {
+    private func proseConversation(_ thread: EmailThreadView) -> some View {
         let messages = thread.messages ?? []
         return VStack(alignment: .leading, spacing: 18) {
             ForEach(messages) { message in
@@ -1981,15 +2008,13 @@ struct EmailReaderSections: Equatable {
     let current: [MarkdownContentBlock]
     let earlier: [MarkdownContentBlock]
 
-    /// Only a chain that ends the message and follows text of its own folds: a
-    /// reply written below a quote, or a message that is all quote, stays in view.
+    /// History folds only below text of the message's own. A Gmail chain must
+    /// end the message, so a reply written below a quote stays in view; an
+    /// Outlook header block or unquoted attribution folds what follows it, and
+    /// a message that is all quote stays in view (ADR-0301).
     init(markdown: String) {
         let blocks = MarkdownContentParser.parse(markdown)
-        let start = blocks.count - 2
-        if start > 0, case .paragraph(let line) = blocks[start],
-            case .blockquote = blocks[start + 1],
-            line.lowercased().hasPrefix("on "), line.lowercased().hasSuffix(" wrote:")
-        {
+        if let start = Self.historyStart(in: blocks) {
             current = Array(blocks[..<start])
             earlier = Array(blocks[start...])
         } else {
@@ -1997,10 +2022,50 @@ struct EmailReaderSections: Equatable {
             earlier = []
         }
     }
+
+    private static func historyStart(in blocks: [MarkdownContentBlock]) -> Int? {
+        guard blocks.count > 1 else { return nil }
+        for index in 1..<blocks.count {
+            guard case .paragraph(let text) = blocks[index] else { continue }
+            let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let first = lines.first?.lowercased() else { continue }
+            let rest = blocks[(index + 1)...]
+            let quotesFollow = !rest.isEmpty && rest.allSatisfy {
+                if case .blockquote = $0 { return true } else { return false }
+            }
+            if first.hasPrefix("on "), first.hasSuffix(" wrote:"), lines.count == 1,
+                case .blockquote? = rest.first
+            {
+                // Gmail's chain: only quoted blocks may follow it.
+                if quotesFollow { return index }
+                continue
+            }
+            if first.hasPrefix("on "), let wrote = first.range(of: " wrote:"),
+                namesAWriter(first[..<wrote.lowerBound])
+            {
+                return index
+            }
+            if first.hasPrefix("from:"), lines.dropFirst().contains(where: {
+                $0.lowercased().hasPrefix("sent:") || $0.lowercased().hasPrefix("date:")
+            }) {
+                return index
+            }
+            if first.range(of: #"^-{2,}\s*original message\s*-{2,}$"#, options: .regularExpression) != nil {
+                return index
+            }
+        }
+        return nil
+    }
+
+    /// An attribution, unlike prose about someone writing, names an address or a time.
+    private static func namesAWriter(_ attribution: Substring) -> Bool {
+        attribution.contains("@")
+            || attribution.range(of: #"\d{1,2}:\d{2}"#, options: .regularExpression) != nil
+    }
 }
 
 /// Native text only: links open on a gesture; remote images and HTML never load.
-private struct EmailReadingView: View {
+struct EmailReadingView: View {
     let message: EmailMessageView
     /// The whole thread's choice from the Mac panel; nil gives this message
     /// its own Reading view and Show original switch.

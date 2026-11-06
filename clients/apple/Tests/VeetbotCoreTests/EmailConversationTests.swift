@@ -1,0 +1,206 @@
+import Foundation
+import Testing
+@testable import VeetbotCore
+
+/// A long reply-all thread reads as a conversation: each message's own words,
+/// who wrote them, and who could see them (ADR-0301).
+struct EmailConversationTests {
+    private static let owner = "owner@work.example"
+    private static let dana = "Dana Moss <dana@lumen.example>"
+    private static let sean = "Sean Doyle <sean@ironwood.example>"
+    private static let yoav = "Yoav Shalev <yoav@meridian.example>"
+    private static let nate = "Nate Price <nate@bank.example>"
+
+    private static func message(
+        _ id: String, from sender: String, to: [String], cc: [String] = [], reader: String,
+        sent: Bool = false, day: Int = 2, attachments: [[String: Any]] = []
+    ) -> [String: Any] {
+        [
+            "id": id, "sender": sender, "to": to, "cc": cc, "subject": "Term sheet",
+            "body": reader, "reader_body": reader, "direction": sent ? "sent" : "received",
+            "sent_at": String(format: "2026-11-%02dT10:00:00Z", day), "complete": true,
+            "attachments": attachments,
+        ]
+    }
+
+    private static func decode(_ payloads: [[String: Any]]) throws -> [EmailMessageView] {
+        try JSONDecoder.server.decode(
+            [EmailMessageView].self, from: JSONSerialization.data(withJSONObject: payloads))
+    }
+
+    /// Five messages: a board email, a private side note, a second private
+    /// note, everyone again with a banker added, and the owner's reply.
+    private static func boardThread() throws -> EmailConversation {
+        let everyone = [owner, sean, yoav]
+        let outlookChain = "From: Dana Moss \\<dana@lumen.example>\\\nSent: Monday, November 2, 2026 5:17 PM\\\n"
+            + "To: Sean Doyle \\<sean@ironwood.example>\n\nThe whole earlier email."
+        return EmailConversation(
+            messages: try decode([
+                message("m1", from: dana, to: everyone, reader: "Hi all,\n\nThe offer is in. Can we meet Monday?", day: 1),
+                message("m2", from: sean, to: [owner],
+                        reader: "Andy,\n\nI would hold out for 30%.\n\nBest,\\\nSean\n\n" + outlookChain),
+                message("m3", from: sean, to: [owner],
+                        reader: "One more thought on the cap.\n\nBest,\\\nSean\n\n" + outlookChain),
+                message("m4", from: dana, to: [owner, sean, yoav, nate],
+                        reader: "Adding Nate from the bank.\n\nOn Mon, Nov 2, 2026 at 5:17 PM, Sean Doyle \\<sean@ironwood.example> wrote: Andy,\n\nOld text.",
+                        day: 3,
+                        attachments: [["filename": "Term sheet.pdf", "mime_type": "application/pdf", "size": 2048]]),
+                message("m5", from: "Andy Vitus <\(owner)>", to: [dana], cc: [sean, yoav, nate],
+                        reader: "Monday works.", sent: true, day: 3),
+            ]),
+            ownerAddresses: [owner])
+    }
+
+    @Test func testOwnersMessagesSitOnTheirOwnSide() throws {
+        let conversation = try Self.boardThread()
+        #expect(conversation.entries.map(\.isOwner) == [false, false, false, false, true])
+        #expect(conversation.entries[0].author.name == "Dana Moss")
+        #expect(conversation.entries[0].author.short == "Dana")
+        #expect(conversation.entries[4].author.address == Self.owner)
+    }
+
+    /// The bubble keeps what the writer added; the quoted chain, an Outlook
+    /// header block and a sign-off repeated across their messages fold away.
+    @Test func testEachMessageShowsOnlyItsOwnWords() throws {
+        let entries = try Self.boardThread().entries
+        #expect(entries[1].own == MarkdownContentParser.parse("Andy,\n\nI would hold out for 30%."))
+        #expect(entries[1].hasMore)
+        #expect(entries[2].own == MarkdownContentParser.parse("One more thought on the cap."))
+        #expect(entries[3].own == MarkdownContentParser.parse("Adding Nate from the bank."))
+        #expect(entries[0].hasMore == false)
+        #expect(entries[4].own == MarkdownContentParser.parse("Monday works."))
+    }
+
+    /// A narrower audience, a person added, and a return to everyone each
+    /// get one marker where they happen.
+    @Test func testAudienceChangesAreMarkedWhereTheyHappen() throws {
+        let entries = try Self.boardThread().entries
+        #expect(entries[0].marker == nil)
+        guard case .narrowed(let members, let hidden) = entries[1].marker else {
+            Issue.record("Sean's private note must be marked"); return
+        }
+        #expect(members.map(\.address) == ["sean@ironwood.example", Self.owner])
+        #expect(Set(hidden.map(\.address)) == ["dana@lumen.example", "yoav@meridian.example"])
+        #expect(entries[1].isPrivate)
+        #expect(entries[2].marker == nil, "The same side conversation continues without a second marker")
+        #expect(entries[2].isPrivate)
+        guard case .added(let by, let people) = entries[3].marker else {
+            Issue.record("Dana adding Nate must be marked"); return
+        }
+        #expect(by.address == "dana@lumen.example")
+        #expect(people.map(\.name) == ["Nate Price"])
+        #expect(entries[3].isPrivate == false)
+        #expect(entries[4].marker == nil)
+    }
+
+    /// Someone reached only through a side conversation never joins "everyone":
+    /// forwarding the thread to an assistant must not make every later board
+    /// email look private.
+    @Test func testASideConversationsPeopleDoNotJoinEveryone() throws {
+        let board = [Self.owner, Self.sean, Self.yoav]
+        let entries = EmailConversation(
+            messages: try Self.decode([
+                Self.message("b1", from: Self.dana, to: board, reader: "The offer is in."),
+                Self.message("b2", from: "Andy <\(Self.owner)>", to: ["Priya <priya@scale.example>"],
+                             reader: "Please add Monday.\n\nAndy\n\n> Forwarded from Dana Moss \\<dana@lumen.example>\n\nThe offer is in.",
+                             sent: true),
+                Self.message("b3", from: Self.sean, to: [Self.dana], cc: [Self.owner, Self.yoav], reader: "Thanks Dana."),
+            ]),
+            ownerAddresses: [Self.owner]
+        ).entries
+        #expect(entries[1].isPrivate)
+        #expect(entries[1].own == MarkdownContentParser.parse("Please add Monday.\n\nAndy"), "The forwarded copy folds")
+        #expect(entries[1].hasMore)
+        #expect(entries[2].isPrivate == false)
+        #expect(entries[2].marker == .widened)
+    }
+
+    @Test func testWritersAndThoseOnlyCopiedAreCounted() throws {
+        let conversation = try Self.boardThread()
+        #expect(conversation.writers.map(\.person.short) == ["Dana", "Sean", "You"])
+        #expect(conversation.writers.map(\.count) == [2, 2, 1])
+        #expect(conversation.silent.map(\.name) == ["Yoav Shalev", "Nate Price"])
+        #expect(conversation.files.map(\.attachment.filename) == ["Term sheet.pdf"])
+        #expect(conversation.files.first?.author.short == "Dana")
+    }
+
+    @Test func testSideConversationsNameWhoIsLeftOut() throws {
+        let sides = try Self.boardThread().sideConversations
+        #expect(sides.count == 1)
+        #expect(sides[0].entryIDs == ["m2", "m3"])
+        #expect(sides[0].startedBy.short == "Sean")
+        #expect(Set(sides[0].notIncluded.map(\.short)) == ["Dana", "Yoav", "Nate"])
+    }
+
+    /// A brief line skips the greeting and keeps the writer's first point.
+    @Test func testBriefLinesSkipGreetings() throws {
+        let conversation = try Self.boardThread()
+        #expect(conversation.entries[0].briefLine == "The offer is in. Can we meet Monday?")
+        #expect(conversation.entries[1].briefLine == "I would hold out for 30%.")
+        let latest = conversation.writers.map { conversation.entry(id: $0.latestID)?.briefLine }
+        #expect(latest == ["Adding Nate from the bank.", "One more thought on the cap.", "Monday works."])
+    }
+
+    /// Three or more writers plus a side conversation, or many messages, is complex;
+    /// a long exchange between two people is not.
+    @Test func testComplexityNeedsSeveralWritersAndASideConversationOrLength() throws {
+        #expect(try Self.boardThread().isComplex)
+        let pair = try Self.decode((1...10).map { index in
+            Self.message("p\(index)", from: index.isMultiple(of: 2) ? "Andy <\(Self.owner)>" : Self.dana,
+                         to: [index.isMultiple(of: 2) ? Self.dana : Self.owner], reader: "Note \(index).",
+                         sent: index.isMultiple(of: 2))
+        })
+        #expect(EmailConversation(messages: pair, ownerAddresses: [Self.owner]).isComplex == false)
+    }
+
+    @Test func testRepeatedTextShareCountsWhatFolded() throws {
+        let conversation = try Self.boardThread()
+        #expect(conversation.hiddenShare > 0.4)
+        #expect(conversation.hiddenShare < 1)
+    }
+
+    @Test func testPeopleParseFromEnvelopeForms() {
+        #expect(EmailPerson(envelope: "\"Shalev, Yoav\" <Yoav@Meridian.example>").address == "yoav@meridian.example")
+        #expect(EmailPerson(envelope: "\"Shalev, Yoav\" <Yoav@Meridian.example>").name == "Shalev, Yoav")
+        #expect(EmailPerson(envelope: "sam@example.test").name == "sam@example.test")
+        #expect(EmailPerson(envelope: "sam@example.test").short == "sam")
+        #expect(EmailPerson(envelope: "Riley <riley@example.test>").initials == "R")
+        #expect(EmailPerson(envelope: "Dana Moss <dana@lumen.example>").initials == "DM")
+    }
+}
+
+/// Quoted history introduced the Outlook way folds like Gmail's (ADR-0301).
+struct EmailReaderOutlookFoldTests {
+    @Test func testOutlookHeaderBlockFoldsTheRestOfTheMessage() {
+        let own = "Thanks for this.\n\nBest,\\\nSean"
+        let chain = "From: Dana Moss \\<dana@lumen.example>\\\nSent: Monday, November 2, 2026 5:17 PM\\\n"
+            + "To: Andy \\<andy@example.com>\n\nHi Andy,\n\nThe earlier email."
+        let sections = EmailReaderSections(markdown: own + "\n\n" + chain)
+        #expect(sections.current == MarkdownContentParser.parse(own))
+        #expect(sections.earlier == MarkdownContentParser.parse(chain))
+    }
+
+    @Test func testUnquotedAttributionWithAnAddressOrTimeFolds() {
+        let own = "Adding Nate."
+        let chain = "On Mon, Nov 2, 2026 at 5:17 PM, Sean \\<sean@example.com> wrote: Andy,\n\nOld text."
+        let sections = EmailReaderSections(markdown: own + "\n\n" + chain)
+        #expect(sections.current == MarkdownContentParser.parse(own))
+        #expect(sections.earlier == MarkdownContentParser.parse(chain))
+        let original = "Intro.\n\n-----Original Message-----\n\nOld text."
+        #expect(EmailReaderSections(markdown: original).current == MarkdownContentParser.parse("Intro."))
+    }
+
+    /// The rule still never hides the message itself, nor prose that merely
+    /// mentions someone writing.
+    @Test func testOutlookFoldNeverHidesTheMessage() {
+        for markdown in [
+            "From: Dana \\<dana@example.com>\\\nSent: Monday\n\nA forward with no note.",
+            "Intro.\n\nOn Friday we met. Sam wrote:\n\nNo quote follows.",
+            "Intro.\n\nFrom: the desk of Sam\n\nA letterhead, not a header block.",
+        ] {
+            let sections = EmailReaderSections(markdown: markdown)
+            #expect(sections.current == MarkdownContentParser.parse(markdown))
+            #expect(sections.earlier.isEmpty)
+        }
+    }
+}
