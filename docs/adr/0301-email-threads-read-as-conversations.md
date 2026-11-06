@@ -35,7 +35,8 @@ complexity".
    the owner too unless the server marks that message `direction: received`.
    Received mail claiming the owner's address is never shown as the owner's:
    it sits on the left under the raw address with an amber warning that it
-   is not in the owner's sent mail. Everyone else's mail sits on the left, with an initials
+   is not in the owner's sent mail, and the brief's card for that writer
+   carries the same warning. Everyone else's mail sits on the left, with an initials
    avatar and the writer's name. A writer's consecutive messages share one
    name line. Day dividers separate the days. A thread of one message keeps
    the existing prose reader, because a newsletter or a single letter reads

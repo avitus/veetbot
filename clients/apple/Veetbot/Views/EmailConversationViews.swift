@@ -327,11 +327,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
                             Text(entry.message.sentAt, format: .dateTime.hour().minute())
                                 .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                         }
-                        if entry.unverifiedOwner {
-                            Label("Uses your address, but isn't in your sent mail", systemImage: "exclamationmark.triangle")
-                                .veetType(.meta, weight: .medium).foregroundColor(AppTheme.amberText)
-                                .accessibilityIdentifier("email.conversation.unverified")
-                        }
+                        if entry.unverifiedOwner { unverifiedWarning }
                     }
                     bubble(entry)
                     attachmentLine(entry.message)
@@ -448,6 +444,13 @@ struct EmailThreadConversationView<Attachments: View>: View {
             ?? AttributedString(entry.briefLine)
     }
 
+    /// Said wherever received mail claims the owner's address, in either view.
+    private var unverifiedWarning: some View {
+        Label("Uses your address, but isn't in your sent mail", systemImage: "exclamationmark.triangle")
+            .veetType(.meta, weight: .medium).foregroundColor(AppTheme.amberText)
+            .accessibilityIdentifier("email.conversation.unverified")
+    }
+
     /// A writer's latest point, opening to a line per message.
     private func writerCard(_ writer: EmailConversation.Writer) -> some View {
         let open = openWriters.contains(writer.id)
@@ -464,6 +467,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
                             .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                     }
                 }
+                if writer.unverifiedOwner { unverifiedWarning }
                 if let latest {
                     Text(briefText(latest)).veetType(.ui).foregroundColor(AppTheme.ink)
                         .lineLimit(4).fixedSize(horizontal: false, vertical: true)

@@ -233,6 +233,7 @@ struct EmailConversationTests {
         #expect(entries[1].author.address == entries[2].author.address, "One unverified writer, whatever the name or case")
         #expect(entries[1].author.address != entries[0].author.address)
         #expect(conversation.writers.map(\.count) == [1, 2, 1])
+        #expect(conversation.writers.map(\.unverifiedOwner) == [false, true, false], "The brief warns on its card too")
         // Each unverified message keeps its own name line, so its warning is never grouped away.
         typealias View = EmailThreadConversationView<EmptyView>
         #expect(View.continuesGroup(entries[2], after: entries[1], newDay: false, marker: nil) == false)

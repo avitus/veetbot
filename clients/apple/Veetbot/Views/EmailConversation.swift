@@ -111,6 +111,8 @@ struct EmailConversation {
         let person: EmailPerson
         let count: Int
         let latestID: String
+        /// Their mail claims the owner's address but was received, never sent.
+        let unverifiedOwner: Bool
         var id: String { person.address }
     }
 
@@ -302,7 +304,8 @@ struct EmailConversation {
         }
         writers = writerOrder.compactMap { address in
             guard let person = directory[address], let tally = counts[address] else { return nil }
-            return Writer(person: person, count: tally.0, latestID: tally.1)
+            let unverified = built.contains { $0.author.address == address && $0.unverifiedOwner }
+            return Writer(person: person, count: tally.0, latestID: tally.1, unverifiedOwner: unverified)
         }
         silent = order.filter { counts[$0] == nil && $0 != ownerKey }.compactMap { directory[$0] }
 
