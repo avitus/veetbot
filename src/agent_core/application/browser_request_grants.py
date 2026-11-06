@@ -1,4 +1,4 @@
-"""One approval for a request on a signed-in website (ADR-0301).
+"""One approval for a request on a signed-in website (ADR-0302).
 
 The approval the owner resolved with ``approve_for_request`` is the grant. The
 authorizer finds it through the run's ``browser.request_grant.created`` event,

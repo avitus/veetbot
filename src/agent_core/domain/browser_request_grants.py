@@ -1,4 +1,4 @@
-"""One approval for a request on a signed-in website (ADR-0301).
+"""One approval for a request on a signed-in website (ADR-0302).
 
 The approval that the owner resolves with ``approve_for_request`` is the
 grant: it belongs to the run that answers the owner's message, covers the
@@ -39,7 +39,7 @@ REQUEST_GRANT_CREATED_EVENT: Final = "browser.request_grant.created"
 NO_REQUEST_GRANT: Final = "browser.request_grant.none"
 MAXIMUM_REQUEST_GRANT_ORIGINS: Final = 64
 
-# ADR-0301 decision 3: tools that add nothing a page could be typed from, so
+# ADR-0302 decision 3: tools that add nothing a page could be typed from, so
 # they never count as an outside read. ``artifact.export`` and an answered
 # question are already left out of the turn's tool names (ADR-0263).
 REQUEST_GRANT_BOOKKEEPING_TOOLS: frozenset[str] = frozenset(
@@ -64,7 +64,7 @@ def turn_reads_outside(turn: AuthorizationTurn | None) -> bool:
 
 
 def request_grant_summary(origins: tuple[str, ...]) -> str:
-    """The server-authored offer text (ADR-0301 decision 6)."""
+    """The server-authored offer text (ADR-0302 decision 6)."""
 
     hosts = ", ".join(origin.removeprefix("https://") for origin in origins)
     return (
@@ -119,7 +119,7 @@ def request_grant_offer(
     context: TaskGrantSessionContext,
 ) -> BrowserRequestGrantOffer | None:
     """The card's offer, or none: an owner-driven run of a chat bound to a
-    READY login, and an action the grant would itself cover (ADR-0301)."""
+    READY login, and an action the grant would itself cover (ADR-0302)."""
 
     session, profile = context.session, context.profile
     if (

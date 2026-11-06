@@ -1278,7 +1278,7 @@ private struct EmailThreadScreen: View {
                                 Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
                                     .accessibilityIdentifier("email.read-error")
                             }
-                            conversation(thread)
+                            conversation(thread, proxy: proxy)
                             if describesInline {
                                 EmailTeachCard(model: model, explanationFocused: $feedbackFocused)
                             }
@@ -1460,8 +1460,35 @@ private struct EmailThreadScreen: View {
         .disabled(model.isPerformingAction)
     }
 
+    /// Two or more messages read as a conversation, and a complex thread opens
+    /// on its brief (ADR-0301); a single message stays prose.
+    @ViewBuilder private func conversation(_ thread: EmailThreadView, proxy: ScrollViewProxy) -> some View {
+        if (thread.messages ?? []).count >= 2 {
+            let owner = model.accounts.first { $0.id == thread.accountID }?.emailAddress
+            EmailThreadConversationView(
+                thread: thread,
+                conversation: EmailConversationCache.conversation(for: thread, ownerAddress: owner),
+                showsOriginal: inspectorReveal?.showsOriginal,
+                showsSummary: !describesInline,
+                proxy: proxy,
+                onName: { message in
+                    if let inspectorReveal {
+                        inspectorReveal.message(message)
+                    } else {
+                        peopleLookup = .correspondent(message.sender, at: message.sentAt)
+                    }
+                },
+                onFiles: inspectorReveal.map { reveal in { reveal.attachments() } },
+                attachmentLine: { attachmentLine($0) }
+            )
+            .id(thread.id)
+        } else {
+            proseConversation(thread)
+        }
+    }
+
     /// Each message as prose under its sender's line; a hairline parts them.
-    private func conversation(_ thread: EmailThreadView) -> some View {
+    private func proseConversation(_ thread: EmailThreadView) -> some View {
         let messages = thread.messages ?? []
         return VStack(alignment: .leading, spacing: 18) {
             ForEach(messages) { message in
@@ -2042,15 +2069,13 @@ struct EmailReaderSections: Equatable {
     let current: [MarkdownContentBlock]
     let earlier: [MarkdownContentBlock]
 
-    /// Only a chain that ends the message and follows text of its own folds: a
-    /// reply written below a quote, or a message that is all quote, stays in view.
+    /// History folds only below text of the message's own. A Gmail chain must
+    /// end the message, so a reply written below a quote stays in view; an
+    /// Outlook header block or unquoted attribution folds what follows it, and
+    /// a message that is all quote stays in view (ADR-0301).
     init(markdown: String) {
         let blocks = MarkdownContentParser.parse(markdown)
-        let start = blocks.count - 2
-        if start > 0, case .paragraph(let line) = blocks[start],
-            case .blockquote = blocks[start + 1],
-            line.lowercased().hasPrefix("on "), line.lowercased().hasSuffix(" wrote:")
-        {
+        if let start = Self.historyStart(in: blocks) {
             current = Array(blocks[..<start])
             earlier = Array(blocks[start...])
         } else {
@@ -2058,10 +2083,65 @@ struct EmailReaderSections: Equatable {
             earlier = []
         }
     }
+
+    /// The first block of quoted history, if one starts after text of the message's own.
+    private static func historyStart(in blocks: [MarkdownContentBlock]) -> Int? {
+        guard blocks.count > 1 else { return nil }
+        for index in 1..<blocks.count {
+            guard case .paragraph(let text) = blocks[index] else { continue }
+            let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let first = lines.first?.lowercased() else { continue }
+            let rest = blocks[(index + 1)...]
+            let quotesFollow = !rest.isEmpty && rest.allSatisfy {
+                if case .blockquote = $0 { return true } else { return false }
+            }
+            if first.hasPrefix("on "), first.hasSuffix(" wrote:"), lines.count == 1,
+                case .blockquote? = rest.first
+            {
+                // Gmail's chain: only quoted blocks may follow it.
+                if quotesFollow { return index }
+                continue
+            }
+            if first.hasPrefix("on "), let wrote = first.range(of: " wrote:"),
+                namesAWriter(first[..<wrote.lowerBound])
+            {
+                return index
+            }
+            if first.hasPrefix("from:"), isOutlookHeader(lines.dropFirst().map { $0.lowercased() }) {
+                return index
+            }
+            if first.range(of: #"^-{2,}\s*original message\s*-{2,}$"#, options: .regularExpression) != nil {
+                return index
+            }
+        }
+        return nil
+    }
+
+    /// Outlook's block names when it was sent and to whom (or about what);
+    /// a From line followed only by a date is the writer's own text.
+    private static func isOutlookHeader(_ lines: [String]) -> Bool {
+        lines.contains { $0.hasPrefix("sent:") || $0.hasPrefix("date:") }
+            && lines.contains { $0.hasPrefix("to:") || $0.hasPrefix("subject:") }
+    }
+
+    /// An attribution, unlike prose about someone writing, names an address, or
+    /// a time on a date: "On the 10:30 call, Priya wrote:" stays the writer's own.
+    private static func namesAWriter(_ attribution: Substring) -> Bool {
+        if attribution.contains("@") { return true }
+        let time = attribution.range(of: #"\b\d{1,2}:\d{2}\b"#, options: .regularExpression) != nil
+        let months = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+        let date = [
+            #"\b(19|20)\d{2}\b"#,
+            #"\b\d{1,2}/\d{1,2}/\d{2,4}\b"#,
+            #"\b(\#(months))[a-z]*\.?\s+\d{1,2}\b"#,
+            #"\b\d{1,2}\s+(\#(months))[a-z]*\b"#,
+        ].contains { attribution.range(of: $0, options: .regularExpression) != nil }
+        return time && date
+    }
 }
 
 /// Native text only: links open on a gesture; remote images and HTML never load.
-private struct EmailReadingView: View {
+struct EmailReadingView: View {
     let message: EmailMessageView
     /// The whole thread's choice from the Mac panel; nil gives this message
     /// its own Reading view and Show original switch.

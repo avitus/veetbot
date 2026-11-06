@@ -1796,7 +1796,7 @@ public final class ChatViewModel: ObservableObject {
         approvalsInFlight[approval.id] = decision
         defer { approvalsInFlight[approval.id] = nil }
         do {
-            // ADR-0301: allowing the request repeats the card's own offer.
+            // ADR-0302: allowing the request repeats the card's own offer.
             let requestGrant = decision == .approveForRequest
                 ? approval.requestGrantOffer.map(RequestGrantEcho.init(offer:))
                 : nil

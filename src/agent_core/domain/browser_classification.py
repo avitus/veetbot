@@ -134,7 +134,7 @@ _MONTHS = frozenset(
     ]
 )
 _REPORT_TYPES = frozenset({"pathology", "lab", "laboratory", "radiology", "imaging"})
-# ADR-0301: "account" beside these words names a record, not a setting.
+# ADR-0302: "account" beside these words names a record, not a setting.
 _ACCOUNT_RECORDS = frozenset(
     {"activity", "statement", "statements", "summary", "details", "history"}
 )
@@ -882,7 +882,7 @@ def dispatch_constraint_coverage(
     return _refused(consequence, "outside_prefix")
 
 
-# ADR-0301 decision 3: what a request grant may type after an outside read.
+# ADR-0302 decision 3: what a request grant may type after an outside read.
 _SHORT_VALUE_CHARACTERS = 40
 _SHORT_SEARCH_DIGITS = 4
 _DATE_FORMATS = (
@@ -983,7 +983,7 @@ def request_grant_coverage(
     disabled: bool,
     free_text: bool,
 ) -> BrowserCoverage:
-    """Whether one request approval (ADR-0301) covers ``action``.
+    """Whether one request approval (ADR-0302) covers ``action``.
 
     Any page of the login's origins qualifies, whatever its path: a signed-in
     site keeps every view under one authenticated path, so the page path says

@@ -1,4 +1,4 @@
-"""ADR-0301 decisions 2, 3 and 5: what one request approval covers.
+"""ADR-0302 decisions 2, 3 and 5: what one request approval covers.
 
 The request grant covers ordinary reading on any page of the login's origins,
 including a download into the chat. Every write the classifier names, uploads,

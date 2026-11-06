@@ -4,7 +4,7 @@ import SwiftUI
 /// names the action, the element and the page in Veetbot's words, quotes the
 /// website's own text as such, and offers Allow once, Deny, and, when the
 /// server offers it, Allow all actions for this task after a confirmation, or
-/// Allow for this request (ADR-0301) as the primary decision. Website text
+/// Allow for this request (ADR-0302) as the primary decision. Website text
 /// is always verbatim, never Markdown.
 struct BrowserActionApprovalCard: View {
     let approval: ApprovalView
@@ -109,7 +109,7 @@ struct BrowserActionApprovalCard: View {
             if approval.status.isPending, presentation.offersRequestGrant,
                 let offer = approval.requestGrantOffer
             {
-                // ADR-0301: one approval for the rest of the request is the
+                // ADR-0302: one approval for the rest of the request is the
                 // primary decision; Allow once stays beside it.
                 DenialReasonField(text: $denialReason)
                     .disabled(inFlight != nil)

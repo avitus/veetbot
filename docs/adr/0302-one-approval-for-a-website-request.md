@@ -1,4 +1,4 @@
-# ADR-0301: One approval for a request on a signed-in website
+# ADR-0302: One approval for a request on a signed-in website
 
 - Status: Proposed. The owner set the principle and its four choices on
   2026-11-05; acceptance follows the production check in Validation.

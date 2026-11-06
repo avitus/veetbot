@@ -1350,7 +1350,7 @@ private struct InputBody: Encodable {
 
 /// `task_grant` is sent exactly with `approve_for_task` and `request_grant`
 /// exactly with `approve_for_request`; each is omitted otherwise
-/// (0129-design section 15, ADR-0301).
+/// (0129-design section 15, ADR-0302).
 private struct ResolveApprovalBody: Encodable {
     let decision: ApprovalDecision
     let reason: String?

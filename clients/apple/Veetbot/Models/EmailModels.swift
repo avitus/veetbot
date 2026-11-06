@@ -115,8 +115,10 @@ public struct EmailMessageView: Codable, Identifiable, Equatable, Sendable {
     public let sentAt: Date
     public let complete: Bool
     public let attachments: [EmailAttachmentView]?
+    /// `sent` for the owner's own mail, `received` otherwise; absent on older fixtures.
+    public let direction: String?
     enum CodingKeys: String, CodingKey {
-        case id, sender, to, cc, subject, body, complete, attachments
+        case id, sender, to, cc, subject, body, complete, attachments, direction
         case sentAt = "sent_at"
         case readerBody = "reader_body"
     }

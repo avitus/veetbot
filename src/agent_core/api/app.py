@@ -357,7 +357,7 @@ class ResolveApprovalRequest(BaseModel):
     # ADR-0129: the offer's origin and prefix, repeated exactly when the owner
     # allows the action for the task.
     task_grant: TaskGrantEcho | None = None
-    # ADR-0301: the offer's profile, repeated exactly when the owner allows
+    # ADR-0302: the offer's profile, repeated exactly when the owner allows
     # the rest of the request.
     request_grant: RequestGrantEcho | None = None
 

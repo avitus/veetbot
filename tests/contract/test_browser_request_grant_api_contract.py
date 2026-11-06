@@ -1,4 +1,4 @@
-"""ADR-0301: the public boundary of one approval per request.
+"""ADR-0302: the public boundary of one approval per request.
 
 The resolve body carries ``request_grant`` exactly when the decision is
 ``approve_for_request``; the approval view carries the offer additively.

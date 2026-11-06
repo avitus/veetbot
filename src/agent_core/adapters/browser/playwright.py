@@ -541,7 +541,7 @@ class PythonPlaywrightRuntime:
         # refused the page's own document (ADR-0129).
         self._card_activity_fence = False
         # The origins and path prefix a grant-authorized act may load documents
-        # in; a prefix of None (ADR-0301 request grant) allows any path.
+        # in; a prefix of None (ADR-0302 request grant) allows any path.
         self._document_fence: tuple[frozenset[str], str | None] | None = None
         self._fence_refused_page = False
         self._download_window: _DownloadWindow | None = None
@@ -783,7 +783,7 @@ class PythonPlaywrightRuntime:
         if _origin_or_none(url) not in origins:
             return False
         if path_prefix is None:
-            # ADR-0301: a request grant covers the login's sites, any path.
+            # ADR-0302: a request grant covers the login's sites, any path.
             return True
         path = urlsplit(url).path
         return (
@@ -1549,7 +1549,7 @@ class PythonPlaywrightRuntime:
         documents_before = self._main_frame_navigations
         starts_files = action.kind in _FILE_ACTION_KINDS
         names_a_file = starts_files and self._control_names_a_file(action.ref)
-        # ADR-0294 and ADR-0301: an individually approved act, or one the
+        # ADR-0294 and ADR-0302: an individually approved act, or one the
         # owner allowed for the whole request, may save one file.
         file_approved = constraint is None or constraint.grant_kind == "request"
         window = _DownloadWindow(

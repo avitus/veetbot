@@ -243,7 +243,7 @@ class ApprovalView(BaseModel):
     task_grant_offer: BrowserTaskGrantOffer | None = None
     task_grant_id: UUID | None = None
     task_grant_not_covered: TaskGrantNotCovered | None = None
-    # ADR-0301: the request-approval offer on a browser.act card. Additive.
+    # ADR-0302: the request-approval offer on a browser.act card. Additive.
     request_grant_offer: BrowserRequestGrantOffer | None = None
 
 

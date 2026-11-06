@@ -1301,7 +1301,7 @@ async def test_task_grants_flag_off_composes_nothing(research: bool) -> None:
         standing = composition.tool_pipeline._standing_authorizer
 
     # ADR-0172 adds specific owner-action consent independently of task grants,
-    # and ADR-0301's request approval rides on research, not on this flag.
+    # and ADR-0302's request approval rides on research, not on this flag.
     from agent_core.application.browser_follow_consent import BrowserFollowConsentAuthorizer
     from agent_core.application.browser_request_grants import BrowserRequestGrantAuthorizer
     from agent_core.application.browser_research import BrowserResearchAuthorizer

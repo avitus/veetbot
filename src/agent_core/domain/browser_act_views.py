@@ -195,7 +195,7 @@ def request_grant_view_coverage(
     origins: tuple[str, ...],
     free_text: bool,
 ) -> BrowserCoverage:
-    """The worker's request-grant check of ``action`` (ADR-0301), from the
+    """The worker's request-grant check of ``action`` (ADR-0302), from the
     observation that named its element; the view must describe the action."""
 
     if view.observation is None or view.element is None:

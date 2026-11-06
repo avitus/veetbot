@@ -210,7 +210,7 @@ default-off activation flags are owned by
 situations — among them an active run already exists, an idempotency key
 was reused with a different body, an approval was resolved twice with
 different decisions, and, since ADR-0129, a task-grant approval whose offer
-is no longer available or whose repeated offer differs, and since ADR-0301
+is no longer available or whose repeated offer differs, and since ADR-0302
 the same two cases for a request approval — and a client that
 must tell them apart should not be parsing English.
 
@@ -1620,7 +1620,7 @@ clients.
 Resolution takes the decision vocabulary and nothing else.
 `approve_for_task` (ADR-0129) is valid only for a `browser.act` approval that
 carries a task-grant offer, and its body repeats the offered origin and path
-prefix. `approve_for_request` (ADR-0301) is valid only for a `browser.act`
+prefix. `approve_for_request` (ADR-0302) is valid only for a `browser.act`
 approval that carries a `request_grant_offer`, and its body repeats the
 offered profile id. An approval view carries `request_grant_offer` beside
 `task_grant_offer`: the profile id and generation, the login's origins,

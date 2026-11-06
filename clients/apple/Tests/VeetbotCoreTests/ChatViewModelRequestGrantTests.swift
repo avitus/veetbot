@@ -3,7 +3,7 @@ import Testing
 
 @testable import VeetbotCore
 
-/// ADR-0301: one approval for a request on a signed-in website. The card
+/// ADR-0302: one approval for a request on a signed-in website. The card
 /// offers "Allow for this request"; resolving it sends the offered profile,
 /// and a withdrawn offer reloads the card and says so.
 @Suite(.serialized) @MainActor struct ChatViewModelRequestGrantTests {

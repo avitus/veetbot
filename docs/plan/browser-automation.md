@@ -1380,7 +1380,7 @@ ADR-0128), a changed agent or policy version, and removal of the scope end a
 grant. `BROWSER_TASK_GRANTS_ENABLED` gates offers, `approve_for_task`, and the
 task-grant routes.
 
-### One approval for a request (ADR-0301)
+### One approval for a request (ADR-0302)
 
 A `browser.act` card in an owner-driven, top-level interactive run of a chat
 bound to a READY Website Access login offers "Allow for this request" when the

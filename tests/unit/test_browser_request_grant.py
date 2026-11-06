@@ -1,4 +1,4 @@
-"""ADR-0301: one approval for a request on a signed-in website.
+"""ADR-0302: one approval for a request on a signed-in website.
 
 The browser.act card offers "Allow for this request"; resolving it with
 ``approve_for_request`` approves the action and makes the approval the grant

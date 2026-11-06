@@ -77,7 +77,7 @@ class ApprovalService:
             # resolution service, which checks the offer and the grant scope.
             raise ValueError("approve_for_task resolves only through the public approval service")
         if resolution is ApprovalResolutionType.APPROVE_FOR_REQUEST:
-            # ADR-0301: the same holds for allowing a request.
+            # ADR-0302: the same holds for allowing a request.
             raise ValueError(
                 "approve_for_request resolves only through the public approval service"
             )

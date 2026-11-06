@@ -1,4 +1,4 @@
-"""A real Chromium honours a request grant's constraint (ADR-0301).
+"""A real Chromium honours a request grant's constraint (ADR-0302).
 
 An act the owner allowed for the whole request may save a file and move to
 another page of the login's site, whatever its path; the runtime still

@@ -1336,7 +1336,7 @@ def _task_grants_composed(settings: Settings, browser_provider: BrowserProvider)
 def _request_grants_composed(
     settings: Settings, browser_provider: BrowserProvider, ruleset: LoadedRuleset
 ) -> bool:
-    """ADR-0301: one approval per request rides on research authority (on by
+    """ADR-0302: one approval per request rides on research authority (on by
     default) and needs a provider that resolves each session's own profile."""
 
     return (

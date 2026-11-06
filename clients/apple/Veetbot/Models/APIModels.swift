@@ -525,7 +525,7 @@ public enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
     /// Approve this action and allow the offered task permission (ADR-0129).
     case approveForTask = "approve_for_task"
     /// Approve this action and the rest of the request on the chat's
-    /// signed-in website (ADR-0301).
+    /// signed-in website (ADR-0302).
     case approveForRequest = "approve_for_request"
     case deny
 
@@ -577,7 +577,7 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
     /// Why the session's active task permission did not cover this action.
     public var taskGrantNotCovered: TaskGrantNotCoveredView? = nil
     /// The one approval for the rest of the request a `browser.act` card
-    /// offers, when the server makes one (ADR-0301).
+    /// offers, when the server makes one (ADR-0302).
     public var requestGrantOffer: RequestGrantOfferView? = nil
 
     enum CodingKeys: String, CodingKey {

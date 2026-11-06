@@ -32,7 +32,7 @@ public struct BrowserActionApprovalPresentation: Equatable, Sendable {
     public let refusedNotice: String?
     public let notCoveredText: String?
     public let offersTaskGrant: Bool
-    /// Whether the card offers one approval for the rest of the request (ADR-0301).
+    /// Whether the card offers one approval for the rest of the request (ADR-0302).
     public let offersRequestGrant: Bool
 
     /// Nil unless the approval is a described `browser.act` view; an

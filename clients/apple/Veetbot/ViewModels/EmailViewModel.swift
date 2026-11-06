@@ -415,6 +415,7 @@ public final class EmailViewModel: ObservableObject {
         spamFlagErrors = [:]
         spamFlagSubmitting = []
         subscriptions.resetConnection()
+        EmailConversationCache.removeAll()
         active = false
         accounts = []
         inboxItems = []
@@ -1725,8 +1726,12 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         do {
             try await api.excludeEmailThread(thread, idempotencyKey: UUID().uuidString)
+            // The excluded mail leaves the client too, even if the connection moved on.
+            EmailConversationCache.remove(threadID: thread.id)
             guard generation == connection else { return }
             edits = edits.filter { $0.value.base.threadID != thread.id }
+            // The row goes now: a failed reload must not leave the excluded summary in view.
+            inboxItems.removeAll { $0.id == thread.id }
             clearSelection()
             await reload(preserveOrder: true)
         } catch { if generation == connection { report(error, draft: true) } }

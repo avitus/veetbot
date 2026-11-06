@@ -161,7 +161,7 @@ class BrowserActApprovalPresenter:
         ):
             context = await self._context_reader(run.session_id, principal)
         if self._request_enabled and context is not None:
-            # ADR-0301: one approval for the rest of the request.
+            # ADR-0302: one approval for the rest of the request.
             request_offer = request_grant_offer(
                 view=view,
                 action=action,

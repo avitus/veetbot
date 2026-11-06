@@ -852,7 +852,7 @@ class BrowserDispatchConstraint(BaseModel):
 
     The grant kind fixes the other fields: a task grant has one origin, a path
     prefix, an ``unknown`` ceiling and a 256-character text cap; a request
-    grant (ADR-0301) has the login's origins, no prefix, an ``unknown`` ceiling,
+    grant (ADR-0302) has the login's origins, no prefix, an ``unknown`` ceiling,
     a 256-character text cap and whether free text may be typed; a standing
     grant has a ``routine`` ceiling and neither prefix nor text cap. Specific
     Follow consent has the exact X origin, handle and profile path. Other field
@@ -869,7 +869,7 @@ class BrowserDispatchConstraint(BaseModel):
     consequence_ceiling: Literal["routine", "unknown"]
     follow_handle: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,15}$")
     max_text_characters: Literal[256] | None
-    # ADR-0301: a request grant whose turn made no outside read may type free
+    # ADR-0302: a request grant whose turn made no outside read may type free
     # text; otherwise it types only dates, numbers and short searches.
     free_text: bool = Field(default=False, exclude_if=lambda value: not value)
 
@@ -912,7 +912,7 @@ class BrowserDispatchConstraint(BaseModel):
                 and len(self.origins) == 1
             )
         elif self.grant_kind == "request":
-            # ADR-0301: the login's origins, any path, inbound downloads; the
+            # ADR-0302: the login's origins, any path, inbound downloads; the
             # coverage rules, not the ceiling, admit the file transfer.
             valid = (
                 self.consequence_ceiling == "unknown"

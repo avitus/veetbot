@@ -1888,7 +1888,7 @@ class PublicApprovalService:
     ) -> ApprovalView:
         require_scope(principal, "approval.resolve")
         if decision is ApprovalResolutionType.APPROVE_FOR_REQUEST:
-            # ADR-0301: allowing the request needs the grant scope too, checked
+            # ADR-0302: allowing the request needs the grant scope too, checked
             # before any read; with no request grants composed nothing is read.
             require_scope(principal, "browser.grant.write")
             if self._request_grants is None or request_grant is None:
@@ -2126,7 +2126,7 @@ class PublicApprovalService:
         echo: RequestGrantEcho,
         resolution: RequestGrantResolution,
     ) -> ApprovalView:
-        """ADR-0301: approve the action once and record the request grant in one
+        """ADR-0302: approve the action once and record the request grant in one
         unit of work; any refusal leaves the approval pending."""
 
         dispatch_run: UUID | None = None

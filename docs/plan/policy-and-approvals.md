@@ -188,7 +188,7 @@ class ApprovalResolutionType(str, Enum):
     DENY = "deny"
 ```
 
-`APPROVE_FOR_REQUEST` (ADR-0301) is valid only for a `browser.act` approval
+`APPROVE_FOR_REQUEST` (ADR-0302) is valid only for a `browser.act` approval
 that carries a `request_grant_offer`. It resolves the approval to `APPROVED`,
 and the approval itself becomes the grant for the rest of its run on the
 chat's signed-in website, as specified in
@@ -1346,7 +1346,7 @@ call the same methods are Milestone 4.
 
 ADR-0129 later added one optional body field, `task_grant`, which repeats the
 offered origin and path prefix and is accepted only with `approve_for_task`.
-ADR-0301 added `request_grant`, which repeats the offered profile id and is
+ADR-0302 added `request_grant`, which repeats the offered profile id and is
 accepted only with `approve_for_request`.
 That decision also requires `browser.grant.write`, checked by the application
 service before any read; the route's declared scope stays `approval.resolve`.
