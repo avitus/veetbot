@@ -259,6 +259,21 @@ struct EmailConversationTests {
         #expect(entries[1].unverifiedOwner)
     }
 
+    /// Before the account list loads, a thread with no sent mail has no owner
+    /// address to check claims against, and says so instead of staying silent.
+    @Test func testAnUnknownOwnerAddressIsReported() throws {
+        let received = try Self.decode([
+            Self.message("k1", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Claims to be you."),
+            Self.message("k2", from: Self.dana, to: [Self.owner], reader: "Reply."),
+        ])
+        #expect(EmailConversation(messages: received, ownerAddresses: []).ownerUnknown)
+        #expect(EmailConversation(messages: received, ownerAddresses: [Self.owner]).ownerUnknown == false)
+        let withSent = try Self.decode([
+            Self.message("k0", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Sent.", sent: true),
+        ]) + received
+        #expect(EmailConversation(messages: withSent, ownerAddresses: []).ownerUnknown == false)
+    }
+
     /// Names and addresses parse from the usual envelope forms.
     @Test func testPeopleParseFromEnvelopeForms() {
         #expect(EmailPerson(envelope: "\"Shalev, Yoav\" <Yoav@Meridian.example>").address == "yoav@meridian.example")

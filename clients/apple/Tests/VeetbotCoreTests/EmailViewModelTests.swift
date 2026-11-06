@@ -1269,6 +1269,8 @@ import SwiftUI
         await model.openThread(threadID)
         #expect(model.items.contains { $0.id == threadID })
         await model.excludeSelectedThread()
+        let afterExclusion = requests.snapshot.drop { !$0.url!.path.hasSuffix("exclude") }.dropFirst()
+        #expect(afterExclusion.contains { $0.url!.path.hasSuffix("threads") }, "The reload ran and failed")
         #expect(model.items.contains { $0.id == threadID } == false)
     }
 

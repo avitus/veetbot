@@ -147,6 +147,12 @@ struct EmailThreadConversationView<Attachments: View>: View {
                 .help(showsOriginal == true ? "Turn off Show original to read the brief" : "")
                 .accessibilityIdentifier("email.thread.view")
             }
+            if conversation.ownerUnknown {
+                Label("Your address hasn't loaded yet, so mail claiming to be from you can't be checked.",
+                      systemImage: "exclamationmark.triangle")
+                    .veetType(.meta).foregroundColor(AppTheme.amberText).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("email.conversation.owner-unknown")
+            }
             switch effectiveMode {
             case .conversation: conversationBody
             case .brief: brief
