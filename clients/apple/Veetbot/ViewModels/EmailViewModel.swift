@@ -466,6 +466,7 @@ public final class EmailViewModel: ObservableObject {
         saveKeys = [:]
         sendKeys = [:]
         isLoading = false
+        isReadingList = false
         isRefreshing = false
         isLoadingThread = false
         isSaving = false
@@ -507,6 +508,8 @@ public final class EmailViewModel: ObservableObject {
     /// Invalidates pending page reads and clears metadata belonging to the previous query.
     private func resetListQuery() {
         listRequest = UUID()
+        // The abandoned read can no longer clear its own flag.
+        isReadingList = false
         loadedCollectionCounts = nil
         loadedListTotal = nil
         scrollAnchor = nil

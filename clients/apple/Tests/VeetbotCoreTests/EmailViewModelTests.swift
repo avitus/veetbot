@@ -2719,6 +2719,30 @@ import SwiftUI
         #expect(model.items.map(\.id) == [arrivalID, threadID])
     }
 
+    /// A list read abandoned by a connection reset or a new list leaves paging free: the
+    /// abandoned read can no longer clear its own flag (ADR-0303).
+    @Test(arguments: [true, false]) func testAbandonedListReadDoesNotHoldPagingOff(reset: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            let reads = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+            return (200, "{\"items\":[\(self.threadJSON())],\"next_cursor\":null}", reads == 1 ? gate : nil)
+        }
+        defer {
+            gate.release()
+            model.resetConnection()
+        }
+        let read = Task { await model.reload() }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        #expect(model.isReadingList)
+        if reset { model.resetConnection() } else { model.setListView("handled") }
+        #expect(!model.isReadingList, "The abandoned read must not hold paging off")
+        gate.release()
+        await read.value
+    }
+
     @Test func testEmptyInboxPollingDoesNotRestartTheLoadingIndicator() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
