@@ -94,6 +94,8 @@ class BrowserRequestGrantOffer(BaseModel):
     @field_validator("origins")
     @classmethod
     def origins_are_exact_and_unique(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """Normalize each origin and refuse a repeated one."""
+
         normalized = tuple(normalize_browser_origin(value) for value in values)
         if len(set(normalized)) != len(normalized):
             raise ValueError("request grant origins must be unique")

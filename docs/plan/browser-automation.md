@@ -249,11 +249,12 @@ owner-requested extension and its verification requirements.
 
 ### Individually approved text-file download
 
-A click or key press through `browser.act` that carries no grant or research
-constraint holds a one-file window for as long as the act runs. A file started
+A click or key press through `browser.act` that carries no constraint, or a
+request constraint (ADR-0302), holds a one-file window for as long as the act
+runs. A file started
 inside the window is saved, whatever started it (ADR-0294 records why cause cannot
 be established); every other file is cancelled, whether a page starts it on its
-own, a navigation or read meets it, or a sign-in ceremony does. A grant-
+own, a navigation or read meets it, or a sign-in ceremony does. A task-grant-
 or research-authorized act that meets a file cancels it and reports
 `needs_approval`, whatever kind of action it was; a click or key press on a control
 that names a file waits for that file as an approved one does, so a late file is
@@ -261,10 +262,12 @@ reported too. Any other action reports only a file that starts before it settles
 the profile's origins, read from its URL, with a `blob:` URL read as the origin
 inside it. Anything else, including a third-party frame's file and a `data:` URL,
 which names no origin, is cancelled as `origin_not_allowed` and leaves the window
-open for the click's own file. Neither kind of grant covers a download: a control named with
-`download` or `export`, or a link with a `download` attribute, already reads as a
-file-transfer consequence, and a plain control that turns out to save a file is
-refused live.
+open for the click's own file. Neither a task grant nor a research grant
+covers a download: a control named with `download` or `export`, or a link with a
+`download` attribute, already reads as a file-transfer consequence, and a plain
+control that turns out to save a file is refused live. A request grant covers
+inbound downloads (see request coverage below), so its click or key press gets
+the same one-file window, with the same origin and single-file limits.
 
 The runtime admits at most 2 MiB of text: UTF-8 or Windows-1252, with no NUL byte
 and no PDF signature in the first kilobyte, normalized to UTF-8. Size is checked while the file downloads, in a private

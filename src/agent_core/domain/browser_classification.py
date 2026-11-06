@@ -906,6 +906,8 @@ _SEARCH_PUNCTUATION = frozenset(" .,'-&")
 
 
 def _calendar_date(text: str) -> bool:
+    """Whether ``text`` is a real date in one of the accepted formats."""
+
     for pattern in _DATE_FORMATS:
         try:
             datetime.strptime(text, pattern)

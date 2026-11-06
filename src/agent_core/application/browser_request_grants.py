@@ -130,6 +130,8 @@ class BrowserRequestGrantAuthorizer:
         policy: PolicyEngine,
         now: Callable[[], datetime],
     ) -> None:
+        """Keep the browser provider, store and policy the checks read."""
+
         self._provider = provider
         self._uow_factory = uow_factory
         self._policy = policy
@@ -146,6 +148,8 @@ class BrowserRequestGrantAuthorizer:
         action_deadline: datetime,
         turn: AuthorizationTurn | None = None,
     ) -> StandingAuthorization:
+        """Allow the action only when this run's request grant still covers it."""
+
         if (
             action.name != "browser.act"
             or action.target.kind != "browser_provider"
@@ -234,6 +238,8 @@ class BrowserRequestGrantAuthorizer:
 
 
 def _not_covered(approval: ApprovalRequest, reason: str) -> StandingAuthorization:
+    """A refusal naming the closed reason and the approval that holds the grant."""
+
     code = f"browser.request_grant.{reason}"
     # Content-free: a closed reason and the approval that holds the grant.
     logger.info(
@@ -248,4 +254,6 @@ def _not_covered(approval: ApprovalRequest, reason: str) -> StandingAuthorizatio
 
 
 def _view(arguments: dict[str, Any]) -> dict[str, Any]:
+    """The action's arguments as an approval card shows them."""
+
     return approval_argument_view(arguments)

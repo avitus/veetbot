@@ -2270,6 +2270,8 @@ def _task_grant_unavailable(approval_id: UUID) -> ConflictError:
 
 
 def _request_grant_unavailable(approval_id: UUID) -> ConflictError:
+    """The approval carries no request offer to accept."""
+
     return ConflictError(
         "Allow for this request is not available.",
         reason="request_grant_unavailable",
@@ -2278,6 +2280,8 @@ def _request_grant_unavailable(approval_id: UUID) -> ConflictError:
 
 
 def _request_grant_offer_mismatch(approval_id: UUID) -> ConflictError:
+    """The echoed profile is not the one the approval offered."""
+
     return ConflictError(
         "The request permission does not match the one offered.",
         reason="request_grant_offer_mismatch",

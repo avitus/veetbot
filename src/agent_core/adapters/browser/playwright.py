@@ -313,9 +313,10 @@ VirtualDisplayFactory = Callable[[], VirtualDisplay | None]
 class _DownloadWindow:
     """One act's chance to save one file; it closes when the act returns (ADR-0294).
 
-    Only a click or key press no grant authorized is ``approved``, and only a file
-    from the login's origins takes the slot. Any other file is cancelled, and its
-    refusal is reported if nothing was saved.
+    Only a click or key press with no constraint, or one a request grant
+    authorized (ADR-0302), is ``approved``; a task or research grant never is.
+    Only a file from the login's origins takes the slot. Any other file is
+    cancelled, and its refusal is reported if nothing was saved.
     """
 
     approved: bool
@@ -1983,6 +1984,8 @@ class PythonPlaywrightRuntime:
         return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
 
     async def interactive_frame(self) -> bytes:
+        """One JPEG frame of the page for the owner's remote sign-in surface."""
+
         # A compressed frame is several times smaller and quicker to make than a
         # lossless one, which the surface redraws several times a second.
         return await self._current_page().screenshot(

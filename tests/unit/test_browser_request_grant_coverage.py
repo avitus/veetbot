@@ -25,8 +25,10 @@ from agent_core.domain.browser import (
 from agent_core.domain.browser_classification import (
     classify_browser_action,
     dispatch_constraint_coverage,
+    path_is_sensitive,
     request_grant_coverage,
     short_typed_value,
+    task_grant_coverage,
 )
 
 ORIGIN = "https://secure.chase.com"
@@ -300,6 +302,40 @@ def test_account_names_a_document_beside_activity_or_statements() -> None:
         kind=click().kind, role="button", labels=("Manage account",), facts=PLAIN, option_texts=()
     )
     assert still is BrowserActionConsequence.SECURITY_CHANGE
+
+
+def test_the_account_exception_reads_one_segment_not_two() -> None:
+    """The record reading joins words inside one segment or label, never across
+    segments, so task and research grants keep refusing an account area."""
+
+    assert not path_is_sensitive("/lesson/account-details")
+    for path in ("/lesson/account/details", "/account", "/lesson/account-details/edit"):
+        assert path_is_sensitive(path), path
+    for prefix in ("/lesson", None):
+        for path, covered in (
+            ("/lesson/account-details", True),
+            ("/lesson/account/details", False),
+            ("/lesson/account-details/edit", False),
+        ):
+            coverage = task_grant_coverage(
+                action=click(),
+                page_url=f"{ORIGIN}{path}",
+                role="button",
+                labels=("Account details",),
+                facts=PLAIN,
+                option_texts=(),
+                origin=ORIGIN,
+                path_prefix=prefix,
+                disabled=False,
+            )
+            assert coverage.covered is covered, (prefix, path)
+            if not covered:
+                assert coverage.reason == "sensitive_path", (prefix, path)
+    for name in ("Edit account details", "Update account details"):
+        consequence = classify_browser_action(
+            kind=click().kind, role="button", labels=(name,), facts=PLAIN, option_texts=()
+        )
+        assert consequence is BrowserActionConsequence.SECURITY_CHANGE, name
 
 
 def constraint(**update: object) -> BrowserDispatchConstraint:
