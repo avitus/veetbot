@@ -217,6 +217,7 @@ struct EmailConversationTests {
             messages: try Self.decode([
                 Self.message("s1", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Real note.", sent: true),
                 Self.message("s2", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Wire the funds."),
+                Self.message("s4", from: "Another Name <\(Self.owner.uppercased())>", to: [Self.dana], reader: "Follow up."),
                 Self.message("s3", from: Self.dana, to: [Self.owner], reader: "Done."),
             ]),
             ownerAddresses: [Self.owner]
@@ -228,7 +229,15 @@ struct EmailConversationTests {
         #expect(entries[1].author.short != "You")
         #expect(entries[1].author.name == Self.owner)
         #expect(entries[1].marker == nil, "The forged message's audience is still the owner's")
-        #expect(conversation.writers.map(\.count) == [1, 1, 1])
+        #expect(entries[2].unverifiedOwner && entries[2].isOwner == false)
+        #expect(entries[1].author.address == entries[2].author.address, "One unverified writer, whatever the name or case")
+        #expect(entries[1].author.address != entries[0].author.address)
+        #expect(conversation.writers.map(\.count) == [1, 2, 1])
+        // Each unverified message keeps its own name line, so its warning is never grouped away.
+        typealias View = EmailThreadConversationView<EmptyView>
+        #expect(View.continuesGroup(entries[2], after: entries[1], newDay: false, marker: nil) == false)
+        #expect(View.continuesGroup(entries[1], after: entries[0], newDay: false, marker: nil) == false)
+        #expect(View.continuesGroup(entries[3], after: entries[3], newDay: false, marker: nil), "A writer's run still groups")
     }
 
     /// Names and addresses parse from the usual envelope forms.

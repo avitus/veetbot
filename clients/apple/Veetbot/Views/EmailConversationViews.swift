@@ -110,6 +110,16 @@ struct EmailThreadConversationView<Attachments: View>: View {
         Self.mode(chosen: mode, startsOn: startsOn, isComplex: conversation.isComplex, showsOriginal: showsOriginal)
     }
 
+    /// Whether a message shares the previous one's name line: same writer,
+    /// same day, no marker between them. A message claiming the owner's
+    /// address always gets its own name line, which carries its warning.
+    static func continuesGroup(
+        _ entry: EmailConversation.Entry, after previous: EmailConversation.Entry?, newDay: Bool,
+        marker: EmailConversation.Marker?
+    ) -> Bool {
+        !entry.unverifiedOwner && !newDay && marker == nil && previous?.author.address == entry.author.address
+    }
+
     /// The view to show. Show original needs whole messages, which only the
     /// conversation holds; otherwise the owner's choice, else the opening view,
     /// else the brief for a complex thread.
@@ -175,7 +185,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
                     let previous = index > 0 ? entries[index - 1] : nil
                     let newDay = previous.map { !Calendar.current.isDate($0.message.sentAt, inSameDayAs: entry.message.sentAt) } ?? true
                     let marker = sideID == nil ? entry.marker : nil
-                    let grouped = !newDay && marker == nil && previous?.author.address == entry.author.address
+                    let grouped = Self.continuesGroup(entry, after: previous, newDay: newDay, marker: marker)
                     if newDay { dayDivider(entry.message.sentAt) }
                     if let marker { markerView(marker, author: entry.author) }
                     row(entry, grouped: grouped)
