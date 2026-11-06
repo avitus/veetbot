@@ -262,10 +262,8 @@ struct EmailConversation {
             let plain = (message.readerBody ?? "").isEmpty
             if let reader = message.readerBody, !reader.isEmpty {
                 let sections = EmailReaderSections(markdown: reader)
-                // A forwarded copy below a note repeats mail the thread already holds.
-                let forward = sections.current.indices.dropFirst().first { Self.isForwardedHeader(sections.current[$0]) }
-                current = forward.map { Array(sections.current[..<$0]) } ?? sections.current
-                folded = !sections.earlier.isEmpty || forward != nil
+                current = sections.current
+                folded = !sections.earlier.isEmpty
             } else {
                 current = [.paragraph(message.body)]
                 folded = false
@@ -350,16 +348,6 @@ struct EmailConversation {
     /// Blocks compare by their words, ignoring case and spacing.
     private static func signature(_ block: MarkdownContentBlock) -> String {
         plainText(block).lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-    }
-
-    /// The reader's collapsed envelope (`> Forwarded from …`) or a mailer's own dashed line.
-    private static func isForwardedHeader(_ block: MarkdownContentBlock) -> Bool {
-        if case .blockquote(let inner) = block, case .paragraph(let text)? = inner.first {
-            return text.hasPrefix("Forwarded from ")
-        }
-        guard case .paragraph(let text) = block, let first = text.split(separator: "\n").first else { return false }
-        return first.trimmingCharacters(in: .whitespaces).lowercased()
-            .range(of: #"^-{2,}\s*forwarded message\s*-{2,}$"#, options: .regularExpression) != nil
     }
 
     private static let disclaimerOpenings = [

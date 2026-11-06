@@ -2088,6 +2088,7 @@ struct EmailReaderSections: Equatable {
     private static func historyStart(in blocks: [MarkdownContentBlock]) -> Int? {
         guard blocks.count > 1 else { return nil }
         for index in 1..<blocks.count {
+            if isForwardedHeader(blocks[index]) { return index }
             guard case .paragraph(let text) = blocks[index] else { continue }
             let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
             guard let first = lines.first?.lowercased() else { continue }
@@ -2115,6 +2116,16 @@ struct EmailReaderSections: Equatable {
             }
         }
         return nil
+    }
+
+    /// The reader's collapsed envelope (`> Forwarded from …`) or a mailer's own dashed line.
+    private static func isForwardedHeader(_ block: MarkdownContentBlock) -> Bool {
+        if case .blockquote(let inner) = block, case .paragraph(let text)? = inner.first {
+            return text.hasPrefix("Forwarded from ")
+        }
+        guard case .paragraph(let text) = block, let first = text.split(separator: "\n").first else { return false }
+        return first.trimmingCharacters(in: .whitespaces).lowercased()
+            .range(of: #"^-{2,}\s*forwarded message\s*-{2,}$"#, options: .regularExpression) != nil
     }
 
     /// Outlook's block names when it was sent and to whom (or about what);

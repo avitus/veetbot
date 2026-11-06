@@ -906,7 +906,11 @@ above. On a compact iPhone, where the thread is pushed, Archive (as an icon)
 and the thread menu join the back button in a paper navigation bar instead,
 so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
 its reason; a single message follows as prose under its sender's line, with
-View in People and Message details kept beside the sender. Two or more messages
+View in People and Message details kept beside the sender. A forwarded copy below
+that sender's note folds behind **Show earlier replies**, including the reader's
+`Forwarded from` attribution and dashed `Forwarded message` headers. Its nested
+replies, signatures and disclaimers remain available in that expansion. A forward
+without a note stays visible. Two or more messages
 follow as a conversation (ADR-0301; MagicPath peaceful-flood-7871): the owner's
 bubbles on the right, others' on the left under an initials avatar, each showing
 only the writer's own words with **Show full email** for the rest, writer chips
