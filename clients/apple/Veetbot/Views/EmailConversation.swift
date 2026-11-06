@@ -100,6 +100,9 @@ struct EmailConversation {
         let briefLine: String
         /// The message had no reader text, so its raw body shows as typed, never as Markdown.
         let isPlainText: Bool
+        /// Received mail whose From is the owner's address: the server never saw
+        /// the owner send it, so it is shown as someone else's, with a warning.
+        let unverifiedOwner: Bool
         var id: String { message.id }
     }
 
@@ -197,6 +200,7 @@ struct EmailConversation {
             var current: [MarkdownContentBlock]
             var folded: Bool
             var plain: Bool
+            var unverifiedOwner: Bool
             var marker: Marker?
             var isPrivate: Bool
             var audience: Set<String>
@@ -209,9 +213,20 @@ struct EmailConversation {
         var previous: Set<String>?
         var previousPrivate = false
         for message in messages {
-            let author = person(message.sender)
+            // The audience counts the sender as written; the side and the name
+            // trust the owner only for mail the server saw the owner send.
+            let sender = person(message.sender)
+            let unverifiedOwner = sender.isOwner && message.direction == "received"
+            let author: EmailPerson
+            if unverifiedOwner {
+                let claimed = EmailPerson(envelope: message.sender).address
+                author = EmailPerson(address: "unverified:" + claimed, name: claimed)
+                directory[author.address] = author
+            } else {
+                author = sender
+            }
             var memberOrder: [String] = []
-            for address in [author.address] + (message.to + message.cc).map({ person($0).address }) + [ownerKey].compactMap({ $0 })
+            for address in [sender.address] + (message.to + message.cc).map({ person($0).address }) + [ownerKey].compactMap({ $0 })
             where !address.isEmpty && !memberOrder.contains(address) {
                 memberOrder.append(address)
             }
@@ -250,7 +265,7 @@ struct EmailConversation {
                 folded = false
             }
             drafts.append(Draft(
-                message: message, author: author, current: current, folded: folded, plain: plain, marker: marker,
+                message: message, author: author, current: current, folded: folded, plain: plain, unverifiedOwner: unverifiedOwner, marker: marker,
                 isPrivate: isPrivate, audience: audience, members: memberOrder.compactMap { directory[$0] }))
         }
 
@@ -275,7 +290,7 @@ struct EmailConversation {
                 message: draft.message, author: draft.author, isOwner: draft.author.isOwner, own: own,
                 hasMore: draft.folded || trimmed, marker: draft.marker, isPrivate: draft.isPrivate,
                 audience: draft.audience, members: draft.members, briefLine: Self.briefLine(own),
-                isPlainText: draft.plain))
+                isPlainText: draft.plain, unverifiedOwner: draft.unverifiedOwner))
         }
         entries = built
 

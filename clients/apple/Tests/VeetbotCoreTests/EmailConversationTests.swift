@@ -210,6 +210,27 @@ struct EmailConversationTests {
         #expect(EmailConversation.audienceCaveat.contains("Bcc"))
     }
 
+    /// Only mail the server saw the owner send sits on the owner's side: a
+    /// received message forging the owner's From is someone else's, flagged.
+    @Test func testAReceivedMessageFromTheOwnersAddressIsNotTheOwners() throws {
+        let conversation = EmailConversation(
+            messages: try Self.decode([
+                Self.message("s1", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Real note.", sent: true),
+                Self.message("s2", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Wire the funds."),
+                Self.message("s3", from: Self.dana, to: [Self.owner], reader: "Done."),
+            ]),
+            ownerAddresses: [Self.owner]
+        )
+        let entries = conversation.entries
+        #expect(entries[0].isOwner && entries[0].unverifiedOwner == false)
+        #expect(entries[1].isOwner == false)
+        #expect(entries[1].unverifiedOwner)
+        #expect(entries[1].author.short != "You")
+        #expect(entries[1].author.name == Self.owner)
+        #expect(entries[1].marker == nil, "The forged message's audience is still the owner's")
+        #expect(conversation.writers.map(\.count) == [1, 1, 1])
+    }
+
     /// Names and addresses parse from the usual envelope forms.
     @Test func testPeopleParseFromEnvelopeForms() {
         #expect(EmailPerson(envelope: "\"Shalev, Yoav\" <Yoav@Meridian.example>").address == "yoav@meridian.example")

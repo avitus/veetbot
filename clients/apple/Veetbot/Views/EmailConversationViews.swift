@@ -311,6 +311,11 @@ struct EmailThreadConversationView<Attachments: View>: View {
                             Text(entry.message.sentAt, format: .dateTime.hour().minute())
                                 .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                         }
+                        if entry.unverifiedOwner {
+                            Label("Uses your address, but isn't in your sent mail", systemImage: "exclamationmark.triangle")
+                                .veetType(.meta, weight: .medium).foregroundColor(AppTheme.amberText)
+                                .accessibilityIdentifier("email.conversation.unverified")
+                        }
                     }
                     bubble(entry)
                     attachmentLine(entry.message)
