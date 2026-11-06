@@ -396,12 +396,14 @@ set -e
 docker build -f deploy/postgres.Dockerfile -t veetbot-postgres:test .
 test_network="veetbot-test-$(date +%s)-$$"
 docker network create "$test_network"
+test_password=$(openssl rand -hex 16)
+test_credentials="test:$test_password"
 test_database=$(docker run -d --rm --network "$test_network" --network-alias postgres \
-  -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test veetbot-postgres:test)
+  -e POSTGRES_USER=test -e "POSTGRES_PASSWORD=$test_password" -e POSTGRES_DB=test veetbot-postgres:test)
 trap 'docker stop "$test_database"; docker network rm "$test_network"' EXIT
 until docker exec "$test_database" pg_isready -h 127.0.0.1 -U test -d test; do sleep 1; done
 VEETBOT_TEST_NETWORK="$test_network" VEETBOT_TEST_DATABASE_DISPOSABLE=1 \
-  DATABASE_URL='postgresql+asyncpg://test:test@postgres:5432/test' \
+  DATABASE_URL="postgresql+asyncpg://${test_credentials}@postgres:5432/test" \
   scripts/run_in_linux_container.sh 'uv run alembic upgrade head && make test-integration'
 )
 ```

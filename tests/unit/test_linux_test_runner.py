@@ -34,7 +34,7 @@ def test_local_runner_service_access_is_explicit(
         **os.environ,
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "DOCKER_CAPTURE": str(capture),
-        "DATABASE_URL": "postgresql+asyncpg://test:test@postgres/test",
+        "DATABASE_URL": "postgresql+asyncpg://postgres/test",
         "VEETBOT_TEST_DATABASE_DISPOSABLE": "1" if disposable else "0",
         "VEETBOT_TEST_NETWORK": "synthetic-test-network" if network else "",
         "VEETBOT_TEST_DOCKER": "1" if docker_access else "0",
