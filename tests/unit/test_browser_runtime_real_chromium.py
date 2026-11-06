@@ -46,11 +46,13 @@ def html(body: str, *, script: str = "") -> HTMLResponse:
 @asynccontextmanager
 async def browsing(
     routes: list[Route],
+    *,
+    headed: bool = False,
 ) -> AsyncIterator[tuple[LocalHttpsSite, RealBrowserRuntime]]:
     require_real_browser()
     async with local_https_site(Starlette(routes=routes)) as site:
         runtime = RealBrowserRuntime()
-        await runtime.start(site.proxy_url, (site.origin,))
+        await runtime.start(site.proxy_url, (site.origin,), headed=headed)
         try:
             yield site, runtime
         finally:

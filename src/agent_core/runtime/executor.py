@@ -18,6 +18,7 @@ from agent_core.domain.errors import (
     ChildRunRequiredError,
     ConflictError,
     ContextOverflow,
+    DatabaseCapacityError,
     NotFoundError,
     ProviderPinUnavailableError,
     RunCancelledError,
@@ -1023,6 +1024,9 @@ class RunExecutor:
                 ),
             )
         except Exception as exc:
+            if lease is not None and isinstance(exc, DatabaseCapacityError):
+                # Stop heartbeating. The lease reaper owns bounded checkpoint recovery.
+                raise
             # Validation errors can embed private model inputs in their traceback.
             details = log_failure(
                 logger,
@@ -1404,6 +1408,8 @@ async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutco
         raise
     except Exception as exc:
         context.checkpoint = original_checkpoint
+        if context.lease is not None and isinstance(exc, DatabaseCapacityError):
+            raise
         details = log_failure(
             logger,
             "run_finalization_failed",

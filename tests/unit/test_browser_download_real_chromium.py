@@ -1,8 +1,10 @@
 """A real Chromium saves a file only for an individually approved click (ADR-0294)."""
 
 import asyncio
+import gzip
 import time
 
+import pytest
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
@@ -274,3 +276,131 @@ async def test_an_approved_click_without_a_file_reports_nothing() -> None:
         after = await runtime.act(_click(before.revision, before.elements[0].ref))
 
     assert after.download is None
+
+
+@pytest.mark.parametrize("compressed", [False, True])
+async def test_an_approved_csv_export_can_read_the_sites_fetch_without_a_native_download(
+    compressed: bool,
+) -> None:
+    """A dashboard fetches a CSV on click but never creates a Chromium download."""
+
+    async def home(request: Request) -> Response:
+        return html(
+            '<button id="go">Download</button>',
+            script="""
+            document.querySelector('#go').onclick = () => fetch('/activity.csv');
+        """,
+        )
+
+    async def file(request: Request) -> Response:
+        return Response(
+            gzip.compress(CSV) if compressed else CSV,
+            media_type="text/csv",
+            headers={"Content-Encoding": "gzip"} if compressed else {},
+        )
+
+    async with browsing([Route("/", home), Route("/activity.csv", file)], headed=True) as (
+        site,
+        runtime,
+    ):
+        before = await runtime.navigate(site.url("/"))
+        after = await runtime.act(_click(before.revision, before.elements[0].ref))
+    assert after.download is not None and after.download.status == "saved"
+    assert after.download.text() == CSV.decode()
+
+
+async def test_a_csv_fetch_on_an_ordinary_approved_click_is_not_an_export() -> None:
+    async def home(request: Request) -> Response:
+        return html(
+            '<button id="go">Next</button>',
+            script="""
+            document.querySelector('#go').onclick = () => fetch('/activity.csv');
+        """,
+        )
+
+    async def file(request: Request) -> Response:
+        return Response(CSV, media_type="text/csv")
+
+    async with browsing([Route("/", home), Route("/activity.csv", file)]) as (site, runtime):
+        before = await runtime.navigate(site.url("/"))
+        after = await runtime.act(_click(before.revision, before.elements[0].ref))
+    assert after.download is None
+
+
+async def test_a_compressed_csv_over_the_decoded_byte_limit_is_never_saved() -> None:
+    async def home(request: Request) -> Response:
+        return html(
+            '<button id="go">Download</button>', script="go.onclick = () => fetch('/large')"
+        )
+
+    async def file(request: Request) -> Response:
+        return Response(
+            gzip.compress(b"x" * (MAX_BROWSER_DOWNLOAD_BYTES + 1)),
+            media_type="text/csv",
+            headers={"Content-Encoding": "gzip"},
+        )
+
+    async with browsing([Route("/", home), Route("/large", file)]) as (site, runtime):
+        before = await runtime.navigate(site.url("/"))
+        after = await runtime.act(_click(before.revision, before.elements[0].ref))
+    assert after.download is not None and after.download.reason == "too_large"
+    assert after.download.data_base64 is None
+
+
+async def test_a_child_frames_csv_is_not_the_approved_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.adapters.browser import playwright as adapter
+
+    monkeypatch.setattr(adapter, "DOWNLOAD_ACT_BUDGET_SECONDS", 2.0)
+    fetched = asyncio.Event()
+
+    async def home(request: Request) -> Response:
+        return html(
+            '<button id="go">Download</button><iframe src="/frame"></iframe>',
+            script="go.onclick = () => frames[0].postMessage('fetch', '*')",
+        )
+
+    async def frame(request: Request) -> Response:
+        return html("", script="onmessage = () => fetch('/foreign.csv')")
+
+    async def file(request: Request) -> Response:
+        fetched.set()
+        return Response(CSV, media_type="text/csv")
+
+    async with browsing(
+        [Route("/", home), Route("/frame", frame), Route("/foreign.csv", file)]
+    ) as (site, runtime):
+        before = await runtime.navigate(site.url("/"))
+        after = await runtime.act(_click(before.revision, before.elements[0].ref))
+    assert fetched.is_set()
+    assert after.download is not None and after.download.reason == "timed_out"
+
+
+async def test_an_export_whose_observer_cannot_start_says_so_in_the_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A local capture failure is told apart from a site that sent no file."""
+    from playwright.async_api import Error as PlaywrightError
+
+    from agent_core.adapters.browser import playwright as adapter
+    from agent_core.adapters.browser.csv_export import CsvExportObserver
+
+    monkeypatch.setattr(adapter, "DOWNLOAD_ACT_BUDGET_SECONDS", 2.0)
+
+    async def refuse(self: object) -> None:
+        raise PlaywrightError("Target page, context or browser has been closed")
+
+    monkeypatch.setattr(CsvExportObserver, "start", refuse)
+
+    async def home(request: Request) -> Response:
+        return html('<button id="go">Download</button>', script="go.onclick = () => 0")
+
+    caplog.set_level("WARNING", logger=adapter.__name__)
+    async with browsing([Route("/", home)]) as (site, runtime):
+        before = await runtime.navigate(site.url("/"))
+        after = await runtime.act(_click(before.revision, before.elements[0].ref))
+    assert after.download is not None and after.download.reason == "timed_out"
+    records = [r for r in caplog.records if r.name == adapter.__name__]
+    assert [r.getMessage() for r in records] == ["browser.csv_export.observer_unavailable"]
+    assert "closed" not in caplog.text

@@ -34,7 +34,7 @@ from agent_core.domain.browser_task_grants import (
     parse_task_grant_scopes,
     task_grant_id_for_approval,
 )
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, DatabaseCapacityError
 from agent_core.domain.policies import (
     ActionKind,
     AuthorizationTurn,
@@ -594,3 +594,19 @@ async def test_scope_removed_during_snapshot_is_rechecked_before_consumption(
     monkeypatch.setattr(subject.provider, "snapshot_in_session", remove_while_reading)
     assert not (await subject.authorize()).allowed
     assert (await subject.grant()).actions_used == 0
+
+
+async def test_connection_exhaustion_is_not_a_failed_authorizer() -> None:
+    """A worker abandons the attempt for lease recovery rather than asking the owner."""
+    failing = Failing(DatabaseCapacityError("connections exhausted"))
+    with pytest.raises(DatabaseCapacityError):
+        await CompositeStandingAuthorizer([failing]).authorize(
+            action=proposed(),
+            decision=decision(),
+            principal=owner(),
+            run=run(),
+            agent_version="agent-v1",
+            action_deadline=WHEN,
+            turn=BROWSER_TURN,
+        )
+    assert failing.calls == 1

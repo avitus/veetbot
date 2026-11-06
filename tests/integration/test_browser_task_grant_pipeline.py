@@ -29,7 +29,10 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import UUID
 
+import asyncpg  # type: ignore[import-untyped]
 import pytest
+from sqlalchemy import event
+from sqlalchemy.pool import Pool
 
 from agent_core.adapters.browser.hosted_provider import SessionBoundHostedBrowserProvider
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileControlPlane
@@ -72,7 +75,7 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskGrantEndReason,
     TaskGrantEcho,
 )
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, DatabaseCapacityError
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.messages import (
     FakeModelScript,
@@ -1082,6 +1085,79 @@ async def test_allowed_task_on_postgresql(tmp_path: Path) -> None:
 
     assert [payload["authorization_use"] for payload in authorizations] == [1, 2]
     assert grant.actions_used == 2
+
+
+@pytest.mark.parametrize("during_finalization", [False, True], ids=["after-dispatch", "finalizing"])
+async def test_connection_exhaustion_after_an_approved_click_resumes_safely(
+    tmp_path: Path,
+    during_finalization: bool,
+) -> None:
+    settings = task_grant_settings(DATABASE_URL=disposable_database_url())
+    await truncate_application_tables()
+    async with pipeline(
+        tmp_path, [*allow_turns(), FINAL], settings=settings, storage="postgres"
+    ) as harness:
+        run_id = await harness.submit("Continue the lesson once.")
+        approval = await harness.pending(run_id)
+        await harness.composition.approvals.resolve(
+            approval.id, ApprovalResolutionType.APPROVE_ONCE
+        )
+        worker = harness.composition.worker_factory("interrupted")
+        assert isinstance(worker, DurableWorker)
+        fired = False
+
+        def refuse_after_click(*_args: Any) -> None:
+            nonlocal fired
+            if not fired and any(runtime.performed for runtime in harness.runtimes):
+                fired = True
+                raise asyncpg.TooManyConnectionsError()
+
+        def interrupt_finalization(stage: str) -> None:
+            nonlocal fired
+            if stage == "terminal_event" and not fired:
+                fired = True
+                raise DatabaseCapacityError("injected during finalization")
+
+        if during_finalization:
+            harness.composition.executor._finalization_write_probe = interrupt_finalization
+        else:
+            event.listen(Pool, "checkout", refuse_after_click)
+        try:
+            with pytest.raises(DatabaseCapacityError):
+                await worker.run_once()
+        finally:
+            if during_finalization:
+                harness.composition.executor._finalization_write_probe = None
+            else:
+                event.remove(Pool, "checkout", refuse_after_click)
+        assert fired
+        assert (await harness.composition.runs.get(run_id)).status is RunStatus.RUNNING
+        harness.clock.advance(timedelta(seconds=31))
+        async with harness.composition.uow_factory() as uow:
+            assert uow.queue is not None
+            assert await uow.queue.reclaim_expired(1) == 1
+        harness.clock.advance(timedelta(seconds=1))
+        await harness.drain()
+        completed = await harness.composition.runs.get(run_id)
+        [click] = await harness.acts(run_id)
+        events = await harness.events()
+        assert completed.status is RunStatus.COMPLETED
+        assert completed.final_message == FINAL.text
+        assert completed.lease_expirations == 1
+        assert click.status is (
+            ToolInvocationStatus.SUCCEEDED
+            if during_finalization
+            else ToolInvocationStatus.UNCERTAIN
+        )
+        assert sum(len(runtime.performed) for runtime in harness.runtimes) == 1
+        assert sum(e.event_type == "approval.requested" for e in events) == 1
+        observations = [
+            e
+            for e in events
+            if e.payload.get("name") == "browser.observe" and e.event_type == "tool.call.completed"
+        ]
+        assert len(observations) == (0 if during_finalization else 1)
+        assert sum(e.event_type == "run.completed" for e in events) == 1
 
 
 async def test_scheduled_research_on_postgresql(tmp_path: Path) -> None:

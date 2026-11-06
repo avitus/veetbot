@@ -30,7 +30,7 @@ from agent_core.domain.browser_act_views import (
     session_is_task_grant_eligible,
     task_grant_offer,
 )
-from agent_core.domain.browser_download import BrowserDownload
+from agent_core.domain.browser_download import EXPORT_TIMEOUT_GUIDANCE, BrowserDownload
 from agent_core.domain.browser_follow import profile_handle
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.captures import (
@@ -306,9 +306,12 @@ class BrowserActTool:
             return result
         saved_file = await self._saved_file(download, context, store_deadline)
         structured = {**result.structured, "saved_file": saved_file}
+        content = [TextPart(text=serialized_observation(structured))]
+        if download.reason == "timed_out":
+            content.append(TextPart(text=EXPORT_TIMEOUT_GUIDANCE))
         return result.model_copy(
             update={
-                "content": [TextPart(text=serialized_observation(structured))],
+                "content": content,
                 "structured": structured,
             }
         )

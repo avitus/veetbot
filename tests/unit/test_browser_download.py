@@ -570,6 +570,58 @@ def test_a_budget_too_small_for_the_page_still_keeps_the_saved_file_note() -> No
     assert '"saved_file":{"status":"saved"' in projected[0].text
 
 
+@pytest.mark.parametrize("budget", [800, 900])
+def test_a_tight_budget_keeps_a_timed_out_exports_guidance(budget: int) -> None:
+    """ADR-0300 decision 3: the guidance outranks the page, which a later read restores."""
+
+    timed_out = {"status": "refused", "reason": "timed_out"}
+    projected = browser_context_projection(
+        {
+            "provider": "fake",
+            "url": "https://example.org/a",
+            "title": None,
+            "revision": "r" * 128,
+            "text": "",
+            "elements": [],
+            "saved_file": timed_out,
+        },
+        budget=budget,
+        reference=FileReferencePart(
+            artifact_id=UUID(int=1), media_type="application/json", filename="o.json"
+        ),
+    )
+    assert projected is not None
+    assert isinstance(projected[0], TextPart)
+    assert '"reason":"timed_out"' in projected[0].text
+    assert "Do not repeat the same export blindly." in projected[0].text
+
+
+def test_without_room_for_the_guidance_the_page_stays() -> None:
+    """The guidance is dropped before the page, never the saved-file note."""
+
+    projected = browser_context_projection(
+        {
+            "provider": "fake",
+            "url": "https://example.org/a",
+            "title": None,
+            "revision": "r" * 128,
+            "text": "",
+            "elements": [],
+            "saved_file": {"status": "refused", "reason": "timed_out"},
+        },
+        budget=700,
+        reference=FileReferencePart(
+            artifact_id=UUID(int=1), media_type="application/json", filename="o.json"
+        ),
+    )
+    assert projected is not None
+    assert isinstance(projected[0], TextPart)
+    assert '"observation_omitted"' not in projected[0].text
+    assert '"reason":"timed_out"' in projected[0].text
+    # Nothing the page could keep without the guidance was cut to make room for it.
+    assert '"url":"https://example.org/a"' in projected[0].text
+
+
 def test_act_gains_the_report_and_a_pinned_chat_keeps_its_exact_spec() -> None:
     current, pinned = BrowserActTool.spec, PinnedBrowserActTool.spec
     assert current.version == "1.8.0"
@@ -594,3 +646,11 @@ async def test_a_pinned_chat_never_reports_a_file_its_schema_cannot_carry() -> N
     validate_output(result.structured, PinnedBrowserActTool.spec.output_schema)
     assert "saved_file" not in result.structured
     assert writer.created == []
+
+
+async def test_the_final_export_button_never_reports_silent_success_without_a_file() -> None:
+    window = _DownloadWindow(
+        approved=True, export_origin="https://site.test", deadline=asyncio.get_running_loop().time()
+    )
+    result = await PythonPlaywrightRuntime()._finish_download(window, names_a_file=True)
+    assert result == BrowserDownload.refused("timed_out")

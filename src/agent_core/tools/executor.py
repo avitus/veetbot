@@ -56,6 +56,7 @@ from agent_core.domain.errors import (
     BudgetExceededError,
     ChildRunRequiredError,
     ConflictError,
+    DatabaseCapacityError,
     DelegationValidationError,
     NotFoundError,
     RunCancelledError,
@@ -334,7 +335,8 @@ def _action_kind(tool: Tool) -> ActionKind:
 
 # ADR-0263: calls whose results bring nothing a page could be typed from, so
 # G5 does not count them: a file export, which reports platform identifiers,
-# and a question once the owner or the platform has answered it.
+# and a question once the owner or the platform has answered it. A clock read
+# still counts here; only the card activity exception admits it (ADR-0300).
 _G5_EXEMPT_TOOL_NAMES = frozenset({"artifact.export"})
 _G5_EXEMPT_ANSWER_TRUSTS = frozenset({TrustLevel.USER, TrustLevel.PLATFORM})
 
@@ -1810,7 +1812,7 @@ class ToolPipeline:
                         retryable=False,
                     ),
                 )
-            except (RunCancelledError, BudgetExceededError, NotFoundError):
+            except (RunCancelledError, BudgetExceededError, DatabaseCapacityError, NotFoundError):
                 raise
             # Tool implementation failures are deliberately normalized at this boundary.
             except Exception as exc:
@@ -2123,6 +2125,8 @@ class ToolPipeline:
                 action_deadline=action_deadline,
                 turn=_active_turn_facts(checkpoint),
             )
+        except DatabaseCapacityError:
+            raise
         except Exception:
             logger.exception(
                 "standing_authorization_failed",

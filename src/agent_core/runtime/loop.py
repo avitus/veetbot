@@ -884,6 +884,7 @@ async def recover_browser_failure(
 ) -> None:
     """Queue a separate bounded read or owner question, never an action replay."""
     failures: set[str] = set()
+    recovered_uncertain_action = False
     for call, result in zip(calls, results, strict=True):
         if call.name not in {"browser.observe", "browser.navigate", "browser.act"}:
             continue
@@ -908,6 +909,13 @@ async def recover_browser_failure(
                 continue
             if outcome.action == call.name:
                 failures.add(outcome.reason_code)
+                if (
+                    call.name == "browser.act"
+                    and outcome.status is ToolOutcomeStatus.UNCERTAIN
+                    and outcome.reason_code == "tool.outcome_unknown"
+                ):
+                    # The previous worker recorded dispatch but could not save the result.
+                    recovered_uncertain_action = True
                 if (
                     call.name == "browser.act"
                     and outcome.reason_code == "tool.browser.outcome_unknown"
@@ -945,7 +953,10 @@ async def recover_browser_failure(
                 "the interrupted operation will not be replayed."
             )
         }
-    elif failures & {"tool.browser.page_changed", "tool.browser.element_not_found"}:
+    elif recovered_uncertain_action or failures & {
+        "tool.browser.page_changed",
+        "tool.browser.element_not_found",
+    }:
         if any(call.call_id.startswith("browser-recovery:") for call in calls):
             return
         name, counter, maximum = "browser.observe", "browser_recovery_reads", 3

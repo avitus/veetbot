@@ -1,3 +1,7 @@
+# ADR-0300: On 2026-11-05 the owner requested fewer approval prompts for
+# signed-in activity reads and a working Chase CSV export. The repair scopes
+# known card-activity controls to their view and admits an individually approved
+# CSV response from that view. Live Chase acceptance remains open.
 # ADR-0298: On 2026-11-04 the owner chose to stop Email refreshes above the 75%
 # share paying for the re-rating backlog: a new-mail slice assesses and drafts only
 # arrivals, under ADR-0286's rule, and one that found nothing is an empty look.

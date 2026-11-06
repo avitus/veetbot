@@ -9,6 +9,10 @@ class AgentCoreError(Exception):
     """Base class for typed platform failures."""
 
 
+class DatabaseCapacityError(AgentCoreError):
+    """PostgreSQL refused to open a transaction because its connections are exhausted."""
+
+
 class AuthenticationError(AgentCoreError):
     """Authentication did not produce a principal."""
 

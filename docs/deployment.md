@@ -113,8 +113,9 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
    `X-Veetbot-Release: <release-id>` within 180 one-second attempts
    (`VEETBOT_HEALTH_TIMEOUT_SECS`; every unit restarts at once, and the API has
    needed more than a minute to bind), makes an authenticated request to the
-   authoritative session index and model settings, and requires every process to run from the
-   promoted directory;
+   authoritative session index and model settings (up to five attempts two seconds apart
+   when a request times out, cannot connect or returns a 5xx; any other answer is final),
+   and requires every process to run from the promoted directory;
 9. retains the five newest valid releases; and
 10. retains the two newest timestamped `agent-core-sandbox`,
     `veetbot-cockpit-builder`, `veetbot-code-sandbox` and
