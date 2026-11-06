@@ -252,6 +252,16 @@ struct EmailConversationCacheTests {
         #expect(after.entries[0].message.complete == false)
         #expect(after.entries[0].own != before.entries[0].own)
     }
+
+    /// Resetting the Email connection drops every parsed conversation with the
+    /// rest of the old connection's mail.
+    @Test func testResettingTheConnectionDropsCachedConversations() throws {
+        let thread = try Self.thread(body: "Kept only while connected.", complete: true)
+        _ = EmailConversationCache.conversation(for: thread, ownerAddress: "owner@example.test")
+        #expect(EmailConversationCache.holds(threadID: thread.id))
+        EmailViewModel(makeAPIClient: { nil }).resetConnection()
+        #expect(EmailConversationCache.holds(threadID: thread.id) == false)
+    }
 }
 
 /// Quoted history introduced the Outlook way folds like Gmail's (ADR-0301).

@@ -101,5 +101,8 @@ complexity".
   **Show full email** shows it. Gmail's reply-below-a-quote still stays in
   view.
 - Only English attributions and header words are recognized.
+- The client keeps parsed conversations for at most nine threads, reuses one
+  only while its messages are unchanged, and drops them all when the Email
+  connection resets, so no mail text outlives the connection that read it.
 - The owner's copies of earlier messages in the thread decide the owner's
   address when the account has no verified address yet.

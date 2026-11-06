@@ -17,6 +17,12 @@ enum EmailConversationCache {
         built[key] = (messages, conversation)
         return conversation
     }
+
+    /// Drops every parse, so no mail text outlives the connection that read it.
+    static func removeAll() { built.removeAll() }
+
+    /// Whether any parse of this thread is held.
+    static func holds(threadID: UUID) -> Bool { built.keys.contains { $0.hasPrefix("\(threadID)|") } }
 }
 
 /// One muted ink per writer, in the order they first wrote, with a dark-mode partner.

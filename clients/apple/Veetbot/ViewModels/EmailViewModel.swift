@@ -415,6 +415,7 @@ public final class EmailViewModel: ObservableObject {
         spamFlagErrors = [:]
         spamFlagSubmitting = []
         subscriptions.resetConnection()
+        EmailConversationCache.removeAll()
         active = false
         accounts = []
         inboxItems = []
