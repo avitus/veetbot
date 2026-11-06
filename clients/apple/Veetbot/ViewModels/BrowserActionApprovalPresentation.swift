@@ -32,6 +32,8 @@ public struct BrowserActionApprovalPresentation: Equatable, Sendable {
     public let refusedNotice: String?
     public let notCoveredText: String?
     public let offersTaskGrant: Bool
+    /// Whether the card offers one approval for the rest of the request (ADR-0302).
+    public let offersRequestGrant: Bool
 
     /// Nil unless the approval is a described `browser.act` view; an
     /// undescribed one keeps the existing card.
@@ -74,6 +76,7 @@ public struct BrowserActionApprovalPresentation: Equatable, Sendable {
             Self.notCoveredText(for: $0.reason, pathPrefix: prefix)
         }
         offersTaskGrant = approval.status.isPending && approval.taskGrantOffer != nil
+        offersRequestGrant = approval.status.isPending && approval.requestGrantOffer != nil
     }
 
     public static let genericNotCoveredText = "Your task permission doesn't cover this action."

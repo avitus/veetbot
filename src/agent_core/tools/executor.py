@@ -36,6 +36,7 @@ from agent_core.domain.browser_diagnostics import (
     collect_browser_diagnostics,
 )
 from agent_core.domain.browser_projection import browser_context_projection
+from agent_core.domain.browser_request_grants import BrowserRequestGrantOffer
 from agent_core.domain.browser_task_grants import (
     RESEARCH_NOT_COVERED_REASONS,
     TASK_GRANT_NOT_COVERED_REASONS,
@@ -2165,6 +2166,7 @@ class ToolPipeline:
         action_summary = generic_action_summary(tool.spec)
         approval_arguments = dict(invocation.normalized_arguments)
         offer: BrowserTaskGrantOffer | None = None
+        request_offer: BrowserRequestGrantOffer | None = None
         not_covered = _task_grant_not_covered(standing)
         in_session = getattr(tool, "approval_view_in_session", None)
         approval_view = getattr(tool, "approval_view", None)
@@ -2183,6 +2185,7 @@ class ToolPipeline:
                 action_summary = presentation.summary
                 approval_arguments = dict(presentation.arguments)
                 offer = presentation.task_grant_offer
+                request_offer = presentation.request_grant_offer
             elif approval_view is not None:
                 action_summary, approval_arguments = await approval_view(
                     approval_arguments,
@@ -2199,6 +2202,7 @@ class ToolPipeline:
             action_summary = generic_action_summary(tool.spec)
             approval_arguments = dict(invocation.normalized_arguments)
             offer = None
+            request_offer = None
         token.raise_if_cancelled()
         now = self._clock.now()
         approval = ApprovalRequest(
@@ -2229,6 +2233,7 @@ class ToolPipeline:
             ),
             created_at=now,
             task_grant_offer=offer,
+            request_grant_offer=request_offer,
             task_grant_not_covered=not_covered,
             research_not_covered=_research_not_covered(standing),
         )

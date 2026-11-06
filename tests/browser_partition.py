@@ -25,5 +25,7 @@ BROWSER_MODULES = frozenset(
         "test_browser_grant_hostile_constructs.py",
         "test_device_handoff_real_chromium.py",
         "test_browser_task_grant_live_runtime.py",
+        "test_browser_request_grant_real_chromium.py",
+        "test_browser_download_real_chromium.py",
     }
 )

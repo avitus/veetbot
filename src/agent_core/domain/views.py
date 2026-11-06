@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import BrowserProfileStatus
+from agent_core.domain.browser_request_grants import BrowserRequestGrantOffer
 from agent_core.domain.browser_task_grants import BrowserTaskGrantOffer, TaskGrantNotCovered
 from agent_core.domain.devices import (
     DeviceInvocationStatus,
@@ -242,6 +243,8 @@ class ApprovalView(BaseModel):
     task_grant_offer: BrowserTaskGrantOffer | None = None
     task_grant_id: UUID | None = None
     task_grant_not_covered: TaskGrantNotCovered | None = None
+    # ADR-0302: the request-approval offer on a browser.act card. Additive.
+    request_grant_offer: BrowserRequestGrantOffer | None = None
 
 
 class DeviceView(BaseModel):

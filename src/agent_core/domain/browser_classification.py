@@ -134,7 +134,15 @@ _MONTHS = frozenset(
     ]
 )
 _REPORT_TYPES = frozenset({"pathology", "lab", "laboratory", "radiology", "imaging"})
-_DESCRIPTIVE_AFTER: dict[str, frozenset[str]] = {"updated": _MONTHS}
+# ADR-0302: "account" beside these words names a record, not a setting.
+_ACCOUNT_RECORDS = frozenset(
+    {"activity", "statement", "statements", "summary", "details", "history"}
+)
+_DESCRIPTIVE_AFTER: dict[str, frozenset[str]] = {
+    "updated": _MONTHS,
+    "account": _ACCOUNT_RECORDS,
+    "accounts": _ACCOUNT_RECORDS,
+}
 _DESCRIPTIVE_BEFORE: dict[str, frozenset[str]] = {
     "report": _REPORT_TYPES,
     "reports": _REPORT_TYPES,
@@ -846,6 +854,18 @@ def dispatch_constraint_coverage(
             disabled=disabled,
             card_activity=constraint.card_activity_only,
         )
+    if constraint.grant_kind == "request":
+        return request_grant_coverage(
+            action=action,
+            page_url=page_url,
+            role=role,
+            labels=labels,
+            facts=facts,
+            option_texts=option_texts,
+            origins=constraint.origins,
+            disabled=disabled,
+            free_text=constraint.free_text,
+        )
     if constraint.grant_kind == "standing":
         return standing_ceiling_coverage(
             action=action,
@@ -860,3 +880,168 @@ def dispatch_constraint_coverage(
         kind=action.kind, role=role, labels=labels, facts=facts, option_texts=option_texts
     )
     return _refused(consequence, "outside_prefix")
+
+
+# ADR-0302 decision 3: what a request grant may type after an outside read.
+_SHORT_VALUE_CHARACTERS = 40
+_SHORT_SEARCH_DIGITS = 4
+_DATE_FORMATS = (
+    "%m/%d/%Y",
+    "%m/%d/%y",
+    "%m-%d-%Y",
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%d.%m.%Y",
+    "%b %d, %Y",
+    "%B %d, %Y",
+    "%b %d %Y",
+    "%B %d %Y",
+    "%d %b %Y",
+    "%d %B %Y",
+)
+_AMOUNT = re.compile(
+    r"[$\u20ac\u00a3]?-?(?:[0-9]{1,3}(?:,[0-9]{3}){0,2}|[0-9]{1,7})(?:\.[0-9]{1,2})?"
+)
+_SEARCH_PUNCTUATION = frozenset(" .,'-&")
+
+
+def _calendar_date(text: str) -> bool:
+    """Whether ``text`` is a real date in one of the accepted formats."""
+
+    for pattern in _DATE_FORMATS:
+        try:
+            datetime.strptime(text, pattern)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def short_typed_value(value: str) -> bool:
+    """A calendar date, an amount up to 9,999,999.99, or a short search.
+
+    A search is at most 40 characters of letters, digits, spaces and
+    ``.,'-&``, with at least one letter and at most four digits in all, so
+    neither an address, a link, an account or card number nor a credential
+    fits. Such values carry no more than a word of what a turn read.
+    """
+
+    text = unicodedata.normalize("NFKC", value).strip()
+    if not text or len(text) > _SHORT_VALUE_CHARACTERS or text != " ".join(text.split()):
+        return False
+    if _calendar_date(text) or _AMOUNT.fullmatch(text) is not None:
+        return True
+    if not all(character.isalnum() or character in _SEARCH_PUNCTUATION for character in text):
+        return False
+    digits = sum(unicodedata.category(character) == "Nd" for character in text)
+    return (
+        digits <= _SHORT_SEARCH_DIGITS
+        and any(character.isalpha() for character in text)
+        and typed_text_allowed(re.sub(r"[0-9]", "", text))
+        and CREDENTIAL_SHAPE.search(text) is None
+    )
+
+
+_UPLOAD_FORMS = frozenset(
+    {
+        "upload",
+        "uploads",
+        "uploaded",
+        "uploading",
+        "attach",
+        "attaches",
+        "attached",
+        "attaching",
+        "attachment",
+        "attachments",
+        "import",
+        "imports",
+        "imported",
+        "importing",
+    }
+)
+
+
+def _names_upload(texts: Sequence[str]) -> bool:
+    """Whether any reading of any text names sending a file to the site."""
+
+    return any(
+        token in _UPLOAD_FORMS
+        for text in texts
+        for reading in _readings(text)
+        for token in reading.split()
+    )
+
+
+def request_grant_coverage(
+    *,
+    action: BrowserAction,
+    page_url: str,
+    role: str,
+    labels: Sequence[str],
+    facts: BrowserElementFacts | None,
+    option_texts: Sequence[str],
+    origins: Sequence[str],
+    disabled: bool,
+    free_text: bool,
+) -> BrowserCoverage:
+    """Whether one request approval (ADR-0302) covers ``action``.
+
+    Any page of the login's origins qualifies, whatever its path: a signed-in
+    site keeps every view under one authenticated path, so the page path says
+    nothing about the control. Routine and unknown controls and inbound
+    downloads are covered; every other named consequence, a file input, any
+    upload wording, a sensitive field and a link or form leaving the origin
+    still ask. ``free_text`` is whether the turn made no outside read; without
+    it only :func:`short_typed_value` text is covered. The worker and the
+    isolated runtime run the same rules.
+    """
+
+    consequence = classify_browser_action(
+        kind=action.kind, role=role, labels=labels, facts=facts, option_texts=option_texts
+    )
+    if facts is None or facts.labels_truncated:
+        return _refused(consequence, "facts_unavailable")
+    if _origin_of(page_url) not in _normalized_origins(origins):
+        return _refused(consequence, "outside_origin")
+    kind = action.kind
+    label_texts = _label_texts(labels, facts)
+    if kind is not BrowserActionKind.SCROLL and not any(
+        normalize_text(text) for text in label_texts
+    ):
+        return _refused(consequence, "unnamed_element")
+    if consequence not in {C.ROUTINE, C.UNKNOWN, C.FILE_TRANSFER}:
+        return _refused(consequence, f"excluded.{consequence.value}")
+    if consequence is C.FILE_TRANSFER and (
+        facts.field_kind is BrowserFieldKind.FILE
+        or _names_upload([*label_texts, *option_texts, facts.context_name])
+    ):
+        return _refused(consequence, "excluded.file_transfer")
+    if disabled:
+        return _refused(consequence, "element_disabled")
+    field = facts.field_kind
+    field_covered = (
+        (kind is BrowserActionKind.TYPE and field in _TYPED_FIELDS)
+        or (kind in _CHOSEN_FIELDS and field is _CHOSEN_FIELDS[kind])
+        or (kind is BrowserActionKind.PRESS and field in _PRESSED_FIELDS)
+        or (kind is BrowserActionKind.CLICK and field not in _UNCLICKABLE_FIELDS)
+        or kind is BrowserActionKind.SCROLL
+    )
+    if not field_covered:
+        return _refused(consequence, "field_not_covered")
+    if kind is BrowserActionKind.TYPE:
+        value = action.value or ""
+        if len(value) > MAXIMUM_COVERED_TEXT_CHARACTERS:
+            return _refused(consequence, "text_too_long")
+        if not (short_typed_value(value) or (free_text and typed_text_allowed(value))):
+            return _refused(consequence, "text_not_covered")
+    link = facts.link_target
+    if kind in _NAVIGATING_KINDS and link is not None and not link.same_origin:
+        return _refused(consequence, "link_outside_origin")
+    form = facts.form_target
+    submits = kind is BrowserActionKind.CLICK or (
+        kind is BrowserActionKind.PRESS and action.key in _SUBMITTING_KEYS
+    )
+    if submits and form is not None and not form.same_origin:
+        return _refused(consequence, "form_outside_origin")
+    return BrowserCoverage(covered=True, consequence=consequence)

@@ -24,6 +24,7 @@ from svp_mcp.errors import SvpError
 
 SECRET = "-".join(("client", "value"))
 CLIENT = oauth.Client("client-1", SECRET)
+PUBLIC_CLIENT = oauth.Client("client-1", None)
 GRANT = {
     "access_token": "access-2",
     "token_type": "Bearer",
@@ -61,14 +62,19 @@ def test_authorization_url_binds_state_challenge_and_resource() -> None:
     }
 
 
-def test_registration_asks_for_one_confidential_loopback_client() -> None:
+def test_registration_asks_for_one_public_loopback_client() -> None:
+    # Since 2026-11-06 the service registers only public (`none`) and
+    # `private_key_jwt` clients; a `client_secret_post` request comes back as
+    # a public client with no secret.
     seen: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(201, json={"client_id": "client-1", "client_secret": SECRET})
+        return httpx.Response(
+            201, json={"client_id": "client-1", "token_endpoint_auth_method": "none"}
+        )
 
-    assert oauth.register(_http(handle)) == CLIENT
+    assert oauth.register(_http(handle)) == PUBLIC_CLIENT
     assert seen[0].method == "POST"
     assert str(seen[0].url) == REGISTRATION_ENDPOINT
     assert json.loads(seen[0].content) == {
@@ -76,19 +82,45 @@ def test_registration_asks_for_one_confidential_loopback_client() -> None:
         "redirect_uris": [LOOPBACK_REDIRECT_URI],
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
-        "token_endpoint_auth_method": "client_secret_post",
+        "token_endpoint_auth_method": "none",
         "scope": " ".join(SCOPES),
     }
 
 
+def test_a_secret_the_service_still_issues_is_kept() -> None:
+    reply = {"client_id": "client-1", "client_secret": SECRET}
+
+    assert oauth.register(_http(lambda _request: httpx.Response(201, json=reply))) == CLIENT
+
+
 @pytest.mark.parametrize(
     "payload",
-    [[], {"client_id": "client-1"}, {"client_id": "", "client_secret": SECRET}],
-    ids=["not-an-object", "no-secret", "empty-id"],
+    [
+        [],
+        {"client_id": ""},
+        {"client_id": "client-1", "client_secret": ""},
+        {"client_id": "client-1", "client_secret": 7},
+    ],
+    ids=["not-an-object", "empty-id", "empty-secret", "non-text-secret"],
 )
-def test_a_registration_without_a_confidential_client_is_refused(payload: object) -> None:
+def test_a_malformed_registration_is_refused(payload: object) -> None:
     with pytest.raises(SvpError, match=r"^svp\.response_invalid$"):
         oauth.register(_http(lambda _request: httpx.Response(201, json=payload)))
+
+
+def test_a_public_client_sends_no_secret_in_either_grant() -> None:
+    forms: list[dict[str, str]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        forms.append(dict(parse_qsl(request.content.decode("ascii"))))
+        return httpx.Response(200, json=GRANT)
+
+    http = _http(handle)
+    oauth.exchange(http, PUBLIC_CLIENT, code="code-1", verifier="verifier-1")
+    oauth.refresh(http, PUBLIC_CLIENT, "refresh-1")
+
+    assert [form["client_id"] for form in forms] == ["client-1", "client-1"]
+    assert all("client_secret" not in form for form in forms)
 
 
 def test_code_exchange_and_refresh_send_the_client_in_the_form() -> None:

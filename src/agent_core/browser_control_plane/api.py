@@ -698,7 +698,7 @@ def create_profile_service_app(
                 ceremony_id,
                 request.headers.get("x-browser-ceremony-capability", ""),
             )
-            return Response(frame, media_type="image/png")
+            return Response(frame, media_type="image/jpeg")
 
         @app.post(
             "/authentication/{ceremony_id}/events",
@@ -782,29 +782,32 @@ body {
   font:16px/1.45 system-ui,-apple-system,sans-serif;margin:0;color:var(--ink);
   background:radial-gradient(circle at top left,#12354a 0,var(--navy) 44%)
 }
-main {max-width:1180px;margin:auto;padding:clamp(18px,4vw,44px)}
+main {max-width:1380px;margin:auto;padding:clamp(14px,3vw,44px)}
 .eyebrow {
   color:var(--turquoise);font-size:.78rem;font-weight:750;letter-spacing:.11em;
   text-transform:uppercase
 }
-h1 {font-size:clamp(1.8rem,4vw,3rem);line-height:1.05;margin:.35rem 0 .6rem}
+h1 {font-size:clamp(1.5rem,3vw,2.2rem);line-height:1.1;margin:.3rem 0 .45rem}
 h2 {font-size:1.05rem;margin:0 0 .75rem}
-.lede {color:var(--muted);max-width:760px;margin:0 0 1.4rem}
-.grid {display:grid;gap:18px;grid-template-columns:minmax(240px,340px) minmax(0,1fr)}
+.lede {color:var(--muted);max-width:820px;margin:0 0 1rem}
+.stack {display:grid;gap:16px}
 .card {
   background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;
   box-shadow:0 20px 45px rgba(0,0,0,.18)
 }
-ol {padding-left:1.25rem;margin:.25rem 0 1rem}
-li {margin:.7rem 0;color:var(--muted)}
+ol {
+  padding-left:1.25rem;margin:.25rem 0 1rem;display:grid;gap:4px 28px;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr))
+}
+li {margin:.35rem 0;color:var(--muted)}
 li strong {color:var(--ink)}
 .privacy {
   border-left:3px solid var(--turquoise);padding:.15rem 0 .15rem .8rem;
   color:var(--muted);font-size:.88rem
 }
 .status {
-  display:flex;align-items:flex-start;gap:.65rem;margin-top:1rem;padding:.75rem .85rem;
-  border-radius:10px;background:#0d1726;color:var(--muted)
+  display:flex;align-items:flex-start;gap:.65rem;margin:0;padding:.6rem 16px;
+  background:#0d1726;color:var(--muted);border-bottom:1px solid var(--line)
 }
 .status::before {
   content:'';width:.65rem;height:.65rem;margin-top:.32rem;border-radius:50%;
@@ -817,9 +820,10 @@ li strong {color:var(--ink)}
   display:flex;justify-content:space-between;gap:12px;align-items:center;padding:13px 16px;
   border-bottom:1px solid var(--line)
 }
+.viewport-head h2 {margin:0}
 .viewport-head span {font-size:.82rem;color:var(--muted)}
 .frame-wrap {
-  position:relative;min-height:330px;background:#eef2f7;display:grid;place-items:center;
+  position:relative;min-height:330px;background:#eef2f7;overflow:auto;
   outline:3px solid transparent;outline-offset:-3px
 }
 .frame-wrap[data-typing] {outline-color:var(--turquoise)}
@@ -828,7 +832,7 @@ li strong {color:var(--ink)}
   resize:none;font-size:16px
 }
 img {
-  display:block;width:100%;height:auto;max-height:68vh;object-fit:contain;
+  display:block;width:auto;max-width:100%;height:auto;margin:0 auto;
   cursor:crosshair;color:#263244
 }
 .controls {padding:16px;border-top:1px solid var(--line)}
@@ -843,7 +847,7 @@ button:disabled {cursor:not-allowed;opacity:.45}
 .keys {display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .hint {color:var(--muted);font-size:.8rem;margin:.7rem 0 0}
 @media(max-width:820px) {
-  .grid {grid-template-columns:1fr}.frame-wrap {min-height:240px}
+  .frame-wrap {min-height:240px}img {max-width:none;margin:0}
 }
 </style></head>
 <body><main><div class="eyebrow">Veetbot · isolated browser</div>
@@ -851,21 +855,11 @@ button:disabled {cursor:not-allowed;opacity:.45}
 <p class="lede">You control this temporary browser. The Veetbot agent and public API
 receive only the finished browser profile—not the username, password, passkey, or MFA
 value you send directly to this isolated browser.</p>
-<div class="grid"><aside class="card"><h2>How to sign in</h2><ol>
-<li><strong>Click the website field in the remote browser</strong> on the right.</li>
-<li><strong>Type</strong> your username, password, or MFA code. Each key goes straight to
-that field as you press it, and pasting from a password manager works too.</li>
-<li>Press Enter or click the website's sign-in button. Repeat until the website confirms
-you are signed in.</li>
-<li><strong>Return to Veetbot</strong> and choose <strong>Check login status</strong>.</li></ol>
-<p class="privacy">Keep this tab open. This link works once and expires after five
-minutes. If it was closed, copied, or reloaded, return to Veetbot and choose
-<strong>Start over</strong>.</p>
-<p id="status" class="status" data-state="connecting" role="status" aria-live="polite">
-Connecting to the isolated browser…</p></aside>
-<section class="card viewport" aria-label="Interactive remote browser">
+<div class="stack"><section class="card viewport" aria-label="Interactive remote browser">
 <div class="viewport-head"><h2>Remote browser</h2>
 <span>Click a field, then type</span></div>
+<p id="status" class="status" data-state="connecting" role="status" aria-live="polite">
+Connecting to the isolated browser…</p>
 <div class="frame-wrap" id="frame-wrap"><img id="frame"
 alt="Remote browser view. Click a website field to focus it, then type.">
 <textarea id="capture" class="capture" aria-label="Typing goes to the focused website field"
@@ -876,7 +870,17 @@ disabled></textarea></div>
 <button type="button" data-key="Backspace" disabled>Backspace</button></div>
 <p class="hint">Nothing you type is kept on this page. Each key goes straight to the
 isolated browser.</p>
-</div></section></div></main>
+</div></section>
+<aside class="card"><h2>How to sign in</h2><ol>
+<li><strong>Click the website field in the remote browser</strong> above.</li>
+<li><strong>Type</strong> your username, password, or MFA code. Each key goes straight to
+that field as you press it, and pasting from a password manager works too.</li>
+<li>Press Enter or click the website's sign-in button. Repeat until the website confirms
+you are signed in.</li>
+<li><strong>Return to Veetbot</strong> and choose <strong>Check login status</strong>.</li></ol>
+<p class="privacy">Keep this tab open. This link works once and expires after five
+minutes. If it was closed, copied, or reloaded, return to Veetbot and choose
+<strong>Start over</strong>.</p></aside></div></main>
 <script src="/authentication-surface.js"></script></body></html>"""
 
 _AUTHENTICATION_SCRIPT = """(()=>{'use strict';const p=new URLSearchParams(location.hash.slice(1));
@@ -886,12 +890,15 @@ const capture=document.getElementById('capture');const wrap=document.getElementB
 const controls=[capture,...document.querySelectorAll('[data-key]')];
 const namedKeys=new Set(['Enter','Escape','Tab','Backspace','ArrowUp','ArrowDown',
 'ArrowLeft','ArrowRight']);
-let refreshTimer=null;let connected=false;let queue=Promise.resolve();let pending=0;
+let timer=null;let stopped=false;let fetching=false;let again=false;
+let activeAt=Date.now();let connected=false;let queue=Promise.resolve();let pending=0;
 let lost=false;
 function setStatus(message,state){status.textContent=message;status.dataset.state=state;}
 function disable(message){connected=false;controls.forEach(control=>control.disabled=true);
-setStatus(message,'error');
-if(refreshTimer!==null){clearInterval(refreshTimer);refreshTimer=null;}}
+setStatus(message,'error');stopped=true;clearTimeout(timer);}
+function active(){activeAt=Date.now();}
+function schedule(){if(stopped)return;clearTimeout(timer);
+const quick=!document.hidden&&Date.now()-activeAt<10000;timer=setTimeout(refresh,quick?250:1000);}
 if(!capability){disable('This secure login link is incomplete or has expired. '
 +'Return to Veetbot and choose Start over.');return;}
 history.replaceState(null,'',location.pathname);
@@ -901,11 +908,12 @@ async function event(value){const r=await fetch(root+'/events',
 if(r.status===401){disable('This secure login has expired. Return to Veetbot and '
 +'choose Start over.');throw new Error('expired');}
 if(!r.ok)throw new Error('interaction rejected');}
-function relay(value){if(!connected)return;pending++;
+function relay(value){if(!connected)return;active();pending++;
 queue=queue.then(()=>lost?undefined:event(value)).catch(()=>{lost=true;
 if(connected)setStatus('A key could not be sent. Clear the website field and type it '
 +'again.','error');}).finally(()=>{pending--;if(pending===0)refresh();});}
-async function refresh(){try{const r=await fetch(root+'/frame',{headers});
+async function refresh(){if(stopped)return;if(fetching){again=true;return;}
+fetching=true;clearTimeout(timer);try{const r=await fetch(root+'/frame',{headers});
 if(r.status===401){disable('This secure login has expired. Return to Veetbot and '
 +'choose Start over.');return;}
 if(!r.ok)throw new Error('session unavailable');const blob=await r.blob();const old=frame.src;
@@ -914,8 +922,9 @@ if(!connected||status.dataset.state==='connecting'){connected=true;
 controls.forEach(control=>control.disabled=false);
 setStatus('Connected — click a website field in the remote browser, then type.',
 'connected');}}
-catch(e){if(refreshTimer!==null){setStatus(
-'The isolated browser is temporarily unavailable. Retrying…','connecting');}}}
+catch(e){if(!stopped){setStatus(
+'The isolated browser is temporarily unavailable. Retrying…','connecting');}}
+finally{fetching=false;if(again){again=false;refresh();}else schedule();}}
 frame.addEventListener('click',e=>{
 if(!connected||!frame.naturalWidth)return;const box=frame.getBoundingClientRect();
 capture.focus({preventScroll:true});lost=false;
@@ -934,7 +943,8 @@ capture.addEventListener('focus',()=>{wrap.dataset.typing='';if(connected)setSta
 capture.addEventListener('blur',()=>{delete wrap.dataset.typing;});
 document.querySelectorAll('[data-key]').forEach(button=>button.addEventListener('click',()=>{
 relay({kind:'key',key:button.dataset.key});capture.focus({preventScroll:true});}));
-refresh();refreshTimer=setInterval(refresh,1000);})();"""
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){active();refresh();}});
+refresh();})();"""
 
 
 def _validate_lifecycle_request(

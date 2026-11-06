@@ -249,11 +249,12 @@ owner-requested extension and its verification requirements.
 
 ### Individually approved text-file download
 
-A click or key press through `browser.act` that carries no grant or research
-constraint holds a one-file window for as long as the act runs. A file started
+A click or key press through `browser.act` that carries no constraint, or a
+request constraint (ADR-0302), holds a one-file window for as long as the act
+runs. A file started
 inside the window is saved, whatever started it (ADR-0294 records why cause cannot
 be established); every other file is cancelled, whether a page starts it on its
-own, a navigation or read meets it, or a sign-in ceremony does. A grant-
+own, a navigation or read meets it, or a sign-in ceremony does. A task-grant-
 or research-authorized act that meets a file cancels it and reports
 `needs_approval`, whatever kind of action it was; a click or key press on a control
 that names a file waits for that file as an approved one does, so a late file is
@@ -261,10 +262,12 @@ reported too. Any other action reports only a file that starts before it settles
 the profile's origins, read from its URL, with a `blob:` URL read as the origin
 inside it. Anything else, including a third-party frame's file and a `data:` URL,
 which names no origin, is cancelled as `origin_not_allowed` and leaves the window
-open for the click's own file. Neither kind of grant covers a download: a control named with
-`download` or `export`, or a link with a `download` attribute, already reads as a
-file-transfer consequence, and a plain control that turns out to save a file is
-refused live.
+open for the click's own file. Neither a task grant nor a research grant
+covers a download: a control named with `download` or `export`, or a link with a
+`download` attribute, already reads as a file-transfer consequence, and a plain
+control that turns out to save a file is refused live. A request grant covers
+inbound downloads (see request coverage below), so its click or key press gets
+the same one-file window, with the same origin and single-file limits.
 
 The runtime admits at most 2 MiB of text: UTF-8 or Windows-1252, with no NUL byte
 and no PDF signature in the first kilobyte, normalized to UTF-8. Size is checked while the file downloads, in a private
@@ -819,6 +822,11 @@ send step. The capture field is cleared as each event is taken, and typed text
 is never placed in diagnostics or durable client state. When an event fails,
 the surface drops the rest of the queue and tells the user to clear the field
 and type again, so a password is never submitted with a character missing.
+The screenshot is a compressed picture of the page at the page's own size: a
+window wide enough shows it unscaled, and a narrower one scrolls it rather than
+shrinking it. The surface has at most one screenshot request in flight, and asks
+every quarter second for ten seconds after the user's last interaction and every
+second otherwise or while the tab is hidden.
 
 Only the isolated service determines completion. It may report `ready`,
 `needs_user`, `authentication_required`, `expired`, or `cancelled`; no caller
@@ -842,7 +850,8 @@ consent banner, do not either. Until the evidence exists a page that shows no
 challenge stays `authentication_required`, including a page that saved state
 already signs in, where the user signs in again or cancels. The runtime keeps
 one boolean for this rule and never inspects, compares, or records the text the
-user sent or any cookie value.
+user sent or any cookie value. Once set, the boolean holds until the runtime
+closes, so a later text event types without repeating the scan.
 
 That evidence is necessary, not sufficient. The runtime is site-independent: a
 profile names allowed origins and nothing about a site's pages, so no marker
@@ -1373,6 +1382,45 @@ revocation or deletion, a new sign-in (which advances the profile generation,
 ADR-0128), a changed agent or policy version, and removal of the scope end a
 grant. `BROWSER_TASK_GRANTS_ENABLED` gates offers, `approve_for_task`, and the
 task-grant routes.
+
+### One approval for a request (ADR-0302)
+
+A `browser.act` card in an owner-driven, top-level interactive run of a chat
+bound to a READY Website Access login offers "Allow for this request" when the
+pending action would itself be covered. The offer is stored on the approval as
+`request_grant_offer`: the profile id and generation, the profile's allowed
+origins and a server-authored summary. Resolving the card with
+`approve_for_request` (which also needs `browser.grant.write`) approves the
+action and appends `browser.request_grant.created`; that approval is the grant.
+It is composed whenever research authority is (`BROWSER_RESEARCH_ENABLED` and
+the bounded-scroll rule) and the provider resolves each session's profile.
+
+`BrowserRequestGrantAuthorizer` finds the run's grant through that event and
+allows an action when the run is still eligible, less than two hours have
+passed since the approval was resolved, the profile is the offered one, READY,
+still allows every grant origin, and has the offered generation, the agent and
+policy versions match the approval's, and request coverage holds on the
+observation that named the element. A changed generation is accepted only
+when the profile's newest sign-in began after the approval and is the one a
+`browser.authentication.resumed` event of this run names. A follow-up message
+is a new run and asks again; stopping the request ends it.
+
+Request coverage (`request_grant_coverage`) allows routine and unknown
+controls and inbound downloads on any page of the grant's origins, whatever
+the path. It refuses every other named consequence, a file input or upload
+wording, a sensitive field, a link or form leaving the page's origin, an
+unnamed, disabled or truncated element, and text over 256 characters. After a
+turn read mail, memory, knowledge, the web or any tool other than the browser,
+the clock, the run's notes, arithmetic, a file export or a capture read, only a
+calendar date, an amount up to 9,999,999.99, or a search of at most 40
+letters, digits, spaces and `.,'-&` with at most four digits may be typed. The
+dispatch constraint carries kind `request`, the origins, no prefix, the
+256-character cap, whether free text is allowed, and a `not_after` no later
+than the grant's end. The isolated runtime repeats the coverage on the live
+page, fences documents and pings to the origins on any path during the act,
+and may save one file for the act as for an individually approved click
+(ADR-0294, ADR-0300). The classifier reads "account" beside activity,
+statement(s), summary, details or history as naming a record.
 
 ### The browser.act approval view
 

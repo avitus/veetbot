@@ -1772,6 +1772,16 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// What the card says when the server withdrew the permission it offered.
+    private static let withdrawnOfferMessages: [String: String] = [
+        "task_grant_unavailable": "Task permission is no longer available. Allow once or Deny.",
+        "task_grant_offer_mismatch": "Task permission is no longer available. Allow once or Deny.",
+        "request_grant_unavailable":
+            "Allow for this request is no longer available. Allow once or Deny.",
+        "request_grant_offer_mismatch":
+            "Allow for this request is no longer available. Allow once or Deny.",
+    ]
+
     /// Resolve the owner's decision and refresh an offer that the server withdrew.
     /// A decision already on its way makes any further tap on that card a no-op.
     public func resolveApproval(
@@ -1786,11 +1796,16 @@ public final class ChatViewModel: ObservableObject {
         approvalsInFlight[approval.id] = decision
         defer { approvalsInFlight[approval.id] = nil }
         do {
+            // ADR-0302: allowing the request repeats the card's own offer.
+            let requestGrant = decision == .approveForRequest
+                ? approval.requestGrantOffer.map(RequestGrantEcho.init(offer:))
+                : nil
             let stored = try await api.resolveApproval(
                 approval.id,
                 decision: decision,
                 reason: reason,
-                taskGrant: taskGrant
+                taskGrant: taskGrant,
+                requestGrant: requestGrant
             )
             guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
             runState.mergeApproval(stored)
@@ -1816,14 +1831,14 @@ public final class ChatViewModel: ObservableObject {
             if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 let reason = apiError.details.reason,
-                reason == "task_grant_unavailable" || reason == "task_grant_offer_mismatch"
+                Self.withdrawnOfferMessages[reason] != nil
             {
                 // The offer is gone or changed: show the card as it is now.
                 do {
                     let stored = try await api.getApproval(approval.id)
                     guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     runState.mergeApproval(stored)
-                    errorMessage = "Task permission is no longer available. Allow once or Deny."
+                    errorMessage = Self.withdrawnOfferMessages[reason]
                 } catch {
                     guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     present(error)
