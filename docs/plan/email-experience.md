@@ -56,8 +56,10 @@ presentation module; this feature does not build a dynamic plugin system.
 
 The priority view combines both accounts. On macOS, Important shows the total
 number of qualifying threads and initially loads up to 100. On touch it opens
-with up to five. Inbox is the A2 initial collection and pages five threads at
-a time (ADR-0231). Account badges and an account filter identify the source
+with up to five. Inbox is the A2 initial collection; on touch it pages five
+threads at a time (ADR-0231). On macOS every list, Inbox, Needs you, Handled,
+Important, Other mail and search results alike, loads up to 100 threads per
+page and scrolls (ADR-0303). Account badges and an account filter identify the source
 of each conversation.
 
 Each row shows the correspondent, subject, a concise statement of what needs
@@ -69,8 +71,9 @@ reasons for inclusion; the row does not repeat it (ADR-0234).
 Numeric ranking scores and internal model details stay out of the main flow.
 
 Only threads that meet the relevance threshold appear in Important.
-On macOS, scrolling near the end fetches the next page automatically. Refresh
-preserves the visible thread and the selected conversation independently.
+On macOS, scrolling near the end of any list fetches the next page
+automatically, with no More button. Refresh preserves the visible thread and
+the selected conversation independently, in every Mac list.
 It can fetch later pages to retain an eligible displaced thread, but does not
 chase an anchor already confirmed handled, archived, or in Spam.
 On touch, More important expands to ten, then pages through the rest. Find

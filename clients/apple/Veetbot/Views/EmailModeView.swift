@@ -238,7 +238,7 @@ public struct EmailModeView: View {
     /// False once the Mac window's sidebar button hides the sidebar.
     var mailboxSidebarVisible = true
     #if os(macOS)
-    @State private var nearImportantListEnd = false
+    @State private var nearListEnd = false
     var inboxWidth = EmailInboxWidthStore.app
     var sidebarStore = EmailSidebarWidthStore.app
     #endif
@@ -540,8 +540,8 @@ public struct EmailModeView: View {
 
     @ViewBuilder private var inboxList: some View {
         #if os(macOS)
-        if model.scrollsImportantMail {
-            importantList
+        if model.scrollsMailList {
+            scrollingList
         } else {
             pagedList
         }
@@ -572,7 +572,7 @@ public struct EmailModeView: View {
     }
 
     #if os(macOS)
-    private var importantList: some View {
+    private var scrollingList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -589,16 +589,16 @@ public struct EmailModeView: View {
                 .scrollTargetLayout()
             }
             .onScrollTargetVisibilityChange(idType: UUID.self, threshold: 0.01) { visible in
-                model.importantScrollAnchor = visible.first
+                model.scrollAnchor = visible.first
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.visibleRect.maxY + 180 >= geometry.contentSize.height
-            } action: { _, nearEnd in nearImportantListEnd = nearEnd }
-            .onChange(of: nearImportantListEnd && model.hasMore && !model.isLoading && !model.pagingFailed,
+            } action: { _, nearEnd in nearListEnd = nearEnd }
+            .onChange(of: nearListEnd && model.hasMore && !model.isLoading && !model.isReadingList && !model.pagingFailed,
                       initial: true) { _, shouldLoad in
-                if shouldLoad { Task { if model.scrollsImportantMail { await model.loadMore() } } }
+                if shouldLoad { Task { if model.scrollsMailList { await model.loadMore() } } }
             }
-            .onReceive(model.restoreImportantAnchor) { id in
+            .onReceive(model.restoreScrollAnchor) { id in
                 // Apply the new row order before positioning the conversation back at the top.
                 DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
             }
@@ -619,7 +619,7 @@ public struct EmailModeView: View {
                 Text(error).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                 Button("Try again") {
                     Task {
-                        await model.reload(preserveOrder: model.scrollsImportantMail)
+                        await model.reload(preserveOrder: model.scrollsMailList)
                         await model.refresh()
                     }
                 }

@@ -92,6 +92,9 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var review: ApprovalView?
     @Published public private(set) var reviewDraft: EmailDraftView?
     @Published public private(set) var isLoading = false
+    /// A list read is in flight, an in-place refresh included. It holds paging off
+    /// without showing the initial loading indicator (ADR-0303).
+    @Published public private(set) var isReadingList = false
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isLoadingThread = false
     @Published public private(set) var isSaving = false
@@ -119,21 +122,22 @@ public final class EmailViewModel: ObservableObject {
     var listTotal: Int? { archiveHiddenThreads.isEmpty ? loadedListTotal : nil }
     @Published private(set) var pagingFailed = false
     /// The visible Mac row, independent of the conversation open in the reader.
-    var importantScrollAnchor: UUID?
-    let restoreImportantAnchor = PassthroughSubject<UUID, Never>()
-    var scrollsImportantMail: Bool {
+    var scrollAnchor: UUID?
+    let restoreScrollAnchor = PassthroughSubject<UUID, Never>()
+    /// Every Mac list loads 100 rows a page and scrolls; touch pages by five (ADR-0303).
+    var scrollsMailList: Bool {
         #if os(macOS)
-        listView == "priority"
+        true
         #else
         false
         #endif
     }
-    private var pageSize: Int { scrollsImportantMail ? 100 : 5 }
+    private var pageSize: Int { scrollsMailList ? 100 : 5 }
 
     /// Do not search later pages for a row already confirmed absent from Important.
-    private var eligibleImportantScrollAnchor: UUID? {
-        guard queryListView == "priority" else { return importantScrollAnchor }
-        guard let id = importantScrollAnchor else { return nil }
+    private var eligibleScrollAnchor: UUID? {
+        guard queryListView == "priority" else { return scrollAnchor }
+        guard let id = scrollAnchor else { return nil }
         if archiveHiddenThreads.contains(id), archiveErrors[id] == nil { return nil }
         var known = inboxItems.first(where: { $0.id == id })
         if let detail = thread, detail.id == id, detail.revision >= (known?.revision ?? 0) {
@@ -492,7 +496,7 @@ public final class EmailViewModel: ObservableObject {
         listRequest = UUID()
         loadedCollectionCounts = nil
         loadedListTotal = nil
-        importantScrollAnchor = nil
+        scrollAnchor = nil
         nextCursor = nil
         hasMore = false
         pagingFailed = false
@@ -515,19 +519,20 @@ public final class EmailViewModel: ObservableObject {
             loadedListTotal = nil
         }
         let visibleCount = preserveOrder ? max(pageSize, inboxItems.count) : pageSize
-        isLoading = !preserveOrder || scrollsImportantMail
+        isLoading = !preserveOrder
+        isReadingList = true
         if !preserveOrder {
             inboxItems = []
             nextCursor = nil
             hasMore = false
         }
         errorMessage = refreshFailure
-        defer { if listRequest == requestID { isLoading = false } }
+        defer { if listRequest == requestID { isLoading = false; isReadingList = false } }
         do {
             async let accountPage = api.emailAccounts()
             async let threadPage = readInbox(api: api,
                 accountID: selectedAccountID, view: queryListView,
-                text: searchText, count: visibleCount, requestID: requestID, anchor: preserveOrder ? eligibleImportantScrollAnchor : nil,
+                text: searchText, count: visibleCount, requestID: requestID, anchor: preserveOrder ? eligibleScrollAnchor : nil,
                 connection: connection, activation: foreground
             )
             let (loadedAccounts, page) = try await (accountPage, threadPage)
@@ -543,7 +548,7 @@ public final class EmailViewModel: ObservableObject {
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             hasMore = nextCursor != nil
             if preserveOrder && !inboxItems.isEmpty {
-                let anchor = importantScrollAnchor
+                let anchor = scrollAnchor
                 let previousIndex = anchor.flatMap { id in items.firstIndex { $0.id == id } }
                 let oldIDs = Set(inboxItems.map(\.id))
                 let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
@@ -553,7 +558,7 @@ public final class EmailViewModel: ObservableObject {
                 arrivedThreadIDs = Set(additions.map(\.id))
                 if let anchor, let previousIndex, let index = items.firstIndex(where: { $0.id == anchor }),
                    index != previousIndex {
-                    restoreImportantAnchor.send(anchor)
+                    restoreScrollAnchor.send(anchor)
                 }
             } else {
                 inboxItems = loadedThreads
@@ -600,7 +605,7 @@ public final class EmailViewModel: ObservableObject {
         let connection = generation
         let mailboxVersions = archiveVersions
         let foreground = active ? activation : nil
-        guard acceptsRead(connection: connection, activation: foreground), !isLoading,
+        guard acceptsRead(connection: connection, activation: foreground), !isLoading, !isReadingList,
               let cursor = nextCursor, let api = makeAPIClient() else { return }
         isLoading = true
         let requestID = listRequest
