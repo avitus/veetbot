@@ -1973,8 +1973,11 @@ class PythonPlaywrightRuntime:
         return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
 
     async def interactive_frame(self) -> bytes:
+        # A compressed frame is several times smaller and quicker to make than a
+        # lossless one, which the surface redraws several times a second.
         return await self._current_page().screenshot(
-            type="png",
+            type="jpeg",
+            quality=80,
             animations="disabled",
             caret="initial",
             scale="css",
@@ -1988,8 +1991,9 @@ class PythonPlaywrightRuntime:
         elif event.kind == "text":
             assert event.text is not None
             # Checked before the text lands so a failed check loses no input.
-            # Only the fact of entry is kept, never the text itself.
-            if await self._sign_in_challenge_visible(page):
+            # Only the fact of entry is kept, never the text itself. The mark stays
+            # set until the runtime closes, so once set no later key repeats the scan.
+            if not self._sign_in_entered and await self._sign_in_challenge_visible(page):
                 self._sign_in_entered = True
             # The user typed each character, so each arrives as a key press;
             # a field filled with no keyboard events is scored as automated.

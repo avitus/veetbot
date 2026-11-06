@@ -160,7 +160,7 @@ class FakeRuntime:
         self.closed = True
 
     async def interactive_frame(self) -> bytes:
-        return b"synthetic-png-frame"
+        return b"synthetic-jpeg-frame"
 
     async def interactive_event(self, event: BrowserInteractiveEvent) -> None:
         self.events.append(event)
@@ -608,8 +608,8 @@ async def test_authentication_surface_binds_fragment_capability_before_interacti
     assert "This secure login link is incomplete or has expired" in script.text
     assert "controls.forEach(control=>control.disabled=true)" in script.text
     assert unauthorized.status_code == 401
-    assert frame.content == b"synthetic-png-frame"
-    assert frame.headers["content-type"] == "image/png"
+    assert frame.content == b"synthetic-jpeg-frame"
+    assert frame.headers["content-type"] == "image/jpeg"
     assert event.status_code == 204
     assert events == [BrowserInteractiveEvent(kind="click", x=100, y=120)]
 
