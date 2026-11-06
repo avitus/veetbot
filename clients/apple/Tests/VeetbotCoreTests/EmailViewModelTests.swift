@@ -15,9 +15,48 @@ import SwiftUI
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
     #if os(macOS)
+    /// A confirmed handled anchor stops restoration paging; an eligible displaced anchor is still found.
+    @Test(arguments: [true, false]) func testMacImportantRefreshSkipsOnlyIneligibleAnchors(handled: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let other = threadJSON().replacingOccurrences(of: threadID.uuidString, with: otherID.uuidString)
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("dismiss") {
+                return (200, self.threadJSON().replacingOccurrences(of: "\"revision\":1,\"summary\"",
+                    with: "\"dismissed_revision\":1,\"revision\":1,\"summary\""))
+            }
+            guard request.url!.path.hasSuffix("threads") else { return (200, self.threadJSON()) }
+            requests.append(request)
+            if requests.snapshot.count == 1 { return (200, self.pageJSON()) }
+            if request.url!.query?.contains("cursor=") == true {
+                if handled { return (503, Self.error("service_unavailable", "Unexpected anchor scan.")) }
+                return (200, self.pageJSON(cursor: "later"))
+            }
+            return (200, "{\"items\":[\(other)],\"next_cursor\":\"next\"}")
+        }
+        defer { model.resetConnection() }
+        model.setListView("priority")
+        for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        await model.openThread(threadID)
+        model.importantScrollAnchor = threadID
+        if handled {
+            let row = try #require(model.items.first)
+            #expect(await model.setThreadHandled(row, handled: true))
+        } else {
+            await model.reload(preserveOrder: true)
+        }
+        #expect(requests.snapshot.count == (handled ? 2 : 3))
+        #expect(model.items.map(\.id) == (handled ? [otherID] : [threadID, otherID]))
+        #expect(model.hasMore)
+        #expect(model.errorMessage == nil)
+        #expect(model.selectedThreadID == threadID)
+    }
+
     /// Scroll the real Mac inbox through a page boundary and retain its visible conversation on refresh.
     @Test func testMacImportantRequestsFullPages() async throws {
         let requests = EmailRequestRecorder()
+        let reorderedAnchor = EmailTestAnchor()
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             if !request.url!.path.hasSuffix("threads") { return (200, self.threadJSON()) }
@@ -29,8 +68,8 @@ import SwiftUI
             let rows = (start..<end).map { i in
                 let row = self.threadJSON().replacingOccurrences(of: self.threadID.uuidString,
                     with: String(format: "00000000-0000-0000-0000-%012d", 801 + i))
-                // During refresh the last conversation receives mail and moves to the top.
-                return i == 106 && requests.snapshot.count > 2
+                // During refresh the visible conversation receives mail and moves far off-screen.
+                return UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", 801 + i)) == reorderedAnchor.id
                     ? row.replacingOccurrences(of: "2026-09-11", with: "2026-09-12") : row
             }.joined(separator: ",")
             return (200, "{\"items\":[\(rows)],\"next_cursor\":\(end < 107 ? "\"\(end)\"" : "null"),\"total_count\":107}")
@@ -69,11 +108,16 @@ import SwiftUI
         try await Task.sleep(for: .milliseconds(150))
         let visible = try #require(model.importantScrollAnchor)
         #expect(visible != threadID)
+        #expect(scroll.documentVisibleRect.minY > scroll.documentVisibleRect.height)
+        reorderedAnchor.set(visible)
         await model.reload(preserveOrder: true)
-        #expect(model.items.first?.id == UUID(uuidString: "00000000-0000-0000-0000-000000000907"))
+        #expect(model.items.first?.id == visible)
         try await Task.sleep(for: .milliseconds(120))
         for _ in 0..<100 where model.importantScrollAnchor != visible { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.importantScrollAnchor == visible)
+        // The saved row is now first: its top must be inside the actual AppKit viewport.
+        // A stale importantScrollAnchor alone cannot satisfy this geometry assertion.
+        #expect(scroll.documentVisibleRect.minY < 1)
         #expect(model.items.count == 107)
         #expect(model.selectedThreadID == threadID)
     }
@@ -3703,6 +3747,14 @@ private final class EmailTestFlag: @unchecked Sendable {
     private var value = false
     func set() { lock.withLock { value = true } }
     var isSet: Bool { lock.withLock { value } }
+}
+
+/// Shares the row moved by the fixture server with its main-actor rendered test.
+private final class EmailTestAnchor: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UUID?
+    func set(_ id: UUID) { lock.withLock { value = id } }
+    var id: UUID? { lock.withLock { value } }
 }
 
 private final class EmailRequestRecorder: @unchecked Sendable {

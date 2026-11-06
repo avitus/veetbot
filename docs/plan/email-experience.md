@@ -71,6 +71,8 @@ Numeric ranking scores and internal model details stay out of the main flow.
 Only threads that meet the relevance threshold appear in Important.
 On macOS, scrolling near the end fetches the next page automatically. Refresh
 preserves the visible thread and the selected conversation independently.
+It can fetch later pages to retain an eligible displaced thread, but does not
+chase an anchor already confirmed handled, archived, or in Spam.
 On touch, More important expands to ten, then pages through the rest. Find
 mail and Review other mail make false negatives discoverable without cluttering
 the default list. Rows are ordered by each conversation's latest activity,

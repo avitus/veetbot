@@ -130,6 +130,15 @@ public final class EmailViewModel: ObservableObject {
     }
     private var pageSize: Int { scrollsImportantMail ? 100 : 5 }
 
+    /// Do not search later pages for a row already confirmed absent from Important.
+    private var eligibleImportantScrollAnchor: UUID? {
+        guard queryListView == "priority" else { return importantScrollAnchor }
+        guard let id = importantScrollAnchor else { return nil }
+        if archiveHiddenThreads.contains(id), archiveErrors[id] == nil { return nil }
+        guard let row = inboxItems.first(where: { $0.id == id }) else { return id }
+        return row.isHandled || row.isArchived || row.isInSpam ? nil : id
+    }
+
     private var queryListView: String {
         searchText.isEmpty || EmailCollection(rawValue: listView) != nil ? listView : "all"
     }
@@ -513,7 +522,7 @@ public final class EmailViewModel: ObservableObject {
             async let accountPage = api.emailAccounts()
             async let threadPage = readInbox(api: api,
                 accountID: selectedAccountID, view: queryListView,
-                text: searchText, count: visibleCount, requestID: requestID, anchor: preserveOrder ? importantScrollAnchor : nil,
+                text: searchText, count: visibleCount, requestID: requestID, anchor: preserveOrder ? eligibleImportantScrollAnchor : nil,
                 connection: connection, activation: foreground
             )
             let (loadedAccounts, page) = try await (accountPage, threadPage)
@@ -1321,6 +1330,9 @@ public final class EmailViewModel: ObservableObject {
             // unsaved draft, updating only server-confirmed attention state.
             if self.thread?.id == result.id, self.thread?.revision == result.revision {
                 self.thread?.dismissedRevision = result.dismissedRevision
+            }
+            if let index = inboxItems.firstIndex(where: { $0.id == result.id && $0.revision == result.revision }) {
+                inboxItems[index].dismissedRevision = result.dismissedRevision
             }
             await reload(preserveOrder: true)
             if confirms && handled {
