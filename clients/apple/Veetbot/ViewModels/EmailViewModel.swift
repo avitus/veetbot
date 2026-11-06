@@ -134,9 +134,8 @@ public final class EmailViewModel: ObservableObject {
     }
     private var pageSize: Int { scrollsMailList ? 100 : 5 }
 
-    /// Do not search later pages for a row already confirmed absent from Important.
+    /// Do not search later pages for a row already confirmed absent from the current list.
     private var eligibleScrollAnchor: UUID? {
-        guard queryListView == "priority" else { return scrollAnchor }
         guard let id = scrollAnchor else { return nil }
         if archiveHiddenThreads.contains(id), archiveErrors[id] == nil { return nil }
         var known = inboxItems.first(where: { $0.id == id })
@@ -144,7 +143,21 @@ public final class EmailViewModel: ObservableObject {
             known = detail
         }
         guard let row = known else { return id }
-        return row.isHandled || row.isArchived || row.isInSpam ? nil : id
+        return Self.staysListed(row, in: queryListView) ? id : nil
+    }
+
+    /// Whether a row's known state keeps it in a list (ADR-0231, ADR-0303): Inbox keeps handled
+    /// mail until it is archived, Needs you and Important drop it once handled, Handled keeps only
+    /// it, and nothing known removes a row from Other mail or search.
+    static func staysListed(_ row: EmailThreadView, in view: String) -> Bool {
+        let inInbox = !row.isArchived && !row.isInSpam
+        switch view {
+        case "priority": return inInbox && !row.isHandled
+        case EmailCollection.inbox.rawValue: return inInbox
+        case EmailCollection.needsYou.rawValue: return inInbox && !row.isHandled && row.needsReply
+        case EmailCollection.handled.rawValue: return inInbox && row.isHandled
+        default: return true
+        }
     }
 
     private var queryListView: String {

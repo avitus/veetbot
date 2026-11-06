@@ -75,7 +75,9 @@ On macOS, scrolling near the end of any list fetches the next page
 automatically, with no More button. Refresh preserves the visible thread and
 the selected conversation independently, in every Mac list.
 It can fetch later pages to retain an eligible displaced thread, but does not
-chase an anchor already confirmed handled, archived, or in Spam.
+chase an anchor its known state has taken out of the list: handled for
+Important and Needs you, not handled for Handled, archived or in Spam for
+Inbox and its collections (ADR-0303).
 On touch, More important expands to ten, then pages through the rest. Find
 mail and Review other mail make false negatives discoverable without cluttering
 the default list. Rows are ordered by each conversation's latest activity,

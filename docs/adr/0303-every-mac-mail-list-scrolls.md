@@ -25,10 +25,11 @@ chose "all Mac lists".
    scrolls near the end. No More mail button appears on the Mac.
 2. **Refresh keeps the visible thread in every list.** The refresh that keeps
    the loaded rows and retains the visible thread, which pull request 240
-   built for Important, applies to every Mac list. The rule that stops chasing
-   a thread already confirmed handled, archived or in Spam stays Important's,
-   because only Important drops such threads; the other lists may still show
-   them.
+   built for Important, applies to every Mac list. Each list stops chasing a
+   visible thread that its known state has taken out of that list: Important
+   and Needs you drop it once handled, Handled drops it once marked not
+   handled, Inbox and the collections drop it once archived or in Spam, and
+   nothing known removes a thread from Other mail or search results.
 3. **Touch is unchanged.** iPhone and iPad keep ADR-0231's five-row Inbox and
    the More important and More mail buttons.
 

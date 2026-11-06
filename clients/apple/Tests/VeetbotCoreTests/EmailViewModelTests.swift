@@ -55,6 +55,47 @@ import SwiftUI
         #expect(model.selectedThreadID == threadID)
     }
 
+    /// Each Mac list stops chasing a visible thread that has just left it: marking it handled
+    /// takes it out of Important and Needs you, and marking it not handled takes it out of
+    /// Handled. Inbox keeps handled mail, so there the refresh still finds it (ADR-0303).
+    @Test(arguments: ["priority", "needs_you", "handled", "inbox"])
+    func testMacListRefreshChasesOnlyAnchorsStillInTheList(view: String) async throws {
+        let requests = EmailRequestRecorder()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let other = threadJSON().replacingOccurrences(of: threadID.uuidString, with: otherID.uuidString)
+        let inHandled = view == "handled"
+        let stillListed = view == "inbox"
+        let base = inHandled
+            ? threadJSON().replacingOccurrences(of: "\"summary\"", with: "\"dismissed_revision\":1,\"summary\"")
+            : threadJSON()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            if request.url!.path.hasSuffix("dismiss") {
+                return (200, self.threadJSON().replacingOccurrences(of: "\"summary\"",
+                    with: "\"dismissed_revision\":\(inHandled ? "null" : "1"),\"summary\""))
+            }
+            guard request.url!.path.hasSuffix("threads") else { return (200, base) }
+            requests.append(request)
+            if requests.snapshot.count == 1 { return (200, "{\"items\":[\(base)],\"next_cursor\":null}") }
+            if request.url!.query?.contains("cursor=") == true {
+                if !stillListed { return (503, Self.error("service_unavailable", "Unexpected anchor scan.")) }
+                return (200, self.pageJSON(cursor: "later"))
+            }
+            return (200, "{\"items\":[\(other)],\"next_cursor\":\"next\"}")
+        }
+        defer { model.resetConnection() }
+        if view == model.listView { await model.reload() } else { model.setListView(view) }
+        for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        await model.openThread(threadID)
+        model.scrollAnchor = threadID
+        let detail = try #require(model.thread)
+        #expect(await model.setThreadHandled(detail, handled: !inHandled, confirms: false))
+        #expect(requests.snapshot.count == (stillListed ? 3 : 2))
+        #expect(model.items.map(\.id) == (stillListed ? [threadID, otherID] : [otherID]))
+        #expect(model.errorMessage == nil)
+    }
+
     /// Every Mac list scrolls through a page boundary and retains its visible conversation on
     /// refresh, Inbox and the collections as well as Important (ADR-0303).
     @Test(arguments: ["priority", "inbox", "needs_you", "handled", "other"])
