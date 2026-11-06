@@ -11,6 +11,7 @@ struct EmailConversationTests {
     private static let yoav = "Yoav Shalev <yoav@meridian.example>"
     private static let nate = "Nate Price <nate@bank.example>"
 
+    /// A server message payload.
     private static func message(
         _ id: String, from sender: String, to: [String], cc: [String] = [], reader: String,
         sent: Bool = false, day: Int = 2, attachments: [[String: Any]] = []
@@ -23,6 +24,7 @@ struct EmailConversationTests {
         ]
     }
 
+    /// Decodes through the production decoder.
     private static func decode(_ payloads: [[String: Any]]) throws -> [EmailMessageView] {
         try JSONDecoder.server.decode(
             [EmailMessageView].self, from: JSONSerialization.data(withJSONObject: payloads))
@@ -51,6 +53,7 @@ struct EmailConversationTests {
             ownerAddresses: [owner])
     }
 
+    /// The owner's mail is marked for the right-hand side.
     @Test func testOwnersMessagesSitOnTheirOwnSide() throws {
         let conversation = try Self.boardThread()
         #expect(conversation.entries.map(\.isOwner) == [false, false, false, false, true])
@@ -115,6 +118,7 @@ struct EmailConversationTests {
         #expect(entries[2].marker == .widened)
     }
 
+    /// Writers are counted in order; the copied who never wrote are listed apart.
     @Test func testWritersAndThoseOnlyCopiedAreCounted() throws {
         let conversation = try Self.boardThread()
         #expect(conversation.writers.map(\.person.short) == ["Dana", "Sean", "You"])
@@ -124,6 +128,7 @@ struct EmailConversationTests {
         #expect(conversation.files.first?.author.short == "Dana")
     }
 
+    /// A side conversation names its members and who was not addressed.
     @Test func testSideConversationsNameWhoIsLeftOut() throws {
         let sides = try Self.boardThread().sideConversations
         #expect(sides.count == 1)
@@ -153,12 +158,58 @@ struct EmailConversationTests {
         #expect(EmailConversation(messages: pair, ownerAddresses: [Self.owner]).isComplex == false)
     }
 
+    /// The folded share reflects the quoted history removed.
     @Test func testRepeatedTextShareCountsWhatFolded() throws {
         let conversation = try Self.boardThread()
         #expect(conversation.hiddenShare > 0.4)
         #expect(conversation.hiddenShare < 1)
     }
 
+    /// Without reader text the raw body is not Markdown: a sender's link label
+    /// or emphasis shows as typed, while reader text still renders.
+    @Test func testABodyWithoutReaderTextStaysPlain() throws {
+        var raw = Self.message("r1", from: Self.dana, to: [Self.owner], reader: "")
+        raw["reader_body"] = NSNull()
+        raw["body"] = "See [your bank](https://bank.attacker.example) *now*"
+        let entries = EmailConversation(
+            messages: try Self.decode([raw, Self.message("r2", from: Self.sean, to: [Self.owner], reader: "**Noted.**")]),
+            ownerAddresses: [Self.owner]
+        ).entries
+        #expect(entries[0].isPlainText)
+        #expect(entries[0].briefLine == "See [your bank](https://bank.attacker.example) *now*")
+        #expect(entries[1].isPlainText == false)
+    }
+
+    /// A list or table reads as its text in the brief and in folding, never as
+    /// a description of the parsed structure.
+    @Test func testListsAndTablesReadAsTheirText() throws {
+        let entries = EmailConversation(
+            messages: try Self.decode([
+                Self.message("l1", from: Self.dana, to: [Self.owner], reader: "- Bring the deck\n- Book the room"),
+            ]),
+            ownerAddresses: [Self.owner]
+        ).entries
+        #expect(entries[0].briefLine == "Bring the deck Book the room")
+        let table = MarkdownContentParser.parse("| Term | Ask |\n| --- | --- |\n| Cap | 30% |")
+        #expect(table.map(EmailConversation.plainText) == ["Term, Ask\nCap, 30%"])
+    }
+
+    /// A side conversation is read from To and Cc, so its marker says who the
+    /// message was addressed to, never that anyone cannot see it (Bcc and lists
+    /// are invisible).
+    @Test func testAudienceMarkersDescribeOnlyTheAddresses() throws {
+        let entries = try Self.boardThread().entries
+        let sean = try #require(entries[1].marker).text(author: entries[1].author)
+        #expect(sean == "Sean wrote to you · not addressed to Dana and Yoav")
+        let dana = try #require(entries[3].marker).text(author: entries[3].author)
+        #expect(dana == "Dana added Nate")
+        for word in ["privately", "only", "can't"] {
+            #expect(!sean.lowercased().contains(word))
+        }
+        #expect(EmailConversation.audienceCaveat.contains("Bcc"))
+    }
+
+    /// Names and addresses parse from the usual envelope forms.
     @Test func testPeopleParseFromEnvelopeForms() {
         #expect(EmailPerson(envelope: "\"Shalev, Yoav\" <Yoav@Meridian.example>").address == "yoav@meridian.example")
         #expect(EmailPerson(envelope: "\"Shalev, Yoav\" <Yoav@Meridian.example>").name == "Shalev, Yoav")
@@ -169,8 +220,43 @@ struct EmailConversationTests {
     }
 }
 
+/// The cache keeps one parse per thread revision, but never past a change to
+/// the messages themselves, such as bodies expired by retention.
+@MainActor
+struct EmailConversationCacheTests {
+    /// A two-message thread at a fixed revision.
+    private static func thread(body: String, complete: Bool) throws -> EmailThreadView {
+        let message: (String) -> [String: Any] = { id in
+            [
+                "id": id, "sender": "Dana <dana@example.test>", "to": ["owner@example.test"], "cc": [],
+                "subject": "Plan", "body": body, "reader_body": body, "direction": "received",
+                "sent_at": "2026-11-02T10:00:00Z", "complete": complete, "attachments": [],
+            ]
+        }
+        let payload: [String: Any] = [
+            "id": "00000000-0000-0000-0000-000000000901", "account_id": "work", "subject": "Plan",
+            "senders": ["dana@example.test"], "updated_at": "2026-11-02T10:00:00Z", "revision": 4,
+            "summary": "", "reason": "", "needs_reply": false, "priority": 0.5, "complete": complete,
+            "messages": [message("c1"), message("c2")],
+        ]
+        return try JSONDecoder.server.decode(EmailThreadView.self, from: JSONSerialization.data(withJSONObject: payload))
+    }
+
+    /// Emptied bodies at the same revision rebuild the conversation.
+    @Test func testChangedMessagesRebuildAtTheSameRevision() throws {
+        let before = EmailConversationCache.conversation(
+            for: try Self.thread(body: "The full text.", complete: true), ownerAddress: "owner@example.test")
+        #expect(before.entries[0].own == MarkdownContentParser.parse("The full text."))
+        let after = EmailConversationCache.conversation(
+            for: try Self.thread(body: "", complete: false), ownerAddress: "owner@example.test")
+        #expect(after.entries[0].message.complete == false)
+        #expect(after.entries[0].own != before.entries[0].own)
+    }
+}
+
 /// Quoted history introduced the Outlook way folds like Gmail's (ADR-0301).
 struct EmailReaderOutlookFoldTests {
+    /// An Outlook header block folds what follows it.
     @Test func testOutlookHeaderBlockFoldsTheRestOfTheMessage() {
         let own = "Thanks for this.\n\nBest,\\\nSean"
         let chain = "From: Dana Moss \\<dana@lumen.example>\\\nSent: Monday, November 2, 2026 5:17 PM\\\n"
@@ -180,12 +266,15 @@ struct EmailReaderOutlookFoldTests {
         #expect(sections.earlier == MarkdownContentParser.parse(chain))
     }
 
+    /// An unquoted attribution naming an address, or a time on a date, folds.
     @Test func testUnquotedAttributionWithAnAddressOrTimeFolds() {
         let own = "Adding Nate."
         let chain = "On Mon, Nov 2, 2026 at 5:17 PM, Sean \\<sean@example.com> wrote: Andy,\n\nOld text."
         let sections = EmailReaderSections(markdown: own + "\n\n" + chain)
         #expect(sections.current == MarkdownContentParser.parse(own))
         #expect(sections.earlier == MarkdownContentParser.parse(chain))
+        let dated = "On Nov 5, 2026, at 10:30 AM, Priya Shah wrote: Andy,\n\nOld text."
+        #expect(EmailReaderSections(markdown: "Agreed.\n\n" + dated).earlier == MarkdownContentParser.parse(dated))
         let original = "Intro.\n\n-----Original Message-----\n\nOld text."
         #expect(EmailReaderSections(markdown: original).current == MarkdownContentParser.parse("Intro."))
     }
@@ -197,6 +286,8 @@ struct EmailReaderOutlookFoldTests {
             "From: Dana \\<dana@example.com>\\\nSent: Monday\n\nA forward with no note.",
             "Intro.\n\nOn Friday we met. Sam wrote:\n\nNo quote follows.",
             "Intro.\n\nFrom: the desk of Sam\n\nA letterhead, not a header block.",
+            "Intro.\n\nFrom: Boston\nDate: Nov 5\n\nThe trip went well.",
+            "Intro.\n\nOn the 10:30 call, Priya wrote: we should move the close.\n\nMore of my own.",
         ] {
             let sections = EmailReaderSections(markdown: markdown)
             #expect(sections.current == MarkdownContentParser.parse(markdown))

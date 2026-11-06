@@ -39,9 +39,10 @@ complexity".
    better at full width.
 2. **A bubble shows only the writer's own words.** Quoted history now also
    folds when it starts with an Outlook header block (a paragraph that begins
-   `From:` and continues with a `Sent:` or `Date:` line), a
-   `-----Original Message-----` line, or an unquoted `On … wrote:` line that
-   names an address or a clock time. A Gmail chain may be followed by more
+   `From:` and continues with a `Sent:` or `Date:` line and a `To:` or
+   `Subject:` line), a `-----Original Message-----` line, or an unquoted
+   `On … wrote:` line that names an address, or a clock time on a date, so
+   "On the 10:30 call, Priya wrote:" stays the writer's own text. A Gmail chain may be followed by more
    quoted blocks, but not by an unquoted reply. As before, nothing folds unless the message has text
    of its own above it. In a conversation, trailing paragraphs that repeat in
    the same writer's other messages fold as well, which removes sign-offs and
@@ -56,9 +57,11 @@ complexity".
    thread's everyone is the union of the audiences of messages that left
    nobody out, so a person reached only through a side conversation, such as
    an assistant the owner forwarded the thread to, never joins it. When a
-   message leaves out part of everyone, an amber marker says who it went to
-   and who cannot see it, and each bubble in that side conversation carries a
-   lock line. When it adds people, a marker says who
+   message leaves out part of everyone, an amber marker says who it was
+   addressed to and who it was not addressed to, and each bubble in that side
+   conversation carries an "Addressed to" line. The words never claim anyone
+   cannot see a message, and a caveat says Bcc recipients and mailing-list
+   members are not shown. When it adds people, a marker says who
    added whom. When the thread returns to everyone, a marker says so. Bcc and
    the members of a mailing list cannot be seen, so they never count.
 4. **The people are listed above the conversation.** One chip per writer with

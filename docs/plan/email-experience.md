@@ -167,8 +167,8 @@ the unchanged retained body. Quoted history folds behind **Show earlier replies*
 when the message has text of its own above it and the history starts one of four
 ways: an `On … wrote:` line followed only by quoted blocks; an Outlook header
 block, a paragraph that begins `From:` and continues with a `Sent:` or `Date:`
-line; a `-----Original Message-----` line; or an unquoted `On … wrote:` line that
-names an address or a clock time. A reply written below a Gmail quote, a message
+line and a `To:` or `Subject:` line; a `-----Original Message-----` line; or an
+unquoted `On … wrote:` line that names an address, or a clock time on a date. A reply written below a Gmail quote, a message
 that is all quote, and a quote the writer introduced some other way stay in view.
 Only English attributions and header words are recognized
 ([ADR-0301](../adr/0301-email-threads-read-as-conversations.md)).
@@ -185,9 +185,11 @@ its sender, To, Cc and the owner. The thread's everyone is the union of the
 audiences of messages that left nobody out, so a person reached only through a
 side conversation never joins it. A message that leaves out part of everyone
 starts a side conversation: an
-amber marker names who it went to and who cannot see it, and each of its bubbles
-carries a lock line. Markers also say who added whom and when the thread
-returns to everyone. Bcc and mailing-list members are invisible to this rule.
+amber marker names who it was addressed to and who it was not, and each of its
+bubbles carries an "Addressed to" line; none claims who can see it, and a caveat
+says Bcc recipients and mailing-list members are not shown. Markers also say who added whom and when the thread
+returns to everyone. Bcc and mailing-list members are invisible to this rule. A message
+without reader text shows its raw body as typed, never as Markdown.
 Chips above the conversation name each writer with a count and fade the other
 writers' messages when pressed; the people only copied are counted in one line.
 

@@ -4,15 +4,17 @@ import SwiftUI
 /// re-renders on every draft keystroke and the parse is not free.
 @MainActor
 enum EmailConversationCache {
-    private static var built: [String: EmailConversation] = [:]
+    private static var built: [String: (messages: [EmailMessageView], conversation: EmailConversation)] = [:]
 
+    /// The cached parse, reused only while the messages are unchanged: retention
+    /// can empty bodies without moving the thread's revision.
     static func conversation(for thread: EmailThreadView, ownerAddress: String?) -> EmailConversation {
         let messages = thread.messages ?? []
         let key = "\(thread.id)|\(thread.revision)|\(messages.count)|\(ownerAddress ?? "")"
-        if let conversation = built[key] { return conversation }
+        if let cached = built[key], cached.messages == messages { return cached.conversation }
         if built.count > 8 { built.removeAll() }
         let conversation = EmailConversation(messages: messages, ownerAddresses: Set([ownerAddress].compactMap { $0 }))
-        built[key] = conversation
+        built[key] = (messages, conversation)
         return conversation
     }
 }
@@ -28,6 +30,7 @@ enum EmailPersonTint {
         AppColorToken(light: AppRGBA(hex: 0x9C3F2B), dark: AppRGBA(hex: 0xF09A84)),
     ]
 
+    /// The writer's ink by the order they first wrote; others are faint.
     static func color(for person: EmailPerson, in conversation: EmailConversation) -> Color {
         guard let index = conversation.writers.firstIndex(where: { $0.person.address == person.address }) else {
             return AppTheme.inkFaint
@@ -36,11 +39,13 @@ enum EmailPersonTint {
     }
 }
 
+/// A tinted circle with the person's initials.
 struct EmailPersonAvatar: View {
     let person: EmailPerson
     let tint: Color
     var size: CGFloat = 28
 
+    /// Initials over the writer's tint, at the given size.
     var body: some View {
         Text(person.initials)
             .veetType(size >= 32 ? .ui : .label, weight: .semibold)
@@ -71,6 +76,7 @@ func emailPeopleList(_ people: [EmailPerson], limit: Int = 3) -> String {
 /// as a brief first (ADR-0301). The caller gives it `.id(thread.id)` so the
 /// view, the focus and the filter start fresh for each thread.
 struct EmailThreadConversationView<Attachments: View>: View {
+    /// Which view of the thread is showing.
     enum Mode: Hashable { case conversation, brief }
 
     let thread: EmailThreadView
@@ -93,8 +99,10 @@ struct EmailThreadConversationView<Attachments: View>: View {
     @State private var expanded: Set<String> = []
     @State private var openWriters: Set<String> = []
 
+    /// Brief for a complex thread unless the owner switched; otherwise the conversation.
     private var effectiveMode: Mode { mode ?? startsOn ?? (conversation.isComplex ? .brief : .conversation) }
 
+    /// The Conversation | Brief switch over whichever view is showing.
     var body: some View {
         VStack(alignment: .leading, spacing: VeetSpace.s4) {
             if conversation.isComplex {
@@ -116,22 +124,27 @@ struct EmailThreadConversationView<Attachments: View>: View {
         })
     }
 
+    /// The person's ink in this thread.
     private func tint(_ person: EmailPerson) -> Color { EmailPersonTint.color(for: person, in: conversation) }
 
     // MARK: - Conversation
 
+    /// Every entry, or only one side conversation's when it is chosen.
     private var visibleEntries: [EmailConversation.Entry] {
         guard let sideID, let side = conversation.sideConversation(id: sideID) else { return conversation.entries }
         return conversation.entries.filter { side.entryIDs.contains($0.id) }
     }
 
+    /// People, an optional side-conversation filter, then the bubbles by day.
     private var conversationBody: some View {
         VStack(alignment: .leading, spacing: VeetSpace.s3) {
             people
             if let sideID, let side = conversation.sideConversation(id: sideID) {
                 HStack(spacing: VeetSpace.s2) {
-                    Label("Only \(emailPeopleList(side.members, limit: 4))", systemImage: "lock")
+                    Label("Addressed to \(emailPeopleList(side.members, limit: 4))", systemImage: "person.2")
                         .veetType(.meta, weight: .medium).foregroundColor(AppTheme.amberText)
+                        .help(EmailConversation.audienceCaveat)
+                        .accessibilityHint(EmailConversation.audienceCaveat)
                     Spacer(minLength: VeetSpace.s2)
                     Button("Show everyone's messages") { self.sideID = nil }
                         .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
@@ -192,6 +205,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
         }
     }
 
+    /// "N emails · N people wrote", with the folded share when it is worth saying.
     private var summaryLine: String {
         var parts = ["\(conversation.entries.count) emails", "\(conversation.writers.count) people wrote"]
         let share = Int((conversation.hiddenShare * 100).rounded())
@@ -199,6 +213,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
         return parts.joined(separator: " · ")
     }
 
+    /// A hairline with the day between messages sent on different days.
     private func dayDivider(_ date: Date) -> some View {
         HStack(spacing: VeetSpace.s3) {
             Rectangle().fill(AppTheme.hairline).frame(height: 1)
@@ -210,23 +225,21 @@ struct EmailThreadConversationView<Attachments: View>: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func markerView(_ marker: EmailConversation.Marker, author: EmailPerson) -> some View {
+    /// The audience change above the message that made it.
+    @ViewBuilder private func markerView(_ marker: EmailConversation.Marker, author: EmailPerson) -> some View {
         switch marker {
-        case .narrowed(let members, let hidden):
-            let recipients = members.filter { $0.address != author.address }
-            let who = members.count == 2 && members.contains(where: \.isOwner)
-                ? (author.isOwner ? "You wrote to \(emailPeopleList(recipients)) privately"
-                    : "\(author.short) wrote to you privately")
-                : "\(author.short) wrote to \(emailPeopleList(recipients, limit: 4)) only"
-            return markerPill("\(who) · \(emailPeopleList(hidden)) can't see this", symbol: "lock", attention: true)
-        case .added(let by, let people):
-            return markerPill("\(by.short) added \(emailPeopleList(people, limit: 4))",
-                              symbol: "person.badge.plus", attention: false)
+        case .narrowed:
+            markerPill(marker.text(author: author), symbol: "person.2", attention: true)
+                .help(EmailConversation.audienceCaveat)
+                .accessibilityHint(EmailConversation.audienceCaveat)
+        case .added:
+            markerPill(marker.text(author: author), symbol: "person.badge.plus", attention: false)
         case .widened:
-            return markerPill("Back to everyone", symbol: "person.3", attention: false)
+            markerPill(marker.text(author: author), symbol: "person.3", attention: false)
         }
     }
 
+    /// A centered capsule; amber when it starts a side conversation.
     private func markerPill(_ text: String, symbol: String, attention: Bool) -> some View {
         HStack {
             Spacer(minLength: 0)
@@ -243,6 +256,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
         .accessibilityIdentifier("email.conversation.marker")
     }
 
+    /// A bubble on its writer's side, under their avatar and name unless grouped.
     @ViewBuilder private func row(_ entry: EmailConversation.Entry, grouped: Bool) -> some View {
         let dim = focus != nil && focus != entry.author.address
         if entry.isOwner {
@@ -289,11 +303,12 @@ struct EmailThreadConversationView<Attachments: View>: View {
         }
     }
 
+    /// The message's own words, its audience line, and Show full email.
     private func bubble(_ entry: EmailConversation.Entry) -> some View {
         let open = expanded.contains(entry.id)
         return VStack(alignment: .leading, spacing: VeetSpace.s2) {
             if entry.isPrivate {
-                Label("Only \(emailPeopleList(entry.members, limit: 4))", systemImage: "lock")
+                Label("Addressed to \(emailPeopleList(entry.members, limit: 4))", systemImage: "person.2")
                     .veetType(.meta).foregroundColor(AppTheme.amberText)
             }
             if showsOriginal == true || open {
@@ -306,9 +321,15 @@ struct EmailThreadConversationView<Attachments: View>: View {
                     .veetType(.meta).foregroundColor(AppTheme.inkFaint).textSelection(.enabled)
                 }
             } else {
-                MarkdownBlocksView(blocks: entry.own)
-                    .textSelection(.enabled).veetType(.ui).lineSpacing(5)
-                    .accessibilityIdentifier("email.conversation.text")
+                Group {
+                    if entry.isPlainText {
+                        Text(verbatim: entry.message.body).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        MarkdownBlocksView(blocks: entry.own)
+                    }
+                }
+                .textSelection(.enabled).veetType(.ui).lineSpacing(5)
+                .accessibilityIdentifier("email.conversation.text")
             }
             if !entry.message.complete {
                 Label("This message is incomplete. Refresh before relying on its full contents.",
@@ -334,6 +355,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
 
     // MARK: - Brief
 
+    /// Where it stands, who is saying what, side conversations, files and the copied.
     private var brief: some View {
         VStack(alignment: .leading, spacing: VeetSpace.s5) {
             if showsSummary, !thread.summary.isEmpty {
@@ -350,6 +372,8 @@ struct EmailThreadConversationView<Attachments: View>: View {
             if !conversation.sideConversations.isEmpty {
                 briefSection("Side conversations") {
                     ForEach(conversation.sideConversations) { side in sideRow(side) }
+                    Text(EmailConversation.audienceCaveat)
+                        .veetType(.meta).foregroundColor(AppTheme.inkFaint).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if !conversation.files.isEmpty {
@@ -367,6 +391,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
         .accessibilityIdentifier("email.brief")
     }
 
+    /// A titled brief section.
     private func briefSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: VeetSpace.s3) {
             Text(title).veetType(.title)
@@ -375,11 +400,16 @@ struct EmailThreadConversationView<Attachments: View>: View {
         }
     }
 
-    private func inline(_ markdown: String) -> AttributedString {
-        (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(markdown)
+    /// A brief line keeps its inline emphasis and links, except a body that had
+    /// no reader text, which shows exactly as typed.
+    private func briefText(_ entry: EmailConversation.Entry) -> AttributedString {
+        guard !entry.isPlainText else { return AttributedString(entry.briefLine) }
+        return (try? AttributedString(
+            markdown: entry.briefLine, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(entry.briefLine)
     }
 
+    /// A writer's latest point, opening to a line per message.
     private func writerCard(_ writer: EmailConversation.Writer) -> some View {
         let open = openWriters.contains(writer.id)
         let latest = conversation.entry(id: writer.latestID)
@@ -396,7 +426,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
                     }
                 }
                 if let latest {
-                    Text(inline(latest.briefLine)).veetType(.ui).foregroundColor(AppTheme.ink)
+                    Text(briefText(latest)).veetType(.ui).foregroundColor(AppTheme.ink)
                         .lineLimit(4).fixedSize(horizontal: false, vertical: true)
                 }
                 Button(open ? "Hide messages" : (writer.count == 1 ? "Show the message" : "Show \(writer.count) messages")) {
@@ -414,9 +444,10 @@ struct EmailThreadConversationView<Attachments: View>: View {
                                     Text(entry.message.sentAt, format: .dateTime.month(.abbreviated).day())
                                         .veetType(.meta).foregroundColor(AppTheme.inkFaint).frame(width: 48, alignment: .leading)
                                     if entry.isPrivate {
-                                        Image(systemName: "lock").veetType(.meta).foregroundColor(AppTheme.amberText)
+                                        Image(systemName: "person.2").veetType(.meta).foregroundColor(AppTheme.amberText)
+                                            .accessibilityLabel("Side conversation")
                                     }
-                                    Text(inline(entry.briefLine)).veetType(.ui).foregroundColor(AppTheme.inkSoft)
+                                    Text(briefText(entry)).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                                         .lineLimit(2).multilineTextAlignment(.leading)
                                 }
                                 .contentShape(Rectangle())
@@ -434,11 +465,13 @@ struct EmailThreadConversationView<Attachments: View>: View {
         .padding(.vertical, VeetSpace.s1)
     }
 
+    /// "N messages · last <date>".
     private func briefMeta(count: Int, latest: Date) -> String {
         let when = latest.formatted(.dateTime.month(.abbreviated).day().hour().minute())
         return "\(count == 1 ? "1 message" : "\(count) messages") · last \(when)"
     }
 
+    /// A side conversation; pressing it filters the conversation to it.
     private func sideRow(_ side: EmailConversation.SideConversation) -> some View {
         Button {
             mode = .conversation
@@ -446,12 +479,12 @@ struct EmailThreadConversationView<Attachments: View>: View {
             sideID = side.id
         } label: {
             VStack(alignment: .leading, spacing: 2) {
-                Label("Only \(emailPeopleList(side.members, limit: 4))", systemImage: "lock")
+                Label("Addressed to \(emailPeopleList(side.members, limit: 4))", systemImage: "person.2")
                     .veetType(.ui, weight: .semibold).foregroundColor(AppTheme.amberText)
                 Text("\(side.entryIDs.count == 1 ? "1 message" : "\(side.entryIDs.count) messages") · started by \(side.startedBy.short), \(side.startedAt.formatted(.dateTime.month(.abbreviated).day()))")
                     .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 if !side.notIncluded.isEmpty {
-                    Text("Not included: \(emailPeopleList(side.notIncluded, limit: 4))")
+                    Text("Not addressed: \(emailPeopleList(side.notIncluded, limit: 4))")
                         .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                 }
             }
@@ -466,6 +499,7 @@ struct EmailThreadConversationView<Attachments: View>: View {
         .accessibilityIdentifier("email.brief.side")
     }
 
+    /// A file with who sent it, opening the attachments or its message.
     @ViewBuilder private func fileRow(_ file: EmailConversation.File) -> some View {
         let label = HStack(spacing: VeetSpace.s2) {
             Image(systemName: "paperclip").foregroundColor(AppTheme.tealText)

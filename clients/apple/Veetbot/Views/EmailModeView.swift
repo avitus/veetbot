@@ -2084,6 +2084,7 @@ struct EmailReaderSections: Equatable {
         }
     }
 
+    /// The first block of quoted history, if one starts after text of the message's own.
     private static func historyStart(in blocks: [MarkdownContentBlock]) -> Int? {
         guard blocks.count > 1 else { return nil }
         for index in 1..<blocks.count {
@@ -2106,9 +2107,7 @@ struct EmailReaderSections: Equatable {
             {
                 return index
             }
-            if first.hasPrefix("from:"), lines.dropFirst().contains(where: {
-                $0.lowercased().hasPrefix("sent:") || $0.lowercased().hasPrefix("date:")
-            }) {
+            if first.hasPrefix("from:"), isOutlookHeader(lines.dropFirst().map { $0.lowercased() }) {
                 return index
             }
             if first.range(of: #"^-{2,}\s*original message\s*-{2,}$"#, options: .regularExpression) != nil {
@@ -2118,10 +2117,26 @@ struct EmailReaderSections: Equatable {
         return nil
     }
 
-    /// An attribution, unlike prose about someone writing, names an address or a time.
+    /// Outlook's block names when it was sent and to whom (or about what);
+    /// a From line followed only by a date is the writer's own text.
+    private static func isOutlookHeader(_ lines: [String]) -> Bool {
+        lines.contains { $0.hasPrefix("sent:") || $0.hasPrefix("date:") }
+            && lines.contains { $0.hasPrefix("to:") || $0.hasPrefix("subject:") }
+    }
+
+    /// An attribution, unlike prose about someone writing, names an address, or
+    /// a time on a date: "On the 10:30 call, Priya wrote:" stays the writer's own.
     private static func namesAWriter(_ attribution: Substring) -> Bool {
-        attribution.contains("@")
-            || attribution.range(of: #"\d{1,2}:\d{2}"#, options: .regularExpression) != nil
+        if attribution.contains("@") { return true }
+        let time = attribution.range(of: #"\b\d{1,2}:\d{2}\b"#, options: .regularExpression) != nil
+        let months = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+        let date = [
+            #"\b(19|20)\d{2}\b"#,
+            #"\b\d{1,2}/\d{1,2}/\d{2,4}\b"#,
+            #"\b(\#(months))[a-z]*\.?\s+\d{1,2}\b"#,
+            #"\b\d{1,2}\s+(\#(months))[a-z]*\b"#,
+        ].contains { attribution.range(of: $0, options: .regularExpression) != nil }
+        return time && date
     }
 }
 

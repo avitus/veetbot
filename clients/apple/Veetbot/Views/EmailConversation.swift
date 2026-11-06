@@ -7,6 +7,7 @@ struct EmailPerson: Hashable, Sendable {
     let name: String
     let isOwner: Bool
 
+    /// A person from an already-normalized address.
     init(address: String, name: String, isOwner: Bool = false) {
         self.address = address
         self.name = name
@@ -41,6 +42,7 @@ struct EmailPerson: Hashable, Sendable {
         return String(name.split(separator: " ").first ?? Substring(name))
     }
 
+    /// One or two letters for the avatar.
     var initials: String {
         let words = (namedOnlyByAddress ? short : name)
             .split(whereSeparator: { $0 == " " || $0 == "," || $0 == "." })
@@ -62,8 +64,24 @@ struct EmailConversation {
         case added(by: EmailPerson, people: [EmailPerson])
         /// Everyone on the thread can see it again.
         case widened
+
+        /// The marker's words, said from the owner's side.
+        func text(author: EmailPerson) -> String {
+            switch self {
+            case .narrowed(let members, let hidden):
+                let recipients = members.filter { $0.address != author.address }
+                let writer = author.isOwner ? "You" : author.short
+                return "\(writer) wrote to \(emailPeopleList(recipients, limit: 4))"
+                    + " · not addressed to \(emailPeopleList(hidden))"
+            case .added(let by, let people):
+                return "\(by.short) added \(emailPeopleList(people, limit: 4))"
+            case .widened:
+                return "Back to everyone"
+            }
+        }
     }
 
+    /// One message as the conversation shows it.
     struct Entry: Identifiable {
         let message: EmailMessageView
         let author: EmailPerson
@@ -80,9 +98,12 @@ struct EmailConversation {
         let members: [EmailPerson]
         /// The first paragraph that is not a greeting, as written.
         let briefLine: String
+        /// The message had no reader text, so its raw body shows as typed, never as Markdown.
+        let isPlainText: Bool
         var id: String { message.id }
     }
 
+    /// Someone who wrote in the thread, with how often and their latest message.
     struct Writer: Identifiable {
         let person: EmailPerson
         let count: Int
@@ -90,6 +111,7 @@ struct EmailConversation {
         var id: String { person.address }
     }
 
+    /// Consecutive or recurring messages to the same narrower audience.
     struct SideConversation: Identifiable {
         let members: [EmailPerson]
         let notIncluded: [EmailPerson]
@@ -100,6 +122,7 @@ struct EmailConversation {
         var id: String { entryIDs.first ?? "" }
     }
 
+    /// An attachment, with who sent it and which message carried it.
     struct File: Identifiable {
         let attachment: EmailAttachmentView
         let author: EmailPerson
@@ -107,6 +130,9 @@ struct EmailConversation {
         let index: Int
         var id: String { "\(entryID)#\(index)" }
     }
+
+    /// Said wherever an audience is shown: it comes from the headers alone.
+    static let audienceCaveat = "Read from the To and Cc lines. Bcc recipients and mailing-list members aren't shown."
 
     let entries: [Entry]
     let writers: [Writer]
@@ -119,6 +145,7 @@ struct EmailConversation {
     /// Three or more writers, and a side conversation or eight messages: open on the brief.
     let isComplex: Bool
 
+    /// Reads the thread in order; the owner is the account address plus every sender of sent mail.
     init(messages: [EmailMessageView], ownerAddresses: Set<String>) {
         var owners = Set(ownerAddresses.map { $0.lowercased() })
         for message in messages where message.direction == "sent" {
@@ -130,7 +157,9 @@ struct EmailConversation {
         // Everyone by address, with the most descriptive name any envelope gave.
         var directory: [String: EmailPerson] = [:]
         var order: [String] = []
+        /// Every owner address counts as one person.
         func key(_ address: String) -> String { owners.contains(address) ? (ownerKey ?? address) : address }
+        /// Records a person, keeping the most descriptive name seen.
         func note(_ envelope: String) {
             let parsed = EmailPerson(envelope: envelope)
             guard !parsed.address.isEmpty else { return }
@@ -150,20 +179,24 @@ struct EmailConversation {
             if let ownerKey, directory[ownerKey] == nil { note(ownerKey) }
             (message.to + message.cc).forEach(note)
         }
+        /// The directory's person for an envelope.
         func person(_ envelope: String) -> EmailPerson {
             let address = key(EmailPerson(envelope: envelope).address)
             return directory[address] ?? EmailPerson(envelope: envelope)
         }
+        /// People in the order they first appeared on the thread.
         func ordered(_ addresses: Set<String>) -> [EmailPerson] {
             order.filter(addresses.contains).compactMap { directory[$0] }
         }
 
         // Each message's words and audience, and where the audience changed.
+        /// A message before repeated sign-offs are trimmed across the writer's mail.
         struct Draft {
             var message: EmailMessageView
             var author: EmailPerson
             var current: [MarkdownContentBlock]
             var folded: Bool
+            var plain: Bool
             var marker: Marker?
             var isPrivate: Bool
             var audience: Set<String>
@@ -205,6 +238,7 @@ struct EmailConversation {
 
             let current: [MarkdownContentBlock]
             let folded: Bool
+            let plain = (message.readerBody ?? "").isEmpty
             if let reader = message.readerBody, !reader.isEmpty {
                 let sections = EmailReaderSections(markdown: reader)
                 // A forwarded copy below a note repeats mail the thread already holds.
@@ -216,7 +250,7 @@ struct EmailConversation {
                 folded = false
             }
             drafts.append(Draft(
-                message: message, author: author, current: current, folded: folded, marker: marker,
+                message: message, author: author, current: current, folded: folded, plain: plain, marker: marker,
                 isPrivate: isPrivate, audience: audience, members: memberOrder.compactMap { directory[$0] }))
         }
 
@@ -240,7 +274,8 @@ struct EmailConversation {
             built.append(Entry(
                 message: draft.message, author: draft.author, isOwner: draft.author.isOwner, own: own,
                 hasMore: draft.folded || trimmed, marker: draft.marker, isPrivate: draft.isPrivate,
-                audience: draft.audience, members: draft.members, briefLine: Self.briefLine(own)))
+                audience: draft.audience, members: draft.members, briefLine: Self.briefLine(own),
+                isPlainText: draft.plain))
         }
         entries = built
 
@@ -282,8 +317,10 @@ struct EmailConversation {
         isComplex = writers.count >= 3 && (!sides.isEmpty || built.count >= 8)
     }
 
+    /// The entry for a message id.
     func entry(id: String) -> Entry? { entries.first { $0.id == id } }
 
+    /// The side conversation with this id.
     func sideConversation(id: String) -> SideConversation? { sideConversations.first { $0.id == id } }
 
     // MARK: - Text
@@ -308,6 +345,7 @@ struct EmailConversation {
         "the information contained in this", "this message and any attachments",
     ]
 
+    /// A trailing legal or confidentiality notice.
     private static func isDisclaimer(_ block: MarkdownContentBlock) -> Bool {
         guard case .paragraph(let text) = block else { return false }
         let opening = text.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "*_ "))
@@ -320,6 +358,7 @@ struct EmailConversation {
         return !line.contains("\n") && line.hasSuffix(",") && line.split(separator: " ").count <= 4
     }
 
+    /// The first paragraph that is not a greeting, on one line.
     static func briefLine(_ blocks: [MarkdownContentBlock]) -> String {
         let paragraphs = blocks.compactMap { block -> String? in
             if case .paragraph(let text) = block { return text } else { return nil }
@@ -328,13 +367,15 @@ struct EmailConversation {
         return point.replacingOccurrences(of: "\n", with: " ")
     }
 
+    /// A block's readable text, for the brief, sign-off matching and the folded share.
     static func plainText(_ block: MarkdownContentBlock) -> String {
         switch block {
         case .paragraph(let text), .heading(_, let text): return text
         case .blockquote(let blocks): return blocks.map(plainText).joined(separator: "\n")
         case .codeBlock(_, let code): return code
-        case .list(let items): return items.map { String(describing: $0) }.joined(separator: "\n")
-        case .table(let table): return String(describing: table)
+        case .list(let items): return items.map(\.text).joined(separator: "\n")
+        case .table(let table):
+            return ([table.headers] + table.rows).map { $0.joined(separator: ", ") }.joined(separator: "\n")
         case .thematicBreak: return ""
         }
     }
