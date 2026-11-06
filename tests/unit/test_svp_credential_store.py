@@ -97,6 +97,20 @@ def test_an_expiring_token_is_refreshed_and_the_rotation_is_durable(
     assert sorted(item.name for item in tmp_path.iterdir()) == ["svp.json", "svp.json.lock"]
 
 
+def test_a_public_grant_refreshes_with_its_client_id_alone(tmp_path: Path) -> None:
+    server = Server()
+    public = {
+        key: value for key, value in _state(expires_at=NOW - 1).items() if key != "client_secret"
+    }
+    path = _file(tmp_path, public)
+
+    assert _store(path, server).access_token() == "access-2"
+
+    assert server.forms[0]["client_id"] == "client-1"
+    assert "client_secret" not in server.forms[0]
+    assert "client_secret" not in read_state(path)
+
+
 def test_a_server_that_does_not_rotate_keeps_its_refresh_token(tmp_path: Path) -> None:
     path = _file(tmp_path, _state(expires_at=NOW - 1))
 
@@ -188,9 +202,19 @@ def test_no_refresh_is_spent_when_the_rotation_could_not_be_saved(tmp_path: Path
         _state(refresh_token=""),
         _state(expires_at="soon"),
         _state(extra="value"),
-        {key: value for key, value in _state().items() if key != "client_secret"},
+        {key: value for key, value in _state().items() if key != "client_id"},
+        _state(client_secret=""),
     ],
-    ids=["array", "empty", "version", "no-refresh", "bad-expiry", "extra-key", "missing-key"],
+    ids=[
+        "array",
+        "empty",
+        "version",
+        "no-refresh",
+        "bad-expiry",
+        "extra-key",
+        "missing-key",
+        "empty-secret",
+    ],
 )
 def test_a_malformed_state_file_is_refused(tmp_path: Path, state: object) -> None:
     with pytest.raises(SvpError, match=r"^svp\.credential_invalid$"):

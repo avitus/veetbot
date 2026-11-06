@@ -819,6 +819,11 @@ send step. The capture field is cleared as each event is taken, and typed text
 is never placed in diagnostics or durable client state. When an event fails,
 the surface drops the rest of the queue and tells the user to clear the field
 and type again, so a password is never submitted with a character missing.
+The screenshot is a compressed picture of the page at the page's own size: a
+window wide enough shows it unscaled, and a narrower one scrolls it rather than
+shrinking it. The surface has at most one screenshot request in flight, and asks
+every quarter second for ten seconds after the user's last interaction and every
+second otherwise or while the tab is hidden.
 
 Only the isolated service determines completion. It may report `ready`,
 `needs_user`, `authentication_required`, `expired`, or `cancelled`; no caller
@@ -842,7 +847,8 @@ consent banner, do not either. Until the evidence exists a page that shows no
 challenge stays `authentication_required`, including a page that saved state
 already signs in, where the user signs in again or cancels. The runtime keeps
 one boolean for this rule and never inspects, compares, or records the text the
-user sent or any cookie value.
+user sent or any cookie value. Once set, the boolean holds until the runtime
+closes, so a later text event types without repeating the scan.
 
 That evidence is necessary, not sufficient. The runtime is site-independent: a
 profile names allowed origins and nothing about a site's pages, so no marker

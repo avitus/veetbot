@@ -4,6 +4,7 @@
 - Date: 2026-10-05
 - Related: ADR-0021, ADR-0071, ADR-0097, ADR-0131
 - Amended by: ADR-0291, under which a schedule may name this server
+- Repaired 2026-11-06: the ceremony registers a public client (see Consequences)
 - Detailed design: `docs/plan/tool-system.md`
 
 ## Context
@@ -159,3 +160,15 @@ company name; the investor portfolio search returned a server error from the
 service for the input tried. Offline tests cover the grant, rotation,
 confinement and tool behaviour against a scripted transport. Production
 enablement remains.
+
+**Public client since 2026-11-06.** Between the morning of 2026-11-05 and
+2026-11-06 the service stopped registering confidential clients: its
+authorization-server metadata now lists only `none` and `private_key_jwt`,
+and a `client_secret_post` registration is answered as `none` with no
+secret. The production grant's refresh was then refused
+(`svp.credential_rejected`), and the ceremony refused the secret-less
+registration (`svp.response_invalid`). The ceremony now registers a public
+client and sends no secret; PKCE binds the code, and the one-holder file
+still protects the refresh token. A file from an earlier confidential
+registration remains readable, but its grant has ended and the ceremony must
+be run again.

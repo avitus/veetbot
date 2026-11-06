@@ -106,7 +106,11 @@ def bootstrap_credential(
             {
                 "version": 1,
                 "client_id": registration.client_id,
-                "client_secret": registration.client_secret,
+                **(
+                    {}
+                    if registration.client_secret is None
+                    else {"client_secret": registration.client_secret}
+                ),
                 "refresh_token": grant.refresh_token,
                 "access_token": grant.access_token,
                 "expires_at": expires_at,

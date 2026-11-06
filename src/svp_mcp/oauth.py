@@ -30,8 +30,10 @@ _SCOPE = " ".join(SCOPES)
 
 @dataclass(frozen=True)
 class Client:
+    """A registered client; a public client, the only kind since 2026-11-06, has no secret."""
+
     client_id: str
-    client_secret: str
+    client_secret: str | None
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,7 @@ def _post(http: httpx.Client, url: str, *, grant: bool, **body: Any) -> dict[str
 
 
 def register(http: httpx.Client) -> Client:
-    """Register one confidential client bound to the fixed loopback redirect."""
+    """Register one public client bound to the fixed loopback redirect; PKCE proves the sign-in."""
 
     payload = _post(
         http,
@@ -118,14 +120,14 @@ def register(http: httpx.Client) -> Client:
             "redirect_uris": [LOOPBACK_REDIRECT_URI],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
-            "token_endpoint_auth_method": "client_secret_post",
+            "token_endpoint_auth_method": "none",
             "scope": _SCOPE,
         },
     )
     client_id, client_secret = payload.get("client_id"), payload.get("client_secret")
-    if not _opaque(client_id) or not _opaque(client_secret):
+    if not _opaque(client_id) or (client_secret is not None and not _opaque(client_secret)):
         raise SvpError("svp.response_invalid")
-    return Client(str(client_id), str(client_secret))
+    return Client(str(client_id), None if client_secret is None else str(client_secret))
 
 
 def _grant(http: httpx.Client, client: Client, form: dict[str, str]) -> Grant:
@@ -136,7 +138,7 @@ def _grant(http: httpx.Client, client: Client, form: dict[str, str]) -> Grant:
         data={
             **form,
             "client_id": client.client_id,
-            "client_secret": client.client_secret,
+            **({} if client.client_secret is None else {"client_secret": client.client_secret}),
             "resource": RESOURCE,
         },
     )

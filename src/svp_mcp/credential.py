@@ -21,13 +21,13 @@ from svp_mcp import oauth
 from svp_mcp.constants import EXPIRY_SKEW_SECONDS, MAXIMUM_STATE_BYTES
 from svp_mcp.errors import SvpError
 
-_KEYS = frozenset(
-    {"version", "client_id", "client_secret", "refresh_token", "access_token", "expires_at"}
-)
+_KEYS = frozenset({"version", "client_id", "refresh_token", "access_token", "expires_at"})
+# Only a confidential client registered before 2026-11-06 has a secret.
+_OPTIONAL_KEYS = frozenset({"client_secret"})
 
 
 def _validated(state: object) -> dict[str, Any]:
-    if not isinstance(state, dict) or set(state) != _KEYS:
+    if not isinstance(state, dict) or not _KEYS <= set(state) <= _KEYS | _OPTIONAL_KEYS:
         raise SvpError("svp.credential_invalid")
     expires_at = state["expires_at"]
     if (
@@ -35,7 +35,11 @@ def _validated(state: object) -> dict[str, Any]:
         or state["version"] != 1
         or any(
             not isinstance(state[key], str) or not state[key]
-            for key in ("client_id", "client_secret", "refresh_token")
+            for key in ("client_id", "refresh_token")
+        )
+        or (
+            "client_secret" in state
+            and (not isinstance(state["client_secret"], str) or not state["client_secret"])
         )
         or not isinstance(state["access_token"], str)
         or isinstance(expires_at, bool)
@@ -153,7 +157,7 @@ class CredentialStore:
             try:
                 grant = oauth.refresh(
                     self._http,
-                    oauth.Client(state["client_id"], state["client_secret"]),
+                    oauth.Client(state["client_id"], state.get("client_secret")),
                     state["refresh_token"],
                 )
             except BaseException:
