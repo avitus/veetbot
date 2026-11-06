@@ -422,6 +422,7 @@ class EmailExperienceService:
             "items": [thread_summary(thread) for thread in page],
             "next_cursor": str(start + limit) if start + limit < len(eligible) else None,
             "collection_counts": counts,
+            "total_count": len(eligible),
         }
 
     async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]:
