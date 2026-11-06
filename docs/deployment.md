@@ -1698,6 +1698,8 @@ production roster the three are entries in the deferred tool index, reached
 with `tool.call`, and the production-roster gates include the flag
 (ADR-0124). A call that returns `svp.credential_rejected` after the grant
 was working means the grant has ended: repeat steps 1 and 2 with a new file.
+A grant made before 2026-11-06 used a client secret, which the service no
+longer accepts, so it must be replaced the same way.
 
 
 ## Optional owner-added MCP servers
