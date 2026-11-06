@@ -9,6 +9,7 @@ from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
 
 async def test_collections_count_before_paging_and_keep_handled_distinct_from_archive() -> None:
+    """Keep collection totals independent of paging, handling and archive state."""
     async with email_client() as (composition, client):
         first, _ = await seed_mail(composition)
         second, _ = await seed_mail(composition, priority=0.1)

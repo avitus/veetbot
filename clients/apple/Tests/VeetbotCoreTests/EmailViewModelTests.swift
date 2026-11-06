@@ -15,6 +15,7 @@ import SwiftUI
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
     #if os(macOS)
+    /// Scroll the real Mac inbox through a page boundary and retain its visible conversation on refresh.
     @Test func testMacImportantRequestsFullPages() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -50,6 +51,7 @@ import SwiftUI
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(for: .milliseconds(150))
 
+        /// Find the long inbox document among the sidebar and reader scroll views.
         func inboxScroll(in view: NSView) -> NSScrollView? {
             if let scroll = view as? NSScrollView, let document = scroll.documentView,
                document.frame.height > frame.height * 3 { return scroll }

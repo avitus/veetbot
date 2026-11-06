@@ -473,6 +473,7 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// Invalidates pending page reads and clears metadata belonging to the previous query.
     private func resetListQuery() {
         listRequest = UUID()
         loadedCollectionCounts = nil

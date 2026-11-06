@@ -108,9 +108,9 @@ checks it per commit; no trailer means lane A.
 
 ## Verification
 
-Always run development tests in the local sandbox. Use `scripts/run_apple_ui_macos_vm.sh` for Apple tests
-(including `make test-apple`) and `scripts/run_in_linux_container.sh` for Linux tests. If unavailable, report the
-blocker. Never run tests on the host desktop. Use Chunk only at the owner's explicit request.
+Always run development tests in the local sandbox. Follow the target-specific commands in
+`docs/plan/development-toolchain.md#local-test-sandboxes` for Apple, Linux, database and Docker tests.
+If unavailable, report the blocker. Never test on the host desktop. Use Chunk only at the owner's request.
 
 Run focused tests, lint, typecheck and docs-check while iterating. Run full hosted CI once on the final head
 before merging (step 4, ADR-0257). Keep `make check` as the fallback. Never run sidecar `make check` while iterating.

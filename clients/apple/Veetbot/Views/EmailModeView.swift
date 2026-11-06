@@ -639,6 +639,7 @@ public struct EmailModeView: View {
         }
     }
 
+    /// Build the shared selectable row used by the Important and other mailbox lists.
     private func inboxRow(_ thread: EmailThreadView) -> some View {
         HStack(alignment: .top, spacing: 10) {
             EmailHandledCircle(model: model, thread: thread, accessibilityID: "email.handled.\(thread.id.uuidString)")
