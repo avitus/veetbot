@@ -36,9 +36,9 @@ complexity".
    shown as the owner's:
    it sits on the left under the raw address with an amber warning that it
    is not in the owner's sent mail, and the brief's card for that writer
-   carries the same warning. While no owner address is known (the account
-   list has not loaded and the thread holds no sent mail), an amber line
-   says that mail claiming the owner's address cannot be checked yet. Everyone else's mail sits on the left, with an initials
+   carries the same warning. Until the account's own address loads, an amber
+   line says that mail claiming the owner's address cannot be checked yet,
+   even when sent mail from an alias already places the owner's own messages. Everyone else's mail sits on the left, with an initials
    avatar and the writer's name. A writer's consecutive messages share one
    name line. Day dividers separate the days. A thread of one message keeps
    the existing prose reader, because a newsletter or a single letter reads

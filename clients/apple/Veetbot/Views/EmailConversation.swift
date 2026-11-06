@@ -149,8 +149,8 @@ struct EmailConversation {
     let hiddenShare: Double
     /// Three or more writers, and a side conversation or eight messages: open on the brief.
     let isComplex: Bool
-    /// No owner address is known yet (no account address and no sent mail), so
-    /// mail claiming the owner's address cannot be told apart and is not flagged.
+    /// The account's own address has not loaded, so mail claiming it cannot be
+    /// checked yet; sent aliases still place the owner's own mail.
     let ownerUnknown: Bool
 
     /// Reads the thread in order; the owner is the account address plus every sender of sent mail.
@@ -159,7 +159,7 @@ struct EmailConversation {
         for message in messages where message.direction == "sent" {
             owners.insert(EmailPerson(envelope: message.sender).address)
         }
-        ownerUnknown = owners.isEmpty
+        ownerUnknown = ownerAddresses.allSatisfy { $0.isEmpty }
         let ownerKey = ownerAddresses.map { $0.lowercased() }.sorted().first
             ?? messages.first(where: { $0.direction == "sent" }).map { EmailPerson(envelope: $0.sender).address }
 

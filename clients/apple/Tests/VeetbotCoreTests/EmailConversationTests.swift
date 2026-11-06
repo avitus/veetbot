@@ -259,8 +259,8 @@ struct EmailConversationTests {
         #expect(entries[1].unverifiedOwner)
     }
 
-    /// Before the account list loads, a thread with no sent mail has no owner
-    /// address to check claims against, and says so instead of staying silent.
+    /// Until the account address loads, claims on it cannot be checked, and the
+    /// conversation says so instead of staying silent, even beside sent aliases.
     @Test func testAnUnknownOwnerAddressIsReported() throws {
         let received = try Self.decode([
             Self.message("k1", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Claims to be you."),
@@ -268,10 +268,17 @@ struct EmailConversationTests {
         ])
         #expect(EmailConversation(messages: received, ownerAddresses: []).ownerUnknown)
         #expect(EmailConversation(messages: received, ownerAddresses: [Self.owner]).ownerUnknown == false)
-        let withSent = try Self.decode([
-            Self.message("k0", from: "Andy Vitus <\(Self.owner)>", to: [Self.dana], reader: "Sent.", sent: true),
+        // Sent mail from an alias does not stand in for the account address: a
+        // claim on the account address could not be checked, so the notice stays.
+        let fromAlias = try Self.decode([
+            Self.message("k0", from: "Andy <andy@alias.example>", to: [Self.dana], reader: "Sent.", sent: true),
         ]) + received
-        #expect(EmailConversation(messages: withSent, ownerAddresses: []).ownerUnknown == false)
+        let early = EmailConversation(messages: fromAlias, ownerAddresses: [])
+        #expect(early.ownerUnknown)
+        #expect(early.entries[0].isOwner, "Known sent addresses keep the owner's side")
+        let loaded = EmailConversation(messages: fromAlias, ownerAddresses: [Self.owner])
+        #expect(loaded.ownerUnknown == false)
+        #expect(loaded.entries[1].unverifiedOwner, "Once the address loads, the claim is flagged")
     }
 
     /// Names and addresses parse from the usual envelope forms.
