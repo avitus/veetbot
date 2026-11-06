@@ -101,6 +101,9 @@ complexity".
   **Show full email** shows it. Gmail's reply-below-a-quote still stays in
   view.
 - Only English attributions and header words are recognized.
+- The Mac panel's thread-wide **Show original** shows the conversation with
+  every message's original body, even on a complex thread, and the switch to
+  **Brief** waits until it is turned off.
 - The client keeps parsed conversations for at most nine threads, reuses one
   only while its messages are unchanged, and drops them all when the Email
   connection resets, so no mail text outlives the connection that read it.

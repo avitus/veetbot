@@ -106,7 +106,17 @@ struct EmailThreadConversationView<Attachments: View>: View {
     @State private var openWriters: Set<String> = []
 
     /// Brief for a complex thread unless the owner switched; otherwise the conversation.
-    private var effectiveMode: Mode { mode ?? startsOn ?? (conversation.isComplex ? .brief : .conversation) }
+    private var effectiveMode: Mode {
+        Self.mode(chosen: mode, startsOn: startsOn, isComplex: conversation.isComplex, showsOriginal: showsOriginal)
+    }
+
+    /// The view to show. Show original needs whole messages, which only the
+    /// conversation holds; otherwise the owner's choice, else the opening view,
+    /// else the brief for a complex thread.
+    static func mode(chosen: Mode?, startsOn: Mode?, isComplex: Bool, showsOriginal: Bool?) -> Mode {
+        if showsOriginal == true { return .conversation }
+        return chosen ?? startsOn ?? (isComplex ? .brief : .conversation)
+    }
 
     /// The Conversation | Brief switch over whichever view is showing.
     var body: some View {
@@ -117,6 +127,8 @@ struct EmailThreadConversationView<Attachments: View>: View {
                     Text("Brief").tag(Mode.brief)
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
+                .disabled(showsOriginal == true)
+                .help(showsOriginal == true ? "Turn off Show original to read the brief" : "")
                 .accessibilityIdentifier("email.thread.view")
             }
             switch effectiveMode {

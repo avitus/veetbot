@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import VeetbotCore
 
@@ -217,6 +218,21 @@ struct EmailConversationTests {
         #expect(EmailPerson(envelope: "sam@example.test").short == "sam")
         #expect(EmailPerson(envelope: "Riley <riley@example.test>").initials == "R")
         #expect(EmailPerson(envelope: "Dana Moss <dana@lumen.example>").initials == "DM")
+    }
+}
+
+/// Show original shows whole messages, which only the conversation holds, so
+/// it overrides the brief a complex thread opens on (ADR-0301).
+struct EmailThreadModeTests {
+    private typealias View = EmailThreadConversationView<EmptyView>
+
+    @Test func testShowOriginalShowsTheConversationOverTheBrief() {
+        #expect(View.mode(chosen: nil, startsOn: nil, isComplex: true, showsOriginal: nil) == .brief)
+        #expect(View.mode(chosen: nil, startsOn: nil, isComplex: true, showsOriginal: false) == .brief)
+        #expect(View.mode(chosen: nil, startsOn: nil, isComplex: true, showsOriginal: true) == .conversation)
+        #expect(View.mode(chosen: .brief, startsOn: nil, isComplex: true, showsOriginal: true) == .conversation)
+        #expect(View.mode(chosen: .brief, startsOn: nil, isComplex: true, showsOriginal: false) == .brief)
+        #expect(View.mode(chosen: nil, startsOn: nil, isComplex: false, showsOriginal: nil) == .conversation)
     }
 }
 
