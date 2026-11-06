@@ -31,6 +31,17 @@ struct EmailConversationTests {
             [EmailMessageView].self, from: JSONSerialization.data(withJSONObject: payloads))
     }
 
+    #if os(macOS)
+    @Test func testImageProjectionKeepsItsPositionInTheConversation() throws {
+        var payload = Self.message("image", from: Self.dana, to: [Self.owner], reader: "Before.\n\nAfter.")
+        payload["reader_image_body"] = "Before.\n\n![Garden](veetbot-email-image:0)\n\nAfter."
+        let conversation = EmailConversation(messages: try Self.decode([payload]), ownerAddresses: [Self.owner])
+        #expect(conversation.entries[0].own == [
+            .paragraph("Before."), .paragraph("![Garden](veetbot-email-image:0)"), .paragraph("After.")
+        ])
+    }
+    #endif
+
     /// Five messages: a board email, a private side note, a second private
     /// note, everyone again with a banker added, and the owner's reply.
     private static func boardThread() throws -> EmailConversation {

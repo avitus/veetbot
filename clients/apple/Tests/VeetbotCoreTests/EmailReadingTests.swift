@@ -1,8 +1,43 @@
 import Foundation
 import Testing
+#if os(macOS)
+import AppKit
+import SwiftUI
+#endif
 @testable import VeetbotCore
 
 struct EmailReadingTests {
+    @Test func testOnlyWholeServerImageReferencesAreActionable() {
+        #expect(EmailImageReference(.paragraph("![Garden](veetbot-email-image:0)"))?.index == 0)
+        for text in [
+            "![Garden](https://images.example/photo)", "!\\[Garden\\](veetbot-email-image:0)",
+            "Before ![Garden](veetbot-email-image:0)", "![Garden](veetbot-email-image:20)",
+            "![Garden](veetbot-email-image:-1)"
+        ] {
+            #expect(EmailImageReference(.paragraph(text)) == nil)
+        }
+    }
+
+    #if os(macOS)
+    @Test @MainActor func testOpeningImageBearingEmailDoesNotFetchImages() async throws {
+        var requests = 0
+        let view = EmailMarkdownBlocksView(
+            blocks: [.paragraph("Before."), .paragraph("![Garden](veetbot-email-image:0)")], messageID: "message")
+            .environment(\.emailImageLoader, { _, _ in
+                requests += 1
+                return Data()
+            })
+        let host = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 600),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(requests == 0)
+    }
+    #endif
+
     /// Reader content is additive; older servers and retained originals stay readable.
     @Test func testReadingProjectionPreservesOriginalAndSupportsOlderServers() throws {
         let original = "Article text.\nUnsubscribe\n<https://example.com/leave>"

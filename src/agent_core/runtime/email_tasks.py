@@ -688,6 +688,7 @@ class _TaskIO:
                 {
                     **item,
                     "body": "",
+                    "reader_html": "",
                     "body_offset": item["next_body_offset"],
                     "body_complete": False,
                 }
@@ -1551,7 +1552,7 @@ class _TaskIO:
                 json.dumps(
                     {
                         "messages": [
-                            message.model_dump(mode="json", exclude={"sender_check"})
+                            message.model_dump(mode="json", exclude={"sender_check", "reader_html"})
                             for message in messages
                         ],
                         "complete": complete,
@@ -1854,14 +1855,14 @@ class _TaskIO:
         was_complete = same_source and previous.get("analysis_complete") is True
         selected_index = 0 if was_complete else min(cursor, len(segments) - 1)
         message, offset = segments[selected_index]
-        selected = message.model_dump(mode="json")
+        selected = message.model_dump(mode="json", exclude={"reader_html"})
         selected.update(
             body=message.body[offset : offset + EMAIL_ASSESSMENT_PASSAGE_CHARACTERS],
             body_offset_characters=offset,
         )
         visible = [selected]
         if message.id != thread.messages[-1].id or offset:
-            latest = thread.messages[-1].model_dump(mode="json")
+            latest = thread.messages[-1].model_dump(mode="json", exclude={"reader_html"})
             latest.update(
                 body=thread.messages[-1].body[:EMAIL_ASSESSMENT_PASSAGE_CHARACTERS],
                 body_offset_characters=0,
@@ -2153,7 +2154,9 @@ class _TaskIO:
             "field contains the authenticated owner's requested revision. Return a body "
             "only; the application determines the account and reply recipients.",
             {
-                "thread": thread.model_dump(mode="json"),
+                "thread": thread.model_dump(
+                    mode="json", exclude={"messages": {"__all__": {"reader_html"}}}
+                ),
                 "learning": learning,
                 "owner_instruction": instruction,
             },

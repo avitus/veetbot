@@ -875,7 +875,8 @@ kept on this Mac and restored at the next launch (MagicPath cozy-evening-6871):
 the sidebar's hairline drags it from 200 to 340 points (260 before any drag,
 `veetbot.email.sidebarWidth`), a native split divider drags the inbox from 260
 to 480 (300 before any drag, `veetbot.email.inboxWidth`), the right panel's
-hairline drags it from 260 to 440 (below), and the reader takes the rest.
+hairline drags it from 260 to 440 (below), and the reader takes the rest. Its contents fill that width with fixed edge
+padding, without the former 680-point cap (ADR-0303).
 Dragging the sidebar or the panel wider stops where the reader would fall
 below 420 points; a double-click on either hairline returns its column to its
 starting width. A window too narrow for the chosen widths squeezes the reader
@@ -975,6 +976,13 @@ Archiving the open conversation, from its inbox row or the reading pane, clears
 the pane immediately and opens the next visible conversation, or the previous one
 when archiving the last row. With no remaining rows, the pane becomes empty. Loading the successor does not wait for archive
 admission or completion, and a later archive failure does not replace the new selection.
+
+On Mac, externally hosted email images appear at their positions in the reading
+text after **Load images** is pressed for that message (ADR-0303). The control
+explains the possible open disclosure. Loading is never automatic or remembered
+for a sender; a failed image offers **Try again** while the text stays readable.
+The server returns bounded JPEG renditions without exposing raw HTML to a
+WebView. Older cached mail needs its source read again to gain image references.
 
 The reading column separates the attention summary, original conversation and
 reply composer. Why this matters and Improve priorities expand on demand, while

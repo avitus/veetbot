@@ -968,6 +968,10 @@ class EmailService(Protocol):
 
     async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]: ...
 
+    async def image(
+        self, principal: Principal, thread_id: UUID, message_id: str, index: int
+    ) -> bytes: ...
+
     async def feedback(
         self,
         principal: Principal,

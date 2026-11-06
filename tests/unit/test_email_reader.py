@@ -430,3 +430,163 @@ def test_cleanup_stays_quick_on_a_long_wrapped_paragraph() -> None:
     result = reading_body("\n".join(lines))
     assert time.monotonic() - started < 5
     assert result == " ".join(lines)
+
+
+async def test_images_are_projected_in_place_but_never_fetched_on_thread_read() -> None:
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0]["reader_html"] = (
+                '<p>Before.</p><img src="https://images.example/photo.png" alt="The garden">'
+                '<p>After.</p><img width="1" height="1" src="https://images.example/pixel">'
+                '<img src="http://localhost/private"><script>bad()</script>'
+            )
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        response = await client.get(f"/v1/email/threads/{thread.id}")
+        message = response.json()["messages"][0]
+        assert message["body"] == thread.messages[0].body
+        assert "reader_html" not in message
+        rich = message.get("reader_image_body", "")
+        assert rich.index("Before.") < rich.index("![The garden]") < rich.index("After.")
+        assert "pixel" not in rich and "localhost" not in rich and "bad()" not in rich
+
+
+async def test_image_endpoint_checks_retention_identity_scope_failure_and_explicit_retry() -> None:
+    from uuid import uuid4
+
+    import pytest
+
+    from agent_core.domain.errors import (
+        AuthorizationError,
+        EmailImageUnavailableError,
+        NotFoundError,
+    )
+
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        service = app.services.email
+        calls: list[str] = []
+
+        async def read(url: str) -> bytes:
+            calls.append(url)
+            if len(calls) == 1:
+                raise EmailImageUnavailableError("Image could not be loaded.")
+            return b"jpeg-fixture"
+
+        service.read_image = read
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0]["reader_html"] = '<p>Photo.</p><img src="https://images.example/photo.png">'
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        route = f"/v1/email/threads/{thread.id}/images"
+        await client.get(f"/v1/email/threads/{thread.id}")
+        assert calls == []
+        assert (
+            await client.post(route, json={"message_id": "missing", "index": 0})
+        ).status_code == 400
+        assert (await client.post(route, json={"message_id": "m1", "index": 1})).status_code == 400
+        assert (await client.post(route, json={"message_id": "m1", "index": -1})).status_code == 400
+        assert (
+            await client.post(
+                route, json={"message_id": "m1", "index": 0, "url": "https://other.example"}
+            )
+        ).status_code == 400
+        assert (
+            await client.post(
+                f"/v1/email/threads/{uuid4()}/images", json={"message_id": "m1", "index": 0}
+            )
+        ).status_code == 404
+        assert calls == []
+        with pytest.raises(AuthorizationError):
+            await service.image(
+                app.principal.model_copy(update={"scopes": set()}), thread.id, "m1", 0
+            )
+        with pytest.raises(NotFoundError):
+            await service.image(
+                app.principal.model_copy(update={"principal_id": "another-owner"}),
+                thread.id,
+                "m1",
+                0,
+            )
+        assert calls == []
+        failure = await client.post(route, json={"message_id": "m1", "index": 0})
+        assert failure.status_code == 502, failure.text
+        assert len(calls) == 1
+        response = await client.post(route, json={"message_id": "m1", "index": 0})
+        assert response.status_code == 200 and response.content == b"jpeg-fixture"
+        assert response.headers["cache-control"] == "private, no-store"
+        assert calls == ["https://images.example/photo.png"] * 2
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = {**record.payload, "last_accessed_at": "2024-01-01T00:00:00Z"}
+            await uow.email.put(
+                record.model_copy(update={"revision": record.revision + 1, "payload": payload}),
+                expected_revision=record.revision,
+            )
+        assert (await client.post(route, json={"message_id": "m1", "index": 0})).status_code == 400
+        message = (await client.get(f"/v1/email/threads/{thread.id}")).json()["messages"][0]
+        assert message["reader_image_body"] is None
+        assert len(calls) == 2
+
+
+def test_image_projection_rejects_sender_markdown_hidden_and_nonpublic_sources() -> None:
+    urls: list[str] = []
+    source = """<p>![Forged](veetbot-email-image:0)</p>
+    <div hidden><img src="https://images.example/hidden"></div>
+    <img style="width:1px" src="https://images.example/pixel">
+    <img src="cid:attachment"><img src="data:image/png;base64,abc">
+    <img src="http://images.example/insecure"><img src="https://127.0.0.1/private">
+    <img src="https://name:password@images.example/private">
+    <img src="https://images.example/photo.png" alt="[Garden]">
+    <p>After.</p>"""
+    rich = reading_body(source, image_urls=urls)
+    assert urls == ["https://images.example/photo.png"]
+    assert r"!\[Forged\](veetbot-email-image:0)" in rich
+    assert r"![\[Garden\]](veetbot-email-image:0)" in rich
+    assert rich.endswith("After.")
+
+
+def test_image_projection_caps_references_without_losing_prose() -> None:
+    urls: list[str] = []
+    rich = reading_body(
+        "<p>Before.</p>" + '<img src="https://images.example/photo.png">' * 30 + "<p>After.</p>",
+        image_urls=urls,
+    )
+    assert len(urls) == 20
+    assert rich.count("veetbot-email-image:") == 20
+    assert rich.startswith("Before.") and rich.endswith("After.")
+
+
+async def test_adding_image_source_preserves_revision_and_learning_content() -> None:
+    from uuid import uuid4
+
+    from tests.gates.test_email_learning_m26 import observation, prepare
+
+    async with email_client() as (app, client):
+        service = await prepare(app)
+        source = observation()
+        session = uuid4()
+        original = await service.import_thread(app.principal, "work", source, session)
+        html = '<p>Photo.</p><img src="https://images.example/photo.png">'
+        source["messages"][0]["reader_html"] = html
+        updated = await service.import_thread(app.principal, "work", source, session)
+        assert updated.id == original.id and updated.revision == original.revision
+        assert updated.source_fingerprint == original.source_fingerprint
+        assert updated.messages[0].body == original.messages[0].body
+        assert updated.messages[0].reader_html == html
+        projection = (await client.get(f"/v1/email/threads/{updated.id}")).json()
+        assert "veetbot-email-image:0" in projection["messages"][0]["reader_image_body"]

@@ -14,6 +14,12 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 
 
+class ImageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message_id: str = Field(min_length=1, max_length=256)
+    index: int = Field(ge=0, lt=20, strict=True)
+
+
 class FeedbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     thread_id: UUID
@@ -134,10 +140,29 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         # owner lock. Chat, drafting and learning keep the original service data.
         messages = cast(list[dict[str, Any]], result["messages"])
         for message in messages:
+            html = message.pop("reader_html", "")
+            urls: list[str] = []
+            rich = reading_body(html, subject=message["subject"], image_urls=urls)
+            message["reader_image_body"] = rich if urls else None
             message["reader_body"] = reading_body(
                 message["body"], subject=message["subject"] or str(result["subject"])
             )
         return result
+
+    @router.post(
+        "/v1/email/threads/{thread_id}/images", openapi_extra={"required_scope": "email.read"}
+    )
+    async def image(
+        thread_id: UUID,
+        body: ImageRequest,
+        authenticated: Annotated[Principal, secured("email.read")],
+    ) -> Response:
+        content = await boundary(
+            service.image(authenticated, thread_id, body.message_id, body.index)
+        )
+        return Response(
+            content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"}
+        )
 
     @router.post("/v1/email/feedback", openapi_extra={"required_scope": "email.write"})
     async def feedback(

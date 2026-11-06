@@ -98,6 +98,8 @@ class EmailMessage(EmailValue):
     cc: list[str] = Field(default_factory=list)
     subject: str = ""
     body: str = ""
+    # Presentation only; never model evidence or content identity.
+    reader_html: str = Field(default="", max_length=65536)
     body_offset: int = Field(default=0, ge=0)
     sent_at: datetime
     complete: bool = False
@@ -471,12 +473,14 @@ def body_cutoff(now: datetime) -> datetime:
 
 def retained_thread(thread: EmailThread, cutoff: datetime) -> EmailThread:
     """Expire only this conversation, before a read can renew its access time."""
-    if thread.last_accessed_at > cutoff or not any(message.body for message in thread.messages):
+    if thread.last_accessed_at > cutoff or not any(
+        message.body or message.reader_html for message in thread.messages
+    ):
         return thread
     return thread.model_copy(
         update={
             "messages": [
-                message.model_copy(update={"body": "", "complete": False})
+                message.model_copy(update={"body": "", "reader_html": "", "complete": False})
                 for message in thread.messages
             ],
             "complete": False,

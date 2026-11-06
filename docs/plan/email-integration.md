@@ -591,3 +591,12 @@ this package. No new OAuth scope is requested. Report spam, Not spam and
 sender cleanup reuse `modify_labels`, and a `mailto:` unsubscribe reuses
 `send_message`, each under its existing classification, approval floor and
 uncertainty rule. Milestone 18's gates remain independently binding.
+
+### Image-bearing presentation source (ADR-0303)
+
+The application-only `get_thread_page` additionally retains a complete HTML
+alternative containing images when it fits 64 KiB, as `reader_html`. It stays
+within the existing response budget and follows the message's retention and
+erasure. The ordinary `get_thread` tool keeps returning only its text body.
+The reader derives inert image references; raw HTML is not model evidence or
+content identity. See [email-experience.md](email-experience.md).

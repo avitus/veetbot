@@ -130,8 +130,9 @@ must not equate an incomplete scan or model failure with an empty priority inbox
 
 Thread detail contains the original messages, a grounded summary, any request
 or deadline, the importance explanation, and an editable draft when one is
-appropriate. Render sanitized text initially; external images, tracking pixels,
-and active HTML do not load. Show attachment metadata and the fact that an
+appropriate. Render sanitized text initially; external images load only after an
+explicit **Load images** press in the Mac reader (ADR-0303). Known hidden and tiny
+tracking images and active HTML remain excluded. Show attachment metadata and the fact that an
 attachment was not read. A draft that depends on an unread attachment requests
 the missing information rather than claiming to have reviewed it. Each attachment
 offers Save, which stores a copy in the thread's chat
@@ -161,8 +162,9 @@ more lines that repeats an earlier block of the same message, however it wrapped
 is shown once, which is how a signature quoted at every level appears. No other
 prose is removed for repeating.
 
-Native text renders the result at a comfortable line width, with external
-HTTP(S) links opened only by a user gesture and a **Show original** toggle for
+Native text renders the result across the available Mac reader width, keeping
+its edge padding; iPhone and iPad retain their bounded reading width. External
+HTTP(S) links open only by a user gesture, with a **Show original** toggle for
 the unchanged retained body. Quoted history folds behind **Show earlier replies**
 when the message has text of its own above it and the history starts one of four
 ways: an `On … wrote:` line followed only by quoted blocks; an Outlook header
@@ -172,6 +174,20 @@ unquoted `On … wrote:` line that names an address, or a clock time on a date. 
 that is all quote, and a quote the writer introduced some other way stay in view.
 Only English attributions and header words are recognized
 ([ADR-0301](../adr/0301-email-threads-read-as-conversations.md)).
+
+The Mac image reader (ADR-0303) uses a separate `reader_image_body` projection
+with server-authored image indices in message order. Image-bearing HTML, up to
+64 KiB per message, is retained as `reader_html` only by the application Gmail
+sync path, excluded from model evidence and content identity, and expires and
+is erased with the body. The ordinary Gmail tool's text body is unchanged.
+The scoped `POST /v1/email/threads/{id}/images` accepts `message_id` and `index`
+(0 through 19), never a URL. After source retention and ownership checks it
+fetches that reference through the credential-free, DNS-pinned public image
+reader and returns a bounded JPEG with `private, no-store`. No thread read
+fetches an image. The Mac asks once per visible message, explains that loading
+may disclose an open, and offers explicit retry on failure. It discards late
+results after the source or connection changes. CID attachments and GIFs remain
+unsupported; previously retained mail gains images on its next source read.
 
 A thread of two or more messages reads as a conversation (ADR-0301). Each message
 is a bubble: the owner's own mail (only messages marked `direction: sent`) on

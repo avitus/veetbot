@@ -366,7 +366,8 @@ struct EmailThreadConversationView<Attachments: View>: View {
                     if entry.isPlainText {
                         Text(verbatim: entry.message.body).fixedSize(horizontal: false, vertical: true)
                     } else {
-                        MarkdownBlocksView(blocks: entry.own)
+                        EmailMarkdownBlocksView(blocks: entry.own, messageID: entry.id)
+                            .id(entry.message.displayReaderBody)
                     }
                 }
                 .textSelection(.enabled).veetType(.ui).lineSpacing(5)

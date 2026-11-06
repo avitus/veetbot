@@ -348,6 +348,7 @@ class GmailSync:
                 "history_id": _history(raw.get("historyId")),
                 "internal_date": _history(raw.get("internalDate")),
                 "headers_complete": headers_complete,
+                "reader_html": self.client._reader_html(payload),
                 "reply_to": headers.get("reply-to", ""),
                 "message_id_header": headers.get("message-id", ""),
                 "in_reply_to": headers.get("in-reply-to", ""),

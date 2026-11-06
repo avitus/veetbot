@@ -170,3 +170,14 @@ async def test_missing_artifact_scope_refuses_before_network() -> None:
         {"url": "https://photos.example.com/photo.jpg"}, tool_context()
     )
     assert result.failure and result.failure.reason_code == "policy.scope.missing"
+
+
+async def test_email_image_failure_is_typed_and_never_exposes_the_url() -> None:
+    from agent_core.domain.errors import EmailImageUnavailableError
+
+    async def resolve(host: str) -> tuple[str, ...]:
+        return ("127.0.0.1",)
+
+    with pytest.raises(EmailImageUnavailableError, match="Image could not be loaded") as failure:
+        await PublicImageReader(resolve).read_email("https://images.example/private?secret=fixture")
+    assert "secret" not in str(failure.value)

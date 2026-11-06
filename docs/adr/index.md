@@ -349,3 +349,4 @@ implementation without one.
 - [ADR-0300: Read card activity without per-click approval and capture an approved CSV export (Proposed)](0300-card-activity-reads-and-csv-exports.md)
 - [ADR-0301: Email threads read as conversations, with a brief for complex ones (Accepted)](0301-email-threads-read-as-conversations.md)
 - [ADR-0302: One approval for a request on a signed-in website (Proposed)](0302-one-approval-for-a-website-request.md)
+- [ADR-0303: Click-to-load email images and a fluid Mac reader (Accepted)](0303-email-inline-images-and-fluid-reader.md)

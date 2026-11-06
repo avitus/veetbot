@@ -259,8 +259,8 @@ struct EmailConversation {
 
             let current: [MarkdownContentBlock]
             let folded: Bool
-            let plain = (message.readerBody ?? "").isEmpty
-            if let reader = message.readerBody, !reader.isEmpty {
+            let plain = (message.displayReaderBody ?? "").isEmpty
+            if let reader = message.displayReaderBody, !reader.isEmpty {
                 let sections = EmailReaderSections(markdown: reader)
                 current = sections.current
                 folded = !sections.earlier.isEmpty
@@ -283,7 +283,7 @@ struct EmailConversation {
                 .flatMap { drafts[$0].current.map(Self.signature) })
             var own = draft.current
             var trimmed = false
-            while own.count > 1, let last = own.last,
+            while own.count > 1, let last = own.last, EmailImageReference(last) == nil,
                 others.contains(Self.signature(last)) || Self.isDisclaimer(last)
             {
                 own.removeLast()
@@ -371,7 +371,7 @@ struct EmailConversation {
     /// The first paragraph that is not a greeting, on one line.
     static func briefLine(_ blocks: [MarkdownContentBlock]) -> String {
         let paragraphs = blocks.compactMap { block -> String? in
-            if case .paragraph(let text) = block { return text } else { return nil }
+            if case .paragraph(let text) = block, EmailImageReference(block) == nil { return text } else { return nil }
         }
         let point = paragraphs.first { !isGreeting($0) } ?? paragraphs.first ?? blocks.first.map(plainText) ?? ""
         return point.replacingOccurrences(of: "\n", with: " ")

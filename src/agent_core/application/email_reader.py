@@ -9,9 +9,11 @@ from html.parser import HTMLParser
 from itertools import groupby
 from urllib.parse import urlsplit
 
+from agent_core.domain.web import is_public_https_url
+
 _INVISIBLE = str.maketrans("", "", "\u00ad\u034f\u200b\ufeff")
 _URL_LINE = re.compile(r"^<?(https?://[^\s<>]+)>?([*_]?)$", re.I)
-_HTML = re.compile(r"</?(?:html|body|div|p|h[1-6]|a|br|table|span|script|style)\b[^>]*>", re.I)
+_HTML = re.compile(r"</?(?:html|body|div|p|h[1-6]|a|br|table|span|script|style|img)\b[^>]*>", re.I)
 _PROMOTIONS = re.compile(
     r"^(?:forwarded this email\? subscribe for more|unsubscribe|manage (?:email )?preferences|"
     r"view (?:this email )?in (?:your )?browser|view in app|comment|like|share this story|"
@@ -188,8 +190,9 @@ def _with_line_breaks(lines: list[str], flowing: set[int]) -> list[str]:
 class _HTMLText(HTMLParser):
     """Extract inert text and explicit links, without a WebView or resource loader."""
 
-    def __init__(self) -> None:
+    def __init__(self, image_urls: list[str] | None = None) -> None:
         super().__init__(convert_charrefs=True)
+        self.image_urls = image_urls
         self.parts: list[str] = []
         self.hidden: list[str] = []
         self.anchor: tuple[int, str] | None = None
@@ -216,6 +219,20 @@ class _HTMLText(HTMLParser):
         if hidden:
             if not void:
                 self.hidden.append(tag)
+            return
+        if tag == "img" and self.image_urls is not None and len(self.image_urls) < 20:
+            url = values.get("src") or ""
+            dimensions = [values.get("width") or "", values.get("height") or ""]
+            dimensions += re.findall(r"(?:^|;)(?:width|height):([0-9.]+)(?:px)?(?:;|$)", style)
+            tiny = any(
+                float(value) <= 2 for value in dimensions if re.fullmatch(r"\d+(?:\.\d+)?", value)
+            )
+            if is_public_https_url(url) and not tiny:
+                index = len(self.image_urls)
+                self.image_urls.append(url)
+                label = _inert(re.sub(r"\s+", " ", values.get("alt") or "Image"))[:300]
+                self.parts.append(f"\n\n![{label}](veetbot-email-image:{index})\n\n")
+                self.anchor = None
             return
         if tag in {"p", "div", "table", "tr", "blockquote", "ul", "ol"}:
             self.parts.append("\n\n")
@@ -287,13 +304,13 @@ def _forwarded(lines: list[str]) -> list[str]:
     return result
 
 
-def reading_body(body: str, *, subject: str = "") -> str:
+def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None = None) -> str:
     """Derive safe reading Markdown from retained text, preserving substantive prose."""
     text = body.translate(_INVISIBLE).replace("\r\n", "\n").replace("\r", "\n")
     # Extracted HTML text is already inert and carries the reader's own links.
     extracted = bool(_HTML.search(text))
     if extracted:
-        parser = _HTMLText()
+        parser = _HTMLText(image_urls)
         parser.feed(text)
         parser.close()
         text = "".join(parser.parts)

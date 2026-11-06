@@ -9,6 +9,10 @@ class AgentCoreError(Exception):
     """Base class for typed platform failures."""
 
 
+class EmailImageUnavailableError(AgentCoreError):
+    """An explicitly requested email image could not be safely rendered."""
+
+
 class DatabaseCapacityError(AgentCoreError):
     """PostgreSQL refused to open a transaction because its connections are exhausted."""
 

@@ -112,6 +112,16 @@ public struct EmailMessageView: Codable, Identifiable, Equatable, Sendable {
     public let body: String
     /// Inert reading Markdown derived from the retained source; absent on older servers.
     public let readerBody: String?
+    public var readerImageBody: String? = nil
+
+    /// Image references are actionable only in the Mac email reader.
+    public var displayReaderBody: String? {
+        #if os(macOS)
+        readerImageBody ?? readerBody
+        #else
+        readerBody
+        #endif
+    }
     public let sentAt: Date
     public let complete: Bool
     public let attachments: [EmailAttachmentView]?
@@ -121,6 +131,7 @@ public struct EmailMessageView: Codable, Identifiable, Equatable, Sendable {
         case id, sender, to, cc, subject, body, complete, attachments, direction
         case sentAt = "sent_at"
         case readerBody = "reader_body"
+        case readerImageBody = "reader_image_body"
     }
 }
 

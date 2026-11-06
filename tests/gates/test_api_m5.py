@@ -267,6 +267,7 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         "mcp_server_unavailable",  # ADR-0255 owner-added MCP servers.
         "mcp_sign_in_unsupported",
         "integration_key_unavailable",  # ADR-0275 wrong-key/tamper refusal.
+        "email_image_unavailable",  # ADR-0303 owner-requested image rendering.
         "unsupported_media_type",
         "payload_too_large",
         "rate_limited",
