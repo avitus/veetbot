@@ -135,7 +135,11 @@ public final class EmailViewModel: ObservableObject {
         guard queryListView == "priority" else { return importantScrollAnchor }
         guard let id = importantScrollAnchor else { return nil }
         if archiveHiddenThreads.contains(id), archiveErrors[id] == nil { return nil }
-        guard let row = inboxItems.first(where: { $0.id == id }) else { return id }
+        var known = inboxItems.first(where: { $0.id == id })
+        if let detail = thread, detail.id == id, detail.revision >= (known?.revision ?? 0) {
+            known = detail
+        }
+        guard let row = known else { return id }
         return row.isHandled || row.isArchived || row.isInSpam ? nil : id
     }
 

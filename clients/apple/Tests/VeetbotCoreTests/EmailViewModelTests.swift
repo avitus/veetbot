@@ -16,17 +16,19 @@ import SwiftUI
 
     #if os(macOS)
     /// A confirmed handled anchor stops restoration paging; an eligible displaced anchor is still found.
-    @Test(arguments: [true, false]) func testMacImportantRefreshSkipsOnlyIneligibleAnchors(handled: Bool) async throws {
+    @Test(arguments: [true, false], [1, 2]) func testMacImportantRefreshSkipsOnlyIneligibleAnchors(handled: Bool, selectedRevision: Int) async throws {
         let requests = EmailRequestRecorder()
         let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
         let other = threadJSON().replacingOccurrences(of: threadID.uuidString, with: otherID.uuidString)
+        let selected = threadJSON().replacingOccurrences(of: "\"revision\":1,", with: "\"revision\":\(selectedRevision),")
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
             if request.url!.path.hasSuffix("dismiss") {
-                return (200, self.threadJSON().replacingOccurrences(of: "\"revision\":1,\"summary\"",
-                    with: "\"dismissed_revision\":1,\"revision\":1,\"summary\""))
+                return (200, selected.replacingOccurrences(of: "\"summary\"",
+                    with: "\"dismissed_revision\":\(selectedRevision),\"summary\""))
             }
-            guard request.url!.path.hasSuffix("threads") else { return (200, self.threadJSON()) }
+            guard request.url!.path.hasSuffix("threads") else { return (200, selected) }
             requests.append(request)
             if requests.snapshot.count == 1 { return (200, self.pageJSON()) }
             if request.url!.query?.contains("cursor=") == true {
@@ -41,8 +43,8 @@ import SwiftUI
         await model.openThread(threadID)
         model.importantScrollAnchor = threadID
         if handled {
-            let row = try #require(model.items.first)
-            #expect(await model.setThreadHandled(row, handled: true))
+            let detail = try #require(model.thread)
+            #expect(await model.setThreadHandled(detail, handled: true))
         } else {
             await model.reload(preserveOrder: true)
         }
