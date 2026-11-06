@@ -17,6 +17,7 @@ from agent_core.domain.browser import (
     BrowserGrantView,
     BrowserProfileView,
 )
+from agent_core.domain.browser_request_grants import RequestGrantEcho
 from agent_core.domain.browser_task_grants import (
     BrowserTaskGrantView,
     BrowserTaskScopePolicy,
@@ -251,6 +252,7 @@ class ApprovalService(Protocol):
         reason: str | None,
         *,
         task_grant: TaskGrantEcho | None = None,
+        request_grant: RequestGrantEcho | None = None,
     ) -> ApprovalView: ...
 
 

@@ -540,7 +540,9 @@ class PythonPlaywrightRuntime:
         # every document load and ping must stay inside, and whether the fence
         # refused the page's own document (ADR-0129).
         self._card_activity_fence = False
-        self._document_fence: tuple[str, str] | None = None
+        # The origins and path prefix a grant-authorized act may load documents
+        # in; a prefix of None (ADR-0301 request grant) allows any path.
+        self._document_fence: tuple[frozenset[str], str | None] | None = None
         self._fence_refused_page = False
         self._download_window: _DownloadWindow | None = None
         self._downloads_path = ""
@@ -777,9 +779,12 @@ class PythonPlaywrightRuntime:
         fence = self._document_fence
         if fence is None:
             return True
-        origin, path_prefix = fence
-        if _origin_or_none(url) != origin:
+        origins, path_prefix = fence
+        if _origin_or_none(url) not in origins:
             return False
+        if path_prefix is None:
+            # ADR-0301: a request grant covers the login's sites, any path.
+            return True
         path = urlsplit(url).path
         return (
             path_prefix == "/" or path_is_within_prefix(path, path_prefix)
@@ -1544,11 +1549,14 @@ class PythonPlaywrightRuntime:
         documents_before = self._main_frame_navigations
         starts_files = action.kind in _FILE_ACTION_KINDS
         names_a_file = starts_files and self._control_names_a_file(action.ref)
+        # ADR-0294 and ADR-0301: an individually approved act, or one the
+        # owner allowed for the whole request, may save one file.
+        file_approved = constraint is None or constraint.grant_kind == "request"
         window = _DownloadWindow(
-            approved=constraint is None and starts_files,
+            approved=file_approved and starts_files,
             export_origin=(
                 _origin_or_none(page.url)
-                if constraint is None
+                if file_approved
                 and starts_files
                 and action.ref in self._export_controls
                 and _origin_allowed(page.url, self._allowed_origins)
@@ -1563,9 +1571,11 @@ class PythonPlaywrightRuntime:
         # takes its refusal with it.
         self._fence_refused_page = False
         if constraint is not None and constraint.path_prefix is not None:
-            self._document_fence = (constraint.origins[0], constraint.path_prefix)
+            self._document_fence = (frozenset({constraint.origins[0]}), constraint.path_prefix)
         elif constraint is not None and constraint.grant_kind == "research":
-            self._document_fence = (constraint.origins[0], "/")
+            self._document_fence = (frozenset({constraint.origins[0]}), "/")
+        elif constraint is not None and constraint.grant_kind == "request":
+            self._document_fence = (frozenset(constraint.origins), None)
         self._card_activity_fence = constraint is not None and constraint.card_activity_only
         draft_binding = None
         if approved_editable:

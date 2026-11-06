@@ -210,17 +210,20 @@ default-off activation flags are owned by
 situations — among them an active run already exists, an idempotency key
 was reused with a different body, an approval was resolved twice with
 different decisions, and, since ADR-0129, a task-grant approval whose offer
-is no longer available or whose repeated offer differs — and a client that
+is no longer available or whose repeated offer differs, and since ADR-0301
+the same two cases for a request approval — and a client that
 must tell them apart should not be parsing English.
 
 ```text
-code       reason                     details also carries
----------  -------------------------  ------------------------
-conflict   active_run_exists          run_id, run_status
-conflict   idempotency_key_reused     (nothing)
-conflict   approval_already_resolved  approval_id, decision
-conflict   task_grant_unavailable     approval_id
-conflict   task_grant_offer_mismatch  approval_id
+code       reason                        details also carries
+---------  ----------------------------  ------------------------
+conflict   active_run_exists             run_id, run_status
+conflict   idempotency_key_reused        (nothing)
+conflict   approval_already_resolved     approval_id, decision
+conflict   task_grant_unavailable        approval_id
+conflict   task_grant_offer_mismatch     approval_id
+conflict   request_grant_unavailable     approval_id
+conflict   request_grant_offer_mismatch  approval_id
 ```
 
 `tool_validation_error` carries `{"tool_name": ..., "errors": [...]}`
@@ -1614,14 +1617,20 @@ identifier on the wire becomes a rule identifier in a client's
 conditional, and the rule set is meant to be editable without breaking
 clients.
 
-Resolution takes the three-value decision vocabulary and nothing else.
+Resolution takes the decision vocabulary and nothing else.
 `approve_for_task` (ADR-0129) is valid only for a `browser.act` approval that
 carries a task-grant offer, and its body repeats the offered origin and path
-prefix.
+prefix. `approve_for_request` (ADR-0301) is valid only for a `browser.act`
+approval that carries a `request_grant_offer`, and its body repeats the
+offered profile id. An approval view carries `request_grant_offer` beside
+`task_grant_offer`: the profile id and generation, the login's origins,
+`duration_seconds` (7200) and a server-authored `summary`. A client that does
+not know the field or the decision shows the card without it.
 
 ```json
 {"decision": "approve_once"}
 {"decision": "approve_for_task", "task_grant": {"origin": "https://www.example.com", "path_prefix": "/lesson"}}
+{"decision": "approve_for_request", "request_grant": {"profile_id": "6f1c…"}}
 {"decision": "deny", "reason": "Do not perform this action."}
 ```
 
@@ -1645,7 +1654,9 @@ Five behaviours the API layer owns:
    malformed_request`. An offer that is no longer available is `conflict`
    with `reason = "task_grant_unavailable"`, and a repeated offer that
    differs is `reason = "task_grant_offer_mismatch"`; both leave the
-   approval pending.
+   approval pending. `approve_for_request` follows the same rules with
+   `request_grant`, `reason = "request_grant_unavailable"` and
+   `reason = "request_grant_offer_mismatch"`.
 
 Resolution writes the decision and then `NOTIFY`s, on the same terms as
 every other notification in this document: the run resumes from its

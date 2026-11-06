@@ -318,6 +318,10 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.browser_request_grants import (
+    BrowserRequestGrantAuthorizer,
+    RequestGrantResolution,
+)
 from agent_core.application.browser_research import BrowserResearchAuthorizer
 from agent_core.application.browser_startup import BrowserStartupRecovery
 from agent_core.application.browser_task_grants import (
@@ -1326,6 +1330,31 @@ def _task_grants_composed(settings: Settings, browser_provider: BrowserProvider)
 
     return settings.browser_task_grants_enabled and isinstance(
         browser_provider, SessionBoundHostedBrowserProvider
+    )
+
+
+def _request_grants_composed(
+    settings: Settings, browser_provider: BrowserProvider, ruleset: LoadedRuleset
+) -> bool:
+    """ADR-0301: one approval per request rides on research authority (on by
+    default) and needs a provider that resolves each session's own profile."""
+
+    return (
+        settings.browser_research_enabled
+        and isinstance(browser_provider, SessionBoundHostedBrowserProvider)
+        and _research_policy_composed(ruleset)
+    )
+
+
+def _research_policy_composed(ruleset: LoadedRuleset) -> bool:
+    """The bounded-scroll rule that research and request grants require (ADR-0209)."""
+
+    return any(
+        rule.tool_name == "browser.act"
+        and rule.condition is PolicyCondition.BOUNDED_BROWSER_SCROLL
+        and rule.decision is PolicyDecisionType.ALLOW
+        and rule.otherwise is PolicyDecisionType.REQUIRE_APPROVAL
+        for rule in ruleset.tool_rules
     )
 
 
@@ -3685,6 +3714,7 @@ async def _compose(
             browser_provider,
             context_reader=_task_grant_context_reader(uow_factory, clock),
             enabled=_task_grants_composed(settings, browser_provider),
+            request_enabled=_request_grants_composed(settings, browser_provider, ruleset),
             now=clock.now,
         )
         # ADR-0294: a chat pinned to the earlier spec keeps it; the latest is offered.
@@ -5028,13 +5058,7 @@ async def _compose(
                     now=clock.now,
                 )
             )
-            if settings.browser_research_enabled and any(
-                rule.tool_name == "browser.act"
-                and rule.condition is PolicyCondition.BOUNDED_BROWSER_SCROLL
-                and rule.decision is PolicyDecisionType.ALLOW
-                and rule.otherwise is PolicyDecisionType.REQUIRE_APPROVAL
-                for rule in ruleset.tool_rules
-            ):
+            if settings.browser_research_enabled and _research_policy_composed(ruleset):
                 standing_authorizers.append(
                     BrowserResearchAuthorizer(
                         provider=browser_provider,
@@ -5051,6 +5075,17 @@ async def _compose(
                     grant_id=settings.browser_grant_id,
                     profile_id=settings.browser_profile_id,
                     purpose=settings.browser_run_purpose,
+                    provider=browser_provider,
+                    uow_factory=uow_factory,
+                    policy=deterministic_engine,
+                    now=clock.now,
+                )
+            )
+        if browser_provider is not None and _request_grants_composed(
+            settings, browser_provider, ruleset
+        ):
+            standing_authorizers.append(
+                BrowserRequestGrantAuthorizer(
                     provider=browser_provider,
                     uow_factory=uow_factory,
                     policy=deterministic_engine,
@@ -5967,6 +6002,12 @@ async def _compose(
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
             task_grants=(TaskGrantResolution(clock=clock) if task_grants_enabled else None),
+            request_grants=(
+                RequestGrantResolution(clock=clock)
+                if browser_provider is not None
+                and _request_grants_composed(settings, browser_provider, ruleset)
+                else None
+            ),
         )
         folder_proposal_pass: FolderProposalPass | None = None
         if settings.thread_folders_api_enabled and folder_profiles.proposals.enabled:

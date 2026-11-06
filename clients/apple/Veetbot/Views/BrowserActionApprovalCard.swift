@@ -3,7 +3,8 @@ import SwiftUI
 /// The `browser.act` approval card (ADR-0129, 0129-design §14 item 3). It
 /// names the action, the element and the page in Veetbot's words, quotes the
 /// website's own text as such, and offers Allow once, Deny, and, when the
-/// server offers it, Allow all actions for this task after a confirmation. Website text
+/// server offers it, Allow all actions for this task after a confirmation, or
+/// Allow for this request (ADR-0301) as the primary decision. Website text
 /// is always verbatim, never Markdown.
 struct BrowserActionApprovalCard: View {
     let approval: ApprovalView
@@ -105,7 +106,50 @@ struct BrowserActionApprovalCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("approval.browser.not-covered")
             }
-            if approval.status.isPending {
+            if approval.status.isPending, presentation.offersRequestGrant,
+                let offer = approval.requestGrantOffer
+            {
+                // ADR-0301: one approval for the rest of the request is the
+                // primary decision; Allow once stays beside it.
+                DenialReasonField(text: $denialReason)
+                    .disabled(inFlight != nil)
+                ApprovalDecisionButtons {
+                    Button {
+                        resolve(.approveForRequest, nil, nil)
+                    } label: {
+                        ApprovalDecisionLabel(
+                            title: "Allow for this request", decision: .approveForRequest,
+                            inFlight: inFlight, websiteCard: true
+                        )
+                    }
+                    .accessibilityIdentifier("approval.allow-for-request")
+                } secondary: {
+                    Button {
+                        resolve(.approveOnce, nil, nil)
+                    } label: {
+                        ApprovalDecisionLabel(
+                            title: "Allow once", decision: .approveOnce, inFlight: inFlight, websiteCard: true
+                        )
+                    }
+                    .accessibilityIdentifier("approval.allow-once")
+                } deny: {
+                    Button(role: .destructive) {
+                        let reason = denialReason.trimmingCharacters(in: .whitespacesAndNewlines)
+                        resolve(.deny, reason.isEmpty ? nil : reason, nil)
+                    } label: {
+                        ApprovalDecisionLabel(title: "Deny", decision: .deny, inFlight: inFlight, websiteCard: true)
+                    }
+                    .accessibilityIdentifier("approval.deny")
+                }
+                .padding(.top, 4)
+                .disabled(inFlight != nil)
+                // The offer's own words, beneath the decisions.
+                Text(verbatim: offer.summary)
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("approval.request-scope")
+            } else if approval.status.isPending {
                 DenialReasonField(text: $denialReason)
                     .disabled(inFlight != nil)
                 ApprovalDecisionButtons {
@@ -173,6 +217,7 @@ struct BrowserActionApprovalCard: View {
         switch approval.decision {
         case .approveOnce: return "Allowed once"
         case .approveForTask: return "Allowed for this task"
+        case .approveForRequest: return "Allowed for this request"
         case .deny: return "Denied"
         case nil: return "Resolved: \(approval.status.displayName)"
         }

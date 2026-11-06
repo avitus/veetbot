@@ -310,7 +310,12 @@ private extension ApprovalView {
     /// How a settled approval reads in its collapsed row.
     var settledTitle: String {
         switch status {
-        case .approved: decision == .approveForTask ? "Allowed for this task" : "Approved"
+        case .approved:
+            switch decision {
+            case .approveForTask: "Allowed for this task"
+            case .approveForRequest: "Allowed for this request"
+            default: "Approved"
+            }
         case .denied: "Denied"
         case .expired: "Expired"
         case .cancelled: "Cancelled"

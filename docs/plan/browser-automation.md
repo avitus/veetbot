@@ -1374,6 +1374,45 @@ ADR-0128), a changed agent or policy version, and removal of the scope end a
 grant. `BROWSER_TASK_GRANTS_ENABLED` gates offers, `approve_for_task`, and the
 task-grant routes.
 
+### One approval for a request (ADR-0301)
+
+A `browser.act` card in an owner-driven, top-level interactive run of a chat
+bound to a READY Website Access login offers "Allow for this request" when the
+pending action would itself be covered. The offer is stored on the approval as
+`request_grant_offer`: the profile id and generation, the profile's allowed
+origins and a server-authored summary. Resolving the card with
+`approve_for_request` (which also needs `browser.grant.write`) approves the
+action and appends `browser.request_grant.created`; that approval is the grant.
+It is composed whenever research authority is (`BROWSER_RESEARCH_ENABLED` and
+the bounded-scroll rule) and the provider resolves each session's profile.
+
+`BrowserRequestGrantAuthorizer` finds the run's grant through that event and
+allows an action when the run is still eligible, less than two hours have
+passed since the approval was resolved, the profile is the offered one, READY,
+still allows every grant origin, and has the offered generation, the agent and
+policy versions match the approval's, and request coverage holds on the
+observation that named the element. A changed generation is accepted only
+when the profile's newest sign-in began after the approval and is the one a
+`browser.authentication.resumed` event of this run names. A follow-up message
+is a new run and asks again; stopping the request ends it.
+
+Request coverage (`request_grant_coverage`) allows routine and unknown
+controls and inbound downloads on any page of the grant's origins, whatever
+the path. It refuses every other named consequence, a file input or upload
+wording, a sensitive field, a link or form leaving the page's origin, an
+unnamed, disabled or truncated element, and text over 256 characters. After a
+turn read mail, memory, knowledge, the web or any tool other than the browser,
+the clock, the run's notes, arithmetic, a file export or a capture read, only a
+calendar date, an amount up to 9,999,999.99, or a search of at most 40
+letters, digits, spaces and `.,'-&` with at most four digits may be typed. The
+dispatch constraint carries kind `request`, the origins, no prefix, the
+256-character cap, whether free text is allowed, and a `not_after` no later
+than the grant's end. The isolated runtime repeats the coverage on the live
+page, fences documents and pings to the origins on any path during the act,
+and may save one file for the act as for an individually approved click
+(ADR-0294, ADR-0300). The classifier reads "account" beside activity,
+statement(s), summary, details or history as naming a record.
+
 ### The browser.act approval view
 
 The approval for `browser.act` names what will happen. Its summary holds only

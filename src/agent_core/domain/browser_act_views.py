@@ -33,6 +33,7 @@ from agent_core.domain.browser_classification import (
     classify_browser_action,
     normalize_text,
     path_is_sensitive,
+    request_grant_coverage,
     task_grant_coverage,
 )
 from agent_core.domain.browser_task_grants import (
@@ -184,6 +185,31 @@ def task_grant_view_coverage(
         origin=origin,
         path_prefix=path_prefix,
         disabled=view.element.disabled,
+    )
+
+
+def request_grant_view_coverage(
+    view: BrowserActView,
+    action: BrowserAction,
+    *,
+    origins: tuple[str, ...],
+    free_text: bool,
+) -> BrowserCoverage:
+    """The worker's request-grant check of ``action`` (ADR-0301), from the
+    observation that named its element; the view must describe the action."""
+
+    if view.observation is None or view.element is None:
+        raise ValueError("an undescribed browser action has no request-grant coverage")
+    return request_grant_coverage(
+        action=action,
+        page_url=view.observation.url,
+        role=view.element.role,
+        labels=element_labels(view.element, view.facts),
+        facts=view.facts,
+        option_texts=option_texts(action),
+        origins=origins,
+        disabled=view.element.disabled,
+        free_text=free_text,
     )
 
 

@@ -32,6 +32,7 @@ from agent_core.domain.browser_act_views import (
 )
 from agent_core.domain.browser_download import EXPORT_TIMEOUT_GUIDANCE, BrowserDownload
 from agent_core.domain.browser_follow import profile_handle
+from agent_core.domain.browser_request_grants import request_grant_offer
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.captures import (
     CAPTURE_LITERAL_KEY,
@@ -122,11 +123,13 @@ class BrowserActApprovalPresenter:
         *,
         context_reader: TaskGrantContextReader | None = None,
         enabled: bool = False,
+        request_enabled: bool = False,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._provider = provider
         self._context_reader = context_reader
         self._enabled = enabled
+        self._request_enabled = request_enabled
         self._now = now
 
     async def present(
@@ -149,8 +152,26 @@ class BrowserActApprovalPresenter:
         snapshot = await browser_snapshot_in_session(self._provider, run.session_id)
         view = describe_browser_action(action, snapshot)
         offer = None
-        if self._enabled and view.described and self._context_reader is not None:
+        request_offer = None
+        context = None
+        if (
+            (self._enabled or self._request_enabled)
+            and view.described
+            and self._context_reader is not None
+        ):
             context = await self._context_reader(run.session_id, principal)
+        if self._request_enabled and context is not None:
+            # ADR-0301: one approval for the rest of the request.
+            request_offer = request_grant_offer(
+                view=view,
+                action=action,
+                run=run,
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                turn=turn,
+                context=context,
+            )
+        if self._enabled and context is not None:
             session = context.session
             eligible = session is not None and session_is_task_grant_eligible(
                 run,
@@ -173,7 +194,10 @@ class BrowserActApprovalPresenter:
                 active_grant=context.active_grant,
             )
         return ApprovalPresentation(
-            summary=view.summary, arguments=view.arguments, task_grant_offer=offer
+            summary=view.summary,
+            arguments=view.arguments,
+            task_grant_offer=offer,
+            request_grant_offer=request_offer,
         )
 
 

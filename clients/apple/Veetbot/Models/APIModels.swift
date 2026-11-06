@@ -524,13 +524,17 @@ public enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
     case approveOnce = "approve_once"
     /// Approve this action and allow the offered task permission (ADR-0129).
     case approveForTask = "approve_for_task"
+    /// Approve this action and the rest of the request on the chat's
+    /// signed-in website (ADR-0301).
+    case approveForRequest = "approve_for_request"
     case deny
 
     /// What the tapped control says while this decision is on its way; a
     /// website card's controls say Allow rather than Approve.
     public func progressLabel(websiteCard: Bool) -> String {
         switch self {
-        case .approveOnce, .approveForTask: return websiteCard ? "Allowing…" : "Approving…"
+        case .approveOnce, .approveForTask, .approveForRequest:
+            return websiteCard ? "Allowing…" : "Approving…"
         case .deny: return "Denying…"
         }
     }
@@ -572,6 +576,9 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
     public var taskGrantID: UUID? = nil
     /// Why the session's active task permission did not cover this action.
     public var taskGrantNotCovered: TaskGrantNotCoveredView? = nil
+    /// The one approval for the rest of the request a `browser.act` card
+    /// offers, when the server makes one (ADR-0301).
+    public var requestGrantOffer: RequestGrantOfferView? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, status, arguments, risk, decision
@@ -588,6 +595,7 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
         case taskGrantOffer = "task_grant_offer"
         case taskGrantID = "task_grant_id"
         case taskGrantNotCovered = "task_grant_not_covered"
+        case requestGrantOffer = "request_grant_offer"
     }
 }
 
@@ -630,6 +638,9 @@ extension ApprovalView {
         taskGrantID = try container.decodeIfPresent(UUID.self, forKey: .taskGrantID)
         taskGrantNotCovered = try container.decodeIfPresent(
             TaskGrantNotCoveredView.self, forKey: .taskGrantNotCovered
+        )
+        requestGrantOffer = try? container.decodeIfPresent(
+            RequestGrantOfferView.self, forKey: .requestGrantOffer
         )
     }
 }

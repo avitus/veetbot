@@ -1300,16 +1300,24 @@ async def test_task_grants_flag_off_composes_nothing(research: bool) -> None:
         paths = _task_grant_paths(composition)
         standing = composition.tool_pipeline._standing_authorizer
 
-    # ADR-0172 adds specific owner-action consent independently of task grants.
+    # ADR-0172 adds specific owner-action consent independently of task grants,
+    # and ADR-0301's request approval rides on research, not on this flag.
     from agent_core.application.browser_follow_consent import BrowserFollowConsentAuthorizer
+    from agent_core.application.browser_request_grants import BrowserRequestGrantAuthorizer
     from agent_core.application.browser_research import BrowserResearchAuthorizer
 
     assert isinstance(standing, CompositeStandingAuthorizer)
-    assert len(standing._authorizers) == 1 + int(research)
+    assert len(standing._authorizers) == 1 + 2 * int(research)
     assert isinstance(standing._authorizers[0], BrowserFollowConsentAuthorizer)
     if research:
         assert isinstance(standing._authorizers[1], BrowserResearchAuthorizer)
+        assert isinstance(standing._authorizers[2], BrowserRequestGrantAuthorizer)
+    assert not any(
+        isinstance(authorizer, BrowserTaskGrantAuthorizer) for authorizer in standing._authorizers
+    )
     assert act._presenter._enabled is False
+    assert act._presenter._request_enabled is research
+    assert (composition.services.approvals._request_grants is not None) is research  # type: ignore[attr-defined]
     assert composition.services.browser_task_grants is None
     assert composition.services.approvals._task_grants is None  # type: ignore[attr-defined]
     assert paths == set()
