@@ -2567,7 +2567,7 @@ cap; never reflect body fields, values, unknown field names or parser details
 in errors. There is no GET-by-ID, reveal or export route. See
 [the owner and operator guide](../integration-keys.md).
 
-### Email image rendering (ADR-0303)
+### Email image rendering (ADR-0304)
 
 `POST /v1/email/threads/{thread_id}/images` requires `email.read` and Email mode.
 The closed JSON body contains `message_id` (1–256 characters) and integer `index`

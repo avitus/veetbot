@@ -439,5 +439,6 @@ nav:
       - "ADR-0300: Card activity reads and CSV exports": adr/0300-card-activity-reads-and-csv-exports.md
       - "ADR-0301: Email threads read as conversations": adr/0301-email-threads-read-as-conversations.md
       - "ADR-0302: One approval for a website request": adr/0302-one-approval-for-a-website-request.md
-      - "ADR-0303: Click-to-load email images and a fluid Mac reader": adr/0303-email-inline-images-and-fluid-reader.md
+      - "ADR-0303: Every Mac mail list scrolls": adr/0303-every-mac-mail-list-scrolls.md
+      - "ADR-0304: Click-to-load email images and a fluid Mac reader": adr/0304-email-inline-images-and-fluid-reader.md
   - Changelog: changelog.md

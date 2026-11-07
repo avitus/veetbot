@@ -592,7 +592,7 @@ sender cleanup reuse `modify_labels`, and a `mailto:` unsubscribe reuses
 `send_message`, each under its existing classification, approval floor and
 uncertainty rule. Milestone 18's gates remain independently binding.
 
-### Image-bearing presentation source (ADR-0303)
+### Image-bearing presentation source (ADR-0304)
 
 The application-only `get_thread_page` additionally retains a complete HTML
 alternative containing images when it fits 64 KiB, as `reader_html`. It stays

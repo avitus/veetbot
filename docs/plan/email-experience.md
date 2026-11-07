@@ -56,8 +56,10 @@ presentation module; this feature does not build a dynamic plugin system.
 
 The priority view combines both accounts. On macOS, Important shows the total
 number of qualifying threads and initially loads up to 100. On touch it opens
-with up to five. Inbox is the A2 initial collection and pages five threads at
-a time (ADR-0231). Account badges and an account filter identify the source
+with up to five. Inbox is the A2 initial collection; on touch it pages five
+threads at a time (ADR-0231). On macOS every list, Inbox, Needs you, Handled,
+Important, Other mail and search results alike, loads up to 100 threads per
+page and scrolls (ADR-0303). Account badges and an account filter identify the source
 of each conversation.
 
 Each row shows the correspondent, subject, a concise statement of what needs
@@ -69,10 +71,14 @@ reasons for inclusion; the row does not repeat it (ADR-0234).
 Numeric ranking scores and internal model details stay out of the main flow.
 
 Only threads that meet the relevance threshold appear in Important.
-On macOS, scrolling near the end fetches the next page automatically. Refresh
-preserves the visible thread and the selected conversation independently.
+On macOS, scrolling near the end of any list fetches the next page
+automatically, with no More button. Refresh preserves the visible thread and
+the selected conversation independently, in every Mac list.
 It can fetch later pages to retain an eligible displaced thread, but does not
-chase an anchor already confirmed handled, archived, or in Spam.
+chase an anchor its known state has taken out of the list: handled for
+Important and Needs you, not handled for Handled, archived or in Spam for
+Inbox and its collections. The search reads at most five pages past the rows
+on screen, then keeps the rows without restoring the position (ADR-0303).
 On touch, More important expands to ten, then pages through the rest. Find
 mail and Review other mail make false negatives discoverable without cluttering
 the default list. Rows are ordered by each conversation's latest activity,
@@ -131,7 +137,7 @@ must not equate an incomplete scan or model failure with an empty priority inbox
 Thread detail contains the original messages, a grounded summary, any request
 or deadline, the importance explanation, and an editable draft when one is
 appropriate. Render sanitized text initially; external images load only after an
-explicit **Load images** press in the Mac reader (ADR-0303). Known hidden and tiny
+explicit **Load images** press in the Mac reader (ADR-0304). Known hidden and tiny
 tracking images and active HTML remain excluded. Show attachment metadata and the fact that an
 attachment was not read. A draft that depends on an unread attachment requests
 the missing information rather than claiming to have reviewed it. Each attachment
@@ -175,7 +181,7 @@ that is all quote, and a quote the writer introduced some other way stay in view
 Only English attributions and header words are recognized
 ([ADR-0301](../adr/0301-email-threads-read-as-conversations.md)).
 
-The Mac image reader (ADR-0303) uses a separate `reader_image_body` projection
+The Mac image reader (ADR-0304) uses a separate `reader_image_body` projection
 with server-authored image indices in message order. Image-bearing HTML, up to
 64 KiB per message, is retained as `reader_html` only by the application Gmail
 sync path, excluded from model evidence and content identity, and expires and

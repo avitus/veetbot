@@ -1,4 +1,4 @@
-# ADR-0303: Click-to-load email images and a fluid Mac reader
+# ADR-0304: Click-to-load email images and a fluid Mac reader
 
 - Status: Accepted (owner request and image-loading choice, 2026-11-06)
 - Date: 2026-11-06
@@ -85,3 +85,10 @@ execution took 44.80 seconds. Estimated final verification wall time was eight
 minutes, with Linux checks overlapping the Mac VM; Mac startup and compilation
 were the slowest stage (approximately three minutes). These are local sandbox
 results, not hosted CI or production delivery evidence.
+
+Before the release PR, `main`'s Mac scrolling changes were merged and this ADR
+renumbered to 0304. The combined Email partition passed all 238 tests in 48.423
+seconds, including the corrected image-request fixture. Documentation checks
+passed after resolving citation offsets. Estimated merge-verification wall time
+was 142 seconds for the Apple VM and 15 seconds for documentation, overlapping;
+total approximately 142 seconds, with Apple startup/build the slowest stage.
