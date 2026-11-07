@@ -17,7 +17,11 @@ the message, and is excluded from content identity and model evidence. The
 thread API sanitizes it into an additional reading projection. It never sends
 raw HTML to a WebView. Older retained messages without this part keep their
 existing reader until the mailbox source is read again. When the HTML alternative
-contains only images, the projection keeps the plain-text body before those images.
+omits plain-text paragraphs (including image-only or image-plus-footer parts),
+the projection keeps the missing paragraphs before the HTML. Matching compares
+visible words, ignoring markup, whitespace, punctuation and link destinations,
+so paragraphs already represented in HTML are not repeated. MIME alternatives
+do not establish an insertion position for missing prose.
 
 Only explicit public HTTPS image references survive sanitization. Hidden images,
 images declared at two pixels or smaller, active content, inline data and CID

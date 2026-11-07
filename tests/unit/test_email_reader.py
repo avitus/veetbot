@@ -3,6 +3,8 @@
 import time
 from typing import cast
 
+import pytest
+
 from agent_core.application.email_reader import reading_body
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
@@ -597,7 +599,8 @@ async def test_adding_image_source_preserves_revision_and_learning_content() -> 
         assert "veetbot-email-image:0" in projection["messages"][0]["reader_image_body"]
 
 
-async def test_image_only_html_preserves_plain_text_in_mac_projection() -> None:
+@pytest.mark.parametrize("footer", ["", "<p>Unsubscribe from these updates.</p>"])
+async def test_image_only_html_preserves_plain_text_in_mac_projection(footer: str) -> None:
     """Image alternatives must not erase text present only in the plain MIME part."""
     async with email_client() as (app, client):
         thread, _ = await seed_mail(app)
@@ -608,7 +611,7 @@ async def test_image_only_html_preserves_plain_text_in_mac_projection() -> None:
             messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
             messages[0]["reader_html"] = (
                 '<a href="https://example.com"><img src="https://images.example/photo.png" '
-                'alt="The garden"></a>'
+                'alt="The garden"></a>' + footer
             )
             payload["messages"] = messages
             await uow.email.put(
@@ -666,3 +669,18 @@ async def test_image_fetch_concurrency_is_bounded_and_slots_release_after_failur
         assert calls == 12 and active == 0
         assert sum(isinstance(result, EmailImageUnavailableError) for result in results) == 1
         assert results.count(b"jpeg-fixture") == 11
+
+
+def test_image_projection_merges_only_plain_paragraphs_missing_from_html() -> None:
+    """Visible words match across markup, wrapping and link URLs without duplicate prose."""
+    from agent_core.application.email_reader import merge_image_body
+
+    plain = "Already here with [a link](https://plain.example).\n\nMissing detail."
+    rich = (
+        "**Already here** with [a link](https://html.example).\n\n![Photo](veetbot-email-image:0)"
+    )
+    html_text = "**Already here** with [a link](https://html.example)."
+    result = merge_image_body(plain, rich, html_text)
+    assert result == "Missing detail.\n\n" + rich
+    assert merge_image_body("Already here\nwith a link.", rich, html_text) == rich
+    assert merge_image_body("", rich, html_text) == rich

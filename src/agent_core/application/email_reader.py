@@ -410,3 +410,25 @@ def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None =
         result = _with_line_breaks(result, flowing)
     cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(result)).strip()
     return cleaned
+
+
+def merge_image_body(plain: str, rich: str, html_text: str) -> str:
+    """Retain plain MIME paragraphs absent from the image-bearing HTML alternative.
+
+    Compare visible words rather than Markdown formatting, wrapping, punctuation or
+    link destinations. Unmatched paragraphs precede the HTML because MIME parts do
+    not provide a reliable position for prose omitted from one alternative.
+    """
+
+    def words(value: str) -> str:
+        """Normalize inert reader Markdown into a bounded visible-word sequence."""
+        labels = re.sub(r"\]\([^\n)]*\)", "]", value)
+        return " ".join(re.findall(r"\w+", labels.casefold()))
+
+    represented = " " + words(html_text) + " "
+    missing: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", plain):
+        normalized = words(paragraph)
+        if normalized and " " + normalized + " " not in represented:
+            missing.append(paragraph)
+    return "\n\n".join([*missing, rich])
