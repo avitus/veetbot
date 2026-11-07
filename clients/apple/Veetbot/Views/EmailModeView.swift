@@ -1279,6 +1279,10 @@ private struct EmailThreadScreen: View {
                                     .accessibilityIdentifier("email.read-error")
                             }
                             conversation(thread, proxy: proxy)
+                                .id(thread.id)
+                                .environment(\.emailImageLoader, { messageID, index in
+                                    try await model.loadImage(threadID: thread.id, messageID: messageID, index: index)
+                                })
                             if describesInline {
                                 EmailTeachCard(model: model, explanationFocused: $feedbackFocused)
                             }
@@ -1286,10 +1290,11 @@ private struct EmailThreadScreen: View {
                         }
                         #if os(macOS)
                         .padding(.horizontal, VeetSpace.s6).padding(.top, VeetSpace.s4).padding(.bottom, VeetSpace.s7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         #else
                         .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 28)
-                        #endif
                         .frame(maxWidth: 680, alignment: .leading).frame(maxWidth: .infinity)
+                        #endif
                     }
                     .accessibilityIdentifier("email.detail")
                     .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -2088,6 +2093,7 @@ struct EmailReaderSections: Equatable {
     private static func historyStart(in blocks: [MarkdownContentBlock]) -> Int? {
         guard blocks.count > 1 else { return nil }
         for index in 1..<blocks.count {
+            if isForwardedHeader(blocks[index]) { return index }
             guard case .paragraph(let text) = blocks[index] else { continue }
             let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
             guard let first = lines.first?.lowercased() else { continue }
@@ -2115,6 +2121,16 @@ struct EmailReaderSections: Equatable {
             }
         }
         return nil
+    }
+
+    /// The reader's collapsed envelope (`> Forwarded from …`) or a mailer's own dashed line.
+    private static func isForwardedHeader(_ block: MarkdownContentBlock) -> Bool {
+        if case .blockquote(let inner) = block, case .paragraph(let text)? = inner.first {
+            return text.hasPrefix("Forwarded from ")
+        }
+        guard case .paragraph(let text) = block, let first = text.split(separator: "\n").first else { return false }
+        return first.trimmingCharacters(in: .whitespaces).lowercased()
+            .range(of: #"^-{2,}\s*forwarded message\s*-{2,}$"#, options: .regularExpression) != nil
     }
 
     /// Outlook's block names when it was sent and to whom (or about what);
@@ -2151,7 +2167,7 @@ struct EmailReadingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let reader = message.readerBody, !reader.isEmpty {
+            if let reader = message.displayReaderBody, !reader.isEmpty {
                 if showsOriginal == nil {
                     HStack {
                         Text(showingOriginal ? "Original message" : "Reading view")
@@ -2203,7 +2219,8 @@ struct EmailReadingView: View {
     }
 
     private func markdown(_ blocks: [MarkdownContentBlock]) -> some View {
-        MarkdownBlocksView(blocks: blocks)
+        EmailMarkdownBlocksView(blocks: blocks, messageID: message.id)
+            .id(message.displayReaderBody)
             .textSelection(.enabled)
             .veetType(.ui).lineSpacing(5)
     }

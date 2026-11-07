@@ -1,5 +1,6 @@
 """Flag-mounted Email API. Exact authorization and private cache semantics."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, cast
 from uuid import UUID
@@ -7,11 +8,17 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_core.application.email_reader import reading_body
+from agent_core.application.email_reader import merge_image_body, reading_body
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.services import EmailService
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
+
+
+class ImageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message_id: str = Field(min_length=1, max_length=256)
+    index: int = Field(ge=0, lt=20, strict=True)
 
 
 class FeedbackRequest(BaseModel):
@@ -129,15 +136,40 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         thread_id: UUID,
         authenticated: Annotated[Principal, secured("email.read")],
     ) -> dict[str, object]:
+        """Project retained message text and optional image references without fetching them."""
         result = await service.thread(authenticated, thread_id)
         # HTTP presentation only, after authorization and retention, outside the
         # owner lock. Chat, drafting and learning keep the original service data.
         messages = cast(list[dict[str, Any]], result["messages"])
         for message in messages:
+            html = message.pop("reader_html", "")
+            urls: list[str] = []
+            rich = reading_body(html, subject=message["subject"], image_urls=urls)
             message["reader_body"] = reading_body(
                 message["body"], subject=message["subject"] or str(result["subject"])
             )
+            if urls:
+                rich = await asyncio.to_thread(
+                    merge_image_body, message["reader_body"], rich, reading_body(html)
+                )
+            message["reader_image_body"] = rich if urls else None
         return result
+
+    @router.post(
+        "/v1/email/threads/{thread_id}/images", openapi_extra={"required_scope": "email.read"}
+    )
+    async def image(
+        thread_id: UUID,
+        body: ImageRequest,
+        authenticated: Annotated[Principal, secured("email.read")],
+    ) -> Response:
+        """Return one explicitly requested image from an authorized retained message."""
+        content = await boundary(
+            service.image(authenticated, thread_id, body.message_id, body.index)
+        )
+        return Response(
+            content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"}
+        )
 
     @router.post("/v1/email/feedback", openapi_extra={"required_scope": "email.write"})
     async def feedback(

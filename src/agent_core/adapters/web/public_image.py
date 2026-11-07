@@ -13,6 +13,7 @@ import httpx
 from PIL import Image, ImageOps
 
 from agent_core.adapters.jobs.http import resolve_job_host
+from agent_core.domain.errors import EmailImageUnavailableError
 from agent_core.domain.web import is_public_https_url
 from agent_core.execution.egress_core import address_is_public
 
@@ -53,6 +54,19 @@ class PublicImageReader:
     ) -> None:
         self.resolve = resolver
         self.transport = transport
+
+    async def read_email(self, url: str) -> bytes:
+        """Give the email reader a content-free, typed failure for a rejected image."""
+        try:
+            return await self.read(url)
+        except (
+            httpx.HTTPError,
+            TimeoutError,
+            OSError,
+            ValueError,
+            Image.DecompressionBombError,
+        ) as exc:
+            raise EmailImageUnavailableError("Image could not be loaded. Try again.") from exc
 
     async def read(self, url: str) -> bytes:
         """Fetch a public photo, validating and pinning each network hop."""

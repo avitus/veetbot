@@ -875,7 +875,8 @@ kept on this Mac and restored at the next launch (MagicPath cozy-evening-6871):
 the sidebar's hairline drags it from 200 to 340 points (260 before any drag,
 `veetbot.email.sidebarWidth`), a native split divider drags the inbox from 260
 to 480 (300 before any drag, `veetbot.email.inboxWidth`), the right panel's
-hairline drags it from 260 to 440 (below), and the reader takes the rest.
+hairline drags it from 260 to 440 (below), and the reader takes the rest. Its contents fill that width with fixed edge
+padding, without the former 680-point cap (ADR-0304).
 Dragging the sidebar or the panel wider stops where the reader would fall
 below 420 points; a double-click on either hairline returns its column to its
 starting width. A window too narrow for the chosen widths squeezes the reader
@@ -906,7 +907,11 @@ above. On a compact iPhone, where the thread is pushed, Archive (as an icon)
 and the thread menu join the back button in a paper navigation bar instead,
 so nothing scrolls beneath the back button. Veetbot's gist sits behind a two-point teal rule with the state line and
 its reason; a single message follows as prose under its sender's line, with
-View in People and Message details kept beside the sender. Two or more messages
+View in People and Message details kept beside the sender. A forwarded copy below
+that sender's note folds behind **Show earlier replies**, including the reader's
+`Forwarded from` attribution and dashed `Forwarded message` headers. Its nested
+replies, signatures and disclaimers remain available in that expansion. A forward
+without a note stays visible. Two or more messages
 follow as a conversation (ADR-0301; MagicPath peaceful-flood-7871): the owner's
 bubbles on the right, others' on the left under an initials avatar, each showing
 only the writer's own words with **Show full email** for the rest, writer chips
@@ -971,6 +976,13 @@ Archiving the open conversation, from its inbox row or the reading pane, clears
 the pane immediately and opens the next visible conversation, or the previous one
 when archiving the last row. With no remaining rows, the pane becomes empty. Loading the successor does not wait for archive
 admission or completion, and a later archive failure does not replace the new selection.
+
+On Mac, externally hosted email images appear at their positions in the reading
+text after **Load images** is pressed for that message (ADR-0304). The control
+explains the possible open disclosure. Loading is never automatic or remembered
+for a sender; a failed image offers **Try again** while the text stays readable.
+The server returns bounded JPEG renditions without exposing raw HTML to a
+WebView. Older cached mail needs its source read again to gain image references.
 
 The reading column separates the attention summary, original conversation and
 reply composer. Why this matters and Improve priorities expand on demand, while

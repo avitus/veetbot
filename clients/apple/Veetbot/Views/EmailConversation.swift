@@ -259,13 +259,11 @@ struct EmailConversation {
 
             let current: [MarkdownContentBlock]
             let folded: Bool
-            let plain = (message.readerBody ?? "").isEmpty
-            if let reader = message.readerBody, !reader.isEmpty {
+            let plain = (message.displayReaderBody ?? "").isEmpty
+            if let reader = message.displayReaderBody, !reader.isEmpty {
                 let sections = EmailReaderSections(markdown: reader)
-                // A forwarded copy below a note repeats mail the thread already holds.
-                let forward = sections.current.indices.dropFirst().first { Self.isForwardedHeader(sections.current[$0]) }
-                current = forward.map { Array(sections.current[..<$0]) } ?? sections.current
-                folded = !sections.earlier.isEmpty || forward != nil
+                current = sections.current
+                folded = !sections.earlier.isEmpty
             } else {
                 current = [.paragraph(message.body)]
                 folded = false
@@ -285,7 +283,7 @@ struct EmailConversation {
                 .flatMap { drafts[$0].current.map(Self.signature) })
             var own = draft.current
             var trimmed = false
-            while own.count > 1, let last = own.last,
+            while own.count > 1, let last = own.last, EmailImageReference(last) == nil,
                 others.contains(Self.signature(last)) || Self.isDisclaimer(last)
             {
                 own.removeLast()
@@ -352,16 +350,6 @@ struct EmailConversation {
         plainText(block).lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
-    /// The reader's collapsed envelope (`> Forwarded from …`) or a mailer's own dashed line.
-    private static func isForwardedHeader(_ block: MarkdownContentBlock) -> Bool {
-        if case .blockquote(let inner) = block, case .paragraph(let text)? = inner.first {
-            return text.hasPrefix("Forwarded from ")
-        }
-        guard case .paragraph(let text) = block, let first = text.split(separator: "\n").first else { return false }
-        return first.trimmingCharacters(in: .whitespaces).lowercased()
-            .range(of: #"^-{2,}\s*forwarded message\s*-{2,}$"#, options: .regularExpression) != nil
-    }
-
     private static let disclaimerOpenings = [
         "disclaimer", "confidentiality notice", "this email and any", "this e-mail and any",
         "the information contained in this", "this message and any attachments",
@@ -383,7 +371,7 @@ struct EmailConversation {
     /// The first paragraph that is not a greeting, on one line.
     static func briefLine(_ blocks: [MarkdownContentBlock]) -> String {
         let paragraphs = blocks.compactMap { block -> String? in
-            if case .paragraph(let text) = block { return text } else { return nil }
+            if case .paragraph(let text) = block, EmailImageReference(block) == nil { return text } else { return nil }
         }
         let point = paragraphs.first { !isGreeting($0) } ?? paragraphs.first ?? blocks.first.map(plainText) ?? ""
         return point.replacingOccurrences(of: "\n", with: " ")

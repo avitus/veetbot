@@ -8,6 +8,17 @@ import Testing
 /// rule, feedback lives in one Teach Veetbot card, and every control keeps
 /// the identifier the journeys drive.
 @Suite struct EmailSurfaceStructureTests {
+    /// The Mac reader must use the space the split view gives it on large displays.
+    @Test func testMacReaderHasNoFixedWidthCeiling() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let start = try #require(email.range(of: "private struct EmailThreadScreen")).lowerBound
+        let end = try #require(email.range(of: ".accessibilityIdentifier(\"email.detail\")", range: start..<email.endIndex)).lowerBound
+        let reader = String(email[start..<end])
+        #expect(reader.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(reader.contains("#else\n                        .padding(.horizontal, 24)"))
+        #expect(!reader.contains("#endif\n                        .frame(maxWidth: 680"))
+    }
+
     @Test
     func testReferenceNavigationAndDirectActionsArePresent() throws {
         let email = try source(at: "Veetbot/Views/EmailModeView.swift")

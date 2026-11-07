@@ -866,6 +866,21 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Refreshes a thread without overwriting local edits or clearing unrelated action failures.
+    /// An explicit image press, bound to the currently displayed source and connection.
+    func loadImage(threadID: UUID, messageID: String, index: Int) async throws -> Data {
+        guard thread?.id == threadID, let api = makeAPIClient(),
+              let message = thread?.messages?.first(where: { $0.id == messageID }) else {
+            throw CancellationError()
+        }
+        let connection = generation
+        let data = try await api.emailImage(threadID: threadID, messageID: messageID, index: index)
+        guard generation == connection, thread?.id == threadID,
+              thread?.messages?.first(where: { $0.id == messageID }) == message else {
+            throw CancellationError()
+        }
+        return data
+    }
+
     public func openThread(_ id: UUID, approvalID: UUID? = nil, refreshOnly: Bool = false) async {
         await openThread(id, approvalID: approvalID, refreshOnly: refreshOnly, activation: active ? activation : nil)
     }

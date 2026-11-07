@@ -9,9 +9,11 @@ from html.parser import HTMLParser
 from itertools import groupby
 from urllib.parse import urlsplit
 
+from agent_core.domain.web import is_public_https_url
+
 _INVISIBLE = str.maketrans("", "", "\u00ad\u034f\u200b\ufeff")
 _URL_LINE = re.compile(r"^<?(https?://[^\s<>]+)>?([*_]?)$", re.I)
-_HTML = re.compile(r"</?(?:html|body|div|p|h[1-6]|a|br|table|span|script|style)\b[^>]*>", re.I)
+_HTML = re.compile(r"</?(?:html|body|div|p|h[1-6]|a|br|table|span|script|style|img)\b[^>]*>", re.I)
 _PROMOTIONS = re.compile(
     r"^(?:forwarded this email\? subscribe for more|unsubscribe|manage (?:email )?preferences|"
     r"view (?:this email )?in (?:your )?browser|view in app|comment|like|share this story|"
@@ -188,13 +190,16 @@ def _with_line_breaks(lines: list[str], flowing: set[int]) -> list[str]:
 class _HTMLText(HTMLParser):
     """Extract inert text and explicit links, without a WebView or resource loader."""
 
-    def __init__(self) -> None:
+    def __init__(self, image_urls: list[str] | None = None) -> None:
+        """Optionally collect image destinations while emitting inert presentation text."""
         super().__init__(convert_charrefs=True)
+        self.image_urls = image_urls
         self.parts: list[str] = []
         self.hidden: list[str] = []
         self.anchor: tuple[int, str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Retain visible formatting and bounded public image references, never active HTML."""
         values = dict(attrs)
         void = tag in {"br", "hr", "img", "input", "meta", "link", "source", "wbr"}
         if self.hidden:
@@ -216,6 +221,26 @@ class _HTMLText(HTMLParser):
         if hidden:
             if not void:
                 self.hidden.append(tag)
+            return
+        if tag == "img" and self.image_urls is not None and len(self.image_urls) < 20:
+            url = values.get("src") or ""
+            dimensions = [values.get("width") or "", values.get("height") or ""]
+            dimensions += re.findall(r"(?:^|;)(?:width|height):([0-9.]+)(?:px)?(?=;|$)", style)
+            tiny = any(
+                float(value) <= 2 for value in dimensions if re.fullmatch(r"\d+(?:\.\d+)?", value)
+            )
+            if is_public_https_url(url) and not tiny:
+                index = len(self.image_urls)
+                self.image_urls.append(url)
+                label = _inert(re.sub(r"\s+", " ", values.get("alt") or "Image"))[:300]
+                anchor = self.anchor
+                if anchor:
+                    start, href = anchor
+                    text = "".join(self.parts[start:]).strip()
+                    self.parts[start:] = [_link(text, href)] if text else []
+                self.parts.append(f"\n\n![{label}](veetbot-email-image:{index})\n\n")
+                if anchor:
+                    self.anchor = (len(self.parts), anchor[1])
             return
         if tag in {"p", "div", "table", "tr", "blockquote", "ul", "ol"}:
             self.parts.append("\n\n")
@@ -287,13 +312,13 @@ def _forwarded(lines: list[str]) -> list[str]:
     return result
 
 
-def reading_body(body: str, *, subject: str = "") -> str:
+def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None = None) -> str:
     """Derive safe reading Markdown from retained text, preserving substantive prose."""
     text = body.translate(_INVISIBLE).replace("\r\n", "\n").replace("\r", "\n")
     # Extracted HTML text is already inert and carries the reader's own links.
     extracted = bool(_HTML.search(text))
     if extracted:
-        parser = _HTMLText()
+        parser = _HTMLText(image_urls)
         parser.feed(text)
         parser.close()
         text = "".join(parser.parts)
@@ -391,3 +416,35 @@ def reading_body(body: str, *, subject: str = "") -> str:
         result = _with_line_breaks(result, flowing)
     cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(result)).strip()
     return cleaned
+
+
+def merge_image_body(plain: str, rich: str, html_text: str) -> str:
+    """Retain plain MIME paragraphs absent from the image-bearing HTML alternative.
+
+    Compare visible words rather than Markdown formatting, wrapping, punctuation or
+    link destinations. Unmatched paragraphs precede the HTML because MIME parts do
+    not provide a reliable position for prose omitted from one alternative.
+    """
+
+    def words(value: str) -> str:
+        """Normalize inert reader Markdown into a bounded visible-word sequence."""
+        labels: list[str] = []
+        for line in value.splitlines(keepends=True):
+            position = 0
+            while (start := line.find("](", position)) != -1:
+                end = line.find(")", start + 2)
+                if end == -1:
+                    # Nothing later on this line can close a destination either.
+                    break
+                labels.append(line[position : start + 1])
+                position = end + 1
+            labels.append(line[position:])
+        return " ".join(re.findall(r"\w+", "".join(labels).casefold()))
+
+    represented = " " + words(html_text) + " "
+    missing: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", plain):
+        normalized = words(paragraph)
+        if normalized and " " + normalized + " " not in represented:
+            missing.append(paragraph)
+    return "\n\n".join([*missing, rich])

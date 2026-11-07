@@ -350,3 +350,4 @@ implementation without one.
 - [ADR-0301: Email threads read as conversations, with a brief for complex ones (Accepted)](0301-email-threads-read-as-conversations.md)
 - [ADR-0302: One approval for a request on a signed-in website (Proposed)](0302-one-approval-for-a-website-request.md)
 - [ADR-0303: Every Mac mail list scrolls (Accepted)](0303-every-mac-mail-list-scrolls.md)
+- [ADR-0304: Click-to-load email images and a fluid Mac reader (Accepted)](0304-email-inline-images-and-fluid-reader.md)

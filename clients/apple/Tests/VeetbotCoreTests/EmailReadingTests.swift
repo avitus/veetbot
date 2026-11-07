@@ -1,8 +1,43 @@
 import Foundation
 import Testing
+#if os(macOS)
+import AppKit
+import SwiftUI
+#endif
 @testable import VeetbotCore
 
 struct EmailReadingTests {
+    @Test func testOnlyWholeServerImageReferencesAreActionable() {
+        #expect(EmailImageReference(.paragraph("![Garden](veetbot-email-image:0)"))?.index == 0)
+        for text in [
+            "![Garden](https://images.example/photo)", "!\\[Garden\\](veetbot-email-image:0)",
+            "Before ![Garden](veetbot-email-image:0)", "![Garden](veetbot-email-image:20)",
+            "![Garden](veetbot-email-image:-1)"
+        ] {
+            #expect(EmailImageReference(.paragraph(text)) == nil)
+        }
+    }
+
+    #if os(macOS)
+    @Test @MainActor func testOpeningImageBearingEmailDoesNotFetchImages() async throws {
+        var requests = 0
+        let view = EmailMarkdownBlocksView(
+            blocks: [.paragraph("Before."), .paragraph("![Garden](veetbot-email-image:0)")], messageID: "message")
+            .environment(\.emailImageLoader, { _, _ in
+                requests += 1
+                return Data()
+            })
+        let host = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 600),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(requests == 0)
+    }
+    #endif
+
     /// Reader content is additive; older servers and retained originals stay readable.
     @Test func testReadingProjectionPreservesOriginalAndSupportsOlderServers() throws {
         let original = "Article text.\nUnsubscribe\n<https://example.com/leave>"
@@ -39,20 +74,41 @@ struct EmailReadingTests {
             == [.blockquote([.blockquote([.paragraph("Riley Example\nPartner")])])])
     }
 
-    /// A chain below a message's own text folds, the forward's note stays in view.
+    /// A chain below a message's own text folds, while every paragraph of its note stays.
     @Test func testEarlierRepliesFoldBelowAMessagesOwnText() {
         let chain = "On Fri, Oct 30, 2026 at 6:15 PM Sam \\<sam@example.com> wrote:\n\n"
             + "> Earlier.\n>\n> On Friday Riley wrote:\n>\n>> Earlier still."
-        let own = "My note.\n\n> Forwarded from Sam\n\nSam's note."
+        let own = "My note.\n\nA second paragraph of my own."
         let sections = EmailReaderSections(markdown: own + "\n\n" + chain)
         #expect(sections.current == MarkdownContentParser.parse(own))
         #expect(sections.earlier == MarkdownContentParser.parse(chain))
+    }
+
+    /// A single forwarded message keeps the sender's request above its nested history.
+    @Test func testForwardedHistoryFoldsBelowTheSendersNote() {
+        let own = "Hi Alex,\n\nCan you make a 30 minute call on Monday at 5:00pm?\n\nBest regards,\\\nTaylor"
+        let history = "> Forwarded from Sam \\<sam@example.com>\n\n"
+            + "How about 5 pm on Monday?\n\n"
+            + "On Fri, Nov 6, 2026 at 8:26 AM Dana \\<dana@example.com> wrote:\n\n"
+            + "> Monday is busy.\n>\n> [image: Logo]\n>\n> DISCLAIMER: For the intended recipient."
+        let sections = EmailReaderSections(markdown: own + "\n\n" + history)
+        #expect(sections.current == MarkdownContentParser.parse(own))
+        #expect(sections.earlier == MarkdownContentParser.parse(history))
+    }
+
+    @Test func testDashedForwardedHistoryUsesTheSameFoldRule() {
+        let history = "---------- Forwarded message ---------\n\nFrom: Sam\n\nEarlier message."
+        let sections = EmailReaderSections(markdown: "Please review.\n\n" + history)
+        #expect(sections.current == MarkdownContentParser.parse("Please review."))
+        #expect(sections.earlier == MarkdownContentParser.parse(history))
     }
 
     /// Folding must never hide what the message itself says.
     @Test func testEarlierRepliesStayWhenFoldingCouldHideTheMessage() {
         let unfolded = [
             // Nothing of its own would be left to show.
+            "> Forwarded from Sam\n\nThe whole forwarded message.",
+            "---------- Forwarded message ---------\n\nThe whole forwarded message.",
             "On Friday Sam wrote:\n\n> The whole message.",
             // A reply written below the quote answers it.
             "Intro.\n\nOn Friday Sam wrote:\n\n> A question?\n\nThe answer.",

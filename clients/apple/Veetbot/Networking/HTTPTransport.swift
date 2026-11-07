@@ -171,6 +171,7 @@ public actor HTTPTransport {
     ///
     /// A request with a restart window keeps retrying past that bound while the
     /// proxy answers for a restarting API, until the window's backoff is spent.
+    /// A zero-delay response cannot extend retries beyond the ordinary attempt bound.
     ///
     /// An `uploading` body is sent as an upload task so its progress can be
     /// reported; the request's own `body` must then be nil and its headers carry
@@ -214,7 +215,7 @@ public actor HTTPTransport {
                     let delay = Self.retryDelayNanoseconds(response: http, attempt: attempt)
                     let restarting = Self.isServerRestart(data: data, response: http)
                     if attempt < request.retryAttempts
-                        || (restarting && restartWait + delay <= restartWindow)
+                        || (restarting && restartWindow > 0 && delay > 0 && restartWait + delay <= restartWindow)
                     {
                         if restarting { restartWait += delay }
                         try await self.sleep(delay)

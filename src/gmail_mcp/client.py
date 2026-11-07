@@ -282,6 +282,26 @@ class GmailClient:
             return ""
 
     @classmethod
+    def _reader_html(cls, payload: object, *, maximum: int = 65536) -> str:
+        """Keep a complete bounded HTML alternative for the inert image reader."""
+        if not isinstance(payload, dict):
+            return ""
+        pending = [payload]
+        while pending:
+            part = pending.pop()
+            if part.get("filename"):
+                continue
+            children = part.get("parts", [])
+            if isinstance(children, list):
+                pending.extend(item for item in reversed(children) if isinstance(item, dict))
+            if part.get("mimeType") == "text/html":
+                body = part.get("body")
+                text = cls._decode_body(body.get("data") if isinstance(body, dict) else None)
+                if "<img" in text.lower() and len(text.encode()) <= maximum:
+                    return text
+        return ""
+
+    @classmethod
     def _payload_content(cls, payload: object) -> tuple[str, list[dict[str, object]]]:
         if not isinstance(payload, dict):
             return "", []

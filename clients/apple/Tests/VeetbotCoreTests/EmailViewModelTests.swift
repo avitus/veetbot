@@ -14,6 +14,39 @@ import SwiftUI
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    /// Opening mail is inert; each load or retry requires another explicit request.
+    @Test func testImagesLoadOnlyByExplicitRequestAndDoNotRetryOnFailure() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("images") {
+                requests.append(request)
+                if requests.snapshot.count == 3 { return (200, "image-fixture") }
+                return (502, Self.error("email_image_unavailable", "Image could not be loaded."))
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            let message = """
+            {"id":"image-message","sender":"alex@example.test","to":[],"cc":[],"subject":"Photo","body":"Photo","reader_image_body":"![Photo](veetbot-email-image:0)","sent_at":"2026-09-11T00:00:00Z","complete":true}
+            """
+            return (200, self.threadJSON().replacingOccurrences(of: "\"messages\":[]", with: "\"messages\":[\(message)]"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(requests.snapshot.isEmpty)
+        let message = try #require(model.thread?.messages?.first)
+        for count in 1...2 {
+            do {
+                _ = try await model.loadImage(threadID: threadID, messageID: message.id, index: 0)
+                Issue.record("Unavailable image unexpectedly loaded")
+            } catch {
+                #expect(requests.snapshot.count == count)
+            }
+        }
+        let data = try await model.loadImage(threadID: threadID, messageID: message.id, index: 0)
+        #expect(data == Data("image-fixture".utf8))
+        #expect(requests.snapshot.count == 3)
+    }
+
     #if os(macOS)
     /// A confirmed handled anchor stops restoration paging; an eligible displaced anchor is still found.
     @Test(arguments: [true, false], [1, 2]) func testMacImportantRefreshSkipsOnlyIneligibleAnchors(handled: Bool, selectedRevision: Int) async throws {
@@ -346,6 +379,37 @@ import SwiftUI
         defer { second.contentView = nil }
         #expect(try await inbox(of: reopened, in: second, settlesAt: 480),
                 "The inbox must reopen at the width the owner dragged it to, not \(inboxWidth(reopened))")
+    }
+
+    /// The actual white editor follows the reader when a large window is resized.
+    @Test func testMacReaderUsesWideWindowsAndShrinksWithThem() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        let host = NSHostingView(rootView: EmailModeView(model: model, viewportHeight: 1000, discussInChat: {}))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 2200, height: 1000),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil; model.resetConnection() }
+        func editors(in view: NSView) -> [NSTextView] {
+            (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap { editors(in: $0) }
+        }
+        host.frame = NSRect(x: 0, y: 0, width: 2200, height: 1000)
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(200))
+        host.layoutSubtreeIfNeeded()
+        let wide = try #require(editors(in: host).first { $0.isEditable }).bounds.width
+        #expect(wide > 900, "A large monitor must not leave the reply inside a 680-point column")
+        window.setContentSize(NSSize(width: 1200, height: 1000))
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(200))
+        host.layoutSubtreeIfNeeded()
+        let narrow = try #require(editors(in: host).first { $0.isEditable }).bounds.width
+        #expect(narrow < wide - 300)
+        #expect(narrow > 100)
     }
 
     /// A sent reply is a record: its rendered body accepts no typing and holds no insertion point,

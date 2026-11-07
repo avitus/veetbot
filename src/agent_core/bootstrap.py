@@ -6149,6 +6149,7 @@ async def _compose(
             mcp_servers=owner_mcp_servers,
             calls=call_service,
             email=EmailExperienceService(
+                read_image=PublicImageReader().read_email,
                 uow_factory=uow_factory,
                 clock=clock,
                 ids=ids,

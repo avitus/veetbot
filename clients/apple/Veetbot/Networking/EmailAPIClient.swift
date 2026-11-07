@@ -20,6 +20,15 @@ extension VeetbotAPIClient {
         try await transport.send(TransportRequest(method: .get, path: "/v1/email/threads/\(id.uuidString)"))
     }
 
+    public func emailImage(threadID: UUID, messageID: String, index: Int) async throws -> Data {
+        let values: [String: JSONValue] = ["message_id": .string(messageID), "index": .number(Double(index))]
+        let (data, _) = try await transport.sendData(TransportRequest(
+            method: .post, path: "/v1/email/threads/\(threadID.uuidString)/images",
+            body: try JSONEncoder.server.encode(values), retryAttempts: 1
+        ))
+        return data
+    }
+
     public func refreshEmail(idempotencyKey: String) async throws -> EmailOperationView {
         try await transport.send(TransportRequest(
             method: .post, path: "/v1/email/refresh", body: Data("{}".utf8),

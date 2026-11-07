@@ -2566,3 +2566,14 @@ empty details. All responses use private, no-store caching, including failures. 
 cap; never reflect body fields, values, unknown field names or parser details
 in errors. There is no GET-by-ID, reveal or export route. See
 [the owner and operator guide](../integration-keys.md).
+
+### Email image rendering (ADR-0304)
+
+`POST /v1/email/threads/{thread_id}/images` requires `email.read` and Email mode.
+The closed JSON body contains `message_id` (1–256 characters) and integer `index`
+(0–19). The URL is derived solely from that owner's retained message. The
+response is a bounded `image/jpeg` with `Cache-Control: private, no-store`.
+Malformed or unavailable references return 400, missing scope 403, an unowned
+thread 404, and upstream network or decode failure `email_image_unavailable` (502). No automatic retry is
+performed. Thread reads expose `reader_image_body`, never raw `reader_html`,
+and fetch no external images. The native owner gesture is **Load images**.

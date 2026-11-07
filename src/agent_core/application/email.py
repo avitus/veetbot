@@ -6,6 +6,7 @@ remote work; email bodies never become fabricated owner messages.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -22,6 +23,7 @@ from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.email_junk import admit_pilot
+from agent_core.application.email_reader import reading_body
 from agent_core.application.email_subscriptions import EmailSubscriptions, SubscriptionRequest
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
@@ -248,8 +250,11 @@ class EmailExperienceService:
         current_archive_principal: Callable[[], Principal] | None = None,
         unsubscribe_enabled: bool = False,
         unsubscribe_grace_days: int = 10,
+        read_image: Callable[[str], Awaitable[bytes]] | None = None,
     ) -> None:
         """Wire ordinary run policy, account bindings, and finite email allowances."""
+        self.read_image = read_image
+        self._image_slots = asyncio.Semaphore(4)
         self.uow_factory = uow_factory
         self.clock = clock
         self.ids = ids
@@ -424,6 +429,39 @@ class EmailExperienceService:
             "collection_counts": counts,
             "total_count": len(eligible),
         }
+
+    async def image(
+        self, principal: Principal, thread_id: UUID, message_id: str, index: int
+    ) -> bytes:
+        """Load only an image referenced by this owner's still-retained message."""
+        require_scope(principal, "email.read")
+        async with self.uow_factory() as uow:
+            thread = await self._thread(uow.email, principal, thread_id)
+            message = next((item for item in thread.messages if item.id == message_id), None)
+            urls: list[str] = []
+            if message is not None:
+                reading_body(message.reader_html, image_urls=urls)
+            if index < 0 or index >= len(urls) or self.read_image is None:
+                raise ValueError("This image is unavailable. Refresh the email and try again.")
+            url = urls[index]
+            assert message is not None
+            source = message.reader_html
+        async with self._image_slots:
+            async with self.uow_factory() as uow:
+                current = await self._thread(uow.email, principal, thread_id)
+                if not any(
+                    item.id == message_id and item.reader_html == source
+                    for item in current.messages
+                ):
+                    raise ValueError("The email source changed while the image was loading.")
+            content = await self.read_image(url)
+        async with self.uow_factory() as uow:
+            current = await self._thread(uow.email, principal, thread_id)
+            if not any(
+                item.id == message_id and item.reader_html == source for item in current.messages
+            ):
+                raise ValueError("The email source changed while the image was loading.")
+        return content
 
     async def thread(self, principal: Principal, thread_id: UUID) -> dict[str, object]:
         """Read a scoped thread with its current attention state and draft projection."""
@@ -2821,6 +2859,7 @@ class EmailExperienceService:
                     cc=parsed("cc"),
                     subject=str(raw.get("subject", "")),
                     body=str(raw.get("body", "")),
+                    reader_html=str(raw.get("reader_html", "")),
                     body_offset=int(raw.get("body_offset", 0)),
                     sent_at=sent_at,
                     complete=bool(raw.get("body_complete"))
@@ -2844,7 +2883,7 @@ class EmailExperienceService:
             json.dumps(
                 {
                     "messages": [
-                        message.model_dump(mode="json", exclude={"sender_check"})
+                        message.model_dump(mode="json", exclude={"sender_check", "reader_html"})
                         for message in messages
                     ],
                     "complete": normalized.get("complete", False),
@@ -2893,11 +2932,11 @@ class EmailExperienceService:
                 or (
                     previous.complete == complete
                     and [
-                        message.model_dump(exclude={"labels", "sender_check"})
+                        message.model_dump(exclude={"labels", "sender_check", "reader_html"})
                         for message in previous.messages
                     ]
                     == [
-                        message.model_dump(exclude={"labels", "sender_check"})
+                        message.model_dump(exclude={"labels", "sender_check", "reader_html"})
                         for message in messages
                     ]
                 )

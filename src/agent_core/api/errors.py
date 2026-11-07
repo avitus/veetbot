@@ -18,6 +18,7 @@ ERROR_STATUS_MAP: dict[type[BaseException], ErrorMapping] = {
     ReconsolidationValidationError: ErrorMapping("validation_error", 400),
     domain_errors.AuthenticationError: ErrorMapping("authentication_error", 401),
     domain_errors.AuthorizationError: ErrorMapping("authorization_error", 403),
+    domain_errors.EmailImageUnavailableError: ErrorMapping("email_image_unavailable", 502),
     domain_errors.NotFoundError: ErrorMapping("not_found", 404),
     domain_errors.IntegrationSecretUnavailableError: ErrorMapping(
         "integration_key_unavailable", 503
