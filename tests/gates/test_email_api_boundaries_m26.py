@@ -29,6 +29,13 @@ COMMANDS = (
     Command("inbox", "GET", "/v1/email/threads", "email.read", account_bound=False),
     Command("thread", "GET", "/v1/email/threads/{t}", "email.read"),
     Command(
+        "image",
+        "POST",
+        "/v1/email/threads/{t}/images",
+        "email.read",
+        {"message_id": "{m}", "index": 0},
+    ),
+    Command(
         "feedback",
         "POST",
         "/v1/email/feedback",
@@ -133,6 +140,26 @@ async def _request(
 ) -> tuple[str, dict[str, object] | None]:
     """Seed the state each command needs and return its concrete request payload."""
     thread, draft = await seed_mail(app)
+    if command.name == "image":
+        messages = [
+            m.model_copy(update={"reader_html": '<img src="https://images.example/photo.png">'})
+            for m in thread.messages
+        ]
+        async with app.uow_factory() as uow, uow.email.lock(app.principal):
+            await save_value(
+                uow.email,
+                app.principal,
+                "thread",
+                str(thread.id),
+                thread.model_copy(update={"messages": messages}),
+                app.clock.now(),
+            )
+
+        async def read_image(url: str) -> bytes:
+            """Serve a synthetic rendition without contacting an external host."""
+            return b"jpeg-fixture"
+
+        app.services.email.read_image = read_image
     if command.name == "save_attachment":
         app.principal.scopes.add("artifact.write")
         listed = EmailAttachment(filename="invoice.pdf", mime_type="application/pdf", size=10)

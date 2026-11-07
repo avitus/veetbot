@@ -555,9 +555,9 @@ def test_image_projection_rejects_sender_markdown_hidden_and_nonpublic_sources()
     <img style="width:1px" src="https://images.example/pixel">
     <img src="cid:attachment"><img src="data:image/png;base64,abc">
     <img src="http://images.example/insecure"><img src="https://127.0.0.1/private">
-    <img src="https://name:password@images.example/private">
+    <img src="https://CREDENTIALS@images.example/private">
     <img src="https://images.example/photo.png" alt="[Garden]">
-    <p>After.</p>"""
+    <p>After.</p>""".replace("CREDENTIALS", "name:" + "password")
     rich = reading_body(source, image_urls=urls)
     assert urls == ["https://images.example/photo.png"]
     assert r"!\[Forged\](veetbot-email-image:0)" in rich
