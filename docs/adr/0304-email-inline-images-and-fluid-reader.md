@@ -16,7 +16,8 @@ plain-text body. It is presentation source only: it expires and is erased with
 the message, and is excluded from content identity and model evidence. The
 thread API sanitizes it into an additional reading projection. It never sends
 raw HTML to a WebView. Older retained messages without this part keep their
-existing reader until the mailbox source is read again.
+existing reader until the mailbox source is read again. When the HTML alternative
+contains only images, the projection keeps the plain-text body before those images.
 
 Only explicit public HTTPS image references survive sanitization. Hidden images,
 images declared at two pixels or smaller, active content, inline data and CID
@@ -26,7 +27,8 @@ control explains that loading can disclose that the message was opened.
 The scoped image endpoint accepts a retained message identity and image index,
 never a caller-provided URL. It rechecks source retention and uses the existing
 credential-free, DNS-pinned public image reader with its byte, pixel, redirect
-and time limits. Images are returned as bounded JPEG renditions, with no-store
+and time limits. The process-wide email service admits at most four concurrent
+image fetches, releasing the slot on success, failure or cancellation. Images are returned as bounded JPEG renditions, with no-store
 responses, and are not saved as artifacts or used for learning. Failures leave
 the message readable and offer an explicit retry. There is no automatic retry.
 
@@ -92,3 +94,14 @@ seconds, including the corrected image-request fixture. Documentation checks
 passed after resolving citation offsets. Estimated merge-verification wall time
 was 142 seconds for the Apple VM and 15 seconds for documentation, overlapping;
 total approximately 142 seconds, with Apple startup/build the slowest stage.
+
+PR review follow-up preserves plain MIME text when the HTML alternative contains
+only images and limits the shared email service to four concurrent image fetches.
+The two new regressions first failed on missing text and 12 simultaneous fetches:
+`scripts/run_in_linux_container.sh 'uv run pytest tests/unit/test_email_reader.py -q -k "image_only_html or image_fetch_concurrency"'`.
+The reader, Gmail transport, image adapter and email service partition then passed
+112 tests in 17.86 seconds, including slot release after failure. Lint, typecheck
+(1787 source files), citation repair and documentation checks passed. Estimated
+follow-up wall time was three minutes, with approximately one minute of container
+startup, 18 seconds of tests and 20 seconds of static/documentation checks;
+these stages ran serially with no overlap. Container startup was the slowest stage.

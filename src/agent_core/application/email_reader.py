@@ -191,6 +191,7 @@ class _HTMLText(HTMLParser):
     """Extract inert text and explicit links, without a WebView or resource loader."""
 
     def __init__(self, image_urls: list[str] | None = None) -> None:
+        """Optionally collect image destinations while emitting inert presentation text."""
         super().__init__(convert_charrefs=True)
         self.image_urls = image_urls
         self.parts: list[str] = []
@@ -198,6 +199,7 @@ class _HTMLText(HTMLParser):
         self.anchor: tuple[int, str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Retain visible formatting and bounded public image references, never active HTML."""
         values = dict(attrs)
         void = tag in {"br", "hr", "img", "input", "meta", "link", "source", "wbr"}
         if self.hidden:

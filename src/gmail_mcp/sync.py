@@ -326,6 +326,7 @@ class GmailSync:
         return self._history_argument(value[3]), _integer(value[4], 0, UPSTREAM_MAXIMUM_BYTES)
 
     def _message(self, raw: dict[str, Any], thread_id: str) -> dict[str, Any]:
+        """Normalize a verified source message with bounded app-only presentation HTML."""
         if raw.get("threadId") != thread_id:
             raise GmailError("gmail.provider_output_invalid")
         _text(raw.get("id"))

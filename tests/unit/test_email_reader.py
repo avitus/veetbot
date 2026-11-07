@@ -590,3 +590,74 @@ async def test_adding_image_source_preserves_revision_and_learning_content() -> 
         assert updated.messages[0].reader_html == html
         projection = (await client.get(f"/v1/email/threads/{updated.id}")).json()
         assert "veetbot-email-image:0" in projection["messages"][0]["reader_image_body"]
+
+
+async def test_image_only_html_preserves_plain_text_in_mac_projection() -> None:
+    """Image alternatives must not erase text present only in the plain MIME part."""
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0]["reader_html"] = (
+                '<a href="https://example.com"><img src="https://images.example/photo.png" '
+                'alt="The garden"></a>'
+            )
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        message = (await client.get(f"/v1/email/threads/{thread.id}")).json()["messages"][0]
+        assert message["reader_body"]
+        assert message["reader_body"] in message["reader_image_body"]
+        assert "![The garden](veetbot-email-image:0)" in message["reader_image_body"]
+
+
+async def test_image_fetch_concurrency_is_bounded_and_slots_release_after_failure() -> None:
+    """Parallel loads share a four-image budget and failed fetches release their slot."""
+    import asyncio
+
+    from agent_core.domain.errors import EmailImageUnavailableError
+
+    async with email_client() as (app, _):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0]["reader_html"] = '<img src="https://images.example/photo.png">'
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        active = peak = calls = 0
+
+        async def read(url: str) -> bytes:
+            nonlocal active, peak, calls
+            active += 1
+            calls += 1
+            fail = calls == 1
+            peak = max(peak, active)
+            try:
+                await asyncio.sleep(0.05)
+                if fail:
+                    raise EmailImageUnavailableError("Synthetic failure")
+                return b"jpeg-fixture"
+            finally:
+                active -= 1
+
+        app.services.email.read_image = read
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(app.services.email.image(app.principal, thread.id, "m1", 0) for _ in range(12)),
+                return_exceptions=True,
+            ),
+            timeout=5,
+        )
+        assert peak <= 4
+        assert calls == 12 and active == 0
+        assert sum(isinstance(result, EmailImageUnavailableError) for result in results) == 1
+        assert results.count(b"jpeg-fixture") == 11

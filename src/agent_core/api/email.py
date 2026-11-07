@@ -135,6 +135,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         thread_id: UUID,
         authenticated: Annotated[Principal, secured("email.read")],
     ) -> dict[str, object]:
+        """Project retained message text and optional image references without fetching them."""
         result = await service.thread(authenticated, thread_id)
         # HTTP presentation only, after authorization and retention, outside the
         # owner lock. Chat, drafting and learning keep the original service data.
@@ -143,10 +144,12 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
             html = message.pop("reader_html", "")
             urls: list[str] = []
             rich = reading_body(html, subject=message["subject"], image_urls=urls)
-            message["reader_image_body"] = rich if urls else None
             message["reader_body"] = reading_body(
                 message["body"], subject=message["subject"] or str(result["subject"])
             )
+            if urls and not reading_body(html).strip():
+                rich = "\n\n".join(filter(None, [message["reader_body"], rich]))
+            message["reader_image_body"] = rich if urls else None
         return result
 
     @router.post(
@@ -157,6 +160,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         body: ImageRequest,
         authenticated: Annotated[Principal, secured("email.read")],
     ) -> Response:
+        """Return one explicitly requested image from an authorized retained message."""
         content = await boundary(
             service.image(authenticated, thread_id, body.message_id, body.index)
         )

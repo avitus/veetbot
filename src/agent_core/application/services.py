@@ -970,7 +970,9 @@ class EmailService(Protocol):
 
     async def image(
         self, principal: Principal, thread_id: UUID, message_id: str, index: int
-    ) -> bytes: ...
+    ) -> bytes:
+        """Fetch one retained image by index after authorization and explicit consent."""
+        ...
 
     async def feedback(
         self,

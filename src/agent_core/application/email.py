@@ -6,6 +6,7 @@ remote work; email bodies never become fabricated owner messages.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -253,6 +254,7 @@ class EmailExperienceService:
     ) -> None:
         """Wire ordinary run policy, account bindings, and finite email allowances."""
         self.read_image = read_image
+        self._image_slots = asyncio.Semaphore(4)
         self.uow_factory = uow_factory
         self.clock = clock
         self.ids = ids
@@ -444,7 +446,8 @@ class EmailExperienceService:
             url = urls[index]
             assert message is not None
             source = message.reader_html
-        content = await self.read_image(url)
+        async with self._image_slots:
+            content = await self.read_image(url)
         async with self.uow_factory() as uow:
             current = await self._thread(uow.email, principal, thread_id)
             if not any(
