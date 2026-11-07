@@ -41,7 +41,7 @@ import SwiftUI
         model.setListView("priority")
         for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         await model.openThread(threadID)
-        model.importantScrollAnchor = threadID
+        model.scrollAnchor = threadID
         if handled {
             let detail = try #require(model.thread)
             #expect(await model.setThreadHandled(detail, handled: true))
@@ -55,8 +55,75 @@ import SwiftUI
         #expect(model.selectedThreadID == threadID)
     }
 
-    /// Scroll the real Mac inbox through a page boundary and retain its visible conversation on refresh.
-    @Test func testMacImportantRequestsFullPages() async throws {
+    /// Each Mac list stops chasing a visible thread that has just left it: marking it handled
+    /// takes it out of Important and Needs you, and marking it not handled takes it out of
+    /// Handled. Inbox keeps handled mail, so there the refresh still finds it (ADR-0303).
+    @Test(arguments: ["priority", "needs_you", "handled", "inbox"])
+    func testMacListRefreshChasesOnlyAnchorsStillInTheList(view: String) async throws {
+        let requests = EmailRequestRecorder()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let other = threadJSON().replacingOccurrences(of: threadID.uuidString, with: otherID.uuidString)
+        let inHandled = view == "handled"
+        let stillListed = view == "inbox"
+        let base = inHandled
+            ? threadJSON().replacingOccurrences(of: "\"summary\"", with: "\"dismissed_revision\":1,\"summary\"")
+            : threadJSON()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            if request.url!.path.hasSuffix("dismiss") {
+                return (200, self.threadJSON().replacingOccurrences(of: "\"summary\"",
+                    with: "\"dismissed_revision\":\(inHandled ? "null" : "1"),\"summary\""))
+            }
+            guard request.url!.path.hasSuffix("threads") else { return (200, base) }
+            requests.append(request)
+            if requests.snapshot.count == 1 { return (200, "{\"items\":[\(base)],\"next_cursor\":null}") }
+            if request.url!.query?.contains("cursor=") == true {
+                if !stillListed { return (503, Self.error("service_unavailable", "Unexpected anchor scan.")) }
+                return (200, self.pageJSON(cursor: "later"))
+            }
+            return (200, "{\"items\":[\(other)],\"next_cursor\":\"next\"}")
+        }
+        defer { model.resetConnection() }
+        if view == model.listView { await model.reload() } else { model.setListView(view) }
+        for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        await model.openThread(threadID)
+        model.scrollAnchor = threadID
+        let detail = try #require(model.thread)
+        #expect(await model.setThreadHandled(detail, handled: !inHandled, confirms: false))
+        #expect(requests.snapshot.count == (stillListed ? 3 : 2))
+        #expect(model.items.map(\.id) == (stillListed ? [threadID, otherID] : [otherID]))
+        #expect(model.errorMessage == nil)
+    }
+
+    /// Keeping the visible thread in place searches at most five pages beyond the rows on
+    /// screen; past that the refresh keeps its rows and gives up the position (ADR-0303).
+    @Test func testRestoringTheVisibleThreadSearchesABoundedNumberOfPages() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            guard request.url!.path.hasSuffix("threads") else { return (200, self.threadJSON()) }
+            requests.append(request)
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            let page = Int(query.first { $0.name == "cursor" }?.value ?? "0")!
+            let id = String(format: "00000000-0000-0000-0000-%012d", 801 + page)
+            let row = self.threadJSON().replacingOccurrences(of: self.threadID.uuidString, with: id)
+            return (200, "{\"items\":[\(row)],\"next_cursor\":\(page < 40 ? "\"\(page + 1)\"" : "null")}")
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let before = requests.snapshot.count
+        model.scrollAnchor = UUID()
+        await model.reload(preserveOrder: true)
+        #expect(requests.snapshot.count - before == 6, "one page for the rows, then five to search")
+        #expect(model.items.count == 6)
+        #expect(model.errorMessage == nil)
+    }
+
+    /// Every Mac list scrolls through a page boundary and retains its visible conversation on
+    /// refresh, Inbox and the collections as well as Important (ADR-0303).
+    @Test(arguments: ["priority", "inbox", "needs_you", "handled", "other"])
+    func testMacListsRequestFullPagesAndScroll(view: String) async throws {
         let requests = EmailRequestRecorder()
         let reorderedAnchor = EmailTestAnchor()
         let model = try makeModel { request in
@@ -77,7 +144,7 @@ import SwiftUI
             return (200, "{\"items\":[\(rows)],\"next_cursor\":\(end < 107 ? "\"\(end)\"" : "null"),\"total_count\":107}")
         }
         defer { model.resetConnection() }
-        model.setListView("priority")
+        if view == model.listView { await model.reload() } else { model.setListView(view) }
         for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(model.items.count == 100)
         #expect(model.listTotal == 107)
@@ -99,7 +166,7 @@ import SwiftUI
             return view.subviews.lazy.compactMap { inboxScroll(in: $0) }.first
         }
         let scroll = try #require(inboxScroll(in: host))
-        #expect(model.items.count == 100, "Opening Important should not fetch the next page")
+        #expect(model.items.count == 100, "Opening the list should not fetch the next page")
         scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.documentView!.bounds.height - scroll.contentView.bounds.height))
         scroll.reflectScrolledClipView(scroll.contentView)
         for _ in 0..<200 where model.items.count == 100 { try await Task.sleep(for: .milliseconds(10)) }
@@ -108,17 +175,17 @@ import SwiftUI
         #expect(requests.snapshot.map { URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)!
             .queryItems!.first { $0.name == "limit" }!.value } == ["100", "100"])
         try await Task.sleep(for: .milliseconds(150))
-        let visible = try #require(model.importantScrollAnchor)
+        let visible = try #require(model.scrollAnchor)
         #expect(visible != threadID)
         #expect(scroll.documentVisibleRect.minY > scroll.documentVisibleRect.height)
         reorderedAnchor.set(visible)
         await model.reload(preserveOrder: true)
         #expect(model.items.first?.id == visible)
         try await Task.sleep(for: .milliseconds(120))
-        for _ in 0..<100 where model.importantScrollAnchor != visible { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(model.importantScrollAnchor == visible)
+        for _ in 0..<100 where model.scrollAnchor != visible { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.scrollAnchor == visible)
         // The saved row is now first: its top must be inside the actual AppKit viewport.
-        // A stale importantScrollAnchor alone cannot satisfy this geometry assertion.
+        // A stale scrollAnchor alone cannot satisfy this geometry assertion.
         #expect(scroll.documentVisibleRect.minY < 1)
         #expect(model.items.count == 107)
         #expect(model.selectedThreadID == threadID)
@@ -164,11 +231,19 @@ import SwiftUI
                 to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
         }
         #expect(model.items.count == 5)
-        let table = try #require(descendant(NSTableView.self, in: host))
-        let scroll = try #require(table.enclosingScrollView)
+        // Every Mac list is a scroll view now (ADR-0303): the inbox is the tallest one in
+        // the split's first pane, beside the reader.
+        let split = try #require(descendant(NSSplitView.self, in: host))
+        /// Every scroll view under a pane.
+        func scrollViews(in view: NSView) -> [NSScrollView] {
+            let own: [NSScrollView] = (view as? NSScrollView).map { [$0] } ?? []
+            return own + view.subviews.flatMap { scrollViews(in: $0) }
+        }
+        let scroll = try #require(scrollViews(in: split.subviews[0]).max { $0.frame.height < $1.frame.height })
         #expect(host.convert(scroll.bounds, from: scroll).minY < 150,
                 "Inbox controls must leave mail near the top of the available content")
-        #expect(table.visibleRect.contains(table.rect(ofRow: table.numberOfRows - 1)),
+        let document = try #require(scroll.documentView)
+        #expect(document.frame.height <= scroll.contentView.bounds.height + 1,
                 "Five priorities must fit completely without scrolling at the default text size")
         try snapshot("email-sidebar-default")
         // Before any drag the inbox moves to the design's width once the split has laid out.
@@ -179,7 +254,6 @@ import SwiftUI
         #expect(abs(scroll.frame.width - EmailInboxWidthStore.idealWidth) <= 2,
                 "Before any drag the inbox opens at the design's width, not \(scroll.frame.width)")
         let originalWidth = scroll.frame.width
-        let split = try #require(descendant(NSSplitView.self, in: host))
         split.setPosition(500, ofDividerAt: 0)
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 200_000_000)
@@ -2667,6 +2741,30 @@ import SwiftUI
         gate.release()
         try await waitForEmailTestCondition { model.items.count == 2 }
         #expect(model.items.map(\.id) == [arrivalID, threadID])
+    }
+
+    /// A list read abandoned by a connection reset or a new list leaves paging free: the
+    /// abandoned read can no longer clear its own flag (ADR-0303).
+    @Test(arguments: [true, false]) func testAbandonedListReadDoesNotHoldPagingOff(reset: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            let reads = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+            return (200, "{\"items\":[\(self.threadJSON())],\"next_cursor\":null}", reads == 1 ? gate : nil)
+        }
+        defer {
+            gate.release()
+            model.resetConnection()
+        }
+        let read = Task { await model.reload() }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        #expect(model.isReadingList)
+        if reset { model.resetConnection() } else { model.setListView("handled") }
+        #expect(!model.isReadingList, "The abandoned read must not hold paging off")
+        gate.release()
+        await read.value
     }
 
     @Test func testEmptyInboxPollingDoesNotRestartTheLoadingIndicator() async throws {
