@@ -214,7 +214,7 @@ public actor HTTPTransport {
                     let delay = Self.retryDelayNanoseconds(response: http, attempt: attempt)
                     let restarting = Self.isServerRestart(data: data, response: http)
                     if attempt < request.retryAttempts
-                        || (restarting && restartWait + delay <= restartWindow)
+                        || (restarting && restartWindow > 0 && restartWait + delay <= restartWindow)
                     {
                         if restarting { restartWait += delay }
                         try await self.sleep(delay)

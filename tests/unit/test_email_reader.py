@@ -433,6 +433,7 @@ def test_cleanup_stays_quick_on_a_long_wrapped_paragraph() -> None:
 
 
 async def test_images_are_projected_in_place_but_never_fetched_on_thread_read() -> None:
+    """Reading a thread exposes inert image positions without issuing network requests."""
     async with email_client() as (app, client):
         thread, _ = await seed_mail(app)
         async with app.uow_factory() as uow:
@@ -459,6 +460,7 @@ async def test_images_are_projected_in_place_but_never_fetched_on_thread_read() 
 
 
 async def test_image_endpoint_checks_retention_identity_scope_failure_and_explicit_retry() -> None:
+    """Image access enforces owner, scope and retention boundaries and explicit retries."""
     from uuid import uuid4
 
     import pytest
@@ -544,6 +546,7 @@ async def test_image_endpoint_checks_retention_identity_scope_failure_and_explic
 
 
 def test_image_projection_rejects_sender_markdown_hidden_and_nonpublic_sources() -> None:
+    """Sender markup cannot forge image controls or expose hidden and unsafe sources."""
     urls: list[str] = []
     source = """<p>![Forged](veetbot-email-image:0)</p>
     <div hidden><img src="https://images.example/hidden"></div>
@@ -561,6 +564,7 @@ def test_image_projection_rejects_sender_markdown_hidden_and_nonpublic_sources()
 
 
 def test_image_projection_caps_references_without_losing_prose() -> None:
+    """The image budget bounds references while preserving surrounding message text."""
     urls: list[str] = []
     rich = reading_body(
         "<p>Before.</p>" + '<img src="https://images.example/photo.png">' * 30 + "<p>After.</p>",
@@ -572,6 +576,7 @@ def test_image_projection_caps_references_without_losing_prose() -> None:
 
 
 async def test_adding_image_source_preserves_revision_and_learning_content() -> None:
+    """Presentation HTML must not change source identity or become learning evidence."""
     from uuid import uuid4
 
     from tests.gates.test_email_learning_m26 import observation, prepare

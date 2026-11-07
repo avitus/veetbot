@@ -263,6 +263,7 @@ async def test_a_thread_beyond_the_output_budget_returns_a_truncated_prefix() ->
 
 
 def test_image_bearing_html_is_retained_separately_from_source_text() -> None:
+    """App sync retains bounded HTML while ordinary tools keep their original text."""
     html = '<p>Hello.</p><img src="https://images.example/photo.png">'
     payload = {
         "mimeType": "multipart/alternative",
@@ -288,6 +289,7 @@ def test_image_bearing_html_is_retained_separately_from_source_text() -> None:
 
 
 def test_reader_html_omits_oversized_and_attachment_parts_without_truncating() -> None:
+    """Only complete inline HTML parts within the presentation budget are retained."""
     html = '<p>Hello.</p><img src="https://images.example/photo.png">'
     assert (
         GmailClient._reader_html(

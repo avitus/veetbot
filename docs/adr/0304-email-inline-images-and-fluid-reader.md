@@ -30,7 +30,9 @@ credential-free, DNS-pinned public image reader with its byte, pixel, redirect
 and time limits. The process-wide email service admits at most four concurrent
 image fetches, releasing the slot on success, failure or cancellation. Images are returned as bounded JPEG renditions, with no-store
 responses, and are not saved as artifacts or used for learning. Failures leave
-the message readable and offer an explicit retry. There is no automatic retry.
+the message readable and offer an explicit retry. There is no automatic retry,
+including zero-delay proxy restart responses; restart retries require a positive
+opt-in restart window.
 
 The Mac reader uses the width left by its neighboring columns with fixed edge
 padding, without the old 680-point ceiling. iPhone and iPad retain their current
@@ -105,3 +107,13 @@ The reader, Gmail transport, image adapter and email service partition then pass
 follow-up wall time was three minutes, with approximately one minute of container
 startup, 18 seconds of tests and 20 seconds of static/documentation checks;
 these stages ran serially with no overlap. Container startup was the slowest stage.
+
+The second review's proxy-restart regression failed all six combinations of
+502/503/504 and zero/past-date `Retry-After` values before the transport fix:
+`scripts/run_apple_ui_macos_vm.sh swift test --package-path clients/apple --filter HTTPTransportTests/testEmailImageDoesNotRetryZeroDelayProxyFailure`.
+The combined HTTP transport and Email partition then passed 294 tests in 48.501
+seconds. The existing positive restart-window tests still pass. Lint, typecheck,
+citations and docs passed; touched tests and image rendering paths now describe
+their contracts. Estimated final round wall time was two minutes for the Apple
+VM and 20 seconds for static/docs checks, overlapping; total approximately two
+minutes, with Apple startup/build/test the slowest stage.

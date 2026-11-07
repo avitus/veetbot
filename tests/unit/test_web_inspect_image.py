@@ -173,6 +173,7 @@ async def test_missing_artifact_scope_refuses_before_network() -> None:
 
 
 async def test_email_image_failure_is_typed_and_never_exposes_the_url() -> None:
+    """Image fetch errors map to a stable typed failure without leaking source URLs."""
     from agent_core.domain.errors import EmailImageUnavailableError
 
     async def resolve(host: str) -> tuple[str, ...]:

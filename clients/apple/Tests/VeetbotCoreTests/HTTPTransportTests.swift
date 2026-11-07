@@ -480,6 +480,30 @@ import Testing
         #expect(await client.transport.authorizationState() == .requiresReauthentication)
     }
 
+    /// A zero-delay proxy restart must not bypass the image request's one-attempt policy.
+    @Test(arguments: [502, 503, 504], ["0", "Wed, 01 Jan 2020 00:00:00 GMT"])
+    func testEmailImageDoesNotRetryZeroDelayProxyFailure(status: Int, retryAfter: String) async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var count = 0
+        StubURLProtocol.handler = { request in
+            let attempt = lock.withLock { count += 1; return count }
+            let response = try #require(HTTPURLResponse(
+                url: request.url!, statusCode: attempt == 1 ? status : 200,
+                httpVersion: "HTTP/1.1", headerFields: ["Retry-After": retryAfter]
+            ))
+            return (response, Data("Proxy restarting".utf8))
+        }
+        let client = try makeClient(token: "valid")
+        do {
+            _ = try await client.emailImage(threadID: UUID(), messageID: "image", index: 0)
+            Issue.record("Image request automatically retried a proxy failure")
+        } catch {
+            #expect(lock.withLock { count } == 1)
+        }
+        #expect(lock.withLock { count } == 1)
+    }
+
     @Test
     func testRetryableHTTPStatusUsesStableIdempotencyKey() async throws {
         defer { StubURLProtocol.handler = nil }

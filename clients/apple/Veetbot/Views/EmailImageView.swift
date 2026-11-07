@@ -20,6 +20,7 @@ struct EmailImageReference: Equatable {
     let index: Int
     let label: String
 
+    /// Parse one bounded server image marker without accepting arbitrary Markdown images.
     init?(_ block: MarkdownContentBlock) {
         guard case .paragraph(let text) = block,
               let marker = text.range(of: "](veetbot-email-image:", options: .backwards),
@@ -40,6 +41,7 @@ struct EmailMarkdownBlocksView: View {
 
     private var rows: [MarkdownQuoteRow] { MarkdownQuoteRow.rows(blocks, depth: 0) }
 
+    /// Keep images inert until this message receives an explicit load gesture.
     var body: some View {
         #if os(macOS)
         if !rows.contains(where: { EmailImageReference($0.block) != nil }) {
@@ -92,6 +94,7 @@ private struct EmailRemoteImageView: View {
     @State private var failed = false
     @State private var attempt = 0
 
+    /// Load one rendition per explicit attempt and leave failures available for manual retry.
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let image {

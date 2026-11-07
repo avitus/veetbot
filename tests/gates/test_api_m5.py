@@ -230,6 +230,7 @@ async def test_public_session_creation_rejects_scheduler_and_delegation_owned_me
 
 
 async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
+    """Every emitted API error belongs to the documented public vocabulary."""
     expected = {
         "authentication_error",
         "authorization_error",

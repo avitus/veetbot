@@ -14,6 +14,7 @@ import SwiftUI
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    /// Opening mail is inert; each load or retry requires another explicit request.
     @Test func testImagesLoadOnlyByExplicitRequestAndDoNotRetryOnFailure() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
