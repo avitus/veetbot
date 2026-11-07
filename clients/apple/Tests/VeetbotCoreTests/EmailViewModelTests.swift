@@ -96,6 +96,30 @@ import SwiftUI
         #expect(model.errorMessage == nil)
     }
 
+    /// Keeping the visible thread in place searches at most five pages beyond the rows on
+    /// screen; past that the refresh keeps its rows and gives up the position (ADR-0303).
+    @Test func testRestoringTheVisibleThreadSearchesABoundedNumberOfPages() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            guard request.url!.path.hasSuffix("threads") else { return (200, self.threadJSON()) }
+            requests.append(request)
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            let page = Int(query.first { $0.name == "cursor" }?.value ?? "0")!
+            let id = String(format: "00000000-0000-0000-0000-%012d", 801 + page)
+            let row = self.threadJSON().replacingOccurrences(of: self.threadID.uuidString, with: id)
+            return (200, "{\"items\":[\(row)],\"next_cursor\":\(page < 40 ? "\"\(page + 1)\"" : "null")}")
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        let before = requests.snapshot.count
+        model.scrollAnchor = UUID()
+        await model.reload(preserveOrder: true)
+        #expect(requests.snapshot.count - before == 6, "one page for the rows, then five to search")
+        #expect(model.items.count == 6)
+        #expect(model.errorMessage == nil)
+    }
+
     /// Every Mac list scrolls through a page boundary and retains its visible conversation on
     /// refresh, Inbox and the collections as well as Important (ADR-0303).
     @Test(arguments: ["priority", "inbox", "needs_you", "handled", "other"])

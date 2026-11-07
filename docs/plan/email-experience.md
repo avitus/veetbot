@@ -77,7 +77,8 @@ the selected conversation independently, in every Mac list.
 It can fetch later pages to retain an eligible displaced thread, but does not
 chase an anchor its known state has taken out of the list: handled for
 Important and Needs you, not handled for Handled, archived or in Spam for
-Inbox and its collections (ADR-0303).
+Inbox and its collections. The search reads at most five pages past the rows
+on screen, then keeps the rows without restoring the position (ADR-0303).
 On touch, More important expands to ten, then pages through the rest. Find
 mail and Review other mail make false negatives discoverable without cluttering
 the default list. Rows are ordered by each conversation's latest activity,

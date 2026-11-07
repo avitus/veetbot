@@ -592,6 +592,10 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
+    /// How many pages past the visible rows a refresh searches for a displaced visible thread
+    /// before keeping its rows without restoring the position (ADR-0303).
+    static let anchorSearchPages = 5
+
     /// Stops paging when the original connection or foreground visit no longer owns the read.
     private func readInbox(api: VeetbotAPIClient, accountID: String?, view: String, text: String, count: Int,
                            requestID: UUID, anchor: UUID?, connection: UUID, activation foreground: UUID?) async throws -> EmailThreadPage {
@@ -601,6 +605,9 @@ public final class EmailViewModel: ObservableObject {
         var ids: Set<UUID> = []
         var cursor: String?
         var cursors: Set<String> = []
+        var pages = 0
+        // Pages the visible rows need, then a bounded search for a displaced visible thread.
+        let pageLimit = max(1, (count + 99) / 100) + Self.anchorSearchPages
         repeat {
             guard listRequest == requestID, acceptsRead(connection: connection, activation: foreground) else { throw CancellationError() }
             // If a refresh displaced the visible thread, keep paging until we find it or exhaust the list.
@@ -612,7 +619,9 @@ public final class EmailViewModel: ObservableObject {
             total = page.totalCount
             rows.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
             cursor = try nextPageCursor(page.nextCursor, seen: &cursors)
-        } while cursor != nil && ((count > 100 && rows.count < count) || anchor.map { !ids.contains($0) } == true)
+            pages += 1
+        } while cursor != nil
+            && ((count > 100 && rows.count < count) || (anchor.map { !ids.contains($0) } == true && pages < pageLimit))
         return EmailThreadPage(items: rows, nextCursor: cursor, collectionCounts: counts, totalCount: total)
     }
 
