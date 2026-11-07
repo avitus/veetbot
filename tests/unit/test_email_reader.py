@@ -694,3 +694,22 @@ def test_image_merge_stays_quick_on_unclosed_link_delimiters() -> None:
     started = time.monotonic()
     assert merge_image_body("Keep this text.", hostile, hostile).startswith("Keep this text.")
     assert time.monotonic() - started < 1
+
+
+def test_images_inside_links_keep_surrounding_text_linked() -> None:
+    """An image splits an anchor into linked text segments and standalone image markers."""
+    urls: list[str] = []
+    result = reading_body(
+        '<a href="https://example.com/article">Before'
+        '<img src="https://images.example/one.png" alt="One">Middle'
+        '<img src="https://images.example/two.png" alt="Two">After</a>',
+        image_urls=urls,
+    )
+    assert result.split("\n\n") == [
+        "[Before](https://example.com/article)",
+        "![One](veetbot-email-image:0)",
+        "[Middle](https://example.com/article)",
+        "![Two](veetbot-email-image:1)",
+        "[After](https://example.com/article)",
+    ]
+    assert len(urls) == 2

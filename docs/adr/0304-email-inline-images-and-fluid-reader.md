@@ -26,7 +26,9 @@ a single pass, and the paragraph merge runs in a worker thread.
 
 Only explicit public HTTPS image references survive sanitization. Hidden images,
 images declared at two pixels or smaller, active content, inline data and CID
-references are omitted. A visible image can still be a tracker; the loading
+references are omitted. Text surrounding an image inside a link keeps its
+destination; the image remains a standalone loadable reference. A visible image
+can still be a tracker; the loading
 control explains that loading can disclose that the message was opened.
 
 The scoped image endpoint accepts a retained message identity and image index,

@@ -233,8 +233,14 @@ class _HTMLText(HTMLParser):
                 index = len(self.image_urls)
                 self.image_urls.append(url)
                 label = _inert(re.sub(r"\s+", " ", values.get("alt") or "Image"))[:300]
+                anchor = self.anchor
+                if anchor:
+                    start, href = anchor
+                    text = "".join(self.parts[start:]).strip()
+                    self.parts[start:] = [_link(text, href)] if text else []
                 self.parts.append(f"\n\n![{label}](veetbot-email-image:{index})\n\n")
-                self.anchor = None
+                if anchor:
+                    self.anchor = (len(self.parts), anchor[1])
             return
         if tag in {"p", "div", "table", "tr", "blockquote", "ul", "ol"}:
             self.parts.append("\n\n")
