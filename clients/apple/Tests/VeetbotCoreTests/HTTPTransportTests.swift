@@ -504,6 +504,32 @@ import Testing
         #expect(lock.withLock { count } == 1)
     }
 
+    /// An opted-in restart window must also stop when the proxy supplies no positive backoff.
+    @Test(arguments: [502, 503, 504], ["0", "Wed, 01 Jan 2020 00:00:00 GMT"])
+    func testRestartWindowDoesNotLoopOnZeroDelay(status: Int, retryAfter: String) async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var count = 0
+        StubURLProtocol.handler = { request in
+            let attempt = lock.withLock { count += 1; return count }
+            let response = try #require(HTTPURLResponse(
+                url: request.url!, statusCode: attempt == 1 ? status : 200,
+                httpVersion: "HTTP/1.1", headerFields: ["Retry-After": retryAfter]
+            ))
+            return (response, Data("Proxy restarting".utf8))
+        }
+        let client = try makeClient(token: "valid")
+        do {
+            _ = try await client.transport.sendData(TransportRequest(
+                method: .get, path: "/v1/sessions", retryAttempts: 1, restartWindow: 60
+            ))
+            Issue.record("Restart window retried without consuming any backoff budget")
+        } catch {
+            #expect(lock.withLock { count } == 1)
+        }
+        #expect(lock.withLock { count } == 1)
+    }
+
     @Test
     func testRetryableHTTPStatusUsesStableIdempotencyKey() async throws {
         defer { StubURLProtocol.handler = nil }

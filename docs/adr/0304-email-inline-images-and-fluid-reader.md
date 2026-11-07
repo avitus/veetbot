@@ -82,38 +82,16 @@ Regression evidence:
   sandbox lacked the CircleCI CLI, so repository pytest commands ran there.
   A damaged Apple VM build cache was cleared inside the guest before rerunning.
 
-Timing before submission: the final lint/typecheck/image-adapter stage took
-17.05 seconds wall time; source checks took 16.71 seconds and architecture
-checks 32.72 seconds including container startup. The Mac partition's test
-execution took 44.80 seconds. Estimated final verification wall time was eight
-minutes, with Linux checks overlapping the Mac VM; Mac startup and compilation
-were the slowest stage (approximately three minutes). These are local sandbox
-results, not hosted CI or production delivery evidence.
+Additional regression evidence:
 
-Before the release PR, `main`'s Mac scrolling changes were merged and this ADR
-renumbered to 0304. The combined Email partition passed all 238 tests in 48.423
-seconds, including the corrected image-request fixture. Documentation checks
-passed after resolving citation offsets. Estimated merge-verification wall time
-was 142 seconds for the Apple VM and 15 seconds for documentation, overlapping;
-total approximately 142 seconds, with Apple startup/build the slowest stage.
-
-PR review follow-up preserves plain MIME text when the HTML alternative contains
-only images and limits the shared email service to four concurrent image fetches.
-The two new regressions first failed on missing text and 12 simultaneous fetches:
-`scripts/run_in_linux_container.sh 'uv run pytest tests/unit/test_email_reader.py -q -k "image_only_html or image_fetch_concurrency"'`.
-The reader, Gmail transport, image adapter and email service partition then passed
-112 tests in 17.86 seconds, including slot release after failure. Lint, typecheck
-(1787 source files), citation repair and documentation checks passed. Estimated
-follow-up wall time was three minutes, with approximately one minute of container
-startup, 18 seconds of tests and 20 seconds of static/documentation checks;
-these stages ran serially with no overlap. Container startup was the slowest stage.
-
-The second review's proxy-restart regression failed all six combinations of
-502/503/504 and zero/past-date `Retry-After` values before the transport fix:
-`scripts/run_apple_ui_macos_vm.sh swift test --package-path clients/apple --filter HTTPTransportTests/testEmailImageDoesNotRetryZeroDelayProxyFailure`.
-The combined HTTP transport and Email partition then passed 294 tests in 48.501
-seconds. The existing positive restart-window tests still pass. Lint, typecheck,
-citations and docs passed; touched tests and image rendering paths now describe
-their contracts. Estimated final round wall time was two minutes for the Apple
-VM and 20 seconds for static/docs checks, overlapping; total approximately two
-minutes, with Apple startup/build/test the slowest stage.
+- The combined Mac Email partition passed 238 tests after integration with the
+  scrolling behavior from ADR-0303.
+- `test_image_only_html_preserves_plain_text_in_mac_projection` and
+  `test_image_fetch_concurrency_is_bounded_and_slots_release_after_failure`
+  failed on missing text and twelve simultaneous fetches before their fixes.
+  The reader, Gmail transport, image adapter and email service partition then
+  passed 112 tests, including slot release after failure.
+- `HTTPTransportTests/testEmailImageDoesNotRetryZeroDelayProxyFailure` failed
+  before its fix for all six combinations of 502/503/504 and zero/past-date
+  `Retry-After`. The HTTP transport and Email partition then passed 294 tests,
+  including existing positive restart-window behavior.
