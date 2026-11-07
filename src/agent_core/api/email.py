@@ -1,5 +1,6 @@
 """Flag-mounted Email API. Exact authorization and private cache semantics."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, cast
 from uuid import UUID
@@ -148,7 +149,9 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
                 message["body"], subject=message["subject"] or str(result["subject"])
             )
             if urls:
-                rich = merge_image_body(message["reader_body"], rich, reading_body(html))
+                rich = await asyncio.to_thread(
+                    merge_image_body, message["reader_body"], rich, reading_body(html)
+                )
             message["reader_image_body"] = rich if urls else None
         return result
 

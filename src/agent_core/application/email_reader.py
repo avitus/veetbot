@@ -422,8 +422,18 @@ def merge_image_body(plain: str, rich: str, html_text: str) -> str:
 
     def words(value: str) -> str:
         """Normalize inert reader Markdown into a bounded visible-word sequence."""
-        labels = re.sub(r"\]\([^\n)]*\)", "]", value)
-        return " ".join(re.findall(r"\w+", labels.casefold()))
+        labels: list[str] = []
+        for line in value.splitlines(keepends=True):
+            position = 0
+            while (start := line.find("](", position)) != -1:
+                end = line.find(")", start + 2)
+                if end == -1:
+                    # Nothing later on this line can close a destination either.
+                    break
+                labels.append(line[position : start + 1])
+                position = end + 1
+            labels.append(line[position:])
+        return " ".join(re.findall(r"\w+", "".join(labels).casefold()))
 
     represented = " " + words(html_text) + " "
     missing: list[str] = []

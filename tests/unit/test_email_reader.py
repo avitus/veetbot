@@ -684,3 +684,13 @@ def test_image_projection_merges_only_plain_paragraphs_missing_from_html() -> No
     assert result == "Missing detail.\n\n" + rich
     assert merge_image_body("Already here\nwith a link.", rich, html_text) == rich
     assert merge_image_body("", rich, html_text) == rich
+
+
+def test_image_merge_stays_quick_on_unclosed_link_delimiters() -> None:
+    """Unclosed sender link syntax must not cause repeated scans of the remaining body."""
+    from agent_core.application.email_reader import merge_image_body
+
+    hostile = r"\](" * 16384
+    started = time.monotonic()
+    assert merge_image_body("Keep this text.", hostile, hostile).startswith("Keep this text.")
+    assert time.monotonic() - started < 1

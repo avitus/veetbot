@@ -21,7 +21,8 @@ omits plain-text paragraphs (including image-only or image-plus-footer parts),
 the projection keeps the missing paragraphs before the HTML. Matching compares
 visible words, ignoring markup, whitespace, punctuation and link destinations,
 so paragraphs already represented in HTML are not repeated. MIME alternatives
-do not establish an insertion position for missing prose.
+do not establish an insertion position for missing prose. Link normalization uses
+a single pass, and the paragraph merge runs in a worker thread.
 
 Only explicit public HTTPS image references survive sanitization. Hidden images,
 images declared at two pixels or smaller, active content, inline data and CID
