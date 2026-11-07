@@ -32,7 +32,8 @@ can still be a tracker; the loading
 control explains that loading can disclose that the message was opened.
 
 The scoped image endpoint accepts a retained message identity and image index,
-never a caller-provided URL. It rechecks source retention and uses the existing
+never a caller-provided URL. It rechecks source retention after admission to a
+fetch slot and after the fetch, and uses the existing
 credential-free, DNS-pinned public image reader with its byte, pixel, redirect
 and time limits. The process-wide email service admits at most four concurrent
 image fetches, releasing the slot on success, failure or cancellation. Images are returned as bounded JPEG renditions, with no-store

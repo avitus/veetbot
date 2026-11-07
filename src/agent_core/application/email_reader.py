@@ -225,7 +225,7 @@ class _HTMLText(HTMLParser):
         if tag == "img" and self.image_urls is not None and len(self.image_urls) < 20:
             url = values.get("src") or ""
             dimensions = [values.get("width") or "", values.get("height") or ""]
-            dimensions += re.findall(r"(?:^|;)(?:width|height):([0-9.]+)(?:px)?(?:;|$)", style)
+            dimensions += re.findall(r"(?:^|;)(?:width|height):([0-9.]+)(?:px)?(?=;|$)", style)
             tiny = any(
                 float(value) <= 2 for value in dimensions if re.fullmatch(r"\d+(?:\.\d+)?", value)
             )

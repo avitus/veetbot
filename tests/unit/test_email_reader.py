@@ -713,3 +713,68 @@ def test_images_inside_links_keep_surrounding_text_linked() -> None:
         "[After](https://example.com/article)",
     ]
     assert len(urls) == 2
+
+
+@pytest.mark.parametrize("style", ["width:100px;height:1px", "height:100px;width:2px"])
+def test_adjacent_dimensions_exclude_tiny_images(style: str) -> None:
+    """Either inline dimension can exclude an image even after another declaration."""
+    urls: list[str] = []
+    reading_body(f'<img style="{style}" src="https://images.example/pixel">', image_urls=urls)
+    assert urls == []
+
+
+async def test_queued_image_rechecks_erasure_before_fetching() -> None:
+    """An image erased while waiting for admission must never reach the external host."""
+    import asyncio
+
+    queued = asyncio.Event()
+
+    class WaitingSlot(asyncio.Semaphore):
+        async def __aenter__(self) -> None:
+            queued.set()
+            return await super().__aenter__()
+
+    async with email_client() as (app, _):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0]["reader_html"] = '<img src="https://images.example/photo.png">'
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        calls: list[str] = []
+
+        async def read(url: str) -> bytes:
+            calls.append(url)
+            return b"jpeg"
+
+        service = app.services.email
+        service.read_image = read
+        service._image_slots = WaitingSlot(0)
+        task = asyncio.create_task(service.image(app.principal, thread.id, "m1", 0))
+        try:
+            await asyncio.wait_for(queued.wait(), timeout=2)
+            async with app.uow_factory() as uow:
+                record = await uow.email.get(app.principal, "thread", str(thread.id))
+                assert record is not None
+                payload = dict(record.payload)
+                messages = [
+                    dict(item) for item in cast(list[dict[str, object]], payload["messages"])
+                ]
+                messages[0]["reader_html"] = ""
+                payload["messages"] = messages
+                await uow.email.put(
+                    record.model_copy(update={"revision": record.revision + 1, "payload": payload}),
+                    expected_revision=record.revision,
+                )
+            service._image_slots.release()
+            with pytest.raises(ValueError):
+                await asyncio.wait_for(task, timeout=2)
+            assert calls == []
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

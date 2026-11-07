@@ -447,6 +447,13 @@ class EmailExperienceService:
             assert message is not None
             source = message.reader_html
         async with self._image_slots:
+            async with self.uow_factory() as uow:
+                current = await self._thread(uow.email, principal, thread_id)
+                if not any(
+                    item.id == message_id and item.reader_html == source
+                    for item in current.messages
+                ):
+                    raise ValueError("The email source changed while the image was loading.")
             content = await self.read_image(url)
         async with self.uow_factory() as uow:
             current = await self._thread(uow.email, principal, thread_id)
