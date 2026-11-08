@@ -48,6 +48,7 @@ implementation may trade away.
 | Consent | A clearly labelled tap, or one confirmed multi-select batch, is the consent for exactly those senders. In Chat the agent proposes a batch of at most twenty-five named senders and the owner approves it once. |
 | Egress | The platform sends the request server-side through the egress proxy. This is the platform's first direct dial to a host that mail content selected, and the owner approved it explicitly. |
 | Fallbacks | Report spam, `mailto:` unsubscribe, and archiving the sender's existing Inbox mail. |
+| Cleanup (2026-11-07) | Unsubscribing in Email mode includes archiving existing Inbox mail after an accepted request or successful send, without an archive choice or second approval prompt. |
 | Deferred | Web-form unsubscribes through browser automation, and every standing or automatic unsubscribe rule. |
 | Spam (2026-10-08) | While processing mail, Veetbot flags suspected spam and the owner confirms. A flag never moves mail; Report spam is an owner tap on one thread, with Not spam to undo it. |
 
@@ -66,8 +67,8 @@ authorizes them, the suspected-spam flag, and the surfaces that operate them.
 - **Report spam and Not spam.** One fixed label delta through the account's
   write server, for senders that offer no safe mechanism, fail
   authentication, or keep mailing after they were asked to stop.
-- **Sender cleanup.** Optionally archive the sender's existing Inbox mail as
-  part of the same consented gesture.
+- **Sender cleanup.** Archive the sender's existing Inbox mail as part of
+  the same consented unsubscribe gesture.
 - **Suspected spam.** A spam verdict in the importance assessment, informed
   by Gmail's own sender check, flags a thread without touching Gmail; the
   owner reports one thread as spam, or clears the flag, with one tap.
@@ -551,9 +552,14 @@ grace period Milestone 18 accepted for `trash_thread` and the reason the
 reversal is a first-class command rather than advice to open Gmail.
 
 **Sender cleanup** removes `INBOX` from the sender's existing Inbox threads.
-It is an option on the unsubscribe confirmation, off by default, and applies
-only to senders whose unsubscribe was accepted or sent. Archived mail stays
-in All Mail.
+It is included in the Email mode unsubscribe gesture without an extra choice
+or approval prompt, and applies only to senders whose unsubscribe was accepted
+or sent. Archived mail stays in All Mail. The HTTP request defaults
+`archive_existing` to true; explicit false remains supported for older clients
+whose consent excluded cleanup. Existing persisted consents keep their recorded
+value. The native client always sends true. Chat retains its separately
+approved tool calls. The existing identity matching and limit of 100 threads
+per gesture still apply.
 
 Label actions keep Milestone 18's uncertainty rule: a possibly dispatched
 `modify_labels` is never retried, and a fresh governed read reconciles what
@@ -699,8 +705,9 @@ rows last; the owner can filter by account and state.
 Unsubscribe on one row, or Select followed by *Unsubscribe N*, opens one
 confirmation. It lists every sender with its mechanism in plain words —
 *One-click request to example.com*, *Sends an email to unsub@…* — states
-that an unsubscribe cannot be undone, and offers *Also archive existing mail
-from these senders*. Confirming is the consent. Select all skips protected
+that an unsubscribe cannot be undone, and explains that existing Inbox mail
+from these senders will be archived. There is no archive toggle. Confirming
+is the consent for both actions. Select all skips protected
 rows and stops at twenty-five.
 
 A bulk thread's detail carries the same Unsubscribe action beside its sender,

@@ -191,6 +191,38 @@ Consequences:
   consent, roadmap B8 owns standing grants, and Milestone 26 excludes
   automatic mailbox actions.
 
+## Cleanup presentation amendment — 2026-11-07
+
+The owner requested automatic archiving when unsubscribing, with no extra
+question. Email mode now includes sender cleanup in its unsubscribe gesture
+and explains it without an archive toggle. The HTTP default is true, while
+explicit false from older clients and persisted consents retain their original
+meaning. Cleanup still follows only an accepted request or successful send,
+uses the existing bounded sender selection, and keeps the approval floor and
+exact consent consumer. Chat tools retain their existing approval boundaries.
+No milestone or gate moves.
+
+The regression command is
+`scripts/run_in_linux_container.sh make test-static PYTEST_ARGS=tests/gates/test_email_unsubscribe_m31.py`.
+Before the repair, both new default-cleanup cases (one-click and mailto)
+failed because no label write occurred. After the repair, all 25 cases pass,
+including fixed sender selection, failed-request exclusion and replay.
+The native regression removes the manual archive opt-in before confirming;
+its first `scripts/run_apple_ui_macos_vm.sh make test-apple` run failed because
+the submitted `archive_existing` value was false. Reading lane A applies
+because the change amends this design and a gate test. This is an owner-directed
+default change within the existing mechanism, with no engineering-plan
+requirement weakened and no new ADR required. The final Apple package run
+passes 1,183 core tests and four accessibility tests in the Tart VM. Three
+macOS UI journeys pass with no skips: single sender, selected batch, and the
+thread action. Their fixture requires `archive_existing: true`. Lint, typecheck
+and documentation checks pass in the Linux sandbox. The full static partition
+recorded 9,934 passes, three skips and three interrupted-run failures in refresh
+and People import tests; a parallel recheck passed those cases but interrupted
+two different People cases. All 123 tests in the three affected files then passed
+serially, without source or assertion changes. The unsubscribe regression file
+passed all 25 cases. Deployment remains separate.
+
 ## Acceptance status
 
 The owner requested the capability and answered the four shaping decisions in

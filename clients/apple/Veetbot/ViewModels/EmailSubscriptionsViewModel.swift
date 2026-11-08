@@ -22,8 +22,6 @@ public final class EmailSubscriptionsViewModel: ObservableObject {
     @Published public private(set) var accountFilter: String?
     @Published public private(set) var stateFilter: String?
     @Published public private(set) var selectedID: String?
-    /// Off until the owner asks for it, on every confirmation.
-    @Published public var archiveExisting = false
 
     private let makeAPIClient: () -> VeetbotAPIClient?
     private let statusBackoff: @Sendable (UInt64) async throws -> Void
@@ -151,7 +149,6 @@ public final class EmailSubscriptionsViewModel: ObservableObject {
         guard let confirmation, let api = makeAPIClient() else { return }
         let targets = confirmation.targets
         let ids = targets.map(\.id)
-        let archive = archiveExisting
         self.confirmation = nil
         selection = []
         isSelecting = false
@@ -159,7 +156,7 @@ public final class EmailSubscriptionsViewModel: ObservableObject {
         let connection = generation
         do {
             let operation = try await api.unsubscribeEmailSubscriptions(
-                targets, archiveExisting: archive, idempotencyKey: UUID().uuidString)
+                targets, archiveExisting: true, idempotencyKey: UUID().uuidString)
             guard accepts(connection) else { return }
             await settle(operation, targets: ids, connection: connection)
         } catch {
@@ -213,7 +210,6 @@ public final class EmailSubscriptionsViewModel: ObservableObject {
         accountFilter = nil
         stateFilter = nil
         isSelecting = false
-        archiveExisting = false
         unavailable = false
         errorMessage = nil
         isLoading = false
@@ -267,7 +263,6 @@ public final class EmailSubscriptionsViewModel: ObservableObject {
     }
 
     private func present(_ value: EmailUnsubscribeConfirmation) {
-        archiveExisting = false
         confirmation = value
     }
 

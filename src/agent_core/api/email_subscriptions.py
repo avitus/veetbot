@@ -30,7 +30,7 @@ class TargetRequest(BaseModel):
 class UnsubscribeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     targets: list[TargetRequest] = Field(min_length=1, max_length=SUBSCRIPTION_BATCH_LIMIT)
-    archive_existing: bool = Field(default=False, strict=True)
+    archive_existing: bool = Field(default=True, strict=True)
     idempotency_key: str = Field(min_length=1, max_length=200)
 
 

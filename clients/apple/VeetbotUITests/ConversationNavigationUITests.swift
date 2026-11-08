@@ -1825,7 +1825,7 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// Checks the one confirmation both surfaces present: each sender with its
-    /// mechanism in plain words, the warning, and the archive option left off.
+    /// mechanism in plain words, the warning, and automatic archiving.
     private func checkConfirmation(title: String, naming senders: [(name: String, sentence: String)]) {
         XCTAssertTrue(app.buttons["email.unsubscribe.confirm"].waitForExistence(timeout: 5))
         XCTAssertTrue(texts(title).firstMatch.exists, app.debugDescription)
@@ -1838,7 +1838,7 @@ final class ConversationNavigationUITests: XCTestCase {
         }
         let archive = element("email.unsubscribe.archive")
         XCTAssertTrue(archive.exists)
-        XCTAssertFalse(isOn(archive), "Archiving existing mail is off until the owner asks for it")
+        XCTAssertEqual(text(of: archive), "Existing Inbox mail from these senders will be archived.")
     }
 
     /// Opening one sender's detail, confirming its mechanism, and watching the
@@ -1918,14 +1918,6 @@ final class ConversationNavigationUITests: XCTestCase {
                 ("Shop Deals", "Sends an email to unsubscribe@shop.example.test"),
                 ("Running Club", "One-click request to run.example.test"),
             ])
-        let archive = element("email.unsubscribe.archive")
-        #if os(macOS)
-        activate(archive)
-        #else
-        // The row's trailing switch, not its label, changes the value.
-        archive.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        #endif
-        XCTAssertTrue(isOn(archive))
         activate(app.buttons["email.unsubscribe.confirm"])
 
         waitForSubscriptionState("Unsubscribed", count: 3)

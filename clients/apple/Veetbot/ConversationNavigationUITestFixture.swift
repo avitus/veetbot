@@ -630,7 +630,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let ids = targets.compactMap { $0["subscription_id"] as? String }
             let consented = Self.subscriptionLock.withLock {
                 !targets.isEmpty && targets.count <= 25 && Set(ids).count == ids.count
-                    && payload["archive_existing"] is Bool && key != nil
+                    && payload["archive_existing"] as? Bool == true && key != nil
                     && request.value(forHTTPHeaderField: "Idempotency-Key") == key
                     && targets.allSatisfy { target in
                         guard let id = target["subscription_id"] as? String,

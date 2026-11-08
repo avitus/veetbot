@@ -192,8 +192,6 @@ import Testing
         #expect(confirmation.targets.count == 2)
         #expect(confirmation.targets.map(\.sentence) == Array(repeating: "One-click request to news.example.com", count: 2))
         #expect(EmailUnsubscribeConfirmation.warning == "An unsubscribe cannot be undone.")
-        #expect(!model.archiveExisting, "Archiving existing mail is off until the owner asks for it")
-        model.archiveExisting = true
         await model.confirmUnsubscribe()
 
         let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
