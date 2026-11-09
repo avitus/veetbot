@@ -58,6 +58,7 @@ async def test_collections_count_before_paging_and_keep_handled_distinct_from_ar
 
 
 async def test_collection_counts_obey_scope_account_search_archive_and_source_revision() -> None:
+    """Exclude inaccessible mail and apply search, archive, and current-revision handling."""
     async with email_client() as (composition, client):
         base, _ = await seed_mail(composition)
         now = composition.clock.now()

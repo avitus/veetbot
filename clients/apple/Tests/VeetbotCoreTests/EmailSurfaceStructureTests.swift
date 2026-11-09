@@ -193,6 +193,7 @@ import Testing
         #expect(!email.contains("from: sidebar, available: available"), "The stored width is never the drag base")
     }
 
+    /// Keep Important first and suspected spam distinct across the shared device navigation.
     @Test
     func testImportantIsFirstAndSpamIsSeparateOnEveryDevice() throws {
         let email = try source(at: "Veetbot/Views/EmailModeView.swift")

@@ -122,6 +122,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         cursor: str | None = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 5,
     ) -> dict[str, object]:
+        """Return the selected authorized collection with scoped totals and pagination."""
         return await boundary(
             service.threads(
                 authenticated,

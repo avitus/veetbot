@@ -701,10 +701,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             func needs(_ row: [String: Any]) -> Bool {
                 inbox(row) && row["needs_reply"] as? Bool == true && !handled(row)
             }
+            /// Match uncleared suspected spam that remains in the Inbox.
             func spam(_ row: [String: Any]) -> Bool {
                 inbox(row) && row["suspected_spam"] as? Bool == true
                     && row["spam_cleared"] as? Bool != true && row["in_spam"] as? Bool != true
             }
+            /// Keep the priority fixture consistent with server eligibility.
             func important(_ row: [String: Any]) -> Bool {
                 inbox(row) && !handled(row) && !spam(row) && (row["priority"] as? Double ?? 0) >= 0.7
             }

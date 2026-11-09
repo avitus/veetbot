@@ -820,6 +820,7 @@ public struct EmailModeView: View {
                              identifier: "email.collection.suspectedSpam")
     }
 
+    /// Render one collection as a sidebar row or compact pill with the same selection action.
     @ViewBuilder private func mailNavigationButton(_ title: String, symbol: String, count: Int?,
                                       view: String, identifier: String) -> some View {
         let button = Button { model.setListView(view) } label: {
