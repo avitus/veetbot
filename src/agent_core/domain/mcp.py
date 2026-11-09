@@ -17,7 +17,7 @@ MCP_SERVER_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 MCP_AUTH_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # ADR-0255: an owner-added server's name, and the first-party prefixes it may not take.
 OWNER_MCP_SERVER_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
-RESERVED_MCP_SERVER_PREFIXES = ("gmail_", "bland_", "svp_")
+RESERVED_MCP_SERVER_PREFIXES = ("gmail_", "bland_", "svp_", "calendar_")
 MAXIMUM_OWNER_MCP_SERVERS = 16
 MAXIMUM_OWNER_MCP_URL_LENGTH = 2048
 
@@ -259,13 +259,13 @@ OWNER_ACCESS_CLASSIFICATIONS: dict[
 def schedule_may_name(config: MCPServerConfig) -> bool:
     """ADR-0291: what a schedule or job may name; calling keeps its own flag (ADR-0213).
 
-    The schedule role vouches only for Gmail and Scale VP, and an owner-added
+    The schedule role vouches only for Gmail, Calendar and Scale VP, and an owner-added
     server needs no scope to vouch for.
     """
     return (
         config.owner_managed
         or is_email_server_id(config.server_id)
-        or config.server_id == "svp_read"
+        or config.server_id in {"svp_read", "calendar_read"}
     )
 
 
