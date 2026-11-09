@@ -1181,6 +1181,11 @@ def test_all_226_versioned_knobs_are_present_and_non_null() -> None:
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
     assert len(qualified_paths) == 226
+    assert {
+        "tools/limits.yaml:mcp.warmup_connect_timeout_seconds",
+        "tools/limits.yaml:mcp.warmup_retry_seconds",
+        "tools/limits.yaml:mcp.warmup_attempts",
+    } <= qualified_paths
     # ADR-0261 adds the capture reader's step and run read limits.
     assert {
         "tools/limits.yaml:capture.step_maximum_reads",
