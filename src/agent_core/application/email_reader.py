@@ -5,6 +5,7 @@ survives; the client always offers the unchanged retained source alongside this 
 """
 
 import re
+from html import unescape
 from html.parser import HTMLParser
 from itertools import groupby
 from urllib.parse import urlsplit
@@ -197,6 +198,7 @@ class _HTMLText(HTMLParser):
         self.parts: list[str] = []
         self.hidden: list[str] = []
         self.anchor: tuple[int, str] | None = None
+        self.list_items: list[int] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Retain visible formatting and bounded public image references, never active HTML."""
@@ -243,13 +245,23 @@ class _HTMLText(HTMLParser):
                     self.anchor = (len(self.parts), anchor[1])
             return
         if tag in {"p", "div", "table", "tr", "blockquote", "ul", "ol"}:
-            self.parts.append("\n\n")
+            # A paragraph wrapper at the start of a list item must not separate
+            # its bullet from its text. Later paragraphs keep their boundary.
+            if (
+                tag in {"p", "div"}
+                and self.list_items
+                and not any(part.strip() for part in self.parts[self.list_items[-1] :])
+            ):
+                del self.parts[self.list_items[-1] :]
+            else:
+                self.parts.append("\n\n")
         elif tag in {"br", "hr"}:
             self.parts.append("\n")
         elif tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             self.parts.append("\n\n" + "#" * int(tag[1]) + " ")
         elif tag == "li":
             self.parts.append("\n- ")
+            self.list_items.append(len(self.parts))
         elif tag in {"td", "th"}:
             self.parts.append(" ")
         elif tag in {"b", "strong"}:
@@ -270,6 +282,8 @@ class _HTMLText(HTMLParser):
             label = "".join(self.parts[start:]).strip()
             self.parts[start:] = [_link(label, url)] if label else []
             self.anchor = None
+        if tag == "li" and self.list_items:
+            self.list_items.pop()
         if tag in {"b", "strong"}:
             self.parts.append("**")
         elif tag in {"i", "em"}:
@@ -310,6 +324,22 @@ def _forwarded(lines: list[str]) -> list[str]:
         result.append(lines[index])
         index += 1
     return result
+
+
+def reading_source(body: str, html: str) -> str:
+    """Recover structure only when the body exactly matches Gmail's HTML fallback.
+
+    The legacy Gmail converter strips tags but retains hidden/style text. Such a
+    body is not independent plain MIME prose to merge back into sanitized HTML.
+    Replay that conversion for identification only; never render its output.
+    Unmatched plain alternatives and the retained source evidence stay intact.
+    """
+    if html:
+        flattened = re.sub(r"<[^>]+>", " ", unescape(html))
+        flattened = re.sub(r"[ \t\r\f\v]+", " ", flattened).strip()
+        if body == flattened:
+            return html
+    return body
 
 
 def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None = None) -> str:

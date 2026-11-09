@@ -989,6 +989,12 @@ explains the possible open disclosure. Loading is never automatic or remembered
 for a sender; a failed image offers **Try again** while the text stays readable.
 The server returns bounded JPEG renditions without exposing raw HTML to a
 WebView. Older cached mail needs its source read again to gain image references.
+When the stored text exactly matches Gmail's legacy tag-stripped HTML fallback,
+the reader derives both text projections from the retained HTML. This prevents
+stylesheet and hidden text from being restored as supposedly missing prose.
+Genuine plain-text alternatives still contribute missing paragraphs; the original
+body stays unchanged. Paragraph wrappers inside HTML list items keep their first
+text beside the bullet.
 
 The reading column separates the attention summary, original conversation and
 reply composer. Why this matters and Improve priorities expand on demand, while

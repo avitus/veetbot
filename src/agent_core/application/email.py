@@ -29,6 +29,8 @@ from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalStatus
+from agent_core.domain.argument_views import approval_argument_view
+from agent_core.domain.canonical import canonical_json, canonical_value
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
     EMAIL_ARRIVAL_DAILY_SHARE,
@@ -1961,6 +1963,10 @@ class EmailExperienceService:
             await self._fence(uow, run, lease)
             draft = await self._draft(uow.email, principal, task.draft_id)
             arguments = send_message_arguments(draft, consent.provider_thread_id)
+            # Approval arguments are a shortened/redacted presentation, not the action.
+            # Bind the full normalized invocation and its hash to the consented draft.
+            normalized = cast(dict[str, Any], canonical_value(arguments))
+            arguments_hash = hashlib.sha256(canonical_json(arguments).encode("utf-8")).hexdigest()
             approval = await uow.approvals.get(approval_id, principal)
             invocations = await uow.invocations.list_for_run(run.id, principal)
             expected_call = "email-" + hashlib.sha256(f"{run.id}:send".encode()).hexdigest()[:32]
@@ -1975,8 +1981,10 @@ class EmailExperienceService:
                 or invocation is None
                 or invocation.call_id != expected_call
                 or invocation.tool_name != consent.tool_name
-                or approval.arguments != arguments
-                or approval.normalized_arguments_hash != invocation.normalized_arguments_hash
+                or invocation.normalized_arguments != normalized
+                or invocation.normalized_arguments_hash != arguments_hash
+                or approval.normalized_arguments_hash != arguments_hash
+                or approval.arguments != approval_argument_view(normalized)
             ):
                 raise ConflictError("approval does not match the consented send")
             await uow.events.append(
