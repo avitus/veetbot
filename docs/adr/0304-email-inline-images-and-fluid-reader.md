@@ -103,3 +103,31 @@ Additional regression evidence:
   before its fix for all six combinations of 502/503/504 and zero/past-date
   `Retry-After`. The HTTP transport and Email partition then passed 294 tests,
   including existing positive restart-window behavior.
+
+## HTML fallback repair (2026-11-09)
+
+The owner reported stylesheet code in a Mac login notification. Gmail's legacy
+HTML-to-text fallback removed tags but kept stylesheet and hidden text. The
+image projection then restored that text as missing plain-MIME prose. The reader
+now identifies that fallback by exactly replaying the legacy conversion against
+the retained HTML and uses sanitized HTML for both reading projections on a
+match. Unmatched plain alternatives retain the existing conservative merge;
+stored bodies, model evidence, image consent and source retention are unchanged.
+HTML list paragraphs also keep their first text beside the bullet.
+
+Reading lane B, matching the diff-derived minimum. No milestone acceptance
+criterion moves, plan deviation or new architectural decision is introduced.
+The changes cover the reader, thread projection, synthetic reader tests,
+Apple-client documentation and changelog. Mail without retained HTML cannot
+recover structure through this repair. Server delivery is still required.
+
+Regression command:
+`scripts/run_in_linux_container.sh 'uv run pytest tests/unit/test_email_reader.py -q -k "html_fallback or html_list_paragraph"'`.
+It first failed all three cases on leaked CSS and detached bullets. The reader,
+Gmail transport and email API boundary partition then passed 128 tests in
+64.38 seconds, covering preserved original bodies, genuine plain alternatives,
+safe links, hidden content and image references. The sandbox has no CircleCI
+CLI, so tests used the repository's pytest runner.
+Import-boundary and reading-lane checks passed 27 tests in 32.51 seconds.
+Repository lint, typechecking and documentation checks passed; citation repair
+made no changes. No new acceptance gate is claimed.

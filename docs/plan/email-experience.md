@@ -732,6 +732,11 @@ The send flow is:
    argument hash match the consented revision and the gesture event, and it
    never notifies for a consent already given. The pre-effect dispatch guard
    revalidates the consent again.
+   This comparison uses the full canonically normalized invocation arguments
+   and their independently recomputed hash. The approval's argument preview
+   is redacted and shortened at 512 characters; compare that preview only to
+   the same presentation of the expected arguments, never to the full reply.
+   A change beyond the visible preview still invalidates consent.
 4. Dispatch through the existing account-specific send MCP tool. Persist the
    confirmed result and update the thread and draft state across devices.
 
