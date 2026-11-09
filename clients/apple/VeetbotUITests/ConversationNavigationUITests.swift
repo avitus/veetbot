@@ -1213,6 +1213,7 @@ final class ConversationNavigationUITests: XCTestCase {
 
     /// Verifies the reading and reply flow with normal platform appearance.
     func testEmailReadingKeepsFeedbackOptionalAndReplyReachable() {
+        app.launchArguments += ["--ui-testing-email-suspected-spam", "--ui-testing-email-subscriptions"]
         app.launch()
         checkEmailReadingFlow()
     }
@@ -1235,6 +1236,33 @@ final class ConversationNavigationUITests: XCTestCase {
         let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(app.textFields["email.search"].exists)
+        let important = app.buttons["email.collection.important"]
+        let inbox = app.buttons["email.collection.inbox"]
+        XCTAssertTrue(important.isHittable)
+        XCTAssertTrue(inbox.exists)
+        if important.frame.minY < inbox.frame.minY {
+            XCTAssertLessThan(important.frame.maxY, inbox.frame.maxY)
+        } else {
+            XCTAssertLessThan(important.frame.minX, inbox.frame.minX)
+        }
+        activate(important)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        attachEmailScreenshot("Important before Inbox")
+        if app.launchArguments.contains("--ui-testing-email-suspected-spam") {
+            let spam = app.buttons["email.thread.00000000-0000-0000-0000-000000000898"]
+            XCTAssertTrue(spam.waitForNonExistence(timeout: 5), "Important excludes suspected spam")
+            activate(app.buttons["email.collection.suspectedSpam"])
+            XCTAssertTrue(spam.waitForExistence(timeout: 5))
+            XCTAssertTrue(row.waitForNonExistence(timeout: 5), "Suspected spam excludes ordinary mail")
+            #if os(macOS)
+            let title = app.staticTexts["email.toolbar-title"]
+            XCTAssertTrue(text(of: title).contains("Suspected spam"))
+            XCTAssertFalse(text(of: title).contains("need you"))
+            #endif
+            attachEmailScreenshot("Suspected spam collection")
+        }
+        activate(inbox)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["sidebar.settings"].isHittable, "The hidden Chat toolbar must not leak into Email")
         XCTAssertTrue(app.buttons["email.learning"].isHittable)
         XCTAssertTrue(app.buttons["email.refresh"].isHittable)

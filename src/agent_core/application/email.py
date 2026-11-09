@@ -349,7 +349,9 @@ class EmailExperienceService:
         self,
         principal: Principal,
         *,
-        view: Literal["priority", "other", "all", "inbox", "needs_you", "handled"] = "priority",
+        view: Literal[
+            "priority", "other", "all", "inbox", "needs_you", "handled", "suspected_spam"
+        ] = "priority",
         account_id: str | None = None,
         text: str | None = None,
         cursor: str | None = None,
@@ -371,7 +373,7 @@ class EmailExperienceService:
                     continue
                 threads.append(stored)
         eligible: list[EmailThread] = []
-        counts = {"inbox": 0, "needs_you": 0, "handled": 0}
+        counts = {"priority": 0, "inbox": 0, "needs_you": 0, "handled": 0, "suspected_spam": 0}
         for thread in threads:
             if (
                 thread.archive_operation is not None
@@ -409,6 +411,11 @@ class EmailExperienceService:
                 continue
             handled = thread.dismissed_revision == thread.revision
             collections = {
+                "priority": priority,
+                "suspected_spam": thread.in_inbox
+                and thread.suspected_spam
+                and not thread.spam_cleared
+                and not thread.in_spam,
                 "inbox": thread.in_inbox,
                 "needs_you": thread.in_inbox and thread.needs_reply and not handled,
                 "handled": thread.in_inbox and handled,

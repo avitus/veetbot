@@ -851,12 +851,12 @@ Accounts awaiting their first update show a pending message; the client shows
 an account failure only when the server has recorded a refresh error.
 
 The wide Email sidebar contains account and search controls, New chat, the
-Chat / Email switch, pending chat attention, and Mailbox navigation for Inbox,
-Needs you, Handled and Subscriptions. Its bottom row opens Chat, Memory, People,
+Chat / Email switch, pending chat attention, and Mail navigation for Important, Inbox,
+Needs you and Handled, with Suspected spam and Subscriptions under More. Its bottom row opens Chat, Memory, People,
 Schedules, Persona and Settings. On the Mac it follows the clean reader design
 (MagicPath cozy-evening-6871): the Cockpit · Chat · Email switch and Search mail lead,
-then a Mail section (Inbox, Needs you behind an amber dot, Handled, with
-counts), a More section (Subscriptions, Email learning, Find other mail), any
+then a Mail section (Important, Inbox, Needs you behind an amber dot, Handled,
+with counts), a More section (Suspected spam, Subscriptions, Email learning, Find other mail), any
 pending chat attention, and the account picker; New chat joins the bottom row. On the Mac the window's sidebar button hides
 it together with Chat's sidebar; the mode bar with the mode switch and More then
 returns, and account, search and collection pills sit above the inbox.
@@ -869,7 +869,13 @@ On touch the main page has an Email heading, count and appearance toggle; on
 the Mac the window toolbar carries the title instead ("Inbox · 2 need you":
 the collection in semibold, then how many need the owner in faint ink) and the
 appearance toggle, above a hairline. Compact screens put the mailbox collections in horizontal
-filter pills. Important / Other mail remains available under Find other mail.
+filter pills with Important first. Important uses the existing relevance threshold,
+including while searching; Suspected spam lists only uncleared flagged Inbox mail.
+Other mail remains available under Find other mail. Navigation counts cover the
+account and search before paging and are omitted when an older server supplies none.
+The canvas references for this navigation are Mac revision `470590720605032448`,
+iPad revision `470590874544406528` and iPhone revision `470590869133742080`, in
+MagicPath project `462051782995116032`.
 On the Mac all four Email columns take the width the owner gives them, each
 kept on this Mac and restored at the next launch (MagicPath cozy-evening-6871):
 the sidebar's hairline drags it from 200 to 340 points (260 before any drag,

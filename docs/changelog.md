@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-09 — Email navigation follows the canvas
+
+- Important is directly above Inbox on Mac and iPad and first in the iPhone
+  filters. It uses Veetbot’s existing importance assessment; searching Important
+  stays within important mail.
+- More includes Suspected spam before Subscriptions. The category shows flagged
+  Inbox mail and never moves mail in Gmail. Counts respect account and search.
+
 ## 2026-11-04 — Email refreshes above the budget share spend on new mail (ADR-0298)
 
 - Once spending passes 75% of a limit, a refresh with Email open rates only mail that

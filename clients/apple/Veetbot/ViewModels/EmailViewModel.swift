@@ -152,6 +152,7 @@ public final class EmailViewModel: ObservableObject {
     static func staysListed(_ row: EmailThreadView, in view: String) -> Bool {
         let inInbox = !row.isArchived && !row.isInSpam
         switch view {
+        case "suspected_spam": return inInbox && row.isSuspectedSpam && row.spamCleared != true
         case "priority": return inInbox && !row.isHandled
         case EmailCollection.inbox.rawValue: return inInbox
         case EmailCollection.needsYou.rawValue: return inInbox && !row.isHandled && row.needsReply
@@ -161,7 +162,7 @@ public final class EmailViewModel: ObservableObject {
     }
 
     private var queryListView: String {
-        searchText.isEmpty || EmailCollection(rawValue: listView) != nil ? listView : "all"
+        searchText.isEmpty || EmailCollection(rawValue: listView) != nil || listView == "priority" || listView == "suspected_spam" ? listView : "all"
     }
     public var collection: EmailCollection { EmailCollection(rawValue: listView) ?? .inbox }
 

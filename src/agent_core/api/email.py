@@ -114,7 +114,9 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
     @router.get("/v1/email/threads", openapi_extra={"required_scope": "email.read"})
     async def threads(
         authenticated: Annotated[Principal, secured("email.read")],
-        view: Literal["priority", "other", "all", "inbox", "needs_you", "handled"] = "priority",
+        view: Literal[
+            "priority", "other", "all", "inbox", "needs_you", "handled", "suspected_spam"
+        ] = "priority",
         account_id: str | None = None,
         text: str | None = None,
         cursor: str | None = None,

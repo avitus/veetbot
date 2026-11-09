@@ -71,6 +71,14 @@ reasons for inclusion; the row does not repeat it (ADR-0234).
 Numeric ranking scores and internal model details stay out of the main flow.
 
 Only threads that meet the relevance threshold appear in Important.
+The Mail navigation lists Important above Inbox, then Needs you and Handled,
+on Mac and regular-width iPad; iPhone and compact layouts use the same order
+in scrolling filter pills. More begins with Suspected spam, then Subscriptions.
+Important selects the existing `priority` view directly. Searching Important
+stays within that view. Suspected spam lists flagged Inbox threads only,
+excluding cleared flags and mail already in Gmail Spam; it changes no labels.
+Both counts cover the authorized account and search before pagination, and
+remain absent when an older server omits them.
 On macOS, scrolling near the end of any list fetches the next page
 automatically, with no More button. Refresh preserves the visible thread and
 the selected conversation independently, in every Mac list.
@@ -991,9 +999,9 @@ and uncertain results using the existing error vocabulary where possible. SSE
 continues to carry ordinary run progress; email projections refresh by version
 after completion. No custom streaming transport is required.
 
-`GET /v1/email/threads` also accepts `view=inbox|needs_you|handled` alongside
+`GET /v1/email/threads` also accepts `view=inbox|needs_you|handled|suspected_spam` alongside
 existing `priority|other|all` views. It returns additive `collection_counts`
-(`inbox`, `needs_you`, `handled`) from the same authorized, feedback-adjusted
+(`priority`, `inbox`, `needs_you`, `handled`, `suspected_spam`) from the same authorized, feedback-adjusted
 snapshot as the page, before the view and pagination filters. Account and text
 filters apply to both counts and rows. Older clients ignore the new field;
 clients receiving no counts show no count rather than inferring one from a page.

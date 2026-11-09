@@ -701,7 +701,16 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             func needs(_ row: [String: Any]) -> Bool {
                 inbox(row) && row["needs_reply"] as? Bool == true && !handled(row)
             }
-            let counts = ["inbox": matching.filter(inbox).count,
+            func spam(_ row: [String: Any]) -> Bool {
+                inbox(row) && row["suspected_spam"] as? Bool == true
+                    && row["spam_cleared"] as? Bool != true && row["in_spam"] as? Bool != true
+            }
+            func important(_ row: [String: Any]) -> Bool {
+                inbox(row) && !handled(row) && !spam(row) && (row["priority"] as? Double ?? 0) >= 0.7
+            }
+            let counts = ["priority": matching.filter(important).count,
+                          "suspected_spam": matching.filter(spam).count,
+                          "inbox": matching.filter(inbox).count,
                           "needs_you": matching.filter(needs).count,
                           "handled": matching.filter { inbox($0) && handled($0) }.count]
             let selected = matching.filter { row in
@@ -709,9 +718,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 case "inbox": return inbox(row)
                 case "needs_you": return needs(row)
                 case "handled": return inbox(row) && handled(row)
+                case "suspected_spam": return spam(row)
                 case "all": return true
-                case "other": return !inbox(row) || handled(row)
-                default: return inbox(row) && !handled(row)
+                case "other": return !important(row)
+                default: return important(row)
                 }
             }
             let limit = max(1, Int(query.first { $0.name == "limit" }?.value ?? "5") ?? 5)

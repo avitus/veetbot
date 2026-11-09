@@ -1472,18 +1472,19 @@ import SwiftUI
     }
 
     /// Search stays in the selected collection and old servers never imply zero counts.
-    @Test func testCollectionSearchAndUnknownCounts() async throws {
+    @Test(arguments: ["needs_you", "priority", "suspected_spam"])
+    func testCollectionSearchAndUnknownCounts(view: String) async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             return (200, self.pageJSON())
         }
-        model.setCollection(.needsYou)
+        model.setListView(view)
         model.setSearchText("board")
         await model.reload()
         #expect(requests.snapshot.contains {
-            $0.url?.query?.contains("view=needs_you") == true && $0.url?.query?.contains("text=board") == true
+            $0.url?.query?.contains("view=\(view)") == true && $0.url?.query?.contains("text=board") == true
         })
         #expect(model.collectionCounts == nil)
         model.resetConnection()
