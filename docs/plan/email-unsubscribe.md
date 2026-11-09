@@ -48,6 +48,7 @@ implementation may trade away.
 | Consent | A clearly labelled tap, or one confirmed multi-select batch, is the consent for exactly those senders. In Chat the agent proposes a batch of at most twenty-five named senders and the owner approves it once. |
 | Egress | The platform sends the request server-side through the egress proxy. This is the platform's first direct dial to a host that mail content selected, and the owner approved it explicitly. |
 | Fallbacks | Report spam, `mailto:` unsubscribe, and archiving the sender's existing Inbox mail. |
+| Cleanup (2026-11-07) | Unsubscribing in Email mode includes archiving existing Inbox mail after an accepted request or successful send, without an archive choice or second approval prompt. |
 | Deferred | Web-form unsubscribes through browser automation, and every standing or automatic unsubscribe rule. |
 | Spam (2026-10-08) | While processing mail, Veetbot flags suspected spam and the owner confirms. A flag never moves mail; Report spam is an owner tap on one thread, with Not spam to undo it. |
 
@@ -66,8 +67,8 @@ authorizes them, the suspected-spam flag, and the surfaces that operate them.
 - **Report spam and Not spam.** One fixed label delta through the account's
   write server, for senders that offer no safe mechanism, fail
   authentication, or keep mailing after they were asked to stop.
-- **Sender cleanup.** Optionally archive the sender's existing Inbox mail as
-  part of the same consented gesture.
+- **Sender cleanup.** Archive the sender's existing Inbox mail as part of
+  the same consented unsubscribe gesture.
 - **Suspected spam.** A spam verdict in the importance assessment, informed
   by Gmail's own sender check, flags a thread without touching Gmail; the
   owner reports one thread as spam, or clears the flag, with one tap.
@@ -96,7 +97,7 @@ not find it here should find the reason here.
    reports, or archives without an owner act for those exact senders or that
    exact thread; a suspected-spam flag is not such an act.
 4. **Background or scheduled cleanup.** The census advances only inside
-   foreground refresh slices (email-experience.md:267-272). There is no
+   foreground refresh slices (email-experience.md:275-280). There is no
    monitor, digest, or notification about subscriptions.
 5. **Gmail filters and blocked senders.** Both need the
    `gmail.settings.basic` OAuth scope and a new consent ceremony. No new
@@ -120,7 +121,7 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:1024-1027).
+  (email-experience.md:1032-1035).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -137,7 +138,7 @@ not find it here should find the reason here.
   browser. This milestone adds a second transport under the same rule.
 - **The ninety-day window and its exclusions.** ADR-0096's window, and the
   exclusion of Spam and Trash, apply unchanged
-  (email-experience.md:419-433).
+  (email-experience.md:427-441).
 
 Nothing in the platform dials an arbitrary public host today. `web.fetch`
 hands its URL to a hosted provider, which owns resolution and redirects
@@ -282,7 +283,7 @@ without any of them carrying it.
 ### How records form
 
 The refresh task already pages thread summaries for each account, up to 100
-per slice (email-experience.md:443-451). The census reads the `bulk` block on
+per slice (email-experience.md:451-459). The census reads the `bulk` block on
 the summaries refresh was already reading. It issues no query of its own and
 adds no page. A summary whose block says anything but `none`, or that carries
 a `List-Id`, creates or updates its subscription; owner-sent mail, Spam, and
@@ -551,9 +552,14 @@ grace period Milestone 18 accepted for `trash_thread` and the reason the
 reversal is a first-class command rather than advice to open Gmail.
 
 **Sender cleanup** removes `INBOX` from the sender's existing Inbox threads.
-It is an option on the unsubscribe confirmation, off by default, and applies
-only to senders whose unsubscribe was accepted or sent. Archived mail stays
-in All Mail.
+It is included in the Email mode unsubscribe gesture without an extra choice
+or approval prompt, and applies only to senders whose unsubscribe was accepted
+or sent. Archived mail stays in All Mail. The HTTP request defaults
+`archive_existing` to true; explicit false remains supported for older clients
+whose consent excluded cleanup. Existing persisted consents keep their recorded
+value. The native client always sends true. Chat retains its separately
+approved tool calls. The existing identity matching and limit of 100 threads
+per gesture still apply.
 
 Label actions keep Milestone 18's uncertainty rule: a possibly dispatched
 `modify_labels` is never retried, and a fresh governed read reconciles what
@@ -579,7 +585,7 @@ Gmail's own filter already holds back most spam, and Spam is excluded from
 refresh, so the target is junk that reached the Inbox anyway.
 
 **The verdict.** The importance assessment
-(email-experience.md:570-593) gains one boolean, `spam`, beside `bulk`. Spam
+(email-experience.md:578-601) gains one boolean, `spam`, beside `bulk`. Spam
 is unsolicited mail that is deceptive or unwanted and comes from a party with
 no relationship to the owner: phishing, scams, fake invoices and account
 notices, and mass cold marketing. Mail the owner signed up for is `bulk`, not
@@ -627,7 +633,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:1022-1042): the owner names one thread and the
+delta (email-experience.md:1030-1050): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.
@@ -699,8 +705,9 @@ rows last; the owner can filter by account and state.
 Unsubscribe on one row, or Select followed by *Unsubscribe N*, opens one
 confirmation. It lists every sender with its mechanism in plain words —
 *One-click request to example.com*, *Sends an email to unsub@…* — states
-that an unsubscribe cannot be undone, and offers *Also archive existing mail
-from these senders*. Confirming is the consent. Select all skips protected
+that an unsubscribe cannot be undone, and explains that existing Inbox mail
+from these senders will be archived. There is no archive toggle. Confirming
+is the consent for both actions. Select all skips protected
 rows and stops at twenty-five.
 
 A bulk thread's detail carries the same Unsubscribe action beside its sender,

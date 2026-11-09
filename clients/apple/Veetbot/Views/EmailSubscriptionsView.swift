@@ -325,7 +325,8 @@ struct EmailUnsubscribeConfirmationSheet: View {
             }
             .frame(maxHeight: 280)
             .accessibilityIdentifier("email.unsubscribe.targets")
-            Toggle("Also archive existing mail from these senders", isOn: $model.archiveExisting)
+            Text("Existing Inbox mail from these senders will be archived.")
+                .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 .accessibilityIdentifier("email.unsubscribe.archive")
             HStack {
                 Button("Cancel") { model.cancelConfirmation() }

@@ -114,12 +114,15 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
     @router.get("/v1/email/threads", openapi_extra={"required_scope": "email.read"})
     async def threads(
         authenticated: Annotated[Principal, secured("email.read")],
-        view: Literal["priority", "other", "all", "inbox", "needs_you", "handled"] = "priority",
+        view: Literal[
+            "priority", "other", "all", "inbox", "needs_you", "handled", "suspected_spam"
+        ] = "priority",
         account_id: str | None = None,
         text: str | None = None,
         cursor: str | None = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 5,
     ) -> dict[str, object]:
+        """Return the selected authorized collection with scoped totals and pagination."""
         return await boundary(
             service.threads(
                 authenticated,

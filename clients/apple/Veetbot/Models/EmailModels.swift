@@ -379,6 +379,8 @@ public struct EmailCollectionCounts: Codable, Equatable, Sendable {
     public let inbox: Int
     public let needsYou: Int
     public let handled: Int
+    public var priority: Int?
+    public var suspectedSpam: Int?
 
     public func count(for collection: EmailCollection) -> Int {
         switch collection {
@@ -389,7 +391,8 @@ public struct EmailCollectionCounts: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case inbox, handled
+        case inbox, handled, priority
+        case suspectedSpam = "suspected_spam"
         case needsYou = "needs_you"
     }
 }

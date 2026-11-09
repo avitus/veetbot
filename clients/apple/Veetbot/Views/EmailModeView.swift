@@ -694,29 +694,9 @@ public struct EmailModeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     SidebarSectionLabel(title: "Mail")
-                    ForEach(EmailCollection.allCases, id: \.self) { collection in
-                        Button { model.setCollection(collection) } label: {
-                            SidebarRow {
-                                if collection == .needsYou {
-                                    Circle().fill(AppTheme.amber).frame(width: 6, height: 6)
-                                } else {
-                                    Image(systemName: collectionSymbol(collection))
-                                }
-                            } title: {
-                                Text(collectionTitle(collection))
-                                    .fontWeight(model.listView == collection.rawValue ? .medium : .regular)
-                            } trailing: { _ in
-                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
-                            }
-                            .padding(.horizontal, VeetSpace.s2)
-                            .background(RoundedRectangle(cornerRadius: A2Metrics.rowRadius, style: .continuous)
-                                .fill(model.listView == collection.rawValue ? AppTheme.selected : .clear))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(model.listView == collection.rawValue ? .isSelected : [])
-                        .accessibilityIdentifier("email.collection.\(collectionID(collection))")
-                    }
+                    mailCollectionRows
                     SidebarSectionLabel(title: "More")
+                    moreMailRows
                     if model.unsubscribeAvailable {
                         Button { showingSubscriptions = true } label: {
                             SidebarRow { Image(systemName: "envelope") } title: { Text("Subscriptions") }
@@ -772,7 +752,7 @@ public struct EmailModeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     ModeSegment(selected: .email, choose: openMode)
-                    inboxHeader
+                    searchField
                     Button(action: newChat) { Label("New chat", systemImage: "plus").frame(maxWidth: .infinity) }
                         .primaryCapsule().accessibilityIdentifier("email.new-chat")
                     if !chatAttention.isEmpty {
@@ -790,21 +770,10 @@ public struct EmailModeView: View {
                             .accessibilityIdentifier("email.chat-attention.\(row.id)")
                         }
                     }
-                    SidebarSectionLabel(title: "Mailbox")
-                    ForEach(EmailCollection.allCases, id: \.self) { collection in
-                        Button { model.setCollection(collection) } label: {
-                            SidebarRow { Image(systemName: collectionSymbol(collection)) } title: {
-                                Text(collectionTitle(collection))
-                            } trailing: { _ in
-                                if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
-                            }
-                            .padding(.horizontal, 8)
-                            .background(RoundedRectangle(cornerRadius: 7).fill(model.listView == collection.rawValue ? AppTheme.selected : .clear))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(model.listView == collection.rawValue ? .isSelected : [])
-                        .accessibilityIdentifier("email.collection.\(collectionID(collection))")
-                    }
+                    SidebarSectionLabel(title: "Mail")
+                    mailCollectionRows
+                    SidebarSectionLabel(title: "More")
+                    moreMailRows
                     if model.unsubscribeAvailable {
                         Button { showingSubscriptions = true } label: {
                             SidebarRow { Image(systemName: "tray.full") } title: { Text("Subscriptions") }
@@ -821,6 +790,8 @@ public struct EmailModeView: View {
                     #if os(iOS)
                     .accessibilityIdentifier("email.learning")
                     #endif
+                    otherMailDisclosure
+                    accountsPicker
                     if let pause = model.budgetPauseMessage { budgetPause(pause) }
                 }.padding(12)
             }
@@ -828,6 +799,61 @@ public struct EmailModeView: View {
     }
 
     #endif
+
+    /// The same order on every device; compact widths present these as scrolling pills.
+    private var mailCollectionRows: some View {
+        Group {
+            mailNavigationButton("Important", symbol: "star", count: model.collectionCounts?.priority,
+                                 view: "priority", identifier: "email.collection.important")
+            ForEach(EmailCollection.allCases, id: \.self) { collection in
+                mailNavigationButton(collectionTitle(collection), symbol: collectionSymbol(collection),
+                                     count: model.collectionCounts?.count(for: collection),
+                                     view: collection.rawValue,
+                                     identifier: "email.collection.\(collectionID(collection))")
+            }
+        }
+    }
+
+    private var moreMailRows: some View {
+        mailNavigationButton("Suspected spam", symbol: "shield.lefthalf.filled",
+                             count: model.collectionCounts?.suspectedSpam, view: "suspected_spam",
+                             identifier: "email.collection.suspectedSpam")
+    }
+
+    /// Render one collection as a sidebar row or compact pill with the same selection action.
+    @ViewBuilder private func mailNavigationButton(_ title: String, symbol: String, count: Int?,
+                                      view: String, identifier: String) -> some View {
+        let button = Button { model.setListView(view) } label: {
+            if showsMailboxSidebar {
+                SidebarRow {
+                    if view == "needs_you" {
+                        Circle().fill(AppTheme.amber).frame(width: 6, height: 6)
+                    } else {
+                        Image(systemName: symbol)
+                    }
+                } title: {
+                    Text(title).fontWeight(model.listView == view ? .medium : .regular)
+                } trailing: { _ in
+                    if let count { Text(count, format: .number) }
+                }
+                .padding(.horizontal, VeetSpace.s2)
+                .background(RoundedRectangle(cornerRadius: A2Metrics.rowRadius, style: .continuous)
+                    .fill(model.listView == view ? AppTheme.selected : .clear))
+            } else {
+                HStack(spacing: 6) {
+                    Text(title)
+                    if let count { Text(count, format: .number) }
+                }
+            }
+        }
+        .accessibilityAddTraits(model.listView == view ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
+        if showsMailboxSidebar {
+            button.buttonStyle(.plain)
+        } else {
+            button.buttonStyle(FilterPillButtonStyle(selected: model.listView == view))
+        }
+    }
 
     private func globalButton(_ title: String, _ symbol: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).frame(maxWidth: .infinity, minHeight: 32) }
@@ -897,22 +923,11 @@ public struct EmailModeView: View {
             if !showsMailboxSidebar {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
-                        ForEach(EmailCollection.allCases, id: \.self) { collection in
-                            Button {
-                                model.setCollection(collection)
-                            } label: {
-                                // One label, so the pill style draws one capsule around title and count.
-                                HStack(spacing: 6) {
-                                    Text(collectionTitle(collection))
-                                    if let count = model.collectionCounts?.count(for: collection) { Text(count, format: .number) }
-                                }
-                            }
-                            .buttonStyle(FilterPillButtonStyle(selected: model.listView == collection.rawValue))
-                            .accessibilityIdentifier("email.collection.\(collectionID(collection))")
-                        }
+                        mailCollectionRows
                     }
                 }
             }
+            if !showsMailboxSidebar { moreMailRows }
             otherMailDisclosure
         }.padding(12)
     }
@@ -931,7 +946,7 @@ public struct EmailModeView: View {
         #if os(macOS)
         let prompt = showsMailboxSidebar ? "Search mail" : "Find mail"
         #else
-        let prompt = "Find mail"
+        let prompt = "Search mail"
         #endif
         return HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundColor(AppTheme.inkSoft)
@@ -2435,8 +2450,9 @@ struct EmailToolbarTitle: View {
     }
 
     private var title: String {
-        if model.listView == "priority" { return model.searchText.isEmpty ? "Important" : "Search results" }
+        if model.listView == "priority" { return "Important" }
         if model.listView == "other" { return "Other mail" }
+        if model.listView == "suspected_spam" { return "Suspected spam" }
         switch model.collection {
         case .inbox: return "Inbox"
         case .needsYou: return "Needs you"
@@ -2446,7 +2462,7 @@ struct EmailToolbarTitle: View {
 
     /// Prefers the server's count across pages; older servers describe only the loaded rows.
     private var detail: String {
-        if model.listView == "priority" {
+        if model.listView == "priority" || model.listView == "suspected_spam" {
             if let total = model.listTotal { return "\(total) \(total == 1 ? "thread" : "threads")" }
             return model.isLoading && model.items.isEmpty ? "Loading…" : "\(model.items.count) loaded"
         }

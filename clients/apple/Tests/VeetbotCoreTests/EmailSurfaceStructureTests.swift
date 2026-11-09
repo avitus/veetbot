@@ -193,6 +193,20 @@ import Testing
         #expect(!email.contains("from: sidebar, available: available"), "The stored width is never the drag base")
     }
 
+    /// Keep Important first and suspected spam distinct across the shared device navigation.
+    @Test
+    func testImportantIsFirstAndSpamIsSeparateOnEveryDevice() throws {
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let start = try #require(email.range(of: "private var mailCollectionRows:")).upperBound
+        let end = try #require(email.range(of: "private var moreMailRows:")).lowerBound
+        let rows = String(email[start..<end])
+        let important = try #require(rows.range(of: "email.collection.important"))
+        let inbox = try #require(rows.range(of: "ForEach(EmailCollection.allCases"))
+        #expect(important.lowerBound < inbox.lowerBound)
+        #expect(email.components(separatedBy: "mailCollectionRows").count >= 4)
+        #expect(email.contains("email.collection.suspectedSpam"))
+    }
+
     private func source(at relativePath: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

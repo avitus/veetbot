@@ -51,7 +51,7 @@ import Testing
         #expect(view.contains("Text(target.sentence)"))
         #expect(view.contains("Text(EmailUnsubscribeConfirmation.warning)"))
         #expect(view.contains(
-            "Toggle(\"Also archive existing mail from these senders\", isOn: $model.archiveExisting)"))
+            "Text(\"Existing Inbox mail from these senders will be archived.\")"))
         #expect(view.contains("await model.confirmUnsubscribe()"))
         #expect(view.contains(".accessibilityIdentifier(\"email.unsubscribe.confirm\")"))
     }

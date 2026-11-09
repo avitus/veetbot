@@ -908,6 +908,33 @@ async def test_unsubscribe_label_actions_are_fixed_deltas() -> None:
         assert final["state"] == "active"
 
 
+@pytest.mark.parametrize("mechanism", ["one_click", "mailto"])
+async def test_unsubscribe_archives_by_default_without_another_approval(mechanism: str) -> None:
+    """The unsubscribe gesture includes cleanup without a separate archive choice."""
+    mailbox, transport = Mailbox(), Transport()
+    _shop(mailbox)
+    for message_id in mailbox.blocks:
+        mailbox.blocks[message_id] = _block(message_id, mechanism=mechanism)
+    async with _app(mailbox, transport) as app, _client(app) as client:
+        await _refresh(app)
+        [row] = await _rows(app)
+        body = {"targets": [_target(row)], "idempotency_key": "automatic-cleanup"}
+        result = await client.post("/v1/email/subscriptions/unsubscribe", json=body)
+        assert result.status_code == 200, result.text
+        run = await app.runs.get(UUID(result.json()["run_id"]))
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert mailbox.named("modify_labels") == [
+            {
+                "thread_ids": ["shop-0", "shop-1", "shop-2"],
+                "add_label_ids": None,
+                "remove_label_ids": ["INBOX"],
+            }
+        ]
+        replay = await client.post("/v1/email/subscriptions/unsubscribe", json=body)
+        assert replay.status_code == 200 and replay.json()["replayed"]
+        assert len(mailbox.named("modify_labels")) == 1
+
+
 async def _assert_cleanup_archives_only_an_accepted_sender() -> None:
     mailbox, transport = Mailbox(), Transport()
     _shop(mailbox)
