@@ -2123,13 +2123,27 @@ def _fixed_clock() -> FixedClock:
     return FixedClock(datetime(2026, 10, 31, 12, tzinfo=UTC))
 
 
-async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_read() -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Thanks. I will review them.",
+        "Please review these details. " * 24 + "The final decision is approved.",
+        "Merci, Andre\u0301. I will review them.",
+    ],
+    ids=["short", "truncated-preview", "normalized-text"],
+)
+async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_read(
+    body: str,
+) -> None:
     """One press is the owner's consent: the task reads the mailbox, the consumer resolves
     the exact approval once, and the gesture record carries no mail content (ADR-0279)."""
     import json
     from dataclasses import replace
 
     from agent_core.domain.approvals import ApprovalStatus
+    from agent_core.domain.argument_views import approval_argument_view
+    from agent_core.domain.canonical import canonical_value
+    from agent_core.domain.email import EmailDraftEdit
     from tests.gates.test_email_m18 import _email_settings
 
     factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
@@ -2139,6 +2153,18 @@ async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_r
         clock=_fixed_clock(),
     ) as app:
         thread, draft = await _seed_draft(app)
+        draft = await app.services.email.edit_draft(
+            app.principal,
+            draft.id,
+            EmailDraftEdit(
+                expected_revision=draft.revision,
+                to=draft.to,
+                cc=draft.cc,
+                bcc=draft.bcc,
+                subject=draft.subject,
+                body=body,
+            ),
+        )
         operation = await app.services.email.send(
             app.principal,
             draft.id,
@@ -2163,7 +2189,9 @@ async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_r
             outbox = await uow.notification_outbox.list(app.principal, limit=100)
         assert send.effect_sent_at is not None
         assert approval is not None and approval.status is ApprovalStatus.APPROVED
-        assert approval.arguments["body"] == draft.body
+        assert send.normalized_arguments is not None
+        assert send.normalized_arguments["body"] == canonical_value(body)
+        assert approval.arguments == approval_argument_view(send.normalized_arguments)
         assert gesture is not None and gesture.actor_type == "principal"
         assert draft.body not in json.dumps(gesture.payload)
         assert "reply@example.test" not in json.dumps(gesture.payload)
@@ -2176,6 +2204,88 @@ async def test_one_press_send_is_consented_once_and_dispatched_after_the_fresh_r
             idempotency_key="send-once",
         )
         assert replay.run_id == operation.run_id and replay.replayed
+
+
+@pytest.mark.parametrize("changed_field", ["body-tail", "invocation-hash"])
+async def test_one_press_send_rejects_changes_hidden_by_the_approval_preview(
+    changed_field: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shortened preview cannot authorize a different full message or hash."""
+    from dataclasses import replace
+
+    from agent_core.adapters.persistence.memory import InMemoryToolInvocationRepository
+    from agent_core.domain.agents import Principal
+    from agent_core.domain.email import EmailDraftEdit
+    from agent_core.domain.errors import ConflictError
+    from agent_core.domain.persistence import WorkerLease
+    from agent_core.domain.runs import Run
+    from tests.gates.test_email_m18 import _email_settings
+
+    factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        clock=_fixed_clock(),
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        draft = await app.services.email.edit_draft(
+            app.principal,
+            draft.id,
+            EmailDraftEdit(
+                expected_revision=draft.revision,
+                to=draft.to,
+                cc=draft.cc,
+                bcc=draft.bcc,
+                subject=draft.subject,
+                body="Please review these details. " * 24 + "Approved.",
+            ),
+        )
+        genuine = app.services.email.approve_send
+        checked = False
+
+        async def changed(
+            principal: Principal, run: Run, lease: WorkerLease | None, approval_id: UUID
+        ) -> None:
+            nonlocal checked
+            async with app.uow_factory() as uow:
+                calls = await uow.invocations.list_for_run(run.id, principal)
+                [send] = [item for item in calls if item.tool_name.endswith("send_message")]
+                assert send.normalized_arguments is not None
+                update: dict[str, Any] = {"normalized_arguments_hash": "0" * 64}
+                if changed_field == "body-tail":
+                    update = {
+                        "normalized_arguments": {
+                            **send.normalized_arguments,
+                            "body": draft.body + " Changed after the visible prefix.",
+                        }
+                    }
+                # Fault injection: the normal repository transition also rejects
+                # immutable argument changes; exercise the consent check itself.
+                assert isinstance(uow.invocations, InMemoryToolInvocationRepository)
+                monkeypatch.setitem(
+                    uow.invocations._invocations, send.id, send.model_copy(update=update)
+                )
+            with pytest.raises(ConflictError, match="approval does not match"):
+                await genuine(principal, run, lease, approval_id)
+            checked = True
+            raise ConflictError("approval does not match the consented send")
+
+        monkeypatch.setattr(app.services.email, "approve_send", changed)
+        operation = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=draft.revision,
+            source_revision=thread.revision,
+            idempotency_key="changed-full-message",
+        )
+        await _drain(app)
+        assert checked, await app.runs.get(operation.run_id)
+        assert (await app.services.email.draft(app.principal, draft.id)).status.value == "ready"
+        async with app.uow_factory() as uow:
+            calls = await uow.invocations.list_for_run(operation.run_id, app.principal)
+        assert all(
+            item.effect_sent_at is None for item in calls if item.tool_name.endswith("send_message")
+        )
 
 
 async def test_undo_within_the_window_returns_the_parked_send_to_editing() -> None:
