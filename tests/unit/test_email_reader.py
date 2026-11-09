@@ -9,6 +9,69 @@ from agent_core.application.email_reader import reading_body
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
 
+@pytest.mark.parametrize("with_image", [False, True])
+async def test_html_fallback_does_not_restore_styles_as_missing_plain_prose(
+    with_image: bool,
+) -> None:
+    """A retained tag-stripped HTML fallback is not an independent MIME alternative."""
+    import base64
+
+    from gmail_mcp.client import GmailClient
+
+    html = (
+        "<html><head><style>#outlook a { padding:0; }</style>"
+        "<!--[if mso]><xml><o:PixelsPerInch>96</o:PixelsPerInch></xml><![endif]-->"
+        "</head><body><h1>Account login</h1><p>A new login was recorded.</p>"
+        "<div hidden>Hidden preheader</div><p>Manage your "
+        '<a href="https://example.com/security">activity</a>.</p>'
+        + (
+            '<img src="https://images.example/logo.png" alt="Logo">'
+            if with_image
+            else '<img src="https://images.example/pixel.png" width="1" height="1">'
+        )
+        + "</body></html>"
+    )
+    original, _ = GmailClient._payload_content(
+        {
+            "mimeType": "text/html",
+            "body": {"data": base64.urlsafe_b64encode(html.encode()).decode()},
+        }
+    )
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0].update(body=original, reader_html=html)
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        message = (await client.get(f"/v1/email/threads/{thread.id}")).json()["messages"][0]
+        assert message["body"] == original
+        for rendered in [message["reader_body"], message["reader_image_body"]]:
+            if rendered is None:
+                continue
+            assert "padding" not in rendered
+            assert "Hidden preheader" not in rendered
+            assert "96" not in rendered
+            assert rendered.count("A new login was recorded.") == 1
+            assert "[activity](https://example.com/security)" in rendered
+        assert (message["reader_image_body"] is not None) == with_image
+
+
+def test_html_list_paragraph_starts_beside_its_bullet() -> None:
+    result = reading_body(
+        "<ul><li><p><strong>Application:</strong> Example browser</p></li>"
+        "<li> <div><p>Time: Today</p></div></li></ul>"
+    )
+    assert "- **Application:** Example browser" in result
+    assert "- Time: Today" in result
+    assert "\n-\n" not in result
+
+
 def test_forwarded_newsletter_keeps_article_attribution_and_embeds_links() -> None:
     source = """A thoughtful read.
 

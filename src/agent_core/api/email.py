@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_core.application.email_reader import merge_image_body, reading_body
+from agent_core.application.email_reader import merge_image_body, reading_body, reading_source
 from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.services import EmailService
 from agent_core.domain.agents import Principal
@@ -149,7 +149,8 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
             urls: list[str] = []
             rich = reading_body(html, subject=message["subject"], image_urls=urls)
             message["reader_body"] = reading_body(
-                message["body"], subject=message["subject"] or str(result["subject"])
+                reading_source(message["body"], html),
+                subject=message["subject"] or str(result["subject"]),
             )
             if urls:
                 rich = await asyncio.to_thread(

@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-09 — HTML email stays readable
+
+- HTML-only messages with retained HTML no longer display stylesheet code above
+  their content. The reader recovers the original structure instead of treating
+  tag-stripped markup as a separate plain-text alternative.
+- List items wrapped in paragraphs keep their bullet beside their text.
+
 ## 2026-11-09 — Email navigation follows the canvas
 
 - Important is directly above Inbox on Mac and iPad and first in the iPhone
