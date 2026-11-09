@@ -9,10 +9,12 @@ from tests.unit.test_config import base_environment
 
 
 def test_calendar_is_default_off() -> None:
+    """Verify calendar is default off."""
     assert getattr(load_settings(base_environment()), "calendar_enabled", None) is False
 
 
 def test_calendar_has_one_read_only_server() -> None:
+    """Verify calendar has one read only server."""
     import agent_core.mcp.configuration as configuration
 
     factory = getattr(configuration, "calendar_server_configs", None)
@@ -26,6 +28,7 @@ def test_calendar_has_one_read_only_server() -> None:
 
 
 def test_private_credentials_and_scheduler_separation(tmp_path: Path) -> None:
+    """Verify private credentials and scheduler separation."""
     import json
 
     import pytest
@@ -56,6 +59,7 @@ def test_private_credentials_and_scheduler_separation(tmp_path: Path) -> None:
 
 
 def test_scheduler_vouches_for_calendar_scope() -> None:
+    """Verify scheduler vouches for calendar scope."""
     from dataclasses import replace
 
     from agent_core.bootstrap import _schedule_principal
@@ -69,6 +73,7 @@ def test_scheduler_vouches_for_calendar_scope() -> None:
 
 
 def test_reads_use_existing_policy_and_selected_server_is_schedulable() -> None:
+    """Verify reads use existing policy and selected server is schedulable."""
     from agent_core.domain.mcp import RESERVED_MCP_SERVER_PREFIXES, schedule_may_name
     from agent_core.domain.policies import PolicyDecisionType
     from agent_core.mcp.configuration import calendar_server_configs
@@ -89,6 +94,7 @@ def test_reads_use_existing_policy_and_selected_server_is_schedulable() -> None:
 
 
 async def test_chat_read_and_explicit_schedule_access(tmp_path: Path) -> None:
+    """Verify chat read and explicit schedule access."""
     import asyncio
     import json
 
@@ -186,6 +192,7 @@ async def test_chat_read_and_explicit_schedule_access(tmp_path: Path) -> None:
 
 
 async def test_real_stdio_child_receives_only_broker_credential(tmp_path: Path) -> None:
+    """Verify real stdio child receives only broker credential."""
     import json
     import shlex
     import sys
@@ -219,3 +226,24 @@ async def test_real_stdio_child_receives_only_broker_credential(tmp_path: Path) 
     output = log.read_text() + repr(result) + repr(refused)
     assert "secret-access" not in output
     assert "oauth2.googleapis.com" not in output
+
+
+def test_private_credential_file_errors_preserve_operator_guidance(tmp_path: Path) -> None:
+    """Unsafe files report the actionable mode/size rule without exposing content."""
+    import pytest
+
+    from agent_core.config import ConfigurationError, _read_calendar_credential_file
+
+    path = tmp_path / "calendar.json"
+    for contents, mode in (("{}", 0o644), ("x" * 16385, 0o600), ("", 0o600)):
+        path.write_text(contents)
+        path.chmod(mode)
+        with pytest.raises(ConfigurationError, match="must be a 0600 regular file under 16 KiB"):
+            _read_calendar_credential_file(str(path))
+    path.unlink()
+    with pytest.raises(ConfigurationError, match=r"is unavailable$"):
+        _read_calendar_credential_file(str(path))
+    path.write_text("invalid document")
+    path.chmod(0o600)
+    with pytest.raises(ConfigurationError, match=r"is unavailable or invalid$"):
+        _read_calendar_credential_file(str(path))

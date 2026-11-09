@@ -7,9 +7,12 @@ title: Google Calendar Setup
 This integration reads one Google account's selected calendars. It cannot create,
 edit or delete events or invite attendees. It is disabled until configured.
 
-1. Enable the Google Calendar API in your Google Cloud project. Configure an
-   installed desktop OAuth client and download its configuration to an absolute,
-   private file (`chmod 600`). Use production publishing status for durable access;
+1. Use a Google Cloud project separate from Gmail and enable the Google Calendar
+   API there. Google revocation invalidates all grants for the project, including
+   tokens for its other OAuth clients; a shared project would disconnect Gmail
+   when Calendar is revoked. See [Google's revocation rules](https://developers.google.com/identity/protocols/oauth2/native-app#tokenrevoke).
+   Configure an installed desktop OAuth client and download its configuration to
+   an absolute, private file (`chmod 600`). Use production publishing status for durable access;
    external testing grants may expire after seven days. Complete any Google consent
    or Workspace administrator requirements that apply to your account.
 2. Run the bootstrap on your own computer, where a browser can complete its local
@@ -50,7 +53,9 @@ provider outage is an error, never an empty agenda. Changing selected calendars
 requires replacing the credential document and restarting the credential-bearing
 roles. The selection applies to Chat and every schedule or job granted this server,
 so replacing it changes the calendars available to those existing grants; it is
-not an instant in-chat revocation control. To disconnect, disable the flag in application and schedule environments, restart the roles, remove the local
+not an instant in-chat revocation control. To disconnect, disable the flag in
+application and schedule environments and clear `CALENDAR_READ_CREDENTIAL_FILE`
+from every environment before restarting the roles. Then remove the local
 credential file and revoke the grant in your Google Account. Session history is
 removed through ordinary session deletion; disconnecting does not erase it.
 

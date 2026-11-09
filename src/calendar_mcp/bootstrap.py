@@ -29,6 +29,7 @@ class BootstrapError(RuntimeError):
 
 
 def _challenge(verifier: str) -> str:
+    """Derive the unpadded S256 PKCE challenge for a verifier."""
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
@@ -41,6 +42,7 @@ def _authorization_url(
     state: str,
     verifier: str,
 ) -> str:
+    """Build Google consent parameters with offline access, state and PKCE."""
     return f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{
         urlencode(
             {

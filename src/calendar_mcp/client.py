@@ -47,11 +47,13 @@ class CalendarError(RuntimeError):
     """A stable content-free provider failure."""
 
     def __init__(self, code: str) -> None:
+        """Initialize the instance without exposing credentials in diagnostic output."""
         self.code = code
         super().__init__(code)
 
 
 def text(value: object, maximum: int = 1024) -> str:
+    """Validate a bounded nonblank string without control characters."""
     if (
         not isinstance(value, str)
         or not value.strip()
@@ -63,6 +65,7 @@ def text(value: object, maximum: int = 1024) -> str:
 
 
 def parse_credential(raw: str) -> dict[str, Any]:
+    """Require the exact read-only scopes and a bounded distinct calendar selection."""
     try:
         value = json.loads(raw)
         if not isinstance(value, dict) or set(value) != {
@@ -93,6 +96,7 @@ def parse_credential(raw: str) -> dict[str, Any]:
 
 class CalendarClient:
     def __init__(self, credential: str, *, http_client: httpx.AsyncClient | None = None) -> None:
+        """Initialize the instance without exposing credentials in diagnostic output."""
         self._credential = parse_credential(credential)
         self._http = http_client or httpx.AsyncClient(
             timeout=httpx.Timeout(30, connect=10), follow_redirects=False
@@ -103,10 +107,12 @@ class CalendarClient:
         self._lock = asyncio.Lock()
 
     async def close(self) -> None:
+        """Close the HTTP transport only when this adapter created it."""
         if self._owns_http:
             await self._http.aclose()
 
     async def _json(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        """Request fixed provider endpoints with bounded time and response size."""
         try:
             async with (
                 asyncio.timeout(30),
@@ -140,6 +146,7 @@ class CalendarClient:
             raise CalendarError("calendar.provider_output_invalid") from exc
 
     async def _token(self) -> str:
+        """Refresh an expired access token under a lock and validate its lifetime."""
         async with self._lock:
             if self._access_token is not None and time.monotonic() < self._expires:
                 return self._access_token
@@ -169,6 +176,7 @@ class CalendarClient:
             return token
 
     async def _get(self, path: str, params: dict[str, str | int] | None = None) -> dict[str, Any]:
+        """Retry a rejected access token once after refreshing the grant."""
         for attempt in range(2):
             token = await self._token()
             try:
@@ -185,6 +193,7 @@ class CalendarClient:
         raise AssertionError("Unreachable")
 
     def _calendar(self, calendar_id: str) -> str:
+        """Enforce operator selection before encoding a Calendar API path segment."""
         text(calendar_id)
         if calendar_id not in self._credential["calendar_ids"]:
             raise CalendarError("calendar.not_selected")
@@ -192,6 +201,7 @@ class CalendarClient:
 
     @staticmethod
     def _event(value: object) -> dict[str, Any]:
+        """Validate event identity and time fields, then retain the supported fields."""
         if not isinstance(value, dict) or not isinstance(value.get("id"), str) or not value["id"]:
             raise CalendarError("calendar.provider_output_invalid")
         if value.get("status") != "cancelled":
@@ -204,6 +214,7 @@ class CalendarClient:
         return {key: item for key, item in value.items() if key in _EVENT_FIELDS}
 
     async def list_calendars(self) -> dict[str, Any]:
+        """Read metadata only for calendars in the operator selection."""
         calendars = []
         for identifier in self._credential["calendar_ids"]:
             result = await self._get("/users/me/calendarList/" + self._calendar(identifier))
@@ -230,6 +241,7 @@ class CalendarClient:
         page_token: str | None = None,
         max_results: int = 50,
     ) -> dict[str, Any]:
+        """Read one bounded page of expanded occurrences without altering time fields."""
         calendar = self._calendar(calendar_id)
         try:
             if not _INSTANT.fullmatch(text(time_min, 64)) or not _INSTANT.fullmatch(
@@ -277,6 +289,7 @@ class CalendarClient:
         }
 
     async def get_event(self, calendar_id: str, event_id: str) -> dict[str, Any]:
+        """Read one event only after enforcing the selected-calendar boundary."""
         calendar = self._calendar(calendar_id)
         if event_id in {".", ".."}:
             raise CalendarError("calendar.arguments_invalid")

@@ -14,6 +14,7 @@ from calendar_mcp.client import MAXIMUM_BYTES, CalendarClient, CalendarError
 
 
 async def _call(operation: Awaitable[dict[str, Any]]) -> CallToolResult:
+    """Return bounded structured output or a content-free Calendar failure."""
     try:
         result = await operation
         encoded = json.dumps(result, separators=(",", ":"))
@@ -31,8 +32,11 @@ async def _call(operation: Awaitable[dict[str, Any]]) -> CallToolResult:
 
 
 def create_server(client: CalendarClient) -> MCPServer:
+    """Expose the three read tools and close the client at server shutdown."""
+
     @asynccontextmanager
     async def lifespan(_server: MCPServer) -> AsyncIterator[None]:
+        """Release the HTTP client when the stdio server stops."""
         try:
             yield None
         finally:

@@ -55,6 +55,7 @@ _ERRORS = {
 
 
 def calendar_failure(result: MCPCallResult, spec: ToolSpec) -> ToolFailure | None:
+    """Map only recognized first-party Calendar errors to safe runtime failures."""
     if (
         not result.is_error
         or not spec.name.startswith("mcp.calendar_read.")

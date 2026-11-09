@@ -1165,6 +1165,7 @@ class MCPRuntime:
 
     @staticmethod
     def _result(result: MCPCallResult, spec: ToolSpec) -> ToolResult:
+        """Normalize MCP output while preserving ambiguous non-idempotent outcomes."""
         if result.is_error:
             effect_status = (
                 result.structured.get("effect_status") if result.structured is not None else None

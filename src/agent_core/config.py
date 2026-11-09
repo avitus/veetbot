@@ -980,18 +980,22 @@ _GMAIL_NAMED_CREDENTIAL = re.compile(r"^gmail_[a-z][a-z0-9_]{0,31}_(?:read|write
 
 
 def _read_calendar_credential_file(raw_path: str) -> str:
+    """Load an owner-only grant while preserving actionable setup errors."""
     name = "CALENDAR_READ_CREDENTIAL_FILE"
     path = Path(raw_path)
     if not path.is_absolute() or path.is_symlink():
         raise ConfigurationError(f"{name} must be an absolute private regular file")
     try:
         metadata = path.stat()
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-            or not 1 <= metadata.st_size <= 16384
-        ):
-            raise ConfigurationError(f"{name} must be a 0600 regular file under 16 KiB")
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or not 1 <= metadata.st_size <= 16384
+    ):
+        raise ConfigurationError(f"{name} must be a 0600 regular file under 16 KiB")
+    try:
         loaded = json.loads(path.read_bytes())
     except (OSError, ValueError, UnicodeError) as exc:
         raise ConfigurationError(f"{name} is unavailable or invalid") from exc

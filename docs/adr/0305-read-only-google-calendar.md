@@ -78,3 +78,27 @@ The engineering plan records this authorized B11 extension; no other requirement
 policy decision or milestone ceiling changed.
 Production activation requires the owner's Google consent and a live calendar
 smoke. No production acceptance is claimed by this decision.
+
+## PR review follow-up
+
+PR #247's first review identified two setup corrections and a swallowed diagnostic.
+The guide now requires a separate Google Cloud project so Calendar revocation does
+not revoke Gmail grants, and clears the credential-file setting before restart.
+Credential metadata checks now preserve the 0600/size diagnostic outside the
+`ValueError` translation. Added docstrings document the touched adapter functions.
+
+The local Linux sandbox reproduced the diagnostic defect with
+`circleci testsuite run static --run-tests=all -t tests/unit/test_calendar_composition.py`:
+one assertion failed because the required mode/size hint became a generic error.
+After the fix, 280 tests passed across Calendar, configuration, toolchain and
+secret-scanner files; the repository scanner itself initially could not read a
+mis-mounted Git directory. After correcting the mount, all five scanner tests
+passed in 10.71 seconds (56.34 seconds including discovery).
+Calendar contracts passed all 21 tests. Lint and typing passed (1.11 and 8.81
+seconds respectively). Static execution took 23.61 seconds and contract execution
+1.17 seconds; including discovery, those commands took 68.66 and 47.76 seconds
+and overlapped. Documentation checks passed in 19.69 seconds; citation repair
+reported no unresolved citations. Total local verification including setup and
+iteration was approximately five minutes (estimate), with test discovery the
+slowest stage. This follow-up uses Reading-Lane: A and changes no acceptance
+criteria or activation requirements.

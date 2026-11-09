@@ -26,6 +26,7 @@ from agent_core.mcp.runtime import MCPRuntime
 def test_calendar_errors_have_safe_actionable_failures(
     code: str, reason: str, retryable: bool
 ) -> None:
+    """Verify calendar errors have safe actionable failures."""
     (row,) = calendar_server_configs("local")
     remote = MCPRemoteTool(
         name="get_event",

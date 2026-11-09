@@ -12,6 +12,7 @@ from calendar_mcp.client import CalendarClient
 
 
 def respond(request: httpx.Request) -> httpx.Response:
+    """Supply deterministic Google responses through the injected mock transport."""
     if request.url.host == "oauth2.googleapis.com":
         return httpx.Response(200, json={"access_token": "secret-access", "expires_in": 3600})
     if "/calendarList/" in request.url.path:
@@ -20,6 +21,7 @@ def respond(request: httpx.Request) -> httpx.Response:
 
 
 def client(raw: str) -> CalendarClient:
+    """Build the stdio fixture with mocked Google transport."""
     return CalendarClient(
         raw, http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))
     )

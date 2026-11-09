@@ -14,6 +14,7 @@ SCOPES = "https://www.googleapis.com/auth/calendar.calendarlist.readonly https:/
 
 
 def credential() -> dict[str, Any]:
+    """Build a synthetic grant for selected-calendar contract tests."""
     return {
         "client_id": "client",
         "client_secret": "secret",
@@ -24,6 +25,7 @@ def credential() -> dict[str, Any]:
 
 
 def modules() -> tuple[Any, Any]:
+    """Require the first-party adapter and server before exercising their contract."""
     assert importlib.util.find_spec("calendar_mcp") is not None, "Calendar adapter must exist"
     return importlib.import_module("calendar_mcp.client"), importlib.import_module(
         "calendar_mcp.server"
@@ -32,6 +34,7 @@ def modules() -> tuple[Any, Any]:
 
 @pytest.mark.asyncio
 async def test_read_contract_and_pagination_preserve_calendar_time() -> None:
+    """Verify read contract and pagination preserve calendar time."""
     module, server_module = modules()
     requests: list[httpx.Request] = []
     event = {
@@ -52,6 +55,7 @@ async def test_read_contract_and_pagination_preserve_calendar_time() -> None:
     }
 
     def respond(request: httpx.Request) -> httpx.Response:
+        """Supply deterministic Google responses through the injected mock transport."""
         requests.append(request)
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "access", "expires_in": 3600})
@@ -106,9 +110,11 @@ async def test_read_contract_and_pagination_preserve_calendar_time() -> None:
     ],
 )
 async def test_provider_errors_are_content_free(status: int, code: str) -> None:
+    """Verify provider errors are content free."""
     module, _ = modules()
 
     def respond(request: httpx.Request) -> httpx.Response:
+        """Supply deterministic Google responses through the injected mock transport."""
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "access", "expires_in": 3600})
         return httpx.Response(status, text="secret upstream content")
@@ -129,9 +135,11 @@ async def test_provider_errors_are_content_free(status: int, code: str) -> None:
     ],
 )
 async def test_invalid_windows_never_request_google(start: str, end: str) -> None:
+    """Verify invalid windows never request google."""
     module, _ = modules()
 
     def unexpected(request: httpx.Request) -> httpx.Response:
+        """Fail if a rejected operation reaches its external boundary."""
         pytest.fail("Invalid arguments must fail before network access")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(unexpected)) as http:
@@ -146,9 +154,11 @@ async def test_invalid_windows_never_request_google(start: str, end: str) -> Non
     [[], {"items": "invalid"}, {"items": [{"id": "broken"}]}, {"items": [], "nextPageToken": 7}],
 )
 async def test_invalid_provider_output_is_not_an_empty_agenda(payload: Any) -> None:
+    """Verify invalid provider output is not an empty agenda."""
     module, _ = modules()
 
     def respond(request: httpx.Request) -> httpx.Response:
+        """Supply deterministic Google responses through the injected mock transport."""
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "access", "expires_in": 3600})
         return httpx.Response(200, json=payload)
@@ -161,10 +171,12 @@ async def test_invalid_provider_output_is_not_an_empty_agenda(payload: Any) -> N
 
 @pytest.mark.asyncio
 async def test_refresh_retry_is_bounded_and_revocation_is_terminal() -> None:
+    """Verify refresh retry is bounded and revocation is terminal."""
     module, _ = modules()
     calls: list[str] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
+        """Supply deterministic Google responses through the injected mock transport."""
         calls.append(str(request.url.host))
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "access", "expires_in": 3600})
@@ -188,6 +200,7 @@ async def test_refresh_retry_is_bounded_and_revocation_is_terminal() -> None:
     ],
 )
 def test_credentials_cannot_expand_google_permissions(change: dict[str, Any]) -> None:
+    """Verify credentials cannot expand google permissions."""
     module, _ = modules()
     with pytest.raises(module.CalendarError, match="credential_rejected"):
         module.CalendarClient(json.dumps({**credential(), **change}))
@@ -195,9 +208,11 @@ def test_credentials_cannot_expand_google_permissions(change: dict[str, Any]) ->
 
 @pytest.mark.asyncio
 async def test_oversized_provider_response_fails_closed() -> None:
+    """Verify oversized provider response fails closed."""
     module, _ = modules()
 
     def respond(request: httpx.Request) -> httpx.Response:
+        """Supply deterministic Google responses through the injected mock transport."""
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "access", "expires_in": 3600})
         return httpx.Response(200, content=b"x" * (module.MAXIMUM_BYTES + 1))

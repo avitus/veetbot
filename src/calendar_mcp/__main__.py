@@ -26,6 +26,7 @@ _PRIVACY_POLICY_URL = "https://www.veetbot.com/privacy"
 
 
 def _oauth_client(path: Path) -> tuple[str, str]:
+    """Read installed-app client settings from an owner-only regular file."""
     if not path.is_absolute() or path.is_symlink():
         raise BootstrapError("OAuth client file must be an absolute private regular file")
     try:
@@ -47,6 +48,7 @@ def _oauth_client(path: Path) -> tuple[str, str]:
 
 
 def _authorize_via_loopback(_mode: str, authorization_url: str) -> str:
+    """Accept a matching-state callback on localhost within five minutes."""
     query = parse_qs(urlsplit(authorization_url).query)
     redirect = urlsplit(query["redirect_uri"][0])
     expected_state = query["state"][0]
@@ -56,6 +58,7 @@ def _authorize_via_loopback(_mode: str, authorization_url: str) -> str:
 
     class Callback(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            """Reject mismatched state and retain only the accepted authorization code."""
             callback = parse_qs(urlsplit(self.path).query)
             code = callback.get("code", [""])[0]
             state = callback.get("state", [""])[0]
@@ -72,6 +75,7 @@ def _authorize_via_loopback(_mode: str, authorization_url: str) -> str:
             self.wfile.write(body)
 
         def log_message(self, _format: str, *_args: object) -> None:
+            """Suppress callback request logging so authorization codes stay private."""
             return
 
     server = HTTPServer((LOOPBACK_REDIRECT_HOST, redirect.port), Callback)
@@ -140,6 +144,7 @@ def _authorize_with_disclosure(
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run the consent ceremony or serve the broker-provided credential over stdio."""
     for name in ("httpx", "httpcore"):
         logging.getLogger(name).setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(prog="python -m calendar_mcp")

@@ -15,7 +15,10 @@ from calendar_mcp.client import SCOPES
 
 
 async def test_bootstrap_requests_exact_scopes_and_writes_private_selection(tmp_path: Path) -> None:
+    """Verify bootstrap requests exact scopes and writes private selection."""
+
     def authorize(mode: str, url: str) -> str:
+        """Validate consent parameters before returning a synthetic authorization code."""
         values = parse_qs(urlsplit(url).query)
         assert mode == "read"
         assert values["scope"] == [SCOPES]
@@ -25,6 +28,7 @@ async def test_bootstrap_requests_exact_scopes_and_writes_private_selection(tmp_
         return "code"
 
     def exchange(request: httpx.Request) -> httpx.Response:
+        """Validate the token request before returning a synthetic grant."""
         values = parse_qs(request.content.decode())
         assert values["grant_type"] == ["authorization_code"]
         assert values["code_verifier"][0]
@@ -56,7 +60,10 @@ async def test_bootstrap_requests_exact_scopes_and_writes_private_selection(tmp_
 
 
 def test_declining_disclosure_never_opens_google() -> None:
+    """Verify declining disclosure never opens google."""
+
     def unexpected(mode: str, url: str) -> str:
+        """Fail if a rejected operation reaches its external boundary."""
         pytest.fail("Declined consent must not open the browser")
 
     with pytest.raises(BootstrapError, match="cancelled"):
@@ -66,6 +73,7 @@ def test_declining_disclosure_never_opens_google() -> None:
 
 
 def test_oauth_client_requires_private_file(tmp_path: Path) -> None:
+    """Verify oauth client requires private file."""
     path = tmp_path / "client.json"
     path.write_text(json.dumps({"installed": {"client_id": "id", "client_secret": "secret"}}))
     path.chmod(0o644)
@@ -78,6 +86,7 @@ def test_oauth_client_requires_private_file(tmp_path: Path) -> None:
 def test_loopback_rejects_wrong_state_before_accepting_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify loopback rejects wrong state before accepting code."""
     import io
     import webbrowser
     from typing import Any
@@ -90,12 +99,14 @@ def test_loopback_rejects_wrong_state_before_accepting_code(
 
     class Server:
         def __init__(self, address: tuple[str, int], handler: Any) -> None:
+            """Capture the fake listener address and callback handler."""
             assert address == ("127.0.0.1", 8765)
             self.handler = handler
             self.calls = 0
             self.timeout = 0.0
 
         def handle_request(self) -> None:
+            """Deliver a wrong-state callback before the valid callback."""
             self.calls += 1
             handler = object.__new__(self.handler)
             state = "wrong" if self.calls == 1 else "expected"
@@ -107,6 +118,7 @@ def test_loopback_rejects_wrong_state_before_accepting_code(
             handler.do_GET()
 
         def server_close(self) -> None:
+            """Record shutdown of the fake callback listener."""
             closed.append(True)
 
     monkeypatch.setattr(entry, "HTTPServer", Server)
@@ -125,6 +137,7 @@ def test_loopback_rejects_wrong_state_before_accepting_code(
 
 @pytest.mark.parametrize("scope", ["https://www.googleapis.com/auth/calendar", ""])
 async def test_unexpected_grant_never_creates_a_credential(tmp_path: Path, scope: str) -> None:
+    """Verify unexpected grant never creates a credential."""
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(
             lambda request: httpx.Response(
