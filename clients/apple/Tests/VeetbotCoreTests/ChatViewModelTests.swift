@@ -6,6 +6,29 @@ import UserNotifications
 @testable import VeetbotCore
 
 @Suite(.serialized) @MainActor struct ChatViewModelTests {
+    @Test func testSwitchingToEmailDefaultsToImportant() async throws {
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let chat = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: nil),
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore()
+        )
+        let coordinator = AppCoordinator(chat: chat)
+        #expect(coordinator.email.listView == "priority")
+        coordinator.mode = .email
+        coordinator.email.setCollection(.inbox)
+        coordinator.mode = .email
+        #expect(coordinator.email.listView == "inbox")
+        for previousMode in [ClientMode.chat, .cockpit] {
+            coordinator.mode = previousMode
+            coordinator.mode = .email
+            #expect(coordinator.email.listView == "priority")
+            coordinator.email.setCollection(.handled)
+        }
+    }
+
     @Test
     func testSendWaitsForStartupHistoryReconciliation() async throws {
         let suiteName = "com.veetbot.tests.\(UUID().uuidString)"

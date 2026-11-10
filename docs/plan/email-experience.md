@@ -47,8 +47,10 @@ the draft visible alongside or below its source conversation. Preserve the
 deployment floors ADR-0211 sets and the adaptive layouts.
 
 Switching modes preserves the active Chat run, unsent chat text, selected mail,
-scroll position, unsent email edits, and the loaded mail list: returning to
-Email refreshes the rows in place rather than clearing them (ADR-0234). Memory,
+and unsent email edits. Entering Email selects Important (owner request,
+2026-11-10); choosing another collection while already in Email remains supported.
+Returning to an already selected Important list preserves its scroll position
+and refreshes its loaded rows in place (ADR-0234). Memory,
 Persona, Schedules, and Settings remain global. Adding a future mode requires a small mode descriptor and a
 presentation module; this feature does not build a dynamic plugin system.
 
@@ -56,7 +58,8 @@ presentation module; this feature does not build a dynamic plugin system.
 
 The priority view combines both accounts. On macOS, Important shows the total
 number of qualifying threads and initially loads up to 100. On touch it opens
-with up to five. Inbox is the A2 initial collection; on touch it pages five
+with up to five. Important is the initial collection and the default on each
+switch into Email; this supersedes ADR-0231's Inbox default. On touch, Inbox pages five
 threads at a time (ADR-0231). On macOS every list, Inbox, Needs you, Handled,
 Important, Other mail and search results alike, loads up to 100 threads per
 page and scrolls (ADR-0303). Account badges and an account filter identify the source
@@ -79,6 +82,14 @@ stays within that view. Suspected spam lists flagged Inbox threads only,
 excluding cleared flags and mail already in Gmail Spam; it changes no labels.
 Both counts cover the authorized account and search before pagination, and
 remain absent when an older server omits them.
+Switching between previously loaded, unsearched Inbox and Important lists
+shows the last successful rows and pagination immediately, then refreshes in
+place. Keep at most two in-memory snapshots of up to 1,000 rows each; never
+persist them to disk. Account or search changes, connection replacement,
+revoked read access, and local mailbox or importance mutations invalidate
+these snapshots. A failed background read retains the visible cached list
+with the existing error indication. A collection without a snapshot still
+loads from the server; obsolete switch responses cannot replace the active list.
 On macOS, scrolling near the end of any list fetches the next page
 automatically, with no More button. Refresh preserves the visible thread and
 the selected conversation independently, in every Mac list.

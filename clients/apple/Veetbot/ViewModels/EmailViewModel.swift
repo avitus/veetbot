@@ -4,7 +4,13 @@ import Foundation
 
 @MainActor
 public final class AppCoordinator: ObservableObject {
-    @Published public var mode: ClientMode = .chat
+    @Published public var mode: ClientMode = .chat {
+        didSet {
+            if mode == .email, oldValue != .email {
+                email.setListView("priority")
+            }
+        }
+    }
     /// A schedule a Cockpit widget asked to open; the window shows the schedules browser.
     @Published public var requestedSchedule: UUID?
     public let chat: ChatViewModel
@@ -112,7 +118,16 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var feedbackID: UUID?
     @Published public private(set) var hasMore = false
     @Published public private(set) var selectedAccountID: String?
-    @Published public private(set) var listView = "inbox"
+    @Published public private(set) var listView = "priority"
+    private struct CachedMailList {
+        let rows: [EmailThreadView]
+        let counts: EmailCollectionCounts?
+        let total: Int?
+        let cursor: String?
+        let seenCursors: Set<String>
+    }
+    // Only the two unsearched collections, for this connection and account filter.
+    private var cachedMailLists: [String: CachedMailList] = [:]
     @Published private var loadedCollectionCounts: EmailCollectionCounts?
     /// A pending optimistic mailbox change makes the last confirmed counts stale.
     public var collectionCounts: EmailCollectionCounts? {
@@ -400,6 +415,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Cancels obsolete work and removes all mail, local edits and errors from the old connection.
     public func resetConnection() {
+        cachedMailLists = [:]
         generation = UUID()
         isResettingLearning = false
         activation = UUID()
@@ -447,7 +463,7 @@ public final class EmailViewModel: ObservableObject {
         selectedThreadID = nil
         selectedAccountID = nil
         resetListQuery()
-        listView = "inbox"
+        listView = "priority"
         searchText = ""
         unavailable = false
         errorMessage = nil
@@ -477,6 +493,8 @@ public final class EmailViewModel: ObservableObject {
     /// Clears thread selection and reloads the chosen account within the current foreground visit.
     public func setAccount(_ id: String?) {
         guard id != selectedAccountID else { return }
+        cachedMailLists = [:]
+        inboxItems = []
         selectedAccountID = id
         resetListQuery()
         clearSelection()
@@ -489,12 +507,27 @@ public final class EmailViewModel: ObservableObject {
         guard value != listView else { return }
         listView = value
         resetListQuery()
+        let cached = searchText.isEmpty ? cachedMailLists[value] : nil
+        inboxItems = cached?.rows ?? []
+        loadedCollectionCounts = cached?.counts
+        loadedListTotal = cached?.total
+        nextCursor = cached?.cursor
+        seenCursors = cached?.seenCursors ?? []
+        hasMore = nextCursor != nil
+        arrivedThreadIDs = []
+        isLoading = false
         let foreground = active ? activation : nil
-        Task { await reload(activation: foreground) }
+        let query = listRequest
+        Task {
+            guard self.listRequest == query else { return }
+            await reload(preserveOrder: cached != nil, activation: foreground)
+        }
     }
 
     /// Debounces search changes and binds the eventual reload to the visit that scheduled it.
     public func setSearchText(_ text: String) {
+        cachedMailLists = [:]
+        inboxItems = []
         searchText = text
         resetListQuery()
         searchTask?.cancel()
@@ -517,6 +550,16 @@ public final class EmailViewModel: ObservableObject {
         nextCursor = nil
         hasMore = false
         pagingFailed = false
+    }
+
+    private func cacheMailList() {
+        guard searchText.isEmpty, listView == "inbox" || listView == "priority" else { return }
+        guard inboxItems.count <= 1_000 else {
+            cachedMailLists[listView] = nil
+            return
+        }
+        cachedMailLists[listView] = CachedMailList(rows: inboxItems, counts: loadedCollectionCounts,
+            total: loadedListTotal, cursor: nextCursor, seenCursors: seenCursors)
     }
 
     /// Allows explicit inactive reads while binding visible inbox work to its current foreground visit.
@@ -582,9 +625,11 @@ public final class EmailViewModel: ObservableObject {
                 arrivedThreadIDs = []
             }
             for value in loadedThreads { observeArchive(value) }
+            cacheMailList()
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             if isUnavailable(error) {
+                cachedMailLists = [:]
                 unavailable = true
                 loadedListTotal = nil
                 inboxItems = []
@@ -652,6 +697,7 @@ public final class EmailViewModel: ObservableObject {
             hasMore = false
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             hasMore = nextCursor != nil
+            cacheMailList()
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             pagingFailed = true
@@ -1113,6 +1159,7 @@ public final class EmailViewModel: ObservableObject {
                                                     explanation: explanation, targetValue: targetValue, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
             feedbackID = result.feedbackID
+            cachedMailLists = [:]
             switch judgment {
             case "needs_reply": feedbackMessage = "This thread needs a reply."
             case "no_reply_needed": feedbackMessage = "This thread needs no reply."
@@ -1132,6 +1179,7 @@ public final class EmailViewModel: ObservableObject {
             _ = try await api.undoEmailFeedback(feedbackID, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
             self.feedbackID = nil
+            cachedMailLists = [:]
             feedbackMessage = "Feedback undone."
             await reload(preserveOrder: true)
         } catch { if generation == connection { report(error) } }
@@ -1377,6 +1425,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let result = try await api.dismissEmailThread(thread, dismissed: handled, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return false }
+            cachedMailLists = [:]
             // The command returns a summary. Preserve the open messages and
             // unsaved draft, updating only server-confirmed attention state.
             if self.thread?.id == result.id, self.thread?.revision == result.revision {
@@ -1477,6 +1526,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let result = try await api.clearEmailThreadSpamFlag(thread.id, cleared: cleared)
             guard generation == connection else { return }
+            cachedMailLists = [:]
             for index in inboxItems.indices where inboxItems[index].id == thread.id {
                 inboxItems[index].suspectedSpam = result.suspectedSpam
                 inboxItems[index].spamCleared = result.spamCleared
@@ -1511,6 +1561,7 @@ public final class EmailViewModel: ObservableObject {
         let request = archiveRequests[thread.id]
             ?? ArchiveRequest(thread: thread, archived: archived, key: UUID().uuidString, spam: spam)
         archiveRequests[thread.id] = request
+        cachedMailLists = [:]
         archiveErrors[thread.id] = nil
         archiveReadErrors.remove(thread.id)
         archiveVersions[thread.id] = UUID()
@@ -1606,6 +1657,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Applies fresh source context and mailbox state while retaining local drafts and independent errors.
     private func mergeArchive(_ value: EmailThreadView) {
+        cachedMailLists = [:]
         archiveVersions[value.id] = UUID()
         archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox, operation: value.archiveOperation,
             dismissedRevision: value.dismissedRevision, inSpam: value.inSpam)
@@ -1760,6 +1812,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let value = try await api.resetEmailLearning(scope: scope, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
+            cachedMailLists = [:]
             learning = value
             toasts.show(scope == "preferences" ? "Importance preferences reset."
                 : scope == "style" ? "Writing style reset." : "Email learning reset.")
@@ -1775,6 +1828,7 @@ public final class EmailViewModel: ObservableObject {
             // The excluded mail leaves the client too, even if the connection moved on.
             EmailConversationCache.remove(threadID: thread.id)
             guard generation == connection else { return }
+            cachedMailLists = [:]
             edits = edits.filter { $0.value.base.threadID != thread.id }
             // The row goes now: a failed reload must not leave the excluded summary in view.
             inboxItems.removeAll { $0.id == thread.id }

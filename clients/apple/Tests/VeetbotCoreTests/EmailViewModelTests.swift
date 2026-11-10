@@ -14,6 +14,79 @@ import SwiftUI
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    @Test func testCollectionSwitchShowsCachedRowsBeforeSlowRefresh() async throws {
+        let requests = EmailRequestRecorder()
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let otherID = UUID()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            requests.append(request)
+            if requests.snapshot.count > 2 {
+                _ = gate.wait(timeout: .now() + 5)
+                return (502, Self.error("service_unavailable", "Temporary failure"))
+            }
+            let page = self.pageJSON(cursor: "next")
+            return (200, request.url!.query!.contains("view=inbox")
+                ? page.replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString) : page)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { model.items.first?.id == otherID && !model.isReadingList }
+        model.setListView("priority")
+        // No yield or network wait is allowed before the cached list is visible.
+        #expect(model.items.map(\.id) == [threadID])
+        #expect(model.hasMore)
+        #expect(!model.isLoading)
+        try await waitForEmailTestCondition { requests.snapshot.count == 3 }
+        #expect(model.items.map(\.id) == [threadID])
+        #expect(!model.isLoading)
+        gate.signal()
+        try await waitForEmailTestCondition { !model.isReadingList }
+        #expect(model.items.map(\.id) == [threadID])
+        model.setListView("inbox")
+        #expect(model.items.map(\.id) == [otherID])
+    }
+
+    @Test(arguments: ["connection", "account", "search"])
+    func testCollectionCacheDoesNotCrossQueryBoundaries(boundary: String) async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, self.pageJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && !model.items.isEmpty }
+        switch boundary {
+        case "connection": model.resetConnection(); model.setListView("inbox")
+        case "account": model.setAccount("work")
+        default: model.setSearchText("unrelated")
+        }
+        model.setListView("priority")
+        #expect(model.items.isEmpty)
+    }
+
+    @Test func testHandledChangeInvalidatesCachedImportantList() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("dismiss") {
+                return (200, self.threadJSON().replacingOccurrences(of: "\"summary\"",
+                    with: "\"dismissed_revision\":1,\"summary\""))
+            }
+            return (200, self.pageJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && !model.items.isEmpty }
+        let row = try #require(model.items.first)
+        #expect(await model.setThreadHandled(row, handled: true, confirms: false))
+        model.setListView("priority")
+        #expect(model.items.isEmpty, "Do not redisplay the old unhandled Important snapshot")
+    }
+
     /// Opening mail is inert; each load or retry requires another explicit request.
     @Test func testImagesLoadOnlyByExplicitRequestAndDoNotRetryOnFailure() async throws {
         let requests = EmailRequestRecorder()
@@ -71,8 +144,8 @@ import SwiftUI
             return (200, "{\"items\":[\(other)],\"next_cursor\":\"next\"}")
         }
         defer { model.resetConnection() }
-        model.setListView("priority")
-        for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.listView == "priority")
+        await model.reload()
         await model.openThread(threadID)
         model.scrollAnchor = threadID
         if handled {
@@ -1488,7 +1561,7 @@ import SwiftUI
         })
         #expect(model.collectionCounts == nil)
         model.resetConnection()
-        #expect(model.collection == .inbox)
+        #expect(model.listView == "priority")
         #expect(model.searchText.isEmpty)
     }
 

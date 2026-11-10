@@ -86,7 +86,7 @@ The owner decided these on 2026-10-22:
 - **The mode shell.** `ClientMode`, the app coordinator and the per-mode right
   panel (ADR-0092, ADR-0237). The Email design says a new mode is "a small
   mode descriptor and a presentation module"
-  (`email-experience.md:52-53`), and that a mode confers no authority.
+  (`email-experience.md:54-55`), and that a mode confers no authority.
 - **The execution service.** It runs gVisor containers with a read-only root,
   networking off, an empty environment and run leases. Its one-image
   assumption is an open question in `sandbox-isolation.md:1765-1769`. This
