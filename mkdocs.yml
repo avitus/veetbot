@@ -447,4 +447,5 @@ nav:
       - "ADR-0306: Live browser progress": adr/0306-live-browser-progress.md
       - "ADR-0307: Aggregate browser operation evidence": adr/0307-browser-operation-report.md
       - "ADR-0308: Open-shadow browser regions": adr/0308-open-shadow-browser-regions.md
+      - "ADR-0309: Recall continuity and phase clocks": adr/0309-recall-continuity-and-phase-clocks.md
   - Changelog: changelog.md

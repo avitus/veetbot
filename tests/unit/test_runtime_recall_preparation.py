@@ -332,7 +332,10 @@ async def test_optional_preparation_budget_is_shared_and_durable(
         assert checkpoints[-1].payload["recall_work"] == saved.recall_work.model_dump(mode="json")
 
 
-async def test_checkpoint_loss_recovers_budget_after_the_history_boundary() -> None:
+@pytest.mark.parametrize("phase_key", [None, "automatic:1"])
+async def test_checkpoint_loss_recovers_budget_after_the_history_boundary(
+    phase_key: str | None,
+) -> None:
     from datetime import timedelta
     from uuid import UUID
 
@@ -343,7 +346,9 @@ async def test_checkpoint_loss_recovers_budget_after_the_history_boundary() -> N
     from tests.contract.test_runtime_semantic_queries_contract import runtime_stack
 
     clock, factory, _, _, _, _ = await runtime_stack()
-    budget = RecallWorkBudget(searches=4, rounds=2, deadline_at=NOW + timedelta(seconds=10))
+    budget = RecallWorkBudget(
+        searches=4, rounds=2, deadline_at=NOW + timedelta(seconds=10), phase_key=phase_key
+    )
     async with factory() as uow:
         source = await uow.events.append(
             NewEvent(
@@ -550,3 +555,57 @@ async def test_refused_automatic_recall_leaves_an_event() -> None:
         assert limited, "A refused automatic recall must leave a memory.recall.limited event"
         assert limited[0].payload["reason"] == "exhausted"
         assert limited[0].payload["step_number"] == 1
+
+
+async def test_model_thinking_does_not_spend_later_recall_phases() -> None:
+    from agent_core.domain.messages import ToolResultItem
+
+    clock = FixedClock(NOW)
+    script = _search_then_done()
+    script.turns[0].delay_ms = 20_000
+    async with build(settings=_settings(), script=script, clock=clock) as app:
+        app.executor._prepare_recall = _bound_preparation(app, clock, advance_seconds=0)
+        run_id = await app.runs.submit("Suggest breakfast options")
+        outcome = await app.runs.wait_terminal(run_id)
+        assert outcome.status is RunStatus.COMPLETED, outcome.failure
+        async with app.uow_factory() as uow:
+            saved = await uow.checkpoints.latest(run_id)
+            events = await uow.events.list_after(
+                outcome.session_id, 0, app.principal, run_id=run_id
+            )
+        assert saved is not None
+        results = [item for item in saved.conversation if isinstance(item, ToolResultItem)]
+        assert results and not any(item.is_error for item in results)
+        assert not [event for event in events if event.event_type == "memory.recall.limited"]
+
+
+async def test_checkpointed_phase_cannot_be_reopened_after_reconstruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.runtime import loop
+
+    original = loop.prepare_recall
+    observed = []
+
+    async def replay(context: Any, **kwargs: Any) -> None:
+        await original(context, **kwargs)
+        permit = context.recall_permit
+        if permit is None or not permit.remaining:
+            return
+        saved = context.checkpoint.model_dump_json()
+        context.checkpoint = RunCheckpoint.model_validate_json(saved)
+        await original(context, **kwargs)
+        assert context.recall_permit.remaining == 0
+        assert context.checkpoint.model_dump_json() == saved
+        observed.append(context.checkpoint.recall_work.phase_key)
+        # Continue the original, still-unspent invocation after testing replay.
+        context.recall_permit = permit
+
+    monkeypatch.setattr(loop, "prepare_recall", replay)
+    clock = FixedClock(NOW)
+    async with build(settings=_settings(), script=_search_then_done(), clock=clock) as app:
+        app.executor._prepare_recall = _bound_preparation(app, clock, advance_seconds=0)
+        outcome = await app.runs.wait_terminal(await app.runs.submit("Suggest breakfast options"))
+        assert outcome.status is RunStatus.COMPLETED, outcome.failure
+    assert len(observed) == 3
+    assert len(set(observed)) == 3

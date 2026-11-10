@@ -106,7 +106,9 @@ class MemoryRecallUsage(BaseModel):
     content_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     ranked_ids: tuple[UUID, ...] | None = Field(default=None, max_length=20)
 
-    @field_validator("ranked_ids")
+    returned_ids: tuple[UUID, ...] | None = Field(default=None, max_length=20)
+
+    @field_validator("ranked_ids", "returned_ids")
     @classmethod
     def distinct_ranks(cls, value: tuple[UUID, ...] | None) -> tuple[UUID, ...] | None:
         if value is not None and len(set(value)) != len(value):

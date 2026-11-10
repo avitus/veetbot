@@ -1027,6 +1027,14 @@ browser evidence, tool-call/result pairs and the frozen prefix are unchanged.
 Caller cancellation still propagates. This prevents optional recall from consuming
 the answer window of an otherwise successful browser research run.
 
+[ADR-0309](../adr/0309-recall-continuity-and-phase-clocks.md) reserves five items
+and 500 tokens for fresh automatic evidence when `memory.search@2.3.0` is pinned.
+Validated whole deliberate blocks share the remaining fifteen items and 1,500
+tokens; unused space remains available to automatic recall. The combined ceiling
+stays twenty items and 2,000 tokens. No automatic evidence is cached across calls.
+New runtime reservations time each durably admitted recall phase separately,
+bounded by the run deadline, so model thinking cannot exhaust a later phase.
+
 ## Ports and data model
 
 `ContextBuilder` (Section 7) is unchanged. These are additions.

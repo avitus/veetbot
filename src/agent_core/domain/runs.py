@@ -173,7 +173,8 @@ class RecallWorkBudget(BaseModel):
     automatic round is reserved once per run and refreshed on later build
     steps without new slots (ADR-0282). Reservations written before that
     decision counted the automatic round as a round, which `automatic` cannot
-    see; they keep their stricter accounting.
+    see; they keep their stricter accounting. ADR-0309 records a phase key
+    before each new execution window; absent keys retain the legacy deadline.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -181,6 +182,7 @@ class RecallWorkBudget(BaseModel):
     rounds: int = Field(ge=0, le=2)
     deadline_at: AwareDatetime
     automatic: bool = False
+    phase_key: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class RunCheckpoint(BaseModel):

@@ -231,3 +231,30 @@ async def test_lexical_receipt_does_not_wait_on_semantic_authority() -> None:
         runtime_semantic_queries=cast(Any, UnreachableAuthority()),
     )
     assert await validating.validate_retained(usage, session_id=SESSION_ID, run_id=RUN_ID)
+
+
+@pytest.mark.parametrize("tampered", [False, True])
+async def test_returned_ids_must_match_authoritative_rendered_trace(tampered: bool) -> None:
+    clock, factory, _, _ = await formation_stack()
+    record = memory(statement="The workshop is on Thursday.")
+    async with factory() as uow:
+        await uow.memories.upsert_belief(record)
+    retriever = HybridMemoryRetriever(
+        factory, clock, SequenceIdFactory(UUID(int=i) for i in range(8000, 8010)), principal()
+    )
+    result = await retriever.recall(
+        recall_query(text="workshop"), session_id=SESSION_ID, run_id=RUN_ID
+    )
+    assert result.items
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    usage = MemoryRecallUsage(
+        trace_id=result.trace_id,
+        tokens=result.tokens,
+        items=len(result.items),
+        content_sha256=trace.rendered_sha256,
+        returned_ids=(UUID(int=999),) if tampered else tuple(trace.returned),
+    )
+    assert await retriever.validate_retained(usage, session_id=SESSION_ID, run_id=RUN_ID) is (
+        not tampered
+    )

@@ -884,3 +884,71 @@ async def test_overview_first_person_uses_full_budget_before_competing_beliefs()
     assert all(str(item.record_id) in result.rendered for item in contexts[:9])
     assert "Incomplete context" not in result.rendered
     assert result.tokens <= query.budget_tokens
+
+
+@pytest.mark.parametrize("hard_exclusion", [False, True])
+async def test_context_allocation_preserves_identity_discovery(hard_exclusion: bool) -> None:
+    from agent_core.context.recall_budget import AUTOMATIC_RESERVE, select_search_results
+    from agent_core.domain.memory import BeliefType
+    from agent_core.domain.people import PeopleEndpoint, RelationshipAssertion
+    from tests.unit.test_context_memory_budget import search_result
+
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    first = Person(id=uuid4(), display_name="Quinn", **common)
+    second = Person(id=uuid4(), display_name="Morgan", **common)
+    records = [
+        memory(belief_id=5000 + i, statement=f"The user's coach handles activity {i}.").model_copy(
+            update={"belief_type": BeliefType.RELATIONSHIP}
+        )
+        for i in range(7)
+    ]
+    async with factory() as uow:
+        for person in (first, second):
+            await uow.people.put(person, expected_revision=0)
+        for i, record in enumerate(records):
+            await uow.memories.upsert_belief(record)
+            await uow.people.put(
+                RelationshipAssertion(
+                    id=uuid4(),
+                    subject=PeopleEndpoint(kind="person", id=second.id if i == 6 else first.id),
+                    object=PeopleEndpoint(kind="owner"),
+                    predicate="other",
+                    qualifier="coach",
+                    belief_id=record.id,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+    query = recall_query(text="What does my coach recommend?", max_items=20).model_copy(
+        update={
+            "candidate_selection": "relevance",
+            "exclude_ids": (records[-1].id,) if hard_exclusion else (),
+        }
+    )
+    call, result = search_result("earlier", text="Already shown", tokens=1500, items=15)
+    assert result.memory_recall is not None
+    result.memory_recall = result.memory_recall.model_copy(
+        update={
+            "returned_ids": (records[0].id if hard_exclusion else records[-1].id,),
+        }
+    )
+    _, allowance, _ = select_search_results(
+        [call, result],
+        reserve=AUTOMATIC_RESERVE,
+        permitted_receipts={result.memory_recall},
+    )
+    bounded = allowance.bound(query)
+    assert bounded is not None
+    service = PeopleContextService(factory, HybridMemoryRetriever(factory, clock, ids(), owner))
+    async with factory() as uow:
+        before = await service._relationship_people(uow, owner, query, Sensitivity.SENSITIVE)
+        after = await service._relationship_people(uow, owner, bounded, Sensitivity.SENSITIVE)
+    assert before[0] == ([first.id] if hard_exclusion else [])
+    assert after[0] == before[0], "Presentation must not turn ambiguous evidence into one identity"

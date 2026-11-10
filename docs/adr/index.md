@@ -358,3 +358,4 @@ implementation without one.
 - [ADR-0307: Aggregate browser operation evidence without page content](0307-browser-operation-report.md)
 
 - [ADR-0308: Discover semantic browser regions in open shadow roots](0308-open-shadow-browser-regions.md)
+- [ADR-0309: Recall continuity and phase clocks (Proposed)](0309-recall-continuity-and-phase-clocks.md)

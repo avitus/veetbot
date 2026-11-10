@@ -1336,6 +1336,7 @@ class HybridMemoryRetriever:
                 or trace.passages
                 or len(trace.beliefs) + len(trace.people) != usage.items
                 or len(trace.beliefs) + len(trace.people) > 20
+                or (usage.returned_ids is not None and usage.returned_ids != tuple(trace.returned))
             ):
                 return False
             query = trace.query

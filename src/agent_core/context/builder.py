@@ -23,6 +23,7 @@ from agent_core.context.knowledge_catalog import (
 from agent_core.context.recall_budget import (
     FULL_ALLOWANCE,
     RecallAllowance,
+    automatic_reserve,
     context_ranking,
     ranking_block,
     select_current_search_results,
@@ -614,7 +615,11 @@ class BudgetedContextBuilder:
         active = _insert_provider_continuation(active, checkpoint)
         history_count = len(history)
         shared, recall_allowance, searches_omitted = await select_current_search_results(
-            [*history, *active], self._memory_retriever, session_id=run.session_id, run_id=run.id
+            [*history, *active],
+            self._memory_retriever,
+            session_id=run.session_id,
+            run_id=run.id,
+            reserve=automatic_reserve(checkpoint),
         )
         history, active = shared[:history_count], shared[history_count:]
         # Old sessions predate admission-time excerpts. Their event is the

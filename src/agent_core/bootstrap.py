@@ -4642,6 +4642,17 @@ async def _compose(
             inline_output_bytes=inline_output_bytes,
         )
     )
+    registry.register(
+        MemorySearchTool(
+            memory_retriever,
+            model_planning=True,
+            overview_enabled=True,
+            retain_automatic=True,
+            factory=uow_factory,
+            people_context=people_context,
+            inline_output_bytes=inline_output_bytes,
+        )
+    )
     people_erasure = PeopleErasureService(uow_factory, clock)
     people_identity = PeopleIdentityService(uow_factory, clock, ids)
     people_duplicates = (

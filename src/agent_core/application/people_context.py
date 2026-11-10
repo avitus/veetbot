@@ -677,7 +677,10 @@ class PeopleContextService:
                 "expand_ids": (),
                 "subjects": [],
                 "sensitivity_ceiling": ceiling,
-                "max_items": min(query.max_items, 20),
+                "max_items": min(query.identity_max_items or query.max_items, 20),
+                "exclude_ids": query.exclude_ids
+                if query.identity_exclude_ids is None
+                else query.identity_exclude_ids,
             }
         )
         records = await uow.memories.query(discovery)

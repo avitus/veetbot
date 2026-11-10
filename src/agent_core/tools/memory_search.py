@@ -93,6 +93,7 @@ class MemorySearchTool:
         factory: UnitOfWorkFactory | None = None,
         people_context: PeopleContextService | None = None,
         overview_enabled: bool = False,
+        retain_automatic: bool = False,
         inline_output_bytes: int = 4096,
     ) -> None:
         self._retriever = retriever
@@ -101,6 +102,7 @@ class MemorySearchTool:
         self._people_context = people_context
         self._inline_output_bytes = inline_output_bytes
         self._overview_enabled = overview_enabled
+        self._retain_automatic = retain_automatic
         if model_planning:
             schema = deepcopy(INPUT_SCHEMA)
             schema["required"] = ["text"]
@@ -155,6 +157,11 @@ class MemorySearchTool:
                     }
                 )
 
+        if retain_automatic:
+            if not model_planning or not overview_enabled:
+                raise ValueError("Automatic retention requires the current planned search")
+            self.spec = self.spec.model_copy(update={"version": "2.3.0"})
+
     def query(
         self,
         arguments: dict[str, Any],
@@ -192,13 +199,15 @@ class MemorySearchTool:
                 "as_of": arguments.get("as_of"),
                 "known_at": arguments.get("known_at") if self._model_planning else None,
                 "profile": RecallProfile.DEEP,
-                "budget_tokens": 2_000,
+                "budget_tokens": 1_500 if self._retain_automatic else 2_000,
                 "budget_bytes": min(self._inline_output_bytes, self.spec.maximum_output_bytes),
                 "relationship_group": arguments.get("relationship_group")
                 if self._overview_enabled
                 else None,
                 "people_after": arguments.get("people_after") if self._overview_enabled else None,
-                "max_items": 20,
+                "max_items": 15 if self._retain_automatic else 20,
+                "identity_max_items": 20 if self._retain_automatic else None,
+                "identity_exclude_ids": () if self._retain_automatic else None,
                 "min_score": 0.1,
                 "sensitivity_ceiling": Sensitivity.RESTRICTED,
             }
@@ -264,5 +273,8 @@ class MemorySearchTool:
                 items=len(result.items) + len(result.people),
                 content_sha256=hashlib.sha256(result.rendered.encode()).hexdigest(),
                 ranked_ids=None if result.stages is None else result.stages.ranked_ids[:20],
+                returned_ids=tuple(item.belief_id for item in result.items)
+                if self._retain_automatic
+                else None,
             ),
         )

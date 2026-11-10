@@ -155,6 +155,18 @@ reserved once per run and refreshed on later build steps without new slots or
 rounds, while deliberate searches reserve one slot each from the two it leaves,
 in at most two deliberate rounds; and a refused or timed-out automatic recall
 appends `memory.recall.limited` with its reason beside the limitation marker.
+[ADR-0309](../adr/0309-recall-continuity-and-phase-clocks.md) repairs continuity
+for newly pinned `memory.search@2.3.0`: deliberate results use at most fifteen
+items and 1,500 tokens, leaving five items and 500 tokens for fresh automatic
+recall within the unchanged shared ceiling. Fresh automatic queries exclude belief
+IDs actually rendered in retained search blocks, only after those IDs and the
+whole receipt pass current trace validation. Ranked-but-unrendered IDs and
+withheld results exclude nothing. Older pins retain their allocation.
+New execution-bound reservations checkpoint each recall phase before work and
+give that phase five seconds for preparation plus ten for search. Model thinking
+does not spend later phases' time. Run-wide slots and deliberate rounds remain
+nonrefundable; replay of a checkpointed phase cannot recreate its permit. Old
+reservations without phase identities retain their absolute deadline.
 Context assembly now records its existing block
 priority as one deduplicated twenty-original rank prefix, as specified in
 [ADR-0192](../adr/0192-recovered-source-evaluation.md). The scorer verifies that

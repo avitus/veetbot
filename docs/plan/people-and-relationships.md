@@ -571,6 +571,13 @@ role discovery to existing linked facts: bounded eligible relationship beliefs
 select only an unambiguous visible direct owner relationship. No role dictionary
 or inferred graph path is used. Name ambiguity never falls back to role selection.
 Automatic and planned deliberate recall share this People context mechanism.
+[ADR-0309](../adr/0309-recall-continuity-and-phase-clocks.md) keeps identity
+selection independent of presentation allocation for the new search version:
+automatic queries retain their original bounded discovery cap and hard
+exclusions when their prompt allowance shrinks or already-rendered beliefs are
+excluded. Deliberate discovery retains its twenty-candidate ceiling. This
+prevents a reduced presentation budget from manufacturing a unique identity;
+source visibility, sensitivity, temporal restrictions and hard exclusions remain.
 
 [ADR-0238](../adr/0238-owner-overview-and-memory-delivery.md) adds direct owner
 relationship pages for explicit owner/family overviews. The first family page
