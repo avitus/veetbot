@@ -21,14 +21,17 @@ PROGRESS_MEDIA_TYPE = "application/vnd.veetbot.browser-progress+ndjson"
 
 
 def request() -> Request:
+    """Build an isolated request for the response generator contract."""
     return Request({"type": "http", "headers": [(b"accept", PROGRESS_MEDIA_TYPE.encode())]})
 
 
 async def test_hosted_phase_arrives_before_result_and_disconnect_cancels_operation() -> None:
+    """Hosted phase arrives before result and disconnect cancels operation."""
     entered = asyncio.Event()
     cancelled = asyncio.Event()
 
     async def operation() -> dict[str, str]:
+        """Exercise the blocked or failing operation boundary for this regression."""
         try:
             with browser_phase("navigation"):
                 entered.set()
@@ -55,6 +58,7 @@ async def test_hosted_phase_arrives_before_result_and_disconnect_cancels_operati
 async def test_hosted_progress_retains_final_observation_or_refusal(
     tmp_path: Path, missing: bool
 ) -> None:
+    """Hosted progress retains final observation or refusal."""
     sessions, _runtime, lease = await leased(tmp_path)
     async with _app(sessions) as client:
         response = await client.post(
@@ -73,7 +77,10 @@ async def test_hosted_progress_retains_final_observation_or_refusal(
 
 
 async def test_hosted_stream_maps_unknown_errors_without_leaking_text() -> None:
+    """Hosted stream maps unknown errors without leaking text."""
+
     async def operation() -> dict[str, str]:
+        """Exercise the blocked or failing operation boundary for this regression."""
         raise RuntimeError("secret-cookie-canary")
 
     response = await _diagnosed_response(request(), operation(), lambda value: value)
@@ -88,6 +95,7 @@ async def test_hosted_stream_maps_unknown_errors_without_leaking_text() -> None:
 async def test_hosted_progress_rejects_unauthenticated_requests_before_execution(
     tmp_path: Path,
 ) -> None:
+    """Hosted progress rejects unauthenticated requests before execution."""
     sessions, runtime, lease = await leased(tmp_path)
     before = list(runtime.actions)
     async with _app(sessions) as client:
@@ -105,6 +113,7 @@ async def test_hosted_progress_rejects_unauthenticated_requests_before_execution
 async def test_hosted_client_reads_progress_before_final_result_and_never_reposts(
     ending: str,
 ) -> None:
+    """Hosted client reads progress before final result and never reposts."""
     import httpx
 
     from agent_core.adapters.browser.hosted_sessions import (
@@ -121,11 +130,13 @@ async def test_hosted_client_reads_progress_before_final_result_and_never_repost
     updates = []
 
     def progress(update: object) -> None:
+        """Observe an update before allowing the mocked response to finish."""
         updates.append(update)
         seen.set()
 
     class Stream(httpx.AsyncByteStream):
         async def __aiter__(self) -> AsyncIterator[bytes]:
+            """Yield incremental records to exercise bounded stream parsing."""
             yield (
                 b'{"type":"progress","progress":{"version":1,"phase":"navigation",'
                 b'"placement":"runtime","elapsed_ms":10}}\n'
@@ -152,6 +163,7 @@ async def test_hosted_client_reads_progress_before_final_result_and_never_repost
                 yield frame
 
     def serve(request: httpx.Request) -> httpx.Response:
+        """Return the configured legacy or streamed service response."""
         calls.append(request)
         assert request.headers["accept"] == PROGRESS_MEDIA_TYPE
         return httpx.Response(200, headers={"content-type": PROGRESS_MEDIA_TYPE}, stream=Stream())
@@ -180,11 +192,13 @@ async def test_hosted_client_reads_progress_before_final_result_and_never_repost
 
 
 async def test_local_progress_is_bounded_and_listener_failures_do_not_change_results() -> None:
+    """Local progress is bounded and listener failures do not change results."""
     from agent_core.domain.browser_diagnostics import collect_browser_diagnostics
 
     seen: list[object] = []
 
     def record(update: object) -> None:
+        """Count updates and simulate a failing presentation listener."""
         seen.append(update)
         raise RuntimeError("private-listener-error")
 
@@ -201,6 +215,7 @@ async def test_local_progress_is_bounded_and_listener_failures_do_not_change_res
 
 
 async def test_progress_publisher_failure_cannot_change_tool_result() -> None:
+    """Progress publisher failure cannot change tool result."""
     from agent_core.adapters.determinism import SequenceIdFactory
     from agent_core.adapters.live_events import InMemoryLiveEventBroadcaster
     from agent_core.domain.browser import BrowserObservation
@@ -216,6 +231,7 @@ async def test_progress_publisher_failure_cannot_change_tool_result() -> None:
 
     class Broadcaster(InMemoryLiveEventBroadcaster):
         def __init__(self) -> None:
+            """Track the publisher lifecycle for the failure isolation regression."""
             super().__init__()
             self.entered = asyncio.Event()
             self.stopped = asyncio.Event()
@@ -223,6 +239,7 @@ async def test_progress_publisher_failure_cannot_change_tool_result() -> None:
         async def publish(
             self, session_id: UUID, run_id: UUID, event: str, data: dict[str, Any]
         ) -> None:
+            """Simulate a stalled broadcaster and record cancellation cleanup."""
             self.entered.set()
             try:
                 await asyncio.Event().wait()
@@ -233,6 +250,7 @@ async def test_progress_publisher_failure_cannot_change_tool_result() -> None:
 
     class Provider(FakeBrowserProvider):
         async def observe(self) -> BrowserObservation:
+            """Emit a phase while producing the normal browser observation."""
             with browser_phase("observation"):
                 async with asyncio.timeout(1):
                     await broadcaster.entered.wait()
@@ -266,6 +284,7 @@ async def test_progress_publisher_failure_cannot_change_tool_result() -> None:
 
 
 async def test_progress_publishing_uses_only_the_matching_run_and_call() -> None:
+    """Progress publishing uses only the matching run and call."""
     from uuid import uuid4
 
     from agent_core.adapters.live_events import InMemoryLiveEventBroadcaster
@@ -303,6 +322,7 @@ async def test_progress_publishing_uses_only_the_matching_run_and_call() -> None
 async def test_invalid_progress_is_ignored_and_old_json_services_still_work(
     streaming: bool,
 ) -> None:
+    """Invalid progress is ignored and old json services still work."""
     import httpx
 
     from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
@@ -314,6 +334,7 @@ async def test_invalid_progress_is_ignored_and_old_json_services_still_work(
     observation = FakeBrowserProvider()._observation("https://example.org/").model_dump(mode="json")
 
     def serve(_request: httpx.Request) -> httpx.Response:
+        """Return the configured legacy or streamed service response."""
         if not streaming:
             return httpx.Response(200, json=observation)
         frames = [
@@ -347,6 +368,7 @@ async def test_invalid_progress_is_ignored_and_old_json_services_still_work(
 
 
 async def test_streamed_action_still_fences_repeated_dispatch(tmp_path: Path) -> None:
+    """Streamed action still fences repeated dispatch."""
     import hashlib
 
     from tests.unit.test_browser_dispatch_constraint import CLICK
@@ -369,6 +391,7 @@ async def test_streamed_action_still_fences_repeated_dispatch(tmp_path: Path) ->
 
 @pytest.mark.parametrize("blocked_send", [False, True])
 async def test_http_disconnect_waits_for_operation_cleanup(blocked_send: bool) -> None:
+    """Http disconnect waits for operation cleanup."""
     from starlette.types import Message
 
     entered = asyncio.Event()
@@ -376,6 +399,7 @@ async def test_http_disconnect_waits_for_operation_cleanup(blocked_send: bool) -
     sending = asyncio.Event()
 
     async def operation() -> dict[str, str]:
+        """Exercise the blocked or failing operation boundary for this regression."""
         try:
             entered.set()
             await asyncio.Event().wait()
@@ -388,12 +412,14 @@ async def test_http_disconnect_waits_for_operation_cleanup(blocked_send: bool) -
     assert isinstance(response, StreamingResponse)
 
     async def receive() -> Message:
+        """Signal disconnection only after operation and response execution begin."""
         await entered.wait()
         if blocked_send:
             await sending.wait()
         return {"type": "http.disconnect"}
 
     async def send(message: Message) -> None:
+        """Model either a successful send or a stalled transport."""
         if blocked_send and message["type"] == "http.response.body":
             sending.set()
             await asyncio.Event().wait()

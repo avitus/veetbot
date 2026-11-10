@@ -122,6 +122,7 @@ class BrowserDiagnosticCollector:
     _progress_count: int = 0
 
     def progress(self, phase: Phase, placement: Placement) -> None:
+        """Emit a bounded content-free update while isolating listener failures."""
         if self.on_progress is None or self._progress_count >= MAX_PROGRESS_UPDATES:
             return
         self._progress_count += 1
@@ -161,6 +162,7 @@ def collect_browser_diagnostics(
     enabled: bool = True,
     on_progress: Callable[[BrowserProgress], None] | None = None,
 ) -> Iterator[BrowserDiagnosticCollector]:
+    """Scope diagnostics and active phases to one operation and restore the caller context."""
     collector = BrowserDiagnosticCollector(clock=clock, _started=clock(), on_progress=on_progress)
     token = _CURRENT.set(collector if enabled else None)
     active_token = _ACTIVE.set(())
@@ -179,6 +181,7 @@ class PhaseOutcome:
 
 @contextmanager
 def browser_phase(phase: Phase, placement: Placement = "runtime") -> Iterator[PhaseOutcome]:
+    """Record phase outcomes and restore parent progress when nested work finishes."""
     collector = _CURRENT.get()
     result = PhaseOutcome()
     if collector is None:
@@ -211,11 +214,13 @@ def browser_phase(phase: Phase, placement: Placement = "runtime") -> Iterator[Ph
 
 
 def has_browser_progress_listener() -> bool:
+    """Indicate whether this operation requested transient phase updates."""
     collector = _CURRENT.get()
     return collector is not None and collector.on_progress is not None
 
 
 def admit_browser_progress(encoded: str) -> None:
+    """Validate a hosted phase and rebase its elapsed time to the local operation."""
     collector = _CURRENT.get()
     if collector is None:
         return

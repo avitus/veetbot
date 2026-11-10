@@ -654,6 +654,7 @@ async def test_an_invisible_sign_in_field_in_a_frame_is_not_a_challenge(path: st
 
 
 async def test_navigation_progress_is_visible_while_chromium_waits_for_the_page() -> None:
+    """Prove real Chromium reports navigation before a blocked page response completes."""
     from agent_core.domain.browser_diagnostics import BrowserProgress, collect_browser_diagnostics
 
     requested = asyncio.Event()

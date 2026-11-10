@@ -115,6 +115,7 @@ class HostedBrowserSessionControlPlane:
         response_model: type[BaseModel] | None,
         idempotency_key: str | None = None,
     ) -> BaseModel | None:
+        """Send once, admit bounded diagnostics, and preserve JSON or streamed result semantics."""
         try:
             secret = await self._credentials.resolve(CredentialRef(CREDENTIAL_NAME))
         except PermissionError as exc:

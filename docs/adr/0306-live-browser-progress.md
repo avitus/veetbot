@@ -54,4 +54,5 @@ plus four accessibility-evidence tests in the local VMs. The initial streaming
 regression failed because the response waited for the operation to finish. A
 second regression reproduced interrupted cleanup on an HTTP disconnect; it now
 passes for both a waiting reader and a blocked send. Lint and typing pass.
-The broader static partition and final hosted verification remain delivery checks.
+The full local static partition passed 9,982 tests with three skips in 857.91 seconds.
+Final hosted verification remains a delivery check.

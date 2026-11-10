@@ -230,6 +230,7 @@ class _ProfileServiceBoundary:
         delivered = False
 
         async def bounded_receive() -> Message:
+            """Replay the bounded request body once, then expose actual disconnect messages."""
             nonlocal delivered
             if delivered:
                 # Streaming responses must observe disconnects after consuming the body.
@@ -508,6 +509,7 @@ def create_profile_service_app(
         async def acquire(
             payload: _AcquireRequest, request: Request
         ) -> dict[str, Any] | JSONResponse | StreamingResponse:
+            """Fence acquisition retries and negotiate optional progress for this operation."""
             expected = (
                 f"browser-session:{payload.profile_id}:{payload.run_id}:"
                 f"{payload.attempt_number}:acquire"
@@ -532,6 +534,7 @@ def create_profile_service_app(
         async def navigate(
             payload: _NavigateRequest, request: Request
         ) -> dict[str, Any] | StreamingResponse:
+            """Navigate with the negotiated progress or legacy JSON response."""
             return await _diagnosed_response(
                 request,
                 sessions.navigate_snapshot(payload.lease_ref, payload.url),
@@ -542,6 +545,7 @@ def create_profile_service_app(
         async def observe(
             payload: _ObserveRequest, request: Request
         ) -> dict[str, Any] | StreamingResponse:
+            """Read the requested page projection with optional live phase updates."""
             return await _diagnosed_response(
                 request,
                 sessions.observe_snapshot(payload.lease_ref, payload.expansion, payload.extraction),
@@ -552,6 +556,7 @@ def create_profile_service_app(
         async def act(
             payload: _ActRequest, request: Request
         ) -> dict[str, Any] | JSONResponse | StreamingResponse:
+            """Validate the dispatch key before running an optionally streamed action."""
             expected = (
                 f"browser-session:{_private_ref_digest(payload.lease_ref)}:act:{payload.sequence}"
             )
@@ -573,6 +578,7 @@ def create_profile_service_app(
         async def upload(
             payload: _UploadRequest, request: Request
         ) -> dict[str, Any] | JSONResponse | StreamingResponse:
+            """Validate the image and dispatch key before an optionally streamed upload."""
             digest = _private_ref_digest(payload.lease_ref)
             expected = f"browser-session:{digest}:upload:{payload.sequence}"
             rejected = _require_idempotency(request, expected)
@@ -973,6 +979,7 @@ async def _diagnosed_response[ResponseT](
     operation: Awaitable[ResponseT],
     render: Callable[[ResponseT], dict[str, Any]],
 ) -> dict[str, Any] | StreamingResponse:
+    """Negotiate live phases only for clients that explicitly request the media type."""
     if request.headers.get("accept") == PROGRESS_MEDIA_TYPE:
         return progress_response(request, operation, render)
     return await diagnosed_operation(request, operation, render)

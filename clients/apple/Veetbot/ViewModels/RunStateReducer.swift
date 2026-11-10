@@ -84,6 +84,16 @@ public struct ToolActivity: Identifiable, Sendable {
         }
     }
 
+    /// Summarize a collapsed call while preserving its target, permission, and outcome.
+    public func activitySummary(detail: String?, at date: Date) -> String {
+        var parts = [name]
+        if let detail { parts.append(detail) }
+        if allowedByTaskGrant { parts.append("Allowed by task permission") }
+        parts.append(presentationStatus.rawValue.capitalized)
+        if let browserProgress { parts.append(browserProgress.summary(at: date)) }
+        return parts.joined(separator: " · ")
+    }
+
     /// Present error-bearing completed calls as failed without rewriting their wire status.
     public var presentationStatus: ToolActivityStatus {
         status == .completed && result?.isError == true
@@ -1063,6 +1073,7 @@ public struct BrowserActivityProgress: Decodable, Sendable {
     public let phase: String
     public let placement: String
     public let elapsedMS: Int
+    private let receivedAt = Date()
 
     enum CodingKeys: String, CodingKey {
         case version, phase, placement
@@ -1075,8 +1086,11 @@ public struct BrowserActivityProgress: Decodable, Sendable {
             && (0...3_600_000).contains(elapsedMS)
     }
 
-    public var summary: String {
+    public var summary: String { summary(at: receivedAt) }
+
+    public func summary(at date: Date) -> String {
         let label = BrowserActivityDiagnostics.phaseLabels[phase] ?? "Browser operation"
-        return "\(label) · \(String(format: "%.1f s", Double(elapsedMS) / 1000))"
+        let seconds = min(3600, Double(elapsedMS) / 1000 + max(0, date.timeIntervalSince(receivedAt)))
+        return "\(label) · \(String(format: "%.1f s", seconds))"
     }
 }

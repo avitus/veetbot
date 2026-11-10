@@ -30,6 +30,10 @@ import Testing
         #expect(reducer.tools[0].browserProgress == nil)
         reducer.reduce(progress())
         #expect(reducer.tools[0].browserProgress?.summary == "Read page · 1.2 s")
+        #expect(reducer.tools[0].browserProgress?.summary(at: .distantPast) == "Read page · 1.2 s")
+        #expect(reducer.tools[0].browserProgress?.summary(at: .distantFuture) == "Read page · 3600.0 s")
+        #expect(reducer.tools[0].activitySummary(detail: "example.com", at: .distantPast)
+            == "browser.observe · example.com · Running · Read page · 1.2 s")
         #expect(reducer.tools[0].status == .running)
         reducer.reduce(SSEFrame(id: 3, event: "tool.call.uncertain", data: [
             "call_id": .string("read"), "name": .string("browser.observe"),
@@ -37,6 +41,8 @@ import Testing
         reducer.reduce(progress())
         #expect(reducer.tools[0].browserProgress == nil)
         #expect(reducer.tools[0].status == .uncertain)
+        #expect(reducer.tools[0].activitySummary(detail: "example.com", at: .distantPast)
+            == "browser.observe · example.com · Uncertain")
     }
 
     @Test

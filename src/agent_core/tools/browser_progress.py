@@ -20,17 +20,20 @@ async def publish_browser_progress(
     call_id: str,
     name: str,
 ) -> AsyncIterator[Callable[[BrowserProgress], None] | None]:
+    """Publish coalesced transient updates without delaying or changing the tool result."""
     if broadcaster is None:
         yield None
         return
     queue: asyncio.Queue[BrowserProgress] = asyncio.Queue(maxsize=1)
 
     def offer(update: BrowserProgress) -> None:
+        """Replace any queued phase with the newest validated update."""
         if queue.full():
             queue.get_nowait()
         queue.put_nowait(update)
 
     async def publish() -> None:
+        """Forward updates with a bounded wait and isolate broadcaster failures."""
         while True:
             update = await queue.get()
             try:

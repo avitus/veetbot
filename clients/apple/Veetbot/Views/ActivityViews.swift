@@ -42,7 +42,7 @@ struct WorkStrip: View {
                         .veetIcon(.small, weight: .semibold)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .frame(width: 12)
-                    Text(sentence)
+                    sentenceLabel
                         .veetType(.ui)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -126,16 +126,23 @@ struct WorkStrip: View {
     }
 
     /// One sentence: the call and its outcome, or the bundle's count and outcomes.
-    private var sentence: String {
+    @ViewBuilder
+    private var sentenceLabel: some View {
+        if case .single(let activity) = content, activity.browserProgress != nil {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(sentence(at: context.date))
+            }
+        } else {
+            Text(sentence(at: .now))
+        }
+    }
+
+    private func sentence(at date: Date) -> String {
         switch content {
         case .bundle(let bundle):
             return bundle.summary
         case .single(let activity):
-            var parts = [activity.name]
-            if let detail = ToolLedgerRow.detail(for: activity) { parts.append(detail) }
-            if activity.allowedByTaskGrant { parts.append("Allowed by task permission") }
-            parts.append(activity.presentationStatus.rawValue.capitalized)
-            return parts.joined(separator: " · ")
+            return activity.activitySummary(detail: ToolLedgerRow.detail(for: activity), at: date)
         }
     }
 }
@@ -174,9 +181,11 @@ struct ToolLedgerRow: View {
                             )
                     }
                     if let progress = activity.browserProgress {
-                        Text(progress.summary)
-                            .veetType(.meta)
-                            .foregroundColor(AppTheme.inkSoft)
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(progress.summary(at: context.date))
+                                .veetType(.meta)
+                                .foregroundColor(AppTheme.inkSoft)
+                        }
                     }
                     if let detail = Self.detail(for: activity) {
                         Text(detail)

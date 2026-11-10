@@ -14,6 +14,7 @@ from agent_core.domain.browser_diagnostics import MAX_PROGRESS_UPDATES, admit_br
 async def read_progress_response(
     response: httpx.Response, *, maximum_body_bytes: int
 ) -> tuple[int, bytes]:
+    """Decode bounded updates and exactly one terminal result without retrying the request."""
     pending = bytearray()
     total = 0
     records = 0
