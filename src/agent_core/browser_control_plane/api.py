@@ -14,7 +14,7 @@ from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -23,6 +23,7 @@ from agent_core.browser_control_plane.handoff import (
     MAX_DEVICE_HANDOFF_BYTES,
     DeviceSessionHandoff,
 )
+from agent_core.browser_control_plane.progress import diagnosed_operation, progress_response
 from agent_core.browser_control_plane.sessions import (
     CeremonyCapabilityRejected,
     DeviceHandoffInvalid,
@@ -41,9 +42,8 @@ from agent_core.domain.browser import (
     BrowserSnapshot,
 )
 from agent_core.domain.browser_diagnostics import (
+    PROGRESS_MEDIA_TYPE,
     BrowserDiagnostics,
-    browser_phase,
-    collect_browser_diagnostics,
 )
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import MAX_BROWSER_UPLOAD_BODY_BYTES, BrowserImagePayload
@@ -169,6 +169,7 @@ class _ProfileServiceBoundary:
         self._authorization = authorization.reveal()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Authenticate and bound service bodies while preserving disconnect delivery."""
         if scope["type"] != "http" or not (
             scope["method"] == "POST" and str(scope["path"]).startswith("/v1/")
         ):
@@ -230,9 +231,11 @@ class _ProfileServiceBoundary:
         delivered = False
 
         async def bounded_receive() -> Message:
+            """Replay the bounded request body once, then expose actual disconnect messages."""
             nonlocal delivered
             if delivered:
-                return {"type": "http.request", "body": b"", "more_body": False}
+                # Streaming responses must observe disconnects after consuming the body.
+                return await receive()
             delivered = True
             return {"type": "http.request", "body": bytes(body), "more_body": False}
 
@@ -386,6 +389,8 @@ def create_profile_service_app(
     sessions: HostedProfileSessionService | None = None,
     sweep_interval_seconds: float = 15.0,
 ) -> FastAPI:
+    """Compose the authenticated profile and session API with bounded lifecycle cleanup."""
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # ADR-0128 D16: sweep on a timer, not only when traffic arrives.
@@ -506,7 +511,8 @@ def create_profile_service_app(
         @app.post("/v1/browser-sessions:acquire", response_model=None)
         async def acquire(
             payload: _AcquireRequest, request: Request
-        ) -> dict[str, Any] | JSONResponse:
+        ) -> dict[str, Any] | JSONResponse | StreamingResponse:
+            """Fence acquisition retries and negotiate optional progress for this operation."""
             expected = (
                 f"browser-session:{payload.profile_id}:{payload.run_id}:"
                 f"{payload.attempt_number}:acquire"
@@ -528,7 +534,10 @@ def create_profile_service_app(
             )
 
         @app.post("/v1/browser-sessions:navigate", response_model=None)
-        async def navigate(payload: _NavigateRequest, request: Request) -> dict[str, Any]:
+        async def navigate(
+            payload: _NavigateRequest, request: Request
+        ) -> dict[str, Any] | StreamingResponse:
+            """Navigate with the negotiated progress or legacy JSON response."""
             return await _diagnosed_response(
                 request,
                 sessions.navigate_snapshot(payload.lease_ref, payload.url),
@@ -536,7 +545,10 @@ def create_profile_service_app(
             )
 
         @app.post("/v1/browser-sessions:observe", response_model=None)
-        async def observe(payload: _ObserveRequest, request: Request) -> dict[str, Any]:
+        async def observe(
+            payload: _ObserveRequest, request: Request
+        ) -> dict[str, Any] | StreamingResponse:
+            """Read the requested page projection with optional live phase updates."""
             return await _diagnosed_response(
                 request,
                 sessions.observe_snapshot(payload.lease_ref, payload.expansion, payload.extraction),
@@ -544,7 +556,10 @@ def create_profile_service_app(
             )
 
         @app.post("/v1/browser-sessions:act", response_model=None)
-        async def act(payload: _ActRequest, request: Request) -> dict[str, Any] | JSONResponse:
+        async def act(
+            payload: _ActRequest, request: Request
+        ) -> dict[str, Any] | JSONResponse | StreamingResponse:
+            """Validate the dispatch key before running an optionally streamed action."""
             expected = (
                 f"browser-session:{_private_ref_digest(payload.lease_ref)}:act:{payload.sequence}"
             )
@@ -565,7 +580,8 @@ def create_profile_service_app(
         @app.post("/v1/browser-sessions:upload", response_model=None)
         async def upload(
             payload: _UploadRequest, request: Request
-        ) -> dict[str, Any] | JSONResponse:
+        ) -> dict[str, Any] | JSONResponse | StreamingResponse:
+            """Validate the image and dispatch key before an optionally streamed upload."""
             digest = _private_ref_digest(payload.lease_ref)
             expected = f"browser-session:{digest}:upload:{payload.sequence}"
             rejected = _require_idempotency(request, expected)
@@ -575,10 +591,13 @@ def create_profile_service_app(
                 image = payload.image.decode()
             except MediaInputError:
                 return _error(400, "invalid_request", "invalid image upload")
-            result = await sessions.act_snapshot(
-                payload.lease_ref, payload.action, sequence=payload.sequence, image=image
+            return await _diagnosed_response(
+                request,
+                sessions.act_snapshot(
+                    payload.lease_ref, payload.action, sequence=payload.sequence, image=image
+                ),
+                _snapshot_response,
             )
-            return _snapshot_response(result)
 
         @app.post("/v1/browser-sessions:renew", response_model=None)
         async def renew(payload: _RenewRequest, request: Request) -> dict[str, Any] | JSONResponse:
@@ -962,16 +981,11 @@ async def _diagnosed_response[ResponseT](
     request: Request,
     operation: Awaitable[ResponseT],
     render: Callable[[ResponseT], dict[str, Any]],
-) -> dict[str, Any]:
-    with collect_browser_diagnostics(clock=asyncio.get_running_loop().time) as collector:
-        try:
-            with browser_phase("operation", "hosted"):
-                result = await operation
-            payload = render(result)
-        finally:
-            request.state.browser_diagnostics = collector.snapshot()
-    payload["browser_diagnostics"] = collector.snapshot().model_dump(mode="json")
-    return payload
+) -> dict[str, Any] | StreamingResponse:
+    """Negotiate live phases only for clients that explicitly request the media type."""
+    if request.headers.get("accept") == PROGRESS_MEDIA_TYPE:
+        return progress_response(request, operation, render)
+    return await diagnosed_operation(request, operation, render)
 
 
 def _diagnostic_error_response(request: Request, response: JSONResponse) -> JSONResponse:

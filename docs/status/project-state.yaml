@@ -1,3 +1,7 @@
+# ADR-0306: On 2026-11-10 the owner directed continuation of the browser
+# improvement work packages. W2 gains bounded live phase updates through the
+# existing transient run stream and native activity view. Delivery and broader
+# W2 acceptance remain pending; no milestone or gate moves.
 # ADR-0305: Read-only Google Calendar implementation authorized 2026-11-09.
 # Selected calendars, separate OAuth and explicit scheduled access; implemented offline.
 # Production consent and activation pending; no milestone or gate moves.

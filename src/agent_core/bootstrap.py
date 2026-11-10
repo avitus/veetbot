@@ -5203,6 +5203,7 @@ async def _compose(
             uow_factory,
             clock,
             ids,
+            live_events=live_events,
             policy=policy_engine,
             recovery_policy=tool_deterministic_engine,
             workspace_factory=sandbox_manager,

@@ -98,13 +98,23 @@ or automatic credential entry is introduced. See
 W1–W6 remain partial. Later slices added verified sign-in resumption, a reviewed
 X Home briefing workflow and bounded startup recovery (ADRs 0164, 0175 and 0177).
 Those capabilities do not establish broad site coverage, task quality or capacity.
-In-flight phase streaming, frame coverage and the broader W7–W10 capabilities
-remain outstanding. Live site contracts use the websites, tasks and account/action
+Frame coverage, aggregate operational reporting and the broader W7–W10
+capabilities remain outstanding. Live site contracts use the websites, tasks and account/action
 scope the owner has already selected; ask only for genuinely missing scope.
 Technical predicate and workflow maintenance belongs to the implementation,
 not to the user.
 Keep the release scorecard unmeasured until its own evidence exists; local work
 is not a push, review, deployment or a completed program.
+
+### Construction — 2026-11-10
+
+The W2 continuation adds bounded live phase progress through authenticated
+hosted responses, the existing transient run stream and native activity rows
+([ADR-0306](adr/0306-live-browser-progress.md)). Terminal diagnostics retain
+replayable results. Progress delivery is best effort, with bounded queues and
+finite publish waits. A lost browser response still follows the existing
+uncertain-effect rules. Review, production delivery and live acceptance remain
+pending; W2 aggregate reporting and the broader program exit evidence remain open.
 
 ### Production diagnosis — 2026-10-18
 
