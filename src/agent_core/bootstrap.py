@@ -628,6 +628,7 @@ from agent_core.knowledge.embedding import KnowledgeEmbedder
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.knowledge.uploads import UploadAutoIngest
 from agent_core.mcp.configuration import (
+    calendar_server_configs,
     calling_server_configs,
     email_server_configs,
     svp_server_configs,
@@ -2394,13 +2395,27 @@ def _schedule_principal(settings: Settings) -> Principal:
         for row in svp_server_configs(settings.auth_tenant_id, enabled=settings.svp_enabled)
         for scope in row.required_scopes
     }
+    calendar_scopes = {
+        scope
+        for row in calendar_server_configs(
+            settings.auth_tenant_id, enabled=settings.calendar_enabled
+        )
+        for scope in row.required_scopes
+    }
     # ADR-0254: a feed-keeping schedule's occurrence keeps its Cockpit scopes.
     feed_scopes = COCKPIT_FEED_SCOPES if settings.cockpit_enabled else ()
     return Principal(
         tenant_id=settings.auth_tenant_id,
         principal_id=settings.auth_principal_id,
         roles=set(settings.auth_roles),
-        scopes={*settings.auth_scopes, *email_scopes, *call_scopes, *svp_scopes, *feed_scopes},
+        scopes={
+            *settings.auth_scopes,
+            *email_scopes,
+            *call_scopes,
+            *svp_scopes,
+            *calendar_scopes,
+            *feed_scopes,
+        },
     )
 
 
@@ -6952,7 +6967,20 @@ async def build(
         enabled=effective_settings.svp_enabled
         and (credential_resolver is not None or "svp_read" in effective_settings.credentials),
     )
+    if any(config.server_id == "calendar_read" for config in mcp_servers):
+        raise ConfigurationError("The Calendar row requires AGENT_CALENDAR_ENABLED")
+    composed_calendar_rows = calendar_server_configs(
+        effective_principal.tenant_id,
+        enabled=effective_settings.calendar_enabled
+        and (credential_resolver is not None or "calendar_read" in effective_settings.credentials),
+    )
+    if composed_calendar_rows:
+        effective_principal = effective_principal.model_copy(
+            update={"scopes": {*effective_principal.scopes, "mcp.calendar_read.use"}},
+            deep=True,
+        )
     effective_mcp_servers = (
+        *composed_calendar_rows,
         *mcp_servers,
         *composed_email_rows,
         *composed_call_rows,

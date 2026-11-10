@@ -1593,3 +1593,10 @@ invalid content fails closed without another revision.
 4. A future continuous-session mode would conflict with the one-active-run
    constraint and unbounded conversation growth. It requires separate evidence
    and is not an alternate interpretation of the dedicated-session rule here.
+
+## Google Calendar reads (ADR-0305)
+
+An enabled `calendar_read` server is eligible for explicit schedule selection and
+read-only job grants. A non-job schedule holding `mcp.calendar_read.use` must
+name the server. The schedule role mirrors `AGENT_CALENDAR_ENABLED` without
+credentials. See [Calendar integration](calendar-integration.md).

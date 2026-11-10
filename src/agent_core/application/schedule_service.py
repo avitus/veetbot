@@ -591,7 +591,7 @@ async def mcp_server_scopes(
     """ADR-0291: what these servers require, refusing one a schedule or job cannot name.
 
     Calling keeps its own flag (ADR-0213), and the schedule role can vouch only for
-    Gmail and Scale VP. An owner-added server requires no scope.
+    Gmail, Calendar and Scale VP. An owner-added server requires no scope.
     """
     scopes: set[str] = set()
     for server_id in sorted(servers):
@@ -698,6 +698,14 @@ async def _validate_definition(
     ):
         raise ScheduleValidationError(
             "schedule.mcp_scope_unnamed", "A schedule must name Scale VP to hold its scope."
+        )
+    if (
+        not isinstance(definition.task, JobTask)
+        and "mcp.calendar_read.use" in definition.requested_scopes
+        and "calendar_read" not in definition.mcp_servers
+    ):
+        raise ScheduleValidationError(
+            "schedule.mcp_scope_unnamed", "A schedule must name Calendar to hold its scope."
         )
     if definition.browser_profile_id is not None:
         require_scope(principal, "browser.profile.read")

@@ -233,3 +233,25 @@ def svp_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MCPServ
             required_scopes=frozenset({"mcp.svp_read.use"}),
         ),
     )
+
+
+def calendar_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MCPServerConfig, ...]:
+    """Compose the one read-only Calendar row (ADR-0305)."""
+    if not enabled:
+        return ()
+    return (
+        MCPServerConfig(
+            tenant_id=tenant_id,
+            server_id="calendar_read",
+            transport=MCPTransport.STDIO,
+            endpoint=shlex.join([sys.executable, "-m", "calendar_mcp"]),
+            operator_configured=True,
+            auth_scheme=MCPAuthScheme.ENV,
+            auth_name="CALENDAR_MCP_CREDENTIAL",
+            credential_ref="calendar_read",
+            side_effect=SideEffectClass.NETWORK_READ,
+            risk=RiskLevel.LOW,
+            idempotency=IdempotencyClass.READ_ONLY,
+            required_scopes=frozenset({"mcp.calendar_read.use"}),
+        ),
+    )

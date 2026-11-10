@@ -1842,6 +1842,7 @@ def test_repository_contract_requires_red_green_tdd_evidence() -> None:
 
 
 def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
+    """Verify project metadata and test layout match the toolchain spec."""
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["project"]["scripts"]["agent"] == "agent_core.cli.main:app"
@@ -1854,6 +1855,7 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
         "src/gmail_mcp",
         "src/bland_mcp",
         "src/svp_mcp",
+        "src/calendar_mcp",
     ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"

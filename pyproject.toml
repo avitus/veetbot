@@ -65,7 +65,7 @@ docs = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_core", "src/gmail_mcp", "src/bland_mcp", "src/svp_mcp"]
+packages = ["src/agent_core", "src/gmail_mcp", "src/bland_mcp", "src/svp_mcp", "src/calendar_mcp"]
 
 [tool.ruff]
 line-length = 100
@@ -77,7 +77,7 @@ select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "TID", "RUF"]
 external = ["S"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent_core", "gmail_mcp", "bland_mcp", "svp_mcp"]
+known-first-party = ["agent_core", "gmail_mcp", "bland_mcp", "svp_mcp", "calendar_mcp"]
 
 [tool.mypy]
 python_version = "3.12"
