@@ -1483,6 +1483,13 @@ import SwiftUI
         model.setListView(view)
         model.setSearchText("board")
         await model.reload()
+        // Switching the collection also schedules a reload. An explicit reload can
+        // be superseded, so synchronize on the transport boundary we assert below.
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains {
+                $0.url?.query?.contains("view=\(view)") == true && $0.url?.query?.contains("text=board") == true
+            }
+        }
         #expect(requests.snapshot.contains {
             $0.url?.query?.contains("view=\(view)") == true && $0.url?.query?.contains("text=board") == true
         })
