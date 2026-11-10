@@ -1515,6 +1515,13 @@ describes, because writing back to a remote server's prompt is not something
 the platform can do and a locally edited copy that shadows the remote one
 would drift silently.
 
+Discovery renders only prompts whose declarations have no required arguments.
+It skips prompts requiring inputs, such as a company name, without sending
+`prompts/get`: discovery has no caller-supplied values. Prompts with optional
+arguments remain eligible for rendering with server defaults. Required-input
+prompts are not exposed as tools or added to the ephemeral skill catalog;
+argument-aware invocation is not provided by this discovery path.
+
 **Sampling and roots are refused.** `sampling/createMessage` lets a server ask
 the client to run a model call, which means an external party spending a
 tenant's budget on a prompt the platform did not compose; `roots` lets a
