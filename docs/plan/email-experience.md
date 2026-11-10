@@ -156,8 +156,15 @@ The reading view derives inert Markdown from each retained message on the scoped
 thread read, after source retention is enforced. It removes invisible preheader
 padding and recognizable promotional controls, collapses a forwarded envelope to
 its source attribution, embeds source URLs as labeled links, and restores article
-headings and paragraph flow. Explicit HTML advertisements and hidden/active HTML
-are omitted; ambiguous prose, author attribution, substantive disclosures, and
+headings and paragraph flow. A retained HTML alternative supplies the reading
+structure when it represents source prose, with plain-text paragraphs absent
+from it preserved before it. An unrelated image/footer alternative leaves the
+text reader intact.
+Rectangular tables with at least two rows and columns become inert Markdown
+tables; the first row is the heading. Column spans keep their text in the first
+column and reserve empty cells for the rest. Layout wrappers, row spans and
+irregular tables retain their prose rather than inventing a grid. Explicit HTML
+advertisements and hidden/active HTML are omitted; ambiguous prose, author attribution, substantive disclosures, and
 postscripts remain. No link is fetched or resolved during cleanup. Only the
 reader makes a link, from an HTML anchor or a source URL whose destination it
 checked: brackets, angle brackets and backslashes in the sender's own text are
@@ -190,8 +197,8 @@ Only English attributions and header words are recognized
 ([ADR-0301](../adr/0301-email-threads-read-as-conversations.md)).
 
 The Mac image reader (ADR-0304) uses a separate `reader_image_body` projection
-with server-authored image indices in message order. Image-bearing HTML, up to
-64 KiB per message, is retained as `reader_html` only by the application Gmail
+with server-authored image indices in message order. Presentation HTML, with or
+without images, up to 64 KiB per message, is retained as `reader_html` only by the application Gmail
 sync path, excluded from model evidence and content identity, and expires and
 is erased with the body. The ordinary Gmail tool's text body is unchanged.
 The scoped `POST /v1/email/threads/{id}/images` accepts `message_id` and `index`

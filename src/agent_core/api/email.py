@@ -152,6 +152,14 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
                 reading_source(message["body"], html),
                 subject=message["subject"] or str(result["subject"]),
             )
+            html_text = reading_body(html, subject=message["subject"] or str(result["subject"]))
+            if html_text:
+                plain = message["reader_body"]
+                merged = await asyncio.to_thread(merge_image_body, plain, html_text, html_text)
+                # An unrelated image/footer alternative must not replace the text
+                # reader. Prefer HTML structure when it represents source prose.
+                if not plain or merged != plain + "\n\n" + html_text:
+                    message["reader_body"] = merged
             if urls:
                 rich = await asyncio.to_thread(
                     merge_image_body, message["reader_body"], rich, reading_body(html)

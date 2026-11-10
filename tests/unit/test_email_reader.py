@@ -841,3 +841,75 @@ async def test_queued_image_rechecks_erasure_before_fetching() -> None:
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("plain", [False, True])
+async def test_flash_email_preserves_table_and_paragraphs_without_images(plain: bool) -> None:
+    """Synthetic financial mail preserves its HTML structure through the scoped API."""
+    import base64
+
+    from gmail_mcp.client import GmailClient
+
+    html = (
+        "<p>Quarterly results.</p><p>Please review the figures.</p>"
+        "<table><tr><th>Metric</th><th>Actual</th></tr>"
+        "<tr><td>Revenue</td><td>$42</td></tr></table><p>Thank you.</p>"
+    )
+    part = {
+        "mimeType": "text/html",
+        "body": {"data": base64.urlsafe_b64encode(html.encode()).decode()},
+    }
+    original = (
+        "Quarterly results. Please review the figures. Metric Actual Revenue $42 Thank you."
+        if plain
+        else GmailClient._payload_content(part)[0]
+    )
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0].update(body=original, reader_html=GmailClient._reader_html(part))
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        message = (await client.get(f"/v1/email/threads/{thread.id}")).json()["messages"][0]
+        assert message["body"] == original
+        assert "Quarterly results.\n\nPlease review the figures." in message["reader_body"]
+        assert "| Metric | Actual |\n| --- | --- |\n| Revenue | $42 |" in message["reader_body"]
+        assert message["reader_body"].count("Quarterly results.") == 1
+        assert message["reader_image_body"] is None
+
+
+def test_html_data_table_inside_layout_preserves_safe_cells() -> None:
+    result = reading_body(
+        '<table role="presentation"><tr><td><p>Intro.</p>'
+        "<table><tr><td>Metric</td><td>Value</td></tr>"
+        "<tr><td><strong>Revenue</strong></td><td>One | two<br>Three</td></tr>"
+        "</table><p>Closing.</p></td></tr></table>"
+    )
+    assert "| Metric | Value |\n| --- | --- |" in result
+    assert r"| **Revenue** | One \| two Three |" in result
+    assert "Intro." in result and "Closing." in result
+
+
+def test_html_row_spans_keep_all_text_without_inventing_columns() -> None:
+    result = reading_body(
+        '<table><tr><td rowspan="2">Summary</td></tr><tr><td>Revenue</td><td>$42</td></tr></table>'
+    )
+    assert "Summary" in result and "Revenue" in result and "$42" in result
+    assert "| --- |" not in result
+
+
+def test_html_column_spans_preserve_financial_table_grid() -> None:
+    result = reading_body(
+        '<table><tr><th>Metric</th><th colspan="2">Quarter</th></tr>'
+        "<tr><td>Revenue</td><td>Actual</td><td>Plan</td></tr>"
+        '<tr><td>Total</td><td colspan="2">$42</td></tr></table>'
+    )
+    assert "| Metric | Quarter |  |\n| --- | --- | --- |" in result
+    assert "| Revenue | Actual | Plan |" in result
+    assert "| Total | $42 |  |" in result
