@@ -343,6 +343,7 @@ public final class RunStateReducer: ObservableObject {
     }
 
     public func seed(run: RunView) {
+        if activeRunID != run.id || run.status != .running { clearBrowserProgress() }
         let historicalDeadline = activeRunID == run.id && runStatus == .cancelled
             && run.status == .cancelled && failure?.reason == .deadlineExceeded
             && run.failure == nil
@@ -353,6 +354,7 @@ public final class RunStateReducer: ObservableObject {
     }
 
     public func begin(runID: UUID, status: RunStatus) {
+        if activeRunID != runID || status != .running { clearBrowserProgress() }
         activeRunID = runID
         runStatus = status
         failure = nil
@@ -386,6 +388,10 @@ public final class RunStateReducer: ObservableObject {
         }
         if let id = frame.id {
             guard persistedSequences.insert(id).inserted else { return }
+        }
+        let previousRunID = activeRunID
+        defer {
+            if activeRunID != previousRunID || runStatus != .running { clearBrowserProgress() }
         }
         let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:))
         // Streamed frames arrive many times a second; publish only what changed.
@@ -827,10 +833,14 @@ public final class RunStateReducer: ObservableObject {
         summaryHeadings = ReasoningSummaryHeadings()
     }
 
-    private func transitionToTerminal(_ status: RunStatus) {
+    private func clearBrowserProgress() {
         for index in tools.indices where tools[index].browserProgress != nil {
             tools[index].browserProgress = nil
         }
+    }
+
+    private func transitionToTerminal(_ status: RunStatus) {
+        clearBrowserProgress()
         runStatus = status
         endReasoning()
         clarifyingQuestion = nil

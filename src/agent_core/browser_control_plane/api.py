@@ -169,6 +169,7 @@ class _ProfileServiceBoundary:
         self._authorization = authorization.reveal()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Authenticate and bound service bodies while preserving disconnect delivery."""
         if scope["type"] != "http" or not (
             scope["method"] == "POST" and str(scope["path"]).startswith("/v1/")
         ):
@@ -388,6 +389,8 @@ def create_profile_service_app(
     sessions: HostedProfileSessionService | None = None,
     sweep_interval_seconds: float = 15.0,
 ) -> FastAPI:
+    """Compose the authenticated profile and session API with bounded lifecycle cleanup."""
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # ADR-0128 D16: sweep on a timer, not only when traffic arrives.

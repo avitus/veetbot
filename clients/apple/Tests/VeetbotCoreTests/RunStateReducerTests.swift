@@ -45,6 +45,46 @@ import Testing
             == "browser.observe · example.com · Uncertain")
     }
 
+    @Test(arguments: ["seed", "begin", "stream"], [false, true])
+    func browserProgressClearsWhenRunIsSeededOrReplaced(source: String, replaceRun: Bool) throws {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        reducer.begin(runID: runID, status: .running)
+        reducer.reduce(SSEFrame(id: 1, event: "tool.call.started", data: [
+            "run_id": .string(runID.uuidString), "call_id": .string("read"), "name": .string("browser.observe"),
+        ]))
+        reducer.reduce(SSEFrame(id: nil, event: "tool.call.progress", data: [
+            "run_id": .string(runID.uuidString), "call_id": .string("read"), "name": .string("browser.observe"),
+            "browser_progress": .object([
+                "version": .number(1), "phase": .string("observation"), "placement": .string("runtime"),
+                "elapsed_ms": .number(1200),
+            ]),
+        ]))
+        func update(id: UUID, status: RunStatus) throws {
+            if source == "seed" {
+                let object: [String: Any] = [
+                    "id": id.uuidString, "session_id": UUID().uuidString, "status": status.rawValue,
+                    "step_count": 1, "model_call_count": 1, "tool_call_count": 1,
+                    "usage": ["input_tokens": 0, "output_tokens": 0, "cost_usd": "0.00"],
+                    "limits": ["max_steps": 12, "max_cost_usd": "1.00"],
+                    "created_at": "2026-11-10T12:00:00Z", "updated_at": "2026-11-10T12:00:01Z",
+                ]
+                reducer.seed(run: try JSONDecoder.server.decode(
+                    RunView.self, from: JSONSerialization.data(withJSONObject: object)
+                ))
+            } else if source == "stream" {
+                reducer.reduce(SSEFrame(id: nil, event: status == .running ? "run.started" : "run.cancelled",
+                    data: ["run_id": .string(id.uuidString)]))
+            } else {
+                reducer.begin(runID: id, status: status)
+            }
+        }
+        try update(id: runID, status: .running)
+        #expect(reducer.tools[0].browserProgress != nil)
+        try update(id: replaceRun ? UUID() : runID, status: replaceRun ? .running : .cancelled)
+        #expect(reducer.tools[0].browserProgress == nil)
+    }
+
     @Test
     func aStalePendingReadCannotUndoAnApproval() throws {
         let reducer = RunStateReducer()
