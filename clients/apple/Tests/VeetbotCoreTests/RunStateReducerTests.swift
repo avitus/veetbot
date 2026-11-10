@@ -5,6 +5,7 @@ import Testing
 
 @MainActor
 @Suite struct RunStateReducerTests {
+    /// Progress appears mid-call, rejects foreign or unsafe updates, and cannot revive a result.
     @Test
     func browserProgressArrivesDuringTheCallAndCannotReviveItsResult() {
         let reducer = RunStateReducer()
@@ -13,6 +14,7 @@ import Testing
         reducer.reduce(SSEFrame(id: 2, event: "tool.call.started", data: [
             "run_id": .string(runID.uuidString), "call_id": .string("read"), "name": .string("browser.observe"),
         ]))
+        /// Build a transient frame with controlled phase and run identity.
         func progress(phase: String = "observation", run: UUID? = nil) -> SSEFrame {
             SSEFrame(id: nil, event: "tool.call.progress", data: [
                 "run_id": .string((run ?? runID).uuidString),
@@ -45,6 +47,7 @@ import Testing
             == "browser.observe · example.com · Uncertain")
     }
 
+    /// All run-update sources preserve same-run progress and clear it on replacement or completion.
     @Test(arguments: ["seed", "begin", "stream"], [false, true])
     func browserProgressClearsWhenRunIsSeededOrReplaced(source: String, replaceRun: Bool) throws {
         let reducer = RunStateReducer()
@@ -60,6 +63,7 @@ import Testing
                 "elapsed_ms": .number(1200),
             ]),
         ]))
+        /// Apply the same lifecycle update through each supported entry point.
         func update(id: UUID, status: RunStatus) throws {
             if source == "seed" {
                 let object: [String: Any] = [

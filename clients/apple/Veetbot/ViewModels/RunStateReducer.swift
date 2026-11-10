@@ -342,6 +342,7 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
+    /// Apply an authoritative point read without carrying progress across run transitions.
     public func seed(run: RunView) {
         if activeRunID != run.id || run.status != .running { clearBrowserProgress() }
         let historicalDeadline = activeRunID == run.id && runStatus == .cancelled
@@ -353,6 +354,7 @@ public final class RunStateReducer: ObservableObject {
         if run.status != .waitingForUser { clarifyingQuestion = nil }
     }
 
+    /// Begin or refresh a run, retaining live progress only for the same running task.
     public func begin(runID: UUID, status: RunStatus) {
         if activeRunID != runID || status != .running { clearBrowserProgress() }
         activeRunID = runID
@@ -381,6 +383,7 @@ public final class RunStateReducer: ObservableObject {
         pendingUserMessageID = nil
     }
 
+    /// Reduce durable events once and admit transient progress without changing replay state.
     public func reduce(_ frame: SSEFrame) {
         if frame.event == "tool.call.progress" {
             reduceBrowserProgress(frame)
@@ -602,6 +605,7 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
+    /// Accept only bounded progress for the current running browser call.
     private func reduceBrowserProgress(_ frame: SSEFrame) {
         guard frame.id == nil,
             let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
@@ -618,6 +622,7 @@ public final class RunStateReducer: ObservableObject {
         updateTool(callID: callID) { $0.browserProgress = progress }
     }
 
+    /// Apply the authoritative call update and retire any previous transient phase.
     private func updateTool(from frame: SSEFrame, status: ToolActivityStatus) {
         let suppliedName =
             frame.data["name"]?.stringValue
@@ -833,12 +838,14 @@ public final class RunStateReducer: ObservableObject {
         summaryHeadings = ReasoningSummaryHeadings()
     }
 
+    /// Remove transient phase labels without changing authoritative tool outcomes.
     private func clearBrowserProgress() {
         for index in tools.indices where tools[index].browserProgress != nil {
             tools[index].browserProgress = nil
         }
     }
 
+    /// Finish run presentation and retire transient reasoning, questions, and browser progress.
     private func transitionToTerminal(_ status: RunStatus) {
         clearBrowserProgress()
         runStatus = status
@@ -1098,6 +1105,7 @@ public struct BrowserActivityProgress: Decodable, Sendable {
 
     public var summary: String { summary(at: receivedAt) }
 
+    /// Render a fixed phase label with locally advancing, bounded elapsed time.
     public func summary(at date: Date) -> String {
         let label = BrowserActivityDiagnostics.phaseLabels[phase] ?? "Browser operation"
         let seconds = min(3600, Double(elapsedMS) / 1000 + max(0, date.timeIntervalSince(receivedAt)))

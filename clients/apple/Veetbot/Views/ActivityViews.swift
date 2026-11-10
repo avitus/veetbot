@@ -137,6 +137,7 @@ struct WorkStrip: View {
         }
     }
 
+    /// Preserve the collapsed call details while including its live phase when present.
     private func sentence(at date: Date) -> String {
         switch content {
         case .bundle(let bundle):
