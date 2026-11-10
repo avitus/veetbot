@@ -41,7 +41,7 @@ from agent_core.adapters.browser.csv_export import observe_csv_export
 from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
 from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
-from agent_core.adapters.browser.page_structure import REGION_CAPTURE_SCRIPT
+from agent_core.adapters.browser.page_structure import PAGE_TEXT_HELPERS, REGION_CAPTURE_SCRIPT
 from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
 from agent_core.adapters.browser.use_copies import inspected_use_references
 from agent_core.adapters.browser.virtual_display import platform_virtual_display
@@ -106,29 +106,46 @@ MAXIMUM_SCANNED_ELEMENTS = 4_096
 MAXIMUM_CANDIDATE_OFFSET = 65_536
 # Return a bounded handle set in an isolated world, including open shadow roots.
 # The numeric offset is supplied only by this runtime, never by a model.
-_CONTROL_SELECTOR = """(() => {
+_CONTROL_SELECTOR = (
+    "(() => {"
+    + PAGE_TEXT_HELPERS
+    + """
     const queryAll = (root, selector) => {
         const offset = Number(selector);
         if (!Number.isInteger(offset) || offset < 0 || offset > 65536) return [];
         let dialog = null;
         if (root.nodeType === 9) {
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-            let candidate, visited = 0;
-            while (visited++ < 8192 && (candidate = walker.nextNode())) {
-                if (!candidate.matches('dialog[open],[role="dialog"],[role="alertdialog"]'))
-                    continue;
-                const style = getComputedStyle(candidate), box = candidate.getBoundingClientRect();
-                if (style.visibility === 'visible' && style.display !== 'none'
-                    && style.opacity !== '0' && box.width > 0 && box.height > 0
-                    && !candidate.closest('[hidden],[aria-hidden="true"]')) {
-                    dialog = candidate; break;
+            let candidate = root.documentElement, visited = 0;
+            while (candidate && visited < 8192) {
+                visited++;
+                let skip = blocked(candidate);
+                if (!skip) {
+                    const ancestors = ancestorExclusion(candidate, root, 8192 - visited);
+                    visited += ancestors.visits;
+                    skip = ancestors.skip;
+                    if (ancestors.limited) break;
                 }
+                if (!skip && candidate.nodeType === 1
+                    && candidate.matches('dialog[open],[role="dialog"],[role="alertdialog"]')) {
+                    const box = candidate.getBoundingClientRect();
+                    if (box.width > 0 && box.height > 0) {
+                        dialog = candidate; break;
+                    }
+                }
+                candidate = advance(candidate, root, !skip, true);
             }
         }
         const result = [], pending = [];
-        if (dialog?.firstElementChild) pending.push(root.firstElementChild);
-        else dialog = null;
-        let node = dialog?.firstElementChild || root.firstElementChild, index = 0;
+        let node = root.firstElementChild, index = 0;
+        if (root.shadowRoot?.firstElementChild) {
+            if (node) pending.push(node);
+            node = root.shadowRoot.firstElementChild;
+        }
+        if (dialog && (dialog.firstElementChild || dialog.shadowRoot?.firstElementChild)) {
+            pending.push(node);
+            if (dialog.firstElementChild) pending.push(dialog.firstElementChild);
+            node = dialog.shadowRoot?.firstElementChild || pending.pop();
+        } else dialog = null;
 
         while (node) {
             if (node === dialog) { node = node.nextElementSibling || pending.pop(); continue; }
@@ -144,6 +161,7 @@ _CONTROL_SELECTOR = """(() => {
     };
     return {queryAll, query: (root, selector) => queryAll(root, selector)[0] || null};
 })()"""
+)
 # A page settles for at most this long after navigation or an action (ADR-0130).
 SETTLE_SECONDS = 2.0
 # ADR-0294: an approved click on a control that names a file waits this long for

@@ -128,6 +128,142 @@ async def test_active_dialog_controls_precede_navigation() -> None:
         assert observation.elements[0].name == "Continue task"
 
 
+@pytest.mark.parametrize("shape", ["nested_shadow", "native_shadow", "dialog_host", "mixed"])
+async def test_shadow_dialog_priority_survives_projection_and_control_continuation(
+    shape: str,
+) -> None:
+    async def home(request: Request) -> Response:
+        del request
+        return html(
+            "<nav>"
+            + "".join(f"<button>Navigation {i}</button>" for i in range(300))
+            + '</nav><div id="host"></div>',
+            script="""
+            const outer = document.querySelector('#host').attachShadow({mode:'open'});
+            outer.innerHTML = '<div id="nested"></div>';
+            const inner = outer.querySelector('#nested').attachShadow({mode:'open'});
+            inner.innerHTML = NATIVE ? '<dialog open id="task"></dialog>'
+                : '<div role="dialog" id="task"></div>';
+            const dialog = inner.querySelector('#task');
+            const content = HOST ? dialog.attachShadow({mode:'open'}) : dialog;
+            content.innerHTML = Array.from({length:300}, (_, i) =>
+                '<button>Task ' + i + '</button>').join('');
+            if (MIXED) {
+                content.innerHTML += '<slot></slot>';
+                dialog.innerHTML = '<button>Task 300</button>';
+            }
+            """.replace("HOST", "true" if shape in {"dialog_host", "mixed"} else "false")
+            .replace("NATIVE", "true" if shape == "native_shadow" else "false")
+            .replace("MIXED", "true" if shape == "mixed" else "false"),
+        )
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        observation = await runtime.navigate(site.url("/"))
+        assert observation.elements[0].name == "Task 0"
+        for budget in (1024, 4096):
+            projected = browser_context_projection(
+                observation.model_dump(mode="json"),
+                budget=budget,
+                reference=FileReferencePart(artifact_id=UUID(int=1), media_type="application/json"),
+            )
+            assert projected is not None and len(content_bytes(projected)) <= budget
+            payload = json.loads(next(p.text for p in projected if isinstance(p, TextPart)))
+            assert payload["elements"][0]["name"] == "Task 0"
+        names = [element.name for element in observation.elements]
+        for _ in range(2):
+            observation = await runtime.expand(
+                BrowserObservationExpansion(after=observation.elements[-1].ref)
+            )
+            names.extend(element.name for element in observation.elements)
+        assert names == [f"Task {i}" for i in range(301 if shape == "mixed" else 300)] + [
+            f"Navigation {i}" for i in range(300)
+        ]
+        dialog = next(region for region in observation.regions if region.kind == "dialog")
+        focused = await runtime.expand(
+            BrowserObservationExpansion(
+                region_ref=dialog.ref, expected_revision=observation.revision
+            )
+        )
+        assert focused.elements and focused.elements[0].name == "Task 0"
+        assert all(element.name.startswith("Task ") for element in focused.elements)
+        remainder = await runtime.expand(
+            BrowserObservationExpansion(after=focused.elements[-1].ref)
+        )
+        assert [element.name for element in (*focused.elements, *remainder.elements)] == [
+            f"Task {i}" for i in range(301 if shape == "mixed" else 300)
+        ]
+
+
+@pytest.mark.parametrize(
+    "exclusion",
+    ["hidden", 'aria-hidden="true"', 'style="opacity:0"', "contenteditable", 'role="textbox"'],
+)
+async def test_dialog_priority_ignores_excluded_shadow_and_slot_ancestors(exclusion: str) -> None:
+    async def home(request: Request) -> Response:
+        del request
+        return html(
+            '<div id="slotted"><div role="dialog"><button>Excluded slot</button></div></div>'
+            + f'<div {exclusion} id="excluded"></div>'
+            + '<form><button>Scoped task</button></form><div id="active"></div>',
+            script="""
+            document.querySelector('#slotted').attachShadow({mode:'open'}).innerHTML =
+                '<div RULE><slot></slot></div>';
+            document.querySelector('#excluded').attachShadow({mode:'open'}).innerHTML =
+                '<div role="dialog"><button>Excluded host</button></div>';
+            document.querySelector('#active').attachShadow({mode:'open'}).innerHTML =
+                '<div role="alertdialog"><button>Actual task</button></div>';
+            """.replace("RULE", exclusion),
+        )
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        observed = await runtime.navigate(site.url("/"))
+        assert observed.elements[0].name == "Actual task"
+        form = next(region for region in observed.regions if region.kind == "form")
+        focused = await runtime.expand(
+            BrowserObservationExpansion(region_ref=form.ref, expected_revision=observed.revision)
+        )
+        assert [element.name for element in focused.elements] == ["Scoped task"]
+
+
+async def test_shadow_dialog_ranking_stops_at_discovery_bound() -> None:
+    async def home(request: Request) -> Response:
+        del request
+        return html(
+            '<button>Navigation</button><div id="host"></div>',
+            script="""
+            document.querySelector('#host').attachShadow({mode:'open'}).innerHTML =
+                '<span></span>'.repeat(9000)
+                + '<div role="dialog"><button>Beyond priority scan</button></div>';
+            """,
+        )
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        observed = await runtime.navigate(site.url("/"))
+        assert observed.elements[0].name == "Navigation"
+        assert any(element.name == "Beyond priority scan" for element in observed.elements)
+
+
+async def test_changed_shadow_dialog_priority_rejects_old_control_continuation() -> None:
+    async def home(request: Request) -> Response:
+        del request
+        return html(
+            "<button>Navigation</button>" * 300 + '<div id="host"></div>',
+            script="""
+            document.querySelector('#host').attachShadow({mode:'open'}).innerHTML =
+                '<div role="dialog">' + '<button>Task</button>'.repeat(300) + '</div>';
+            """,
+        )
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        observed = await runtime.navigate(site.url("/"))
+        assert observed.elements[0].name == "Task"
+        assert runtime._page is not None
+        await runtime._page.locator('[role="dialog"]').evaluate("node => node.hidden = true")
+        with pytest.raises(BrowserProviderError, match="page_changed"):
+            await runtime.expand(BrowserObservationExpansion(after=observed.elements[-1].ref))
+        assert not runtime._elements and not runtime._regions
+
+
 async def test_passive_recaptcha_badge_does_not_interrupt_automation() -> None:
     async def home(request: Request) -> Response:
         del request

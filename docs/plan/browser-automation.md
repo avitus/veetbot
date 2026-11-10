@@ -1966,6 +1966,17 @@ revisions and changed continuation text fail with `tool.browser.page_changed`.
 Main and section regions are discoverable; active dialog controls precede general
 navigation. Existing node, candidate, UTF-8, privacy and origin limits apply.
 
+Dialog priority also traverses open shadow roots, using the same bounded,
+iterative walk as semantic regions. Its 8,192-visit discovery budget includes
+composed-ancestor checks for assigned slots; hidden, transparent and editable
+ancestors cannot promote a dialog. The first eligible dialog's shadow and light
+children precede ordinary controls, without duplicates across continuation.
+Dialogs beyond the priority scan remain eligible for ordinary control discovery;
+ranking is not a claim that no other dialog exists. A changed ordering must still
+pass the existing continuation-anchor check. Explicit region focus includes the
+focused root's own open shadow children and retains its own scope instead of
+promoting a dialog outside it. Frames and closed roots remain excluded.
+
 Tool guidance distinguishes action references (`elements[].ref`, including for
 scroll) from read-only region references (`regions[].ref`). The first focused
 read omits `text_offset` or uses zero; continuation copies the returned

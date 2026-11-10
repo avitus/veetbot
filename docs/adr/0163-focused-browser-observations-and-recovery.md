@@ -63,3 +63,33 @@ trusted Playwright, origin isolation and revision-bound authority.
 [Stagehand focus selector resolution, revision c88a64f](https://github.com/browserbase/stagehand/blob/c88a64f8d48d13e5e4d43d14fd9e54e388de3383/packages/extension/understudy/a11y/snapshot/focusSelectors.ts).
 No SDK, cloud provider, model calls, arbitrary selectors or frame access are added.
 Benchmarks remain deferred. These are regression workflows, not comparative scores.
+
+## Open-shadow dialog follow-up — 2026-11-10
+
+Decision 2's dialog priority now follows open shadow roots, including dialogs
+that host their own shadow content. It shares the semantic-region collector's
+iterative traversal and exclusion checks, with 8,192 discovery visits including
+composed ancestors. Focus starts inside the selected root's own shadow content
+before its light children. Control limits, revision and continuation fences,
+frame exclusions and action authority are unchanged. This repairs the existing
+W3 observation contract; it does not introduce a new capability or ADR decision.
+
+Construction evidence from real Chromium in the local Linux ARM64 container,
+using the previously established 64 MiB process-stack setting:
+
+- Red: `make test-browser-cases
+  CASES=tests/unit/test_browser_focus_real_chromium.py::test_shadow_dialog_priority_survives_projection_and_control_continuation`
+  failed in both initial shadow shapes: `Navigation 0` appeared before `Task 0`.
+- Extending that regression to focus reproduced an empty control list for a
+  dialog hosting its own shadow root. Both defects then passed, with four shapes
+  covering native dialogs, nested roots, shadow hosts and mixed slotted content.
+- Assertions cover complete ordered continuation without duplicates, 1,024- and
+  4,096-byte model projections, excluded hosts/slot ancestors, bounded priority
+  discovery, scoped focus and rejection after dialog ordering changes.
+- Full browser partition: 425 passed in 315.14 seconds. No skipped cases.
+- After integrating dev's unrelated recall-context change, all 36 focus and
+  shadow-region cases passed again. The four dialog-shape cases also passed
+  the final focused-continuation assertion, including slotted light children.
+
+This is direct-dev construction evidence. Live-site acceptance, production
+delivery, comparative benchmarks and the broader W3 exit gate remain separate.

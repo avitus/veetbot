@@ -138,6 +138,12 @@ hidden and editable hosts and slot ancestors. Frames, closed roots and collectio
 extraction's separate scope are unchanged. This is construction for direct
 `dev` delivery; live-site acceptance and production availability remain separate.
 
+The W3 follow-up applies active-dialog-first control ranking to those open roots,
+including dialogs that host their own shadow content. Bounded discovery excludes
+hidden and editable composed ancestors; projection and control continuation keep
+the task controls ahead of navigation. This completes that construction gap in
+ADR-0163, without changing action authority or claiming the whole W3 exit gate.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12
