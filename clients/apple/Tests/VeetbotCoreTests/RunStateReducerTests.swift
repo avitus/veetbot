@@ -6,6 +6,40 @@ import Testing
 @MainActor
 @Suite struct RunStateReducerTests {
     @Test
+    func browserProgressArrivesDuringTheCallAndCannotReviveItsResult() {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        reducer.reduce(SSEFrame(id: 1, event: "run.started", data: ["run_id": .string(runID.uuidString)]))
+        reducer.reduce(SSEFrame(id: 2, event: "tool.call.started", data: [
+            "run_id": .string(runID.uuidString), "call_id": .string("read"), "name": .string("browser.observe"),
+        ]))
+        func progress(phase: String = "observation", run: UUID? = nil) -> SSEFrame {
+            SSEFrame(id: nil, event: "tool.call.progress", data: [
+                "run_id": .string((run ?? runID).uuidString),
+                "call_id": .string("read"), "name": .string("browser.observe"),
+                "browser_progress": .object([
+                    "version": .number(1), "phase": .string(phase), "placement": .string("runtime"),
+                    "elapsed_ms": .number(1200),
+                ]),
+            ])
+        }
+        reducer.reduce(progress(phase: "secret-cookie-canary"))
+        #expect(reducer.tools[0].browserProgress == nil)
+        reducer.reduce(progress(run: UUID()))
+        #expect(reducer.activeRunID == runID)
+        #expect(reducer.tools[0].browserProgress == nil)
+        reducer.reduce(progress())
+        #expect(reducer.tools[0].browserProgress?.summary == "Read page · 1.2 s")
+        #expect(reducer.tools[0].status == .running)
+        reducer.reduce(SSEFrame(id: 3, event: "tool.call.uncertain", data: [
+            "call_id": .string("read"), "name": .string("browser.observe"),
+        ]))
+        reducer.reduce(progress())
+        #expect(reducer.tools[0].browserProgress == nil)
+        #expect(reducer.tools[0].status == .uncertain)
+    }
+
+    @Test
     func aStalePendingReadCannotUndoAnApproval() throws {
         let reducer = RunStateReducer()
         let pending = try WireModelsTests.contractApproval("offered")

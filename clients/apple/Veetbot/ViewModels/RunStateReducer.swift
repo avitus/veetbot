@@ -45,6 +45,7 @@ public struct ToolActivity: Identifiable, Sendable {
     public var risk: RiskLevel?
     public var approvalID: UUID?
     public var browserDiagnostics: BrowserActivityDiagnostics? = nil
+    public var browserProgress: BrowserActivityProgress? = nil
     /// How the call was allowed without a card, such as
     /// `browser_task_grant`, and the view of what it did (ADR-0129 G7).
     public var authorizationKind: String? = nil
@@ -369,6 +370,10 @@ public final class RunStateReducer: ObservableObject {
     }
 
     public func reduce(_ frame: SSEFrame) {
+        if frame.event == "tool.call.progress" {
+            reduceBrowserProgress(frame)
+            return
+        }
         if let id = frame.id {
             guard persistedSequences.insert(id).inserted else { return }
         }
@@ -581,6 +586,22 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
+    private func reduceBrowserProgress(_ frame: SSEFrame) {
+        guard frame.id == nil,
+            let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
+            runID == activeRunID, runStatus == .running,
+            let callID = frame.data["call_id"]?.stringValue,
+            let index = toolIndex[callID], tools[index].status == .running,
+            let name = frame.data["name"]?.stringValue, name == tools[index].name,
+            ["browser.navigate", "browser.observe", "browser.act", "browser.upload"].contains(name),
+            let payload = frame.data["browser_progress"],
+            let fields = payload.objectValue,
+            Set(fields.keys) == Set(["version", "phase", "placement", "elapsed_ms"]),
+            let progress = decode(BrowserActivityProgress.self, from: payload), progress.isValid
+        else { return }
+        updateTool(callID: callID) { $0.browserProgress = progress }
+    }
+
     private func updateTool(from frame: SSEFrame, status: ToolActivityStatus) {
         let suppliedName =
             frame.data["name"]?.stringValue
@@ -607,6 +628,7 @@ public final class RunStateReducer: ObservableObject {
         )
         updateTool(callID: callID) { tool in
             tool.status = presentedStatus
+            tool.browserProgress = nil
             if let suppliedName {
                 tool.name = suppliedName
                 tool.hasKnownName = true
@@ -796,6 +818,9 @@ public final class RunStateReducer: ObservableObject {
     }
 
     private func transitionToTerminal(_ status: RunStatus) {
+        for index in tools.indices where tools[index].browserProgress != nil {
+            tools[index].browserProgress = nil
+        }
         runStatus = status
         endReasoning()
         clarifyingQuestion = nil
@@ -1012,7 +1037,7 @@ public struct BrowserActivityDiagnostics: Decodable, Sendable {
         return rows.joined(separator: "\n")
     }
 
-    private static let phaseLabels = [
+    fileprivate static let phaseLabels = [
         "binding": "Website connection", "acquisition": "Browser session", "launch": "Browser launch",
         "navigation": "Open page", "readiness": "Wait for page", "observation": "Read page",
         "dispatch": "Send action", "projection": "Prepare result", "cleanup": "Close browser",
@@ -1030,4 +1055,28 @@ public struct BrowserActivityDiagnostics: Decodable, Sendable {
         "timeout": "The browser operation timed out.", "internal": "The browser operation failed.",
         "cancelled": "The browser operation was interrupted.",
     ]
+}
+
+/// Transient display state for one running browser call (ADR-0306).
+public struct BrowserActivityProgress: Decodable, Sendable {
+    public let version: Int
+    public let phase: String
+    public let placement: String
+    public let elapsedMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case version, phase, placement
+        case elapsedMS = "elapsed_ms"
+    }
+
+    public var isValid: Bool {
+        version == 1 && BrowserActivityDiagnostics.phaseLabels[phase] != nil
+            && ["orchestrator", "hosted", "runtime"].contains(placement)
+            && (0...3_600_000).contains(elapsedMS)
+    }
+
+    public var summary: String {
+        let label = BrowserActivityDiagnostics.phaseLabels[phase] ?? "Browser operation"
+        return "\(label) · \(String(format: "%.1f s", Double(elapsedMS) / 1000))"
+    }
 }

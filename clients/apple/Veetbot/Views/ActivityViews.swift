@@ -173,6 +173,11 @@ struct ToolLedgerRow: View {
                                     ? AppTheme.red : AppTheme.inkSoft
                             )
                     }
+                    if let progress = activity.browserProgress {
+                        Text(progress.summary)
+                            .veetType(.meta)
+                            .foregroundColor(AppTheme.inkSoft)
+                    }
                     if let detail = Self.detail(for: activity) {
                         Text(detail)
                             .veetMono()

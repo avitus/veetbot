@@ -353,3 +353,4 @@ implementation without one.
 - [ADR-0304: Click-to-load email images and a fluid Mac reader (Accepted)](0304-email-inline-images-and-fluid-reader.md)
 
 - [ADR-0305: Read-only Google Calendar access (Accepted)](0305-read-only-google-calendar.md)
+- [ADR-0306: Show browser phases while an operation is running (Accepted)](0306-live-browser-progress.md)

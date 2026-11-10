@@ -1777,6 +1777,29 @@ may return the summary as optional metadata; invalid summaries are discarded as
 a whole. Existing clients and services may omit it. Existing event retention,
 access and deletion rules apply; no new raw tracing or capture store is enabled.
 
+### Live browser phase progress (ADR-0306)
+
+The phase collector also offers up to 128 version-1 progress updates with a
+closed phase and placement and bounded elapsed milliseconds. Nested phases
+restore their parent on exit. A single pending update is replaced by newer
+progress so slow consumers cannot block browser work.
+
+Authenticated hosted callers opt in with Accept
+`application/vnd.veetbot.browser-progress+ndjson`. Each newline-delimited record
+is either `progress` with the validated record or one final `result` with the
+original status and JSON body. Ordinary JSON remains supported. Stream parsing
+bounds bytes and record count and requires the terminal result; missing or
+malformed results follow existing provider failure and uncertain-effect rules.
+Disconnect cancels and joins the operation. Upload uses the same diagnostics.
+
+The worker publishes `tool.call.progress` through the existing transient run
+stream, with run and call identity supplied by trusted execution. Publishing is
+bounded, best effort and stopped before the terminal event. Native clients show
+fixed phase labels only for a matching running browser call, then clear them on
+its terminal event. Progress cannot supply task results or authorization. The
+terminal diagnostics remain the replayable execution record. See
+[ADR-0306](../adr/0306-live-browser-progress.md).
+
 ### Bounded readiness and visible postconditions (ADR-0159)
 
 Version 1.2.0 adds optional `readiness` (`dom_quiet` or `bound_expired`) to

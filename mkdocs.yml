@@ -444,4 +444,5 @@ nav:
       - "ADR-0303: Every Mac mail list scrolls": adr/0303-every-mac-mail-list-scrolls.md
       - "ADR-0304: Click-to-load email images and a fluid Mac reader": adr/0304-email-inline-images-and-fluid-reader.md
       - "ADR-0305: Read-only Google Calendar access": adr/0305-read-only-google-calendar.md
+      - "ADR-0306: Live browser progress": adr/0306-live-browser-progress.md
   - Changelog: changelog.md
