@@ -45,6 +45,7 @@ public struct ToolActivity: Identifiable, Sendable {
     public var risk: RiskLevel?
     public var approvalID: UUID?
     public var browserDiagnostics: BrowserActivityDiagnostics? = nil
+    public var browserProgress: BrowserActivityProgress? = nil
     /// How the call was allowed without a card, such as
     /// `browser_task_grant`, and the view of what it did (ADR-0129 G7).
     public var authorizationKind: String? = nil
@@ -81,6 +82,16 @@ public struct ToolActivity: Identifiable, Sendable {
         case "scroll": return "Scroll \(page)"
         default: return "Act on \(target)"
         }
+    }
+
+    /// Summarize a collapsed call while preserving its target, permission, and outcome.
+    public func activitySummary(detail: String?, at date: Date) -> String {
+        var parts = [name]
+        if let detail { parts.append(detail) }
+        if allowedByTaskGrant { parts.append("Allowed by task permission") }
+        parts.append(presentationStatus.rawValue.capitalized)
+        if let browserProgress { parts.append(browserProgress.summary(at: date)) }
+        return parts.joined(separator: " · ")
     }
 
     /// Present error-bearing completed calls as failed without rewriting their wire status.
@@ -331,7 +342,9 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
+    /// Apply an authoritative point read without carrying progress across run transitions.
     public func seed(run: RunView) {
+        if activeRunID != run.id || run.status != .running { clearBrowserProgress() }
         let historicalDeadline = activeRunID == run.id && runStatus == .cancelled
             && run.status == .cancelled && failure?.reason == .deadlineExceeded
             && run.failure == nil
@@ -341,7 +354,9 @@ public final class RunStateReducer: ObservableObject {
         if run.status != .waitingForUser { clarifyingQuestion = nil }
     }
 
+    /// Begin or refresh a run, retaining live progress only for the same running task.
     public func begin(runID: UUID, status: RunStatus) {
+        if activeRunID != runID || status != .running { clearBrowserProgress() }
         activeRunID = runID
         runStatus = status
         failure = nil
@@ -368,9 +383,18 @@ public final class RunStateReducer: ObservableObject {
         pendingUserMessageID = nil
     }
 
+    /// Reduce durable events once and admit transient progress without changing replay state.
     public func reduce(_ frame: SSEFrame) {
+        if frame.event == "tool.call.progress" {
+            reduceBrowserProgress(frame)
+            return
+        }
         if let id = frame.id {
             guard persistedSequences.insert(id).inserted else { return }
+        }
+        let previousRunID = activeRunID
+        defer {
+            if activeRunID != previousRunID || runStatus != .running { clearBrowserProgress() }
         }
         let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:))
         // Streamed frames arrive many times a second; publish only what changed.
@@ -581,6 +605,24 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
+    /// Accept only bounded progress for the current running browser call.
+    private func reduceBrowserProgress(_ frame: SSEFrame) {
+        guard frame.id == nil,
+            let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
+            runID == activeRunID, runStatus == .running,
+            let callID = frame.data["call_id"]?.stringValue,
+            let index = toolIndex[callID], tools[index].status == .running,
+            let name = frame.data["name"]?.stringValue, name == tools[index].name,
+            ["browser.navigate", "browser.observe", "browser.act", "browser.upload"].contains(name),
+            let payload = frame.data["browser_progress"],
+            let fields = payload.objectValue,
+            Set(fields.keys) == Set(["version", "phase", "placement", "elapsed_ms"]),
+            let progress = decode(BrowserActivityProgress.self, from: payload), progress.isValid
+        else { return }
+        updateTool(callID: callID) { $0.browserProgress = progress }
+    }
+
+    /// Apply the authoritative call update and retire any previous transient phase.
     private func updateTool(from frame: SSEFrame, status: ToolActivityStatus) {
         let suppliedName =
             frame.data["name"]?.stringValue
@@ -607,6 +649,7 @@ public final class RunStateReducer: ObservableObject {
         )
         updateTool(callID: callID) { tool in
             tool.status = presentedStatus
+            tool.browserProgress = nil
             if let suppliedName {
                 tool.name = suppliedName
                 tool.hasKnownName = true
@@ -795,7 +838,16 @@ public final class RunStateReducer: ObservableObject {
         summaryHeadings = ReasoningSummaryHeadings()
     }
 
+    /// Remove transient phase labels without changing authoritative tool outcomes.
+    private func clearBrowserProgress() {
+        for index in tools.indices where tools[index].browserProgress != nil {
+            tools[index].browserProgress = nil
+        }
+    }
+
+    /// Finish run presentation and retire transient reasoning, questions, and browser progress.
     private func transitionToTerminal(_ status: RunStatus) {
+        clearBrowserProgress()
         runStatus = status
         endReasoning()
         clarifyingQuestion = nil
@@ -1012,7 +1064,7 @@ public struct BrowserActivityDiagnostics: Decodable, Sendable {
         return rows.joined(separator: "\n")
     }
 
-    private static let phaseLabels = [
+    fileprivate static let phaseLabels = [
         "binding": "Website connection", "acquisition": "Browser session", "launch": "Browser launch",
         "navigation": "Open page", "readiness": "Wait for page", "observation": "Read page",
         "dispatch": "Send action", "projection": "Prepare result", "cleanup": "Close browser",
@@ -1030,4 +1082,33 @@ public struct BrowserActivityDiagnostics: Decodable, Sendable {
         "timeout": "The browser operation timed out.", "internal": "The browser operation failed.",
         "cancelled": "The browser operation was interrupted.",
     ]
+}
+
+/// Transient display state for one running browser call (ADR-0306).
+public struct BrowserActivityProgress: Decodable, Sendable {
+    public let version: Int
+    public let phase: String
+    public let placement: String
+    public let elapsedMS: Int
+    private let receivedAt = Date()
+
+    enum CodingKeys: String, CodingKey {
+        case version, phase, placement
+        case elapsedMS = "elapsed_ms"
+    }
+
+    public var isValid: Bool {
+        version == 1 && BrowserActivityDiagnostics.phaseLabels[phase] != nil
+            && ["orchestrator", "hosted", "runtime"].contains(placement)
+            && (0...3_600_000).contains(elapsedMS)
+    }
+
+    public var summary: String { summary(at: receivedAt) }
+
+    /// Render a fixed phase label with locally advancing, bounded elapsed time.
+    public func summary(at date: Date) -> String {
+        let label = BrowserActivityDiagnostics.phaseLabels[phase] ?? "Browser operation"
+        let seconds = min(3600, Double(elapsedMS) / 1000 + max(0, date.timeIntervalSince(receivedAt)))
+        return "\(label) · \(String(format: "%.1f s", seconds))"
+    }
 }

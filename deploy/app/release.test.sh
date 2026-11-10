@@ -945,6 +945,24 @@ grep -Fq \
   'schedule worker AGENT_SVP_ENABLED must match the application environment' \
   "$TEST_ROOT/schedule-svp-mismatch.out"
 
+# Likewise a schedule that names Calendar keeps its scope only under this flag.
+schedule_calendar_mismatch_env="$TEST_ROOT/schedule-calendar-mismatch.env"
+cp "$schedule_env" "$schedule_calendar_mismatch_env"
+printf '%s\n' 'AGENT_CALENDAR_ENABLED=1' >>"$schedule_calendar_mismatch_env"
+schedule_calendar_mismatch_id="20260810-152259-0000004"
+make_stage "$schedule_calendar_mismatch_id"
+if VEETBOT_TEST_ENV_FILE="$schedule_calendar_mismatch_env" \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_worker_env" \
+  run_release "$schedule_calendar_mismatch_id" \
+  >"$TEST_ROOT/schedule-calendar-mismatch.out" 2>&1; then
+  printf 'release with a mismatched schedule Calendar flag unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ ! -e "$DEPLOY_ROOT/releases/$schedule_calendar_mismatch_id" ]]
+grep -Fq \
+  'schedule worker AGENT_CALENDAR_ENABLED must match the application environment' \
+  "$TEST_ROOT/schedule-calendar-mismatch.out"
+
 surface_env="$TEST_ROOT/surface-enabled.env"
 surface_worker_env="$TEST_ROOT/veetbot-surface-enabled.env"
 cp "$ENV_FILE" "$surface_env"

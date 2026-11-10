@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
@@ -52,6 +52,19 @@ class BrowserPhaseRecord(BaseModel):
     placement: Placement
     outcome: Outcome
     failure: Failure = "none"
+    elapsed_ms: int = Field(ge=0, le=3_600_000)
+
+
+PROGRESS_MEDIA_TYPE = "application/vnd.veetbot.browser-progress+ndjson"
+MAX_PROGRESS_UPDATES = 128
+
+
+class BrowserProgress(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    version: Literal[1] = 1
+    phase: Phase
+    placement: Placement
     elapsed_ms: int = Field(ge=0, le=3_600_000)
 
 
@@ -105,6 +118,20 @@ class BrowserDiagnosticCollector:
     _started: float
     _phases: list[BrowserPhaseRecord] = field(default_factory=list)
     _truncated: bool = False
+    on_progress: Callable[[BrowserProgress], None] | None = None
+    _progress_count: int = 0
+
+    def progress(self, phase: Phase, placement: Placement) -> None:
+        """Emit a bounded content-free update while isolating listener failures."""
+        if self.on_progress is None or self._progress_count >= MAX_PROGRESS_UPDATES:
+            return
+        self._progress_count += 1
+        update = BrowserProgress(
+            phase=phase, placement=placement, elapsed_ms=_milliseconds(self._started, self.clock)
+        )
+        # Presentation failures cannot change action or diagnostic outcomes.
+        with suppress(Exception):
+            self.on_progress(update)
 
     def append(self, record: BrowserPhaseRecord) -> None:
         if len(self._phases) < 64:
@@ -125,18 +152,25 @@ _CURRENT: ContextVar[BrowserDiagnosticCollector | None] = ContextVar(
 )
 
 
+_ACTIVE: ContextVar[tuple[tuple[Phase, Placement], ...]] = ContextVar("browser_phases", default=())
+
+
 @contextmanager
 def collect_browser_diagnostics(
     *,
     clock: Callable[[], float],
     enabled: bool = True,
+    on_progress: Callable[[BrowserProgress], None] | None = None,
 ) -> Iterator[BrowserDiagnosticCollector]:
-    collector = BrowserDiagnosticCollector(clock=clock, _started=clock())
+    """Scope diagnostics and active phases to one operation and restore the caller context."""
+    collector = BrowserDiagnosticCollector(clock=clock, _started=clock(), on_progress=on_progress)
     token = _CURRENT.set(collector if enabled else None)
+    active_token = _ACTIVE.set(())
     try:
         yield collector
     finally:
         _CURRENT.reset(token)
+        _ACTIVE.reset(active_token)
 
 
 @dataclass
@@ -147,12 +181,16 @@ class PhaseOutcome:
 
 @contextmanager
 def browser_phase(phase: Phase, placement: Placement = "runtime") -> Iterator[PhaseOutcome]:
+    """Record phase outcomes and restore parent progress when nested work finishes."""
     collector = _CURRENT.get()
     result = PhaseOutcome()
     if collector is None:
         yield result
         return
     started = collector.clock()
+    parent = _ACTIVE.get()
+    active_token = _ACTIVE.set((*parent, (phase, placement)))
+    collector.progress(phase, placement)
     try:
         yield result
     except BaseException as error:
@@ -170,6 +208,28 @@ def browser_phase(phase: Phase, placement: Placement = "runtime") -> Iterator[Ph
                     elapsed_ms=_milliseconds(started, collector.clock),
                 )
             )
+        _ACTIVE.reset(active_token)
+        if parent:
+            collector.progress(*parent[-1])
+
+
+def has_browser_progress_listener() -> bool:
+    """Indicate whether this operation requested transient phase updates."""
+    collector = _CURRENT.get()
+    return collector is not None and collector.on_progress is not None
+
+
+def admit_browser_progress(encoded: str) -> None:
+    """Validate a hosted phase and rebase its elapsed time to the local operation."""
+    collector = _CURRENT.get()
+    if collector is None:
+        return
+    try:
+        progress = BrowserProgress.model_validate_json(encoded)
+    except (ValidationError, ValueError):
+        return
+    # Rebase elapsed time on the enclosing tool operation's clock.
+    collector.progress(progress.phase, progress.placement)
 
 
 P = ParamSpec("P")

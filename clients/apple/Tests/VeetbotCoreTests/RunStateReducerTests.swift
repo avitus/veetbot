@@ -5,6 +5,90 @@ import Testing
 
 @MainActor
 @Suite struct RunStateReducerTests {
+    /// Progress appears mid-call, rejects foreign or unsafe updates, and cannot revive a result.
+    @Test
+    func browserProgressArrivesDuringTheCallAndCannotReviveItsResult() {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        reducer.reduce(SSEFrame(id: 1, event: "run.started", data: ["run_id": .string(runID.uuidString)]))
+        reducer.reduce(SSEFrame(id: 2, event: "tool.call.started", data: [
+            "run_id": .string(runID.uuidString), "call_id": .string("read"), "name": .string("browser.observe"),
+        ]))
+        /// Build a transient frame with controlled phase and run identity.
+        func progress(phase: String = "observation", run: UUID? = nil) -> SSEFrame {
+            SSEFrame(id: nil, event: "tool.call.progress", data: [
+                "run_id": .string((run ?? runID).uuidString),
+                "call_id": .string("read"), "name": .string("browser.observe"),
+                "browser_progress": .object([
+                    "version": .number(1), "phase": .string(phase), "placement": .string("runtime"),
+                    "elapsed_ms": .number(1200),
+                ]),
+            ])
+        }
+        reducer.reduce(progress(phase: "secret-cookie-canary"))
+        #expect(reducer.tools[0].browserProgress == nil)
+        reducer.reduce(progress(run: UUID()))
+        #expect(reducer.activeRunID == runID)
+        #expect(reducer.tools[0].browserProgress == nil)
+        reducer.reduce(progress())
+        #expect(reducer.tools[0].browserProgress?.summary == "Read page · 1.2 s")
+        #expect(reducer.tools[0].browserProgress?.summary(at: .distantPast) == "Read page · 1.2 s")
+        #expect(reducer.tools[0].browserProgress?.summary(at: .distantFuture) == "Read page · 3600.0 s")
+        #expect(reducer.tools[0].activitySummary(detail: "example.com", at: .distantPast)
+            == "browser.observe · example.com · Running · Read page · 1.2 s")
+        #expect(reducer.tools[0].status == .running)
+        reducer.reduce(SSEFrame(id: 3, event: "tool.call.uncertain", data: [
+            "call_id": .string("read"), "name": .string("browser.observe"),
+        ]))
+        reducer.reduce(progress())
+        #expect(reducer.tools[0].browserProgress == nil)
+        #expect(reducer.tools[0].status == .uncertain)
+        #expect(reducer.tools[0].activitySummary(detail: "example.com", at: .distantPast)
+            == "browser.observe · example.com · Uncertain")
+    }
+
+    /// All run-update sources preserve same-run progress and clear it on replacement or completion.
+    @Test(arguments: ["seed", "begin", "stream"], [false, true])
+    func browserProgressClearsWhenRunIsSeededOrReplaced(source: String, replaceRun: Bool) throws {
+        let reducer = RunStateReducer()
+        let runID = UUID()
+        reducer.begin(runID: runID, status: .running)
+        reducer.reduce(SSEFrame(id: 1, event: "tool.call.started", data: [
+            "run_id": .string(runID.uuidString), "call_id": .string("read"), "name": .string("browser.observe"),
+        ]))
+        reducer.reduce(SSEFrame(id: nil, event: "tool.call.progress", data: [
+            "run_id": .string(runID.uuidString), "call_id": .string("read"), "name": .string("browser.observe"),
+            "browser_progress": .object([
+                "version": .number(1), "phase": .string("observation"), "placement": .string("runtime"),
+                "elapsed_ms": .number(1200),
+            ]),
+        ]))
+        /// Apply the same lifecycle update through each supported entry point.
+        func update(id: UUID, status: RunStatus) throws {
+            if source == "seed" {
+                let object: [String: Any] = [
+                    "id": id.uuidString, "session_id": UUID().uuidString, "status": status.rawValue,
+                    "step_count": 1, "model_call_count": 1, "tool_call_count": 1,
+                    "usage": ["input_tokens": 0, "output_tokens": 0, "cost_usd": "0.00"],
+                    "limits": ["max_steps": 12, "max_cost_usd": "1.00"],
+                    "created_at": "2026-11-10T12:00:00Z", "updated_at": "2026-11-10T12:00:01Z",
+                ]
+                reducer.seed(run: try JSONDecoder.server.decode(
+                    RunView.self, from: JSONSerialization.data(withJSONObject: object)
+                ))
+            } else if source == "stream" {
+                reducer.reduce(SSEFrame(id: nil, event: status == .running ? "run.started" : "run.cancelled",
+                    data: ["run_id": .string(id.uuidString)]))
+            } else {
+                reducer.begin(runID: id, status: status)
+            }
+        }
+        try update(id: runID, status: .running)
+        #expect(reducer.tools[0].browserProgress != nil)
+        try update(id: replaceRun ? UUID() : runID, status: replaceRun ? .running : .cancelled)
+        #expect(reducer.tools[0].browserProgress == nil)
+    }
+
     @Test
     func aStalePendingReadCannotUndoAnApproval() throws {
         let reducer = RunStateReducer()

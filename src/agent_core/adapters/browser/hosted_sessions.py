@@ -18,6 +18,7 @@ from pydantic import (
     model_validator,
 )
 
+from agent_core.adapters.browser.progress import read_progress_response
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
@@ -32,7 +33,12 @@ from agent_core.domain.browser import (
     BrowserSnapshot,
     require_service_origin,
 )
-from agent_core.domain.browser_diagnostics import admit_browser_diagnostics, browser_phase_call
+from agent_core.domain.browser_diagnostics import (
+    PROGRESS_MEDIA_TYPE,
+    admit_browser_diagnostics,
+    browser_phase_call,
+    has_browser_progress_listener,
+)
 from agent_core.domain.browser_download import MAX_BROWSER_DOWNLOAD_BYTES
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
 from agent_core.domain.browser_upload import BrowserImageFile, BrowserImagePayload
@@ -109,6 +115,7 @@ class HostedBrowserSessionControlPlane:
         response_model: type[BaseModel] | None,
         idempotency_key: str | None = None,
     ) -> BaseModel | None:
+        """Send once, admit bounded diagnostics, and preserve JSON or streamed result semantics."""
         try:
             secret = await self._credentials.resolve(CredentialRef(CREDENTIAL_NAME))
         except PermissionError as exc:
@@ -120,6 +127,8 @@ class HostedBrowserSessionControlPlane:
             "Authorization": "Bearer " + secret.reveal(),
             "Content-Type": "application/json",
         }
+        if has_browser_progress_listener():
+            headers["Accept"] = PROGRESS_MEDIA_TYPE
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
         try:
@@ -129,30 +138,26 @@ class HostedBrowserSessionControlPlane:
                 headers=headers,
                 json=dict(payload),
             ) as response:
-                if response.status_code in {401, 403}:
-                    raise BrowserProviderError(
-                        "tool.browser.provider_unavailable",
-                        retryable=False,
+                status = response.status_code
+                if status in {401, 403}:
+                    raise BrowserProviderError("tool.browser.provider_unavailable", retryable=False)
+                if response.headers.get("content-type", "").split(";", 1)[0] == PROGRESS_MEDIA_TYPE:
+                    status, body = await read_progress_response(
+                        response, maximum_body_bytes=MAXIMUM_SESSION_RESPONSE_BYTES
                     )
-                if response.status_code == 409:
+                else:
                     body = await _bounded_body(response)
+                if status == 409:
                     _admit_diagnostics(body)
                     reason = _safe_reason_code(body) or "tool.browser.profile_unavailable"
                     raise BrowserProviderError(reason, retryable=False)
-                if response.status_code in {408, 425, 429} or response.status_code >= 500:
-                    _admit_diagnostics(await _bounded_body(response))
-                    raise BrowserProviderError(
-                        "tool.browser.provider_unavailable",
-                        retryable=True,
-                    )
-                if not 200 <= response.status_code < 300:
-                    raise BrowserProviderError(
-                        "tool.browser.provider_unavailable",
-                        retryable=False,
-                    )
+                if status in {408, 425, 429} or status >= 500:
+                    _admit_diagnostics(body)
+                    raise BrowserProviderError("tool.browser.provider_unavailable", retryable=True)
+                if not 200 <= status < 300:
+                    raise BrowserProviderError("tool.browser.provider_unavailable", retryable=False)
                 if response_model is None:
                     return None
-                body = await _bounded_body(response)
         except BrowserProviderError:
             raise
         except (httpx.TimeoutException, httpx.TransportError) as exc:

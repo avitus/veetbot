@@ -5,7 +5,7 @@ import { SiteFooter, SiteHeader } from "../components/SiteChrome";
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
-    "How Veetbot accesses, uses, stores, shares, and protects data, including data obtained through the Gmail API.",
+    "How Veetbot accesses, uses, stores, shares, and protects data, including data obtained through the Gmail and Google Calendar APIs.",
   alternates: { canonical: "/privacy" },
 };
 
@@ -20,9 +20,9 @@ export default function PrivacyPolicy() {
           <h1>Privacy Policy</h1>
           <p className="legal-intro">
             This policy explains how Veetbot handles information on its public
-            website and in its optional Gmail integration.
+            website and in its optional Gmail and Google Calendar integrations.
           </p>
-          <p className="effective-date">Effective September 28, 2026</p>
+          <p className="effective-date">Effective November 9, 2026</p>
         </header>
 
         <div className="legal-layout">
@@ -107,6 +107,30 @@ export default function PrivacyPolicy() {
                 and other derived output are treated as Google user data under
                 this policy. Veetbot does not create cross-user aggregate or
                 anonymized Gmail datasets.
+              </p>
+            </section>
+
+            <section>
+              <h2>Google Calendar access</h2>
+              <p>
+                Calendar access requires separate consent to{" "}
+                <code>calendar.calendarlist.readonly</code> and{" "}
+                <code>calendar.events.readonly</code>. Google grants these scopes
+                across accessible calendars; Veetbot restricts its tools to the
+                calendars selected during setup. It reads names, time zones,
+                event times, titles, descriptions, locations and attendees to
+                answer calendar questions and produce briefings you schedule.
+                It cannot create, edit or delete events or send invitations.
+              </p>
+              <p>
+                Relevant Calendar content may be processed by the configured AI
+                provider under the same Google-data sharing and retention rules
+                below. Calendar results and summaries may remain in session
+                history until deletion, with deleted data retained in encrypted
+                backups for no more than 35 days. Calendar text is untrusted.
+                This integration adds no automatic Calendar memory ingestion.
+                You can disable it, revoke its Google grant and delete its
+                associated sessions.
               </p>
             </section>
 

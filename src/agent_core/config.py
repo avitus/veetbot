@@ -189,6 +189,7 @@ class Settings:
     call_owner_requests_enabled: bool = True
     call_configuration: CallConfiguration | None = None
     call_webhook_secret: SecretStr | None = None
+    calendar_enabled: bool = False
     svp_enabled: bool = False
     # ADR-0255: owner-added MCP servers, the key sealing their tokens, and the
     # absolute URL of their sign-in callback.
@@ -976,6 +977,58 @@ _GMAIL_ACCOUNT_FIELDS = frozenset(
     }
 )
 _GMAIL_NAMED_CREDENTIAL = re.compile(r"^gmail_[a-z][a-z0-9_]{0,31}_(?:read|write|send)$")
+
+
+def _read_calendar_credential_file(raw_path: str) -> str:
+    """Load an owner-only grant while preserving actionable setup errors."""
+    name = "CALENDAR_READ_CREDENTIAL_FILE"
+    path = Path(raw_path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError(f"{name} must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or not 1 <= metadata.st_size <= 16384
+    ):
+        raise ConfigurationError(f"{name} must be a 0600 regular file under 16 KiB")
+    try:
+        loaded = json.loads(path.read_bytes())
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ConfigurationError(f"{name} is unavailable or invalid") from exc
+    fields = {"client_id", "client_secret", "refresh_token", "scope", "calendar_ids"}
+    if not isinstance(loaded, dict) or set(loaded) != fields:
+        raise ConfigurationError(f"{name} has an invalid credential shape")
+    if any(
+        not isinstance(loaded[key], str) or not loaded[key].strip() or len(loaded[key]) > 4096
+        for key in ("client_id", "client_secret", "refresh_token")
+    ):
+        raise ConfigurationError(f"{name} has invalid credentials")
+    expected = {
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        "https://www.googleapis.com/auth/calendar.events.readonly",
+    }
+    if not isinstance(loaded["scope"], str) or set(loaded["scope"].split()) != expected:
+        raise ConfigurationError(f"{name} requires the exact read-only scopes")
+    ids = loaded["calendar_ids"]
+    if (
+        not isinstance(ids, list)
+        or not 1 <= len(ids) <= 16
+        or any(
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > 1024
+            or any(ord(c) < 32 for c in value)
+            for value in ids
+        )
+    ):
+        raise ConfigurationError(f"{name} requires selected calendar IDs")
+    if len(set(ids)) != len(ids):
+        raise ConfigurationError(f"{name} has duplicate calendar IDs")
+    return json.dumps(loaded, sort_keys=True, separators=(",", ":"))
 
 
 def _read_gmail_credential_file(
@@ -2002,6 +2055,18 @@ def _load_settings(
         or values.get("BLAND_WEBHOOK_SECRET_FILE")
     ):
         raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
+    calendar_enabled = _parse_flag(values, "AGENT_CALENDAR_ENABLED")
+    calendar_file = values.get("CALENDAR_READ_CREDENTIAL_FILE", "").strip()
+    if calendar_file and not calendar_enabled:
+        raise ConfigurationError("CALENDAR_READ_CREDENTIAL_FILE requires AGENT_CALENDAR_ENABLED=1")
+    if calendar_file and (not load_email_credentials or not load_provider_credentials):
+        raise ConfigurationError("This role must not hold CALENDAR_READ_CREDENTIAL_FILE")
+    if calendar_enabled and load_email_credentials and load_provider_credentials:
+        if "calendar_read" in credentials:
+            raise ConfigurationError("Duplicate Calendar credential source")
+        credentials["calendar_read"] = SecretStr(_read_calendar_credential_file(calendar_file))
+    elif "calendar_read" in credentials:
+        raise ConfigurationError("Calendar credentials require the enabled credential-bearing role")
     svp_enabled = _parse_flag(values, "AGENT_SVP_ENABLED")
     raw_svp_credential_file = values.get("SVP_CREDENTIAL_FILE", "").strip()
     if (
@@ -2336,6 +2401,7 @@ def _load_settings(
         ),
         call_configuration=call_configuration,
         call_webhook_secret=call_webhook_secret,
+        calendar_enabled=calendar_enabled,
         svp_enabled=svp_enabled,
         mcp_servers_enabled=mcp_servers_enabled,
         mcp_authorization_key=mcp_authorization_key,

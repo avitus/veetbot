@@ -1,3 +1,13 @@
+# ADR-0307: The owner-authorized W2 continuation adds a bounded, owner-scoped
+# browser operation report over existing terminal diagnostics. Construction
+# and direct-dev delivery do not establish live-site or program acceptance.
+# ADR-0306: On 2026-11-10 the owner directed continuation of the browser
+# improvement work packages. W2 gains bounded live phase updates through the
+# existing transient run stream and native activity view. Delivery and broader
+# W2 acceptance remain pending; no milestone or gate moves.
+# ADR-0305: Read-only Google Calendar implementation authorized 2026-11-09.
+# Selected calendars, separate OAuth and explicit scheduled access; implemented offline.
+# Production consent and activation pending; no milestone or gate moves.
 # ADR-0303: On 2026-11-06 the owner asked why the Mac Email list still showed
 # five threads after the Important list learned to scroll, and chose to make
 # every Mac mail list load up to 100 threads per page and scroll. macOS

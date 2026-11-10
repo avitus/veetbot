@@ -48,6 +48,7 @@ from agent_core.domain.tools import (
     ToolSource,
     ToolSpec,
 )
+from agent_core.mcp.calendar_failures import calendar_failure
 from agent_core.mcp.configuration import build_stdio_environment, is_email_attachment_tool
 from agent_core.mcp.mapping import MCPMappingReport, map_discovered_tools
 from agent_core.ports.credentials import CredentialResolver
@@ -1164,12 +1165,16 @@ class MCPRuntime:
 
     @staticmethod
     def _result(result: MCPCallResult, spec: ToolSpec) -> ToolResult:
+        """Normalize MCP output while preserving ambiguous non-idempotent outcomes."""
         if result.is_error:
             effect_status = (
                 result.structured.get("effect_status") if result.structured is not None else None
             )
             if MCPRuntime._non_idempotent_effect(spec) and effect_status != "not_applied":
                 return MCPRuntime._outcome_unknown("MCP non-idempotent call failed after dispatch")
+            calendar_error = calendar_failure(result, spec)
+            if calendar_error is not None:
+                return ToolResult(ok=False, content=[], failure=calendar_error)
             gmail_code = MCPRuntime._gmail_failure_code(result)
             if gmail_code == "gmail.outcome_unknown":
                 return MCPRuntime._outcome_unknown("MCP server could not determine the outcome")

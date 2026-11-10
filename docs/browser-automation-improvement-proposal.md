@@ -98,13 +98,31 @@ or automatic credential entry is introduced. See
 W1–W6 remain partial. Later slices added verified sign-in resumption, a reviewed
 X Home briefing workflow and bounded startup recovery (ADRs 0164, 0175 and 0177).
 Those capabilities do not establish broad site coverage, task quality or capacity.
-In-flight phase streaming, frame coverage and the broader W7–W10 capabilities
-remain outstanding. Live site contracts use the websites, tasks and account/action
+Frame coverage, aggregate operational reporting and the broader W7–W10
+capabilities remain outstanding. Live site contracts use the websites, tasks and account/action
 scope the owner has already selected; ask only for genuinely missing scope.
 Technical predicate and workflow maintenance belongs to the implementation,
 not to the user.
 Keep the release scorecard unmeasured until its own evidence exists; local work
 is not a push, review, deployment or a completed program.
+
+### Construction — 2026-11-10
+
+The W2 continuation adds bounded live phase progress through authenticated
+hosted responses, the existing transient run stream and native activity rows
+([ADR-0306](adr/0306-live-browser-progress.md)). Terminal diagnostics retain
+replayable results. Progress delivery is best effort, with bounded queues and
+finite publish waits. A lost browser response still follows the existing
+uncertain-effect rules. Review, production delivery and live acceptance remain
+pending; the broader program exit evidence remains open.
+
+The same continuation adds `agent run browser-report --hours N [--json]`
+([ADR-0307](adr/0307-browser-operation-report.md)). It aggregates bounded terminal
+phase diagnostics for the configured owner, including duration percentiles,
+closed failure groups, missing/invalid metadata and explicit sample truncation.
+It reuses existing event retention and introduces no capture store or external
+metrics service. This construction report is not a live-site quality benchmark;
+production availability and the broader W2 exit evidence remain separate.
 
 ### Production diagnosis — 2026-10-18
 

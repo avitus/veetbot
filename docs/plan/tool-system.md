@@ -2357,6 +2357,14 @@ unsubscribe transport ([ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md)
 
 ### Browser operation diagnostics (ADR-0158)
 
+ADR-0306 adds optional transient `tool.call.progress` frames during builtin
+browser execution. The pipeline binds each update to its run and call, publishes
+through the existing live broadcaster with a bounded single-item queue and a
+250 ms publish timeout, then cancels and joins the publisher before recording
+the terminal event. Only validated phase metadata enters this path. Publication
+failure cannot change action authority, effects, results or recovery. These
+frames are absent from the event log and model context.
+
 The terminal events for builtin browser tools may additionally carry a versioned
 `browser_diagnostics` summary collected by trusted execution. It contains only
 closed phase/outcome/failure/placement enums, bounded timings and a truncation

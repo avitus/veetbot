@@ -4473,7 +4473,7 @@ owner's current ranking, not a schedule.
 | B8 | General standing approval grants. The restrictive-only advisory approval signal entered as Milestone 30 on 2026-09-19 (ADR-0111) | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
-| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. Email entered as Milestone 18 (ADR-0071), Bland telephone calling as Milestone 27 (ADR-0097); other voice input and calendar remain deferred |
+| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. Email entered as Milestone 18 (ADR-0071), Bland telephone calling as Milestone 27 (ADR-0097); read-only Google Calendar authorized independently in ADR-0305; other voice input and Calendar writes remain deferred |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 | B13 | The WhatsApp linked-device bridge: reading the owner's personal account and sending as the owner | A risk-acceptance ADR naming the ToS violation and account-ban risk the owner accepts, plus a dependency ADR for the whatsmeow-class sidecar; after Milestone 25 |
 | B14 | Owner records: named numeric series the owner appends to and queries over time (blood pressure, weight, sleep), kept apart from beliefs, with a trust-gated append, deterministic window summaries, approval-gated deletion and no automatic recall in the first slice | Entered as Milestone 34 on 2026-10-22 (ADR-0239), specified in `owner-records.md`. Not a general SQL surface and not an alternate memory store |
@@ -5157,3 +5157,10 @@ It has no calendar expiry and retains the fifty-new-conversations-per-UTC-day ca
 shared durable admissions, raw-choice rule, protections and off switch. Invalid
 evidence disables calls. The general calibrated filter and time-limited pilot
 remain unchanged; reviewed bypass precision does not measure recall.
+
+### Read-only Google Calendar extension (ADR-0305)
+
+The owner authorized implementation on 2026-11-09.
+[Calendar integration](calendar-integration.md) defines one selected-calendar,
+read-only MCP server, separate OAuth consent and explicit scheduled access.
+It adds no milestone and moves no verified gate ceiling.

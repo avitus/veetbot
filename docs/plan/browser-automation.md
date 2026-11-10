@@ -1777,6 +1777,48 @@ may return the summary as optional metadata; invalid summaries are discarded as
 a whole. Existing clients and services may omit it. Existing event retention,
 access and deletion rules apply; no new raw tracing or capture store is enabled.
 
+### Aggregate browser operation report (ADR-0307)
+
+`agent run browser-report --hours N [--json]` reads owner-scoped terminal browser
+operation evidence from PostgreSQL. The default window is twenty-four hours,
+with a ninety-day maximum, and the newest 10,000 completed, failed or uncertain
+operations are sampled with explicit selection truncation. The four builtin
+browser tools are counted; policy refusals before execution and unfinished
+operations are excluded. A read-only, repeatable-read transaction has a ten-second
+statement timeout. The query projects only closed labels and bounded diagnostic
+metadata, never arguments, results, page content or correlation identifiers.
+
+Whole diagnostics-v1 objects are validated before computing counts and median,
+95th percentile and maximum elapsed seconds by tool/outcome and by
+phase/placement/outcome/failure. Missing, invalid, oversized and truncated
+metadata are counted explicitly. Each diagnostic object is limited to 16 KiB.
+Nested phase durations overlap and are not added into operation wall time.
+Empty traffic supplies no success claim. Existing event retention and deletion
+remain authoritative; this adds no metrics service or new capture store.
+
+### Live browser phase progress (ADR-0306)
+
+The phase collector also offers up to 128 version-1 progress updates with a
+closed phase and placement and bounded elapsed milliseconds. Nested phases
+restore their parent on exit. A single pending update is replaced by newer
+progress so slow consumers cannot block browser work.
+
+Authenticated hosted callers opt in with Accept
+`application/vnd.veetbot.browser-progress+ndjson`. Each newline-delimited record
+is either `progress` with the validated record or one final `result` with the
+original status and JSON body. Ordinary JSON remains supported. Stream parsing
+bounds bytes and record count and requires the terminal result; missing or
+malformed results follow existing provider failure and uncertain-effect rules.
+Disconnect cancels and joins the operation. Upload uses the same diagnostics.
+
+The worker publishes `tool.call.progress` through the existing transient run
+stream, with run and call identity supplied by trusted execution. Publishing is
+bounded, best effort and stopped before the terminal event. Native clients show
+fixed phase labels only for a matching running browser call, then clear them on
+its terminal event. Progress cannot supply task results or authorization. The
+terminal diagnostics remain the replayable execution record. See
+[ADR-0306](../adr/0306-live-browser-progress.md).
+
 ### Bounded readiness and visible postconditions (ADR-0159)
 
 Version 1.2.0 adds optional `readiness` (`dom_quiet` or `bound_expired`) to

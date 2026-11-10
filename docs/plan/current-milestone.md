@@ -4,6 +4,11 @@ title: Current Milestone
 
 # Current milestone
 
+- **Read-only Google Calendar — ADR-0305:** The owner authorized implementation
+  on 2026-11-09. [Calendar integration](calendar-integration.md) specifies selected
+  calendars, operator OAuth setup, three read tools and explicit scheduled access.
+  Implemented with offline tests; production consent and activation remain pending.
+
 - **Save an email attachment — ADR-0296:** On 2026-11-03 the owner asked to add email
   attachments to Veetbot's file storage and chose the email's chat as the place, a Save
   button plus an approval-gated Chat tool as the ways in, and knowledge on every save.

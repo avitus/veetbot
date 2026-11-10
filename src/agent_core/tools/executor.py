@@ -10,7 +10,7 @@ import math
 import re
 from collections import Counter, deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from contextlib import asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -121,10 +121,12 @@ from agent_core.ports.credentials import CredentialResolver, UnavailableCredenti
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
 from agent_core.ports.execution import WorkspaceFactory
+from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.policies import PolicyEngine, StandingAuthorizer
 from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
+from agent_core.tools.browser_progress import publish_browser_progress
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME
 from agent_core.tools.delegate_run import DELEGATE_RUN_TOOL_NAME
 from agent_core.tools.messages import message_for
@@ -800,6 +802,7 @@ class ToolPipeline:
         clock: Clock,
         ids: IdFactory,
         *,
+        live_events: LiveEventBroadcaster | None = None,
         policy: PolicyEngine | None = None,
         recovery_policy: PolicyEngine | None = None,
         workspace_factory: WorkspaceFactory | None = None,
@@ -823,6 +826,7 @@ class ToolPipeline:
     ) -> None:
         """Compose tool validation, policy, execution, recovery, and typed work."""
         self._registry = registry
+        self._live_events = live_events
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
@@ -1696,15 +1700,31 @@ class ToolPipeline:
             "browser.act",
             "browser.upload",
         }
-        with (
-            log_context(
-                run_id=str(run.id),
-                session_id=str(run.session_id),
-                tenant_id=run.tenant_id,
-                tool_invocation_id=str(invocation.id),
-            ),
-            collect_browser_diagnostics(clock=loop.time, enabled=browser_operation) as diagnostics,
-        ):
+        async with AsyncExitStack() as activity:
+            activity.enter_context(
+                log_context(
+                    run_id=str(run.id),
+                    session_id=str(run.session_id),
+                    tenant_id=run.tenant_id,
+                    tool_invocation_id=str(invocation.id),
+                )
+            )
+            on_progress = await activity.enter_async_context(
+                publish_browser_progress(
+                    self._live_events if browser_operation else None,
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    call_id=call.call_id,
+                    name=tool.spec.name,
+                )
+            )
+            diagnostics = activity.enter_context(
+                collect_browser_diagnostics(
+                    clock=loop.time,
+                    enabled=browser_operation,
+                    on_progress=on_progress,
+                )
+            )
             try:
                 if effective_timeout <= 0:
                     raise TimeoutError

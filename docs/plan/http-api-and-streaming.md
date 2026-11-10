@@ -1371,6 +1371,13 @@ containing a newline would terminate the frame early, so serialization
 uses no pretty-printing and escapes newlines inside strings, which
 compact JSON does by construction.
 
+`tool.call.progress` is an additional transient event for builtin browser calls
+(ADR-0306). Its trusted envelope contains `run_id`, `call_id`, `name` and a
+`browser_progress` record with version, phase, placement and elapsed milliseconds.
+It has no event id, is not replayed, and does not change tool or run status.
+Clients ignore invalid records and progress received after the call completes.
+The ordinary terminal tool event remains authoritative.
+
 ### The ids are per-session and the endpoint is per-run
 
 A run's stream shows the sequences belonging to that run's events, and

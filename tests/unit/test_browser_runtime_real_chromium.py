@@ -651,3 +651,33 @@ async def test_an_invisible_sign_in_field_in_a_frame_is_not_a_challenge(path: st
 
     assert not evidence.challenge_visible
     assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+
+
+async def test_navigation_progress_is_visible_while_chromium_waits_for_the_page() -> None:
+    """Prove real Chromium reports navigation before a blocked page response completes."""
+    from agent_core.domain.browser_diagnostics import BrowserProgress, collect_browser_diagnostics
+
+    requested = asyncio.Event()
+    release = asyncio.Event()
+    updates: list[BrowserProgress] = []
+
+    async def page(_request: Request) -> HTMLResponse:
+        requested.set()
+        await release.wait()
+        return html("<h1>Ready</h1>")
+
+    async with browsing([Route("/", page)]) as (site, runtime):
+        with collect_browser_diagnostics(
+            clock=asyncio.get_running_loop().time, on_progress=updates.append
+        ):
+            task = asyncio.create_task(runtime.navigate(site.origin + "/"))
+            try:
+                async with asyncio.timeout(5):
+                    await requested.wait()
+                assert not task.done()
+                assert any(update.phase == "navigation" for update in updates)
+                assert site.origin not in str(updates)
+            finally:
+                release.set()
+                observation = await task
+        assert "Ready" in observation.text
