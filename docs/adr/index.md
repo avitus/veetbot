@@ -356,3 +356,5 @@ implementation without one.
 - [ADR-0306: Show browser phases while an operation is running (Accepted)](0306-live-browser-progress.md)
 
 - [ADR-0307: Aggregate browser operation evidence without page content](0307-browser-operation-report.md)
+
+- [ADR-0308: Discover semantic browser regions in open shadow roots](0308-open-shadow-browser-regions.md)

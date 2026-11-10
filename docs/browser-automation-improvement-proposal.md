@@ -130,6 +130,14 @@ metrics service. This report belongs to the owner's direct-`dev` continuation.
 It is not a live-site quality benchmark; production availability and the broader
 W2 exit evidence remain separate. ADR-0307 records the local verification.
 
+The next W3 slice adds semantic-region discovery and focus inside open shadow
+roots ([ADR-0308](adr/0308-open-shadow-browser-regions.md)). Web-component forms,
+dialogs and status messages share the existing bounded evidence interface.
+Versioned coverage discloses the wider scope; composed-ancestor checks exclude
+hidden and editable hosts and slot ancestors. Frames, closed roots and collection
+extraction's separate scope are unchanged. This is construction for direct
+`dev` delivery; live-site acceptance and production availability remain separate.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

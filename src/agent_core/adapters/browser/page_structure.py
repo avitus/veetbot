@@ -1,4 +1,4 @@
-"""Bounded trusted collection of visible main-document semantic evidence."""
+"""Bounded trusted collection of visible document and open-shadow semantic evidence."""
 
 # Do not use innerText/textContent: those materialize unbounded subtrees and can
 # include editable values. The two walks have independent node/text ceilings.
@@ -23,24 +23,48 @@ PAGE_TEXT_HELPERS = """
         return style.display === 'none' || style.visibility !== 'visible' || style.opacity === '0';
     };
     // One sibling per level, never an array of every child of a hostile node.
-    const advance = (node, root, descend) => {
+    const advance = (node, root, descend, openShadow = false) => {
+        if (descend && openShadow && node.shadowRoot?.firstChild)
+            return node.shadowRoot.firstChild;
         if (descend && node.firstChild) return node.firstChild;
         while (node && node !== root) {
             if (node.nextSibling) return node.nextSibling;
-            node = node.parentNode;
+            const parent = node.parentNode;
+            if (openShadow && parent?.nodeType === 11 && parent.host) {
+                node = parent.host;
+                if (node.firstChild) return node.firstChild;
+            } else node = parent;
         }
         return null;
     };
+    const composedParent = node => node.assignedSlot || node.parentElement
+        || node.getRootNode()?.host || null;
+    const ancestorExclusion = (node, root, remaining) => {
+        let parent = node === root ? composedParent(node) : node.assignedSlot, visits = 0;
+        while (parent) {
+            if (visits === remaining) return {skip: true, visits, limited: true};
+            visits++;
+            if (blocked(parent)) return {skip: true, visits, limited: false};
+            parent = composedParent(parent);
+        }
+        return {skip: false, visits, limited: false};
+    };
     const summary = (root, limit = 512, excludeCollections = false, budget = null,
-                     excludeArticles = false) => {
+                     excludeArticles = false, openShadow = false) => {
         let node = root, scanned = 0, text = '', clipped = false;
         const nodeLimit = budget ? Math.min(256, budget.remaining) : 256;
         while (node && scanned < nodeLimit && text.length < limit) {
             scanned++;
-            const skip = blocked(node) || (excludeCollections && node !== root
+            let skip = blocked(node) || (excludeCollections && node !== root
                 && node.nodeType === 1 && node.matches(collectionSelector))
                 || (excludeArticles && node !== root && node.nodeType === 1
                     && node.matches('article,[role="article"]'));
+            if (openShadow && !skip) {
+                const ancestors = ancestorExclusion(node, root, nodeLimit - scanned);
+                scanned += ancestors.visits;
+                skip = ancestors.skip;
+                if (ancestors.limited) break;
+            }
             if (!skip && node.nodeType === 3) {
                 const range = document.createRange();
                 range.selectNode(node);
@@ -54,7 +78,7 @@ PAGE_TEXT_HELPERS = """
                     text += cut(addition, remaining);
                 }
             }
-            node = advance(node, root, !skip);
+            node = advance(node, root, !skip, openShadow);
         }
         if (budget) budget.remaining -= scanned;
         return {text, text_truncated: clipped || node !== null};
@@ -83,7 +107,13 @@ REGION_SCRIPT = (
     let node = root, scanned = 0, matched = 0;
     while (node && scanned < 8192) {
         scanned++;
-        const skip = blocked(node);
+        let skip = blocked(node);
+        if (!skip) {
+            const ancestors = ancestorExclusion(node, root, 8192 - scanned);
+            scanned += ancestors.visits;
+            skip = ancestors.skip;
+            if (ancestors.limited) break;
+        }
         if (!skip && node.nodeType === 1) {
             const kind = kindOf(node);
             const box = kind ? node.getBoundingClientRect() : null;
@@ -96,11 +126,12 @@ REGION_SCRIPT = (
                 if (regions.length > 32) regions.pop();
             }
         }
-        node = advance(node, root, !skip);
+        node = advance(node, root, !skip, true);
     }
     return {
-        regions: regions.map(region => ({kind: region.kind, ...summary(region.node)})),
-        coverage: {version: 1, scope: 'main_document', scanned_nodes: scanned,
+        regions: regions.map(region => ({kind: region.kind,
+            ...summary(region.node, 512, false, null, false, true)})),
+        coverage: {version: 2, scope: 'main_document_and_open_shadow', scanned_nodes: scanned,
                    scan_limit_reached: node !== null, omitted_regions: matched - regions.length}
     };
 }"""

@@ -35,7 +35,7 @@ async def test_visible_regions_prioritize_dialogs_and_exclude_hidden_or_editable
             <iframe srcdoc="<h2>FRAME_CANARY</h2>"></iframe>
             <div id="shadow-host"></div>
             <script>document.querySelector("#shadow-host").attachShadow({mode:"open"})
-              .innerHTML = "<h2>SHADOW_CANARY</h2>";</script>
+              .innerHTML = "<h2>Visible shadow heading</h2>";</script>
         """)
 
     async with browsing([Route("/", home)]) as (site, runtime):
@@ -48,8 +48,9 @@ async def test_visible_regions_prioritize_dialogs_and_exclude_hidden_or_editable
         serialized = json.dumps(regions)
         assert "CANARY" not in serialized and "HIDDEN_HEADING" not in serialized
         assert "INVISIBLE_HEADING" not in serialized
+        assert "Visible shadow heading" in serialized
         assert all(r["ref"].startswith(observation.revision + ":region:") for r in regions)
-        assert raw["region_coverage"]["scope"] == "main_document"
+        assert raw["region_coverage"]["scope"] == "main_document_and_open_shadow"
         assert raw["region_coverage"]["scan_limit_reached"] is False
         assert raw["region_coverage"]["omitted_regions"] == 0
         with pytest.raises(BrowserProviderError) as refused:

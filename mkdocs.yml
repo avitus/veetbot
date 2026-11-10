@@ -446,4 +446,5 @@ nav:
       - "ADR-0305: Read-only Google Calendar access": adr/0305-read-only-google-calendar.md
       - "ADR-0306: Live browser progress": adr/0306-live-browser-progress.md
       - "ADR-0307: Aggregate browser operation evidence": adr/0307-browser-operation-report.md
+      - "ADR-0308: Open-shadow browser regions": adr/0308-open-shadow-browser-regions.md
   - Changelog: changelog.md

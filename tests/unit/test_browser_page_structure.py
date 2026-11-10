@@ -6,7 +6,7 @@ from uuid import UUID
 import pytest
 from jsonschema import Draft202012Validator
 
-from agent_core.domain.browser import BrowserObservation
+from agent_core.domain.browser import BrowserObservation, BrowserRegionCoverage
 from agent_core.domain.browser_projection import browser_context_projection
 from agent_core.domain.messages import FileReferencePart, TextPart
 from agent_core.domain.tool_output import content_bytes
@@ -19,7 +19,7 @@ from tests.unit.test_browser_tools import FakeBrowserProvider
 
 
 def structured_page(
-    *, revision: str = "revision", message: str = "Changes saved"
+    *, revision: str = "revision", message: str = "Changes saved", shadow: bool = False
 ) -> BrowserObservation:
     return BrowserObservation.model_validate(
         {
@@ -47,8 +47,8 @@ def structured_page(
                 ],
             ],
             "region_coverage": {
-                "version": 1,
-                "scope": "main_document",
+                "version": 2 if shadow else 1,
+                "scope": "main_document_and_open_shadow" if shadow else "main_document",
                 "scanned_nodes": 200,
                 "scan_limit_reached": False,
                 "omitted_regions": 5,
@@ -58,10 +58,12 @@ def structured_page(
 
 
 @pytest.mark.parametrize("budget", [1024, 4096])
+@pytest.mark.parametrize("shadow", [False, True])
 def test_model_projection_retains_status_and_control_or_explicit_region_omissions(
     budget: int,
+    shadow: bool,
 ) -> None:
-    observation = structured_page()
+    observation = structured_page(shadow=shadow)
     result = observation_result(FakeBrowserProvider(), observation, 512 * 1024)
     assert result.structured is not None
     assert result.structured.get("regions"), "tool discarded page structure"
@@ -77,13 +79,19 @@ def test_model_projection_retains_status_and_control_or_explicit_region_omission
     assert payload["revision"] == observation.revision and payload["elements"]
     assert payload["coverage"]["omitted_regions"] == 32 - len(payload["regions"])
     assert payload["provider_region_coverage"]["omitted_regions"] == 5
+    assert observation.region_coverage is not None
+    assert payload["provider_region_coverage"]["version"] == (2 if shadow else 1)
+    assert payload["provider_region_coverage"]["scope"] == observation.region_coverage.scope
     if budget == 4096:
         assert payload["regions"][0] == result.structured["regions"][0]
     assert all(r in result.structured["regions"] for r in payload["regions"])
 
 
-def test_canonical_bounding_counts_region_omissions_and_progress_ignores_reference_churn() -> None:
-    page = structured_page()
+@pytest.mark.parametrize("shadow", [False, True])
+def test_canonical_bounding_counts_region_omissions_and_progress_ignores_reference_churn(
+    shadow: bool,
+) -> None:
+    page = structured_page(shadow=shadow)
     result = observation_result(FakeBrowserProvider(), page, 4096)
     assert result.structured is not None
     assert result.structured.get("regions"), "canonical output discarded every region"
@@ -92,10 +100,30 @@ def test_canonical_bounding_counts_region_omissions_and_progress_ignores_referen
         result.structured["regions"]
     )
     first = page.model_dump(mode="json")
-    renewed = structured_page(revision="new").model_dump(mode="json")
-    changed = structured_page(message="Changes rejected").model_dump(mode="json")
+    renewed = structured_page(revision="new", shadow=shadow).model_dump(mode="json")
+    changed = structured_page(message="Changes rejected", shadow=shadow).model_dump(mode="json")
     assert observation_evidence_key(first) == observation_evidence_key(renewed)
     assert observation_evidence_key(first) != observation_evidence_key(changed)
+
+
+@pytest.mark.parametrize(
+    "version,scope",
+    [
+        (1, "main_document_and_open_shadow"),
+        (2, "main_document"),
+        (3, "main_document_and_open_shadow"),
+    ],
+)
+def test_region_coverage_rejects_misleading_or_unknown_versions(version: int, scope: str) -> None:
+    """The scope cannot silently claim shadow coverage under the old provider contract."""
+    with pytest.raises(ValueError):
+        BrowserRegionCoverage.model_validate(
+            {
+                "version": version,
+                "scope": scope,
+                "scanned_nodes": 1,
+            }
+        )
 
 
 @pytest.mark.parametrize(

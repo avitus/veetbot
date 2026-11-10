@@ -1256,9 +1256,12 @@ class PythonPlaywrightRuntime:
         try:
             if root is not None and not await root.evaluate("""node => {
                 if (!node.isConnected || node.ownerDocument !== document) return false;
-                for (let p = node, count = 0; p; p = p.parentElement) {
+                for (let p = node, count = 0; p;
+                     p = p.assignedSlot || p.parentElement || p.getRootNode()?.host) {
                     if (++count > 8192 || p.hidden || p.getAttribute('aria-hidden') === 'true'
-                        || p.isContentEditable) return false;
+                        || p.isContentEditable || p.matches('input,textarea,select,'
+                            + '[role="textbox"],[role="searchbox"],'
+                            + '[role="combobox"],[role="spinbutton"]')) return false;
                     const style = getComputedStyle(p);
                     if (style.display === 'none' || style.visibility !== 'visible'
                         || style.opacity === '0') return false;

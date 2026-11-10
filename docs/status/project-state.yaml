@@ -1,3 +1,6 @@
+# ADR-0308: The owner-authorized browser continuation extends W3 semantic
+# regions and focus into open shadow roots, with versioned coverage and the
+# existing privacy and visit limits. No frame authority or milestone moves.
 # ADR-0307: The owner-authorized W2 continuation adds a bounded, owner-scoped
 # browser operation report over existing terminal diagnostics. Construction
 # and direct-dev delivery do not establish live-site or program acceptance.

@@ -642,11 +642,19 @@ class BrowserSemanticRegion(BaseModel):
 class BrowserRegionCoverage(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-    version: Literal[1] = 1
-    scope: Literal["main_document"] = "main_document"
+    version: Literal[1, 2] = 1
+    scope: Literal["main_document", "main_document_and_open_shadow"] = "main_document"
     scanned_nodes: int = Field(ge=0, le=8192)
     scan_limit_reached: bool = False
     omitted_regions: int = Field(default=0, ge=0, le=8192)
+
+    @model_validator(mode="after")
+    def scope_matches_version(self) -> BrowserRegionCoverage:
+        """Old providers retain document-only coverage; shadow evidence identifies version 2."""
+        expected = "main_document" if self.version == 1 else "main_document_and_open_shadow"
+        if self.scope != expected:
+            raise ValueError("region coverage scope must match its version")
+        return self
 
 
 class BrowserTextCoverage(BaseModel):

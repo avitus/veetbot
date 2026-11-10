@@ -1861,10 +1861,17 @@ prioritized in that order within a main-document scan of at most 8,192 nodes.
 At most 32 whole records are retained; each text summary inspects at most 256
 nodes and contains at most 512 characters, with explicit truncation. Hidden
 subtrees and input, textarea, select and editable content do not contribute.
-Frames and shadow roots are outside this region scope. The existing general
-readable-text field and control capture are unchanged.
+Frames remain outside this region scope. ADR-0308 extends region discovery and
+summaries to open shadow roots, retaining the same visit, count and text bounds.
+Coverage version 2 names `main_document_and_open_shadow`; legacy version 1
+retains `main_document`. Composed-ancestor checks for slotted nodes share the
+visit limit. A focused shadow region does not adopt assigned light nodes outside
+its DOM subtree. Hidden, editable and transparent hosts or slot ancestors exclude
+their content. Focus rechecks composed ancestors before capture. Closed roots
+remain excluded; collection extraction keeps its separate main-document scope.
+The existing general readable-text field and control capture are unchanged.
 
-Version 1 coverage records scope, scanned nodes, scan exhaustion and the known
+Both coverage versions record scope, scanned nodes, scan exhaustion and the known
 omitted-region count within the scanned prefix. A bound is not whole-page
 completeness. Region references bind to the enclosing revision but are evidence
 identifiers only: `browser.act` and `browser.observe(after=...)` cannot use them.
