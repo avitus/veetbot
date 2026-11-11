@@ -362,6 +362,7 @@ from agent_core.application.device_management import (
 )
 from agent_core.application.email import EmailExperienceService
 from agent_core.application.email_attachments import EmailAttachmentSaver
+from agent_core.application.email_draft_files import EmailDraftFiles
 from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.application.job_execution import JobExecution
@@ -4881,6 +4882,7 @@ async def _compose(
             warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
             email_attachment_saver=EmailAttachmentSaver(SignatureAttachmentInspector()),
+            email_draft_interceptor=lambda *args: email_draft_files.invoke(*args),
             access_tokens=owner_mcp_servers,
             owner_servers_enabled=settings.mcp_servers_enabled,
         )
@@ -5023,6 +5025,9 @@ async def _compose(
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
         registry.register(KnowledgeSearchTool(knowledge_service, factory=uow_factory))
+        email_draft_files = EmailDraftFiles(
+            uow_factory, general_artifact_store, SignatureAttachmentInspector(), clock
+        )
         artifact_writers = ArtifactWriterFactory(
             uow_factory,
             general_artifact_store,
@@ -6220,6 +6225,7 @@ async def _compose(
             mcp_servers=owner_mcp_servers,
             calls=call_service,
             email=EmailExperienceService(
+                draft_files=email_draft_files,
                 read_image=PublicImageReader().read_email,
                 uow_factory=uow_factory,
                 clock=clock,

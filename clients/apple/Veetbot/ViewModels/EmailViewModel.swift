@@ -331,7 +331,7 @@ public final class EmailViewModel: ObservableObject {
     /// An owner action that failed, so a refusal can be shown beside the control that
     /// caused it. Reporting it only above the conversation leaves the action looking
     /// inert, because the button that triggered it is far below.
-    public var draftActionMessage: String? { draftActionError }
+    public var draftActionMessage: String? { draftActionError ?? thread?.preparationIssue }
     /// A failed mail read, reported with the conversation it could not refresh.
     public var threadReadMessage: String? { threadReadError }
     /// Says where held edits are while a stale draft waits for the owner's review of the new mail.
@@ -1060,6 +1060,35 @@ public final class EmailViewModel: ObservableObject {
             : draft.status == "failed" ? Self.sendFailedMessage : Self.sendNotMadeMessage
     }
 
+    public var draftPreparationMessage: String {
+        switch thread?.preparationStage {
+        case "finding_context": "Finding context…"
+        case "finding_documents": "Finding documents…"
+        case "staging_files": "Attaching files…"
+        case "ready_for_review": "Ready for review"
+        default: "Preparing draft…"
+        }
+    }
+
+    public func loadDraftAttachment(_ id: UUID) async throws -> LoadedArtifact {
+        guard let api = makeAPIClient() else { throw HTTPTransportError.notConfigured }
+        let metadata = try await api.getArtifact(id)
+        guard case .content(let data, _) = try await api.getArtifactContent(id) else {
+            throw HTTPTransportError.invalidResponse
+        }
+        return LoadedArtifact(metadata: metadata, data: data)
+    }
+
+    public func removeDraftAttachment(_ id: UUID) async {
+        guard let draft, draft.canEdit, !isPreparingSend, var edit = edits[draft.id] else { return }
+        edit.attachmentIDs.removeAll { $0 == id }
+        edits[draft.id] = edit
+        review = nil
+        reviewDraft = nil
+        autosaveTask?.cancel()
+        _ = await saveDraft(draft.id)
+    }
+
     public func changeEdit(_ keyPath: WritableKeyPath<EmailDraftEdit, String>, to text: String) {
         guard let draft, draft.canEdit, var edit = edits[draft.id] else { return }
         edit[keyPath: keyPath] = text
@@ -1463,12 +1492,27 @@ public final class EmailViewModel: ObservableObject {
             let strings = entries.compactMap(\.stringValue)
             return strings.count == entries.count && strings == expected
         }
+        let files = draft.attachments ?? []
+        let expectedTool = files.isEmpty ? "send_message" : "send_attached_message"
+        func attachmentsMatch() -> Bool {
+            guard !files.isEmpty else { return approval.arguments["attachments"] == nil }
+            guard let encoded = try? JSONEncoder.server.encode(files),
+                  let expected = try? JSONDecoder.server.decode([JSONValue].self, from: encoded),
+                  let observed = approval.arguments["attachments"]?.arrayValue else { return false }
+            func normalized(_ value: JSONValue) -> JSONValue {
+                guard var fields = value.objectValue,
+                      let id = fields["artifact_id"]?.stringValue else { return value }
+                fields["artifact_id"] = .string(id.lowercased())
+                return .object(fields)
+            }
+            return expected.map(normalized) == observed.map(normalized)
+        }
         guard let account = accounts.first(where: { $0.id == draft.accountID }),
             let serverID = account.sendServerID,
-            let toolName = draft.sendToolName, toolName == "mcp.\(serverID).send_message", approval.toolName == toolName,
+            let toolName = draft.sendToolName, toolName == "mcp.\(serverID).\(expectedTool)", approval.toolName == toolName,
             let providerThreadID = draft.providerThreadID,
             approval.arguments["thread_id"]?.stringValue == providerThreadID else { return false }
-        return textMatches("subject", draft.subject) && textMatches("body", draft.body)
+        return attachmentsMatch() && textMatches("subject", draft.subject) && textMatches("body", draft.body)
             && addressesMatch("to", draft.to) && addressesMatch("cc", draft.cc) && addressesMatch("bcc", draft.bcc)
     }
 

@@ -14,6 +14,66 @@ import SwiftUI
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    @Test func testDraftAttachmentManifestSurvivesNativeRoundTrip() throws {
+        var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])
+        let fileID = UUID().uuidString
+        payload["attachments"] = [["artifact_id": fileID, "filename": "board.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]]
+        let draft = try JSONDecoder.server.decode(EmailDraftView.self,
+            from: JSONSerialization.data(withJSONObject: payload))
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder.server.encode(draft)) as? [String: Any])
+        let files = try #require(encoded["attachments"] as? [[String: Any]])
+        #expect(files.first?["artifact_id"] as? String == fileID)
+    }
+
+    @Test func testSendAcknowledgesTheDisplayedAttachmentIDs() async throws {
+        let fileID = UUID()
+        var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])
+        payload["attachments"] = [["artifact_id": fileID.uuidString, "filename": "board.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]]
+        let withFile = String(data: try JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("/send") {
+                requests.append(request)
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            return (200, self.threadJSON(draft: withFile))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.sendNow()
+        let request = try #require(requests.snapshot.first)
+        let sent = try Self.archiveRequestBody(request)
+        #expect(sent["reviewed_attachment_ids"] as? [String] == [fileID.uuidString])
+    }
+
+    @Test func testRemovingDraftAttachmentSavesOnlyReviewedIDs() async throws {
+        let fileID = UUID()
+        var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])
+        payload["attachments"] = [["artifact_id": fileID.uuidString, "filename": "board.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]]
+        let withFile = String(data: try JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            if request.httpMethod == "PUT" {
+                requests.append(request)
+                return (200, self.draftJSON(revision: 2).dropLast() + ",\"attachments\":[]}")
+            }
+            return (200, self.threadJSON(draft: withFile))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.removeDraftAttachment(fileID)
+        let request = try #require(requests.snapshot.first)
+        let sent = try Self.archiveRequestBody(request)
+        #expect(sent["attachment_ids"] as? [String] == [])
+        #expect(model.currentEdit?.attachmentIDs == [])
+        #expect(model.currentEdit?.isDirty == false)
+    }
+
     @Test func testCollectionSwitchShowsCachedRowsBeforeSlowRefresh() async throws {
         let requests = EmailRequestRecorder()
         let gate = DispatchSemaphore(value: 0)

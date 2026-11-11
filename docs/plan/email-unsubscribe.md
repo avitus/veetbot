@@ -114,14 +114,14 @@ not find it here should find the reason here.
 
 - **The first-party Gmail servers.** `gmail_mcp` stays the only code that
   speaks to Google, still dials exactly its two fixed endpoints
-  (email-integration.md:342-350), and still imports nothing from
+  (email-integration.md:351-359), and still imports nothing from
   `agent_core`. It already fetches complete headers; it projects a closed
   allowlist of them, and this milestone widens that projection by one closed
   block. It never dials a sender.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:1078-1081).
+  (email-experience.md:1112-1115).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
@@ -541,7 +541,7 @@ unsub@lists.example.org* — because a tap that sends mail must say so and say
 where. Dispatch is the account's ordinary send server under Milestone 18's
 rules without exception: `NON_IDEMPOTENT`, and an outcome lost after
 dispatch is `uncertain`, shown as *Send status unknown*, and never sent again
-automatically (email-integration.md:390-403).
+automatically (email-integration.md:399-412).
 
 **Report spam** applies `SPAM` and removes `INBOX`. It is what the interface
 offers when a sender has no safe mechanism, when it failed authentication,
@@ -633,7 +633,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:1076-1096): the owner names one thread and the
+delta (email-experience.md:1110-1130): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.

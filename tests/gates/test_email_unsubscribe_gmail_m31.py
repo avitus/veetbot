@@ -388,9 +388,10 @@ async def test_unsubscribe_read_contract_is_closed_and_google_only(
         "get_message_body",
         "get_unsubscribe",
         "fetch_attachment",
+        "stage_attachment",  # ADR-0317: private draft staging, still hidden from Chat.
     }
     assert ROSTERS["write"] == ("create_draft", "modify_labels", "trash_thread", "untrash_thread")
-    assert ROSTERS["send"] == ("send_message",)
+    assert ROSTERS["send"] == ("send_message", "send_attached_message")
     for mode in ("write", "send"):
         names = {
             tool.name

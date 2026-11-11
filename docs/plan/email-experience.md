@@ -160,9 +160,9 @@ or deadline, the importance explanation, and an editable draft when one is
 appropriate. Render sanitized text initially; external images load only after an
 explicit **Load images** press in the Mac reader (ADR-0304). Known hidden and tiny
 tracking images and active HTML remain excluded. Show attachment metadata and the fact that an
-attachment was not read. A draft that depends on an unread attachment requests
-the missing information rather than claiming to have reviewed it. Each attachment
-offers Save, which stores a copy in the thread's chat
+attachment was not read. Draft research retrieves required materials before
+asking for missing information (ADR-0317); it never claims to have reviewed
+unread contents. Each attachment offers Save, storing a copy in the thread's chat
 ([ADR-0296](../adr/0296-save-email-attachments-to-the-chat.md)).
 
 The reading view derives inert Markdown from each retained message on the scoped
@@ -683,8 +683,10 @@ Automatically prepare drafts for up to the **three highest-priority reply-worthy
 threads** after the fresh assessment. Also allow Draft reply on any selected
 thread. Determine whether a reply is still needed using the complete available
 thread, including replies made in Gmail or another client. Abstain when the
-request is unclear, an attachment is essential, or a consequential decision is
-missing. A draft can request the missing decision; it must not invent one.
+request remains unclear after bounded research or a consequential decision is
+missing. ADR-0317 requires retrieving accessible evidence and staging requested
+files before drafting; an unavailable file is a preparation issue shown to the
+owner. A draft can request a genuinely missing decision; it must not invent one.
 
 The reading view places **Reply** beside **Draft with Veetbot** (ADR-0312).
 Reply opens a blank, focused owner-written composer, or resumes that owner's
@@ -725,6 +727,38 @@ Gmail and does not require a Gmail-write approval. Gmail draft synchronization
 is not required for this release. The existing Gmail draft tool remains
 available through its ordinary approval path when explicitly requested.
 
+### Research and draft attachments (ADR-0317)
+
+The owner approved [ADR-0317](../adr/0317-evidence-backed-email-replies.md) on
+2026-11-11. Its bounded research, private staging, manifest, exact-file consent,
+retention, erasure and acceptance contracts extend this specification. Research
+uses ordinary governed typed task calls and existing budgets, for both automatic
+and requested AI drafts. The owner sees real attachment chips, can open or remove
+them, and consents to their immutable digests with the exact draft revision.
+Manual composition and the approval-gated Save to Chat action remain unchanged.
+
+The application-only `stage_attachment` read stores an `email_draft_attachment`
+artifact without emitting a Chat attachment or offering it to knowledge. A
+successful draft binds its manifest and owns those blobs. The application-only
+`send_attached_message` keeps only metadata in tool arguments; its interceptor
+resolves and verifies bytes after approval and injects them only into the private
+stdio request. Text-only drafts retain the original send tool. No remote provider
+file is refetched after send approval.
+
+The task checkpoints research admissions and results, so replay does not buy a
+second query allowance. Calendar evidence includes the selected calendar's IANA
+zone; absent Calendar evidence is not a claim about the owner's agenda. Preview
+requires both artifact authority and the source mailbox's current read scope.
+The native draft displays each filename and size, opens the existing file viewer
+for preview/download, and autosaves removal as an ordinary revisioned edit.
+
+The private attached-send interceptor holds the owner's email lock from final
+manifest/byte validation through the bounded provider dispatch. This narrow
+exception to keeping network I/O outside projection locks serializes source
+erasure with the exact approved dispatch. No model call or attachment download
+holds that lock. Excluding a source clears affected proposal wording and file
+references, invalidates consent and preserves unrelated file copies.
+
 ### Editing and sending
 
 Each draft is bound to a mailbox identity, thread, reply target, source revision,
@@ -747,7 +781,7 @@ The send flow is:
 
 1. Send is one press on the exact current revision (⌘↩ on the Mac). The press
    is the owner's consent to that exact message — mailbox, recipients, subject,
-   body and thread — recorded with the durable send task as an authenticated
+   body, thread and attachment manifest — recorded with the durable send task as an authenticated
    gesture, as the Archive gesture is (ADR-0095, ADR-0279). The client sends
    the draft revision and the thread revision it displayed; the server derives
    everything else from that immutable revision. A thread that moved on, a
@@ -1298,7 +1332,7 @@ native editing and approved sending, and useful semantic email memories.
 
 It excludes another provider, self-service account onboarding, terminal UI work,
 autonomous sending, automatic Gmail writes, Gmail draft synchronization,
-background monitoring beyond ADR-0286's arrival checks, digests, attachment processing, calendar operations,
+background monitoring beyond ADR-0286's arrival checks, digests, attachment processing beyond ADR-0317, calendar writes,
 permanent mailbox deletion, offline-authoritative editing, a separate email
 persona, model routing changes, and a general learned memory policy. Existing
 Chat tools remain available under their existing contracts.

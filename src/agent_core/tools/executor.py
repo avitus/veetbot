@@ -324,7 +324,11 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
             return ArtifactOrigin.MODEL_OUTPUT
         return ArtifactOrigin.SANDBOX_EXPORT
     if is_email_attachment_tool(tool.spec.server_id, tool.spec.name.rpartition(".")[2]):
-        return ArtifactOrigin.EMAIL_ATTACHMENT
+        return (
+            ArtifactOrigin.EMAIL_DRAFT_ATTACHMENT
+            if tool.spec.name.endswith(".stage_attachment")
+            else ArtifactOrigin.EMAIL_ATTACHMENT
+        )
     return ArtifactOrigin.TOOL_OUTPUT
 
 

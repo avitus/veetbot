@@ -207,6 +207,7 @@ class MCPRuntime:
         warmup_attempts: int = 5,
         call_interceptor: CallInterceptor | None = None,
         email_attachment_saver: EmailAttachmentSaver | None = None,
+        email_draft_interceptor: CallInterceptor | None = None,
         access_tokens: MCPAccessTokens | None = None,
         owner_servers_enabled: bool = False,
     ) -> None:
@@ -248,6 +249,7 @@ class MCPRuntime:
         self._stdio_preparation_slots = asyncio.Semaphore(_MAXIMUM_PARALLEL_STDIO_PREPARATIONS)
         self._call_interceptor = call_interceptor
         self._email_attachment_saver = email_attachment_saver
+        self._email_draft_interceptor = email_draft_interceptor
         # ADR-0255: owner-added rows, and the sealed sign-ins their tokens come from.
         self._access_tokens = access_tokens
         self._owner_servers_enabled = owner_servers_enabled
@@ -831,6 +833,30 @@ class MCPRuntime:
                         structured={"effect_status": "not_applied"},
                     )
                 return await self._call_interceptor(
+                    context,
+                    spec.server_id,
+                    remote_name,
+                    arguments,
+                    lambda values: self._connected_client(connection).call_tool(
+                        remote_name, values
+                    ),
+                )
+            if (
+                remote_name
+                in {
+                    "stage_attachment",
+                    "send_attached_message",
+                }
+                and spec.server_id is not None
+                and spec.server_id.startswith("gmail_")
+            ):
+                if self._email_draft_interceptor is None:
+                    return MCPCallResult(
+                        content=("gmail.arguments_invalid",),
+                        is_error=True,
+                        structured={"effect_status": "not_applied"},
+                    )
+                return await self._email_draft_interceptor(
                     context,
                     spec.server_id,
                     remote_name,

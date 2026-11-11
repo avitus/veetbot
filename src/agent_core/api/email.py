@@ -13,6 +13,7 @@ from agent_core.application.errors import EmailFeedbackTargetError
 from agent_core.application.services import EmailService
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
+from agent_core.domain.errors import ConflictError
 
 
 class ImageRequest(BaseModel):
@@ -59,6 +60,7 @@ class SendRequest(BaseModel):
     expected_revision: int = Field(ge=1, strict=True)
     source_revision: int = Field(ge=1, strict=True)
     idempotency_key: str = Field(min_length=1, max_length=200)
+    reviewed_attachment_ids: list[UUID] | None = Field(default=None, max_length=10)
 
 
 class SendUndoRequest(RevisionRequest):
@@ -404,7 +406,13 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         """One authenticated press consents to exactly this draft revision (ADR-0279)."""
         if idempotency_key is not None and idempotency_key != body.idempotency_key:
             raise HTTPException(status_code=400, detail="Idempotency keys must match")
-        await service.draft(authenticated, draft_id)
+        reviewed = await service.draft(authenticated, draft_id)
+        if (body.reviewed_attachment_ids or []) != [
+            item.artifact_id for item in reviewed.attachments
+        ]:
+            raise ConflictError(
+                "Review the attachments in an updated client before sending this reply."
+            )
         operation = await service.send(
             authenticated,
             draft_id,

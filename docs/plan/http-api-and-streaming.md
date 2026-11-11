@@ -2280,6 +2280,25 @@ direct-send route or arbitrary write extension to the memory API. Every command 
 authorization, failure, conflict and retry coverage under the existing error
 vocabulary; ordinary run SSE remains the progress transport.
 
+ADR-0317 adds `attachments` to draft reads, defaulting to an empty list for
+retained older drafts. Each entry carries `artifact_id`, `account_id`,
+`source_thread_id`, `message_id`, `attachment_index`, `filename`, `media_type`,
+`size_bytes` and `sha256`. Draft edits accept optional `attachment_ids`, a unique
+subset of that revision's existing files; they cannot introduce arbitrary files.
+Omitting the field preserves the files for older clients. An edit creates a new
+revision and invalidates pending send consent. The existing artifact metadata and
+content routes provide preview/download, additionally requiring the source
+mailbox's current read authority for draft-owned files. Thread point reads expose
+`preparation_stage` while that thread's requested draft is being prepared, and
+`preparation_issue` for a content-free failure beside the preserved draft. A
+successful replacement or a new source revision clears that issue.
+The existing send routes bind the complete manifest through the draft revision.
+One-press Send additionally accepts `reviewed_attachment_ids` (at most ten UUIDs):
+its ordered list must match the displayed revision's files. Omission is accepted
+only for text-only drafts, so an older client cannot consent to hidden files.
+A mismatch returns conflict before task admission; clients supply no bytes or
+paths to Send. The server still derives every file property from the revision.
+
 `POST /v1/email/drafts/{id}/style-example` explicitly endorses the current
 revision as a bounded shared style example. It requires `email.write`, current
 mailbox authority and `expected_revision`; it returns the shared learning state,

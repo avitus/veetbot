@@ -1257,6 +1257,7 @@ private struct EmailThreadScreen: View {
     @State private var showingRevisions = false
     @State private var showingEnvelope = false
     @State private var composerClosed = false
+    @State private var previewDraftFile: EmailDraftAttachment?
     @State private var peopleLookup: PeopleLookup?
     @FocusState private var focusedField: Field?
     @FocusState private var feedbackFocused: Bool
@@ -1347,7 +1348,7 @@ private struct EmailThreadScreen: View {
                                 }
                             } label: {
                                 if model.isGeneratingDraft {
-                                    ProgressView("Drafting…")
+                                    ProgressView(model.draftPreparationMessage)
                                 } else {
                                     Label(model.hasVeetbotDraft ? "Use Veetbot draft" : "Draft with Veetbot", systemImage: "sparkles")
                                 }
@@ -1376,6 +1377,9 @@ private struct EmailThreadScreen: View {
             }
         }
         .background(AppTheme.paper)
+        .sheet(item: $previewDraftFile) { file in
+            ArtifactViewerView(artifactID: file.artifactID, load: model.loadDraftAttachment)
+        }
         .onChange(of: model.selectedThreadID) { composerClosed = false }
         .confirmationDialog("Discard this reply?", isPresented: $showingDiscard, titleVisibility: .visible) {
             Button("Discard draft", role: .destructive) { Task { await model.discardDraft() } }
@@ -1752,6 +1756,30 @@ private struct EmailThreadScreen: View {
                 }
             }.disabled(!draft.canEdit || model.isPreparingSend)
             HairlineDivider()
+            let files = (draft.attachments ?? []).filter { edit.attachmentIDs.contains($0.artifactID) }
+            if !files.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(files) { file in
+                        HStack(spacing: 8) {
+                            Button { previewDraftFile = file } label: {
+                                Label(file.filename, systemImage: "paperclip").lineLimit(1)
+                            }.buttonStyle(.plain).foregroundColor(AppTheme.tealText)
+                                .accessibilityIdentifier("email.draft-file.\(file.artifactID)")
+                                .help("Preview or download this attachment")
+                            Spacer(minLength: 4)
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(file.sizeBytes), countStyle: .file))
+                                .foregroundColor(AppTheme.inkSoft)
+                            if draft.canEdit {
+                                Button { Task { await model.removeDraftAttachment(file.artifactID) } } label: {
+                                    Image(systemName: "xmark.circle")
+                                }.buttonStyle(.plain).disabled(model.isPreparingSend)
+                                    .accessibilityLabel("Remove \(file.filename)")
+                            }
+                        }.veetType(.meta)
+                    }
+                }.padding(Self.wellInset)
+                HairlineDivider()
+            }
             // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
             // no longer change (sending, sent, uncertain) renders as text instead of an editor.
             // Only the editor is disabled: a disabled ancestor would also block selecting the text.
@@ -1884,7 +1912,7 @@ private struct EmailThreadScreen: View {
         } else if draft.isProcessing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(draft.status == "sending" ? "Sending…" : "Preparing your draft…")
+                Text(draft.status == "sending" ? "Sending…" : model.draftPreparationMessage)
                     .veetType(.ui).foregroundColor(AppTheme.inkSoft)
             }
             .accessibilityElement(children: .combine)

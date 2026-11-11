@@ -27,8 +27,12 @@ from tests.contract.support import NOW
 from tests.gates.test_email_m18 import _credential, _thread
 
 NEW_READ_TOOLS = {"get_profile", "sync_changes", "get_thread_page", "get_message_body"}
-# Milestone 31's evidence read joined the same application-only marker.
-APPLICATION_ONLY_READ_TOOLS = NEW_READ_TOOLS | {"get_unsubscribe", "fetch_attachment"}
+# Milestone 31 and ADR-0317 extend the same application-only marker.
+APPLICATION_ONLY_READ_TOOLS = NEW_READ_TOOLS | {
+    "get_unsubscribe",
+    "fetch_attachment",
+    "stage_attachment",
+}
 
 
 class Mailbox:

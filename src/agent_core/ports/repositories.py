@@ -398,6 +398,19 @@ class ArtifactRepository(Protocol):
         """
         ...
 
+    async def retain_for_email_draft(
+        self,
+        artifact_ids: Sequence[UUID],
+        principal: Principal,
+        *,
+        run_id: UUID,
+        session_id: UUID,
+        thread_id: UUID,
+        now: datetime,
+    ) -> list[ArtifactRef]:
+        """Bind live staging files to their draft session without knowledge admission."""
+        ...
+
     async def retain_for_reply(
         self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID
     ) -> list[ArtifactRef]:

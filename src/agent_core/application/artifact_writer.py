@@ -13,11 +13,13 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import (
+    EMAIL_SOURCE_METADATA_KEY,
     ArtifactMetadata,
     ArtifactOrigin,
     StoredArtifactRef,
     saved_from,
 )
+from agent_core.domain.email_drafting import DRAFT_TARGET_KEY
 from agent_core.domain.errors import ArtifactIntegrityError
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
@@ -74,6 +76,7 @@ class BoundArtifactWriter:
         sha256: str,
         now: datetime,
         source: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> StoredArtifactRef | None:
         """The run's live artifact with this origin, name, type, and content, if any.
 
@@ -94,6 +97,15 @@ class BoundArtifactWriter:
                 and artifact.media_type == media_type
                 and artifact.sha256 == sha256
                 and saved_from(artifact.metadata) == source
+                and (
+                    self._origin is not ArtifactOrigin.EMAIL_DRAFT_ATTACHMENT
+                    or (
+                        artifact.metadata.get(DRAFT_TARGET_KEY)
+                        == (metadata or {}).get(DRAFT_TARGET_KEY)
+                        and artifact.metadata.get(EMAIL_SOURCE_METADATA_KEY)
+                        == (metadata or {}).get(EMAIL_SOURCE_METADATA_KEY)
+                    )
+                )
                 and (artifact.expires_at is None or artifact.expires_at > now)
             ):
                 return StoredArtifactRef(
@@ -125,7 +137,7 @@ class BoundArtifactWriter:
             await asyncio.to_thread(spool.seek, 0)
             now = self._clock.now()
             existing = await self._same_in_run(
-                filename, media_type, digest.hexdigest(), now, saved_from(metadata or {})
+                filename, media_type, digest.hexdigest(), now, saved_from(metadata or {}), metadata
             )
             if existing is not None:
                 return existing

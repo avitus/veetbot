@@ -93,6 +93,9 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
   every read, and a name that does not match is `gmail.attachment_not_found`. Both return
   the file in structured content only, and the MCP runtime stores it and returns a receipt,
   so its bytes reach no event, invocation, or checkpoint.
+- `stage_attachment(message_id, attachment_index, filename, draft_thread_id, source_thread_id)`
+  is application-only (ADR-0317). It fetches the source file through the existing
+  bounded read; the platform validates and stages it privately for a typed draft.
 - `list_labels()` — system and user label ids and names.
 
 `gmail_write`:
@@ -114,6 +117,12 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
   is deliberately no send-a-draft tool: a send is proposed by value, so the
   complete outbound content sits in the proposed action's arguments where the
   approver reads it, rather than behind a draft id the approver cannot see.
+
+- `send_attached_message` is application-only (ADR-0317). Its envelope and reply
+  headers match `send_message`; its attachment manifest binds immutable owner
+  files by id, source, filename, media type, size and digest. The platform resolves
+  bytes after exact-message approval and passes them only over private stdio.
+  The Gmail adapter verifies those bytes and MIME limits before any send request.
 
 ## Credentials and the bootstrap ceremony
 

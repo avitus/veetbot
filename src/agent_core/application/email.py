@@ -22,6 +22,7 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.email_draft_files import EmailDraftFiles
 from agent_core.application.email_junk import admit_pilot
 from agent_core.application.email_reader import reading_body
 from agent_core.application.email_subscriptions import EmailSubscriptions, SubscriptionRequest
@@ -73,6 +74,7 @@ from agent_core.domain.email import (
     send_gesture,
     send_message_arguments,
 )
+from agent_core.domain.email_drafting import DRAFT_ATTACHMENT_BYTES, DraftAttachment
 from agent_core.domain.email_junk import JunkAuthorization, JunkPilotUnavailableError
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -215,8 +217,8 @@ def expired_body(record: EmailRecord, cutoff: datetime) -> EmailThread | EmailDr
         return None if retained is thread else retained
     draft = EmailDraft.model_validate(record.payload)
     return (
-        draft.model_copy(update={"body": ""})
-        if draft.body and draft_expired(draft, cutoff)
+        draft.model_copy(update={"body": "", "attachments": []})
+        if (draft.body or draft.attachments) and draft_expired(draft, cutoff)
         else None
     )
 
@@ -253,8 +255,10 @@ class EmailExperienceService:
         unsubscribe_enabled: bool = False,
         unsubscribe_grace_days: int = 10,
         read_image: Callable[[str], Awaitable[bytes]] | None = None,
+        draft_files: EmailDraftFiles | None = None,
     ) -> None:
         """Wire ordinary run policy, account bindings, and finite email allowances."""
+        self.draft_files = draft_files
         self.read_image = read_image
         self._image_slots = asyncio.Semaphore(4)
         self.uow_factory = uow_factory
@@ -492,6 +496,19 @@ class EmailExperienceService:
                 else await self._retained_draft(uow.email, principal, thread.draft_id)
             )
             result["draft"] = None if draft is None else draft.model_dump(mode="json")
+            result["preparation_stage"] = None
+            if thread.session_id is not None:
+                active_run = await uow.runs.active_for_session(thread.session_id, principal)
+                task = (
+                    None
+                    if active_run is None
+                    else await read_value(
+                        uow.email, principal, "task", str(active_run.id), EmailTask
+                    )
+                )
+                if task is not None and task.kind == "draft" and task.thread_id == thread.id:
+                    result["preparation_stage"] = task.stage
+
             result["subscription"] = await self.subscriptions.thread_block(
                 uow.email, principal, thread
             )
@@ -621,8 +638,10 @@ class EmailExperienceService:
         if draft is None:
             raise NotFoundError("email draft not found")
         self._authorize_account(principal, draft.account_id)
-        if draft.body and draft_expired(draft, body_cutoff(self.clock.now())):
-            return draft.model_copy(update={"body": ""})
+        if (draft.body or draft.attachments) and draft_expired(
+            draft, body_cutoff(self.clock.now())
+        ):
+            return draft.model_copy(update={"body": "", "attachments": []})
         return draft
 
     async def draft(self, principal: Principal, draft_id: UUID) -> EmailDraft:
@@ -633,6 +652,38 @@ class EmailExperienceService:
                 raise NotFoundError("email draft not found")
             return draft
 
+    async def validate_draft_attachments(
+        self, uow: RepositoryUnitOfWork, principal: Principal, draft: EmailDraft
+    ) -> None:
+        """Verify retained bytes before consent and before taking a dispatch claim."""
+        if not draft.attachments:
+            return
+        if self.draft_files is None:
+            raise ConflictError("Reply attachments are unavailable.")
+        for row in await self.draft_files.validate(uow, principal, draft):
+            await self.draft_files.read(row)
+
+    async def settle_draft_attachments(
+        self, uow: RepositoryUnitOfWork, principal: Principal, draft: EmailDraft
+    ) -> None:
+        """Settled files expire after thirty days without extending prior erasure."""
+        deadline = self.clock.now() + timedelta(days=30)
+        files = {item.artifact_id: item for item in draft.attachments}
+        async for record in records(uow.email, principal, "draft_revision"):
+            if str(record.payload.get("id")) == str(draft.id):
+                version = EmailDraft.model_validate(record.payload)
+                files.update({item.artifact_id: item for item in version.attachments})
+        for item in files.values():
+            try:
+                row = await uow.artifacts.get(item.artifact_id, principal)
+            except NotFoundError:
+                continue
+            await uow.artifacts.expire(
+                item.artifact_id,
+                principal,
+                min(deadline, row.expires_at) if row.expires_at else deadline,
+            )
+
     async def _retained_draft(
         self, store: EmailStore, principal: Principal, draft_id: UUID
     ) -> EmailDraft | None:
@@ -641,8 +692,10 @@ class EmailExperienceService:
         if draft is None:
             return None
         self._authorize_account(principal, draft.account_id)
-        if draft.body and draft_expired(draft, body_cutoff(self.clock.now())):
-            draft = draft.model_copy(update={"body": ""})
+        if (draft.body or draft.attachments) and draft_expired(
+            draft, body_cutoff(self.clock.now())
+        ):
+            draft = draft.model_copy(update={"body": "", "attachments": []})
             await save_value(store, principal, "draft", str(draft.id), draft, self.clock.now())
         return draft
 
@@ -679,7 +732,7 @@ class EmailExperienceService:
         require_scope(principal, "email.write")
         if any(c in edit.subject for c in "\r\n\x00"):
             raise ValueError("subject contains a header delimiter")
-        values = {
+        values: dict[str, Any] = {
             "to": addresses(edit.to),
             "cc": addresses(edit.cc),
             "bcc": addresses(edit.bcc),
@@ -727,6 +780,15 @@ class EmailExperienceService:
                 raise ConflictError(
                     "New mail arrived on this thread. Read it, then save your reply again."
                 )
+            if edit.attachment_ids is not None:
+                available = {item.artifact_id: item for item in current.attachments}
+                if len(set(edit.attachment_ids)) != len(edit.attachment_ids) or any(
+                    identifier not in available for identifier in edit.attachment_ids
+                ):
+                    raise ValueError("an edit can only retain or remove the draft's attachments")
+                values["attachments"] = [
+                    available[identifier] for identifier in edit.attachment_ids
+                ]
             updated = current.model_copy(
                 update={
                     **values,
@@ -740,6 +802,12 @@ class EmailExperienceService:
                     # A new revision is a new action; no earlier attempt owns it.
                     "send_claim_id": None,
                     "updated_at": self.clock.now(),
+                }
+            )
+            updated = updated.model_copy(
+                update={
+                    "send_tool_name": f"mcp.{self.account_servers[updated.account_id]['send']}."
+                    + ("send_attached_message" if updated.attachments else "send_message")
                 }
             )
             await self._archive_draft(uow.email, principal, current)
@@ -1325,6 +1393,7 @@ class EmailExperienceService:
                 )
             if draft is not None:
                 assert thread is not None
+                await self.validate_draft_attachments(uow, principal, draft)
                 if consented and (source_revision != thread.revision or draft.stale):
                     raise ConflictError(
                         "New mail arrived on this thread. Read it, then send again."
@@ -1461,6 +1530,7 @@ class EmailExperienceService:
                         ),
                         expires_at=now + timedelta(seconds=600),
                         undo_until=scheduled_for,
+                        with_attachments=bool(draft.attachments),
                     )
                     if consented and draft is not None and thread is not None
                     else None
@@ -1938,7 +2008,7 @@ class EmailExperienceService:
             ):
                 raise ConflictError("send consent has no matching authenticated gesture")
             for invocation in await uow.invocations.list_for_run(run.id, principal):
-                if not invocation.tool_name.endswith(".send_message"):
+                if not invocation.tool_name.endswith((".send_message", ".send_attached_message")):
                     continue
                 approval = await uow.approvals.get_by_action(invocation.id)
                 if invocation.tool_name != consent.tool_name or (
@@ -3514,6 +3584,8 @@ class EmailExperienceService:
         instruction: str | None = None,
         run: Run | None = None,
         lease: WorkerLease | None = None,
+        attachments: list[DraftAttachment] | None = None,
+        expected_draft_revision: int | None = None,
     ) -> EmailDraft:
         if not body.strip() or len(body) > 500_000:
             raise ValueError("generated draft body is empty or too large")
@@ -3544,6 +3616,13 @@ class EmailExperienceService:
                     uow.email, principal, "draft", str(thread.draft_id), EmailDraft
                 )
             )
+            if (
+                expected_draft_revision is not None
+                and (old.revision if old else 0) != expected_draft_revision
+            ):
+                raise ConflictError(
+                    "The draft changed during preparation; your edits are preserved."
+                )
             if old is not None and old.status != EmailDraftStatus.DISCARDED and instruction is None:
                 return old
             if old is not None and old.status not in {
@@ -3572,6 +3651,7 @@ class EmailExperienceService:
                 if target.subject.casefold().startswith("re:")
                 else f"Re: {target.subject}",
                 body=body,
+                attachments=attachments or [],
                 session_id=session.id,
                 run_id=run_id,
                 updated_at=self.clock.now(),
@@ -3579,10 +3659,32 @@ class EmailExperienceService:
                 references=list(dict.fromkeys([*target.references, target.message_id_header])),
                 generated_body_digest=hashlib.sha256(body.encode()).hexdigest(),
                 provider_thread_id=thread.provider_thread_id,
-                send_tool_name=f"mcp.{self.account_servers[thread.account_id]['send']}.send_message",
+                send_tool_name=f"mcp.{self.account_servers[thread.account_id]['send']}."
+                + ("send_attached_message" if attachments else "send_message"),
             )
             if old is not None:
                 await self._archive_draft(uow.email, principal, old)
+            if draft.attachments:
+                if (
+                    self.draft_files is None
+                    or sum(item.size_bytes for item in draft.attachments) > DRAFT_ATTACHMENT_BYTES
+                ):
+                    raise ConflictError(
+                        "Draft attachments are unavailable or exceed the size limit."
+                    )
+                await uow.artifacts.retain_for_email_draft(
+                    [
+                        item.artifact_id
+                        for item in draft.attachments
+                        if old is None or item not in old.attachments
+                    ],
+                    principal,
+                    run_id=run_id,
+                    session_id=session.id,
+                    thread_id=thread.id,
+                    now=self.clock.now(),
+                )
+                await self.draft_files.validate(uow, principal, draft)
             await save_value(uow.email, principal, "draft", str(draft.id), draft, self.clock.now())
             await self._archive_draft(uow.email, principal, draft)
             await save_value(
@@ -3590,7 +3692,13 @@ class EmailExperienceService:
                 principal,
                 "thread",
                 str(thread.id),
-                thread.model_copy(update={"draft_id": draft.id, "session_id": session.id}),
+                thread.model_copy(
+                    update={
+                        "draft_id": draft.id,
+                        "session_id": session.id,
+                        "preparation_issue": None,
+                    }
+                ),
                 self.clock.now(),
             )
         try:
@@ -3740,6 +3848,7 @@ class EmailExperienceService:
                 raise ConflictError("the draft changed or its send is unresolved")
             if draft.status is EmailDraftStatus.DISCARDED:
                 return draft
+            await self.settle_draft_attachments(uow, principal, draft)
             draft = draft.model_copy(
                 update={"status": EmailDraftStatus.DISCARDED, "updated_at": self.clock.now()}
             )
@@ -3809,6 +3918,44 @@ class EmailExperienceService:
             counts = await uow.session_deletions.erase_email_source(
                 principal, account_id, provider_id, message_ids, now
             )
+            # Other conversations may contain a proposal derived from this source.
+            # Revoke its revision and wording while preserving unrelated file copies.
+            for kind in ("draft", "draft_revision"):
+                for row in [entry async for entry in records(uow.email, principal, kind)]:
+                    proposal = EmailDraft.model_validate(row.payload)
+                    remaining_files = [
+                        item
+                        for item in proposal.attachments
+                        if not (
+                            item.account_id == account_id and item.source_thread_id == provider_id
+                        )
+                    ]
+                    if len(remaining_files) == len(proposal.attachments):
+                        continue
+                    if proposal.run_id is not None:
+                        await uow.approvals.cancel_for_run(proposal.run_id)
+                    await save_value(
+                        uow.email,
+                        principal,
+                        kind,
+                        row.key,
+                        proposal.model_copy(
+                            update={
+                                "attachments": remaining_files,
+                                "body": "",
+                                "stale": True,
+                                "revision": proposal.revision + 1
+                                if kind == "draft"
+                                else proposal.revision,
+                                "approval_id": None,
+                                "send_claim_id": None,
+                                "send_undo_until": None,
+                                "status": EmailDraftStatus.READY,
+                                "updated_at": now,
+                            }
+                        ),
+                        now,
+                    )
             draft_ids: set[str] = set()
             for row in [row async for row in records(uow.email, principal, "draft")]:
                 if row.payload.get("thread_id") == str(thread_id):

@@ -1106,6 +1106,7 @@ class ArtifactOrigin(StrEnum):
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"
     EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"
+    EMAIL_DRAFT_ATTACHMENT = "EMAIL_DRAFT_ATTACHMENT"
 
 
 @dataclass(frozen=True)
@@ -1126,7 +1127,7 @@ random identifier and three facts about bytes. `ArtifactMetadata` is
 what the store holds and what `GET /v1/artifacts/{id}` reads after
 authorization, which ADR-0028 already specifies.
 
-`origin` exists because the seven sources have different review
+`origin` exists because the sources have different review
 properties and an operator asking "what did this run produce" wants
 them separated. `EMAIL_ATTACHMENT` is a file saved from an email (ADR-0296),
 which rides on the run's reply as an export does. `TOOL_OUTPUT` is the truncation path
@@ -1145,6 +1146,12 @@ admitted source document
 [knowledge-documents.md](knowledge-documents.md) owns, and it is the
 one origin whose lifetime is not the run's: it is stored with no
 `expires_at` and acquires one only when the document is deleted.
+
+`EMAIL_DRAFT_ATTACHMENT` is private reply staging (ADR-0317). It is never a
+Chat reply attachment or automatic knowledge source. Its identity includes the
+source mailbox/message and target reply, so two automatic replies own separate
+copies even when they select identical bytes. Only the preparing run can bind
+its live files to its target draft; reference adoption cannot revive erased files.
 
 `trust` is inherited, never assigned by the producer. An artifact
 written from a sandbox is `EXTERNAL_UNTRUSTED` because Section 28.5
@@ -1241,6 +1248,12 @@ conversation and goes with it. ADR-0122 applies the second rule to the
 run's own `SANDBOX_EXPORT`, `MODEL_OUTPUT` and `EMAIL_ATTACHMENT` artifacts when its final
 reply attaches them; an export from a run that never replies keeps its
 30 days.
+
+ADR-0317 retains draft-owned files with unsent drafts. Sending or discarding a
+draft gives its current and historical attachment copies thirty days, without
+extending an earlier erasure deadline. Failed, cancelled or unreferenced staging
+keeps the ordinary thirty-day expiry. Source exclusion and principal erasure
+remove these copies through the existing artifact cleanup boundary.
 
 The corpus does not currently bound artifacts anywhere, which
 [http-api-and-streaming.md](http-api-and-streaming.md) notices from

@@ -3236,6 +3236,46 @@ class PostgresArtifactRepository:
             raise NotFoundError("artifact not found")
         return artifact_to_domain(row)
 
+    async def retain_for_email_draft(
+        self,
+        artifact_ids: Sequence[UUID],
+        principal: Principal,
+        *,
+        run_id: UUID,
+        session_id: UUID,
+        thread_id: UUID,
+        now: datetime,
+    ) -> list[ArtifactRef]:
+        """Fence erasure and bind exactly this draft's unexpired staging files."""
+        wanted = set(artifact_ids)
+        if not wanted:
+            return []
+        if await lock_run_erasure(self._session, run_id) is not None:
+            raise NotFoundError("draft attachment not found")
+        rows = (
+            await self._session.scalars(
+                select(ArtifactRow)
+                .where(
+                    ArtifactRow.id.in_(sorted(wanted)),
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                    ArtifactRow.run_id == run_id,
+                    ArtifactRow.origin == "email_draft_attachment",
+                    ArtifactRow.metadata_json["email_draft_thread"].astext == str(thread_id),
+                    or_(ArtifactRow.expires_at.is_(None), ArtifactRow.expires_at > now),
+                )
+                .with_for_update()
+            )
+        ).all()
+        if len(rows) != len(wanted):
+            raise NotFoundError("draft attachment not found")
+        for row in rows:
+            row.session_id = session_id
+            row.expires_at = None
+        await self._session.flush()
+        retained = {row.id: artifact_to_domain(row) for row in rows}
+        return [retained[identifier] for identifier in dict.fromkeys(artifact_ids)]
+
     async def retain_for_reply(
         self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID
     ) -> list[ArtifactRef]:

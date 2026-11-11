@@ -1664,6 +1664,41 @@ class InMemoryArtifactRepository:
             self._rows[artifact_id] = retained
             return retained.model_copy(deep=True)
 
+    async def retain_for_email_draft(
+        self,
+        artifact_ids: Sequence[UUID],
+        principal: Principal,
+        *,
+        run_id: UUID,
+        session_id: UUID,
+        thread_id: UUID,
+        now: datetime,
+    ) -> list[ArtifactRef]:
+        """Retain only this draft's live staging files under the artifact lock."""
+        async with self._lock:
+            retained: list[ArtifactRef] = []
+            for identifier in dict.fromkeys(artifact_ids):
+                item = self._rows.get(identifier)
+                if (
+                    item is None
+                    or item.tenant_id != principal.tenant_id
+                    or item.principal_id != principal.principal_id
+                    or item.run_id != run_id
+                    or run_id in self._people_erased_runs
+                    or item.origin != "email_draft_attachment"
+                    or item.metadata.get("email_draft_thread") != str(thread_id)
+                    or (item.expires_at is not None and item.expires_at <= now)
+                ):
+                    raise NotFoundError("draft attachment not found")
+                retained.append(
+                    item.model_copy(
+                        update={"session_id": session_id, "expires_at": None}, deep=True
+                    )
+                )
+            for item in retained:
+                self._rows[item.id] = item
+            return [item.model_copy(deep=True) for item in retained]
+
     async def retain_for_reply(
         self, artifact_ids: Sequence[UUID], principal: Principal, *, run_id: UUID
     ) -> list[ArtifactRef]:

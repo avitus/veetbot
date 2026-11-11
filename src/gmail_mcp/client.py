@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
+import hashlib
 import html
 import json
 import re
@@ -651,6 +653,7 @@ class GmailClient:
         bcc: str | None,
         in_reply_to: str | None = None,
         references: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> str:
         message = EmailMessage()
         message["To"] = cls._required_header(to, "to", maximum=8192)
@@ -678,7 +681,36 @@ class GmailClient:
                 raise GmailError("gmail.arguments_invalid")
             message["References"] = cls._required_header(references, "references", maximum=8192)
         message.set_content(body)
-        return base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
+        total = 0
+        if attachments is not None:
+            if not 1 <= len(attachments) <= 10:
+                raise GmailError("gmail.arguments_invalid")
+            for item in attachments:
+                try:
+                    encoded = item["data_base64"]
+                    if not isinstance(encoded, str) or len(encoded) > 20 * 1024 * 1024:
+                        raise ValueError
+                    content = base64.b64decode(encoded, validate=True)
+                    total += len(content)
+                    if (
+                        not content
+                        or total > 15 * 1024 * 1024
+                        or len(content) != item["size_bytes"]
+                        or hashlib.sha256(content).hexdigest() != item["sha256"]
+                    ):
+                        raise ValueError
+                    filename = cls._required_header(item["filename"], "filename", maximum=1024)
+                    media_type = cls._required_header(item["media_type"], "media_type", maximum=255)
+                    if not re.fullmatch(r"[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+", media_type):
+                        raise ValueError
+                    main, sub = media_type.split("/", 1)
+                    message.add_attachment(content, maintype=main, subtype=sub, filename=filename)
+                except (KeyError, TypeError, ValueError, binascii.Error) as exc:
+                    raise GmailError("gmail.arguments_invalid") from exc
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
+        if len(raw) > 24 * 1024 * 1024:
+            raise GmailError("gmail.attachment_too_large")
+        return raw
 
     async def create_draft(
         self,
@@ -779,6 +811,7 @@ class GmailClient:
         thread_id: str | None = None,
         in_reply_to: str | None = None,
         references: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         request: dict[str, object] = {
             "raw": self._raw_message(
@@ -789,6 +822,7 @@ class GmailClient:
                 bcc=bcc,
                 in_reply_to=in_reply_to,
                 references=references,
+                attachments=attachments,
             )
         }
         if thread_id is not None:
