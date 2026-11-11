@@ -1333,6 +1333,11 @@ class FakeCeremonyPage:
 
     def locator(self, selector: str) -> Mock:
         """Return the challenge fields; a hidden password input stays in the DOM."""
+        if selector in {"h1,h2,h3,h4,h5,h6,[role=heading]", "a,button,[role=link],[role=button]"}:
+            prompts = Mock(spec=Locator)
+            prompts.filter.return_value = prompts
+            prompts.count = AsyncMock(return_value=0)
+            return prompts
         assert "input[type=password]" in selector
         field = Mock(spec=Locator)
         field.is_visible = AsyncMock(return_value=self.password_visible)

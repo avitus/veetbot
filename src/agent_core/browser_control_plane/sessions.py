@@ -349,6 +349,7 @@ class HostedProfileSessionService:
                     if (
                         not evidence.on_allowed_origin
                         or evidence.challenge_visible
+                        or evidence.security_challenge_seen
                         or not await self._confirms_site(definition, runtime)
                     ):
                         raise BrowserProviderError(
@@ -842,6 +843,8 @@ class HostedProfileSessionService:
         if definition is None:
             _decide(with_session, without_session, confirmed_path=urlsplit(page).path)
             return
+        if with_session.security_challenge_seen or without_session.security_challenge_seen:
+            raise DeviceSessionRejected("session_unconfirmed")
         if (
             not with_session.on_allowed_origin
             or with_session.challenge_visible
@@ -1549,6 +1552,8 @@ def _tells_the_session_apart(
     confirmed_path: str,
 ) -> None:
     """ADR-0128 section 4.4: what each load showed, however long it was watched."""
+    if with_session.security_challenge_seen or without_session.security_challenge_seen:
+        raise DeviceSessionRejected("session_unconfirmed")
     confirmed = _normalized_path(confirmed_path)
     if with_session.challenge_visible or not _stays(with_session, confirmed):
         raise DeviceSessionRejected("session_signed_out")

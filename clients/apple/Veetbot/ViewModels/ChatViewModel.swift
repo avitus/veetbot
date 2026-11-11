@@ -157,6 +157,8 @@ public final class ChatViewModel: ObservableObject {
     /// launch URL, capability or session value: those live only in the locals
     /// of `completeDeviceSignIn`.
     @Published public private(set) var deviceSignInRequest: DeviceSignInRequest?
+    /// Content-free progress for bounded fresh-ceremony retries (ADR-0316).
+    @Published public private(set) var deviceSignInAttempt = 0
     /// Which surface started the open sign-in, and so presents its window.
     @Published public private(set) var deviceSignInSurface: DeviceSignInSurface = .websiteAccess
     /// The open conversation's active task permission, if any (ADR-0129).
@@ -2363,7 +2365,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// The owner tapped I'm signed in: create the profile if it is new, begin
-    /// a device ceremony, hand the session over once and learn the outcome
+    /// a device ceremony, hand the session over once per ceremony and learn the outcome
     /// (0128-design §5.2). The launch URL and its capability exist only in
     /// this function's locals.
     public func completeDeviceSignIn(
@@ -2411,13 +2413,16 @@ public final class ChatViewModel: ObservableObject {
         confirmingDeviceSignInID = request.id
         defer {
             isManagingWebsiteAccess = false
-            if confirmingDeviceSignInID == request.id { confirmingDeviceSignInID = nil }
+            if confirmingDeviceSignInID == request.id {
+                confirmingDeviceSignInID = nil
+                deviceSignInAttempt = 0
+            }
         }
 
         // The window can close, or the connection change, during any await
         // below, so each step after one checks first.
         func superseded() -> Bool {
-            deviceSignInRequest?.id != request.id || generation != connectionGeneration
+            Task.isCancelled || deviceSignInRequest?.id != request.id || generation != connectionGeneration
         }
         // What a superseded attempt undoes: the profile a new website's window
         // created, and a ceremony that may still be open.
@@ -2431,7 +2436,9 @@ public final class ChatViewModel: ObservableObject {
         /// credential.
         func settle(_ result: DeviceSignInResult) async -> DeviceSignInResult {
             guard superseded() else { return result }
-            guard closedDuringDeviceSignInID == request.id, generation == connectionGeneration else {
+            guard closedDuringDeviceSignInID == request.id || Task.isCancelled,
+                generation == connectionGeneration
+            else {
                 return stopped
             }
             closedDuringDeviceSignInID = nil
@@ -2475,69 +2482,94 @@ public final class ChatViewModel: ObservableObject {
             profileID = profile.id
         }
 
-        // D19: the begin names the root of the confirmed page's origin, which
-        // is allowed by construction and keeps the page's path and query off
-        // the API.
-        let ceremony: BrowserAuthenticationView
-        switch await beginCeremony(
-            using: api, profileID: profileID, loginURL: confirmedOrigin + "/", mode: .device,
-            while: { !superseded() }
-        ) {
-        case .success(let begun):
-            ceremony = begun
-            openCeremonyID = begun.id
-            // Beginning recorded this on the server; a failure below reloads nothing (ADR-0297).
-            rememberDeviceSignIn(for: profileID)
-        case .failure(let error):
-            return await settle(failure(error.message))
-        }
-        guard !superseded() else { return await settle(stopped) }
-        guard let target = DeviceSignInHandoffTarget(launchURL: ceremony.launchURL) else {
-            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
-            openCeremonyID = nil
-            return await settle(failure(DeviceSignInMessage.couldNotStart))
-        }
-
-        let outcome = await deviceHandoffClient.send(body, to: target)
-        // A sealed session made the ceremony ready: there is nothing to end.
-        if outcome == .sealed { openCeremonyID = nil }
-        guard !superseded() else { return await settle(stopped) }
-        let status: BrowserAuthenticationStatus?
-        switch outcome {
-        case .sealed, .transportFailed:
-            status = await deviceCeremonyStatus(
-                using: api, id: ceremony.id, polling: true, while: { !superseded() }
-            )
-        case .capabilityRejected:
-            status = await deviceCeremonyStatus(
-                using: api, id: ceremony.id, polling: false, while: { !superseded() }
-            )
-        case .tooLarge:
-            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
-            openCeremonyID = nil
-            return await settle(failure(DeviceSignInMessage.tooMuchData, canRetry: false))
-        case .rejected(let code) where code == "internal_error" || code.hasPrefix("http_5"):
-            status = await deviceCeremonyStatus(
-                using: api, id: ceremony.id, polling: false, while: { !superseded() }
-            )
-        case .rejected(let code):
-            _ = try? await api.cancelBrowserAuthentication(ceremony.id)
-            openCeremonyID = nil
-            if code == "tool.browser.profile_unavailable" {
-                if !superseded() { try? await reloadBrowserProfiles(using: api) }
-                return await settle(failure(DeviceSignInMessage.profileUnavailable, canRetry: false))
+        var attempt = 1
+        while true {
+            guard !superseded() else { return await settle(stopped) }
+            deviceSignInAttempt = attempt
+            // D19: the begin names the root of the confirmed page's origin, which
+            // is allowed by construction and keeps the page's path and query off
+            // the API.
+            let ceremony: BrowserAuthenticationView
+            switch await beginCeremony(
+                using: api, profileID: profileID, loginURL: confirmedOrigin + "/", mode: .device,
+                recover: attempt == 1, while: { !superseded() }
+            ) {
+            case .success(let begun):
+                ceremony = begun
+                openCeremonyID = begun.id
+                // Beginning recorded this on the server; a failure below reloads nothing (ADR-0297).
+                rememberDeviceSignIn(for: profileID)
+            case .failure(let error):
+                return await settle(failure(error.message))
             }
-            return await settle(failure(Self.deviceSignInMessage(for: code)))
-        }
-        if status?.isTerminal ?? false { openCeremonyID = nil }
-        guard !superseded() else { return await settle(stopped) }
-
-        guard status == .ready else {
-            if !(status?.isTerminal ?? false) {
+            guard !superseded() else { return await settle(stopped) }
+            guard let target = DeviceSignInHandoffTarget(launchURL: ceremony.launchURL) else {
                 _ = try? await api.cancelBrowserAuthentication(ceremony.id)
                 openCeremonyID = nil
+                return await settle(failure(DeviceSignInMessage.couldNotStart))
             }
-            return await settle(failure(DeviceSignInMessage.couldNotConfirm))
+
+            let outcome = await deviceHandoffClient.send(body, to: target)
+            // A sealed session made the ceremony ready: there is nothing to end.
+            if outcome == .sealed { openCeremonyID = nil }
+            guard !superseded() else { return await settle(stopped) }
+            let status: BrowserAuthenticationStatus?
+            switch outcome {
+            case .sealed, .transportFailed:
+                status = await deviceCeremonyStatus(
+                    using: api, id: ceremony.id, polling: true, while: { !superseded() }
+                )
+            case .capabilityRejected:
+                status = await deviceCeremonyStatus(
+                    using: api, id: ceremony.id, polling: false, while: { !superseded() }
+                )
+            case .tooLarge:
+                _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+                openCeremonyID = nil
+                return await settle(failure(DeviceSignInMessage.tooMuchData, canRetry: false))
+            case .verificationUnavailable:
+                // Only a definite failed handoff plus authoritative closure permits
+                // a fresh ceremony. A lost answer never permits resending a session.
+                let closed = try? await api.cancelBrowserAuthentication(ceremony.id)
+                let confirmedClosed = closed?.id == ceremony.id
+                    && closed?.profileID == profileID && closed?.status == .cancelled
+                if confirmedClosed { openCeremonyID = nil }
+                guard !superseded() else { return await settle(stopped) }
+                guard confirmedClosed, attempt < 3 else {
+                    return await settle(failure(DeviceSignInMessage.couldNotCheck))
+                }
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(attempt) * 500_000_000)
+                } catch {
+                    return await settle(stopped)
+                }
+                guard !superseded() else { return await settle(stopped) }
+                attempt += 1
+                continue
+            case .rejected(let code) where code == "internal_error" || code.hasPrefix("http_5"):
+                status = await deviceCeremonyStatus(
+                    using: api, id: ceremony.id, polling: false, while: { !superseded() }
+                )
+            case .rejected(let code):
+                _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+                openCeremonyID = nil
+                if code == "tool.browser.profile_unavailable" {
+                    if !superseded() { try? await reloadBrowserProfiles(using: api) }
+                    return await settle(failure(DeviceSignInMessage.profileUnavailable, canRetry: false))
+                }
+                return await settle(failure(Self.deviceSignInMessage(for: code)))
+            }
+            if status?.isTerminal ?? false { openCeremonyID = nil }
+            guard !superseded() else { return await settle(stopped) }
+
+            guard status == .ready else {
+                if !(status?.isTerminal ?? false) {
+                    _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+                    openCeremonyID = nil
+                }
+                return await settle(failure(DeviceSignInMessage.couldNotConfirm))
+            }
+            break
         }
         // The profile is signed in: a remote ceremony still remembered for it
         // is superseded, and Start over must not remove the ready profile.
@@ -2675,6 +2707,7 @@ public final class ChatViewModel: ObservableObject {
         profileID: UUID,
         loginURL: String,
         mode: BrowserAuthenticationMode,
+        recover: Bool = true,
         while isCurrent: () -> Bool
     ) async -> Result<BrowserAuthenticationView, DeviceSignInError> {
         func begin() async throws -> BrowserAuthenticationView {
@@ -2692,6 +2725,12 @@ public final class ChatViewModel: ObservableObject {
                 return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart))
             }
             conflict = true
+        }
+        // A retry must not displace a different sign-in that acquired this profile.
+        guard recover else {
+            return .failure(DeviceSignInError(
+                conflict ? DeviceSignInMessage.websiteInUse : DeviceSignInMessage.couldNotStart
+            ))
         }
         guard isCurrent() else { return .failure(DeviceSignInError(DeviceSignInMessage.couldNotStart)) }
         let ceremonies: [BrowserAuthenticationView]

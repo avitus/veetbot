@@ -1,10 +1,26 @@
 """Bounded challenge detection; never collect credentials or frame contents."""
 
+import json
+
 from agent_core.adapters.browser.page_structure import PAGE_TEXT_HELPERS
+
+# Shared with ceremony verification: a remembered account or an interstitial
+# must never become positive authentication evidence (ADR-0316).
+SECURITY_CHALLENGE_TEXT = (
+    r"^\s*(?:performing\s+security\s+verification|verify\s+you\s+are\s+human)\s*[.!…]?\s*$"
+)
+# textContent joins an icon label and a following <br> without whitespace.
+REMEMBERED_SIGN_IN_TEXT = r"sign\s+in\s+as\s+\S"
+SECURITY_CHALLENGE_HEADINGS = "h1,h2,h3,h4,h5,h6,[role=heading]"
+REMEMBERED_SIGN_IN_CONTROLS = "a,button,[role=link],[role=button]"
 
 AUTHENTICATION_SCRIPT = (
     "() => {"
     + PAGE_TEXT_HELPERS
+    + f"const securityText = new RegExp({json.dumps(SECURITY_CHALLENGE_TEXT)}, 'i');"
+    + f"const rememberedText = new RegExp({json.dumps(REMEMBERED_SIGN_IN_TEXT)}, 'i');"
+    + f"const securityHeadings = {json.dumps(SECURITY_CHALLENGE_HEADINGS)};"
+    + f"const rememberedControls = {json.dumps(REMEMBERED_SIGN_IN_CONTROLS)};"
     + """
     const root = document.body;
     let node = root, scanned = 0;
@@ -36,13 +52,17 @@ AUTHENTICATION_SCRIPT = (
         const captcha = element && node.matches(
             'iframe[src*="captcha" i],iframe[title*="captcha" i],'
             + '[id*="captcha" i],[class*="captcha" i]');
+        const namedChallenge = element && (
+            (node.matches(securityHeadings) && securityText.test(cut(node.textContent || '', 512)))
+            || (node.matches(rememberedControls)
+                && rememberedText.test(cut(node.textContent || '', 512))));
         let context = null;
-        if (credential || captcha || node === root || node.assignedSlot) {
+        if (credential || captcha || namedChallenge || node === root || node.assignedSlot) {
             context = ancestry(node);
             if (!context) break;
         }
         if (context && !context.hidden
-            && (credential || captcha && !context.badge)) {
+            && (credential || captcha && !context.badge || namedChallenge && !context.editable)) {
             const box = node.getBoundingClientRect();
             if (box.width > 0 && box.height > 0)
                 return true;

@@ -365,3 +365,4 @@ implementation without one.
 - [ADR-0313: Verify browser completion rows across open shadow roots](0313-open-shadow-browser-completion.md)
 - [ADR-0314: Forward-only branches in reviewed browser workflows](0314-reviewed-browser-read-branches.md)
 - [ADR-0315: Bounded control discovery for reviewed workflows](0315-bounded-workflow-target-discovery.md)
+- [ADR-0316: Recognize unresolved sign-ins and retry temporary checks (Proposed)](0316-retry-transient-device-sign-in-checks.md)

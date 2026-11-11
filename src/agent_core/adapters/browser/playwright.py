@@ -40,7 +40,13 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from agent_core.adapters.browser.csv_export import observe_csv_export
 from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
-from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
+from agent_core.adapters.browser.page_authentication import (
+    AUTHENTICATION_SCRIPT,
+    REMEMBERED_SIGN_IN_CONTROLS,
+    REMEMBERED_SIGN_IN_TEXT,
+    SECURITY_CHALLENGE_HEADINGS,
+    SECURITY_CHALLENGE_TEXT,
+)
 from agent_core.adapters.browser.page_readiness import DOM_QUIET_SCRIPT
 from agent_core.adapters.browser.page_structure import PAGE_TEXT_HELPERS, REGION_CAPTURE_SCRIPT
 from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
@@ -531,6 +537,7 @@ class PythonPlaywrightRuntime:
         self._readiness_requests = _ReadinessRequests()
         self._disallowed_navigation = False
         self._evidence_loaded_at: float | None = None
+        self._security_challenge_seen = False
         self._document_loaded_at: float | None = None
         self._dismissed_beforeunload = False
         self._document_session: CDPSession | None = None
@@ -1048,6 +1055,7 @@ class PythonPlaywrightRuntime:
         """
         page = self._current_page()
         self._disallowed_navigation = False
+        self._security_challenge_seen = False
         with _verification_requests(page) as wait_for_application:
             on_stage(BrowserVerificationStage.NAVIGATE)
             try:
@@ -1101,6 +1109,7 @@ class PythonPlaywrightRuntime:
             on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
             path=(urlsplit(page.url).path or "/")[:4096],
             challenge_visible=challenge_visible,
+            security_challenge_seen=self._security_challenge_seen,
             observed_seconds=0.0 if loaded_at is None else max(0.0, now - loaded_at),
         )
 
@@ -1949,9 +1958,18 @@ class PythonPlaywrightRuntime:
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.needs_user", retryable=False)
 
-    @staticmethod
-    async def _sign_in_challenge_visible(page: Page) -> bool:
+    async def _sign_in_challenge_visible(self, page: Page) -> bool:
         """Report a password, one-time-code, CAPTCHA, passkey, MFA, or consent prompt."""
+        headings = page.locator(SECURITY_CHALLENGE_HEADINGS).filter(
+            has_text=re.compile(SECURITY_CHALLENGE_TEXT, re.IGNORECASE)
+        )
+        for index in range(await headings.count()):
+            if await headings.nth(index).is_visible():
+                # Keep this for the whole verification, including its second
+                # look. A later redirect cannot turn bot clearance into proof
+                # of an account session, on either side of the comparison.
+                self._security_challenge_seen = True
+                return True
         intervention = page.locator(
             f"{_CREDENTIAL_FIELDS},"
             "iframe[src*='captcha' i],iframe[title*='captcha' i],"
@@ -1969,6 +1987,12 @@ class PythonPlaywrightRuntime:
         )
         for index in range(await interactive_text.count()):
             if await interactive_text.nth(index).is_visible():
+                return True
+        prompts = page.locator(REMEMBERED_SIGN_IN_CONTROLS).filter(
+            has_text=re.compile(REMEMBERED_SIGN_IN_TEXT, re.IGNORECASE)
+        )
+        for index in range(await prompts.count()):
+            if await prompts.nth(index).is_visible():
                 return True
         return await _credential_field_in_frame(page)
 

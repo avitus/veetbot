@@ -637,6 +637,31 @@ async def test_a_pending_image_does_not_prevent_the_site_from_verifying_the_sess
             assert status.status is BrowserAuthenticationStatus.CANCELLED
 
 
+async def test_a_security_blocked_control_cannot_prove_a_session(tmp_path: Path) -> None:
+    """An anti-bot clearance cookie is not proof of an authenticated account."""
+    require_real_browser()
+
+    class SecurityControlSite(MembersSite):
+        async def learn(self, request: Request) -> Response:
+            if request.cookies.get("session") == self.token:
+                return HTMLResponse("<h1>Public welcome page</h1>")
+            return HTMLResponse("<h2>Performing security verification</h2>")
+
+    members = SecurityControlSite()
+    async with (
+        local_https_site(members.app) as site,
+        profile_service(site, tmp_path / "profiles") as service,
+    ):
+        response, ceremony_id = await hand_off(
+            service, cookie=await signed_in_cookie(members), confirmed_path="/learn"
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["code"] == "session_unconfirmed"
+        assert (
+            await service.sessions.authentication_status(ceremony_id, OWNER)
+        ).status is BrowserAuthenticationStatus.CANCELLED
+
+
 @pytest.mark.parametrize("outcome", ["ready", "challenge", "redirect", "timeout"])
 async def test_verification_waits_for_the_sites_delayed_session_decision(
     tmp_path: Path, outcome: str, caplog: pytest.LogCaptureFixture

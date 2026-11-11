@@ -839,6 +839,17 @@ password or one-time-code field counts in a visible frame of the page as well as
 in the page itself, because some websites keep their sign-in form in a frame
 (ADR-0288).
 
+A visible security-verification heading or a remembered-account **Sign in as**
+link/button also counts as an unresolved sign-in (ADR-0316), in both ceremony
+verification and ordinary browser readiness. Remembering an account is not
+evidence of an authenticated session. Hidden controls and incidental article
+text do not trigger these checks; the checks never interact with the challenge.
+A security interstitial in either verification browser makes the comparison
+unconfirmed, including configured-site checks. Passing a bot check alone is
+not proof of authentication; a blocked empty-session control supplies no such
+proof. Internal page evidence distinguishes this from a sign-in prompt using
+only a boolean, with no additional page data in logs or public responses.
+
 In the remote ceremony the runtime reports `ready` only on evidence of a sign-in
 it mediated itself: during this ceremony the user sent text while one of those
 challenges was visible, no challenge is visible now, the page is on an allowed
@@ -922,13 +933,27 @@ loads the page, and the profile is created with every allowed origin, up to the
 stays refused, and an existing profile's origins never change. When
 the user confirms, the client reads the store's cookies and keeps those whose
 domain is an allowed host or a parent of one. It reads `localStorage` of the
-allowed origins it visited in an isolated script world, and sends them once with
+allowed origins it visited in an isolated script world, and sends them once per ceremony with
 the confirmed page's URL. It then clears the store. It never persists or logs a
 cookie, storage value, or capability, never places one in durable or published
 client state, and never sends the handoff with its Veetbot API credential or to
 any address but the launch URL. A begin whose answer is lost, or that meets an
 open ceremony, is recovered once by cancelling the newest open ceremony and
 beginning again.
+
+After an explicit `409 tool.browser.provider_unavailable` handoff response,
+the native client closes the failed ceremony and requires its authoritative
+`cancelled` outcome before starting another (ADR-0316). One press permits at
+most three sequential handoffs, each in a fresh ceremony with a new single-use
+capability and the same locally scoped session. The retry delays are 0.5 and
+1 second; the window shows the attempt number. A retry begin does not recover
+an open-ceremony conflict by cancelling another ceremony. Unknown outcomes,
+other refusals, unsuccessful closure, cancellation, a closed window or a
+changed connection stop retries. Session material stays only in the completion
+call's local variables. Every attempt runs the full unchanged thirty-second
+server verification; the user operation may take roughly ninety seconds plus
+orchestration and cleanup. A transport failure still uses status reconciliation
+and never replays a handoff.
 
 `POST /authentication/{ceremony_id}/handoff` is a direct surface route. The
 boundary authenticates `X-Browser-Ceremony-Capability` before buffering, then

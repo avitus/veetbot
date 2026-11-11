@@ -449,7 +449,9 @@ struct DeviceSignInSheet: View {
             HStack(spacing: 12) {
                 if isConfirming {
                     ProgressView().controlSize(.small)
-                    Text("Checking the sign-in…")
+                    Text(model.deviceSignInAttempt > 1
+                        ? "Checking again (attempt \(model.deviceSignInAttempt) of 3)…"
+                        : "Checking the sign-in…")
                         .veetType(.meta)
                         .foregroundColor(.secondary)
                 }

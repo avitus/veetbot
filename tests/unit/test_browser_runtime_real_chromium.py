@@ -527,6 +527,65 @@ async def test_verification_sees_a_sign_in_form_in_a_frame() -> None:
     assert evidence.challenge_visible
 
 
+@pytest.mark.parametrize("operation", ["verify", "automate"])
+async def test_visible_security_verification_is_a_challenge(operation: str) -> None:
+    """The LinkedIn run returned a security interstitial as a successful observation."""
+
+    async def challenge(request: Request) -> Response:
+        del request
+        return html(
+            "<main><h1>site.test</h1><h2>Performing security verification</h2>"
+            "<p>This website uses a security service to protect against malicious bots.</p>"
+            "</main>"
+        )
+
+    async with browsing([Route("/", challenge)]) as (site, runtime):
+        if operation == "verify":
+            evidence = await runtime.load_page_evidence(site.url("/"))
+            assert evidence.challenge_visible
+        else:
+            # Readiness must stop before an ordinary observation reaches the model.
+            await runtime._current_page().goto(site.url("/"))
+            with pytest.raises(BrowserProviderError) as refused:
+                await runtime.check_automation_ready()
+            assert refused.value.reason_code == "tool.browser.needs_user"
+
+
+async def test_hidden_or_discussed_security_verification_is_not_a_challenge() -> None:
+    async def article(request: Request) -> Response:
+        del request
+        return html(
+            "<h1>How security checks work</h1>"
+            "<p>The screen may say Performing security verification while it loads.</p>"
+            "<h2 hidden>Performing security verification</h2>"
+            "<a hidden href='/login'>Sign in as Example User</a>"
+            "<p>Choose Sign in as Example User when prompted.</p>"
+            "<a href='/account'>Signed in as Example User</a>"
+        )
+
+    async with browsing([Route("/", article)]) as (site, runtime):
+        evidence = await runtime.load_page_evidence(site.url("/"))
+        assert not evidence.challenge_visible
+        await runtime.check_automation_ready()
+
+
+@pytest.mark.parametrize("operation", ["verify", "automate"])
+async def test_a_remembered_account_prompt_is_not_a_signed_in_page(operation: str) -> None:
+    async def prompt(request: Request) -> Response:
+        del request
+        return html("<h1>Welcome</h1><a href='/login'>Icon label<br>Sign in as Example User</a>")
+
+    async with browsing([Route("/", prompt)]) as (site, runtime):
+        if operation == "verify":
+            evidence = await runtime.load_page_evidence(site.url("/"))
+            assert evidence.challenge_visible
+        else:
+            await runtime._current_page().goto(site.url("/"))
+            with pytest.raises(BrowserProviderError) as refused:
+                await runtime.check_automation_ready()
+            assert refused.value.reason_code == "tool.browser.needs_user"
+
+
 async def test_a_signed_out_page_that_draws_its_form_late_still_reads_as_signed_out() -> None:
     """Chase draws its framed form after its requests go quiet; the control must see it."""
 

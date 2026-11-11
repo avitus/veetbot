@@ -454,4 +454,5 @@ nav:
       - "ADR-0313: Open-shadow browser completion": adr/0313-open-shadow-browser-completion.md
       - "ADR-0314: Reviewed browser read branches": adr/0314-reviewed-browser-read-branches.md
       - "ADR-0315: Bounded workflow target discovery": adr/0315-bounded-workflow-target-discovery.md
+      - "ADR-0316: Recognize unresolved sign-ins and retry checks": adr/0316-retry-transient-device-sign-in-checks.md
   - Changelog: changelog.md
