@@ -15,13 +15,27 @@ from agent_core.domain.browser import (
     BrowserObservation,
 )
 from agent_core.domain.browser_extraction import BrowserExtractionRequest
-from agent_core.tools.browser_act import BrowserActTool
+from agent_core.tools.browser_act import BrowserActTool, ShadowBrowserActTool
 from tests.contract.support import tool_context
 from tests.unit.test_browser_runtime_real_chromium import browsing, html
 from tests.unit.test_browser_tools import FakeBrowserProvider
 
 
-@pytest.mark.parametrize("kind", ["text", "region", "shadow_region", "row", "location", "hidden"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "text",
+        "region",
+        "shadow_region",
+        "row",
+        "shadow_row",
+        "shadow_row_duplicate",
+        "shadow_row_hidden",
+        "shadow_row_pinned",
+        "location",
+        "hidden",
+    ],
+)
 async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
     """Verify delayed receipt does not duplicate an effect."""
     effects: list[bool] = []
@@ -34,9 +48,11 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
             script="const receiptRoot = "
             + (
                 "document.querySelector('#host').attachShadow({mode:'open'});"
-                if kind == "shadow_region"
+                if kind.startswith("shadow_")
                 else "document.body;"
             )
+            + f"const duplicate = {str(kind == 'shadow_row_duplicate').lower()};"
+            + f"const hiddenReceipt = {str(kind == 'shadow_row_hidden').lower()};"
             + """
             document.querySelector('#save').onclick = async () => {
                 await fetch('/effect', {method:'POST'});
@@ -45,6 +61,11 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
                     receipt.innerHTML =
                         '<p role="status">Saved successfully</p>' +
                         '<table><tbody><tr><td>42</td></tr></tbody></table>';
+                    if (duplicate) {
+                        const row = receipt.querySelector('tr');
+                        row.after(row.cloneNode(true));
+                    }
+                    receipt.hidden = hiddenReceipt;
                     receiptRoot.append(receipt);
                     history.replaceState({}, '', '/complete');
                 }, 850);
@@ -80,7 +101,7 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
         evidence: dict[str, Any] = {"kind": "text", "text": "Saved successfully"}
         if kind in {"region", "shadow_region"}:
             evidence.update(kind="region", region_kind="status")
-        elif kind == "row":
+        elif kind == "row" or kind.startswith("shadow_row"):
             evidence = {
                 "kind": "row",
                 "collection_kind": "table",
@@ -91,7 +112,12 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
         elif kind == "hidden":
             evidence["text"] = "Hidden confirmation"
         before = await runtime.navigate(site.url("/"))
-        result = await BrowserActTool(Provider()).execute(
+        tool = (
+            ShadowBrowserActTool
+            if kind.startswith("shadow_row") and kind != "shadow_row_pinned"
+            else BrowserActTool
+        )
+        result = await tool(Provider()).execute(
             {
                 "kind": "click",
                 "expected_revision": before.revision,
@@ -102,7 +128,11 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
         )
         assert result.ok and result.structured is not None, (result.model_dump(), effects)
         assert result.structured["condition"]["status"] == (
-            "not_observed" if kind == "hidden" else "satisfied"
+            "not_observed"
+            if kind in {"hidden", "shadow_row_hidden", "shadow_row_pinned"}
+            else "ambiguous"
+            if kind == "shadow_row_duplicate"
+            else "satisfied"
         )
         assert effects == [True]
 

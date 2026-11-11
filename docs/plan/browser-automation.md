@@ -1881,7 +1881,7 @@ retains `main_document`. Composed-ancestor checks for slotted nodes share the
 visit limit. A focused shadow region does not adopt assigned light nodes outside
 its DOM subtree. Hidden, editable and transparent hosts or slot ancestors exclude
 their content. Focus rechecks composed ancestors before capture. Closed roots
-remain excluded; collection extraction keeps its separate main-document scope.
+remain excluded; collection extraction has its separately versioned scope.
 The existing general readable-text field and control capture are unchanged.
 
 Both coverage versions record scope, scanned nodes, scan exhaustion and the known
@@ -1945,8 +1945,9 @@ version 2 reports that scope, while version 1 retains the document-only scopes.
 The provider boundary rejects a result from a different scope. Pinned older
 tools send their unchanged document-only requests, omitting the new scope field
 on the hosted wire. Older services may refuse a widened request; they cannot
-silently narrow it. Article extraction and row completion predicates retain
-their existing document-only scopes.
+silently narrow it. Article extraction retains its document-only scope. Row
+completion predicates remain document-only until the tool versions introduced
+by ADR-0313 below.
 
 Collection, row and cell walks visit shadow children before light children;
 composed-ancestor checks share their existing visit ceilings. Hidden, transparent
@@ -2105,6 +2106,18 @@ truncated or absent evidence cannot prove completion. Row checks use fresh
 revision-bound extraction. A stale verification read permits one fresh capture
 within the shared five-second/21-read limit, never another action. Condition
 status, rather than unrelated page churn, drives repeated-wait detection.
+
+Under [ADR-0313](../adr/0313-open-shadow-browser-completion.md), observe 1.10.0
+and act 1.9.0 select `main_document_and_open_shadow` for row predicates and return
+version-2 extraction evidence. Pinned earlier versions retain document-only
+scope; workflow calls follow their run's tool pins. The tool selects scope;
+model arguments cannot override it. Evidence must match scope as well as revision, collection
+kind/index, fields and row limit, including when checking a cached zero-timeout
+observation. Fresh reads and stale-revision recovery preserve that scope through
+the existing provider boundary; a mismatched or unsupported response refuses
+rather than silently narrowing. The new act output schema admits the widened
+extraction alongside the existing saved-file result. Polling limits, privacy,
+authentication interrupts and non-retryable uncertain effects are unchanged.
 
 Authentication interrupts completion polling immediately, including row extraction
 and its fresh-observation recovery. An interrupted observation cannot satisfy

@@ -767,11 +767,13 @@ from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
     BrowserActTool,
     PinnedBrowserActTool,
+    ShadowBrowserActTool,
 )
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
     ArticleBrowserObserveTool,
     BrowserObserveTool,
+    CompletionBrowserObserveTool,
     PagedBrowserObserveTool,
     ShadowBrowserObserveTool,
 )
@@ -3740,6 +3742,7 @@ async def _compose(
         registry.register(BrowserObserveTool(browser_provider))
         registry.register(ArticleBrowserObserveTool(browser_provider))
         registry.register(ShadowBrowserObserveTool(browser_provider))
+        registry.register(CompletionBrowserObserveTool(browser_provider))
         if isinstance(browser_provider, BrowserImageUploader):
             registry.register(
                 BrowserUploadTool(
@@ -3763,6 +3766,7 @@ async def _compose(
         # ADR-0294: a chat pinned to the earlier spec keeps it; the latest is offered.
         registry.register(PinnedBrowserActTool(browser_provider, presenter=act_presenter))
         registry.register(BrowserActTool(browser_provider, presenter=act_presenter))
+        registry.register(ShadowBrowserActTool(browser_provider, presenter=act_presenter))
     if settings.delegation_enabled:
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:

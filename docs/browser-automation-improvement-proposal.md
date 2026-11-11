@@ -174,6 +174,14 @@ exclusion and existing scan/cell limits apply across roots. Article extraction,
 frames, closed roots and stable collection identity remain outside this slice.
 This is construction evidence, separate from live-site and production acceptance.
 
+The next W4 slice connects open-shadow collection evidence to row waits and
+action postconditions ([ADR-0313](adr/0313-open-shadow-browser-completion.md)).
+Observe 1.10.0 and act 1.9.0 use the widened scope; earlier pinned versions
+keep document-only indexes. Workflow calls follow their run's tool pins.
+Wrong-scope evidence cannot satisfy a row predicate, and failed verification
+never repeats a write.
+Construction and direct-dev delivery do not establish live-site acceptance.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

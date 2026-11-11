@@ -315,3 +315,38 @@ async def test_typed_row_reconciliation_reads_fresh_evidence_only(
     assert result.structured["condition"]["status"] == expected
     assert result.structured["condition"]["observations"] == 2
     assert provider.reads == 1 and not provider.actions
+
+
+def test_document_row_predicate_rejects_a_different_extraction_scope() -> None:
+    from agent_core.domain.browser_evidence import BrowserRowEvidence, evidence_status
+
+    evidence = BrowserRowEvidence.model_validate(
+        {
+            "kind": "row",
+            "collection_kind": "table",
+            "fields": [{"name": "receipt", "column": 0, "type": "integer", "value": 42}],
+        }
+    )
+    request = evidence.extraction_request("revision-1").model_copy(
+        update={"scope": "main_document_and_open_shadow"}
+    )
+    extracted = extracted_observation(
+        {
+            "status": "extracted",
+            "source_name": "Receipts",
+            "rows": [[{"text": "42", "text_truncated": False}]],
+            "source_nodes": 2,
+            "source_scan_limit_reached": False,
+            "row_nodes": 1,
+            "row_scan_limit_reached": False,
+            "omitted_rows": 0,
+        },
+        request,
+        "revision-1",
+    )
+    observed = (
+        EvidenceProvider()
+        ._observation("https://example.org/account")
+        .model_copy(update={"extraction": extracted})
+    )
+    assert evidence_status(observed, evidence) == "not_observed"

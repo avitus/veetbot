@@ -116,6 +116,11 @@ ACT_OUTPUT_SCHEMA: dict[str, Any] = {
     "properties": {**OUTPUT_SCHEMA["properties"], "saved_file": SAVED_FILE_SCHEMA},
 }
 
+SHADOW_ACT_OUTPUT_SCHEMA: dict[str, Any] = {
+    **SHADOW_OUTPUT_SCHEMA,
+    "properties": {**SHADOW_OUTPUT_SCHEMA["properties"], "saved_file": SAVED_FILE_SCHEMA},
+}
+
 _FAILURE_KINDS = {
     "tool.browser.profile_unavailable": ToolFailureKind.PERMISSION,
     "tool.browser.authentication_required": ToolFailureKind.PERMISSION,

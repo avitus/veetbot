@@ -1,3 +1,6 @@
+# ADR-0313: Owner-authorized W4 continuation adds versioned open-shadow row
+# completion checks. Pinned earlier tools retain document scope;
+# verification never replays actions. No milestone or gate moves.
 # ADR-0311: The owner-authorized browser continuation extends W3 table/list/form
 # extraction into open shadow roots under observe 1.9.0. Pinned tools retain
 # document-only extraction; no authority, milestone or gate moves.

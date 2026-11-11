@@ -31,6 +31,7 @@ from agent_core.domain.browser_act_views import (
     task_grant_offer,
 )
 from agent_core.domain.browser_download import EXPORT_TIMEOUT_GUIDANCE, BrowserDownload
+from agent_core.domain.browser_extraction import BrowserExtractionScope
 from agent_core.domain.browser_follow import profile_handle
 from agent_core.domain.browser_request_grants import request_grant_offer
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
@@ -63,6 +64,7 @@ from agent_core.tools.browser_conditions import browser_condition_schema, check_
 from agent_core.tools.browser_results import (
     ACT_OUTPUT_SCHEMA,
     OUTPUT_SCHEMA,
+    SHADOW_ACT_OUTPUT_SCHEMA,
     browser_failure,
     observation_result,
     serialized_observation,
@@ -202,6 +204,7 @@ class BrowserActApprovalPresenter:
 
 
 class BrowserActTool:
+    _row_scope: BrowserExtractionScope = "main_document"
     spec = ToolSpec(
         name="browser.act",
         version="1.8.0",
@@ -303,7 +306,9 @@ class BrowserActTool:
             )
         if condition is not None:
             try:
-                observation = await check_browser_condition(self._provider, observation, condition)
+                observation = await check_browser_condition(
+                    self._provider, observation, condition, row_scope=self._row_scope
+                )
             except Exception as error:
                 # The action already returned; evidence loss cannot prove it was unsent.
                 uncertain = browser_failure(
@@ -394,6 +399,25 @@ class BrowserActTool:
             "sections": sections,
             "read_with": f"tool.call {reader_call(ref.artifact_id)}",
         }
+
+
+class ShadowBrowserActTool(BrowserActTool):
+    """Verify rows in open roots without changing pinned action behavior."""
+
+    _row_scope = "main_document_and_open_shadow"
+    spec = BrowserActTool.spec.model_copy(
+        update={
+            "version": "1.9.0",
+            "output_schema": SHADOW_ACT_OUTPUT_SCHEMA,
+            "description": (
+                "Act once with approval: current revision+elements[].ref, including scroll; "
+                "regions[].ref is read-only. Returns settled page/fresh refs. "
+                "postcondition=observe wait_for; rows include open roots. "
+                "Refresh missing targets for overlays. Never replay uncertain writes; "
+                "success is not causal proof."
+            ),
+        }
+    )
 
 
 class PinnedBrowserActTool(BrowserActTool):

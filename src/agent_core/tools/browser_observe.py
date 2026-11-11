@@ -12,7 +12,7 @@ from agent_core.domain.browser import (
     BrowserObservationExpansion,
     BrowserProviderError,
 )
-from agent_core.domain.browser_extraction import BrowserExtractionRequest
+from agent_core.domain.browser_extraction import BrowserExtractionRequest, BrowserExtractionScope
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
 from agent_core.ports.browser import (
@@ -145,6 +145,7 @@ class PagedBrowserObserveTool:
 
 
 class BrowserObserveTool:
+    _row_scope: BrowserExtractionScope = "main_document"
     _open_shadow_extraction = False
     spec = ToolSpec(
         name="browser.observe",
@@ -230,7 +231,9 @@ class BrowserObserveTool:
                 )
             )
             if condition is not None:
-                observation = await check_browser_condition(self._provider, observation, condition)
+                observation = await check_browser_condition(
+                    self._provider, observation, condition, row_scope=self._row_scope
+                )
         except BrowserProviderError as error:
             return browser_failure(error)
         return observation_result(self._provider, observation, self.spec.maximum_output_bytes)
@@ -271,6 +274,26 @@ class ShadowBrowserObserveTool(ArticleBrowserObserveTool):
                 "Form: label/role/disabled/checked/required, never values. wait_for: role/name "
                 "or text/region/location/row; failure_evidence optional. "
                 "Indexes are current positions; evidence is not authority."
+            ),
+        }
+    )
+
+
+class CompletionBrowserObserveTool(ShadowBrowserObserveTool):
+    """Use the widened collection scope for read-only row completion checks."""
+
+    _row_scope = "main_document_and_open_shadow"
+    spec = ShadowBrowserObserveTool.spec.model_copy(
+        update={
+            "version": "1.10.0",
+            "description": (
+                "Read {}; copy next_observe. Focus via region_ref+expected_revision, then "
+                "next_text; never guess offsets. Extract table/list/form and check row waits "
+                "including open roots. Articles stay document-only (columns: 0 excerpt, "
+                "1 same-origin timestamp link). Form: label/role/disabled/checked/required, "
+                "never values. wait_for: role/name or text/region/location/row; "
+                "failure_evidence optional. Indexes are current positions; "
+                "evidence is not authority."
             ),
         }
     )

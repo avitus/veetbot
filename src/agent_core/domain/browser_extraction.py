@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+BrowserExtractionScope = Literal["main_document", "main_document_and_open_shadow"]
+
 
 class BrowserExtractionField(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -25,7 +27,7 @@ class BrowserExtractionRequest(BaseModel):
     index: int = Field(default=0, ge=0, le=15)
     fields: list[BrowserExtractionField] = Field(min_length=1, max_length=8)
     row_limit: int = Field(default=20, ge=1, le=50)
-    scope: Literal["main_document", "main_document_and_open_shadow"] = "main_document"
+    scope: BrowserExtractionScope = "main_document"
 
     @model_validator(mode="after")
     def unique_fields(self) -> BrowserExtractionRequest:
