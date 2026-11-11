@@ -115,3 +115,56 @@ no skips, using the established 64 MiB process stack. All 1,181 browser-related
 static cases and 170 browser contracts passed. The focused completion boundary
 suite passed 29 cases and the real Chromium completion suite passed eight.
 Lint, type checking, citation reconciliation and documentation checks passed.
+
+## Fresh workflow extraction evidence — 2026-11-11
+
+Decision 5 requires fresh evidence for each step. Reviewed extraction previously
+selected the last successful observation from conversation history, which could
+already be stale. Each extraction now begins with a separately audited ordinary
+observation in a persisted `before_extract` phase. Only its successful,
+uninterrupted, same-origin result supplies the extraction revision. The read
+does not advance completed-step progress; typed extraction must still succeed.
+
+Both calls use normal policy, cancellation, budget and persistence handling.
+A generation change restarts unfinished reading under the existing binding
+checks. A stale extraction may trigger the existing audited recovery read but
+cannot retry extraction, substitute historical evidence or replay an earlier
+action. Invalid or missing extraction remains unverified. Bounded coverage
+remains explicit and is not a claim of whole-page completeness.
+
+This repairs the existing W6 contract. No public schema, catalog definition,
+permission, dependency, milestone gate or engineering-plan requirement changes;
+no new architectural decision is needed. Broader live-site acceptance remains
+separate from construction evidence.
+
+Construction evidence in the local Linux ARM64 sandbox:
+
+- Red: `make test-static
+  PYTEST_ARGS=tests/unit/test_browser_workflow_extraction.py` failed with
+  `unverified` instead of `verified`: extraction used navigation's retired
+  revision even though a fresh observation was available. The regression passes
+  with the fresh-read phase.
+- All 90 focused workflow tests passed, including seven new extraction cases.
+  Failed/stale reads, foreign origins and absent extraction cannot complete the
+  step. Sign-in suspends once and cancellation performs no extraction or action.
+- `make test-browser-cases
+  CASES=tests/unit/test_browser_workflow_extraction_real_chromium.py` passed five
+  cases. Ordinary and open-shadow tables return changed live values; an approved
+  action followed by extraction records one server effect, including after a
+  lost action response. A revision invalidated between the fresh read and
+  extraction stops unverified without retrying the extraction.
+
+Broader checks passed all 1,321 browser-related static tests and 170 browser
+contracts, plus lint, type checking, citation reconciliation and strict
+documentation checks. Reading lane A matches the diff-derived minimum.
+
+Before integrating the advancing `dev`, browser verification passed all 513
+cases with no skips in 452.09 seconds, using two workers and the established
+64 MiB process stack. No ASGI pending-request teardown diagnostic was emitted.
+
+Integration preserves `dev`'s separate ADR-0316 sign-in repair at `f7e4483f`.
+The combined tree passed lint, type checking, all 1,325 browser-related static
+tests and 170 browser contracts. Final browser verification passed all 519 cases
+in 451.21 seconds with no skips or ASGI pending-request teardown diagnostic.
+This records construction coverage, not broader W6 live-site acceptance or
+production availability.

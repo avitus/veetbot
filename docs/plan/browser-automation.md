@@ -2198,6 +2198,16 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
+An extraction step first queues its own ordinary `browser.observe` and persists
+the `before_extract` phase. Only that successful, uninterrupted, same-origin
+result supplies the extraction revision; conversation history cannot substitute
+for this read. The extraction is a second separately audited call. The preliminary
+read does not complete the step. Missing, invalid or stale extraction evidence
+stops unverified; the existing bounded recovery read cannot retry extraction or
+replay an earlier action. Generation changes restart the unfinished read through
+the existing workflow binding checks. Both calls spend the existing workflow and
+run budgets, and final reporting retains the extraction's bounded coverage.
+
 [ADR-0314](../adr/0314-reviewed-browser-read-branches.md) adds optional
 `branches` to reviewed observe steps with a postcondition and positive
 `failure_evidence`. The closed object names `satisfied` and `failed` destinations

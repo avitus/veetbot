@@ -290,6 +290,23 @@ class BrowserWorkflowRunner:
                 ):
                     await self._stop(context, state, "unverified")
                     return None
+                if state["phase"] == "before_extract":
+                    await self._queue(
+                        context,
+                        state,
+                        "read",
+                        "browser.observe",
+                        {
+                            "extract": {
+                                "expected_revision": observed.revision,
+                                "kind": step.collection_kind,
+                                "index": step.index,
+                                "fields": [field.model_dump() for field in step.fields],
+                                "row_limit": step.row_limit,
+                            }
+                        },
+                    )
+                    continue
                 if state["phase"] == "before_action":
                     targets = [
                         element
@@ -385,32 +402,7 @@ class BrowserWorkflowRunner:
                 )
                 await self._queue(context, state, "read", "browser.observe", args)
             else:
-                previous = next(
-                    (
-                        _observation(item)
-                        for item in reversed(context.checkpoint.conversation)
-                        if isinstance(item, ToolResultItem) and _observation(item) is not None
-                    ),
-                    None,
-                )
-                if previous is None:
-                    await self._stop(context, state, "unverified")
-                    return None
-                await self._queue(
-                    context,
-                    state,
-                    "read",
-                    "browser.observe",
-                    {
-                        "extract": {
-                            "expected_revision": previous.revision,
-                            "kind": step.collection_kind,
-                            "index": step.index,
-                            "fields": [field.model_dump() for field in step.fields],
-                            "row_limit": step.row_limit,
-                        }
-                    },
-                )
+                await self._queue(context, state, "before_extract", "browser.observe", {})
         await self._stop(context, state, "verified")
         return None
 

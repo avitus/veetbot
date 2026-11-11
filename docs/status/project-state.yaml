@@ -1,3 +1,6 @@
+# ADR-0164 follow-up: Owner-authorized W6 continuation gives each extraction
+# step a fresh audited observation, preserving budgets and non-replay handling.
+# No deployed recipe, milestone or gate changes.
 # ADR-0315: Owner-authorized W4/W6 continuation adds bounded workflow target
 # discovery through current control continuations. Four requested windows per
 # action retain ordinary approvals, revision fences and uncertain-write handling.

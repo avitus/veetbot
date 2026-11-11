@@ -198,6 +198,12 @@ approval still binds the newly observed target. Ambiguity, stale evidence and
 exhausted discovery stop safely; uncertain actions never restart discovery.
 The deployed recipe catalog and broader live-site acceptance remain unchanged.
 
+The following W6 repair gives every reviewed extraction step its own fresh,
+audited observation before requesting typed rows. Earlier conversation evidence
+cannot provide its revision, and the preliminary read cannot count as completed
+extraction. Stale or failed reads stop without replaying an earlier write. This
+repairs ADR-0164's fresh-step contract; it activates no new deployed recipe.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12
