@@ -967,6 +967,15 @@ public final class EmailViewModel: ObservableObject {
                 || previousMailbox.dismissedRevision != result.dismissedRevision
                 || previousMailbox.isHandled != result.isHandled {
                 cachedMailLists = [:]
+                resetListQuery()
+                isLoading = false
+                if let index = inboxItems.firstIndex(where: { $0.id == id }) {
+                    if Self.staysListed(result, in: queryListView) {
+                        inboxItems[index] = result
+                    } else {
+                        inboxItems.remove(at: index)
+                    }
+                }
             }
             thread = result
             isLoadingThread = false

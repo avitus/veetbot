@@ -59,3 +59,10 @@ revision regression first failed only for reopened mail, with its unchanged-read
 control passing; the repair compares effective handled state as well as raw
 mailbox fields. Both cases use
 `EmailViewModelTests.testThreadRevisionInvalidatesCacheOnlyWhenHandledStateChanges`.
+Detail-discovered membership changes also invalidate the in-flight list request
+and its pagination metadata, clear abandoned loading flags, and reconcile the
+visible row with the accepted detail. A delayed reload or next-page response
+cannot restore the invalidated cache. Both cases in
+`EmailViewModelTests.testThreadReadInvalidatesInflightCollectionRead` first
+reproduced stale rows returning after invalidation; the unchanged-read control
+above continues to preserve useful snapshots.

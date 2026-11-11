@@ -134,6 +134,40 @@ import SwiftUI
         #expect(model.items.map(\.id) == (revision == 1 ? [otherID] : []))
     }
 
+    /// An older reload or page must not restore rows invalidated by a newer detail read.
+    @Test(arguments: [false, true])
+    func testThreadReadInvalidatesInflightCollectionRead(paging: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON(), nil) }
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, self.archiveThreadJSON(inInbox: false), nil)
+            }
+            requests.append(request)
+            if requests.snapshot.count > 3 { return (502, Self.error("service_unavailable", "Temporary failure"), nil) }
+            let held = requests.snapshot.count == 3
+            return (200, self.pageJSON(cursor: held && paging ? nil : "next"), held ? gate : nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && requests.snapshot.count == 2 }
+        let pending = Task {
+            if paging { await model.loadMore() } else { await model.reload(preserveOrder: true) }
+        }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        await model.openThread(threadID)
+        #expect(!model.isReadingList && !model.isLoading)
+        #expect(model.items.isEmpty, "The accepted archive must also remove the visible Inbox row")
+        gate.release()
+        await pending.value
+        model.setListView("priority")
+        model.setListView("inbox")
+        #expect(model.items.isEmpty, "An obsolete response must not recreate the invalidated snapshot")
+    }
+
     /// Opening mail is inert; each load or retry requires another explicit request.
     @Test func testImagesLoadOnlyByExplicitRequestAndDoNotRetryOnFailure() async throws {
         let requests = EmailRequestRecorder()
