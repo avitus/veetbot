@@ -32,6 +32,7 @@ class SemanticRecallPreparation:
         *,
         inline_output_bytes: int = 4096,
     ) -> None:
+        """Register every retained search version for matching preparation and execution."""
         self._factory, self._principal = factory, principal.model_copy(deep=True)
         self._retriever, self._former = retriever, former
         self._tool = MemorySearchTool(
@@ -69,6 +70,7 @@ class SemanticRecallPreparation:
         }
 
     async def plan(self, run: Run, checkpoint: RunCheckpoint) -> list[RecallQuery]:
+        """Prepare authorized automatic or deliberate queries under the current allowance."""
         if checkpoint.pending_tool_calls:
             calls = [ToolCallItem.model_validate(value) for value in checkpoint.pending_tool_calls]
             if not any(call.name in {TOOL_CALL_TOOL_NAME, self._tool.spec.name} for call in calls):

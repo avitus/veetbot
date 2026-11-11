@@ -132,7 +132,10 @@ async def test_active_dialog_controls_precede_navigation() -> None:
 async def test_shadow_dialog_priority_survives_projection_and_control_continuation(
     shape: str,
 ) -> None:
+    """Verify shadow dialog priority survives projection and control continuation."""
+
     async def home(request: Request) -> Response:
+        """Serve the synthetic page used to observe browser behavior."""
         del request
         return html(
             "<nav>"
@@ -199,6 +202,8 @@ async def test_shadow_dialog_priority_survives_projection_and_control_continuati
     ["hidden", 'aria-hidden="true"', 'style="opacity:0"', "contenteditable", 'role="textbox"'],
 )
 async def test_dialog_priority_ignores_excluded_shadow_and_slot_ancestors(exclusion: str) -> None:
+    """Verify dialog priority ignores excluded shadow and slot ancestors."""
+
     async def home(request: Request) -> Response:
         del request
         return html(
@@ -226,6 +231,8 @@ async def test_dialog_priority_ignores_excluded_shadow_and_slot_ancestors(exclus
 
 
 async def test_shadow_dialog_ranking_stops_at_discovery_bound() -> None:
+    """Verify shadow dialog ranking stops at discovery bound."""
+
     async def home(request: Request) -> Response:
         del request
         return html(
@@ -244,6 +251,8 @@ async def test_shadow_dialog_ranking_stops_at_discovery_bound() -> None:
 
 
 async def test_changed_shadow_dialog_priority_rejects_old_control_continuation() -> None:
+    """Verify changed shadow dialog priority rejects old control continuation."""
+
     async def home(request: Request) -> Response:
         del request
         return html(

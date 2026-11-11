@@ -9,6 +9,16 @@ from agent_core.application.email_reader import reading_body
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
 
+def test_unclosed_table_keeps_cell_prose_without_a_markdown_grid() -> None:
+    """An incomplete table has no reliable rectangular structure."""
+    result = reading_body(
+        "<table><tr><th>Asset</th><th>Value</th></tr><tr><td>Cash</td><td>42</td></tr>"
+    )
+    assert all(value in result for value in ("Asset", "Value", "Cash", "42"))
+    assert "|" not in result
+    assert "---" not in result
+
+
 @pytest.mark.parametrize("with_image", [False, True])
 async def test_html_fallback_does_not_restore_styles_as_missing_plain_prose(
     with_image: bool,
@@ -885,6 +895,7 @@ async def test_flash_email_preserves_table_and_paragraphs_without_images(plain: 
 
 
 def test_html_data_table_inside_layout_preserves_safe_cells() -> None:
+    """Verify html data table inside layout preserves safe cells."""
     result = reading_body(
         '<table role="presentation"><tr><td><p>Intro.</p>'
         "<table><tr><td>Metric</td><td>Value</td></tr>"
@@ -897,6 +908,7 @@ def test_html_data_table_inside_layout_preserves_safe_cells() -> None:
 
 
 def test_html_row_spans_keep_all_text_without_inventing_columns() -> None:
+    """Verify html row spans keep all text without inventing columns."""
     result = reading_body(
         '<table><tr><td rowspan="2">Summary</td></tr><tr><td>Revenue</td><td>$42</td></tr></table>'
     )

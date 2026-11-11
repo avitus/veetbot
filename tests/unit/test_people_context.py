@@ -23,6 +23,7 @@ async def test_focused_search_keeps_beliefs_before_filling_spare_space_with_inte
     belief_count: int,
     extra_kind: Literal["interaction", "relationship", "commitment"],
 ) -> None:
+    """Verify focused search keeps beliefs before filling spare space with interactions."""
     from uuid import UUID
 
     from agent_core.domain.memory import TracedPersonContext
@@ -115,6 +116,7 @@ async def qualified_relationship_recall_contract(
     *,
     inactive_label: str | None = None,
 ) -> None:
+    """Exercise complete role labels, temporal validity and legacy discovery behavior."""
     await relationship_recall_contract(
         clock,
         factory,
@@ -139,6 +141,7 @@ async def relationship_recall_contract(
     focused: bool = False,
     inactive_label: str | None = None,
 ) -> None:
+    """Exercise governed relationship discovery against either persistence adapter."""
     from datetime import timedelta
 
     from agent_core.domain.memory import BeliefType
@@ -1008,6 +1011,7 @@ async def test_overview_first_person_uses_full_budget_before_competing_beliefs(
 
 @pytest.mark.parametrize("hard_exclusion", [False, True])
 async def test_context_allocation_preserves_identity_discovery(hard_exclusion: bool) -> None:
+    """Verify context allocation preserves identity discovery."""
     from agent_core.context.recall_budget import AUTOMATIC_RESERVE, select_search_results
     from agent_core.domain.memory import BeliefType
     from agent_core.domain.people import PeopleEndpoint, RelationshipAssertion

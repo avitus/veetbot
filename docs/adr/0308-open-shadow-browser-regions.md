@@ -35,6 +35,16 @@ Keep collection extraction's existing main-document-only scope. Preserve new
 region coverage through hosted transport, canonical bounding and small-budget
 model projection. Existing cleanup invalidates every handle on capture failure.
 
+The release review identified a mixed-version cutover: the browser service starts
+before application workers switch. Workers now advertise the exact version-2
+coverage capability in an HTTP header. Unadvertised version-2 region evidence is
+omitted from the wire response, never relabeled as document-only; ordinary page
+text, controls and facts remain available. Version-1 coverage is unchanged. This
+negotiation also preserves compatibility if application promotion fails, without
+requiring a browser-service rollback to repair a schema mismatch. Canonical
+snapshots retain their full evidence. JSON and progress-stream regressions cover
+legacy, current and unknown capabilities against both coverage versions.
+
 ## Verification
 
 Construction evidence, 2026-11-10, in the local Docker Desktop Linux VM:
@@ -60,3 +70,11 @@ reproduced with the unchanged dev runtime. Increasing only the test container's
 process stack to 64 MiB (`--ulimit stack=67108864:67108864`) made the isolated case
 and complete browser partition pass; no test or production limit was weakened.
 This is direct-dev construction evidence, not live-site or production acceptance.
+
+Release-review verification, 2026-11-11: the new hosted negotiation regression
+first failed in four legacy/unknown-capability cases while 26 existing cases
+passed. After the repair, the local Linux browser-progress, download and email
+reader atoms passed 139 tests; the hosted-client and service HTTP contract atoms
+passed 62. The two coverage versions and JSON/streamed paths are covered without
+changing the canonical snapshot. Commands used `circleci testsuite run` with
+the relevant static and contract file patterns through the Linux sandbox.

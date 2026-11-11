@@ -98,6 +98,7 @@ class MemorySearchTool:
         retain_search_history: bool = False,
         inline_output_bytes: int = 4096,
     ) -> None:
+        """Select a pinned search contract without changing older tool allocations."""
         self._retriever = retriever
         self._model_planning = model_planning
         self._factory = factory
@@ -177,6 +178,7 @@ class MemorySearchTool:
         principal_id: str,
         current_scope: str | None = None,
     ) -> RecallQuery:
+        """Translate validated arguments into the selected version of the recall query."""
         if self._model_planning and "belief_types" in arguments:
             raise ValueError("Planned memory.search accepts type_hints, not hard belief_types")
         scope = arguments.get("scope") if self._model_planning else arguments["scope"]
@@ -230,6 +232,7 @@ class MemorySearchTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        """Execute governed recall and return a receipt binding the exact rendered evidence."""
         if arguments.get("relationship_group") is not None and self._people_context is None:
             raise ToolValidationError("People relationship lookup is unavailable")
         scope: str | None = None

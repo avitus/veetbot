@@ -87,7 +87,9 @@ shows the last successful rows and pagination immediately, then refreshes in
 place. Keep at most two in-memory snapshots of up to 1,000 rows each; never
 persist them to disk. Account or search changes, connection replacement,
 revoked read access, and local mailbox or importance mutations invalidate
-these snapshots. A failed background read retains the visible cached list
+these snapshots. A thread read that discovers changed Inbox, Spam or handled
+state from another device also invalidates them. A failed background read retains
+the visible cached list
 with the existing error indication. A collection without a snapshot still
 loads from the server; obsolete switch responses cannot replace the active list.
 On macOS, scrolling near the end of any list fetches the next page

@@ -200,6 +200,7 @@ class _Table:
     column_span: int = 1
 
     def markdown(self) -> str | None:
+        """Render a closed rectangular data table, leaving unsupported layouts as prose."""
         if not self.eligible or self.cell_start is not None or len(self.rows) < 2:
             return None
         width = len(self.rows[0])
@@ -312,6 +313,7 @@ class _HTMLText(HTMLParser):
             self.anchor = (len(self.parts), values.get("href") or "")
 
     def handle_endtag(self, tag: str) -> None:
+        """Close visible structures and render only complete supported tables."""
         if self.hidden:
             if tag in self.hidden:
                 index = len(self.hidden) - 1 - self.hidden[::-1].index(tag)
@@ -504,12 +506,15 @@ def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None =
     return cleaned
 
 
-def merge_image_body(plain: str, rich: str, html_text: str) -> str:
+def merge_image_body(
+    plain: str, rich: str, html_text: str, *, require_overlap: bool = False
+) -> str:
     """Retain plain MIME paragraphs absent from the image-bearing HTML alternative.
 
     Compare visible words rather than Markdown formatting, wrapping, punctuation or
     link destinations. Unmatched paragraphs precede the HTML because MIME parts do
     not provide a reliable position for prose omitted from one alternative.
+    A text-only alternative can require shared prose before replacing the reader.
     """
 
     def words(value: str) -> str:
@@ -529,8 +534,13 @@ def merge_image_body(plain: str, rich: str, html_text: str) -> str:
 
     represented = " " + words(html_text) + " "
     missing: list[str] = []
+    overlaps = False
     for paragraph in re.split(r"\n\s*\n", plain):
         normalized = words(paragraph)
         if normalized and " " + normalized + " " not in represented:
             missing.append(paragraph)
+        elif normalized:
+            overlaps = True
+    if require_overlap and plain and not overlaps:
+        return plain
     return "\n\n".join([*missing, rich])

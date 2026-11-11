@@ -20,6 +20,7 @@ from tests.contract.support import RUN_ID, SESSION_ID, principal
 
 @pytest.mark.parametrize("mode", ["current", "legacy", "as_of", "known_at", "changed", "tampered"])
 async def test_repeated_current_search_preserves_automatic_allowance(mode: str) -> None:
+    """Verify repeated current search preserves automatic allowance."""
     from datetime import timedelta
 
     from agent_core.context.recall_budget import (
@@ -313,6 +314,7 @@ async def test_lexical_receipt_does_not_wait_on_semantic_authority() -> None:
 
 @pytest.mark.parametrize("tampered", [False, True])
 async def test_returned_ids_must_match_authoritative_rendered_trace(tampered: bool) -> None:
+    """Verify returned ids must match authoritative rendered trace."""
     clock, factory, _, _ = await formation_stack()
     record = memory(statement="The workshop is on Thursday.")
     async with factory() as uow:

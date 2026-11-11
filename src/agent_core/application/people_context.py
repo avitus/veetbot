@@ -671,6 +671,7 @@ class PeopleContextService:
         # This is identity discovery, not a hard type filter on the final facts.
         # Keep every visibility restriction and use ordinary bounded lexical
         # selection; no inferred role vocabulary or extra encoder call.
+        """Resolve one governed identity, requiring full role labels for focused recall."""
         discovery = query.model_copy(
             update={
                 "belief_types": [BeliefType.RELATIONSHIP],

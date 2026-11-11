@@ -26,6 +26,7 @@ from tests.contract.test_runtime_semantic_queries_contract import runtime_stack
 async def test_prepared_queries_match_the_governed_reader(
     deliberate: bool, task_context: bool, omit_scope: bool, search_version: str
 ) -> None:
+    """Verify prepared queries match the governed reader."""
     _, factory, _, _, retriever, _ = await runtime_stack()
     async with factory() as uow:
         live = await uow.runs.get(RUN_ID, principal())

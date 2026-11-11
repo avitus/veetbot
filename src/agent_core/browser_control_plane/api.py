@@ -541,7 +541,7 @@ def create_profile_service_app(
             return await _diagnosed_response(
                 request,
                 sessions.navigate_snapshot(payload.lease_ref, payload.url),
-                _snapshot_response,
+                lambda snapshot: _snapshot_response(snapshot, request=request),
             )
 
         @app.post("/v1/browser-sessions:observe", response_model=None)
@@ -552,7 +552,7 @@ def create_profile_service_app(
             return await _diagnosed_response(
                 request,
                 sessions.observe_snapshot(payload.lease_ref, payload.expansion, payload.extraction),
-                _snapshot_response,
+                lambda snapshot: _snapshot_response(snapshot, request=request),
             )
 
         @app.post("/v1/browser-sessions:act", response_model=None)
@@ -574,7 +574,7 @@ def create_profile_service_app(
                     sequence=payload.sequence,
                     constraint=payload.constraint,
                 ),
-                _snapshot_response,
+                lambda snapshot: _snapshot_response(snapshot, request=request),
             )
 
         @app.post("/v1/browser-sessions:upload", response_model=None)
@@ -596,7 +596,7 @@ def create_profile_service_app(
                 sessions.act_snapshot(
                     payload.lease_ref, payload.action, sequence=payload.sequence, image=image
                 ),
-                _snapshot_response,
+                lambda snapshot: _snapshot_response(snapshot, request=request),
             )
 
         @app.post("/v1/browser-sessions:renew", response_model=None)
@@ -751,13 +751,26 @@ async def _sweep_forever(sessions: HostedProfileSessionService, interval: float)
             )
 
 
-def _snapshot_response(snapshot: BrowserSnapshot) -> dict[str, Any]:
+def _snapshot_response(
+    snapshot: BrowserSnapshot, *, request: Request | None = None
+) -> dict[str, Any]:
     """The observation's fields at the top level, and facts as an optional sibling.
 
     An older worker parses the response as a plain observation and ignores
     ``facts`` (ADR-0129 D26).
     """
     response = snapshot.observation.model_dump(mode="json")
+    coverage = snapshot.observation.region_coverage
+    if (
+        coverage is not None
+        and coverage.version == 2
+        and (request is None or request.headers.get("X-Veetbot-Browser-Region-Coverage") != "2")
+    ):
+        # Older workers reject version 2. Omit optional semantic evidence rather
+        # than mislabeling a shadow scan as main-document-only coverage. This is
+        # a wire projection; the canonical snapshot and action facts stay intact.
+        response["regions"] = []
+        response["region_coverage"] = None
     if snapshot.facts is not None:
         response["facts"] = snapshot.facts.model_dump(mode="json")
     return response

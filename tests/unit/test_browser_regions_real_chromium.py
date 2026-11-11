@@ -17,6 +17,8 @@ from tests.unit.test_browser_runtime_real_chromium import browsing, html
 
 
 async def test_visible_regions_prioritize_dialogs_and_exclude_hidden_or_editable_values() -> None:
+    """Verify visible regions prioritize dialogs and exclude hidden or editable values."""
+
     async def home(request: Request) -> Response:
         del request
         return html("""

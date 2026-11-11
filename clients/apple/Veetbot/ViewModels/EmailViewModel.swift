@@ -552,6 +552,7 @@ public final class EmailViewModel: ObservableObject {
         pagingFailed = false
     }
 
+    /// Retains only the two bounded, unsearched mailbox collections.
     private func cacheMailList() {
         guard searchText.isEmpty, listView == "inbox" || listView == "priority" else { return }
         guard inboxItems.count <= 1_000 else {
@@ -957,7 +958,13 @@ public final class EmailViewModel: ObservableObject {
         do {
             let response = try await api.emailThread(id)
             guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
+            let previousMailbox = archiveStates[id]
             let result = preservingArchiveState(response, since: mailboxVersions)
+            if let previousMailbox,
+               previousMailbox.inInbox != result.inInbox || previousMailbox.inSpam != result.inSpam
+                || previousMailbox.dismissedRevision != result.dismissedRevision {
+                cachedMailLists = [:]
+            }
             thread = result
             isLoadingThread = false
             observeArchive(result)

@@ -154,7 +154,8 @@ async def test_old_and_new_session_response_shapes_parse(
             }
 
     def service(request: httpx.Request) -> httpx.Response:
-        del request
+        """Model a hosted response while checking the negotiated request capability."""
+        assert request.headers.get("X-Veetbot-Browser-Region-Coverage") == "2"
         body = dict(expected_page)
         if facts is not None:
             body["facts"] = facts

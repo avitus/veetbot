@@ -1896,6 +1896,13 @@ model projection retains room for a usable control before optional summaries,
 then favors bounded region evidence over duplicated prose. Hosted transport and
 artifact replay preserve the fields; legacy observations may omit them. The
 progress digest includes semantic evidence, excluding fresh opaque references.
+Hosted workers advertise `X-Veetbot-Browser-Region-Coverage: 2` to receive
+version-2 regions. Without that exact capability the service omits version-2
+regions and their coverage from JSON and streamed responses; it never relabels
+shadow coverage as version 1. Version-1 providers remain unchanged. Canonical
+snapshots, ordinary page text, controls and action facts remain intact. This
+keeps older workers compatible while the browser service is upgraded first,
+including when application promotion fails and older workers continue running.
 
 ### Deterministic collection extraction (ADR-0161)
 

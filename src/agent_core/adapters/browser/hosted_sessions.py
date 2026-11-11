@@ -126,6 +126,7 @@ class HostedBrowserSessionControlPlane:
         headers = {
             "Authorization": "Bearer " + secret.reveal(),
             "Content-Type": "application/json",
+            "X-Veetbot-Browser-Region-Coverage": "2",
         }
         if has_browser_progress_listener():
             headers["Accept"] = PROGRESS_MEDIA_TYPE

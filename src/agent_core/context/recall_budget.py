@@ -34,6 +34,7 @@ class RecallAllowance:
     preserve_identity: bool = False
 
     def bound(self, query: RecallQuery) -> RecallQuery | None:
+        """Fit recall to remaining capacity while preserving independent identity discovery."""
         if not self.tokens or not self.items:
             return None
         return query.model_copy(

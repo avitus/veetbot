@@ -87,6 +87,26 @@ import SwiftUI
         #expect(model.items.isEmpty, "Do not redisplay the old unhandled Important snapshot")
     }
 
+    /// A thread read can discover mailbox changes made on another device.
+    @Test(arguments: ["\"in_inbox\":false", "\"in_spam\":true", "\"dismissed_revision\":1"])
+    func testThreadReadInvalidatesChangedCollectionCache(change: String) async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, self.threadJSON().replacingOccurrences(of: "\"summary\"", with: "\(change),\"summary\""))
+            }
+            return (200, self.pageJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && !model.items.isEmpty }
+        await model.openThread(threadID)
+        model.setListView("priority")
+        #expect(model.items.isEmpty, "Do not restore a snapshot invalidated by another device")
+    }
+
     /// Opening mail is inert; each load or retry requires another explicit request.
     @Test func testImagesLoadOnlyByExplicitRequestAndDoNotRetryOnFailure() async throws {
         let requests = EmailRequestRecorder()

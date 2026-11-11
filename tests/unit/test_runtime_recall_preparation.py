@@ -558,6 +558,7 @@ async def test_refused_automatic_recall_leaves_an_event() -> None:
 
 
 async def test_model_thinking_does_not_spend_later_recall_phases() -> None:
+    """Verify model thinking does not spend later recall phases."""
     from agent_core.domain.messages import ToolResultItem
 
     clock = FixedClock(NOW)
@@ -582,12 +583,14 @@ async def test_model_thinking_does_not_spend_later_recall_phases() -> None:
 async def test_checkpointed_phase_cannot_be_reopened_after_reconstruction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify checkpointed phase cannot be reopened after reconstruction."""
     from agent_core.runtime import loop
 
     original = loop.prepare_recall
     observed = []
 
     async def replay(context: Any, **kwargs: Any) -> None:
+        """Reconstruct execution and confirm its checkpointed phase stays spent."""
         await original(context, **kwargs)
         permit = context.recall_permit
         if permit is None or not permit.remaining:

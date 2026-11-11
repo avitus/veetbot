@@ -118,7 +118,10 @@ async def test_continuously_changing_dom_reports_expired_readiness_bound() -> No
 
 @pytest.mark.parametrize("shape", ["existing", "attached", "nested"])
 async def test_changing_open_shadow_dom_cannot_report_quiet(shape: str) -> None:
+    """Verify changing open shadow dom cannot report quiet."""
+
     async def home(request: Request) -> Response:
+        """Serve the synthetic page used to observe browser behavior."""
         del request
         return html(
             '<div id="host"></div>',
@@ -150,6 +153,7 @@ async def test_changing_open_shadow_dom_cannot_report_quiet(shape: str) -> None:
 
 
 async def test_shadow_action_settles_after_final_update_without_repeating_effect() -> None:
+    """Verify shadow action settles after final update without repeating effect."""
     effects: list[bool] = []
 
     async def home(request: Request) -> Response:
@@ -194,7 +198,10 @@ async def test_shadow_action_settles_after_final_update_without_repeating_effect
 
 @pytest.mark.parametrize("scope", ["closed", "frame", "detached"])
 async def test_readiness_does_not_follow_out_of_scope_or_detached_roots(scope: str) -> None:
+    """Verify readiness does not follow out of scope or detached roots."""
+
     async def home(request: Request) -> Response:
+        """Serve the synthetic page used to observe browser behavior."""
         del request
         if scope == "frame":
             return html(
@@ -225,6 +232,8 @@ async def test_readiness_does_not_follow_out_of_scope_or_detached_roots(scope: s
     "case", ["quiet", "changing", "nodes", "roots", "root_limit", "total", "observer_error"]
 )
 async def test_readiness_limits_and_cleanup(case: str) -> None:
+    """Verify readiness limits and cleanup."""
+
     async def home(request: Request) -> Response:
         del request
         return html('<div id="host"></div>')

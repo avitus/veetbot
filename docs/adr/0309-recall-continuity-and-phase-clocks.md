@@ -79,7 +79,7 @@ After integration with the current `dev` base, all 206 focused static tests and
 and documentation checks passed. Reading lane A applies; no gate acceptance or
 activation evidence is claimed by this diagnostic repair.
 
-The final fixed corpus ran against an isolated copy of production release
+The earlier ADR-0309 audit cohort ran the fixed query corpus against an isolated copy of production release
 `20261110-221916-d50bfe1`, using the revised code on `dev` base `9ef67a13`, the
 unchanged standing semantic configuration and the production `astra/high` model
 selection. It contained ten explicit and ten implicit questions, 34 expected
@@ -100,6 +100,11 @@ not held-out evaluation, independent human grading or milestone acceptance.
 Private prompts, model receipts and source hashes stay outside repository docs.
 The fixed corpus SHA-256 is
 `dcc55c7240df68a7006d6699e11f30b3d383d932ad8990970ec803009c71e430`.
+These are the original cohort's recorded counts, not the later ADR-0310 result.
+The later audit restored a separate snapshot taken while the same release was
+running, containing 1,974 memories, and completed 20/20 tasks with 34/34 facts
+retained and used. See `docs/plan/general-memory-recall.md` for that final cohort.
+The query-corpus digest identifies the questions, not the database snapshot.
 
 The authorized repair changes the allocation and timing decisions described
 above; it makes no further deviation from the plan. Production delivery remains

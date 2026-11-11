@@ -26,6 +26,7 @@ from tests.live.test_model_providers_m3 import attempt, live_enabled, router
     ],
 )
 async def test_recall_planning_and_answer_use(case: str) -> None:
+    """Verify recall planning and answer use."""
     live_enabled()
     root = os.environ.get("RECALL_AUDIT_ROOT")
     key = os.environ.get("VEETBOT_OPENAI_KEY")

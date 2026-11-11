@@ -1249,6 +1249,7 @@ class PythonPlaywrightRuntime:
         text_offset: int = 0,
         prior_text: str | None = None,
     ) -> BrowserObservation:
+        """Capture bounded page evidence and clear every handle if capture fails."""
         revision = secrets.token_hex(16)
         found: list[ElementHandle] = []
         captures: list[asyncio.Task[tuple[BrowserElement, BrowserElementFacts] | None]] = []

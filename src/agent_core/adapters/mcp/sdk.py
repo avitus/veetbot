@@ -416,6 +416,7 @@ class SDKMCPClient:
         return self._client
 
     async def discover(self) -> MCPDiscovery:
+        """Discover tools and render only prompts whose required arguments are available."""
         try:
             client = self._connected()
             listed_tools = await client.list_tools()

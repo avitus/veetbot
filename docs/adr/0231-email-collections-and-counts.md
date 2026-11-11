@@ -45,3 +45,11 @@ contract without widening consent.
 No new storage, migration, scope, provider call, or notification policy is
 needed. Existing authorization and retained-summary traversal govern counts
 and rows together. No milestone, release gate, or production activation moves.
+
+The 2026-11-11 release review added cache invalidation when a thread read learns
+another device changed Inbox, Spam or handled state. All three regression cases
+first reproduced stale collection rows. The repaired Apple package passed 1,191
+tests plus four contrast tests in the local Tart VM using
+`scripts/run_apple_ui_macos_vm.sh make test-apple`. The focused red command used
+`swift test --package-path clients/apple --filter EmailViewModelTests.testThreadReadInvalidatesChangedCollectionCache`
+inside the same VM. Unchanged thread reads retain their cached collections.

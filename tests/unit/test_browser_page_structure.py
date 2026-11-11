@@ -21,6 +21,7 @@ from tests.unit.test_browser_tools import FakeBrowserProvider
 def structured_page(
     *, revision: str = "revision", message: str = "Changes saved", shadow: bool = False
 ) -> BrowserObservation:
+    """Build bounded synthetic controls and region coverage for projection checks."""
     return BrowserObservation.model_validate(
         {
             "url": "https://example.org/lesson",
@@ -63,6 +64,7 @@ def test_model_projection_retains_status_and_control_or_explicit_region_omission
     budget: int,
     shadow: bool,
 ) -> None:
+    """Verify model projection retains status and control or explicit region omissions."""
     observation = structured_page(shadow=shadow)
     result = observation_result(FakeBrowserProvider(), observation, 512 * 1024)
     assert result.structured is not None

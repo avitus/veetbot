@@ -26,6 +26,7 @@ from tests.contract.support import SESSION_ID, principal, session, tool_context
 
 
 async def test_composition_retains_pinned_legacy_memory_search() -> None:
+    """Verify composition retains pinned legacy memory search."""
     from agent_core.bootstrap import build
     from agent_core.tools.registry import RegisteredTool
     from tests.gates.test_runtime_tool_budget import _settings
@@ -113,6 +114,7 @@ async def test_planned_search_uses_the_shared_people_context() -> None:
 
 
 async def test_live_search_does_not_ask_the_model_to_guess_hard_storage_filters() -> None:
+    """Verify live search does not ask the model to guess hard storage filters."""
     from agent_core.bootstrap import build
     from agent_core.domain.messages import FakeModelScript, ScriptedTurn
     from tests.gates.test_runtime_tool_budget import _settings

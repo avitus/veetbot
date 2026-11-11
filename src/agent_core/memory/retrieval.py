@@ -593,6 +593,7 @@ class HybridMemoryRetriever:
         semantic_queries: SemanticQueryLookup | None,
         recover_sources: bool,
     ) -> RecallResult:
+        """Rank governed evidence and render whole records within shared recall limits."""
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
         )
@@ -1337,6 +1338,7 @@ class HybridMemoryRetriever:
     async def _validate_retained(
         self, usage: MemoryRecallUsage, *, session_id: UUID, run_id: UUID
     ) -> bool:
+        """Revalidate a retained receipt against its authoritative trace and current sources."""
         assert usage.trace_id is not None
         async with self._uow_factory() as uow, uow.people.lock(self._principal):
             try:

@@ -587,6 +587,7 @@ class BudgetedContextBuilder:
         agent: AgentSpec,
         principal: Principal,
     ) -> ContextAssembly:
+        """Assemble trusted instructions and bounded current evidence into the model request."""
         plan = await self._planner.current(run.session_id)
         if plan is None:
             raise ContextOverflow("the session has no durable context plan")

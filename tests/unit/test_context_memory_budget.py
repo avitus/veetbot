@@ -375,6 +375,7 @@ async def test_current_search_and_fresh_automatic_evidence_share_original_caps()
 
 
 async def test_two_current_searches_retain_both_facts_and_fresh_automatic_context() -> None:
+    """Verify two current searches retain both facts and fresh automatic context."""
     from agent_core.bootstrap import build
     from agent_core.tools.memory_search import MemorySearchTool
     from agent_core.tools.registry import RegisteredTool
@@ -418,15 +419,18 @@ async def test_two_current_searches_retain_both_facts_and_fresh_automatic_contex
 
 
 async def test_retention_spends_automatic_slots_on_evidence_missing_from_search() -> None:
+    """Verify retention spends automatic slots on evidence missing from search."""
     from agent_core.domain.memory import RecallQuery, RecallResult
     from tests.unit.test_context_recall_delta import _belief, _QueryFormer
 
     class Former(_QueryFormer):
         def form(self, *args: Any, **kwargs: Any) -> list[RecallQuery]:
+            """Persist the synthetic memory used to measure context allocation."""
             return [q.model_copy(update={"max_items": 20}) for q in super().form(*args, **kwargs)]
 
     class Ranked(CurrentRetriever):
         async def recall(self, query: RecallQuery, **kwargs: Any) -> RecallResult:
+            """Read the synthetic evidence under the supplied bounded query."""
             self.queries.append(query)
             items = [
                 _belief(UUID(int=i), "Current rent baseline" if i == 7 else f"Fact {i}")
