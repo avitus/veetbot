@@ -773,6 +773,7 @@ from agent_core.tools.browser_observe import (
     ArticleBrowserObserveTool,
     BrowserObserveTool,
     PagedBrowserObserveTool,
+    ShadowBrowserObserveTool,
 )
 from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
@@ -3738,6 +3739,7 @@ async def _compose(
         )
         registry.register(BrowserObserveTool(browser_provider))
         registry.register(ArticleBrowserObserveTool(browser_provider))
+        registry.register(ShadowBrowserObserveTool(browser_provider))
         if isinstance(browser_provider, BrowserImageUploader):
             registry.register(
                 BrowserUploadTool(

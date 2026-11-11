@@ -82,6 +82,8 @@ async def extract_browser_observation(
         or result.index != request.index
         or result.fields != request.fields
         or result.row_limit != request.row_limit
+        or result.scope
+        != ("main_document_viewport_articles" if request.kind == "articles" else request.scope)
     ):
         raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
     return observation

@@ -166,6 +166,14 @@ interruptions and later verification reads without replaying an effect or adding
 another approval path. ADR-0164 records construction evidence; broader acceptance
 and production delivery remain separate.
 
+The next W3 slice adds open-shadow table/list/form extraction through
+`browser.observe` 1.9.0 ([ADR-0311](adr/0311-open-shadow-browser-extraction.md)).
+Versioned evidence names its wider scope; pinned observe versions keep their
+document-only indexes and wire requests. Composed visibility, editable-content
+exclusion and existing scan/cell limits apply across roots. Article extraction,
+frames, closed roots and stable collection identity remain outside this slice.
+This is construction evidence, separate from live-site and production acceptance.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

@@ -1918,8 +1918,9 @@ that cannot be used for actions or expansion.
 The optional provider capability uses the existing hosted observe route, lease,
 lock and origin binding. It does not dispatch or consume action authority.
 Capture failure/cancellation uses atomic cleanup; unsupported adapters refuse.
-Collection discovery scans at most 8,192 main-document nodes; row discovery at
-most 4,096 descendants; frames and shadow roots are excluded. Requested cell
+Collection discovery scans at most 8,192 nodes; row discovery at
+most 4,096 descendants. Pinned observe versions 1.7.0 and 1.8.0 exclude shadow
+roots. Requested cell
 summaries inspect at most 256 nodes and retain 256 UTF-16 code units without
 splitting a character. Hidden and editable values are excluded. Table spanning
 cells are unsupported; lists expose text; forms expose label, role, disabled,
@@ -1936,6 +1937,26 @@ otherwise the whole extraction is explicitly omitted. In extraction mode,
 requested rows precede optional controls, regions and ordinary prose, with exact
 revision, coverage, untrusted framing and durable artifact/replay preserved.
 Fresh reference bytes never count as progress.
+
+Under ADR-0311, `browser.observe` 1.9.0 automatically includes main-document open
+shadow roots for table/list/form extraction. Its trusted request names
+`main_document_and_open_shadow`; no model-authored scope is accepted. Result
+version 2 reports that scope, while version 1 retains the document-only scopes.
+The provider boundary rejects a result from a different scope. Pinned older
+tools send their unchanged document-only requests, omitting the new scope field
+on the hosted wire. Older services may refuse a widened request; they cannot
+silently narrow it. Article extraction and row completion predicates retain
+their existing document-only scopes.
+
+Collection, row and cell walks visit shadow children before light children;
+composed-ancestor checks share their existing visit ceilings. Hidden, transparent
+and editable hosts and slot ancestors cannot supply content. A form may retain
+an editor's own metadata but never reads its descendants as additional rows.
+Referenced form labels resolve inside the control's own root, with their
+ancestor checks sharing the cell budget. This remains DOM-subtree extraction:
+assigned light nodes outside a shadow collection's subtree are not adopted as
+rows. Frames, closed roots and nested collections are excluded. Wider indexes
+still describe the currently visible collection, not stable identity.
 
 ### Bounded readable snapshots (ADR-0162)
 

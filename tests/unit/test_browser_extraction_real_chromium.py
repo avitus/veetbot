@@ -9,7 +9,7 @@ from starlette.routing import Route
 
 from agent_core.adapters.browser.playwright import PythonPlaywrightRuntime
 from agent_core.domain.browser import BrowserObservation
-from agent_core.tools.browser_observe import BrowserObserveTool
+from agent_core.tools.browser_observe import BrowserObserveTool, ShadowBrowserObserveTool
 from tests.contract.support import tool_context
 from tests.unit.test_browser_extraction import extraction_arguments
 from tests.unit.test_browser_runtime_real_chromium import browsing, html
@@ -88,7 +88,10 @@ async def test_lists_and_form_metadata_are_bounded_visible_reads(kind: str) -> N
         assert "CANARY" not in str(result.structured["extraction"])
 
 
-async def test_extraction_rejects_stale_and_foreign_revisions_and_does_not_send_actions() -> None:
+@pytest.mark.parametrize("tool_class", [BrowserObserveTool, ShadowBrowserObserveTool])
+async def test_extraction_rejects_stale_and_foreign_revisions_and_does_not_send_actions(
+    tool_class: type[BrowserObserveTool],
+) -> None:
     from agent_core.domain.browser import (
         BrowserAction,
         BrowserActionKind,
@@ -117,7 +120,7 @@ async def test_extraction_rejects_stale_and_foreign_revisions_and_does_not_send_
         runtime,
     ):
         first = await runtime.navigate(site.url("/"))
-        tool = BrowserObserveTool(Provider(runtime, site.origin))
+        tool = tool_class(Provider(runtime, site.origin))
         wrong = await tool.execute(extraction_arguments("foreign-revision"), tool_context())
         assert (
             not wrong.ok

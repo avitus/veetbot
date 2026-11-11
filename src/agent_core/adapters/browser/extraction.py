@@ -18,6 +18,10 @@ EXTRACTION_SCRIPT = (
     "request => {"
     + PAGE_TEXT_HELPERS
     + """
+    const openShadow = request.scope === 'main_document_and_open_shadow';
+    const cellSummary = (node, limit = 256, excludeCollections = true, budget = null,
+                         excludeArticles = false) =>
+        summary(node, limit, excludeCollections, budget, excludeArticles, openShadow);
     const cellSelector = 'td,th,[role="cell"],[role="gridcell"]'
         + ',[role="columnheader"],[role="rowheader"]';
     const kindOf = node => {
@@ -34,11 +38,17 @@ EXTRACTION_SCRIPT = (
     let node = document.body, source = null, sourceNodes = 0, index = 0;
     while (node && sourceNodes < 8192) {
         sourceNodes++;
-        const skip = blocked(node);
+        let skip = blocked(node);
+        if (openShadow && !skip) {
+            const ancestors = ancestorExclusion(node, document.body, 8192 - sourceNodes);
+            sourceNodes += ancestors.visits;
+            skip = ancestors.skip;
+            if (ancestors.limited) break;
+        }
         if (!skip && node.nodeType === 1 && kindOf(node) === request.kind && visible(node)) {
             if (index++ === request.index) { source = node; break; }
         }
-        node = advance(node, document.body, !skip);
+        node = advance(node, document.body, !skip, openShadow);
     }
     const result = {
         status: source ? 'extracted' : 'not_found', source_name: '', rows: [],
@@ -46,7 +56,7 @@ EXTRACTION_SCRIPT = (
         row_nodes: 0, row_scan_limit_reached: false, omitted_rows: 0
     };
     if (!source) return result;
-    result.source_name = request.kind === 'articles' ? '' : summary(source, 256, true).text;
+    result.source_name = request.kind === 'articles' ? '' : cellSummary(source).text;
     const spanning = node => {
         if (!node.matches(cellSelector))
             return false;
@@ -58,16 +68,22 @@ EXTRACTION_SCRIPT = (
             });
     };
     const tableCells = row => {
-        let child = row.firstChild, scanned = 0;
+        let child = advance(row, row, true, openShadow), scanned = 0;
         const cells = [];
         while (child && scanned < 256 && cells.length < 16) {
             scanned++;
-            const skip = blocked(child)
+            let skip = blocked(child)
                 || child.nodeType === 1 && child.matches(collectionSelector);
+            if (openShadow && !skip) {
+                const ancestors = ancestorExclusion(child, row, 256 - scanned);
+                scanned += ancestors.visits;
+                skip = ancestors.skip;
+                if (ancestors.limited) break;
+            }
             if (!skip && child.nodeType === 1 && visible(child)
                 && child.matches(cellSelector))
                 cells.push(child);
-            child = advance(child, row, !skip);
+            child = advance(child, row, !skip, openShadow);
         }
         return {cells, truncated: child !== null && cells.length < 16};
     };
@@ -78,7 +94,8 @@ EXTRACTION_SCRIPT = (
         const ids = rawIds.slice(0, 1024).trim().split(/\\s+/);
         const labels = [];
         for (const id of ids.slice(0, 8)) {
-            const element = control.ownerDocument.getElementById(id);
+            const scope = openShadow ? control.getRootNode() : control.ownerDocument;
+            const element = scope.getElementById(id);
             if (element) labels.push(element);
         }
         if (!labels.length) {
@@ -91,15 +108,16 @@ EXTRACTION_SCRIPT = (
         for (const element of labels) {
             // Referenced labels can sit outside the visible form. Their ancestors
             // share the cell's traversal budget and must not hide secret text.
-            let ancestor = element.parentElement, hidden = false;
+            let ancestor = openShadow ? composedParent(element) : element.parentElement;
+            let hidden = false;
             while (ancestor && budget.remaining > 0) {
                 budget.remaining--;
                 if (blocked(ancestor)) { hidden = true; break; }
-                ancestor = ancestor.parentElement;
+                ancestor = openShadow ? composedParent(ancestor) : ancestor.parentElement;
             }
             if (hidden) continue;
             if (ancestor) { truncated = true; break; }
-            const item = summary(element, 256, true, budget);
+            const item = cellSummary(element, 256, true, budget);
             text += (text && item.text ? ' ' : '') + item.text;
             truncated ||= item.text_truncated || text.length > 256;
             text = cut(text, 256);
@@ -108,7 +126,7 @@ EXTRACTION_SCRIPT = (
     };
     const literal = value => value === null ? null : {text: String(value), text_truncated: false};
     const articleCells = article => {
-        const excerpt = summary(article, 256, true, null, true);
+        const excerpt = cellSummary(article, 256, true, null, true);
         let child = article.firstChild, scanned = 0;
         const links = new Set();
         while (child && scanned < 256) {
@@ -150,13 +168,19 @@ EXTRACTION_SCRIPT = (
             literal(control.hasAttribute('required')
                 || control.getAttribute('aria-required') === 'true')];
     };
-    node = source.firstChild;
+    node = advance(source, source, true, openShadow);
     let matched = 0;
     while (node && result.row_nodes < 4096) {
         result.row_nodes++;
-        const skip = blocked(node, request.kind === 'form')
+        let skip = blocked(node, request.kind === 'form')
             || request.kind !== 'articles' && node.nodeType === 1
                 && node.matches(collectionSelector);
+        if (openShadow && !skip) {
+            const ancestors = ancestorExclusion(node, source, 4096 - result.row_nodes);
+            result.row_nodes += ancestors.visits;
+            skip = ancestors.skip;
+            if (ancestors.limited) break;
+        }
         let article = false;
         if (!skip && node.nodeType === 1 && visible(node)) {
             if (request.kind === 'table' && spanning(node)) result.status = 'unsupported_structure';
@@ -183,19 +207,21 @@ EXTRACTION_SCRIPT = (
                         if (form) return form[field.column] || null;
                         if (table) {
                             if (table.cells[field.column])
-                                return summary(table.cells[field.column], 256, true);
+                                return cellSummary(table.cells[field.column]);
                             return table.truncated ? {text: '', text_truncated: true} : null;
                         }
-                        return field.column === 0 ? summary(node, 256, true) : null;
+                        return field.column === 0 ? cellSummary(node) : null;
                     });
                     result.rows.push(cells);
                     result.row_scan_limit_reached ||= table?.truncated || false;
                 }
             }
         }
-        // Native input/select/textarea descendants are values, never new rows.
-        const editable = node.nodeType === 1 && node.matches('input,select,textarea');
-        node = advance(node, source, !skip && !editable && !article);
+        // An editor's descendants are values, never additional form rows.
+        const editable = node.nodeType === 1 && (node.matches('input,select,textarea')
+            || openShadow && node.matches('[role="textbox"],[role="searchbox"],'
+                + '[role="combobox"],[role="spinbutton"]'));
+        node = advance(node, source, !skip && !editable && !article, openShadow);
     }
     result.row_scan_limit_reached ||= node !== null;
     result.omitted_rows = matched - result.rows.length;
@@ -263,7 +289,8 @@ def extracted_observation(
         row_limit=request.row_limit,
         rows=tuple(rows),
         source_ref=None if raw["status"] == "not_found" else f"{revision}:source",
-        scope="main_document_viewport_articles" if request.kind == "articles" else "main_document",
+        version=2 if request.scope == "main_document_and_open_shadow" else 1,
+        scope="main_document_viewport_articles" if request.kind == "articles" else request.scope,
     )
     while result.rows and len(result.model_dump_json().encode("utf-8")) > 64 * 1024:
         result = result.model_copy(

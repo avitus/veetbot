@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from typing import Any
 
 from agent_core.domain.browser import (
@@ -43,6 +44,14 @@ ELEMENT_SCHEMA: dict[str, Any] = {
 }
 _EXTRACTION_SCHEMA = BrowserExtractionResult.model_json_schema()
 _EXTRACTION_DEFINITIONS = _EXTRACTION_SCHEMA.pop("$defs")
+_SHADOW_EXTRACTION_SCHEMA = deepcopy(_EXTRACTION_SCHEMA)
+# Keep published tool output schemas unchanged; only observe 1.9 widens extraction.
+_EXTRACTION_SCHEMA["properties"]["version"].pop("enum")
+_EXTRACTION_SCHEMA["properties"]["version"]["const"] = 1
+_EXTRACTION_SCHEMA["properties"]["scope"]["enum"] = [
+    "main_document",
+    "main_document_viewport_articles",
+]
 OUTPUT_SCHEMA: dict[str, Any] = {
     "$defs": _EXTRACTION_DEFINITIONS,
     "type": "object",
@@ -79,6 +88,11 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     },
     "required": ["provider", "url", "title", "revision", "text", "elements"],
     "additionalProperties": False,
+}
+
+SHADOW_OUTPUT_SCHEMA: dict[str, Any] = {
+    **OUTPUT_SCHEMA,
+    "properties": {**OUTPUT_SCHEMA["properties"], "extraction": _SHADOW_EXTRACTION_SCHEMA},
 }
 
 # ADR-0294: browser.act alone reports a file its click saved or refused.

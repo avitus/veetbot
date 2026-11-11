@@ -1,3 +1,6 @@
+# ADR-0311: The owner-authorized browser continuation extends W3 table/list/form
+# extraction into open shadow roots under observe 1.9.0. Pinned tools retain
+# document-only extraction; no authority, milestone or gate moves.
 # ADR-0308: The owner-authorized browser continuation extends W3 semantic
 # regions and focus into open shadow roots, with versioned coverage and the
 # existing privacy and visit limits. No frame authority or milestone moves.

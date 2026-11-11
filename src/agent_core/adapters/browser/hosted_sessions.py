@@ -241,7 +241,11 @@ class HostedBrowserSessionControlPlane:
             "/v1/browser-sessions:observe",
             payload={
                 "lease_ref": lease_ref,
-                "extraction": request.model_dump(mode="json", exclude_none=True),
+                "extraction": request.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                    exclude={"scope"} if request.scope == "main_document" else set(),
+                ),
             },
             response_model=BrowserSessionObservation,
         )
