@@ -41,6 +41,7 @@ from agent_core.adapters.browser.csv_export import observe_csv_export
 from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
 from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
+from agent_core.adapters.browser.page_readiness import DOM_QUIET_SCRIPT
 from agent_core.adapters.browser.page_structure import PAGE_TEXT_HELPERS, REGION_CAPTURE_SCRIPT
 from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
 from agent_core.adapters.browser.use_copies import inspected_use_references
@@ -226,25 +227,6 @@ _VENDOR_REQUEST_ARGUMENTS = (
     # fetch this address.
     "--gcm-checkin-url=about:blank",
 )
-_QUIET_SCRIPT = """([quietMs, timeoutMs]) => new Promise(resolve => {
-    let quiet = 0;
-    let limit = 0;
-    const observer = new MutationObserver(() => {
-        clearTimeout(quiet);
-        quiet = setTimeout(() => finish(true), quietMs);
-    });
-    function finish(quietReached) {
-        observer.disconnect();
-        clearTimeout(quiet);
-        clearTimeout(limit);
-        resolve(quietReached);
-    }
-    observer.observe(document, {
-        subtree: true, childList: true, attributes: true, characterData: true
-    });
-    quiet = setTimeout(() => finish(true), quietMs);
-    limit = setTimeout(() => finish(false), timeoutMs);
-})"""
 # Playwright's is_visible in one round trip, ported from its computeBox: a
 # display:contents node is visible when a child element or text is; any other
 # node needs checkVisibility(), visibility:visible and a non-empty box.
@@ -1027,7 +1009,7 @@ class PythonPlaywrightRuntime:
             try:
                 async with asyncio.timeout(left + 0.25):
                     quiet = await page.evaluate(
-                        _QUIET_SCRIPT, [DOM_QUIET_MILLISECONDS, max(1, int(left * 1000))]
+                        DOM_QUIET_SCRIPT, [DOM_QUIET_MILLISECONDS, max(1, int(left * 1000))]
                     )
                 return quiet is True
             except TimeoutError:

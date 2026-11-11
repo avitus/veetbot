@@ -1,8 +1,28 @@
 """Bounded trusted collection of visible document and open-shadow semantic evidence."""
 
+# One sibling per level, never an array of every child of a hostile node.
+PAGE_TRAVERSAL_HELPERS = """
+    const advance = (node, root, descend, openShadow = false) => {
+        if (descend && openShadow && node.shadowRoot?.firstChild)
+            return node.shadowRoot.firstChild;
+        if (descend && node.firstChild) return node.firstChild;
+        while (node && node !== root) {
+            if (node.nextSibling) return node.nextSibling;
+            const parent = node.parentNode;
+            if (openShadow && parent?.nodeType === 11 && parent.host) {
+                node = parent.host;
+                if (node.firstChild) return node.firstChild;
+            } else node = parent;
+        }
+        return null;
+    };
+"""
+
 # Do not use innerText/textContent: those materialize unbounded subtrees and can
 # include editable values. The two walks have independent node/text ceilings.
-PAGE_TEXT_HELPERS = """
+PAGE_TEXT_HELPERS = (
+    PAGE_TRAVERSAL_HELPERS
+    + """
     const collectionSelector = 'table,ul,ol,form,[role="table"],[role="grid"]'
         + ',[role="list"],[role="form"]';
     const cut = (value, limit) => {
@@ -21,21 +41,6 @@ PAGE_TEXT_HELPERS = """
             return true;
         const style = getComputedStyle(node);
         return style.display === 'none' || style.visibility !== 'visible' || style.opacity === '0';
-    };
-    // One sibling per level, never an array of every child of a hostile node.
-    const advance = (node, root, descend, openShadow = false) => {
-        if (descend && openShadow && node.shadowRoot?.firstChild)
-            return node.shadowRoot.firstChild;
-        if (descend && node.firstChild) return node.firstChild;
-        while (node && node !== root) {
-            if (node.nextSibling) return node.nextSibling;
-            const parent = node.parentNode;
-            if (openShadow && parent?.nodeType === 11 && parent.host) {
-                node = parent.host;
-                if (node.firstChild) return node.firstChild;
-            } else node = parent;
-        }
-        return null;
     };
     const composedParent = node => node.assignedSlot || node.parentElement
         || node.getRootNode()?.host || null;
@@ -84,6 +89,7 @@ PAGE_TEXT_HELPERS = """
         return {text, text_truncated: clipped || node !== null};
     };
 """
+)
 
 REGION_SCRIPT = (
     "root => {"

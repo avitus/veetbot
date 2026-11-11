@@ -144,6 +144,13 @@ hidden and editable composed ancestors; projection and control continuation keep
 the task controls ahead of navigation. This completes that construction gap in
 ADR-0163, without changing action authority or claiming the whole W3 exit gate.
 
+The next W4 slice extends DOM readiness to the open roots already covered by
+observations. It discovers newly attached roots within bounded polling, removes
+detached subscriptions, and reports `bound_expired` on discovery limits instead
+of a misleading `dom_quiet`. The existing two-second deadline and single-action
+semantics remain. This is construction evidence under ADR-0159, separate from
+live-site and production acceptance.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

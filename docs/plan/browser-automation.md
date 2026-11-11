@@ -1831,6 +1831,19 @@ tracking overflow or deadline expiry reports `bound_expired`; the set resets
 with a new document. A bounded page round trip before the snapshot lets initial
 request events queued after DOMContentLoaded enter the set. It does not require network silence. Explicit observation does not claim a settling check.
 
+DOM quiet includes the main document and its open shadow roots. The watcher
+reconciles roots every 100 ms and immediately before reporting quiet, so a root
+attached to an existing host cannot escape the check merely because attachment
+does not produce a document mutation. Each iterative discovery pass visits at
+most 8,192 nodes, with 65,536 visits per watcher and at most 64 open roots.
+The existing navigation-race retry permits at most two watchers, sharing the
+same two-second settling deadline. Exhausting any discovery limit reports
+`bound_expired`; these limits never extend that deadline. Changed root membership restarts
+the quiet interval, detached roots stop contributing, and completion disconnects
+the observer and clears every watcher timer. Frames and closed roots remain
+outside this scope. The watcher reads structure and mutation presence only,
+without returning page text or treating quiet as business completion.
+
 `browser.observe` may instead accept `wait_for`; `browser.act` may include
 `postcondition`. Each is an exact visible-control predicate with nonempty role
 (up to 64 characters), name (up to 1,024), optional disabled/checked booleans and
