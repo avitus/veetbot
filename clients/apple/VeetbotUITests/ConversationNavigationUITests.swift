@@ -1218,6 +1218,13 @@ final class ConversationNavigationUITests: XCTestCase {
         checkEmailReadingFlow()
     }
 
+    /// Reply itself must create a missing draft, without a second Draft reply press.
+    func testEmailReplyCreatesAMissingDraft() {
+        app.launchArguments.append("--ui-testing-email-no-draft")
+        app.launch()
+        checkEmailReadingFlow()
+    }
+
     /// Exercises the same native controls with a deterministic dark appearance.
     func testEmailReadingInDarkAppearance() {
         app.launchEnvironment["VEETBOT_UI_TEST_COLOR_SCHEME"] = "dark"
@@ -1281,6 +1288,9 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(reply.isHittable)
         XCTAssertFalse(app.textFields["Explain what matters (optional)"].isHittable,
                        "Feedback must not compete with reading the message")
+        if app.launchArguments.contains("--ui-testing-email-no-draft") {
+            XCTAssertFalse(app.textViews["email.draft-body"].exists, "The regression starts without a draft")
+        }
         activate(reply)
         let editor = app.textViews["email.draft-body"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))

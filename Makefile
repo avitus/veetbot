@@ -225,6 +225,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailRowArchiveOfOpenConversationDisplaysNext \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailArchiveFailurePreservesInboxRow \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingKeepsFeedbackOptionalAndReplyReachable \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReplyCreatesAMissingDraft \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingInDarkAppearance \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingAtDefaultMacWindowSize \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarShowsFivePrioritiesWithoutScrolling \

@@ -1329,11 +1329,26 @@ private struct EmailThreadScreen: View {
                                 withAnimation(replyScrollAnimation) {
                                     proxy.scrollTo("reply", anchor: .top)
                                 }
+                                if model.draft == nil {
+                                    Task {
+                                        guard model.selectedThreadID == thread.id, model.draft == nil else { return }
+                                        await model.generateDraft()
+                                        guard model.selectedThreadID == thread.id else { return }
+                                        withAnimation(replyScrollAnimation) {
+                                            proxy.scrollTo("reply", anchor: .top)
+                                        }
+                                    }
+                                }
                             } label: {
-                                Label(
-                                    model.draft == nil ? "Reply" : "Your reply", systemImage: "arrowshape.turn.up.left")
+                                if model.draft == nil && model.isPerformingAction {
+                                    ProgressView("Preparing draft…")
+                                } else {
+                                    Label(
+                                        model.draft == nil ? "Reply" : "Your reply", systemImage: "arrowshape.turn.up.left")
+                                }
                             }
                             .buttonStyle(PrimaryCapsuleButtonStyle())
+                            .disabled(model.draft == nil && model.isPerformingAction)
                             .accessibilityIdentifier("email.jump-to-reply")
                         }
                         .padding(.horizontal, VeetSpace.s5).padding(.vertical, 10)

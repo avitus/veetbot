@@ -261,6 +261,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private var stagedDeliveries: [DispatchWorkItem] = []
     private static let emailLock = NSLock()
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
+    private static var emailHasDraft = true
     private static var emailRevision = 1
     private static var emailStatus = "ready"
     /// Run reads since a one-press send was parked; the third reports it sent.
@@ -447,6 +448,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     static func resetEmail() {
         emailLock.lock()
         defer { emailLock.unlock() }
+        emailHasDraft = !ProcessInfo.processInfo.arguments.contains("--ui-testing-email-no-draft")
         emailBody = "Thanks, Alex. I'll review the agenda."
         emailRevision = 1
         emailSendReads = 0
@@ -818,6 +820,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("DELETE", "/v1/email/feedback/\(Self.emailThreadID)"):
             statusCode = 200
             body = Self.emailThreadJSON
+        case ("POST", "/v1/email/threads/\(Self.emailThreadID)/drafts"):
+            Self.emailLock.withLock { Self.emailHasDraft = true }
+            statusCode = 202
+            body = "{\"draft\":\(Self.emailDraftJSON),\"run_id\":\"\(Self.emailRunID)\",\"status\":\"COMPLETED\",\"approval_id\":null}"
         case ("GET", "/v1/email/drafts/\(Self.emailDraftID)"):
             statusCode = 200
             body = Self.emailDraftJSON
@@ -857,6 +863,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                     if Self.emailSendReads >= 3 { Self.emailStatus = "sent" }
                     return Self.emailStatus == "sent" ? "COMPLETED" : "QUEUED"
                 }
+                if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-no-draft") { return "COMPLETED" }
                 return Self.emailStatus == "sent" ? "COMPLETED" : "WAITING_FOR_APPROVAL"
             }
             body = """
@@ -1562,6 +1569,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     }
     /// Projects confirmed mailbox state separately from a deliberately observable pending archive operation.
     private static var emailThreadJSON: String {
+        let hasDraft = emailLock.withLock { emailHasDraft }
+        let draftID = hasDraft ? "\"\(emailDraftID)\"" : "null"
+        let draft = hasDraft ? emailDraftJSON : "null"
         let (dismissedRevision, archived, target, reads) = emailLock.withLock {
             (emailHandled ? "1" : "null", emailArchived, emailArchiveTarget, emailArchiveReads)
         }
@@ -1582,7 +1592,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             readerFields = "\"body\":\"Please review the agenda before Friday.\","
         }
         return """
-        {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","topics":["Board planning","Hiring"],"senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":"\(emailDraftID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(emailDraftJSON)}
+        {"id":"\(emailThreadID)","account_id":"work","subject":"Board agenda","topics":["Board planning","Hiring"],"senders":["alex@example.test"],"updated_at":"2026-09-11T00:00:00Z","revision":1,"summary":"Review the board agenda before Friday.","reason":"A direct request from your board colleague.","needs_reply":true,"draft_id":\(draftID),"session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","priority":0.95,"complete":true,"messages":[{"id":"message-1","sender":"alex@example.test","to":["owner@work.example"],"cc":[],"subject":"Board agenda","body":"Please review the agenda before Friday.","sent_at":"2026-09-11T00:00:00Z","complete":true,"attachments":[]}],"draft":\(draft)}
         """.replacingOccurrences(of: "\"revision\":1,\"summary\"", with: "\"dismissed_revision\":\(dismissedRevision),\"in_inbox\":\(!archived),\"archive_operation\":\(archiveOperation),\"revision\":1,\"summary\"")
             .replacingOccurrences(of: "\"body\":\"Please review the agenda before Friday.\",", with: readerFields)
     }

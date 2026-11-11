@@ -686,6 +686,10 @@ thread, including replies made in Gmail or another client. Abstain when the
 request is unclear, an attachment is essential, or a consequential decision is
 missing. A draft can request the missing decision; it must not invent one.
 
+The reading view’s **Reply** action opens an existing draft or starts Draft reply
+when no draft exists, showing preparation progress while it runs. It does not
+regenerate an existing draft or replace owner edits.
+
 An explicit Draft reply or refinement request takes precedence over the earlier
 automatic reply-need assessment, without changing that assessment. Its draft
 still requires complete, current source content and verified reply recipients;
