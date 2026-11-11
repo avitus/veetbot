@@ -262,6 +262,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let emailLock = NSLock()
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
     private static var emailHasDraft = true
+    private static var emailComposition = "veetbot"
+    private static var emailManualBody = ""
+    private static var emailVeetbotBody = "Thanks, Alex. I'll review the agenda."
     private static var emailRevision = 1
     private static var emailStatus = "ready"
     /// Run reads since a one-press send was parked; the third reports it sent.
@@ -450,6 +453,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         defer { emailLock.unlock() }
         emailHasDraft = !ProcessInfo.processInfo.arguments.contains("--ui-testing-email-no-draft")
         emailBody = "Thanks, Alex. I'll review the agenda."
+        emailComposition = "veetbot"
+        emailManualBody = ""
+        emailVeetbotBody = emailBody
         emailRevision = 1
         emailSendReads = 0
         emailStatus = "ready"
@@ -820,8 +826,24 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("DELETE", "/v1/email/feedback/\(Self.emailThreadID)"):
             statusCode = 200
             body = Self.emailThreadJSON
+        case ("POST", "/v1/email/threads/\(Self.emailThreadID)/reply"):
+            let kind = requestJSON()["kind"] as? String ?? "manual"
+            Self.emailLock.withLock {
+                if Self.emailComposition == "manual" { Self.emailManualBody = Self.emailBody }
+                else { Self.emailVeetbotBody = Self.emailBody }
+                Self.emailBody = kind == "manual" ? Self.emailManualBody : Self.emailVeetbotBody
+                Self.emailComposition = kind
+                Self.emailHasDraft = true
+                Self.emailRevision += 1
+            }
+            statusCode = 200
+            body = Self.emailDraftJSON
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/drafts"):
-            Self.emailLock.withLock { Self.emailHasDraft = true }
+            Self.emailLock.withLock {
+                Self.emailHasDraft = true
+                Self.emailComposition = "veetbot"
+                Self.emailBody = Self.emailVeetbotBody
+            }
             statusCode = 202
             body = "{\"draft\":\(Self.emailDraftJSON),\"run_id\":\"\(Self.emailRunID)\",\"status\":\"COMPLETED\",\"approval_id\":null}"
         case ("GET", "/v1/email/drafts/\(Self.emailDraftID)"):
@@ -1558,13 +1580,13 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         {"items":[{"id":"work","label":"Work","email_address":"owner@work.example","status":"ready","last_synced_at":"2026-09-11T00:00:00Z","history_complete":false,"history_processed":42,"archive_supported":true,"write_server_id":"gmail_work_write","read_server_id":"gmail_work_read","send_server_id":"gmail_work_send"}],"next_cursor":null}
         """
     private static var emailDraftJSON: String {
-        let (body, revision, status) = emailLock.withLock { (emailBody, emailRevision, emailStatus) }
+        let (body, revision, status, composition) = emailLock.withLock { (emailBody, emailRevision, emailStatus, emailComposition) }
         let escapedBody = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
         // A parked send carries its undo window so the composer shows Undo (ADR-0279).
         let undoUntil = status == "sending"
             ? "\"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(10)))\"" : "null"
         return """
-            {"id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"send_undo_until":\(undoUntil),"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
+            {"composition":"\(composition)","id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"send_undo_until":\(undoUntil),"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
             """
     }
     /// Projects confirmed mailbox state separately from a deliberately observable pending archive operation.

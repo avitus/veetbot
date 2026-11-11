@@ -3338,6 +3338,171 @@ class EmailExperienceService:
                 thread, await self._feedback(uow.email, principal), now=self.clock.now()
             )
 
+    async def _reply_envelope(
+        self, store: EmailStore, principal: Principal, thread: EmailThread
+    ) -> tuple[EmailMessage, list[str], list[str]]:
+        """Use the same verified envelope for owner and generated compositions."""
+        if not thread.complete or not thread.messages:
+            raise ConflictError("a reply requires a complete current thread")
+        account = await read_value(store, principal, "account", thread.account_id, EmailAccount)
+        if account is None or not account.email_address:
+            raise ConflictError("verify the sending account before preparing a draft")
+        own = set(addresses(account.verified_addresses or [account.email_address]))
+        target = thread.messages[-1]
+        if target.direction == "sent":
+            raise ConflictError("the latest message is already an outgoing reply")
+        to = [
+            address
+            for address in addresses(target.reply_to or [target.sender])
+            if address not in own
+        ]
+        cc = [
+            address
+            for address in addresses([*target.to, *target.cc])
+            if address not in own and address not in to
+        ]
+        if not to or not target.message_id_header:
+            raise ConflictError("the source lacks a verified reply target or Message-ID header")
+        return target, to, cc
+
+    async def select_reply(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        *,
+        kind: Literal["manual", "veetbot"],
+        source_revision: int,
+        expected_revision: int | None,
+        idempotency_key: str | None = None,
+    ) -> EmailDraft:
+        """Select a saved composition or start a blank reply, without remote work."""
+        require_scope(principal, "email.read")
+        require_scope(principal, "email.write")
+        digest = hashlib.sha256(
+            f"{thread_id}:{kind}:{source_revision}:{expected_revision}".encode()
+        ).hexdigest()
+        replay_key = (
+            None
+            if idempotency_key is None
+            else hashlib.sha256(f"reply:{idempotency_key}".encode()).hexdigest()
+        )
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            thread = await self._thread(uow.email, principal, thread_id)
+            replay = (
+                None
+                if replay_key is None
+                else await uow.email.get(principal, "draft_edit_replay", replay_key)
+            )
+            if replay is not None:
+                if replay.payload["request_digest"] != digest:
+                    raise ConflictError("idempotency key was used for another reply selection")
+                previous = await read_value(
+                    uow.email,
+                    principal,
+                    "draft_revision",
+                    str(replay.payload["revision_key"]),
+                    EmailDraft,
+                )
+                if previous is None or draft_expired(previous, body_cutoff(self.clock.now())):
+                    raise ConflictError("the previous reply revision is no longer retained")
+                return previous
+            if thread.revision != source_revision:
+                raise ConflictError("New mail arrived. Read the conversation before replying.")
+            current = (
+                None
+                if thread.draft_id is None
+                else await self._draft(uow.email, principal, thread.draft_id)
+            )
+            if (None if current is None else current.revision) != expected_revision:
+                raise ConflictError(
+                    "The draft changed on another device. Refresh before switching."
+                )
+            if current is not None and current.status not in {
+                EmailDraftStatus.READY,
+                EmailDraftStatus.FAILED,
+                EmailDraftStatus.DISCARDED,
+            }:
+                raise ConflictError("Finish the current draft action before switching replies.")
+            if current is not None and current.stale:
+                raise ConflictError("Read the new mail and review your reply before switching.")
+            target, to, cc = await self._reply_envelope(uow.email, principal, thread)
+            assert target.message_id_header is not None
+            active = current is not None and current.status != EmailDraftStatus.DISCARDED
+            selected = (
+                current if active and current is not None and current.composition == kind else None
+            )
+            if selected is None and active and current is not None:
+                candidates = [
+                    EmailDraft.model_validate(row.payload)
+                    async for row in records(uow.email, principal, "draft_revision")
+                    if row.key.startswith(f"{current.id}:")
+                    and ":conflict:" not in row.key
+                    and row.payload.get("composition", "veetbot") == kind
+                ]
+                selected = max(candidates, key=lambda value: value.revision, default=None)
+            if selected is None and kind == "veetbot":
+                raise NotFoundError("No Veetbot draft exists for this reply.")
+            if selected is None:
+                selected = EmailDraft(
+                    id=self.ids.new_id() if not active or current is None else current.id,
+                    thread_id=thread.id,
+                    account_id=thread.account_id,
+                    source_revision=thread.revision,
+                    composition="manual",
+                    to=to,
+                    cc=cc,
+                    subject=target.subject
+                    if target.subject.casefold().startswith("re:")
+                    else f"Re: {target.subject}",
+                    body="",
+                    owner_edited=True,
+                    session_id=thread.session_id,
+                    updated_at=self.clock.now(),
+                    in_reply_to=target.message_id_header,
+                    references=list(dict.fromkeys([*target.references, target.message_id_header])),
+                    provider_thread_id=thread.provider_thread_id,
+                    send_tool_name=f"mcp.{self.account_servers[thread.account_id]['send']}.send_message",
+                )
+            if current is None or selected != current:
+                if current is not None:
+                    await self._archive_draft(uow.email, principal, current)
+                selected = selected.model_copy(
+                    update={
+                        "revision": current.revision + 1 if active and current is not None else 1,
+                        "status": EmailDraftStatus.READY,
+                        "run_id": None,
+                        "approval_id": None,
+                        "send_claim_id": None,
+                        "send_undo_until": None,
+                        "stale": selected.source_revision != thread.revision,
+                        "updated_at": self.clock.now(),
+                    }
+                )
+                await save_value(
+                    uow.email, principal, "draft", str(selected.id), selected, self.clock.now()
+                )
+                await save_value(
+                    uow.email,
+                    principal,
+                    "thread",
+                    str(thread.id),
+                    thread.model_copy(update={"draft_id": selected.id}),
+                    self.clock.now(),
+                )
+            await self._archive_draft(uow.email, principal, selected)
+            if replay_key is not None:
+                await self._put_data(
+                    uow.email,
+                    principal,
+                    "draft_edit_replay",
+                    replay_key,
+                    {
+                        "request_digest": digest,
+                        "revision_key": f"{selected.id}:{selected.revision:012d}",
+                    },
+                )
+            return selected
+
     async def save_generated_draft(
         self,
         principal: Principal,
@@ -3370,27 +3535,8 @@ class EmailExperienceService:
                 raise ConflictError(
                     "a draft requires a complete, current thread and the missing decision"
                 )
-            account = await read_value(
-                uow.email, principal, "account", thread.account_id, EmailAccount
-            )
-            if account is None or not account.email_address:
-                raise ConflictError("verify the sending account before preparing a draft")
-            own = set(addresses(account.verified_addresses or [account.email_address]))
-            target = thread.messages[-1]
-            if target.direction == "sent":
-                raise ConflictError("the latest message is already an outgoing reply")
-            to = [
-                address
-                for address in addresses(target.reply_to or [target.sender])
-                if address not in own
-            ]
-            cc = [
-                address
-                for address in addresses([*target.to, *target.cc])
-                if address not in own and address not in to
-            ]
-            if not to or not target.message_id_header:
-                raise ConflictError("the source lacks a verified reply target or Message-ID header")
+            target, to, cc = await self._reply_envelope(uow.email, principal, thread)
+            assert target.message_id_header is not None
             old = (
                 None
                 if thread.draft_id is None
@@ -3435,6 +3581,8 @@ class EmailExperienceService:
                 provider_thread_id=thread.provider_thread_id,
                 send_tool_name=f"mcp.{self.account_servers[thread.account_id]['send']}.send_message",
             )
+            if old is not None:
+                await self._archive_draft(uow.email, principal, old)
             await save_value(uow.email, principal, "draft", str(draft.id), draft, self.clock.now())
             await self._archive_draft(uow.email, principal, draft)
             await save_value(

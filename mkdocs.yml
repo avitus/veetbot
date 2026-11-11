@@ -450,4 +450,5 @@ nav:
       - "ADR-0309: Recall continuity and phase clocks": adr/0309-recall-continuity-and-phase-clocks.md
       - "ADR-0310: Retain both deliberate searches": adr/0310-retain-both-deliberate-searches.md
       - "ADR-0311: Open-shadow browser extraction": adr/0311-open-shadow-browser-extraction.md
+      - "ADR-0312: Manual reply and Veetbot drafting": adr/0312-manual-reply-and-veetbot-draft.md
   - Changelog: changelog.md

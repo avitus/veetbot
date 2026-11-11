@@ -101,6 +101,15 @@ extension VeetbotAPIClient {
         ))
     }
 
+    public func selectEmailReply(
+        thread: EmailThreadView, draft: EmailDraftView?, kind: String, idempotencyKey: String
+    ) async throws -> EmailDraftView {
+        try await emailCommand(path: "/threads/\(thread.id.uuidString)/reply", values: [
+            "kind": .string(kind), "source_revision": .number(Double(thread.revision)),
+            "expected_revision": draft.map { .number(Double($0.revision)) } ?? .null,
+        ], key: idempotencyKey)
+    }
+
     public func generateEmailDraft(
         threadID: UUID, instruction: String?, idempotencyKey: String
     ) async throws -> EmailDraftOperation {

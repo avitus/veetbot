@@ -286,6 +286,7 @@ class EmailDraftStatus(StrEnum):
 
 
 class EmailDraft(EmailValue):
+    composition: Literal["manual", "veetbot"] = "veetbot"
     id: UUID
     thread_id: UUID
     account_id: str

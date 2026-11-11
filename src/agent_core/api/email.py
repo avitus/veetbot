@@ -36,6 +36,13 @@ class DraftRequest(BaseModel):
     instruction: str | None = Field(default=None, max_length=4000)
 
 
+class ReplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["manual", "veetbot"]
+    source_revision: int = Field(ge=1, strict=True)
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
+
+
 class RevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
@@ -313,6 +320,26 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         body: ResetLearningRequest, authenticated: Annotated[Principal, secured("email.write")]
     ) -> EmailLearningState:
         return await service.reset_learning(authenticated, body.scope)
+
+    @router.post(
+        "/v1/email/threads/{thread_id}/reply", openapi_extra={"required_scope": "email.write"}
+    )
+    async def select_reply(
+        thread_id: UUID,
+        body: ReplyRequest,
+        authenticated: Annotated[Principal, secured("email.write")],
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> EmailDraft:
+        return await boundary(
+            service.select_reply(
+                authenticated,
+                thread_id,
+                kind=body.kind,
+                source_revision=body.source_revision,
+                expected_revision=body.expected_revision,
+                idempotency_key=idempotency_key,
+            )
+        )
 
     @router.post(
         "/v1/email/threads/{thread_id}/drafts", openapi_extra={"required_scope": "email.write"}

@@ -1810,6 +1810,71 @@ import SwiftUI
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
     }
 
+    @Test(arguments: ["none", "ready", "discarded"])
+    func testReplySelectsBlankManualCompositionWithoutGeneration(status: String) async throws {
+        let requests = EmailRequestRecorder()
+        let blank = draftJSON(body: "")
+            .replacingOccurrences(of: "\"revision\":1", with: "\"composition\":\"manual\",\"revision\":2")
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("/reply") { return (200, blank) }
+            if request.url!.path.hasSuffix("/revisions") { return (200, "{\"items\":[],\"next_cursor\":null}") }
+            let detail = self.threadJSON(draft: status == "none" ? "null" : self.draftJSON(status: status))
+            return (200, status != "none" ? detail : detail.replacingOccurrences(
+                of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(await model.selectReply(manual: true))
+        #expect(model.draft?.isManual == true)
+        #expect(model.currentEdit?.body == "")
+        #expect(!model.canReview, "A blank reply is editable but cannot be sent")
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(posts.count == 1)
+        #expect(posts.first?.url?.path.hasSuffix("/reply") == true)
+        #expect(!model.isSelectingReply)
+    }
+
+    @Test func testOnlyExplicitVeetbotChoiceGeneratesAMissingSuggestion() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("/reply") { return (404, Self.error("not_found", "No Veetbot draft")) }
+            if request.httpMethod == "POST" {
+                return (200, "{\"draft\":\(self.draftJSON()),\"run_id\":\"\(self.runID)\",\"status\":\"COMPLETED\"}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "COMPLETED")) }
+            let generated = requests.snapshot.contains { $0.httpMethod == "POST" && $0.url!.path.hasSuffix("/drafts") }
+            let detail = self.threadJSON(draft: generated ? self.draftJSON() : "null")
+            return (200, generated ? detail : detail.replacingOccurrences(
+                of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(await model.selectReply(manual: false))
+        #expect(model.draft?.isManual == false)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.map { $0.url!.lastPathComponent } == ["reply", "drafts"])
+        #expect(!model.isGeneratingDraft && !model.isSelectingReply)
+    }
+
+    @Test func testManualReplyFailureNeverFallsBackToGeneration() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "POST" { return (404, Self.error("not_found", "Reply unavailable")) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(!(await model.selectReply(manual: true)))
+        #expect(model.currentEdit?.body == "Thanks, I will review the agenda.")
+        #expect(model.draftActionMessage == "Reply unavailable")
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+    }
+
     /// A terminal generation failure must be visible even before the first draft exists.
     @Test(arguments: ["FAILED", "CANCELLED"], [false, true])
     func testDraftGenerationReportsTerminalFailure(status: String, existingDraft: Bool) async throws {

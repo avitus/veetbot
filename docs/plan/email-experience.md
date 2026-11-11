@@ -686,9 +686,26 @@ thread, including replies made in Gmail or another client. Abstain when the
 request is unclear, an attachment is essential, or a consequential decision is
 missing. A draft can request the missing decision; it must not invent one.
 
-The reading view’s **Reply** action opens an existing draft or starts Draft reply
-when no draft exists, showing preparation progress while it runs. It does not
-regenerate an existing draft or replace owner edits.
+The reading view places **Reply** beside **Draft with Veetbot** (ADR-0312).
+Reply opens a blank, focused owner-written composer, or resumes that owner's
+saved reply; it never invokes a model or inserts an existing AI suggestion.
+The second action explicitly generates a suggestion, or opens the retained
+Veetbot draft. Labels distinguish **Written by you** from **Veetbot draft**.
+Switching first saves dirty edits and retains both compositions as immutable
+revisions of one current proposal. Only the selected revision can be sent.
+
+`POST /v1/email/threads/{id}/reply` selects `kind: manual | veetbot`, with the
+observed `source_revision` and nullable `expected_revision` (null means no draft).
+It requires `email.read`, `email.write`, and current mailbox read authority.
+Under the existing owner lock it checks both revisions, archives the previous
+composition, and restores the latest non-conflict revision of the chosen kind.
+With no manual revision it creates an empty body using the same verified reply
+envelope as generated drafts; with no Veetbot revision it returns not found.
+It makes no model, Gmail, or run call. An optional Idempotency-Key replays the
+original result and rejects reuse for another request. Source changes, a send
+in progress, or concurrent edits refuse switching without replacing either text.
+Old drafts without a composition marker remain Veetbot drafts. Send retains
+its existing current-source, exact-content approval and Undo contract.
 
 An explicit Draft reply or refinement request takes precedence over the earlier
 automatic reply-need assessment, without changing that assessment. Its draft

@@ -105,6 +105,8 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var isLoadingThread = false
     @Published public private(set) var isSaving = false
     @Published public private(set) var isPerformingAction = false
+    @Published public private(set) var isSelectingReply = false
+    @Published public private(set) var isGeneratingDraft = false
     @Published public private(set) var unavailable = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var budgetPauseMessage: String?
@@ -386,8 +388,8 @@ public final class EmailViewModel: ObservableObject {
     }
 
     public var canReview: Bool {
-        guard let draft else { return false }
-        return draft.canEdit && !draft.stale && conflict == nil && !isPerformingAction && !isPreparingSend
+        guard let draft, let edit = currentEdit, !edit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return draft.canEdit && !draft.stale && conflict == nil && !isPerformingAction && !isSelectingReply && !isPreparingSend
     }
 
     /// Starts foreground refreshes for a new visit or invalidates reads when Email is hidden.
@@ -490,6 +492,8 @@ public final class EmailViewModel: ObservableObject {
         isLoadingThread = false
         isSaving = false
         isPerformingAction = false
+        isSelectingReply = false
+        isGeneratingDraft = false
     }
 
     /// Clears thread selection and reloads the chosen account within the current foreground visit.
@@ -994,6 +998,7 @@ public final class EmailViewModel: ObservableObject {
                 mergeDraft(value)
             } else { draft = nil }
             threadReadError = nil
+            if draft?.isManual == true { await loadRevisions() }
             if let approvalID, draft?.approvalID == approvalID { await loadReview(activation: foreground) }
             else { await settlePendingReview(activation: foreground) }
         } catch {
@@ -1211,13 +1216,63 @@ public final class EmailViewModel: ObservableObject {
         } catch { if generation == connection { report(error) } }
     }
 
+    public var canSelectReply: Bool {
+        !isSelectingReply && conflict == nil
+            && (draft == nil || draft?.canEdit == true || draft?.status == "discarded")
+    }
+
+    public var hasVeetbotDraft: Bool {
+        guard let draft, draft.status != "discarded" else { return false }
+        return !draft.isManual || revisions.contains { $0.id == draft.id && !$0.isManual }
+    }
+
+    /// Reply is owner composition. Switching retains both texts in server revisions.
+    @discardableResult
+    public func selectReply(manual: Bool) async -> Bool {
+        guard let selected = thread, let api = makeAPIClient(), canSelectReply else { return false }
+        let connection = generation
+        let visit = selectionRequest
+        isSelectingReply = true
+        var ownsSelection = true
+        defer { if ownsSelection && generation == connection { isSelectingReply = false } }
+        draftActionError = nil
+        if currentEdit?.isDirty == true, !(await saveDraft()) { return false }
+        guard generation == connection, selectedThreadID == selected.id, selectionRequest == visit else { return false }
+        guard currentEdit?.isDirty != true else {
+            draftActionError = "Finish editing before switching replies. Your text is preserved."
+            return false
+        }
+        if let draft, draft.status != "discarded", draft.isManual == manual { return true }
+        do {
+            let value = try await api.selectEmailReply(
+                thread: selected, draft: draft, kind: manual ? "manual" : "veetbot",
+                idempotencyKey: UUID().uuidString)
+            guard generation == connection, selectedThreadID == selected.id, selectionRequest == visit else { return false }
+            mergeDraft(value)
+            await loadRevisions()
+            return true
+        } catch {
+            guard generation == connection, selectedThreadID == selected.id, selectionRequest == visit else { return false }
+            // Only an explicit Veetbot action may request generation. Reply never falls back to it.
+            if !manual, case HTTPTransportError.api(let failure) = error, failure.statusCode == 404 {
+                isSelectingReply = false
+                ownsSelection = false
+                await generateDraft()
+                return draft?.isManual == false
+            }
+            report(error, draft: true)
+            return false
+        }
+    }
+
     public func generateDraft(instruction: String? = nil) async {
         guard let id = selectedThreadID, let api = makeAPIClient(), !isPerformingAction else { return }
         if currentEdit?.isDirty == true, !(await saveDraft()) { return }
         draftActionError = nil
         isPerformingAction = true
+        isGeneratingDraft = true
         let connection = generation
-        defer { if generation == connection { isPerformingAction = false } }
+        defer { if generation == connection { isPerformingAction = false; isGeneratingDraft = false } }
         do {
             let result = try await api.generateEmailDraft(threadID: id, instruction: instruction, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }

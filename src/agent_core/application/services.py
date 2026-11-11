@@ -1002,6 +1002,17 @@ class EmailService(Protocol):
         idempotency_key: str | None = None,
     ) -> EmailDraft: ...
 
+    async def select_reply(
+        self,
+        principal: Principal,
+        thread_id: UUID,
+        *,
+        kind: Literal["manual", "veetbot"],
+        source_revision: int,
+        expected_revision: int | None,
+        idempotency_key: str | None = None,
+    ) -> EmailDraft: ...
+
     async def draft_revisions(self, principal: Principal, draft_id: UUID) -> dict[str, object]: ...
 
     async def submit_task(

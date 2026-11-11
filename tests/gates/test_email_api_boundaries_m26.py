@@ -62,6 +62,13 @@ COMMANDS = (
     Command("learning", "GET", "/v1/email/learning", "email.read", account_bound=False),
     Command("pause", "PUT", "/v1/email/learning", "email.write", {"paused": True}, False),
     Command("reset", "POST", "/v1/email/learning/reset", "email.write", {"scope": "all"}, False),
+    Command(
+        "reply",
+        "POST",
+        "/v1/email/threads/{t}/reply",
+        "email.write",
+        {"kind": "manual", "source_revision": 1, "expected_revision": 1},
+    ),
     Command("generate", "POST", "/v1/email/threads/{t}/drafts", "email.write", {}),
     Command(
         "send",
@@ -140,6 +147,21 @@ async def _request(
 ) -> tuple[str, dict[str, object] | None]:
     """Seed the state each command needs and return its concrete request payload."""
     thread, draft = await seed_mail(app)
+    if command.name == "reply":
+        from tests.gates.test_email_learning_m26 import prepare
+
+        await prepare(app)
+        thread = thread.model_copy(
+            update={
+                "messages": [
+                    thread.messages[-1].model_copy(update={"message_id_header": "<m1@example.com>"})
+                ]
+            }
+        )
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email, app.principal, "thread", str(thread.id), thread, app.clock.now()
+            )
     if command.name == "image":
         messages = [
             m.model_copy(update={"reader_html": '<img src="https://images.example/photo.png">'})
@@ -285,7 +307,7 @@ async def _succeed_and_retry_without_duplicate_actions(command: Command) -> None
             "save_attachment",
         }:
             assert first.json()["run_id"] == second.json()["run_id"]
-        if command.name in {"feedback", "discuss", "edit", "endorse", "undo", "discard"}:
+        if command.name in {"feedback", "discuss", "edit", "endorse", "undo", "discard", "reply"}:
             assert first.json() == second.json()
         async with app.uow_factory() as uow:
             assert len(await uow.email.list(app.principal, "task")) <= 1

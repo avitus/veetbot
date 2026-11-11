@@ -2268,7 +2268,10 @@ build failure.
 
 The approved [email-experience.md](email-experience.md) defines the account,
 thread, refresh, feedback, learning, draft, send-proposal and one-press send
-(`/send`, `/send-undo`; ADR-0279) route families.
+(`/send`, `/send-undo`; ADR-0279) route families. The owner-composition
+`POST /v1/email/threads/{id}/reply` route (ADR-0312) selects a retained
+manual or Veetbot draft revision without admitting a run; it requires both
+email scopes and current mailbox read authority.
 Application scopes `email.read` and `email.write` intersect current mailbox MCP
 authority; send-proposal returns ordinary run/approval references and existing
 approval routes authorize dispatch; `/send` admits a governed task whose
