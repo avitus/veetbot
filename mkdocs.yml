@@ -448,4 +448,5 @@ nav:
       - "ADR-0307: Aggregate browser operation evidence": adr/0307-browser-operation-report.md
       - "ADR-0308: Open-shadow browser regions": adr/0308-open-shadow-browser-regions.md
       - "ADR-0309: Recall continuity and phase clocks": adr/0309-recall-continuity-and-phase-clocks.md
+      - "ADR-0310: Retain both deliberate searches": adr/0310-retain-both-deliberate-searches.md
   - Changelog: changelog.md

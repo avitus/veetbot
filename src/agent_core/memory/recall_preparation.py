@@ -39,6 +39,7 @@ class SemanticRecallPreparation:
             model_planning=True,
             overview_enabled=True,
             retain_automatic=True,
+            retain_search_history=True,
             inline_output_bytes=inline_output_bytes,
         )
         planned = MemorySearchTool(
@@ -51,7 +52,17 @@ class SemanticRecallPreparation:
             overview_enabled=True,
             inline_output_bytes=inline_output_bytes,
         )
-        self._tools = {tool.spec.version: tool for tool in (legacy, planned, overview, self._tool)}
+        automatic_retention = MemorySearchTool(
+            retriever,
+            model_planning=True,
+            overview_enabled=True,
+            retain_automatic=True,
+            inline_output_bytes=inline_output_bytes,
+        )
+        self._tools = {
+            tool.spec.version: tool
+            for tool in (legacy, planned, overview, automatic_retention, self._tool)
+        }
         self._validators = {
             version: Draft202012Validator(tool.spec.input_schema)
             for version, tool in self._tools.items()

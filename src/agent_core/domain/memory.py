@@ -1161,6 +1161,10 @@ class RecallQuery(BaseModel):
     # reducing the rendered allowance or excluding already-delivered beliefs.
     identity_max_items: int | None = Field(default=None, ge=1, le=20)
     identity_exclude_ids: tuple[UUID, ...] | None = None
+    # Focused searches require whole stored role labels for fallback discovery,
+    # reserve identities and one relationship, then fill extra context after
+    # beliefs. Explicit names and overview pagination are unchanged.
+    focused_people_context: bool = False
 
 
 OWNED_RESOURCE_PATTERN = (

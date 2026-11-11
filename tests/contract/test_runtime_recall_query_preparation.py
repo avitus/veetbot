@@ -19,7 +19,7 @@ from tests.contract.support import RUN_ID, SESSION_ID, agent, principal
 from tests.contract.test_runtime_semantic_queries_contract import runtime_stack
 
 
-@pytest.mark.parametrize("search_version", ["2.1.0", "2.2.0", "2.3.0"])
+@pytest.mark.parametrize("search_version", ["2.1.0", "2.2.0", "2.3.0", "2.4.0"])
 @pytest.mark.parametrize("deliberate", [False, True])
 @pytest.mark.parametrize("task_context", [False, True])
 @pytest.mark.parametrize("omit_scope", [False, True])
@@ -46,7 +46,8 @@ async def test_prepared_queries_match_the_governed_reader(
         retriever,
         model_planning=True,
         overview_enabled=search_version != "2.1.0",
-        retain_automatic=search_version == "2.3.0",
+        retain_automatic=search_version in {"2.3.0", "2.4.0"},
+        retain_search_history=search_version == "2.4.0",
     )
     checkpoint.pinned_tool_names.append("memory.search")
     checkpoint.pinned_tool_versions["memory.search"] = tool.spec.version

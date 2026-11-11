@@ -162,6 +162,17 @@ recall within the unchanged shared ceiling. Fresh automatic queries exclude beli
 IDs actually rendered in retained search blocks, only after those IDs and the
 whole receipt pass current trace validation. Ranked-but-unrendered IDs and
 withheld results exclude nothing. Older pins retain their allocation.
+[ADR-0310](../adr/0310-retain-both-deliberate-searches.md) bounds each deliberate
+result from newly pinned `memory.search@2.4.0` to seven items and 750 tokens.
+Both permitted deliberate results then fit whole within the same allocation,
+preserving earlier supporting facts alongside fresh automatic evidence. Identity
+discovery still uses twenty candidates; unused presentation capacity remains
+available to automatic recall. Earlier versions keep their previous limits.
+For focused searches, identities and one relationship per person retain priority;
+additional relationships, commitments and recent interactions fill spare space
+after beliefs. Explicit owner-overview
+pagination keeps its existing completeness rules. This prevents generic history
+entries from consuming the narrower window before requested facts are shown.
 New execution-bound reservations checkpoint each recall phase before work and
 give that phase five seconds for preparation plus ten for search. Model thinking
 does not spend later phases' time. Run-wide slots and deliberate rounds remain
@@ -847,3 +858,123 @@ routine question. The final routine check disables further tools to isolate
 answer use; it must not be reported as end-to-end recall success. Formatting,
 lint, type checking and documentation checks passed. Reading lane A applies;
 no architecture decision, activation or milestone acceptance changes.
+
+## Follow-up repairs from the revised-query audit
+
+The owner authorized further production-snapshot audits and recall repairs on
+November 10. Reader guidance now preserves first-person ownership for the owner's
+facts, includes grounded names for other people, and searches one missing fact or
+change at a time. It separates comparison baselines from desired features and
+real-world facts from artifact-format instructions. It does not enumerate old
+list members when looking for updates. A recalled list is not proof of
+completeness: check additions, removals and corrections before presenting it as
+current, or label completeness unverified. The private replay covers location,
+routine use, current-list planning, comparison-baseline use and grounded-name
+planning. Its criteria stay outside the repository.
+
+[ADR-0310](../adr/0310-retain-both-deliberate-searches.md) records the runtime
+repairs exposed by those audits. Newly pinned `memory.search@2.4.0` allocates seven
+items and 750 tokens per result, keeping both deliberate results within the
+existing shared allowance and automatic reserve. It reclaims space from validated
+current blocks that differ only in observation time. Focused People context
+reserves identity and one relationship before beliefs, then fills spare capacity
+with additional history. Fallback role discovery requires the complete stored
+relationship label: a shared topic word cannot redirect the query to an unrelated
+person. Older tool pins remain registered with their prior semantics. Source,
+sensitivity, temporal, erasure and search-quota protections remain mandatory.
+
+### Verification method and observations
+
+The local Linux/PostgreSQL audit used a fresh snapshot of production release
+`20261110-221916-d50bfe1`, 1,974 memories, the unchanged production standing-recall
+assets, and `astra/high`. Implementation started from dev `c0eb4420`. The frozen
+20-question sample contains ten explicit and ten implicit tasks, with 34 expected
+fact instances. Its SHA-256 is
+`dcc55c7240df68a7006d6699e11f30b3d383d932ad8990970ec803009c71e430`.
+All 19 previously sampled target/equivalent records kept their statements,
+statuses and sensitivities in this snapshot. User questions stayed fixed; the
+reader generated the revised searches during real runtime execution.
+
+Each full cohort began from the snapshot, used fresh sessions and reset only
+memory-usage fields between questions. No formation, indexing or maintenance
+worker ran. The model could use read-only memory and knowledge tools; no external
+actions were available. Captured model inputs establish actual delivery, including
+verified equivalent records, and assistant review checks whether answers used the
+required facts. Citation presence alone does not earn answer-use credit. Private
+requests, answers, source comparisons and all intermediate observations remain
+outside the repository.
+
+| Observation | Facts ever delivered | Facts in final input | Facts used | Tasks satisfying all checked criteria |
+| --- | --- | --- | --- | --- |
+| Dev baseline | 33/34 | 33/34 | 33/34 | 19/20 |
+| Reader iteration 1 | 31/34 | 31/34 | 31/34 | 17/20 |
+| Reader iteration 2 | 32/34 | 32/34 | 32/34 | 18/20 |
+| Reader iteration 3 | 33/34 | 33/34 | 33/34 | 19/20 |
+| Partial retention diagnostic | 8/8 | 6/8 | 6/8 | 3/5 |
+| Two-search allocation | 32/34 | 31/34 | 31/34 | 18/20 |
+| Focused People allocation | 34/34 | 33/34 | 33/34 | 19/20 |
+| Duplicate-block diagnostic | 33/34 | 33/34 | 33/34 | 19/20 |
+| Complete role-label matching | 34/34 | 34/34 | 34/34 | 20/20 |
+| Final version, including temporal label bounds | 34/34 | 34/34 | 34/34 | 20/20 |
+
+Reader iterations 1 and 2 each also had one uncertain fact-use judgment; neither
+received credit for it. The partial diagnostic stopped after reproducing the
+loss of an earlier search result. The duplicate-block cohort completed twenty
+questions, but controlled probes overlapped its later cases after a portfolio
+failure; it is retained as a diagnostic and excluded from comparative evidence.
+The other full cohorts and the final verification use isolated audit workers.
+These observations are successive development versions, not independent repeated
+measurements or a held-out accuracy estimate.
+
+The remaining misses occurred in query formulation, context allocation and
+identity selection after the required facts were already stored. The final
+role-label policy is deliberately conservative: partial labels fall back to
+ordinary recall, while explicit names remain available. This small purposive
+sample does not certify general recall quality, advice correctness, unattended
+reconsolidation or M33 activation. No milestone acceptance criterion or activation
+gate is marked complete. The allocation and discovery amendments are recorded in
+proposed ADR-0310; other engineering-plan requirements remain unchanged. Reading
+lane A applies and is also the diff-derived minimum.
+
+The final cohort completed all twenty runs, used the semantic arm in every case,
+and delivered and used all 34 checked fact instances, with none uncertain or
+unreviewed. All 1,974 memory rows remained materially unchanged; only expected
+usage bookkeeping was excluded from that comparison. No recall-phase timeout
+was observed. Three tool calls were refused by the existing recall budget,
+without preventing completion. Recorded live model cost was USD 2.052968 for the
+cohort. An additional company in the collection answer was checked against its
+active, affirmed, direct memory record; this verifies stored support, not an
+independent real-world fact check.
+
+Regression commands and their observed behavioral failures are recorded in
+ADR-0310. The opt-in reader replay used `RUN_LIVE_MODEL_TESTS=1` and private
+`RECALL_AUDIT_ROOT` inputs in the Linux sandbox: six live tests passed and two
+unconfigured-provider tests skipped. Those replays isolate reader behavior;
+the final full runtime cohort above verifies the later tool and context changes.
+
+Final local verification used CircleCI Smarter Testing with discovery and
+execution routed into the Linux sandbox. The complete static partition passed
+10,072 tests, with three existing root-permission cases skipped; the complete
+contract partition passed 2,279 tests. The PostgreSQL People atom passed all 149
+cases, including the shared role and temporal-boundary regressions. Commands were
+`circleci testsuite run static --run-tests=all`,
+`circleci testsuite run contract --run-tests=all`, and
+`circleci testsuite run integration --run-tests=all
+-t '^tests/integration/test_people_persistence_m28.py$'`.
+`make lint typecheck`, `make citations-fix` and `make docs-check` passed. Citation
+repairs changed positions only; their recorded text digests were preserved.
+
+The implementation changes are confined to default reader guidance, versioned
+memory-tool composition/query preparation, shared context allocation, receipt
+equality validation, and focused People discovery/rendering. Regression coverage
+is in `tests/unit/test_context_memory_budget.py`, `tests/unit/test_memory_tools.py`,
+`tests/unit/test_people_context.py`, `tests/contract/test_retained_recall.py`,
+`tests/contract/test_runtime_recall_query_preparation.py`,
+`tests/integration/test_people_persistence_m28.py`, and the private-input live
+replay. Context, retrieval and People designs plus ADR-0310 document the behavior;
+other documentation edits repair citation positions and add ADR navigation.
+
+The owner-requested repairs and targeted audit are complete. Production was not
+modified. Existing chats preserve their pinned tool and instruction versions;
+new chats select these defaults after release. Release review, hosted CI and
+production delivery remain separate from this verified dev submission.

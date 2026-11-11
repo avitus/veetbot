@@ -35,8 +35,12 @@ async def test_composition_retains_pinned_legacy_memory_search() -> None:
         legacy = registry.get("memory.search", "1.1.0")
         assert legacy.spec.input_schema["required"] == ["text", "scope"]
         assert "belief_types" in legacy.spec.input_schema["properties"]
-        assert registry.get("memory.search").spec.version == "2.3.0"
-        for version, items, tokens in (("2.2.0", 20, 2000), ("2.3.0", 15, 1500)):
+        assert registry.get("memory.search").spec.version == "2.4.0"
+        for version, items, tokens in (
+            ("2.2.0", 20, 2000),
+            ("2.3.0", 15, 1500),
+            ("2.4.0", 7, 750),
+        ):
             registered = registry.get("memory.search", version)
             assert isinstance(registered, RegisteredTool)
             implementation = registered.implementation
@@ -48,6 +52,10 @@ async def test_composition_retains_pinned_legacy_memory_search() -> None:
                 current_scope="general",
             )
             assert (query.max_items, query.budget_tokens) == (items, tokens)
+            assert query.focused_people_context == (version == "2.4.0")
+            if version == "2.4.0":
+                assert query.identity_max_items == 20
+                assert query.identity_exclude_ids == ()
         planned = registry.get("memory.search", "2.1.0")
         assert "relationship_group" not in planned.spec.input_schema["properties"]
         original = memory()
@@ -125,7 +133,7 @@ async def test_live_search_does_not_ask_the_model_to_guess_hard_storage_filters(
         "A guessed storage kind must not exclude a differently classified true fact"
     )
     assert "type_hints" in search.input_schema["properties"]
-    assert search.version == "2.3.0"
+    assert search.version == "2.4.0"
     assert "relationship_group" in search.input_schema["properties"]
     assert search.input_schema["required"] == ["text"]
 

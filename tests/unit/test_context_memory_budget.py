@@ -374,6 +374,49 @@ async def test_current_search_and_fresh_automatic_evidence_share_original_caps()
     assert checkpoint.model_dump_json() == original
 
 
+async def test_two_current_searches_retain_both_facts_and_fresh_automatic_context() -> None:
+    from agent_core.bootstrap import build
+    from agent_core.tools.memory_search import MemorySearchTool
+    from agent_core.tools.registry import RegisteredTool
+    from tests.gates.test_runtime_tool_budget import _settings
+
+    async with build(settings=_settings(), principal=principal()) as app:
+        current = app.tool_pipeline._registry.get("memory.search")
+        assert isinstance(current, RegisteredTool)
+        implementation = current.implementation
+        assert isinstance(implementation, MemorySearchTool)
+        query = implementation.query(
+            {"text": "A missing supporting fact"},
+            tenant_id=principal().tenant_id,
+            principal_id=principal().principal_id,
+            current_scope="general",
+        )
+        retriever = CurrentRetriever()
+        checkpoint = _checkpoint()
+        checkpoint.pinned_tool_names.append("memory.search")
+        checkpoint.pinned_tool_versions["memory.search"] = current.spec.version
+        for call_id, fact in (
+            ("first", "Earlier required fact"),
+            ("second", "Later required fact"),
+        ):
+            checkpoint.conversation.extend(
+                search_result(call_id, text=fact, tokens=query.budget_tokens, items=query.max_items)
+            )
+        original = checkpoint.model_dump_json()
+        request = await _builder(retriever).build(
+            run(status=RunStatus.RUNNING), checkpoint, agent(), principal()
+        )
+        body = request.model_dump_json()
+        assert "Earlier required fact" in body
+        assert "Later required fact" in body
+        assert "<memory>base</memory>" in body
+        assert _correction_line() in body
+        assert OMITTED not in body
+        assert retriever.queries[0].budget_tokens + 2 * query.budget_tokens <= 2000
+        assert retriever.queries[0].max_items + 2 * query.max_items <= 20
+        assert checkpoint.model_dump_json() == original
+
+
 async def test_retention_spends_automatic_slots_on_evidence_missing_from_search() -> None:
     from agent_core.domain.memory import RecallQuery, RecallResult
     from tests.unit.test_context_recall_delta import _belief, _QueryFormer

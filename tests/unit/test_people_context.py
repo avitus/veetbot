@@ -1,6 +1,7 @@
 """People context never blends same-name identities or widens local memory scope."""
 
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import pytest
@@ -16,21 +17,115 @@ from tests.contract.people_fixtures import PeopleFields
 from tests.contract.support import NOW, SESSION_ID, ids, memory_uow_factory, principal
 
 
+@pytest.mark.parametrize("belief_count", [1, 5])
+@pytest.mark.parametrize("extra_kind", ["interaction", "relationship", "commitment"])
+async def test_focused_search_keeps_beliefs_before_filling_spare_space_with_interactions(
+    belief_count: int,
+    extra_kind: Literal["interaction", "relationship", "commitment"],
+) -> None:
+    from uuid import UUID
+
+    from agent_core.domain.memory import TracedPersonContext
+    from agent_core.tools.memory_search import MemorySearchTool
+
+    clock, factory = await memory_uow_factory()
+    retriever = HybridMemoryRetriever(factory, clock, ids(), principal())
+    tool = MemorySearchTool(
+        retriever,
+        model_planning=True,
+        overview_enabled=True,
+        retain_automatic=True,
+        retain_search_history=True,
+    )
+    beliefs = [
+        memory(belief_id=600 + i, statement=f"Iris fact {i}").model_copy(
+            update={"subject": f"Iris subject {i}"}
+        )
+        for i in range(belief_count)
+    ]
+    async with factory() as uow:
+        for belief in beliefs:
+            await uow.memories.upsert_belief(belief)
+    person = UUID(int=900)
+    contexts = [
+        TracedPersonContext(
+            record_id=UUID(int=901 + i),
+            revision=1,
+            person_ids=[person],
+            kind="person" if i == 0 else extra_kind,
+            text="Iris" if i == 0 else "Received email",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+        for i in range(3)
+    ]
+    query = tool.query(
+        {"text": "Iris"},
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        current_scope="project-a",
+    )
+    result = await retriever.recall(query, session_id=SESSION_ID, people_items=contexts)
+    assert {item.belief_id for item in result.items} == {belief.id for belief in beliefs}
+    assert contexts[0] in result.people, "Identity context must survive the fact-first allocation"
+    assert any(item.kind == extra_kind for item in result.people)
+    if belief_count == 1:
+        assert result.people == contexts, "Spare capacity must still carry recent interactions"
+    assert len(result.items) + len(result.people) <= query.max_items
+    assert result.tokens <= query.budget_tokens
+
+
 @pytest.mark.parametrize("role", ["father", "accountant", "coach", "emergency contact"])
+@pytest.mark.parametrize("focused", [False, True])
 @pytest.mark.parametrize(
     "restriction",
     [None, "ambiguous", "private", "expired", "unresolved", "indirect", "excluded", "permission"],
 )
 async def test_relationship_reference_retrieves_linked_facts_without_a_name(
-    role: str, restriction: str | None
+    role: str, restriction: str | None, focused: bool
 ) -> None:
     clock, factory = await memory_uow_factory()
-    await relationship_recall_contract(clock, factory, role, restriction)
+    await relationship_recall_contract(clock, factory, role, restriction, focused=focused)
 
 
 async def test_relationship_links_survive_more_recent_topical_distractors() -> None:
     clock, factory = await memory_uow_factory()
     await relationship_recall_contract(clock, factory, "coach", None, distractors=256)
+
+
+@pytest.mark.parametrize("role", ["portfolio CEO", "tennis coach", "estate accountant"])
+@pytest.mark.parametrize("partial", [False, True])
+async def test_focused_role_discovery_rejects_shared_topic_words(role: str, partial: bool) -> None:
+    clock, factory = await memory_uow_factory()
+    await qualified_relationship_recall_contract(clock, factory, role, partial)
+
+
+@pytest.mark.parametrize("inactive_label", ["expired", "future"])
+async def test_focused_role_label_must_be_current(inactive_label: str) -> None:
+    clock, factory = await memory_uow_factory()
+    await qualified_relationship_recall_contract(
+        clock, factory, "portfolio CEO", True, inactive_label=inactive_label
+    )
+
+
+async def qualified_relationship_recall_contract(
+    clock: FixedClock,
+    factory: UnitOfWorkFactory,
+    role: str,
+    partial: bool,
+    *,
+    inactive_label: str | None = None,
+) -> None:
+    await relationship_recall_contract(
+        clock,
+        factory,
+        role,
+        "partial_role" if partial else None,
+        query_text=f"Review my {role.split()[0]} plans."
+        if partial
+        else f"Choose a gift for my {role}.",
+        focused=True,
+        inactive_label=inactive_label,
+    )
 
 
 async def relationship_recall_contract(
@@ -40,7 +135,12 @@ async def relationship_recall_contract(
     restriction: str | None,
     *,
     distractors: int = 0,
+    query_text: str | None = None,
+    focused: bool = False,
+    inactive_label: str | None = None,
 ) -> None:
+    from datetime import timedelta
+
     from agent_core.domain.memory import BeliefType
     from agent_core.domain.people import PeopleEndpoint, RelationshipAssertion
     from agent_core.memory.profiles import DEFAULT_RETRIEVAL_PROFILE
@@ -93,6 +193,20 @@ async def relationship_recall_contract(
         if restriction == "private":
             edge = edge.model_copy(update={"sensitivity": Sensitivity.RESTRICTED})
         await uow.people.put(edge, expected_revision=0)
+        if inactive_label is not None:
+            await uow.people.put(
+                edge.model_copy(
+                    update={
+                        "id": uuid4(),
+                        "qualifier": role.split()[0],
+                        "valid_to": NOW if inactive_label == "expired" else None,
+                        "valid_from": NOW + timedelta(days=1)
+                        if inactive_label == "future"
+                        else None,
+                    }
+                ),
+                expected_revision=0,
+            )
         if restriction == "ambiguous":
             await uow.people.put(
                 edge.model_copy(
@@ -110,10 +224,11 @@ async def relationship_recall_contract(
         ),
     )
     query = recall_query(
-        text=f"Choose an exhibition for my {role}.", budget_tokens=2000
+        text=query_text or f"Choose an exhibition for my {role}.", budget_tokens=2000
     ).model_copy(
         update={
             "candidate_selection": "relevance",
+            "focused_people_context": focused,
             "exclude_ids": (relationship.id,) if restriction == "excluded" else (),
         }
     )
@@ -845,7 +960,11 @@ async def test_oversized_first_person_explicitly_advances_to_later_people(contin
     assert "Incomplete context" not in following.rendered
 
 
-async def test_overview_first_person_uses_full_budget_before_competing_beliefs() -> None:
+@pytest.mark.parametrize("interactions", [False, True])
+@pytest.mark.parametrize("focused_people", [False, True])
+async def test_overview_first_person_uses_full_budget_before_competing_beliefs(
+    interactions: bool, focused_people: bool
+) -> None:
     """A fitting person is not skipped because ordinary beliefs took their slots."""
     from uuid import UUID
 
@@ -859,7 +978,7 @@ async def test_overview_first_person_uses_full_budget_before_competing_beliefs()
             record_id=UUID(int=96000 + n),
             revision=1,
             person_ids=[person],
-            kind="relationship",
+            kind="interaction" if interactions else "relationship",
             text="A supported family relationship.",
             sensitivity=Sensitivity.INTERNAL,
         )
@@ -877,6 +996,7 @@ async def test_overview_first_person_uses_full_budget_before_competing_beliefs()
             "relationship_group": "family",
             "max_items": 20,
             "budget_tokens": 4000,
+            "focused_people_context": focused_people,
         }
     )
     result = await retriever.recall(query, session_id=SESSION_ID, people_items=contexts)

@@ -359,3 +359,4 @@ implementation without one.
 
 - [ADR-0308: Discover semantic browser regions in open shadow roots](0308-open-shadow-browser-regions.md)
 - [ADR-0309: Recall continuity and phase clocks (Proposed)](0309-recall-continuity-and-phase-clocks.md)
+- [ADR-0310: Retain both deliberate memory searches (Proposed)](0310-retain-both-deliberate-searches.md)

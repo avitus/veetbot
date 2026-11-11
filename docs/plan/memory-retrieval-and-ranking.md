@@ -761,7 +761,7 @@ Two tools, both returning `TrustLevel.MEMORY` data:
   personal context. The query names the fact needed to answer, such as home
   location, even when the question names another topic. Absence from the bounded
   snapshot or automatic recall does not establish that the fact is unknown.
-  The current `memory.search@2.3.0` uses `type_hints` as structured relevance
+  The current `memory.search@2.4.0` uses `type_hints` as structured relevance
   anchors, never guessed hard storage-type predicates (ADR-0198). Omitted scope
   resolves from the authenticated session, identically in preparation and execution;
   an explicit scope retains intentional cross-project lookup (ADR-0206). Explicit
@@ -773,6 +773,12 @@ Two tools, both returning `TrustLevel.MEMORY` data:
   reserving five items and 500 tokens for fresh automatic recall within the
   unchanged shared request allowance (ADR-0309). Existing pins retain their
   former allocation until a new session selects the current tool.
+  Version 2.4 bounds each result to seven items and 750 tokens so both permitted
+  deliberate searches can remain beside automatic recall. Validated duplicate
+  current blocks consume the allowance once; historical timestamps remain
+  significant. Focused People allocation and complete stored role labels keep
+  extra context and shared-topic identity matches from displacing requested facts
+  (ADR-0310). Existing versions retain their original semantics.
   Deliberate results pack whole evidence within both the token budget and the
   configured serialized inline byte allowance before creating their trace receipt.
   Headers and continuation instructions count toward those limits. Generic tool

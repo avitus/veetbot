@@ -1032,6 +1032,16 @@ and 500 tokens for fresh automatic evidence when `memory.search@2.3.0` is pinned
 Validated whole deliberate blocks share the remaining fifteen items and 1,500
 tokens; unused space remains available to automatic recall. The combined ceiling
 stays twenty items and 2,000 tokens. No automatic evidence is cached across calls.
+[ADR-0310](../adr/0310-retain-both-deliberate-searches.md) gives newly pinned
+`memory.search@2.4.0` a seven-item, 750-token limit per deliberate result, so both
+permitted searches fit as validated whole blocks alongside the automatic reserve.
+Unused deliberate space remains available to automatic recall; identity discovery
+keeps its original twenty-candidate ceiling. Older pins retain their allocation.
+Current 2.4 receipts also carry an equality digest that ignores only the outer
+observation timestamp. Source validation recomputes it from the trace; only then
+may assembly retain the newest of otherwise byte-identical blocks and reclaim
+the duplicate's allowance for automatic recall. Historical queries and older
+receipts retain their existing behavior. No returned evidence is truncated.
 New runtime reservations time each durably admitted recall phase separately,
 bounded by the run deadline, so model thinking cannot exhaust a later phase.
 

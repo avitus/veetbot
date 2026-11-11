@@ -61,10 +61,10 @@ AUTOMATIC_RESERVE = RecallAllowance(tokens=500, items=5)
 
 
 def automatic_reserve(checkpoint: RunCheckpoint) -> RecallAllowance:
-    """New search pins leave room for fresh automatic evidence (ADR-0309)."""
+    """New search pins leave room for fresh automatic evidence (ADRs 0309/0310)."""
     spec = checkpoint.pinned_tool_specs.get("memory.search")
     version = spec.version if spec else checkpoint.pinned_tool_versions.get("memory.search")
-    return AUTOMATIC_RESERVE if version == "2.3.0" else NO_RESERVE
+    return AUTOMATIC_RESERVE if version in {"2.3.0", "2.4.0"} else NO_RESERVE
 
 
 def ranking_block(result: RecallResult) -> RecallRankingBlock | None:
@@ -134,6 +134,7 @@ def select_search_results(
     indexes = _search_indexes(result)
     allowance = RecallAllowance(preserve_identity=reserve != NO_RESERVE)
     seen: set[str] = set()
+    seen_evidence: set[str] = set()
     omitted = False
     blocks = 0
     for index in reversed(indexes):
@@ -163,16 +164,27 @@ def select_search_results(
                 and item.memory_recall is not None
                 and item.memory_recall in permitted_receipts
             )
+        # Use only keys verified against authoritative traces. The first pass
+        # must still validate both receipts, so an invalid newer block cannot
+        # suppress an older valid presentation of the same evidence.
+        evidence_digest = (
+            item.memory_recall.current_evidence_sha256
+            if valid and permitted_receipts is not None and item.memory_recall is not None
+            else None
+        )
         if (
             valid
             and blocks < 4
             and digest not in seen
+            and evidence_digest not in seen_evidence
             and tokens <= allowance.tokens - reserve.tokens
             and items <= allowance.items - reserve.items
         ):
             blocks += 1
             assert digest is not None
             seen.add(digest)
+            if evidence_digest is not None:
+                seen_evidence.add(evidence_digest)
             # Only currently validated, actually rendered beliefs can suppress a
             # fresh read. Ranked-but-unrendered evidence is not already in context.
             returned = (
