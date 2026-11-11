@@ -14,6 +14,194 @@ import SwiftUI
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    @Test func testCollectionSwitchShowsCachedRowsBeforeSlowRefresh() async throws {
+        let requests = EmailRequestRecorder()
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let otherID = UUID()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            requests.append(request)
+            if requests.snapshot.count > 2 {
+                _ = gate.wait(timeout: .now() + 5)
+                return (502, Self.error("service_unavailable", "Temporary failure"))
+            }
+            let page = self.pageJSON(cursor: "next")
+            return (200, request.url!.query!.contains("view=inbox")
+                ? page.replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString) : page)
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { model.items.first?.id == otherID && !model.isReadingList }
+        model.setListView("priority")
+        // No yield or network wait is allowed before the cached list is visible.
+        #expect(model.items.map(\.id) == [threadID])
+        #expect(model.hasMore)
+        #expect(!model.isLoading)
+        try await waitForEmailTestCondition { requests.snapshot.count == 3 }
+        #expect(model.items.map(\.id) == [threadID])
+        #expect(!model.isLoading)
+        gate.signal()
+        try await waitForEmailTestCondition { !model.isReadingList }
+        #expect(model.items.map(\.id) == [threadID])
+        model.setListView("inbox")
+        #expect(model.items.map(\.id) == [otherID])
+    }
+
+    @Test(arguments: ["connection", "account", "search"])
+    func testCollectionCacheDoesNotCrossQueryBoundaries(boundary: String) async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, self.pageJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && !model.items.isEmpty }
+        switch boundary {
+        case "connection": model.resetConnection(); model.setListView("inbox")
+        case "account": model.setAccount("work")
+        default: model.setSearchText("unrelated")
+        }
+        model.setListView("priority")
+        #expect(model.items.isEmpty)
+    }
+
+    @Test func testHandledChangeInvalidatesCachedImportantList() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("dismiss") {
+                return (200, self.threadJSON().replacingOccurrences(of: "\"summary\"",
+                    with: "\"dismissed_revision\":1,\"summary\""))
+            }
+            return (200, self.pageJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && !model.items.isEmpty }
+        let row = try #require(model.items.first)
+        #expect(await model.setThreadHandled(row, handled: true, confirms: false))
+        model.setListView("priority")
+        #expect(model.items.isEmpty, "Do not redisplay the old unhandled Important snapshot")
+    }
+
+    /// A thread read can discover mailbox changes made on another device.
+    @Test(arguments: ["\"in_inbox\":false", "\"in_spam\":true", "\"dismissed_revision\":1"])
+    func testThreadReadInvalidatesChangedCollectionCache(change: String) async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, self.threadJSON().replacingOccurrences(of: "\"summary\"", with: "\(change),\"summary\""))
+            }
+            return (200, self.pageJSON())
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && !model.items.isEmpty }
+        await model.openThread(threadID)
+        model.setListView("priority")
+        #expect(model.items.isEmpty, "Do not restore a snapshot invalidated by another device")
+    }
+
+    /// A new source revision reopens handled mail even if the dismissal marker stays unchanged.
+    @Test(arguments: [1, 2])
+    func testThreadRevisionInvalidatesCacheOnlyWhenHandledStateChanges(revision: Int) async throws {
+        let otherID = UUID()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            let handled = self.threadJSON().replacingOccurrences(of: "\"summary\"", with: "\"dismissed_revision\":1,\"summary\"")
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, handled.replacingOccurrences(of: "\"revision\":1", with: "\"revision\":\(revision)"))
+            }
+            if request.url!.query?.contains("view=inbox") == true {
+                return (200, "{\"items\":[\(handled)],\"next_cursor\":null}")
+            }
+            return (200, self.pageJSON().replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString))
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        #expect(model.items.map(\.id) == [otherID])
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && model.items.first?.id == threadID }
+        await model.openThread(threadID)
+        #expect(model.thread?.isHandled == (revision == 1))
+        model.setListView("priority")
+        #expect(model.items.map(\.id) == (revision == 1 ? [otherID] : []))
+    }
+
+    /// An older reload or page must not restore rows invalidated by a newer detail read.
+    @Test(arguments: [false, true])
+    func testThreadReadInvalidatesInflightCollectionRead(paging: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON(), nil) }
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, self.archiveThreadJSON(inInbox: false), nil)
+            }
+            requests.append(request)
+            if requests.snapshot.count > 3 { return (502, Self.error("service_unavailable", "Temporary failure"), nil) }
+            let held = requests.snapshot.count == 3
+            return (200, self.pageJSON(cursor: held && paging ? nil : "next"), held ? gate : nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.reload()
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && requests.snapshot.count == 2 }
+        let pending = Task {
+            if paging { await model.loadMore() } else { await model.reload(preserveOrder: true) }
+        }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        await model.openThread(threadID)
+        // The replacement read may own the flag now; the abandoned read stays gated.
+        try await waitForEmailTestCondition { requests.snapshot.count == 4 && !model.isReadingList }
+        #expect(!model.isReadingList && !model.isLoading)
+        #expect(model.items.isEmpty, "The accepted archive must also remove the visible Inbox row")
+        gate.release()
+        await pending.value
+        model.setListView("priority")
+        model.setListView("inbox")
+        #expect(model.items.isEmpty, "An obsolete response must not recreate the invalidated snapshot")
+    }
+
+    /// A changed detail replaces invalid pagination without clearing surviving visible mail.
+    @Test func testThreadReadRestoresPaginationAfterMailboxChange() async throws {
+        let requests = EmailRequestRecorder()
+        let gate = EmailArchiveResponseGate()
+        let survivorID = UUID()
+        let survivor = threadJSON().replacingOccurrences(of: threadID.uuidString, with: survivorID.uuidString)
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON(), nil) }
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, self.archiveThreadJSON(inInbox: false), nil)
+            }
+            requests.append(request)
+            if requests.snapshot.count == 1 {
+                return (200, "{\"items\":[\(self.threadJSON()),\(survivor)],\"next_cursor\":\"old\"}", nil)
+            }
+            return (200, "{\"items\":[\(survivor)],\"next_cursor\":\"fresh\"}", gate)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        #expect(model.items.map(\.id) == [survivorID])
+        #expect(!model.isLoading)
+        try await waitForEmailTestCondition { gate.isWaiting }
+        #expect(model.items.map(\.id) == [survivorID], "Keep surviving rows while replacement pagination loads")
+        #expect(requests.snapshot.last?.url?.query?.contains("view=priority") == true)
+        gate.release()
+        try await waitForEmailTestCondition { !model.isReadingList }
+        #expect(model.hasMore, "Replacement metadata must restore automatic pagination")
+        #expect(model.thread?.id == threadID, "List repair must preserve the selected detail")
+    }
+
     /// Opening mail is inert; each load or retry requires another explicit request.
     @Test func testImagesLoadOnlyByExplicitRequestAndDoNotRetryOnFailure() async throws {
         let requests = EmailRequestRecorder()
@@ -71,8 +259,8 @@ import SwiftUI
             return (200, "{\"items\":[\(other)],\"next_cursor\":\"next\"}")
         }
         defer { model.resetConnection() }
-        model.setListView("priority")
-        for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.listView == "priority")
+        await model.reload()
         await model.openThread(threadID)
         model.scrollAnchor = threadID
         if handled {
@@ -1495,7 +1683,7 @@ import SwiftUI
         })
         #expect(model.collectionCounts == nil)
         model.resetConnection()
-        #expect(model.collection == .inbox)
+        #expect(model.listView == "priority")
         #expect(model.searchText.isEmpty)
     }
 

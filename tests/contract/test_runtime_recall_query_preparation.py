@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from agent_core.context.recall_budget import automatic_reserve, select_search_results
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.context import WorkingState
 from agent_core.domain.memory import RecallQuery
@@ -18,12 +19,14 @@ from tests.contract.support import RUN_ID, SESSION_ID, agent, principal
 from tests.contract.test_runtime_semantic_queries_contract import runtime_stack
 
 
+@pytest.mark.parametrize("search_version", ["2.1.0", "2.2.0", "2.3.0", "2.4.0"])
 @pytest.mark.parametrize("deliberate", [False, True])
 @pytest.mark.parametrize("task_context", [False, True])
 @pytest.mark.parametrize("omit_scope", [False, True])
 async def test_prepared_queries_match_the_governed_reader(
-    deliberate: bool, task_context: bool, omit_scope: bool
+    deliberate: bool, task_context: bool, omit_scope: bool, search_version: str
 ) -> None:
+    """Verify prepared queries match the governed reader."""
     _, factory, _, _, retriever, _ = await runtime_stack()
     async with factory() as uow:
         live = await uow.runs.get(RUN_ID, principal())
@@ -40,13 +43,23 @@ async def test_prepared_queries_match_the_governed_reader(
     former = DeterministicQueryFormer(
         principal(), planning="task_context" if task_context else "baseline", admitted=lambda: True
     )
-    tool = MemorySearchTool(retriever, model_planning=True)
+    tool = MemorySearchTool(
+        retriever,
+        model_planning=True,
+        overview_enabled=search_version != "2.1.0",
+        retain_automatic=search_version in {"2.3.0", "2.4.0"},
+        retain_search_history=search_version == "2.4.0",
+    )
+    checkpoint.pinned_tool_names.append("memory.search")
+    checkpoint.pinned_tool_versions["memory.search"] = tool.spec.version
     expected = former.form(
         live,
         WorkingStateManager.load(checkpoint.working_state),
         "Suggest breakfast options",
         current_scope=project_scope(session.metadata),
     )
+    _, allowance, _ = select_search_results([], reserve=automatic_reserve(checkpoint))
+    expected = [bounded for query in expected if (bounded := allowance.bound(query)) is not None]
     if deliberate:
         args: dict[str, Any] = {
             "text": "Which meal fits my constraints?",

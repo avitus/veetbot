@@ -37,12 +37,50 @@ from tests.contract.test_people_store_contract import (
 from tests.integration.m2_support import database_settings
 
 
+@pytest.mark.parametrize("role", ["portfolio CEO", "tennis coach", "estate accountant"])
+@pytest.mark.parametrize("partial", [False, True])
+async def test_postgres_qualified_relationship_discovery(role: str, partial: bool) -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, session
+    from tests.unit.test_people_context import qualified_relationship_recall_contract
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await qualified_relationship_recall_contract(clock, app.uow_factory, role, partial)
+
+
+@pytest.mark.parametrize("inactive_label", ["expired", "future"])
+async def test_postgres_qualified_relationship_label_must_be_current(inactive_label: str) -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, session
+    from tests.unit.test_people_context import qualified_relationship_recall_contract
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await qualified_relationship_recall_contract(
+            clock, app.uow_factory, "portfolio CEO", True, inactive_label=inactive_label
+        )
+
+
 @pytest.mark.parametrize("role", ["father", "accountant", "coach", "emergency contact"])
+@pytest.mark.parametrize("focused", [False, True])
 @pytest.mark.parametrize(
     "restriction",
     [None, "ambiguous", "private", "expired", "unresolved", "indirect", "excluded", "permission"],
 )
-async def test_postgres_relationship_discovery(role: str, restriction: str | None) -> None:
+async def test_postgres_relationship_discovery(
+    role: str, restriction: str | None, focused: bool
+) -> None:
     from agent_core.bootstrap import build
     from tests.contract.support import agent, session
     from tests.unit.test_people_context import relationship_recall_contract
@@ -54,7 +92,9 @@ async def test_postgres_relationship_discovery(role: str, restriction: str | Non
         async with app.uow_factory() as uow:
             await uow.agents.put(agent())
             await uow.sessions.create(session())
-        await relationship_recall_contract(clock, app.uow_factory, role, restriction)
+        await relationship_recall_contract(
+            clock, app.uow_factory, role, restriction, focused=focused
+        )
 
 
 @pytest.mark.parametrize(

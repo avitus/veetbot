@@ -5,6 +5,7 @@ survives; the client always offers the unchanged retained source alongside this 
 """
 
 import re
+from dataclasses import dataclass, field
 from html import unescape
 from html.parser import HTMLParser
 from itertools import groupby
@@ -188,6 +189,27 @@ def _with_line_breaks(lines: list[str], flowing: set[int]) -> list[str]:
     return result
 
 
+@dataclass
+class _Table:
+    """Offsets into sanitized parts; unsupported layouts keep their existing prose."""
+
+    start: int
+    eligible: bool = True
+    rows: list[list[str]] = field(default_factory=list)
+    cell_start: int | None = None
+    column_span: int = 1
+
+    def markdown(self) -> str | None:
+        """Render a closed rectangular data table, leaving unsupported layouts as prose."""
+        if not self.eligible or self.cell_start is not None or len(self.rows) < 2:
+            return None
+        width = len(self.rows[0])
+        if width < 2 or any(len(row) != width for row in self.rows):
+            return None
+        rows = [self.rows[0], ["---"] * width, *self.rows[1:]]
+        return "\n\n" + "\n".join("| " + " | ".join(row) + " |" for row in rows) + "\n\n"
+
+
 class _HTMLText(HTMLParser):
     """Extract inert text and explicit links, without a WebView or resource loader."""
 
@@ -199,6 +221,7 @@ class _HTMLText(HTMLParser):
         self.hidden: list[str] = []
         self.anchor: tuple[int, str] | None = None
         self.list_items: list[int] = []
+        self.tables: list[_Table] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Retain visible formatting and bounded public image references, never active HTML."""
@@ -224,6 +247,24 @@ class _HTMLText(HTMLParser):
             if not void:
                 self.hidden.append(tag)
             return
+        if tag == "table":
+            if self.tables:
+                self.tables[-1].eligible = False
+            self.tables.append(_Table(len(self.parts), values.get("role") != "presentation"))
+        elif self.tables:
+            table = self.tables[-1]
+            if tag == "caption":
+                table.eligible = False
+            elif tag == "tr":
+                table.rows.append([])
+            elif tag in {"td", "th"}:
+                if table.cell_start is not None or not table.rows:
+                    table.eligible = False
+                span = values.get("colspan") or "1"
+                table.column_span = int(span) if re.fullmatch(r"[0-9]{1,2}", span) else 0
+                if values.get("rowspan", "1") != "1" or not 1 <= table.column_span <= 64:
+                    table.eligible = False
+                table.cell_start = len(self.parts)
         if tag == "img" and self.image_urls is not None and len(self.image_urls) < 20:
             url = values.get("src") or ""
             dimensions = [values.get("width") or "", values.get("height") or ""]
@@ -272,11 +313,28 @@ class _HTMLText(HTMLParser):
             self.anchor = (len(self.parts), values.get("href") or "")
 
     def handle_endtag(self, tag: str) -> None:
+        """Close visible structures and render only complete supported tables."""
         if self.hidden:
             if tag in self.hidden:
                 index = len(self.hidden) - 1 - self.hidden[::-1].index(tag)
                 del self.hidden[index:]
             return
+        if self.tables:
+            table = self.tables[-1]
+            if tag in {"td", "th"} and table.cell_start is not None:
+                cell = " ".join("".join(self.parts[table.cell_start :]).split())
+                if "veetbot-email-image:" in cell:
+                    table.eligible = False
+                if table.rows and table.eligible:
+                    table.rows[-1].extend(
+                        [cell.replace("|", r"\|")] + [""] * (table.column_span - 1)
+                    )
+                table.cell_start = None
+            elif tag == "table":
+                self.tables.pop()
+                rendered = table.markdown()
+                if rendered is not None:
+                    self.parts[table.start :] = [rendered]
         if tag == "a" and self.anchor:
             start, url = self.anchor
             label = "".join(self.parts[start:]).strip()
@@ -448,12 +506,15 @@ def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None =
     return cleaned
 
 
-def merge_image_body(plain: str, rich: str, html_text: str) -> str:
+def merge_image_body(
+    plain: str, rich: str, html_text: str, *, require_overlap: bool = False
+) -> str:
     """Retain plain MIME paragraphs absent from the image-bearing HTML alternative.
 
     Compare visible words rather than Markdown formatting, wrapping, punctuation or
     link destinations. Unmatched paragraphs precede the HTML because MIME parts do
     not provide a reliable position for prose omitted from one alternative.
+    A text-only alternative can require shared prose before replacing the reader.
     """
 
     def words(value: str) -> str:
@@ -473,8 +534,13 @@ def merge_image_body(plain: str, rich: str, html_text: str) -> str:
 
     represented = " " + words(html_text) + " "
     missing: list[str] = []
+    overlaps = False
     for paragraph in re.split(r"\n\s*\n", plain):
         normalized = words(paragraph)
         if normalized and " " + normalized + " " not in represented:
             missing.append(paragraph)
+        elif normalized:
+            overlaps = True
+    if require_overlap and plain and not overlaps:
+        return plain
     return "\n\n".join([*missing, rich])

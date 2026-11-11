@@ -98,8 +98,9 @@ or automatic credential entry is introduced. See
 W1–W6 remain partial. Later slices added verified sign-in resumption, a reviewed
 X Home briefing workflow and bounded startup recovery (ADRs 0164, 0175 and 0177).
 Those capabilities do not establish broad site coverage, task quality or capacity.
-Frame coverage, aggregate operational reporting and the broader W7–W10
-capabilities remain outstanding. Live site contracts use the websites, tasks and account/action
+Frame coverage and the broader W7–W10 capabilities remain outstanding. The
+2026-11-10 continuation below adds aggregate reporting construction. Live site
+contracts use the websites, tasks and account/action
 scope the owner has already selected; ask only for genuinely missing scope.
 Technical predicate and workflow maintenance belongs to the implementation,
 not to the user.
@@ -113,8 +114,42 @@ hosted responses, the existing transient run stream and native activity rows
 ([ADR-0306](adr/0306-live-browser-progress.md)). Terminal diagnostics retain
 replayable results. Progress delivery is best effort, with bounded queues and
 finite publish waits. A lost browser response still follows the existing
-uncertain-effect rules. Review, production delivery and live acceptance remain
-pending; W2 aggregate reporting and the broader program exit evidence remain open.
+uncertain-effect rules. [PR #248](https://github.com/avitus/veetbot/pull/248)
+merged as `d50bfe1c897a83245b67424b169ac73231e29297` after a clean review and
+hosted verification. Application and documentation/site delivery passed;
+the public API returned HTTP 200 and all three public release identities matched
+`20261110-221916-d50bfe1`. Live-site acceptance and the broader program exit
+evidence remain open.
+
+The same continuation adds `agent run browser-report --hours N [--json]`
+([ADR-0307](adr/0307-browser-operation-report.md)). It aggregates bounded terminal
+phase diagnostics for the configured owner, including duration percentiles,
+closed failure groups, missing/invalid metadata and explicit sample truncation.
+It reuses existing event retention and introduces no capture store or external
+metrics service. This report belongs to the owner's direct-`dev` continuation.
+It is not a live-site quality benchmark; production availability and the broader
+W2 exit evidence remain separate. ADR-0307 records the local verification.
+
+The next W3 slice adds semantic-region discovery and focus inside open shadow
+roots ([ADR-0308](adr/0308-open-shadow-browser-regions.md)). Web-component forms,
+dialogs and status messages share the existing bounded evidence interface.
+Versioned coverage discloses the wider scope; composed-ancestor checks exclude
+hidden and editable hosts and slot ancestors. Frames, closed roots and collection
+extraction's separate scope are unchanged. This is construction for direct
+`dev` delivery; live-site acceptance and production availability remain separate.
+
+The W3 follow-up applies active-dialog-first control ranking to those open roots,
+including dialogs that host their own shadow content. Bounded discovery excludes
+hidden and editable composed ancestors; projection and control continuation keep
+the task controls ahead of navigation. This completes that construction gap in
+ADR-0163, without changing action authority or claiming the whole W3 exit gate.
+
+The next W4 slice extends DOM readiness to the open roots already covered by
+observations. It discovers newly attached roots within bounded polling, removes
+detached subscriptions, and reports `bound_expired` on discovery limits instead
+of a misleading `dom_quiet`. The existing two-second deadline and single-action
+semantics remain. This is construction evidence under ADR-0159, separate from
+live-site and production acceptance.
 
 ### Production diagnosis — 2026-10-18
 

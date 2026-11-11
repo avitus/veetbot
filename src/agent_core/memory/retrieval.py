@@ -53,6 +53,7 @@ from agent_core.domain.memory import (
 from agent_core.domain.memory_candidates import candidate_strength
 from agent_core.domain.memory_sources import SourceRecoveryObservation
 from agent_core.domain.messages import MemoryRecallUsage, TextPart
+from agent_core.domain.recall_evidence import current_evidence_digest
 from agent_core.domain.recall_execution import recall_search
 from agent_core.domain.reconsolidation_merge import normalize_claim
 from agent_core.domain.reconsolidation_operations import StoredMerge
@@ -592,6 +593,7 @@ class HybridMemoryRetriever:
         semantic_queries: SemanticQueryLookup | None,
         recover_sources: bool,
     ) -> RecallResult:
+        """Rank governed evidence and render whole records within shared recall limits."""
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
         )
@@ -873,11 +875,27 @@ class HybridMemoryRetriever:
         # budget before beliefs compete, otherwise a small reservation can be
         # mistaken for an intrinsically oversized person and skip their evidence.
         first_person = page_people[0] if page_people else None
+        focused_people = effective_query.focused_people_context and first_person is None
+        if focused_people:
+            policy_version += "+focused-people@1"
+            render_policy += "+focused-people@1"
+            eligible_people.sort(
+                key=lambda item: {"person": 0, "relationship": 1, "commitment": 2}.get(item.kind, 3)
+            )
         if first_person is not None:
             eligible_people.sort(key=lambda item: first_person not in item.person_ids)
         selected_people: list[TracedPersonContext] = []
         people_rendered = ""
         for context_item in eligible_people:
+            if focused_people:
+                if context_item.kind not in {"person", "relationship"}:
+                    continue
+                if context_item.kind == "relationship" and any(
+                    previous.kind == "relationship"
+                    and not set(previous.person_ids).isdisjoint(context_item.person_ids)
+                    for previous in selected_people
+                ):
+                    continue
             proposed = people_rendered + "\n" + _person_line(context_item)
             if (
                 len(selected_people) < effective_query.max_items
@@ -1320,6 +1338,7 @@ class HybridMemoryRetriever:
     async def _validate_retained(
         self, usage: MemoryRecallUsage, *, session_id: UUID, run_id: UUID
     ) -> bool:
+        """Revalidate a retained receipt against its authoritative trace and current sources."""
         assert usage.trace_id is not None
         async with self._uow_factory() as uow, uow.people.lock(self._principal):
             try:
@@ -1336,6 +1355,12 @@ class HybridMemoryRetriever:
                 or trace.passages
                 or len(trace.beliefs) + len(trace.people) != usage.items
                 or len(trace.beliefs) + len(trace.people) > 20
+                or (usage.returned_ids is not None and usage.returned_ids != tuple(trace.returned))
+                or (
+                    usage.current_evidence_sha256 is not None
+                    and usage.current_evidence_sha256
+                    != current_evidence_digest(trace.rendered, trace.query)
+                )
             ):
                 return False
             query = trace.query

@@ -21,6 +21,9 @@ from agent_core.domain.memory import (
     RecallResult,
     Sensitivity,
     TracedPersonContext,
+    lexical_term_matched,
+    lexical_tokens,
+    recall_term_lexemes,
 )
 from agent_core.domain.memory_candidates import candidate_strength
 from agent_core.domain.messages import MemoryRecallUsage
@@ -668,6 +671,7 @@ class PeopleContextService:
         # This is identity discovery, not a hard type filter on the final facts.
         # Keep every visibility restriction and use ordinary bounded lexical
         # selection; no inferred role vocabulary or extra encoder call.
+        """Resolve one governed identity, requiring full role labels for focused recall."""
         discovery = query.model_copy(
             update={
                 "belief_types": [BeliefType.RELATIONSHIP],
@@ -677,7 +681,10 @@ class PeopleContextService:
                 "expand_ids": (),
                 "subjects": [],
                 "sensitivity_ceiling": ceiling,
-                "max_items": min(query.max_items, 20),
+                "max_items": min(query.identity_max_items or query.max_items, 20),
+                "exclude_ids": query.exclude_ids
+                if query.identity_exclude_ids is None
+                else query.identity_exclude_ids,
             }
         )
         records = await uow.memories.query(discovery)
@@ -701,6 +708,40 @@ class PeopleContextService:
             and isinstance(people[0], Person)
             and is_safe_text(people[0].display_name)
         ):
+            if query.focused_people_context:
+                edges = await uow.people.query(
+                    PeopleQuery(
+                        tenant_id=principal.tenant_id,
+                        principal_id=principal.principal_id,
+                        sensitivity_ceiling=ceiling,
+                        kinds=["relationship"],
+                        person_id=people[0].id,
+                        belief_ids=evidence,
+                        as_of=query.as_of or self._retriever.current_time(),
+                        known_at=query.known_at,
+                        limit=100,
+                    )
+                )
+                if len(edges) > 100:
+                    return [], False, ()
+                tokens = lexical_tokens(query.text or "")
+                evidence = []
+                for edge in edges:
+                    if (
+                        not isinstance(edge, RelationshipAssertion)
+                        or edge.unresolved
+                        or not any(
+                            endpoint.kind == "owner" for endpoint in (edge.subject, edge.object)
+                        )
+                    ):
+                        continue
+                    label = edge.qualifier or (edge.predicate if edge.predicate != "other" else "")
+                    terms = recall_term_lexemes(label, fold=True)
+                    if terms and all(lexical_term_matched(forms, tokens) for forms in terms):
+                        evidence.append(edge.belief_id)
+                evidence = list(dict.fromkeys(evidence))
+                if not evidence:
+                    return [], False, ()
             return [people[0].id], True, tuple(evidence)
         return [], bool(people), ()
 

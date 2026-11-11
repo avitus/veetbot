@@ -8,6 +8,8 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from agent_core.adapters.browser.page_readiness import DOM_QUIET_SCRIPT
+from agent_core.domain.browser import BrowserAction, BrowserActionKind
 from agent_core.domain.browser_diagnostics import collect_browser_diagnostics
 from tests.unit.test_browser_runtime_real_chromium import browsing, html
 
@@ -112,6 +114,182 @@ async def test_continuously_changing_dom_reports_expired_readiness_bound() -> No
         assert observation.model_dump().get("readiness") == "bound_expired"
         readiness = next(p for p in collector.snapshot().phases if p.phase == "readiness")
         assert readiness.outcome == "bound_expired"
+
+
+@pytest.mark.parametrize("shape", ["existing", "attached", "nested"])
+async def test_changing_open_shadow_dom_cannot_report_quiet(shape: str) -> None:
+    """Verify changing open shadow dom cannot report quiet."""
+
+    async def home(request: Request) -> Response:
+        """Serve the synthetic page used to observe browser behavior."""
+        del request
+        return html(
+            '<div id="host"></div>',
+            script="""
+            function start() {
+                let root = document.querySelector('#host').attachShadow({mode:'open'});
+                if (NESTED) {
+                    root.innerHTML = '<div></div>';
+                    root = root.firstElementChild.attachShadow({mode:'open'});
+                }
+                root.innerHTML = '<button>Changing</button>';
+                setInterval(() => {
+                    root.querySelector('button').textContent = String(Date.now());
+                }, 50);
+            }
+            setTimeout(start, DELAY);
+            """.replace("NESTED", "true" if shape == "nested" else "false").replace(
+                "DELAY", "250" if shape == "attached" else "0"
+            ),
+        )
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        with collect_browser_diagnostics(clock=asyncio.get_running_loop().time) as collector:
+            observed = await runtime.navigate(site.url("/"))
+        assert observed.readiness == "bound_expired"
+        assert next(p for p in collector.snapshot().phases if p.phase == "readiness").outcome == (
+            "bound_expired"
+        )
+
+
+async def test_shadow_action_settles_after_final_update_without_repeating_effect() -> None:
+    """Verify shadow action settles after final update without repeating effect."""
+    effects: list[bool] = []
+
+    async def home(request: Request) -> Response:
+        del request
+        return html(
+            '<button id="send">Submit</button><div id="host"></div>',
+            script="""
+            document.querySelector('#send').onclick = () => {
+                fetch('/effect', {method:'POST'});
+                const root = document.querySelector('#host').attachShadow({mode:'open'});
+                root.innerHTML = '<div role="status">Working</div>';
+                let count = 0;
+                const timer = setInterval(() => {
+                    root.firstElementChild.textContent = ++count === 6 ? 'Saved' : String(count);
+                    if (count === 6) clearInterval(timer);
+                }, 100);
+            };
+            """,
+        )
+
+    async def effect(request: Request) -> Response:
+        del request
+        effects.append(True)
+        return Response("ok")
+
+    async with browsing([Route("/", home), Route("/effect", effect, methods=["POST"])]) as (
+        site,
+        runtime,
+    ):
+        initial = await runtime.navigate(site.url("/"))
+        result = await runtime.act(
+            BrowserAction(
+                kind=BrowserActionKind.CLICK,
+                ref=initial.elements[0].ref,
+                expected_revision=initial.revision,
+            )
+        )
+        assert result.readiness == "dom_quiet"
+        assert any(region.text == "Saved" for region in result.regions)
+        assert effects == [True]
+
+
+@pytest.mark.parametrize("scope", ["closed", "frame", "detached"])
+async def test_readiness_does_not_follow_out_of_scope_or_detached_roots(scope: str) -> None:
+    """Verify readiness does not follow out of scope or detached roots."""
+
+    async def home(request: Request) -> Response:
+        """Serve the synthetic page used to observe browser behavior."""
+        del request
+        if scope == "frame":
+            return html(
+                '<button>Ready</button><iframe srcdoc="<p>Private frame</p>'
+                "<script>setInterval(() => document.querySelector('p').textContent = "
+                'String(Date.now()), 50)</script>"></iframe>'
+            )
+        return html(
+            '<button>Ready</button><div id="host"></div>',
+            script="""
+            const host = document.querySelector('#host');
+            const root = host.attachShadow({mode: MODE});
+            root.innerHTML = '<p>Changing</p>';
+            setInterval(() => root.firstElementChild.textContent = String(Date.now()), 50);
+            if (DETACH) setTimeout(() => host.remove(), 250);
+            """.replace("MODE", "'closed'" if scope == "closed" else "'open'").replace(
+                "DETACH", "true" if scope == "detached" else "false"
+            ),
+        )
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        result = await runtime.navigate(site.url("/"))
+        assert result.readiness == "dom_quiet"
+        assert result.text == "Ready"
+
+
+@pytest.mark.parametrize(
+    "case", ["quiet", "changing", "nodes", "roots", "root_limit", "total", "observer_error"]
+)
+async def test_readiness_limits_and_cleanup(case: str) -> None:
+    """Verify readiness limits and cleanup."""
+
+    async def home(request: Request) -> Response:
+        del request
+        return html('<div id="host"></div>')
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        await runtime.navigate(site.url("/"))
+        assert runtime._page is not None
+        await runtime._page.evaluate(
+            """kind => {
+                const host = document.querySelector('#host');
+                if (kind === 'nodes' || kind === 'total')
+                    host.innerHTML = '<span></span>'.repeat(kind === 'nodes' ? 9000 : 6000);
+                if (kind === 'roots' || kind === 'root_limit') {
+                    for (let i = 0; i < (kind === 'roots' ? 65 : 64); i++) {
+                        const child = document.createElement('div');
+                        host.append(child); child.attachShadow({mode:'open'});
+                    }
+                }
+                if (kind === 'changing' || kind === 'total')
+                    setInterval(() => host.setAttribute('data-tick', String(Date.now())), 50);
+                if (kind === 'observer_error') host.attachShadow({mode:'open'});
+                const state = window.cleanup = {timers: new Set(), observers: []};
+                const NativeObserver = window.MutationObserver;
+                window.MutationObserver = class extends NativeObserver {
+                    constructor(callback) { super(callback); state.observers.push(this); }
+                    observe(...args) {
+                        if (kind === 'observer_error' && args[0] instanceof ShadowRoot)
+                            throw new Error('Subscription failed');
+                        this.active = true; return super.observe(...args);
+                    }
+                    disconnect() { this.active = false; return super.disconnect(); }
+                };
+                const timeout = window.setTimeout, interval = window.setInterval;
+                const clear = window.clearTimeout, clearRepeat = window.clearInterval;
+                window.setTimeout = (callback, ms) => {
+                    const id = timeout(() => { state.timers.delete(id); callback(); }, ms);
+                    state.timers.add(id); return id;
+                };
+                window.setInterval = (callback, ms) => {
+                    const id = interval(callback, ms); state.timers.add(id); return id;
+                };
+                window.clearTimeout = id => { state.timers.delete(id); clear(id); };
+                window.clearInterval = id => { state.timers.delete(id); clearRepeat(id); };
+            }""",
+            case,
+        )
+        started = monotonic()
+        quiet = await runtime._page.evaluate(
+            DOM_QUIET_SCRIPT, [300, 5000 if case == "total" else 800]
+        )
+        assert quiet is (case in {"quiet", "root_limit"})
+        assert monotonic() - started < 4, "discovery did not stop at its own resource bound"
+        assert await runtime._page.evaluate(
+            """() => ({timers: cleanup.timers.size,
+                observers: cleanup.observers.filter(observer => observer.active).length})"""
+        ) == {"timers": 0, "observers": 0}
 
 
 async def test_delayed_action_postcondition_never_duplicates_the_server_effect() -> None:

@@ -1133,7 +1133,9 @@ subcommand under an existing command is not a new command.
 [event-log-and-persistence.md](event-log-and-persistence.md) adds `export`
 on that basis, making the reserved set four words. ADR-0131 adds `latency`,
 a read-only, aggregates-only latency report over recent Chat turns, making
-it five. A spec adding one pays exactly two costs — a line here and one more
+it five. ADR-0205 adds `reliability`; ADR-0307 adds `browser-report`, an
+owner-scoped, content-free report over terminal browser diagnostics. A spec adding
+one pays exactly two costs — a line here and one more
 prompt that needs `--` — and both are cheaper than a thirteenth top-level
 noun, because the twelve is a number Section 17 states and this document's
 own heading repeats.
@@ -1432,7 +1434,8 @@ the plan's text stands with an annotation rather than a replacement.
 15. **CLI results go to stdout and progress goes to stderr**, so the
     Milestone 1 demonstration's six flow lines and its final answer are
     separable without a flag.
-16. **`get`, `events`, `cancel`, `export`, and `latency` are reserved words
+16. **`get`, `events`, `cancel`, `export`, `latency`, `reliability`, and
+    `browser-report` are reserved words
     after `agent run`.** The residual collision with a prompt that is exactly one
     of them is accepted, with `--` as the escape, rather than renaming a
     command the plan fixed. The set is open to a subject spec that needs a

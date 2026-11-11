@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from jsonschema import Draft202012Validator
 
 from agent_core.context.builder import current_user_text
-from agent_core.context.recall_budget import select_current_search_results
+from agent_core.context.recall_budget import automatic_reserve, select_current_search_results
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
@@ -32,25 +32,45 @@ class SemanticRecallPreparation:
         *,
         inline_output_bytes: int = 4096,
     ) -> None:
+        """Register every retained search version for matching preparation and execution."""
         self._factory, self._principal = factory, principal.model_copy(deep=True)
         self._retriever, self._former = retriever, former
         self._tool = MemorySearchTool(
             retriever,
             model_planning=True,
             overview_enabled=True,
+            retain_automatic=True,
+            retain_search_history=True,
             inline_output_bytes=inline_output_bytes,
         )
         planned = MemorySearchTool(
             retriever, model_planning=True, inline_output_bytes=inline_output_bytes
         )
         legacy = MemorySearchTool(retriever, inline_output_bytes=inline_output_bytes)
-        self._tools = {tool.spec.version: tool for tool in (legacy, planned, self._tool)}
+        overview = MemorySearchTool(
+            retriever,
+            model_planning=True,
+            overview_enabled=True,
+            inline_output_bytes=inline_output_bytes,
+        )
+        automatic_retention = MemorySearchTool(
+            retriever,
+            model_planning=True,
+            overview_enabled=True,
+            retain_automatic=True,
+            inline_output_bytes=inline_output_bytes,
+        )
+        self._tools = {
+            tool.spec.version: tool
+            for tool in (legacy, planned, overview, automatic_retention, self._tool)
+        }
         self._validators = {
             version: Draft202012Validator(tool.spec.input_schema)
             for version, tool in self._tools.items()
         }
 
     async def plan(self, run: Run, checkpoint: RunCheckpoint) -> list[RecallQuery]:
+        """Prepare authorized automatic or deliberate queries under the current allowance."""
         if checkpoint.pending_tool_calls:
             calls = [ToolCallItem.model_validate(value) for value in checkpoint.pending_tool_calls]
             if not any(call.name in {TOOL_CALL_TOOL_NAME, self._tool.spec.name} for call in calls):
@@ -123,7 +143,11 @@ class SemanticRecallPreparation:
                 current_scope=project_scope(session.metadata),
             )
             _, allowance, _ = await select_current_search_results(
-                checkpoint.conversation, self._retriever, session_id=run.session_id, run_id=run.id
+                checkpoint.conversation,
+                self._retriever,
+                session_id=run.session_id,
+                run_id=run.id,
+                reserve=automatic_reserve(checkpoint),
             )
             queries = [
                 bounded for query in queries if (bounded := allowance.bound(query)) is not None

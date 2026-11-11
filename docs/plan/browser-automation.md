@@ -1777,6 +1777,25 @@ may return the summary as optional metadata; invalid summaries are discarded as
 a whole. Existing clients and services may omit it. Existing event retention,
 access and deletion rules apply; no new raw tracing or capture store is enabled.
 
+### Aggregate browser operation report (ADR-0307)
+
+`agent run browser-report --hours N [--json]` reads owner-scoped terminal browser
+operation evidence from PostgreSQL. The default window is twenty-four hours,
+with a ninety-day maximum, and the newest 10,000 completed, failed or uncertain
+operations are sampled with explicit selection truncation. The four builtin
+browser tools are counted; policy refusals before execution and unfinished
+operations are excluded. A read-only, repeatable-read transaction has a ten-second
+statement timeout. The query projects only closed labels and bounded diagnostic
+metadata, never arguments, results, page content or correlation identifiers.
+
+Whole diagnostics-v1 objects are validated before computing counts and median,
+95th percentile and maximum elapsed seconds by tool/outcome and by
+phase/placement/outcome/failure. Missing, invalid, oversized and truncated
+metadata are counted explicitly. Each diagnostic object is limited to 16 KiB.
+Nested phase durations overlap and are not added into operation wall time.
+Empty traffic supplies no success claim. Existing event retention and deletion
+remain authoritative; this adds no metrics service or new capture store.
+
 ### Live browser phase progress (ADR-0306)
 
 The phase collector also offers up to 128 version-1 progress updates with a
@@ -1812,6 +1831,19 @@ tracking overflow or deadline expiry reports `bound_expired`; the set resets
 with a new document. A bounded page round trip before the snapshot lets initial
 request events queued after DOMContentLoaded enter the set. It does not require network silence. Explicit observation does not claim a settling check.
 
+DOM quiet includes the main document and its open shadow roots. The watcher
+reconciles roots every 100 ms and immediately before reporting quiet, so a root
+attached to an existing host cannot escape the check merely because attachment
+does not produce a document mutation. Each iterative discovery pass visits at
+most 8,192 nodes, with 65,536 visits per watcher and at most 64 open roots.
+The existing navigation-race retry permits at most two watchers, sharing the
+same two-second settling deadline. Exhausting any discovery limit reports
+`bound_expired`; these limits never extend that deadline. Changed root membership restarts
+the quiet interval, detached roots stop contributing, and completion disconnects
+the observer and clears every watcher timer. Frames and closed roots remain
+outside this scope. The watcher reads structure and mutation presence only,
+without returning page text or treating quiet as business completion.
+
 `browser.observe` may instead accept `wait_for`; `browser.act` may include
 `postcondition`. Each is an exact visible-control predicate with nonempty role
 (up to 64 characters), name (up to 1,024), optional disabled/checked booleans and
@@ -1842,10 +1874,17 @@ prioritized in that order within a main-document scan of at most 8,192 nodes.
 At most 32 whole records are retained; each text summary inspects at most 256
 nodes and contains at most 512 characters, with explicit truncation. Hidden
 subtrees and input, textarea, select and editable content do not contribute.
-Frames and shadow roots are outside this region scope. The existing general
-readable-text field and control capture are unchanged.
+Frames remain outside this region scope. ADR-0308 extends region discovery and
+summaries to open shadow roots, retaining the same visit, count and text bounds.
+Coverage version 2 names `main_document_and_open_shadow`; legacy version 1
+retains `main_document`. Composed-ancestor checks for slotted nodes share the
+visit limit. A focused shadow region does not adopt assigned light nodes outside
+its DOM subtree. Hidden, editable and transparent hosts or slot ancestors exclude
+their content. Focus rechecks composed ancestors before capture. Closed roots
+remain excluded; collection extraction keeps its separate main-document scope.
+The existing general readable-text field and control capture are unchanged.
 
-Version 1 coverage records scope, scanned nodes, scan exhaustion and the known
+Both coverage versions record scope, scanned nodes, scan exhaustion and the known
 omitted-region count within the scanned prefix. A bound is not whole-page
 completeness. Region references bind to the enclosing revision but are evidence
 identifiers only: `browser.act` and `browser.observe(after=...)` cannot use them.
@@ -1857,6 +1896,13 @@ model projection retains room for a usable control before optional summaries,
 then favors bounded region evidence over duplicated prose. Hosted transport and
 artifact replay preserve the fields; legacy observations may omit them. The
 progress digest includes semantic evidence, excluding fresh opaque references.
+Hosted workers advertise `X-Veetbot-Browser-Region-Coverage: 2` to receive
+version-2 regions. Without that exact capability the service omits version-2
+regions and their coverage from JSON and streamed responses; it never relabels
+shadow coverage as version 1. Version-1 providers remain unchanged. Canonical
+snapshots, ordinary page text, controls and action facts remain intact. This
+keeps older workers compatible while the browser service is upgraded first,
+including when application promotion fails and older workers continue running.
 
 ### Deterministic collection extraction (ADR-0161)
 
@@ -1939,6 +1985,17 @@ Text continuation rechecks unchanged captured text. Detached regions, stale
 revisions and changed continuation text fail with `tool.browser.page_changed`.
 Main and section regions are discoverable; active dialog controls precede general
 navigation. Existing node, candidate, UTF-8, privacy and origin limits apply.
+
+Dialog priority also traverses open shadow roots, using the same bounded,
+iterative walk as semantic regions. Its 8,192-visit discovery budget includes
+composed-ancestor checks for assigned slots; hidden, transparent and editable
+ancestors cannot promote a dialog. The first eligible dialog's shadow and light
+children precede ordinary controls, without duplicates across continuation.
+Dialogs beyond the priority scan remain eligible for ordinary control discovery;
+ranking is not a claim that no other dialog exists. A changed ordering must still
+pass the existing continuation-anchor check. Explicit region focus includes the
+focused root's own open shadow children and retains its own scope instead of
+promoting a dialog outside it. Frames and closed roots remain excluded.
 
 Tool guidance distinguishes action references (`elements[].ref`, including for
 scroll) from read-only region references (`regions[].ref`). The first focused

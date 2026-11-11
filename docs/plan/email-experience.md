@@ -47,8 +47,10 @@ the draft visible alongside or below its source conversation. Preserve the
 deployment floors ADR-0211 sets and the adaptive layouts.
 
 Switching modes preserves the active Chat run, unsent chat text, selected mail,
-scroll position, unsent email edits, and the loaded mail list: returning to
-Email refreshes the rows in place rather than clearing them (ADR-0234). Memory,
+and unsent email edits. Entering Email selects Important (owner request,
+2026-11-10); choosing another collection while already in Email remains supported.
+Returning to an already selected Important list preserves its scroll position
+and refreshes its loaded rows in place (ADR-0234). Memory,
 Persona, Schedules, and Settings remain global. Adding a future mode requires a small mode descriptor and a
 presentation module; this feature does not build a dynamic plugin system.
 
@@ -56,7 +58,8 @@ presentation module; this feature does not build a dynamic plugin system.
 
 The priority view combines both accounts. On macOS, Important shows the total
 number of qualifying threads and initially loads up to 100. On touch it opens
-with up to five. Inbox is the A2 initial collection; on touch it pages five
+with up to five. Important is the initial collection and the default on each
+switch into Email; this supersedes ADR-0231's Inbox default. On touch, Inbox pages five
 threads at a time (ADR-0231). On macOS every list, Inbox, Needs you, Handled,
 Important, Other mail and search results alike, loads up to 100 threads per
 page and scrolls (ADR-0303). Account badges and an account filter identify the source
@@ -79,6 +82,16 @@ stays within that view. Suspected spam lists flagged Inbox threads only,
 excluding cleared flags and mail already in Gmail Spam; it changes no labels.
 Both counts cover the authorized account and search before pagination, and
 remain absent when an older server omits them.
+Switching between previously loaded, unsearched Inbox and Important lists
+shows the last successful rows and pagination immediately, then refreshes in
+place. Keep at most two in-memory snapshots of up to 1,000 rows each; never
+persist them to disk. Account or search changes, connection replacement,
+revoked read access, and local mailbox or importance mutations invalidate
+these snapshots. A thread read that discovers changed Inbox, Spam or handled
+state from another device also invalidates them. A failed background read retains
+the visible cached list
+with the existing error indication. A collection without a snapshot still
+loads from the server; obsolete switch responses cannot replace the active list.
 On macOS, scrolling near the end of any list fetches the next page
 automatically, with no More button. Refresh preserves the visible thread and
 the selected conversation independently, in every Mac list.
@@ -156,8 +169,15 @@ The reading view derives inert Markdown from each retained message on the scoped
 thread read, after source retention is enforced. It removes invisible preheader
 padding and recognizable promotional controls, collapses a forwarded envelope to
 its source attribution, embeds source URLs as labeled links, and restores article
-headings and paragraph flow. Explicit HTML advertisements and hidden/active HTML
-are omitted; ambiguous prose, author attribution, substantive disclosures, and
+headings and paragraph flow. A retained HTML alternative supplies the reading
+structure when it represents source prose, with plain-text paragraphs absent
+from it preserved before it. An unrelated image/footer alternative leaves the
+text reader intact.
+Rectangular tables with at least two rows and columns become inert Markdown
+tables; the first row is the heading. Column spans keep their text in the first
+column and reserve empty cells for the rest. Layout wrappers, row spans and
+irregular tables retain their prose rather than inventing a grid. Explicit HTML
+advertisements and hidden/active HTML are omitted; ambiguous prose, author attribution, substantive disclosures, and
 postscripts remain. No link is fetched or resolved during cleanup. Only the
 reader makes a link, from an HTML anchor or a source URL whose destination it
 checked: brackets, angle brackets and backslashes in the sender's own text are
@@ -190,8 +210,8 @@ Only English attributions and header words are recognized
 ([ADR-0301](../adr/0301-email-threads-read-as-conversations.md)).
 
 The Mac image reader (ADR-0304) uses a separate `reader_image_body` projection
-with server-authored image indices in message order. Image-bearing HTML, up to
-64 KiB per message, is retained as `reader_html` only by the application Gmail
+with server-authored image indices in message order. Presentation HTML, with or
+without images, up to 64 KiB per message, is retained as `reader_html` only by the application Gmail
 sync path, excluded from model evidence and content identity, and expires and
 is erased with the body. The ordinary Gmail tool's text body is unchanged.
 The scoped `POST /v1/email/threads/{id}/images` accepts `message_id` and `index`

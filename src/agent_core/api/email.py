@@ -147,14 +147,23 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         for message in messages:
             html = message.pop("reader_html", "")
             urls: list[str] = []
-            rich = reading_body(html, subject=message["subject"], image_urls=urls)
-            message["reader_body"] = reading_body(
-                reading_source(message["body"], html),
-                subject=message["subject"] or str(result["subject"]),
-            )
+            subject = message["subject"] or str(result["subject"])
+            rich = reading_body(html, subject=subject, image_urls=urls)
+            # Image-bearing tables have different layout eligibility. Render each
+            # mode once, reusing the single HTML parse when there are no images.
+            html_text = reading_body(html, subject=subject) if urls else rich
+            source = reading_source(message["body"], html)
+            plain = html_text if source == html else reading_body(source, subject=subject)
+            message["reader_body"] = plain
+            if html_text:
+                # An unrelated image/footer alternative must not replace the text
+                # reader. Prefer HTML structure when it represents source prose.
+                message["reader_body"] = await asyncio.to_thread(
+                    merge_image_body, plain, html_text, html_text, require_overlap=True
+                )
             if urls:
                 rich = await asyncio.to_thread(
-                    merge_image_body, message["reader_body"], rich, reading_body(html)
+                    merge_image_body, message["reader_body"], rich, html_text
                 )
             message["reader_image_body"] = rich if urls else None
         return result

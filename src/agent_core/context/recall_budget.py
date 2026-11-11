@@ -18,6 +18,7 @@ from agent_core.domain.messages import (
     ToolResultItem,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.runs import RunCheckpoint
 from agent_core.domain.tool_output import context_view
 
 OMITTED = (
@@ -29,19 +30,42 @@ OMITTED = (
 class RecallAllowance:
     tokens: int = 2000
     items: int = 20
+    exclude_ids: tuple[UUID, ...] = ()
+    preserve_identity: bool = False
 
     def bound(self, query: RecallQuery) -> RecallQuery | None:
+        """Fit recall to remaining capacity while preserving independent identity discovery."""
         if not self.tokens or not self.items:
             return None
         return query.model_copy(
             update={
                 "budget_tokens": min(query.budget_tokens, self.tokens),
                 "max_items": min(query.max_items, self.items),
+                "exclude_ids": tuple(sorted(set(query.exclude_ids) | set(self.exclude_ids))),
+                **(
+                    {
+                        "identity_max_items": query.identity_max_items or min(query.max_items, 20),
+                        "identity_exclude_ids": query.exclude_ids
+                        if query.identity_exclude_ids is None
+                        else query.identity_exclude_ids,
+                    }
+                    if self.preserve_identity
+                    else {}
+                ),
             }
         )
 
 
 FULL_ALLOWANCE = RecallAllowance()
+NO_RESERVE = RecallAllowance(tokens=0, items=0)
+AUTOMATIC_RESERVE = RecallAllowance(tokens=500, items=5)
+
+
+def automatic_reserve(checkpoint: RunCheckpoint) -> RecallAllowance:
+    """New search pins leave room for fresh automatic evidence (ADRs 0309/0310)."""
+    spec = checkpoint.pinned_tool_specs.get("memory.search")
+    version = spec.version if spec else checkpoint.pinned_tool_versions.get("memory.search")
+    return AUTOMATIC_RESERVE if version in {"2.3.0", "2.4.0"} else NO_RESERVE
 
 
 def ranking_block(result: RecallResult) -> RecallRankingBlock | None:
@@ -104,12 +128,14 @@ def select_search_results(
     conversation: Sequence[ConversationItem],
     *,
     permitted_receipts: set[MemoryRecallUsage] | None = None,
+    reserve: RecallAllowance = NO_RESERVE,
 ) -> tuple[list[ConversationItem], RecallAllowance, bool]:
     """Do not mutate canonical evidence or infer item counts from rendered prose."""
     result = [context_view(item) for item in conversation]
     indexes = _search_indexes(result)
-    allowance = RecallAllowance()
+    allowance = RecallAllowance(preserve_identity=reserve != NO_RESERVE)
     seen: set[str] = set()
+    seen_evidence: set[str] = set()
     omitted = False
     blocks = 0
     for index in reversed(indexes):
@@ -139,17 +165,40 @@ def select_search_results(
                 and item.memory_recall is not None
                 and item.memory_recall in permitted_receipts
             )
+        # Use only keys verified against authoritative traces. The first pass
+        # must still validate both receipts, so an invalid newer block cannot
+        # suppress an older valid presentation of the same evidence.
+        evidence_digest = (
+            item.memory_recall.current_evidence_sha256
+            if valid and permitted_receipts is not None and item.memory_recall is not None
+            else None
+        )
         if (
             valid
             and blocks < 4
             and digest not in seen
-            and tokens <= allowance.tokens
-            and items <= allowance.items
+            and evidence_digest not in seen_evidence
+            and tokens <= allowance.tokens - reserve.tokens
+            and items <= allowance.items - reserve.items
         ):
             blocks += 1
             assert digest is not None
             seen.add(digest)
-            allowance = RecallAllowance(allowance.tokens - tokens, allowance.items - items)
+            if evidence_digest is not None:
+                seen_evidence.add(evidence_digest)
+            # Only currently validated, actually rendered beliefs can suppress a
+            # fresh read. Ranked-but-unrendered evidence is not already in context.
+            returned = (
+                item.memory_recall.returned_ids or ()
+                if permitted_receipts is not None and item.memory_recall is not None
+                else ()
+            )
+            allowance = RecallAllowance(
+                allowance.tokens - tokens,
+                allowance.items - items,
+                tuple(sorted(set(allowance.exclude_ids) | set(returned))),
+                allowance.preserve_identity,
+            )
         else:
             result[index] = item.model_copy(
                 update={
@@ -186,9 +235,10 @@ async def select_current_search_results(
     *,
     session_id: UUID,
     run_id: UUID,
+    reserve: RecallAllowance = NO_RESERVE,
 ) -> tuple[list[ConversationItem], RecallAllowance, bool]:
     """At most four local dependency validations under one shared deadline."""
-    candidates, _, _ = select_search_results(conversation)
+    candidates, _, _ = select_search_results(conversation, reserve=reserve)
     permitted: set[MemoryRecallUsage] = set()
     validator = getattr(retriever, "validate_retained", None)
     if callable(validator):
@@ -208,4 +258,4 @@ async def select_current_search_results(
             logging.getLogger(__name__).warning(
                 "context_memory_validation_failed", extra={"error_class": type(exc).__name__}
             )
-    return select_search_results(conversation, permitted_receipts=permitted)
+    return select_search_results(conversation, permitted_receipts=permitted, reserve=reserve)

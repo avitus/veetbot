@@ -416,6 +416,7 @@ class SDKMCPClient:
         return self._client
 
     async def discover(self) -> MCPDiscovery:
+        """Discover tools and render only prompts whose required arguments are available."""
         try:
             client = self._connected()
             listed_tools = await client.list_tools()
@@ -428,6 +429,9 @@ class SDKMCPClient:
                 resource_declarations = (await client.list_resources()).resources
             prompts: list[MCPRemotePrompt] = []
             for prompt in prompt_declarations:
+                # Discovery has no caller-supplied inputs for parameterized prompts.
+                if any(argument.required for argument in prompt.arguments or ()):
+                    continue
                 try:
                     rendered = await client.get_prompt(prompt.name, {})
                 except MCPError as exc:

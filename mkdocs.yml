@@ -445,4 +445,8 @@ nav:
       - "ADR-0304: Click-to-load email images and a fluid Mac reader": adr/0304-email-inline-images-and-fluid-reader.md
       - "ADR-0305: Read-only Google Calendar access": adr/0305-read-only-google-calendar.md
       - "ADR-0306: Live browser progress": adr/0306-live-browser-progress.md
+      - "ADR-0307: Aggregate browser operation evidence": adr/0307-browser-operation-report.md
+      - "ADR-0308: Open-shadow browser regions": adr/0308-open-shadow-browser-regions.md
+      - "ADR-0309: Recall continuity and phase clocks": adr/0309-recall-continuity-and-phase-clocks.md
+      - "ADR-0310: Retain both deliberate searches": adr/0310-retain-both-deliberate-searches.md
   - Changelog: changelog.md

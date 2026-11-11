@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import pytest
@@ -18,6 +18,62 @@ from agent_core.domain.browser_diagnostics import browser_phase
 from tests.unit.test_browser_dispatch_constraint import SERVICE_AUTH, _app, leased
 
 PROGRESS_MEDIA_TYPE = "application/vnd.veetbot.browser-progress+ndjson"
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("capability", [None, "2", "unknown"])
+@pytest.mark.parametrize("version", [1, 2])
+async def test_region_coverage_is_negotiated_for_older_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stream: bool,
+    capability: str | None,
+    version: Literal[1, 2],
+) -> None:
+    """A newer service remains readable during cutover or failed application promotion."""
+    from agent_core.domain.browser import (
+        BrowserObservation,
+        BrowserRegionCoverage,
+        BrowserSemanticRegion,
+    )
+
+    sessions, runtime, lease = await leased(tmp_path)
+    observation = BrowserObservation(
+        url="https://example.org/current",
+        revision="revision-1",
+        text="Page prose",
+        regions=(BrowserSemanticRegion(ref="revision-1:region:0", kind="status", text="Saved"),),
+        region_coverage=BrowserRegionCoverage(
+            version=version,
+            scope="main_document" if version == 1 else "main_document_and_open_shadow",
+            scanned_nodes=3,
+        ),
+    )
+
+    async def observe() -> BrowserObservation:
+        """Return a captured page independently of the caller's transport version."""
+        return observation
+
+    monkeypatch.setattr(runtime, "observe", observe)
+    headers = {"Authorization": f"Bearer {SERVICE_AUTH}"}
+    if stream:
+        headers["Accept"] = PROGRESS_MEDIA_TYPE
+    if capability is not None:
+        headers["X-Veetbot-Browser-Region-Coverage"] = capability
+    async with _app(sessions) as client:
+        response = await client.post(
+            "/v1/browser-sessions:observe", headers=headers, json={"lease_ref": lease}
+        )
+    assert response.status_code == 200
+    body = json.loads(response.text.splitlines()[-1])["body"] if stream else response.json()
+    assert body["text"] == "Page prose"
+    if version == 1 or capability == "2":
+        assert body["region_coverage"]["version"] == version
+        assert body["regions"]
+    else:
+        assert not body.get("regions")
+        assert body.get("region_coverage") is None
+    assert observation.regions, "Negotiation must not mutate the canonical snapshot"
 
 
 def request() -> Request:

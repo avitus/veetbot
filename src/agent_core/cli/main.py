@@ -83,6 +83,7 @@ from agent_core.domain.views import (
     StreamFrame,
     TextContentBlock,
 )
+from agent_core.observability.browser import BrowserOperationReport, render_browser_report
 from agent_core.observability.latency import ChatLatencyReport, render_latency_report
 from agent_core.observability.memory_health import render_memory_health_report
 from agent_core.observability.reliability import (
@@ -93,7 +94,9 @@ from agent_core.observability.reliability import (
 )
 from agent_core.ports.dispatch import WorkerService
 
-RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export", "latency", "reliability"})
+RUN_RESERVED_WORDS = frozenset(
+    {"get", "events", "cancel", "export", "latency", "reliability", "browser-report"}
+)
 DEFAULT_RUN_WAIT_TIMEOUT_SECONDS = 300.0
 EVENT_READ_TIMEOUT_SECONDS = 30.0
 API_BIND_HOST = "127.0.0.1"
@@ -734,6 +737,36 @@ def run_reliability(
     )
     if check and degraded_signals(report, thresholds):
         raise typer.Exit(2)
+
+
+async def _browser_report(hours: int) -> BrowserOperationReport | None:
+    """Use the configured principal and one current-time bound for the read-only report."""
+    async with build(storage="postgres") as composition:
+        if composition.browser_report is None:
+            return None
+        until = composition.clock.now()
+        return await composition.browser_report(until - timedelta(hours=hours), until)
+
+
+@run_app.command("browser-report")
+def run_browser_report(
+    hours: Annotated[int, typer.Option("--hours", min=1, max=2160)] = 24,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Report bounded browser phase timings and failures without page content (ADR-0307)."""
+    try:
+        report = asyncio.run(_browser_report(hours))
+    except Exception as exc:
+        fields = failure_fields(exc, phase="browser_report")
+        typer.echo(
+            f"Browser report unavailable ({fields['error_class']}; {fields['error_fingerprint']}).",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+    if report is None:
+        typer.echo("the browser report reads the PostgreSQL event log", err=True)
+        raise typer.Exit(1)
+    typer.echo(report.model_dump_json(indent=2) if json_output else render_browser_report(report))
 
 
 async def _latency_report(days: int) -> ChatLatencyReport | None:

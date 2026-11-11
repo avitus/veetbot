@@ -61,3 +61,36 @@ uniqueness and state checks, finite read counts/time, cancellation invalidation,
 no duplicate server effects, unchanged approval classification, and preserved
 condition evidence in small model budgets. Run existing hostile-page, grant,
 lease and real Chromium suites. W4 workflow-specific recovery remains separate.
+
+## Open-shadow readiness follow-up — 2026-11-10
+
+The DOM-quiet observer includes open shadow roots in the main document. Bounded
+root reconciliation runs every 100 ms and before a quiet result, accounting for
+`attachShadow` on an existing host without relying on a document mutation.
+Each iterative pass visits at most 8,192 nodes, with 65,536 total visits and at
+most 64 shadow roots per watcher. The existing navigation-race retry permits at
+most two watchers under one shared two-second deadline. Discovery exhaustion
+reports `bound_expired`, without extending that deadline. Root membership changes
+restart the quiet interval; detached roots stop contributing. Every terminal
+path disconnects subscriptions and clears watcher timers. Frames and closed
+roots are excluded, and no page content is returned by the watcher.
+
+This repairs the existing W4 stability signal for the open-root observation
+scope. It adds no action, effect retry, authorization, dependency or tool schema.
+
+Construction verification in the local Linux ARM64 browser container (64 MiB
+process stack), 2026-11-10:
+
+- Red: `make test-browser-cases
+  CASES=tests/unit/test_browser_readiness_real_chromium.py::test_changing_open_shadow_dom_cannot_report_quiet`
+  reproduced `dom_quiet` while the shadow component changed continuously.
+- Green: all 20 readiness cases passed, including late attachment, nested roots,
+  detachment, closed-root/frame exclusions, all discovery bounds, timer and
+  observer cleanup on success/expiry/subscription failure, and one server effect
+  followed by a stable shadow confirmation. The three existing settling and
+  navigation-race fixtures also passed without changing their assertions.
+- Full browser partition: 439 passed in 314.15 seconds, with no skips.
+- Browser-related static tests: 1,155 passed; browser contracts: 170 passed.
+- Lint, type checking, citation reconciliation and documentation checks passed.
+
+This is direct-dev construction evidence, not production or live-site acceptance.

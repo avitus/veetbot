@@ -295,8 +295,8 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
 # Provider preparation (query vectors) and the searches it serves keep separate
 # clocks: preparation may take at most RECALL_PREPARATION_SECONDS, and the
 # searches get RECALL_SEARCH_SECONDS from the moment preparation returns. The
-# durable reservation bounds both together (ADR-0282; ADR-0190 and ADR-0196
-# set the original single ten-second deadline).
+# durable reservation bounds both together per phase (ADR-0309). Legacy
+# reservations keep ADR-0282's absolute run-wide deadline.
 logger = logging.getLogger(__name__)
 
 RECALL_PREPARATION_SECONDS = 5.0
@@ -327,9 +327,22 @@ async def prepare_recall(
     budget = context.checkpoint.recall_work
     deliberate = bool(context.checkpoint.pending_tool_calls)
     # A later build step refreshes the automatic round already reserved for
-    # this run: fresh search clock, no new slots, no checkpoint write.
+    # this run: fresh search clock, no new slots. New phase clocks are persisted.
     refresh = budget is not None and budget.automatic and not deliberate
-    if budget is not None and started >= budget.deadline_at:
+    phase_clocks = execution_bound and (budget is None or budget.phase_key is not None)
+    phase_key = (
+        "deliberate:"
+        + hashlib.sha256(
+            json.dumps(
+                sorted(call["call_id"] for call in context.checkpoint.pending_tool_calls)
+            ).encode()
+        ).hexdigest()
+        if deliberate
+        else f"automatic:{context.run.step_count}"
+    )
+    if phase_clocks and budget is not None and budget.phase_key == phase_key:
+        return  # A checkpointed phase cannot recreate a spent or lost execution permit.
+    if not phase_clocks and budget is not None and started >= budget.deadline_at:
         return
     if budget is not None and not refresh and (budget.searches >= 4 or budget.rounds >= 2):
         return
@@ -344,20 +357,25 @@ async def prepare_recall(
         RECALL_PREPARATION_SECONDS + RECALL_SEARCH_SECONDS if execution_bound else 10
     )
     deadline = (
-        started + timedelta(seconds=reservation_seconds) if budget is None else budget.deadline_at
+        started + timedelta(seconds=reservation_seconds)
+        if budget is None or phase_clocks
+        else budget.deadline_at
     )
+    if phase_clocks and context.run.deadline_at is not None:
+        deadline = min(deadline, context.run.deadline_at)
     slots = len(queries) * (2 if execution_bound and not deliberate else 1)
     if refresh:
         if not queries or context.clock.now() >= deadline:
             return
-    else:
-        if not 1 <= slots <= remaining or context.clock.now() >= deadline:
-            return
+    elif not 1 <= slots <= remaining or context.clock.now() >= deadline:
+        return
+    if not refresh or phase_clocks:
         context.checkpoint.recall_work = RecallWorkBudget(
-            searches=slots + (0 if budget is None else budget.searches),
+            searches=(0 if refresh else slots) + (0 if budget is None else budget.searches),
             rounds=(1 if deliberate else 0) + (0 if budget is None else budget.rounds),
             deadline_at=deadline,
             automatic=(not deliberate) or (budget is not None and budget.automatic),
+            phase_key=phase_key if phase_clocks else None,
         )
         # This write is authoritative and must not be swallowed as optional work.
         await checkpoint(context, "memory_preparation", pending_batch_budget=pending_batch_budget)

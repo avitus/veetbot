@@ -104,9 +104,14 @@ class MemoryRecallUsage(BaseModel):
     tokens: int = Field(ge=0, le=2000)
     items: int = Field(ge=0, le=20)
     content_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    # Optional current-search equality key, recomputed from the authoritative
+    # trace before it can suppress a redundant whole block during assembly.
+    current_evidence_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     ranked_ids: tuple[UUID, ...] | None = Field(default=None, max_length=20)
 
-    @field_validator("ranked_ids")
+    returned_ids: tuple[UUID, ...] | None = Field(default=None, max_length=20)
+
+    @field_validator("ranked_ids", "returned_ids")
     @classmethod
     def distinct_ranks(cls, value: tuple[UUID, ...] | None) -> tuple[UUID, ...] | None:
         if value is not None and len(set(value)) != len(value):

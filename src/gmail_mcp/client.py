@@ -283,7 +283,7 @@ class GmailClient:
 
     @classmethod
     def _reader_html(cls, payload: object, *, maximum: int = 65536) -> str:
-        """Keep a complete bounded HTML alternative for the inert image reader."""
+        """Keep a complete bounded HTML alternative for the inert reading view."""
         if not isinstance(payload, dict):
             return ""
         pending = [payload]
@@ -297,7 +297,7 @@ class GmailClient:
             if part.get("mimeType") == "text/html":
                 body = part.get("body")
                 text = cls._decode_body(body.get("data") if isinstance(body, dict) else None)
-                if "<img" in text.lower() and len(text.encode()) <= maximum:
+                if text and len(text.encode()) <= maximum:
                     return text
         return ""
 

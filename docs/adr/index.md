@@ -354,3 +354,9 @@ implementation without one.
 
 - [ADR-0305: Read-only Google Calendar access (Accepted)](0305-read-only-google-calendar.md)
 - [ADR-0306: Show browser phases while an operation is running (Accepted)](0306-live-browser-progress.md)
+
+- [ADR-0307: Aggregate browser operation evidence without page content](0307-browser-operation-report.md)
+
+- [ADR-0308: Discover semantic browser regions in open shadow roots](0308-open-shadow-browser-regions.md)
+- [ADR-0309: Recall continuity and phase clocks (Proposed)](0309-recall-continuity-and-phase-clocks.md)
+- [ADR-0310: Retain both deliberate memory searches (Proposed)](0310-retain-both-deliberate-searches.md)

@@ -135,9 +135,9 @@ def _page(revision: str) -> dict[str, object]:
         ({"revision": "r-1", "elements": {"r-1:0": {"field_kind": "rocket"}}}, None),
     ],
 )
-@pytest.mark.parametrize("regions", [False, True])
+@pytest.mark.parametrize("regions", [0, 1, 2])
 async def test_old_and_new_session_response_shapes_parse(
-    facts: dict[str, object] | None, expected: BrowserObservationFacts | None, regions: bool
+    facts: dict[str, object] | None, expected: BrowserObservationFacts | None, regions: int
 ) -> None:
     """ADR-0129 D26: facts are an optional sibling of the observation's fields."""
 
@@ -145,9 +145,17 @@ async def test_old_and_new_session_response_shapes_parse(
     if regions:
         expected_page["regions"] = [{"ref": "r-1:region:0", "kind": "status", "text": "Saved"}]
         expected_page["region_coverage"] = {"scanned_nodes": 12, "omitted_regions": 0}
+        if regions == 2:
+            expected_page["region_coverage"] = {
+                "version": 2,
+                "scope": "main_document_and_open_shadow",
+                "scanned_nodes": 12,
+                "omitted_regions": 0,
+            }
 
     def service(request: httpx.Request) -> httpx.Response:
-        del request
+        """Model a hosted response while checking the negotiated request capability."""
+        assert request.headers.get("X-Veetbot-Browser-Region-Coverage") == "2"
         body = dict(expected_page)
         if facts is not None:
             body["facts"] = facts

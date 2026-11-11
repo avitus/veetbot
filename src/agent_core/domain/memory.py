@@ -1156,6 +1156,15 @@ class RecallQuery(BaseModel):
     # Beliefs the persona row already carries at higher trust: a hard snapshot
     # exclusion, never a relevance signal (persona-surface.md).
     exclude_ids: tuple[UUID, ...] = ()
+    # ADR-0309: presentation allocation must not manufacture an unambiguous
+    # identity. Preserve the original discovery cap and hard exclusions before
+    # reducing the rendered allowance or excluding already-delivered beliefs.
+    identity_max_items: int | None = Field(default=None, ge=1, le=20)
+    identity_exclude_ids: tuple[UUID, ...] | None = None
+    # Focused searches require whole stored role labels for fallback discovery,
+    # reserve identities and one relationship, then fill extra context after
+    # beliefs. Explicit names and overview pagination are unchanged.
+    focused_people_context: bool = False
 
 
 OWNED_RESOURCE_PATTERN = (

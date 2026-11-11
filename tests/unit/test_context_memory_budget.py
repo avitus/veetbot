@@ -336,3 +336,134 @@ async def test_exhausted_recall_with_unavailable_corrections_degrades_context() 
     )
     assert EXHAUSTED in request.model_dump_json()
     assert _correction_line() not in request.model_dump_json()
+
+
+async def test_current_search_cannot_displace_all_automatic_context() -> None:
+    retriever = CurrentRetriever()
+    checkpoint = _checkpoint()
+    checkpoint.pinned_tool_names.append("memory.search")
+    checkpoint.pinned_tool_versions["memory.search"] = "2.3.0"
+    builder = _builder(retriever)
+    first = await builder.build(run(status=RunStatus.RUNNING), checkpoint, agent(), principal())
+    assert "<memory>base</memory>" in first.model_dump_json()
+    checkpoint.conversation.extend(
+        search_result("people", text="Other people evidence", tokens=1000, items=20)
+    )
+    second = await builder.build(run(status=RunStatus.RUNNING), checkpoint, agent(), principal())
+    assert "<memory>base</memory>" in second.model_dump_json()
+    assert OMITTED in second.model_dump_json()
+    assert _correction_line() in second.model_dump_json()
+
+
+async def test_current_search_and_fresh_automatic_evidence_share_original_caps() -> None:
+    retriever = CurrentRetriever()
+    checkpoint = _checkpoint()
+    checkpoint.pinned_tool_names.append("memory.search")
+    checkpoint.pinned_tool_versions["memory.search"] = "2.3.0"
+    checkpoint.conversation.extend(
+        search_result("people", text="Other people evidence", tokens=1500, items=15)
+    )
+    original = checkpoint.model_dump_json()
+    request = await _builder(retriever).build(
+        run(status=RunStatus.RUNNING), checkpoint, agent(), principal()
+    )
+    assert "Other people evidence" in request.model_dump_json()
+    assert "<memory>base</memory>" in request.model_dump_json()
+    assert retriever.queries[0].max_items == 5
+    assert retriever.queries[0].budget_tokens == 500
+    assert checkpoint.model_dump_json() == original
+
+
+async def test_two_current_searches_retain_both_facts_and_fresh_automatic_context() -> None:
+    """Verify two current searches retain both facts and fresh automatic context."""
+    from agent_core.bootstrap import build
+    from agent_core.tools.memory_search import MemorySearchTool
+    from agent_core.tools.registry import RegisteredTool
+    from tests.gates.test_runtime_tool_budget import _settings
+
+    async with build(settings=_settings(), principal=principal()) as app:
+        current = app.tool_pipeline._registry.get("memory.search")
+        assert isinstance(current, RegisteredTool)
+        implementation = current.implementation
+        assert isinstance(implementation, MemorySearchTool)
+        query = implementation.query(
+            {"text": "A missing supporting fact"},
+            tenant_id=principal().tenant_id,
+            principal_id=principal().principal_id,
+            current_scope="general",
+        )
+        retriever = CurrentRetriever()
+        checkpoint = _checkpoint()
+        checkpoint.pinned_tool_names.append("memory.search")
+        checkpoint.pinned_tool_versions["memory.search"] = current.spec.version
+        for call_id, fact in (
+            ("first", "Earlier required fact"),
+            ("second", "Later required fact"),
+        ):
+            checkpoint.conversation.extend(
+                search_result(call_id, text=fact, tokens=query.budget_tokens, items=query.max_items)
+            )
+        original = checkpoint.model_dump_json()
+        request = await _builder(retriever).build(
+            run(status=RunStatus.RUNNING), checkpoint, agent(), principal()
+        )
+        body = request.model_dump_json()
+        assert "Earlier required fact" in body
+        assert "Later required fact" in body
+        assert "<memory>base</memory>" in body
+        assert _correction_line() in body
+        assert OMITTED not in body
+        assert retriever.queries[0].budget_tokens + 2 * query.budget_tokens <= 2000
+        assert retriever.queries[0].max_items + 2 * query.max_items <= 20
+        assert checkpoint.model_dump_json() == original
+
+
+async def test_retention_spends_automatic_slots_on_evidence_missing_from_search() -> None:
+    """Verify retention spends automatic slots on evidence missing from search."""
+    from agent_core.domain.memory import RecallQuery, RecallResult
+    from tests.unit.test_context_recall_delta import _belief, _QueryFormer
+
+    class Former(_QueryFormer):
+        def form(self, *args: Any, **kwargs: Any) -> list[RecallQuery]:
+            """Persist the synthetic memory used to measure context allocation."""
+            return [q.model_copy(update={"max_items": 20}) for q in super().form(*args, **kwargs)]
+
+    class Ranked(CurrentRetriever):
+        async def recall(self, query: RecallQuery, **kwargs: Any) -> RecallResult:
+            """Read the synthetic evidence under the supplied bounded query."""
+            self.queries.append(query)
+            items = [
+                _belief(UUID(int=i), "Current rent baseline" if i == 7 else f"Fact {i}")
+                for i in range(1, 21)
+                if UUID(int=i) not in query.exclude_ids
+            ][: query.max_items]
+            return RecallResult(
+                items=list(items),
+                rendered="\n".join(item.statement for item in items),
+                tokens=100,
+                truncated=False,
+                trace_id=UUID(int=975),
+                watermark=12,
+            )
+
+    retriever = Ranked()
+    checkpoint = _checkpoint()
+    checkpoint.pinned_tool_names.append("memory.search")
+    checkpoint.pinned_tool_versions["memory.search"] = "2.3.0"
+    builder = _builder(retriever, snapshot_id=None, query_former=Former(budget_tokens=2000))
+    first = await builder.build(run(status=RunStatus.RUNNING), checkpoint, agent(), principal())
+    assert "Current rent baseline" in first.model_dump_json()
+    call, result = search_result("people", text="Facts 1, 2, 3 and people", tokens=1000, items=15)
+    assert result.memory_recall is not None
+    result.memory_recall = result.memory_recall.model_copy(
+        update={
+            "returned_ids": tuple(UUID(int=i) for i in (1, 2, 3)),
+            # Ranked evidence is not necessarily rendered: it must not be excluded.
+            "ranked_ids": tuple(UUID(int=i) for i in (1, 2, 3, 7)),
+        }
+    )
+    checkpoint.conversation.extend([call, result])
+    second = await builder.build(run(status=RunStatus.RUNNING), checkpoint, agent(), principal())
+    assert "Current rent baseline" in second.model_dump_json()
+    assert retriever.queries[-1].exclude_ids == tuple(UUID(int=i) for i in (1, 2, 3))
+    assert retriever.queries[-1].max_items == 5

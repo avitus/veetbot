@@ -15,21 +15,31 @@ from tests.unit.test_browser_runtime_real_chromium import browsing, html
 from tests.unit.test_browser_tools import FakeBrowserProvider
 
 
-@pytest.mark.parametrize("kind", ["text", "region", "row", "location", "hidden"])
+@pytest.mark.parametrize("kind", ["text", "region", "shadow_region", "row", "location", "hidden"])
 async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
+    """Verify delayed receipt does not duplicate an effect."""
     effects: list[bool] = []
 
     async def home(request: Request) -> Response:
+        """Serve the synthetic page used to observe browser behavior."""
         del request
         return html(
-            '<button id="save">Save</button><p hidden>Hidden confirmation</p>',
-            script="""
+            '<button id="save">Save</button><p hidden>Hidden confirmation</p><div id="host"></div>',
+            script="const receiptRoot = "
+            + (
+                "document.querySelector('#host').attachShadow({mode:'open'});"
+                if kind == "shadow_region"
+                else "document.body;"
+            )
+            + """
             document.querySelector('#save').onclick = async () => {
                 await fetch('/effect', {method:'POST'});
                 setTimeout(() => {
-                    document.body.insertAdjacentHTML('beforeend',
+                    const receipt = document.createElement('div');
+                    receipt.innerHTML =
                         '<p role="status">Saved successfully</p>' +
-                        '<table><tbody><tr><td>42</td></tr></tbody></table>');
+                        '<table><tbody><tr><td>42</td></tr></tbody></table>';
+                    receiptRoot.append(receipt);
                     history.replaceState({}, '', '/complete');
                 }, 850);
             };
@@ -62,7 +72,7 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
                 return await runtime.act(action, constraint=constraint)
 
         evidence: dict[str, Any] = {"kind": "text", "text": "Saved successfully"}
-        if kind == "region":
+        if kind in {"region", "shadow_region"}:
             evidence.update(kind="region", region_kind="status")
         elif kind == "row":
             evidence = {

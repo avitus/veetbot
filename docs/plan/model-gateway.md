@@ -664,7 +664,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:1246-1248`). The gateway translates those hints into
+(`context-engine.md:1264-1266`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -753,7 +753,7 @@ they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:1220-1222` and the
+The cached-prefix ratio is defined in `context-engine.md:1238-1240` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -1084,7 +1084,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1274-1315` is
+family of the secret scanner at `bootstrap-and-composition.md:1276-1317` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.

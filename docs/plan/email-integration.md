@@ -402,7 +402,7 @@ undetermined-outcome code, resolves to the platform's `uncertain` outcome with
 blocked from being proposed again in the run by the unified breaker's
 threshold-of-one row (tool-system.md:928). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:2068-2070) and the one
+after the watermark (tool-system.md:2075-2077) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
 (browser-automation.md:1454-1458), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an
@@ -592,11 +592,12 @@ sender cleanup reuse `modify_labels`, and a `mailto:` unsubscribe reuses
 `send_message`, each under its existing classification, approval floor and
 uncertainty rule. Milestone 18's gates remain independently binding.
 
-### Image-bearing presentation source (ADR-0304)
+### Bounded presentation source (ADR-0304)
 
 The application-only `get_thread_page` additionally retains a complete HTML
-alternative containing images when it fits 64 KiB, as `reader_html`. It stays
-within the existing response budget and follows the message's retention and
+alternative when it fits 64 KiB, as `reader_html`, including mail without images
+so its paragraphs and tables survive. It stays within the existing response
+budget and follows the message's retention and
 erasure. The ordinary `get_thread` tool keeps returning only its text body.
 The reader derives inert image references; raw HTML is not model evidence or
 content identity. See [email-experience.md](email-experience.md).

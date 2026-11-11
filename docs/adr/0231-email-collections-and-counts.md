@@ -2,6 +2,8 @@
 
 - Status: Accepted — owner requested completion of the approved A2 designs on 2026-10-20
 - Date: 2026-10-20
+- Amended 2026-11-10: the owner requested Important as the initial collection
+  and on each switch into Email, superseding the Inbox default below.
 - Related: ADR-0092, ADR-0095
 - Detailed design: `docs/plan/email-experience.md`
 
@@ -43,3 +45,35 @@ contract without widening consent.
 No new storage, migration, scope, provider call, or notification policy is
 needed. Existing authorization and retained-summary traversal govern counts
 and rows together. No milestone, release gate, or production activation moves.
+
+The 2026-11-11 release review added cache invalidation when a thread read learns
+another device changed Inbox, Spam or handled state. All three regression cases
+first reproduced stale collection rows. The repaired Apple package passed 1,191
+tests plus four contrast tests in the local Tart VM using
+`scripts/run_apple_ui_macos_vm.sh make test-apple`. The focused red command used
+`swift test --package-path clients/apple --filter EmailViewModelTests.testThreadReadInvalidatesChangedCollectionCache`
+inside the same VM. Unchanged thread reads retain their cached collections.
+The mailbox snapshot also retains its observed source revision: a new revision
+can reopen handled mail while the dismissal marker remains unchanged. The
+revision regression first failed only for reopened mail, with its unchanged-read
+control passing; the repair compares effective handled state as well as raw
+mailbox fields. Both cases use
+`EmailViewModelTests.testThreadRevisionInvalidatesCacheOnlyWhenHandledStateChanges`.
+Detail-discovered membership changes also invalidate the in-flight list request
+and its pagination metadata, clear abandoned loading flags, and reconcile the
+visible row with the accepted detail. A delayed reload or next-page response
+cannot restore the invalidated cache. Both cases in
+`EmailViewModelTests.testThreadReadInvalidatesInflightCollectionRead` first
+reproduced stale rows returning after invalidation; the unchanged-read control
+above continues to preserve useful snapshots.
+Invalidation schedules a replacement list read that preserves surviving rows
+and restores pagination. The scheduled read is bound to the connection, query
+and foreground visit; switching any of them supersedes it. The regression
+`EmailViewModelTests.testThreadReadRestoresPaginationAfterMailboxChange` first
+failed because no replacement request ran and pagination stayed disabled.
+The release's iPhone and iPad UI gates also caught four subscription and spam
+tests that still assumed Email opened Inbox. Those flows now explicitly choose
+Inbox before looking for bulk or suspected-spam mail, retaining every action
+and outcome assertion. Important continues to exclude those fixture rows.
+All four corrected cases passed on macOS, iPhone and iPad in the local Tart
+guest, using the same UI tests and ad-hoc signing settings as the hosted gates.
