@@ -71,3 +71,9 @@ and restores pagination. The scheduled read is bound to the connection, query
 and foreground visit; switching any of them supersedes it. The regression
 `EmailViewModelTests.testThreadReadRestoresPaginationAfterMailboxChange` first
 failed because no replacement request ran and pagination stayed disabled.
+The release's iPhone and iPad UI gates also caught four subscription and spam
+tests that still assumed Email opened Inbox. Those flows now explicitly choose
+Inbox before looking for bulk or suspected-spam mail, retaining every action
+and outcome assertion. Important continues to exclude those fixture rows.
+All four corrected cases passed on macOS, iPhone and iPad in the local Tart
+guest, using the same UI tests and ad-hoc signing settings as the hosted gates.

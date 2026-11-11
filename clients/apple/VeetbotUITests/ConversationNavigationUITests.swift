@@ -1999,6 +1999,7 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launch()
         app.activate()
         openEmailMode()
+        activate(app.buttons["email.collection.inbox"])
         let bulk = app.buttons["email.thread.\(Self.bulkThreadID)"]
         XCTAssertTrue(bulk.waitForExistence(timeout: 10))
         activate(bulk)
@@ -2034,6 +2035,7 @@ final class ConversationNavigationUITests: XCTestCase {
         app.launchArguments.append("--ui-testing-email-bulk-thread")
         app.launch()
         openEmailMode()
+        activate(app.buttons["email.collection.inbox"])
         XCTAssertFalse(app.buttons["email.subscriptions.open"].exists)
         let bulk = app.buttons["email.thread.\(Self.bulkThreadID)"]
         XCTAssertTrue(bulk.waitForExistence(timeout: 10))
@@ -2048,6 +2050,7 @@ final class ConversationNavigationUITests: XCTestCase {
     private func openSuspectedSpam() -> XCUIElement {
         app.activate()
         openEmailMode()
+        activate(app.buttons["email.collection.inbox"])
         let row = app.buttons["email.thread.\(Self.spamThreadID)"]
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(row.label.contains("Suspected spam") || firstElement("email.spam.tag.\(Self.spamThreadID)").exists,
