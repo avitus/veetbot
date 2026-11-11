@@ -159,6 +159,8 @@ import SwiftUI
         }
         try await waitForEmailTestCondition { gate.isWaiting }
         await model.openThread(threadID)
+        // The replacement read may own the flag now; the abandoned read stays gated.
+        try await waitForEmailTestCondition { requests.snapshot.count == 4 && !model.isReadingList }
         #expect(!model.isReadingList && !model.isLoading)
         #expect(model.items.isEmpty, "The accepted archive must also remove the visible Inbox row")
         gate.release()
@@ -166,6 +168,38 @@ import SwiftUI
         model.setListView("priority")
         model.setListView("inbox")
         #expect(model.items.isEmpty, "An obsolete response must not recreate the invalidated snapshot")
+    }
+
+    /// A changed detail replaces invalid pagination without clearing surviving visible mail.
+    @Test func testThreadReadRestoresPaginationAfterMailboxChange() async throws {
+        let requests = EmailRequestRecorder()
+        let gate = EmailArchiveResponseGate()
+        let survivorID = UUID()
+        let survivor = threadJSON().replacingOccurrences(of: threadID.uuidString, with: survivorID.uuidString)
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON(), nil) }
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, self.archiveThreadJSON(inInbox: false), nil)
+            }
+            requests.append(request)
+            if requests.snapshot.count == 1 {
+                return (200, "{\"items\":[\(self.threadJSON()),\(survivor)],\"next_cursor\":\"old\"}", nil)
+            }
+            return (200, "{\"items\":[\(survivor)],\"next_cursor\":\"fresh\"}", gate)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.reload()
+        await model.openThread(threadID)
+        #expect(model.items.map(\.id) == [survivorID])
+        #expect(!model.isLoading)
+        try await waitForEmailTestCondition { gate.isWaiting }
+        #expect(model.items.map(\.id) == [survivorID], "Keep surviving rows while replacement pagination loads")
+        #expect(requests.snapshot.last?.url?.query?.contains("view=priority") == true)
+        gate.release()
+        try await waitForEmailTestCondition { !model.isReadingList }
+        #expect(model.hasMore, "Replacement metadata must restore automatic pagination")
+        #expect(model.thread?.id == threadID, "List repair must preserve the selected detail")
     }
 
     /// Opening mail is inert; each load or retry requires another explicit request.

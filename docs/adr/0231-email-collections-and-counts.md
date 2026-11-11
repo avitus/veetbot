@@ -66,3 +66,8 @@ cannot restore the invalidated cache. Both cases in
 `EmailViewModelTests.testThreadReadInvalidatesInflightCollectionRead` first
 reproduced stale rows returning after invalidation; the unchanged-read control
 above continues to preserve useful snapshots.
+Invalidation schedules a replacement list read that preserves surviving rows
+and restores pagination. The scheduled read is bound to the connection, query
+and foreground visit; switching any of them supersedes it. The regression
+`EmailViewModelTests.testThreadReadRestoresPaginationAfterMailboxChange` first
+failed because no replacement request ran and pagination stayed disabled.

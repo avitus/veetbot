@@ -976,6 +976,13 @@ public final class EmailViewModel: ObservableObject {
                         inboxItems.remove(at: index)
                     }
                 }
+                let query = listRequest
+                let visit = activation
+                Task { [weak self] in
+                    guard let self, self.generation == connection, self.activation == visit,
+                          self.listRequest == query else { return }
+                    await self.reload(preserveOrder: true, activation: foreground)
+                }
             }
             thread = result
             isLoadingThread = false
