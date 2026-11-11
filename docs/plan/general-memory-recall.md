@@ -821,3 +821,29 @@ routes available.
     reproduce under their explicit legacy policy; new evidence is independently versioned.
 12. **M33.** **Activation evidence** — only matching complete passing evidence admits optional
     channels; rollback preserves originals and never enables unattended dreaming.
+
+## Reader follow-up from the November 10 diagnostic
+
+The default agent instructions now ask the reader to identify supporting facts,
+search a missing fact directly instead of repeatedly searching the task topic,
+and account explicitly for relevant remembered constraints and routines when
+adapting a plan. Proposed changes must remain distinct from stored facts; memory
+remains evidence, never instructions. This is reader guidance within the existing
+search and context budgets, not a ranking change or a new retrieval arm.
+Content-addressed agent versions preserve existing chat instructions; new chats
+select the revised default after delivery.
+
+The private replay diagnostic in `tests/live/test_recall_audit_replay.py` exercises
+location-query planning and routine use through the actual model adapter. Its
+baseline reproduced the location-planning failure; swimming use varied between
+observations. This targeted diagnostic is neither a held-out quality gate nor
+proof that the production home-location retrieval miss has been eliminated.
+
+Verification on 2026-11-10 used the local Linux sandbox and `astra/high`.
+The baseline replay failed the residence-query criterion and passed routine use;
+the revised instructions passed both targeted replays. An initial, broader draft
+was rejected because it requested additional searches instead of answering the
+routine question. The final routine check disables further tools to isolate
+answer use; it must not be reported as end-to-end recall success. Formatting,
+lint, type checking and documentation checks passed. Reading lane A applies;
+no architecture decision, activation or milestone acceptance changes.
