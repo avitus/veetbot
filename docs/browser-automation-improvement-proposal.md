@@ -151,6 +151,13 @@ of a misleading `dom_quiet`. The existing two-second deadline and single-action
 semantics remain. This is construction evidence under ADR-0159, separate from
 live-site and production acceptance.
 
+The W5 follow-up extends the existing human-only challenge interruption into
+open shadow roots. Password/OTP metadata and bounded visible prompts now pause
+automation there, with composed visibility and passive-badge checks. The read
+does not expose credential values, prove sign-in, or replay an action whose
+effect already occurred. ADR-0163 records construction evidence; broader W5
+and live-site acceptance remain separate.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

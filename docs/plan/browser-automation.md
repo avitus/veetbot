@@ -2041,6 +2041,19 @@ CAPTCHA detection excludes the passive reCAPTCHA badge and its descendants;
 credential fields still interrupt there. Detection is bounded negative evidence, not
 positive login verification.
 
+Challenge detection also traverses open shadow roots in the main document.
+Its 8,192-visit budget includes composed-ancestor checks, including assigned
+slots, so hidden hosts or slot ancestors cannot create a visible challenge.
+Passkey, verification-code, MFA and consent wording is read only from visible,
+noneditable text in a form, dialog or button context, including corresponding
+ARIA roles across shadow boundaries; each text read retains the 512-unit bound.
+Password and OTP checks inspect field metadata, never values. The passive badge
+exception follows composed ancestry and still cannot suppress credential fields.
+Closed roots are not inspected; ADR-0288's separate frame-credential check is
+unchanged. Exhaustion or no match is not positive authentication evidence.
+Existing pre-dispatch refusal, reference invalidation and post-dispatch
+`outcome_unknown` handling remain unchanged.
+
 ### Autonomous verification and continuation (ADR-0164)
 
 The owner-authorized minimal-user-involvement tranche extends visible conditions
