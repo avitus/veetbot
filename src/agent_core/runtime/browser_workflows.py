@@ -34,7 +34,13 @@ def _intent(value: str) -> str:
 
 
 def _definition(recipe: BrowserWorkflowRecipe) -> str:
-    return hashlib.sha256(recipe.model_dump_json().encode()).hexdigest()
+    # Omitted optional branching must not change legacy recipe/checkpoint identity.
+    excluded = {
+        "steps": {
+            index: {"branches"} for index, step in enumerate(recipe.steps) if step.branches is None
+        }
+    }
+    return hashlib.sha256(recipe.model_dump_json(exclude=excluded).encode()).hexdigest()
 
 
 def _condition(condition: BrowserCondition) -> dict[str, Any]:
@@ -195,7 +201,7 @@ class BrowserWorkflowRunner:
             # An interrupted write is reconciled below. Only pre-action reads can restart.
             if state["phase"] not in {"action", "verify"}:
                 state.update(phase="start", call_id=None)
-        while state["completed_steps"] < len(recipe.steps):
+        while state.get("next_step", state["completed_steps"]) < len(recipe.steps):
             context.token.raise_if_cancelled()
             if (
                 context.clock.now() >= datetime.fromisoformat(state["expires_at"])
@@ -212,7 +218,8 @@ class BrowserWorkflowRunner:
             if context.checkpoint.pending_tool_calls:
                 # Includes a pending approved call or the fresh read queued by verified sign-in.
                 await self._dispatch_pending(context, state)
-            step = recipe.steps[state["completed_steps"]]
+            step_index = state.get("next_step", state["completed_steps"])
+            step = recipe.steps[step_index]
             result = next(
                 (
                     item
@@ -284,6 +291,35 @@ class BrowserWorkflowRunner:
                         },
                     )
                     continue
+                if step.branches is not None:
+                    if (
+                        state["phase"] != "read"
+                        or observed.condition is None
+                        or observed.condition.status not in {"satisfied", "failed"}
+                    ):
+                        await self._stop(context, state, "unverified")
+                        return None
+                    status = observed.condition.status
+                    destination = (
+                        step.branches.satisfied if status == "satisfied" else step.branches.failed
+                    )
+                    state["completed_steps"] += 1
+                    state.update(
+                        next_step=destination,
+                        last_branch={
+                            "step": step_index,
+                            "status": status,
+                            "next_step": destination,
+                        },
+                        phase="start",
+                        call_id=None,
+                    )
+                    if destination == len(recipe.steps) and status == "failed":
+                        await self._stop(context, state, "observed_failure")
+                        return None
+                    # Persist the decision before any target read, approval or dispatch.
+                    await checkpoint(context, "browser_workflow_progress")
+                    continue
                 if observed.condition is not None and observed.condition.status != "satisfied":
                     await self._stop(context, state, "unverified")
                     return None
@@ -298,6 +334,8 @@ class BrowserWorkflowRunner:
                     await self._stop(context, state, "unverified")
                     return None
                 state["completed_steps"] += 1
+                if "next_step" in state:
+                    state["next_step"] = step_index + 1
                 state.update(phase="start", call_id=None)
                 await checkpoint(context, "browser_workflow_progress")
                 continue

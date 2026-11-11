@@ -1,3 +1,6 @@
+# ADR-0314: Owner-authorized W6 continuation adds forward-only branches on
+# positive observe results in reviewed recipes. Existing permissions, uncertain
+# effect handling and deployed recipe catalog remain unchanged. No gate moves.
 # ADR-0313: Owner-authorized W4 continuation adds versioned open-shadow row
 # completion checks. Pinned earlier tools retain document scope;
 # verification never replays actions. No milestone or gate moves.

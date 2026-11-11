@@ -363,3 +363,4 @@ implementation without one.
 - [ADR-0311: Extract bounded collections from open shadow roots](0311-open-shadow-browser-extraction.md)
 - [ADR-0312: Reply means owner composition; Veetbot drafting is a separate action (Accepted)](0312-manual-reply-and-veetbot-draft.md)
 - [ADR-0313: Verify browser completion rows across open shadow roots](0313-open-shadow-browser-completion.md)
+- [ADR-0314: Forward-only branches in reviewed browser workflows](0314-reviewed-browser-read-branches.md)

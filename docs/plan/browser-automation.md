@@ -2173,6 +2173,25 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
+[ADR-0314](../adr/0314-reviewed-browser-read-branches.md) adds optional
+`branches` to reviewed observe steps with a postcondition and positive
+`failure_evidence`. The closed object names `satisfied` and `failed` destinations
+as strict zero-based integer indexes, strictly after the current step and at
+most the recipe length. Missing or ambiguous evidence cannot choose a branch.
+A destination equal to the recipe length terminates: satisfied is `verified`,
+failed is explicitly `observed_failure`. No loops, selectors, expressions or
+page-authored destinations are accepted. Actions and their uncertain-effect
+reconciliation cannot branch. A reached action still requires a fresh target
+and the ordinary current policy/approval path.
+
+A branch checkpoints `next_step` and its source/status/destination before further
+work. `completed_steps` counts executed steps, never skipped ones. Legacy state
+without `next_step` keeps its sequential cursor. Resume and generation changes
+preserve the selected cursor while retaining all existing action fences and
+budgets. Omitted branch fields do not change legacy definition digests; branch
+changes do. The existing catalog is unchanged and no new site recipe is activated.
+This is bounded execution construction, not broader live workflow acceptance.
+
 The shipped catalog includes the reviewed X home-feed briefing below; private
 account definitions remain deployment-owned. Engineering-owned definitions
 require site-specific fixtures and review before activation. Users do not author

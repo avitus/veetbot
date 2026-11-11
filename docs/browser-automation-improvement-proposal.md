@@ -182,6 +182,14 @@ Wrong-scope evidence cannot satisfy a row predicate, and failed verification
 never repeats a write.
 Construction and direct-dev delivery do not establish live-site acceptance.
 
+The next W6 slice adds forward-only branches on positively observed alternatives
+in reviewed recipes ([ADR-0314](adr/0314-reviewed-browser-read-branches.md)).
+Already-complete states can skip unnecessary actions; necessary actions still
+use fresh targets and ordinary approvals. Missing/ambiguous evidence and uncertain
+writes cannot select another action. Persisted branch choices preserve resume
+and truthful completed-step counts. The deployed recipe catalog is unchanged;
+live-site and efficiency acceptance remain pending.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

@@ -452,4 +452,5 @@ nav:
       - "ADR-0311: Open-shadow browser extraction": adr/0311-open-shadow-browser-extraction.md
       - "ADR-0312: Manual reply and Veetbot drafting": adr/0312-manual-reply-and-veetbot-draft.md
       - "ADR-0313: Open-shadow browser completion": adr/0313-open-shadow-browser-completion.md
+      - "ADR-0314: Reviewed browser read branches": adr/0314-reviewed-browser-read-branches.md
   - Changelog: changelog.md
