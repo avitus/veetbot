@@ -249,7 +249,9 @@ public final class EmailViewModel: ObservableObject {
         var inInbox: Bool?
         var operation: EmailArchiveOperation?
         var dismissedRevision: Int?
+        var revision: Int
         var inSpam: Bool? = nil
+        var isHandled: Bool { dismissedRevision == revision }
     }
     private var archiveVersions: [UUID: UUID] = [:]
     private var archiveStates: [UUID: ArchiveMailboxState] = [:]
@@ -962,7 +964,8 @@ public final class EmailViewModel: ObservableObject {
             let result = preservingArchiveState(response, since: mailboxVersions)
             if let previousMailbox,
                previousMailbox.inInbox != result.inInbox || previousMailbox.inSpam != result.inSpam
-                || previousMailbox.dismissedRevision != result.dismissedRevision {
+                || previousMailbox.dismissedRevision != result.dismissedRevision
+                || previousMailbox.isHandled != result.isHandled {
                 cachedMailLists = [:]
             }
             thread = result
@@ -1609,6 +1612,7 @@ public final class EmailViewModel: ObservableObject {
             let current = self.thread?.id == thread.id ? self.thread : detail ?? inboxItems.first { $0.id == thread.id }
             archiveStates[thread.id] = ArchiveMailboxState(inInbox: current?.inInbox ?? thread.inInbox,
                 operation: pending, dismissedRevision: current?.dismissedRevision ?? thread.dismissedRevision,
+                revision: current?.revision ?? thread.revision,
                 inSpam: current?.inSpam ?? thread.inSpam)
             archiveVersions[thread.id] = UUID()
             await checkArchiveStatus(thread.id)
@@ -1667,7 +1671,7 @@ public final class EmailViewModel: ObservableObject {
         cachedMailLists = [:]
         archiveVersions[value.id] = UUID()
         archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox, operation: value.archiveOperation,
-            dismissedRevision: value.dismissedRevision, inSpam: value.inSpam)
+            dismissedRevision: value.dismissedRevision, revision: value.revision, inSpam: value.inSpam)
         if let index = inboxItems.firstIndex(where: { $0.id == value.id }), value.revision >= inboxItems[index].revision {
             inboxItems[index] = value
         }
@@ -1693,7 +1697,8 @@ public final class EmailViewModel: ObservableObject {
             }
         } else {
             archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox,
-                operation: value.archiveOperation, dismissedRevision: value.dismissedRevision, inSpam: value.inSpam)
+                operation: value.archiveOperation, dismissedRevision: value.dismissedRevision,
+                revision: value.revision, inSpam: value.inSpam)
         }
         return value
     }

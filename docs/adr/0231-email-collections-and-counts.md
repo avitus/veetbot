@@ -53,3 +53,9 @@ tests plus four contrast tests in the local Tart VM using
 `scripts/run_apple_ui_macos_vm.sh make test-apple`. The focused red command used
 `swift test --package-path clients/apple --filter EmailViewModelTests.testThreadReadInvalidatesChangedCollectionCache`
 inside the same VM. Unchanged thread reads retain their cached collections.
+The mailbox snapshot also retains its observed source revision: a new revision
+can reopen handled mail while the dismissal marker remains unchanged. The
+revision regression first failed only for reopened mail, with its unchanged-read
+control passing; the repair compares effective handled state as well as raw
+mailbox fields. Both cases use
+`EmailViewModelTests.testThreadRevisionInvalidatesCacheOnlyWhenHandledStateChanges`.

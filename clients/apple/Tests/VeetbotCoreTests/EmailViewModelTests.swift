@@ -107,6 +107,33 @@ import SwiftUI
         #expect(model.items.isEmpty, "Do not restore a snapshot invalidated by another device")
     }
 
+    /// A new source revision reopens handled mail even if the dismissal marker stays unchanged.
+    @Test(arguments: [1, 2])
+    func testThreadRevisionInvalidatesCacheOnlyWhenHandledStateChanges(revision: Int) async throws {
+        let otherID = UUID()
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/drafts/") { return (200, self.draftJSON()) }
+            let handled = self.threadJSON().replacingOccurrences(of: "\"summary\"", with: "\"dismissed_revision\":1,\"summary\"")
+            if request.url!.path.hasSuffix(self.threadID.uuidString) {
+                return (200, handled.replacingOccurrences(of: "\"revision\":1", with: "\"revision\":\(revision)"))
+            }
+            if request.url!.query?.contains("view=inbox") == true {
+                return (200, "{\"items\":[\(handled)],\"next_cursor\":null}")
+            }
+            return (200, self.pageJSON().replacingOccurrences(of: self.threadID.uuidString, with: otherID.uuidString))
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        #expect(model.items.map(\.id) == [otherID])
+        model.setListView("inbox")
+        try await waitForEmailTestCondition { !model.isReadingList && model.items.first?.id == threadID }
+        await model.openThread(threadID)
+        #expect(model.thread?.isHandled == (revision == 1))
+        model.setListView("priority")
+        #expect(model.items.map(\.id) == (revision == 1 ? [otherID] : []))
+    }
+
     /// Opening mail is inert; each load or retry requires another explicit request.
     @Test func testImagesLoadOnlyByExplicitRequestAndDoNotRetryOnFailure() async throws {
         let requests = EmailRequestRecorder()
