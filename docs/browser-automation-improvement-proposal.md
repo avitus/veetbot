@@ -190,6 +190,14 @@ writes cannot select another action. Persisted branch choices preserve resume
 and truthful completed-step counts. The deployed recipe catalog is unchanged;
 live-site and efficiency acceptance remain pending.
 
+The next W4/W6 slice connects reviewed action steps to existing bounded control
+continuation ([ADR-0315](adr/0315-bounded-workflow-target-discovery.md)). A target
+outside the first window can be discovered within four requested windows, using
+only advertised current continuations. Search counts survive suspension, and
+approval still binds the newly observed target. Ambiguity, stale evidence and
+exhausted discovery stop safely; uncertain actions never restart discovery.
+The deployed recipe catalog and broader live-site acceptance remain unchanged.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

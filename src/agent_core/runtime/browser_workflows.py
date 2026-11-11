@@ -11,6 +11,7 @@ from uuid import UUID
 from agent_core.domain.browser import (
     BrowserCondition,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserProfileStatus,
     browser_origin,
 )
@@ -61,6 +62,30 @@ def _observation(result: ToolResultItem | None) -> BrowserObservation | None:
                 return BrowserObservation.model_validate_json(part.text)
             except ValueError:
                 pass
+    return None
+
+
+def _control_continuation(
+    result: ToolResultItem, observation: BrowserObservation
+) -> dict[str, str] | None:
+    """Copy only a current, advertised control continuation, never a guessed cursor."""
+    if result.is_error or observation.coverage is None:
+        return None
+    if not result.content or not isinstance(result.content[0], TextPart):
+        return None
+    try:
+        payload = json.loads(result.content[0].text)
+        if not isinstance(payload, dict):
+            return None
+        request = BrowserObservationExpansion.model_validate(payload.get("next_observe"))
+    except ValueError:
+        return None
+    if request.after is not None and any(
+        element.ref == request.after for element in observation.elements
+    ):
+        return {"after": request.after}
+    if request.cursor is not None and request.cursor == observation.coverage.next_cursor:
+        return {"cursor": request.cursor}
     return None
 
 
@@ -273,6 +298,14 @@ class BrowserWorkflowRunner:
                         and element.name == step.name
                         and not element.disabled
                     ]
+                    if not targets:
+                        continuation = _control_continuation(result, observed)
+                        if continuation is None:
+                            await self._stop(context, state, "target_not_observed")
+                            return None
+                        if not await self._read_target_window(context, state, continuation):
+                            return None
+                        continue
                     if len(targets) != 1:
                         await self._stop(context, state, "ambiguous_target")
                         return None
@@ -342,7 +375,8 @@ class BrowserWorkflowRunner:
             if step.kind == "navigate":
                 await self._queue(context, state, "read", "browser.navigate", {"url": step.url})
             elif step.kind == "act":
-                await self._queue(context, state, "before_action", "browser.observe", {})
+                if not await self._read_target_window(context, state, {}):
+                    return None
             elif step.kind == "observe":
                 args = (
                     {}
@@ -379,6 +413,32 @@ class BrowserWorkflowRunner:
                 )
         await self._stop(context, state, "verified")
         return None
+
+    async def _read_target_window(
+        self, context: RunContext, state: dict[str, Any], arguments: dict[str, str]
+    ) -> bool:
+        step_index = state.get("next_step", state["completed_steps"])
+        search = state.get("target_search")
+        if search is not None and (
+            not isinstance(search, dict)
+            or set(search) != {"step", "windows"}
+            or type(search["step"]) is not int
+            or not 0 <= search["step"] < 16
+            or type(search["windows"]) is not int
+            or not 0 <= search["windows"] <= 4
+        ):
+            raise ConflictError("the browser workflow target search is malformed")
+        if search is None or search["step"] != step_index:
+            # Legacy checkpoints may already contain an initial observation.
+            search = {"step": step_index, "windows": int(bool(arguments))}
+            state["target_search"] = search
+        if search["windows"] >= 4:
+            await self._stop(context, state, "target_not_observed")
+            return False
+        search["windows"] += 1
+        # _queue persists this allowance with the pending read before dispatch.
+        await self._queue(context, state, "before_action", "browser.observe", arguments)
+        return bool(state["status"] == "running")
 
     async def _queue(
         self,

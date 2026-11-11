@@ -2192,6 +2192,26 @@ budgets. Omitted branch fields do not change legacy definition digests; branch
 changes do. The existing catalog is unchanged and no new site recipe is activated.
 This is bounded execution construction, not broader live workflow acceptance.
 
+Under [ADR-0315](../adr/0315-bounded-workflow-target-discovery.md), an action
+step with no enabled exact role/name match follows only its current result's
+advertised `next_observe`. A closed `after` request must name a returned control;
+a cursor must match the observation's coverage. The advertised `after` takes
+precedence over a later coverage cursor when only a prefix was returned. No
+invented offsets, text/region continuation or fallback cursor is accepted.
+
+Each action may request at most four target windows, including its initial
+read. The step index and requested count are checkpointed before each read and
+survive suspension and generation changes; a new action step gets a fresh
+allowance. Existing separately audited recovery reads retain their existing
+per-run cap and spend workflow/run budgets. Each successful window replaces
+prior action references. One enabled exact match in the current window permits
+ordinary action proposal; duplicates stop as `ambiguous_target`. Missing usable
+continuation or exhausted discovery stops as `target_not_observed`, not a claim
+of whole-page absence. Failed discovery never selects an older window's target.
+Once dispatch begins, uncertainty only follows existing read-only reconciliation;
+it cannot restart target discovery or resend the action. Public tools, live
+policy/grant checks, approvals and the deployed recipe catalog are unchanged.
+
 The shipped catalog includes the reviewed X home-feed briefing below; private
 account definitions remain deployment-owned. Engineering-owned definitions
 require site-specific fixtures and review before activation. Users do not author
