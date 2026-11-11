@@ -136,6 +136,8 @@ async def check_browser_condition(
             )
             if not provider.allows(observed.url):
                 raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            if observed.interruption is not None:
+                raise BrowserProviderError("tool.browser.needs_user", retryable=False)
             return observed
 
         try:
@@ -162,6 +164,8 @@ async def check_browser_condition(
     with browser_phase("postcondition", "orchestrator") as phase:
         if not provider.allows(observation.url):
             raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+        if observation.interruption is not None:
+            raise BrowserProviderError("tool.browser.needs_user", retryable=False)
         if row is not None and condition.timeout_ms > 0:
             observation = await capture(observation)
         while True:

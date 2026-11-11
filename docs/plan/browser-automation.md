@@ -2085,6 +2085,15 @@ revision-bound extraction. A stale verification read permits one fresh capture
 within the shared five-second/21-read limit, never another action. Condition
 status, rather than unrelated page churn, drives repeated-wait detection.
 
+Authentication interrupts completion polling immediately, including row extraction
+and its fresh-observation recovery. An interrupted observation cannot satisfy
+even a matching legacy control predicate or start another verification read.
+After an action was dispatched, `needs_user` or `authentication_required` during
+verification retains the non-retryable `outcome_unknown` result and the existing
+trusted sign-in interruption marker. The ordinary suspension path may then ask
+for sign-in without treating the action as unsent or replaying it. Other read
+failures remain uncertain without inventing an authentication requirement.
+
 The isolated service optionally loads `BROWSER_PROFILE_VERIFICATION_FILE`, a
 private absolute mode-0600 JSON file of at most 64 KiB. Its version-1 `sites`
 catalog contains at most 32 closed definitions: `id`, `version`, `profile_id`,

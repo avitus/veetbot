@@ -158,6 +158,14 @@ does not expose credential values, prove sign-in, or replay an action whose
 effect already occurred. ADR-0163 records construction evidence; broader W5
 and live-site acceptance remain separate.
 
+The W4/W5 continuation preserves authentication interruptions that arrive during
+completion polling, including extraction reads. Polling stops, the already-sent
+action stays uncertain and non-retryable, and the existing sign-in suspension
+receives its trusted marker. This closes the gap between immediate action
+interruptions and later verification reads without replaying an effect or adding
+another approval path. ADR-0164 records construction evidence; broader acceptance
+and production delivery remain separate.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

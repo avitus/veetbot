@@ -304,11 +304,20 @@ class BrowserActTool:
         if condition is not None:
             try:
                 observation = await check_browser_condition(self._provider, observation, condition)
-            except Exception:
+            except Exception as error:
                 # The action already returned; evidence loss cannot prove it was unsent.
-                return browser_failure(
+                uncertain = browser_failure(
                     BrowserProviderError("tool.browser.outcome_unknown", retryable=False)
                 )
+                if isinstance(error, BrowserProviderError) and error.reason_code in {
+                    "tool.browser.needs_user",
+                    "tool.browser.authentication_required",
+                }:
+                    # Preserve the trusted sign-in signal for the existing
+                    # suspension path without making the sent action retryable.
+                    assert uncertain.failure is not None
+                    uncertain.failure.external_text = BROWSER_AUTH_INTERRUPTION_MARKER
+                return uncertain
         if (
             constraint is not None
             and constraint.grant_kind == "follow"

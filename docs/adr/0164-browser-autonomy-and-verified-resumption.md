@@ -74,3 +74,44 @@ routine work and exactly one interruption per unresolved sign-in episode, while
 requiring eventual completion or an explicit bounded stop. Server-side counters
 must show no duplicate effects after response loss or resumption. Run the full
 sidecar gate and relevant native and persistence checks on the final inputs.
+
+## Authentication during completion polling — 2026-11-11
+
+An authentication challenge can appear after the action's first observation,
+while its completion predicate is still polling. The same sign-in interruption
+used immediately after dispatch must survive this later read. The checker now
+stops on an interrupted initial observation or capture, including extraction
+and stale-revision recovery, before evaluating predicates or issuing another read.
+The action tool preserves `needs_user` and `authentication_required` as the
+existing trusted interruption marker on a non-retryable `outcome_unknown` failure.
+Other verification errors remain uncertain without a sign-in marker.
+
+This connects the existing verified-resumption and suspension mechanisms; it
+introduces no new authority, event, retry, public schema or credential access.
+The uncertain invocation is not reclassified as unsent. Cancellation after the
+sign-in suspension still cannot replay it. This is a W4/W5 construction slice,
+not broader live-site acceptance or production delivery.
+
+Construction regression evidence in the local Linux ARM64 container:
+
+- Red: `make test-static
+  PYTEST_ARGS="tests/unit/test_browser_completion_evidence.py -k authentication_during_postcondition"`
+  failed all three initial cases: provider errors lost the interruption marker,
+  and an interrupted observation was polled repeatedly and returned as a
+  successful tool result. The implementation makes those cases pass.
+- Boundary cases exercise control, text and row predicates, interrupted initial
+  observations, and non-authentication failures. Extraction fixtures retain the
+  valid revision/schema envelope required by the provider port.
+- Real Chromium completion cases verify ordinary and open-shadow password
+  challenges introduced during receipt polling. Each server records exactly one
+  effect, the tool retains a non-retryable uncertain result with the sign-in
+  marker, private references are discarded, and credential canaries stay absent.
+- The composed runtime regression follows an approved action into sign-in
+  suspension during polling, retains its uncertain invocation, and cancels
+  without another dispatch.
+
+Final construction checks: all 465 browser cases passed in 325.13 seconds with
+no skips, using the established 64 MiB process stack. All 1,181 browser-related
+static cases and 170 browser contracts passed. The focused completion boundary
+suite passed 29 cases and the real Chromium completion suite passed eight.
+Lint, type checking, citation reconciliation and documentation checks passed.
