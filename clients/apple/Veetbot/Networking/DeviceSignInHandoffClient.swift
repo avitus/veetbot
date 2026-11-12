@@ -44,6 +44,8 @@ public enum DeviceHandoffOutcome: Equatable, Sendable {
     case sealed
     /// A fixed error code the service returned, such as `session_unconfirmed`.
     case rejected(code: String)
+    /// Exact `409 tool.browser.provider_unavailable`: verification failed without sealing.
+    case verificationUnavailable
     /// `401`: the capability was missing, wrong, used, expired or not a device one.
     case capabilityRejected
     /// `413`: the body was over 1 MiB.
@@ -116,6 +118,9 @@ public struct DeviceSignInHandoffClient: Sendable {
             return .tooLarge
         default:
             let code = (try? JSONDecoder().decode(HandoffError.self, from: data))?.error.code
+            if http.statusCode == 409, code == "tool.browser.provider_unavailable" {
+                return .verificationUnavailable
+            }
             return .rejected(code: code ?? "http_\(http.statusCode)")
         }
     }

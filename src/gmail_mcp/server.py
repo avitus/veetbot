@@ -9,11 +9,43 @@ from typing import Annotated, Any
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent
-from pydantic import Field
+from pydantic import Field, WithJsonSchema
 
 from gmail_mcp.client import GmailClient
 from gmail_mcp.constants import ROSTERS
 from gmail_mcp.errors import GmailError
+
+DRAFT_FILE_SCHEMA = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": 10,
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "artifact_id": {"type": "string", "format": "uuid"},
+            "account_id": {"type": "string", "maxLength": 32},
+            "source_thread_id": {"type": "string", "maxLength": 1024},
+            "message_id": {"type": "string", "maxLength": 256},
+            "attachment_index": {"type": "integer", "minimum": 0, "maximum": 1000},
+            "filename": {"type": "string", "minLength": 1, "maxLength": 1024},
+            "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+            "size_bytes": {"type": "integer", "minimum": 1, "maximum": 15728640},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        },
+        "required": [
+            "artifact_id",
+            "account_id",
+            "source_thread_id",
+            "message_id",
+            "attachment_index",
+            "filename",
+            "media_type",
+            "size_bytes",
+            "sha256",
+        ],
+    },
+}
 
 
 async def _call(
@@ -166,6 +198,17 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
 
             return await _call_attachment(client, message_id, attachment_index, filename)
 
+        @server.tool(meta={"veetbot/application-only": True})
+        async def stage_attachment(
+            message_id: str,
+            attachment_index: Annotated[int, Field(ge=0, le=1000)],
+            filename: str,
+            draft_thread_id: str,
+            source_thread_id: str,
+        ) -> CallToolResult:
+            """Fetch a candidate for private draft staging through the platform interceptor."""
+            return await _call_attachment(client, message_id, attachment_index, filename)
+
         @server.tool()
         async def save_attachment(
             message_id: str,
@@ -266,6 +309,32 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
                 thread_id,
                 in_reply_to,
                 references,
+            )
+
+        @server.tool(meta={"veetbot/application-only": True})
+        async def send_attached_message(
+            to: str,
+            subject: str,
+            body: str,
+            attachments: Annotated[list[dict[str, Any]], WithJsonSchema(DRAFT_FILE_SCHEMA)],
+            cc: str | None = None,
+            bcc: str | None = None,
+            thread_id: str | None = None,
+            in_reply_to: str | None = None,
+            references: str | None = None,
+        ) -> CallToolResult:
+            """Send exactly the staged files reviewed with a typed email draft."""
+            return await _call(
+                client.send_message,
+                to,
+                subject,
+                body,
+                cc,
+                bcc,
+                thread_id,
+                in_reply_to,
+                references,
+                attachments,
             )
 
     return server

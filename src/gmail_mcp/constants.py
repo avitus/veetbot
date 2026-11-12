@@ -26,10 +26,11 @@ ROSTERS: Final = {
         "get_message_body",
         "get_unsubscribe",
         "fetch_attachment",
+        "stage_attachment",
         "save_attachment",
     ),
     "write": ("create_draft", "modify_labels", "trash_thread", "untrash_thread"),
-    "send": ("send_message",),
+    "send": ("send_message", "send_attached_message"),
 }
 
 STABLE_FAILURE_CODES: Final = frozenset(

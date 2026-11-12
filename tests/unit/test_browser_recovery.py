@@ -475,7 +475,10 @@ async def test_sign_in_questions_are_bounded_even_when_owner_replies_without_sig
     assert len(provider.navigations) == 3
 
 
-async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_replays() -> None:
+@pytest.mark.parametrize("during_poll", [False, True])
+async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_replays(
+    during_poll: bool,
+) -> None:
     from agent_core.domain.approvals import ApprovalResolutionType
     from agent_core.domain.browser import BrowserAction, BrowserDispatchConstraint
 
@@ -484,9 +487,15 @@ async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_
             self, action: BrowserAction, *, constraint: BrowserDispatchConstraint | None = None
         ) -> BrowserObservation:
             self.actions.append(action)
+            if during_poll:
+                return self._observation("https://example.org/account")
             return BrowserObservation(
                 url="https://example.org/login", revision="signed-out", interruption="needs_user"
             )
+
+        async def observe(self) -> BrowserObservation:
+            self.observation_count += 1
+            raise BrowserProviderError("tool.browser.needs_user", retryable=False)
 
     provider = AfterClick()
     script = FakeModelScript(
@@ -499,6 +508,11 @@ async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_
                             "kind": "click",
                             "ref": "element-1",
                             "expected_revision": "revision-1",
+                            "postcondition": {
+                                "role": "button",
+                                "name": "Saved",
+                                "timeout_ms": 1000,
+                            },
                         },
                     )
                 ],
@@ -535,6 +549,7 @@ async def test_sign_in_after_an_approved_action_suspends_and_cancellation_never_
         result = await composition.runs.wait_terminal(run_id)
     assert result.status is RunStatus.CANCELLED
     assert len(provider.actions) == 1
+    assert provider.observation_count == int(during_poll)
 
 
 @pytest.mark.parametrize("bound", [True, False])

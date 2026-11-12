@@ -449,4 +449,11 @@ nav:
       - "ADR-0308: Open-shadow browser regions": adr/0308-open-shadow-browser-regions.md
       - "ADR-0309: Recall continuity and phase clocks": adr/0309-recall-continuity-and-phase-clocks.md
       - "ADR-0310: Retain both deliberate searches": adr/0310-retain-both-deliberate-searches.md
+      - "ADR-0311: Open-shadow browser extraction": adr/0311-open-shadow-browser-extraction.md
+      - "ADR-0312: Manual reply and Veetbot drafting": adr/0312-manual-reply-and-veetbot-draft.md
+      - "ADR-0313: Open-shadow browser completion": adr/0313-open-shadow-browser-completion.md
+      - "ADR-0314: Reviewed browser read branches": adr/0314-reviewed-browser-read-branches.md
+      - "ADR-0315: Bounded workflow target discovery": adr/0315-bounded-workflow-target-discovery.md
+      - "ADR-0316: Recognize unresolved sign-ins and retry checks": adr/0316-retry-transient-device-sign-in-checks.md
+      - "ADR-0317: Evidence-backed email replies": adr/0317-evidence-backed-email-replies.md
   - Changelog: changelog.md

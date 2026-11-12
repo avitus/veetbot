@@ -1256,6 +1256,8 @@ private struct EmailThreadScreen: View {
     @State private var showingExclusion = false
     @State private var showingRevisions = false
     @State private var showingEnvelope = false
+    @State private var composerClosed = false
+    @State private var previewDraftFile: EmailDraftAttachment?
     @State private var peopleLookup: PeopleLookup?
     @FocusState private var focusedField: Field?
     @FocusState private var feedbackFocused: Bool
@@ -1268,6 +1270,7 @@ private struct EmailThreadScreen: View {
     /// thread describes itself.
     private var describesInline: Bool { inspectorReveal == nil }
 
+    /// macOS jumps to avoid stale accessibility hit-testing after an animated scroll.
     private var replyScrollAnimation: Animation? {
         #if os(macOS)
         nil
@@ -1298,6 +1301,11 @@ private struct EmailThreadScreen: View {
                                 .environment(\.emailImageLoader, { messageID, index in
                                     try await model.loadImage(threadID: thread.id, messageID: messageID, index: index)
                                 })
+                            Button { Task { await discussInChat() } } label: {
+                                Label("Discuss in Chat", systemImage: "bubble.left.and.bubble.right")
+                            }
+                            .buttonStyle(QuietCapsuleButtonStyle())
+                            .accessibilityIdentifier("email.discuss")
                             if describesInline {
                                 EmailTeachCard(model: model, explanationFocused: $feedbackFocused)
                             }
@@ -1315,28 +1323,46 @@ private struct EmailThreadScreen: View {
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         HStack(spacing: 12) {
                             Button {
-                                Task { await discussInChat() }
-                            } label: {
-                                Label("Discuss in Chat", systemImage: "bubble.left.and.bubble.right")
-                            }
-                            .buttonStyle(QuietCapsuleButtonStyle())
-                            .accessibilityIdentifier("email.discuss")
-                            Spacer(minLength: 0)
-                            Button {
-                                // The Mac jumps: after an animated scrollTo, macOS 26 keeps a
-                                // stale transform for accessibility hit-testing, so the controls
-                                // it just brought on screen cannot be clicked.
-                                withAnimation(replyScrollAnimation) {
-                                    proxy.scrollTo("reply", anchor: .top)
+                                withAnimation(replyScrollAnimation) { proxy.scrollTo("reply", anchor: .top) }
+                                Task {
+                                    guard await model.selectReply(manual: true), model.selectedThreadID == thread.id else { return }
+                                    composerClosed = false
+                                    withAnimation(replyScrollAnimation) { proxy.scrollTo("reply", anchor: .top) }
+                                    focusedField = .body
                                 }
                             } label: {
-                                Label(
-                                    model.draft == nil ? "Reply" : "Your reply", systemImage: "arrowshape.turn.up.left")
+                                Label(model.draft?.isManual == true ? "Continue reply" : "Reply",
+                                      systemImage: "arrowshape.turn.up.left")
                             }
-                            .buttonStyle(PrimaryCapsuleButtonStyle())
+                            .lineLimit(2).minimumScaleFactor(0.85)
+                            .buttonStyle(PrimaryCapsuleButtonStyle(expands: true))
+                            .disabled(!model.canSelectReply)
                             .accessibilityIdentifier("email.jump-to-reply")
+                            Button {
+                                withAnimation(replyScrollAnimation) { proxy.scrollTo("reply", anchor: .top) }
+                                Task {
+                                    guard await model.selectReply(manual: false), model.selectedThreadID == thread.id else { return }
+                                    composerClosed = false
+                                    withAnimation(replyScrollAnimation) { proxy.scrollTo("reply", anchor: .top) }
+                                    focusedField = .body
+                                }
+                            } label: {
+                                if model.isGeneratingDraft {
+                                    ProgressView(model.draftPreparationMessage)
+                                } else {
+                                    Label(model.hasVeetbotDraft ? "Use Veetbot draft" : "Draft with Veetbot", systemImage: "sparkles")
+                                }
+                            }
+                            .lineLimit(2).minimumScaleFactor(0.85)
+                            .buttonStyle(SecondaryCapsuleButtonStyle(expands: true))
+                            .disabled(model.isPerformingAction || !model.canSelectReply)
+                            .accessibilityIdentifier("email.draft-with-veetbot")
                         }
                         .padding(.horizontal, VeetSpace.s5).padding(.vertical, 10)
+                        #if os(iOS)
+                        // Leave room for the floating keyboard Done control above the keyboard.
+                        .padding(.bottom, focusedField == nil && !feedbackFocused ? 0 : 44)
+                        #endif
                         .background(AppTheme.paper.opacity(0.88).background(.ultraThinMaterial))
                         .overlay(alignment: .top) { HairlineDivider() }
                     }
@@ -1351,11 +1377,15 @@ private struct EmailThreadScreen: View {
             }
         }
         .background(AppTheme.paper)
-        .confirmationDialog("Discard this Veetbot draft?", isPresented: $showingDiscard, titleVisibility: .visible) {
+        .sheet(item: $previewDraftFile) { file in
+            ArtifactViewerView(artifactID: file.artifactID, load: model.loadDraftAttachment)
+        }
+        .onChange(of: model.selectedThreadID) { composerClosed = false }
+        .confirmationDialog("Discard this reply?", isPresented: $showingDiscard, titleVisibility: .visible) {
             Button("Discard draft", role: .destructive) { Task { await model.discardDraft() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the proposal from Veetbot. It does not change Gmail.")
+            Text("This removes the saved reply from Veetbot. It does not change Gmail.")
         }
         .confirmationDialog("Exclude this email thread?", isPresented: $showingExclusion, titleVisibility: .visible) {
             Button("Exclude thread", role: .destructive) { Task { await model.excludeSelectedThread() } }
@@ -1619,19 +1649,21 @@ private struct EmailThreadScreen: View {
 
     /// The reply as one quiet column: a serif heading with the save state, any
     /// decision the draft is waiting on, the envelope and body in a single
-    /// well, then Review & Send with the rarer actions folded into a menu.
+    /// well, then Send and Save & close with rarer actions folded into a menu.
     @ViewBuilder private var draftEditor: some View {
         if let draft = model.draft, let edit = model.currentEdit {
+            draftNotices(draft, edit: edit)
+        }
+        if let draft = model.draft, let edit = model.currentEdit, !composerClosed {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("Your reply").veetType(.title)
+                    Text(draft.isManual ? "Your reply" : "Veetbot draft").veetType(.title)
                     Spacer(minLength: 8)
-                    Text(model.isSaving ? "Saving…" : edit.isDirty ? "Unsaved changes" : "Drafted by Veetbot · Saved")
+                    Text(model.isSaving ? "Saving…" : edit.isDirty ? "Unsaved changes" : draft.isManual ? "Written by you · Saved" : "Drafted by Veetbot · Saved")
                         .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                         .multilineTextAlignment(.trailing)
                 }
-                draftNotices(draft, edit: edit)
-                draftWell(draft, edit: edit)
+                draftWell(draft, edit: edit).disabled(model.isSelectingReply)
                 draftActions(draft, edit: edit)
                 // A refused send belongs next to the control that asked for it; above the
                 // conversation it reads as the button having done nothing.
@@ -1676,17 +1708,9 @@ private struct EmailThreadScreen: View {
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Your reply").veetType(.title)
-                Text("Start with a draft in your own style, then make it yours.").veetType(.ui)
+                Text("Write your own reply, or ask Veetbot for a draft.").veetType(.ui)
                     .foregroundColor(AppTheme.inkSoft)
-                Button {
-                    Task { await model.generateDraft() }
-                } label: {
-                    if model.isPerformingAction {
-                        ProgressView("Preparing draft…")
-                    } else {
-                        Label("Draft reply", systemImage: "square.and.pencil")
-                    }
-                }.primaryCapsule().disabled(model.isPerformingAction).padding(.top, 4)
+                if model.isSelectingReply { ProgressView("Opening reply…") }
                 if let error = model.draftActionMessage {
                     Label(error, systemImage: "exclamationmark.circle").foregroundColor(AppTheme.red)
                         .veetType(.ui).accessibilityIdentifier("email.action-error")
@@ -1734,6 +1758,30 @@ private struct EmailThreadScreen: View {
                 }
             }.disabled(!draft.canEdit || model.isPreparingSend)
             HairlineDivider()
+            let files = (draft.attachments ?? []).filter { edit.attachmentIDs.contains($0.artifactID) }
+            if !files.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(files) { file in
+                        HStack(spacing: 8) {
+                            Button { previewDraftFile = file } label: {
+                                Label(file.filename, systemImage: "paperclip").lineLimit(1)
+                            }.buttonStyle(.plain).foregroundColor(AppTheme.tealText)
+                                .accessibilityIdentifier("email.draft-file.\(file.artifactID)")
+                                .help("Preview or download this attachment")
+                            Spacer(minLength: 4)
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(file.sizeBytes), countStyle: .file))
+                                .foregroundColor(AppTheme.inkSoft)
+                            if draft.canEdit {
+                                Button { Task { await model.removeDraftAttachment(file.artifactID) } } label: {
+                                    Image(systemName: "xmark.circle")
+                                }.buttonStyle(.plain).disabled(model.isPreparingSend)
+                                    .accessibilityLabel("Remove \(file.filename)")
+                            }
+                        }.veetType(.meta)
+                    }
+                }.padding(Self.wellInset)
+                HairlineDivider()
+            }
             // `.disabled` leaves the AppKit text view editable and focused, so a draft that can
             // no longer change (sending, sent, uncertain) renders as text instead of an editor.
             // Only the editor is disabled: a disabled ancestor would also block selecting the text.
@@ -1787,6 +1835,18 @@ private struct EmailThreadScreen: View {
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!model.canReview).accessibilityIdentifier("email.send")
             .help("Send this reply (⌘↩). You have a few seconds to undo.")
+            Button("Save & close") {
+                Task {
+                    let selected = model.selectedThreadID
+                    guard await model.saveDraft(), model.currentEdit?.isDirty == false,
+                          model.selectedThreadID == selected else { return }
+                    focusedField = nil
+                    composerClosed = true
+                }
+            }
+            .buttonStyle(QuietCapsuleButtonStyle())
+            .disabled(model.isSelectingReply || model.isPreparingSend || model.conflict != nil || !draft.canEdit)
+            .accessibilityIdentifier("email.save-close")
             Spacer(minLength: 0)
             Menu {
                 Button("Save now") { Task { await model.saveDraft() } }
@@ -1854,7 +1914,7 @@ private struct EmailThreadScreen: View {
         } else if draft.isProcessing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(draft.status == "sending" ? "Sending…" : "Preparing your draft…")
+                Text(draft.status == "sending" ? "Sending…" : model.draftPreparationMessage)
                     .veetType(.ui).foregroundColor(AppTheme.inkSoft)
             }
             .accessibilityElement(children: .combine)
@@ -2669,6 +2729,15 @@ struct EmailSendReview: View {
                         }.veetType(.ui).foregroundColor(AppTheme.inkSoft).textSelection(.enabled)
                         HairlineDivider()
                         Text(draft.subject).veetType(.ui, weight: .semibold)
+                        if let files = draft.attachments, !files.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Attachments (\(files.count))").veetType(.ui, weight: .semibold)
+                                ForEach(files) { file in
+                                    Label(file.filename, systemImage: "paperclip").veetType(.ui)
+                                }
+                            }
+                            .accessibilityIdentifier("email.review-attachments")
+                        }
                         Text(draft.body).veetType(.ui).lineSpacing(5).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }.padding(24).frame(maxWidth: .infinity, alignment: .leading)

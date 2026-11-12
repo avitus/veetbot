@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from agent_core.domain.browser_extraction import BrowserExtractionField, BrowserExtractionRequest
+from agent_core.domain.browser_extraction import (
+    BrowserExtractionField,
+    BrowserExtractionRequest,
+    BrowserExtractionScope,
+)
 from agent_core.domain.web import is_public_https_url
 
 if TYPE_CHECKING:
@@ -87,9 +91,12 @@ class BrowserRowEvidence(BaseModel):
             raise ValueError("row field names must be unique")
         return self
 
-    def extraction_request(self, revision: str) -> BrowserExtractionRequest:
+    def extraction_request(
+        self, revision: str, *, scope: BrowserExtractionScope = "main_document"
+    ) -> BrowserExtractionRequest:
         return BrowserExtractionRequest(
             expected_revision=revision,
+            scope=scope,
             kind=self.collection_kind,
             index=self.index,
             fields=[
@@ -109,16 +116,19 @@ BrowserEvidence = Annotated[
 def evidence_status(
     observation: BrowserObservation,
     evidence: BrowserEvidence,
+    *,
+    row_scope: BrowserExtractionScope = "main_document",
 ) -> Literal["satisfied", "not_observed", "ambiguous"]:
     """Match complete positive evidence; missing evidence never proves absence."""
     if observation.interruption is not None:
         return "not_observed"
     if evidence.kind == "row":
         extracted = observation.extraction
-        request = evidence.extraction_request(observation.revision)
+        request = evidence.extraction_request(observation.revision, scope=row_scope)
         if (
             extracted is None
             or extracted.revision != observation.revision
+            or extracted.scope != request.scope
             or extracted.kind != request.kind
             or extracted.index != request.index
             or extracted.fields != request.fields

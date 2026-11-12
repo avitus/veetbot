@@ -13,6 +13,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.browser_diagnostics import browser_phase
 from agent_core.domain.browser_evidence import BrowserRowEvidence, evidence_status
+from agent_core.domain.browser_extraction import BrowserExtractionScope
 from agent_core.ports.browser import BrowserProvider, extract_browser_observation
 
 
@@ -89,10 +90,10 @@ def _control_status(
 
 
 def _status(
-    observation: BrowserObservation, condition: BrowserCondition
+    observation: BrowserObservation, condition: BrowserCondition, row_scope: BrowserExtractionScope
 ) -> Literal["satisfied", "not_observed", "ambiguous", "failed"]:
     success = (
-        evidence_status(observation, condition.evidence)
+        evidence_status(observation, condition.evidence, row_scope=row_scope)
         if condition.evidence is not None
         else _control_status(observation, condition)
     )
@@ -110,6 +111,8 @@ async def check_browser_condition(
     provider: BrowserProvider,
     observation: BrowserObservation,
     condition: BrowserCondition,
+    *,
+    row_scope: BrowserExtractionScope = "main_document",
 ) -> BrowserObservation:
     """Check visible evidence with bounded read-only polling and a hard capture deadline."""
     loop = asyncio.get_running_loop()
@@ -130,12 +133,16 @@ async def check_browser_condition(
                 raise BrowserProviderError("tool.browser.page_changed", retryable=False)
             count += 1
             observed = (
-                await extract_browser_observation(provider, row.extraction_request(revision))
+                await extract_browser_observation(
+                    provider, row.extraction_request(revision, scope=row_scope)
+                )
                 if extract and row is not None
                 else await provider.observe()
             )
             if not provider.allows(observed.url):
                 raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+            if observed.interruption is not None:
+                raise BrowserProviderError("tool.browser.needs_user", retryable=False)
             return observed
 
         try:
@@ -162,10 +169,12 @@ async def check_browser_condition(
     with browser_phase("postcondition", "orchestrator") as phase:
         if not provider.allows(observation.url):
             raise BrowserProviderError("tool.browser.output_invalid", retryable=False)
+        if observation.interruption is not None:
+            raise BrowserProviderError("tool.browser.needs_user", retryable=False)
         if row is not None and condition.timeout_ms > 0:
             observation = await capture(observation)
         while True:
-            status = _status(observation, condition)
+            status = _status(observation, condition, row_scope)
             remaining = deadline - loop.time()
             if status in {"satisfied", "failed"} or remaining <= 0.25 or count >= 21:
                 break

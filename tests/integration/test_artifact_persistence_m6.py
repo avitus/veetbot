@@ -156,3 +156,71 @@ async def test_postgres_reply_retention_matches_the_repository_contract(tmp_path
     assert stored[captured].expires_at is not None
     # A refused request retains nothing, not even the eligible export it named.
     assert stored[pending].expires_at is not None
+
+
+async def test_postgres_draft_retention_binds_target_and_never_revives_erased_files(
+    tmp_path: Path,
+) -> None:
+    from uuid import uuid4
+
+    settings = replace(database_settings(), artifact_root=tmp_path)
+    async with build(settings=settings, storage="postgres") as app:
+        principal = app.principal
+        session = await app.services.sessions.create(principal, "general", {})
+        destination = await app.services.sessions.create(principal, "general", {})
+        submitted = await app.services.runs.submit(
+            principal,
+            session.id,
+            [TextContentBlock(text="Prepare synthetic draft files")],
+            None,
+            None,
+        )
+        target = uuid4()
+        writer = ArtifactWriterFactory(
+            app.uow_factory, FilesystemArtifactStore(tmp_path), app.clock, RandomIdFactory()
+        ).for_run(
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            session_id=session.id,
+            run_id=submitted.run_id,
+            origin=ArtifactOrigin.EMAIL_DRAFT_ATTACHMENT,
+        )
+        ref = await writer.create(
+            _chunks(b"board"),
+            "board.txt",
+            "text/plain",
+            TrustLevel.EXTERNAL_UNTRUSTED,
+            metadata={"email_draft_thread": str(target)},
+        )
+        with pytest.raises(NotFoundError):
+            async with app.uow_factory() as uow:
+                await uow.artifacts.retain_for_email_draft(
+                    [ref.artifact_id],
+                    principal,
+                    run_id=submitted.run_id,
+                    session_id=destination.id,
+                    thread_id=uuid4(),
+                    now=app.clock.now(),
+                )
+        async with app.uow_factory() as uow:
+            [retained] = await uow.artifacts.retain_for_email_draft(
+                [ref.artifact_id],
+                principal,
+                run_id=submitted.run_id,
+                session_id=destination.id,
+                thread_id=target,
+                now=app.clock.now(),
+            )
+        assert retained.session_id == destination.id and retained.expires_at is None
+        async with app.uow_factory() as uow:
+            await uow.artifacts.expire(ref.artifact_id, principal, app.clock.now())
+        with pytest.raises(NotFoundError):
+            async with app.uow_factory() as uow:
+                await uow.artifacts.retain_for_email_draft(
+                    [ref.artifact_id],
+                    principal,
+                    run_id=submitted.run_id,
+                    session_id=destination.id,
+                    thread_id=target,
+                    now=app.clock.now(),
+                )

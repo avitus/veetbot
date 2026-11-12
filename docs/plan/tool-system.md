@@ -2681,3 +2681,23 @@ composed gate below):
 - `tests/gates/test_capture_reader_adr0261.py` runs a composed fetch, search
   and read. It shows untrusted envelopes in the next request and a refused
   third read in one step.
+
+## Recovery of early tool refusals
+
+Refusals before invocation creation have no row for invocation deduplication.
+Recovery adopts committed conversation results before re-entering a pending
+batch. A call with a recorded error result in the current run returns that exact
+result without repeating validation, dispatch or its terminal event. Successful
+calls retain the invocation recovery path so control-tool context updates are
+restored. Every call still counts once toward the batch's tool budget.
+
+The refusal event also uses the existing derived-event key, scoped to its run
+and call identifier, as an atomic receipt. It is checked before dispatch and
+returned on a repeated append, covering an inline checkpoint that did not yet
+contain the partial batch's results and a replayed bridge call.
+
+`tests/unit/test_tool_refusal_recovery.py` and
+`tests/integration/test_tool_refusal_recovery_postgres.py` exercise two successive
+approval resumes, including a deferred `cockpit.check` refused before the first
+approval. Both must leave one result per call, count the batch once, execute
+approved actions once and allow the next message in the same session.

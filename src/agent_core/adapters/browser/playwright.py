@@ -40,7 +40,15 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from agent_core.adapters.browser.csv_export import observe_csv_export
 from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
-from agent_core.adapters.browser.page_authentication import AUTHENTICATION_SCRIPT
+from agent_core.adapters.browser.page_authentication import (
+    AUTHENTICATION_SCRIPT,
+    CREDENTIAL_VISIBLE_SCRIPT,
+    NAMED_CHALLENGE_SCRIPT,
+    REMEMBERED_SIGN_IN_CONTROLS,
+    REMEMBERED_SIGN_IN_TEXT,
+    SECURITY_CHALLENGE_HEADINGS,
+    SECURITY_CHALLENGE_TEXT,
+)
 from agent_core.adapters.browser.page_readiness import DOM_QUIET_SCRIPT
 from agent_core.adapters.browser.page_structure import PAGE_TEXT_HELPERS, REGION_CAPTURE_SCRIPT
 from agent_core.adapters.browser.page_text import READABLE_TEXT_SCRIPT
@@ -466,8 +474,11 @@ async def _frame_shows_credential_field(frame: Frame) -> bool:
     with suppress(PlaywrightError):
         if await _frame_is_visible(frame):
             fields = frame.locator(_CREDENTIAL_FIELDS)
-            for index in range(await fields.count()):
-                if await fields.nth(index).is_visible():
+            count = await fields.count()
+            if count > 128:
+                return True  # An unbounded credential surface is not automation-ready.
+            for index in range(count):
+                if await fields.nth(index).evaluate(CREDENTIAL_VISIBLE_SCRIPT):
                     return True
     return False
 
@@ -475,6 +486,7 @@ async def _frame_shows_credential_field(frame: Frame) -> bool:
 async def _credential_field_in_frame(page: Page) -> bool:
     """Report a visible password or one-time-code field in a visible frame of ``page``.
 
+    Include the main frame independently of the bounded general text scan.
     Some websites keep their whole sign-in form in a frame (ADR-0288). Only
     credential fields count there: a CAPTCHA class or challenge wording inside
     an embedded widget says nothing about this page. A frame that goes away or
@@ -482,11 +494,7 @@ async def _credential_field_in_frame(page: Page) -> bool:
     verification load. Frames are scanned together, so a stalled one cannot
     hide a field in another.
     """
-    scans = [
-        asyncio.create_task(_frame_shows_credential_field(frame))
-        for frame in page.frames
-        if frame != page.main_frame
-    ]
+    scans = [asyncio.create_task(_frame_shows_credential_field(frame)) for frame in page.frames]
     try:
         with suppress(TimeoutError):
             for finished in asyncio.as_completed(scans, timeout=_FRAME_SCAN_SECONDS):
@@ -531,6 +539,7 @@ class PythonPlaywrightRuntime:
         self._readiness_requests = _ReadinessRequests()
         self._disallowed_navigation = False
         self._evidence_loaded_at: float | None = None
+        self._security_challenge_seen = False
         self._document_loaded_at: float | None = None
         self._dismissed_beforeunload = False
         self._document_session: CDPSession | None = None
@@ -1048,6 +1057,7 @@ class PythonPlaywrightRuntime:
         """
         page = self._current_page()
         self._disallowed_navigation = False
+        self._security_challenge_seen = False
         with _verification_requests(page) as wait_for_application:
             on_stage(BrowserVerificationStage.NAVIGATE)
             try:
@@ -1101,6 +1111,7 @@ class PythonPlaywrightRuntime:
             on_allowed_origin=_origin_allowed(page.url, self._allowed_origins),
             path=(urlsplit(page.url).path or "/")[:4096],
             challenge_visible=challenge_visible,
+            security_challenge_seen=self._security_challenge_seen,
             observed_seconds=0.0 if loaded_at is None else max(0.0, now - loaded_at),
         )
 
@@ -1949,9 +1960,16 @@ class PythonPlaywrightRuntime:
             await self._forget_observation()
             raise BrowserProviderError("tool.browser.needs_user", retryable=False)
 
-    @staticmethod
-    async def _sign_in_challenge_visible(page: Page) -> bool:
+    async def _sign_in_challenge_visible(self, page: Page) -> bool:
         """Report a password, one-time-code, CAPTCHA, passkey, MFA, or consent prompt."""
+        headings = page.locator(SECURITY_CHALLENGE_HEADINGS)
+        for index in range(await headings.count()):
+            if await headings.nth(index).evaluate(NAMED_CHALLENGE_SCRIPT, SECURITY_CHALLENGE_TEXT):
+                # Keep this for the whole verification, including its second
+                # look. A later redirect cannot turn bot clearance into proof
+                # of an account session, on either side of the comparison.
+                self._security_challenge_seen = True
+                return True
         intervention = page.locator(
             f"{_CREDENTIAL_FIELDS},"
             "iframe[src*='captcha' i],iframe[title*='captcha' i],"
@@ -1969,6 +1987,10 @@ class PythonPlaywrightRuntime:
         )
         for index in range(await interactive_text.count()):
             if await interactive_text.nth(index).is_visible():
+                return True
+        prompts = page.locator(REMEMBERED_SIGN_IN_CONTROLS)
+        for index in range(await prompts.count()):
+            if await prompts.nth(index).evaluate(NAMED_CHALLENGE_SCRIPT, REMEMBERED_SIGN_IN_TEXT):
                 return True
         return await _credential_field_in_frame(page)
 

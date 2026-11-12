@@ -12,7 +12,7 @@ public struct ArtifactViewerView: View {
     /// A sheet of its own, or a preview inside the Mac right panel (ADR-0237).
     public enum Presentation { case sheet, embedded }
 
-    @ObservedObject var model: ChatViewModel
+    private let load: @MainActor (UUID) async throws -> LoadedArtifact
     let artifactID: UUID
     let presentation: Presentation
     @Environment(\.dismiss) private var dismiss
@@ -22,9 +22,15 @@ public struct ArtifactViewerView: View {
     @State private var exportError: String?
 
     public init(model: ChatViewModel, artifactID: UUID, presentation: Presentation = .sheet) {
-        self.model = model
+        self.load = { try await model.loadArtifact($0) }
         self.artifactID = artifactID
         self.presentation = presentation
+    }
+
+    public init(artifactID: UUID, load: @escaping @MainActor (UUID) async throws -> LoadedArtifact) {
+        self.artifactID = artifactID
+        self.presentation = .sheet
+        self.load = load
     }
 
     public var body: some View {
@@ -33,7 +39,7 @@ public struct ArtifactViewerView: View {
         .tint(AppTheme.tealFill)
         .task {
             do {
-                artifact = try await model.loadArtifact(artifactID)
+                artifact = try await load(artifactID)
             } catch {
                 errorMessage = error.localizedDescription
             }

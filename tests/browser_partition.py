@@ -4,6 +4,8 @@ BROWSER_MODULES = frozenset(
     {
         "test_recall_owner_review_page.py",
         "test_browser_account_control_real_chromium.py",
+        "test_browser_authentication_shadow_real_chromium.py",
+        "test_browser_shadow_extraction_real_chromium.py",
         "test_browser_entrypoint_real_chromium.py",
         "test_browser_articles_real_chromium.py",
         "test_browser_playwright.py",
@@ -14,6 +16,9 @@ BROWSER_MODULES = frozenset(
         "test_browser_expansion_real_chromium.py",
         "test_browser_readiness_real_chromium.py",
         "test_browser_completion_real_chromium.py",
+        "test_browser_workflow_branches_real_chromium.py",
+        "test_browser_workflow_discovery_real_chromium.py",
+        "test_browser_workflow_extraction_real_chromium.py",
         "test_browser_regions_real_chromium.py",
         "test_browser_shadow_regions_real_chromium.py",
         "test_browser_extraction_real_chromium.py",

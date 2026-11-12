@@ -93,3 +93,42 @@ using the previously established 64 MiB process-stack setting:
 
 This is direct-dev construction evidence. Live-site acceptance, production
 delivery, comparative benchmarks and the broader W3 exit gate remain separate.
+
+## Open-shadow authentication interruption — 2026-11-11
+
+Decision 5's negative challenge detector now traverses the main document and
+open shadow roots. Node and composed-ancestor visits share the 8,192-visit bound;
+hidden hosts and slot ancestors exclude their content. Prompt text is limited
+to 512 UTF-16 units in visible, noneditable form/dialog/button contexts, including
+their ARIA roles. No credential or editable value is collected. Password and
+OTP metadata still interrupts even beneath a passive reCAPTCHA badge, while the
+badge's ordinary CAPTCHA metadata does not. Closed roots remain excluded and
+ADR-0288's separate frame-credential guard is unchanged.
+
+This extends detection within the existing observed scope, without adding
+authentication authority or changing positive protected-state verification.
+No match or scan exhaustion is still only bounded negative evidence. Detection
+before dispatch refuses the action and invalidates references; detection after
+dispatch returns the existing empty interruption observation, preserving the
+uncertain-effect handling rather than replaying the action.
+
+Construction evidence, 2026-11-11, in the local Linux ARM64 browser container
+with the established 64 MiB process stack:
+
+- Red: `make test-browser-cases
+  CASES=tests/unit/test_browser_authentication_shadow_real_chromium.py` failed
+  because a visible shadow password field did not raise `needs_user` before
+  the proposed action. The first implementation made that regression pass.
+- The initial focused authentication/focus run passed 49 cases. The final
+  browser partition passed all 463 cases in 325.34 seconds, with no skips.
+  Its 24 new authentication cases cover nested roots, composed prompt context,
+  hidden/slotted ancestors, badge exceptions, unreadable credential/editable
+  value sentinels, scan limits, reference cleanup, and one post-dispatch server
+  effect followed by an empty interruption observation.
+- Browser-related static tests: 1,167 passed. Browser contracts: 170 passed.
+  Lint and type checking passed; documentation and citation checks accompany
+  this construction evidence.
+
+Direct-dev delivery does not establish live-site authentication acceptance or
+production availability. Positive account/protected-state verification and
+the broader W5 exit evidence remain separate.

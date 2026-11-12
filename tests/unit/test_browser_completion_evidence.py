@@ -4,15 +4,117 @@ from typing import Any
 
 import pytest
 
+from agent_core.adapters.browser.extraction import extracted_observation
 from agent_core.domain.browser import (
+    BROWSER_AUTH_INTERRUPTION_MARKER,
+    BrowserCondition,
     BrowserObservation,
+    BrowserProviderError,
     BrowserRegionCoverage,
     BrowserSemanticRegion,
 )
 from agent_core.tools.browser_act import BrowserActTool
+from agent_core.tools.browser_conditions import check_browser_condition
 from agent_core.tools.browser_observe import BrowserObserveTool
 from tests.contract.support import tool_context
 from tests.unit.test_browser_tools import FakeBrowserProvider
+
+
+@pytest.mark.parametrize("signal", ["needs_user", "authentication_required", "observation"])
+@pytest.mark.parametrize("kind", ["control", "text", "row"])
+async def test_authentication_during_postcondition_preserves_uncertain_sign_in(
+    signal: str, kind: str
+) -> None:
+    class Provider(FakeBrowserProvider):
+        async def observe(self) -> BrowserObservation:
+            self.observation_count += 1
+            if signal != "observation":
+                raise BrowserProviderError(f"tool.browser.{signal}", retryable=False)
+            return self._observation("https://example.org/account").model_copy(
+                update={"interruption": "needs_user"}
+            )
+
+        async def extract(self, request: Any) -> BrowserObservation:
+            observed = await self.observe()
+            return observed.model_copy(
+                update={
+                    "revision": "extracted",
+                    "extraction": extracted_observation(
+                        {
+                            "status": "extracted",
+                            "rows": [],
+                            "source_nodes": 1,
+                            "source_scan_limit_reached": False,
+                            "row_nodes": 0,
+                            "row_scan_limit_reached": False,
+                        },
+                        request,
+                        "extracted",
+                    ),
+                }
+            )
+
+    provider = Provider()
+    condition: dict[str, Any] = {"role": "button", "name": "Saved", "timeout_ms": 1000}
+    if kind == "text":
+        condition = {"evidence": {"kind": "text", "text": "Saved"}, "timeout_ms": 1000}
+    elif kind == "row":
+        condition = {
+            "evidence": {
+                "kind": "row",
+                "collection_kind": "table",
+                "fields": [{"name": "receipt", "column": 0, "type": "integer", "value": 42}],
+            },
+            "timeout_ms": 1000,
+        }
+    result = await BrowserActTool(provider).execute(
+        {
+            "kind": "click",
+            "ref": "element-1",
+            "expected_revision": "revision-1",
+            "postcondition": condition,
+        },
+        tool_context(),
+    )
+    assert not result.ok and result.failure is not None
+    assert result.failure.reason_code == "tool.browser.outcome_unknown"
+    assert result.failure.external_text == BROWSER_AUTH_INTERRUPTION_MARKER
+    assert not result.failure.retryable
+    assert provider.observation_count == 1 and len(provider.actions) == 1
+
+
+async def test_initial_interruption_cannot_satisfy_a_control_or_start_polling() -> None:
+    provider = FakeBrowserProvider()
+    observation = provider._observation("https://example.org/account").model_copy(
+        update={"interruption": "needs_user"}
+    )
+    with pytest.raises(BrowserProviderError, match=r"tool\.browser\.needs_user"):
+        await check_browser_condition(
+            provider, observation, BrowserCondition(role="link", name="Open activity")
+        )
+    assert provider.observation_count == 0 and not provider.actions
+
+
+@pytest.mark.parametrize("reason", ["provider_unavailable", "output_invalid", "page_changed"])
+async def test_other_postcondition_failures_do_not_request_sign_in(reason: str) -> None:
+    class Provider(FakeBrowserProvider):
+        async def observe(self) -> BrowserObservation:
+            raise BrowserProviderError(f"tool.browser.{reason}", retryable=False)
+
+    provider = Provider()
+    result = await BrowserActTool(provider).execute(
+        {
+            "kind": "click",
+            "ref": "element-1",
+            "expected_revision": "revision-1",
+            "postcondition": {"role": "button", "name": "Saved", "timeout_ms": 1000},
+        },
+        tool_context(),
+    )
+    assert not result.ok and result.failure is not None
+    assert result.failure.reason_code == "tool.browser.outcome_unknown"
+    assert result.failure.external_text != BROWSER_AUTH_INTERRUPTION_MARKER
+    assert not result.failure.retryable and len(provider.actions) == 1
 
 
 class EvidenceProvider(FakeBrowserProvider):
@@ -172,8 +274,6 @@ async def test_invalid_evidence_refuses_before_binding(evidence: dict[str, Any])
 async def test_typed_row_reconciliation_reads_fresh_evidence_only(
     rows: list[str], expected: str
 ) -> None:
-    from agent_core.adapters.browser.extraction import extracted_observation
-
     class Provider(EvidenceProvider):
         reads = 0
 
@@ -215,3 +315,38 @@ async def test_typed_row_reconciliation_reads_fresh_evidence_only(
     assert result.structured["condition"]["status"] == expected
     assert result.structured["condition"]["observations"] == 2
     assert provider.reads == 1 and not provider.actions
+
+
+def test_document_row_predicate_rejects_a_different_extraction_scope() -> None:
+    from agent_core.domain.browser_evidence import BrowserRowEvidence, evidence_status
+
+    evidence = BrowserRowEvidence.model_validate(
+        {
+            "kind": "row",
+            "collection_kind": "table",
+            "fields": [{"name": "receipt", "column": 0, "type": "integer", "value": 42}],
+        }
+    )
+    request = evidence.extraction_request("revision-1").model_copy(
+        update={"scope": "main_document_and_open_shadow"}
+    )
+    extracted = extracted_observation(
+        {
+            "status": "extracted",
+            "source_name": "Receipts",
+            "rows": [[{"text": "42", "text_truncated": False}]],
+            "source_nodes": 2,
+            "source_scan_limit_reached": False,
+            "row_nodes": 1,
+            "row_scan_limit_reached": False,
+            "omitted_rows": 0,
+        },
+        request,
+        "revision-1",
+    )
+    observed = (
+        EvidenceProvider()
+        ._observation("https://example.org/account")
+        .model_copy(update={"extraction": extracted})
+    )
+    assert evidence_status(observed, evidence) == "not_observed"

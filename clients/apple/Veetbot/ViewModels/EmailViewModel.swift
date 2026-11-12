@@ -105,6 +105,8 @@ public final class EmailViewModel: ObservableObject {
     @Published public private(set) var isLoadingThread = false
     @Published public private(set) var isSaving = false
     @Published public private(set) var isPerformingAction = false
+    @Published public private(set) var isSelectingReply = false
+    @Published public private(set) var isGeneratingDraft = false
     @Published public private(set) var unavailable = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var budgetPauseMessage: String?
@@ -222,6 +224,7 @@ public final class EmailViewModel: ObservableObject {
     private var autosaveTask: Task<Void, Never>?
     /// The save currently on the wire; a later save or Review & Send waits for it.
     private var inflightSave: Task<Bool, Never>?
+    private var lastSavedDraft: EmailDraftView?
     /// A send proposal that outlasted the local wait; the next read of its draft opens the review.
     private var pendingReviewRunID: UUID?
     /// The poll following a one-press send; Undo cancels it.
@@ -329,7 +332,9 @@ public final class EmailViewModel: ObservableObject {
     /// An owner action that failed, so a refusal can be shown beside the control that
     /// caused it. Reporting it only above the conversation leaves the action looking
     /// inert, because the button that triggered it is far below.
-    public var draftActionMessage: String? { draftActionError }
+    public var draftActionMessage: String? {
+        draftActionError ?? (draft?.isManual == true ? nil : thread?.preparationIssue)
+    }
     /// A failed mail read, reported with the conversation it could not refresh.
     public var threadReadMessage: String? { threadReadError }
     /// Says where held edits are while a stale draft waits for the owner's review of the new mail.
@@ -386,8 +391,8 @@ public final class EmailViewModel: ObservableObject {
     }
 
     public var canReview: Bool {
-        guard let draft else { return false }
-        return draft.canEdit && !draft.stale && conflict == nil && !isPerformingAction && !isPreparingSend
+        guard let draft, let edit = currentEdit, !edit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return draft.canEdit && !draft.stale && conflict == nil && !isPerformingAction && !isSelectingReply && !isPreparingSend
     }
 
     /// Starts foreground refreshes for a new visit or invalidates reads when Email is hidden.
@@ -427,6 +432,7 @@ public final class EmailViewModel: ObservableObject {
         operationTask?.cancel()
         autosaveTask?.cancel()
         inflightSave = nil
+        lastSavedDraft = nil
         pendingReviewRunID = nil
         sendProgressMessage = nil
         isPreparingSend = false
@@ -490,6 +496,8 @@ public final class EmailViewModel: ObservableObject {
         isLoadingThread = false
         isSaving = false
         isPerformingAction = false
+        isSelectingReply = false
+        isGeneratingDraft = false
     }
 
     /// Clears thread selection and reloads the chosen account within the current foreground visit.
@@ -994,6 +1002,7 @@ public final class EmailViewModel: ObservableObject {
                 mergeDraft(value)
             } else { draft = nil }
             threadReadError = nil
+            if draft?.isManual == true { await loadRevisions() }
             if let approvalID, draft?.approvalID == approvalID { await loadReview(activation: foreground) }
             else { await settlePendingReview(activation: foreground) }
         } catch {
@@ -1055,6 +1064,35 @@ public final class EmailViewModel: ObservableObject {
             : draft.status == "failed" ? Self.sendFailedMessage : Self.sendNotMadeMessage
     }
 
+    public var draftPreparationMessage: String {
+        switch thread?.preparationStage {
+        case "finding_context": "Finding context…"
+        case "finding_documents": "Finding documents…"
+        case "staging_files": "Attaching files…"
+        case "ready_for_review": "Ready for review"
+        default: "Preparing draft…"
+        }
+    }
+
+    public func loadDraftAttachment(_ id: UUID) async throws -> LoadedArtifact {
+        guard let api = makeAPIClient() else { throw HTTPTransportError.notConfigured }
+        let metadata = try await api.getArtifact(id)
+        guard case .content(let data, _) = try await api.getArtifactContent(id) else {
+            throw HTTPTransportError.invalidResponse
+        }
+        return LoadedArtifact(metadata: metadata, data: data)
+    }
+
+    public func removeDraftAttachment(_ id: UUID) async {
+        guard let draft, draft.canEdit, !isPreparingSend, var edit = edits[draft.id] else { return }
+        edit.attachmentIDs.removeAll { $0 == id }
+        edits[draft.id] = edit
+        review = nil
+        reviewDraft = nil
+        autosaveTask?.cancel()
+        _ = await saveDraft(draft.id)
+    }
+
     public func changeEdit(_ keyPath: WritableKeyPath<EmailDraftEdit, String>, to text: String) {
         guard let draft, draft.canEdit, var edit = edits[draft.id] else { return }
         edit[keyPath: keyPath] = text
@@ -1107,6 +1145,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let saved = try await api.saveEmailDraft(edit, idempotencyKey: key)
             guard generation == connection else { return false }
+            lastSavedDraft = saved
             saveKeys.removeValue(forKey: id)
             if var latest = edits[id] {
                 // Typing can continue during a save. Advance only its base,
@@ -1211,13 +1250,63 @@ public final class EmailViewModel: ObservableObject {
         } catch { if generation == connection { report(error) } }
     }
 
+    public var canSelectReply: Bool {
+        !isSelectingReply && !isPreparingSend && !isGeneratingDraft && conflict == nil
+            && (draft == nil || draft?.canEdit == true || draft?.status == "discarded" || draft?.status == "sent")
+    }
+
+    public var hasVeetbotDraft: Bool {
+        guard let draft, draft.status != "discarded" else { return false }
+        return !draft.isManual || revisions.contains { $0.id == draft.id && !$0.isManual }
+    }
+
+    /// Reply is owner composition. Switching retains both texts in server revisions.
+    @discardableResult
+    public func selectReply(manual: Bool) async -> Bool {
+        guard let selected = thread, let api = makeAPIClient(), canSelectReply else { return false }
+        let connection = generation
+        let visit = selectionRequest
+        isSelectingReply = true
+        var ownsSelection = true
+        defer { if ownsSelection && generation == connection { isSelectingReply = false } }
+        draftActionError = nil
+        if currentEdit?.isDirty == true, !(await saveDraft()) { return false }
+        guard generation == connection, selectedThreadID == selected.id, selectionRequest == visit else { return false }
+        guard currentEdit?.isDirty != true else {
+            draftActionError = "Finish editing before switching replies. Your text is preserved."
+            return false
+        }
+        if let draft, draft.status != "discarded", draft.status != "sent", draft.isManual == manual { return true }
+        do {
+            let value = try await api.selectEmailReply(
+                thread: selected, draft: draft, kind: manual ? "manual" : "veetbot",
+                idempotencyKey: UUID().uuidString)
+            guard generation == connection, selectedThreadID == selected.id, selectionRequest == visit else { return false }
+            mergeDraft(value)
+            await loadRevisions()
+            return true
+        } catch {
+            guard generation == connection, selectedThreadID == selected.id, selectionRequest == visit else { return false }
+            // Only an explicit Veetbot action may request generation. Reply never falls back to it.
+            if !manual, case HTTPTransportError.api(let failure) = error, failure.statusCode == 404 {
+                isSelectingReply = false
+                ownsSelection = false
+                await generateDraft()
+                return draft?.isManual == false
+            }
+            report(error, draft: true)
+            return false
+        }
+    }
+
     public func generateDraft(instruction: String? = nil) async {
         guard let id = selectedThreadID, let api = makeAPIClient(), !isPerformingAction else { return }
         if currentEdit?.isDirty == true, !(await saveDraft()) { return }
         draftActionError = nil
         isPerformingAction = true
+        isGeneratingDraft = true
         let connection = generation
-        defer { if generation == connection { isPerformingAction = false } }
+        defer { if generation == connection { isPerformingAction = false; isGeneratingDraft = false } }
         do {
             let result = try await api.generateEmailDraft(threadID: id, instruction: instruction, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
@@ -1408,12 +1497,30 @@ public final class EmailViewModel: ObservableObject {
             let strings = entries.compactMap(\.stringValue)
             return strings.count == entries.count && strings == expected
         }
+        let files = draft.attachments ?? []
+        let expectedTool = files.isEmpty ? "send_message" : "send_attached_message"
+        func attachmentsMatch() -> Bool {
+            guard !files.isEmpty else { return approval.arguments["attachments"] == nil }
+            guard let encoded = try? JSONEncoder.server.encode(files),
+                  let expected = try? JSONDecoder.server.decode([JSONValue].self, from: encoded),
+                  let observed = approval.arguments["attachments"]?.arrayValue else { return false }
+            func normalized(_ value: JSONValue) -> JSONValue {
+                guard var fields = value.objectValue,
+                      let id = fields["artifact_id"]?.stringValue else { return value }
+                fields["artifact_id"] = .string(id.lowercased())
+                // Approval presentation can redact a filename. Identity and
+                // content metadata still have to match the retained draft.
+                fields.removeValue(forKey: "filename")
+                return .object(fields)
+            }
+            return expected.map(normalized) == observed.map(normalized)
+        }
         guard let account = accounts.first(where: { $0.id == draft.accountID }),
             let serverID = account.sendServerID,
-            let toolName = draft.sendToolName, toolName == "mcp.\(serverID).send_message", approval.toolName == toolName,
+            let toolName = draft.sendToolName, toolName == "mcp.\(serverID).\(expectedTool)", approval.toolName == toolName,
             let providerThreadID = draft.providerThreadID,
             approval.arguments["thread_id"]?.stringValue == providerThreadID else { return false }
-        return textMatches("subject", draft.subject) && textMatches("body", draft.body)
+        return attachmentsMatch() && textMatches("subject", draft.subject) && textMatches("body", draft.body)
             && addressesMatch("to", draft.to) && addressesMatch("cc", draft.cc) && addressesMatch("bcc", draft.bcc)
     }
 
@@ -1881,6 +1988,7 @@ public final class EmailViewModel: ObservableObject {
     /// sheet. The server parks it for the undo window and this watches it through to Sent.
     public func sendNow() async {
         guard canReview, let api = makeAPIClient(), let pressed = draft else { return }
+        var reviewed = pressed
         isPreparingSend = true
         sendProgressMessage = nil
         pendingReviewRunID = nil
@@ -1890,10 +1998,14 @@ public final class EmailViewModel: ObservableObject {
             autosaveTask?.cancel()
             guard currentEdit?.isDirty == true else { break }
             guard await saveDraft(pressed.id) else { return }
+            guard let saved = lastSavedDraft, saved.id == pressed.id,
+                  saved.isManual == pressed.isManual else { return }
+            reviewed = saved
         }
         // The press belongs to the draft it was made on. If the owner moved to another
         // conversation while that save settled, nothing is sent from here.
-        guard let draft, draft.id == pressed.id, let thread, thread.id == draft.threadID,
+        guard generation == connection, let draft, draft == reviewed,
+              draft.isManual == pressed.isManual, let thread, thread.id == draft.threadID,
               selectedThreadID == draft.threadID else { return }
         guard !draft.stale else {
             draftActionError = staleMailMessage() ?? Self.sendEndedByNewMailMessage

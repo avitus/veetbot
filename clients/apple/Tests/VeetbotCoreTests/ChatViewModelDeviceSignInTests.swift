@@ -14,6 +14,277 @@ import Testing
 
     // MARK: - Device sign-in
 
+    @Test(arguments: [true, false])
+    func temporaryVerificationFailuresUseFreshCeremoniesAtMostThreeTimes(succeeds: Bool) async throws {
+        let profileID = UUID()
+        let ids = [UUID(), UUID(), UUID()]
+        let capabilities = ["A", "B", "C"].map { String(repeating: $0, count: 43) }
+        let begins = Counter()
+        let server = DeviceFlowServer { request in
+            let route = Self.route(request)
+            if route == "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies" {
+                let index = begins.next() - 1
+                guard index < ids.count else { return (500, "too many attempts") }
+                return (201, Self.ceremony(ids[index], profileID: profileID, launch: true)
+                    .replacingOccurrences(of: Self.capability, with: capabilities[index]))
+            }
+            for (index, id) in ids.enumerated() {
+                switch route {
+                case "POST browser.example /authentication/\(id.uuidString)/handoff":
+                    return succeeds && index == 2 ? (200, #"{"status":"ready"}"#)
+                        : (409, #"{"error":{"code":"tool.browser.provider_unavailable","message":"Unavailable."}}"#)
+                case "POST veetbot.test /v1/browser-authentication-ceremonies/\(id.uuidString)/cancel":
+                    return (200, Self.ceremony(id, profileID: profileID, status: "cancelled"))
+                case "GET veetbot.test /v1/browser-authentication-ceremonies/\(id.uuidString)":
+                    return (200, Self.ceremony(id, profileID: profileID, status: "ready"))
+                default: break
+                }
+            }
+            if route == "GET veetbot.test /v1/browser-profiles" {
+                return (200, Self.page([Self.profile(profileID, origins: ["https://example.org"], status: "ready")]))
+            }
+            return nil
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let handoff = Self.handoff(confirmed: "https://example.org/learn")
+
+        let result = await model.completeDeviceSignIn(request, handoff: handoff, adoptedOrigin: nil)
+
+        #expect(begins.value == 3)
+        let ordered = server.routes
+        let beginRoute = "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"
+        let beginPositions = ordered.indices.filter { ordered[$0] == beginRoute }
+        for index in 0..<2 {
+            let cancelRoute = "POST veetbot.test /v1/browser-authentication-ceremonies/\(ids[index].uuidString)/cancel"
+            let cancelPosition = try #require(ordered.firstIndex(of: cancelRoute))
+            #expect(beginPositions[index] < cancelPosition && cancelPosition < beginPositions[index + 1])
+        }
+        #expect(result == (succeeds ? .signedIn(profileID: profileID)
+            : .failed(DeviceSignInFailure(message: DeviceSignInMessage.couldNotCheck, canRetry: true))))
+        for (index, id) in ids.enumerated() {
+            let route = "POST browser.example /authentication/\(id.uuidString)/handoff"
+            #expect(server.routes.filter { $0 == route }.count == 1)
+            let sent = try #require(server.entry(of: route))
+            #expect(sent.capability == capabilities[index])
+            #expect(sent.authorization == nil)
+            #expect(sent.body == (try WebsiteSessionScope(allowedOrigins: ["https://example.org"]).encode(handoff)))
+        }
+        #expect(model.selectedBrowserProfileID == (succeeds ? profileID : nil))
+    }
+
+    @Test(arguments: [
+        (422, "session_signed_out", "cancelled"),
+        (422, "session_unconfirmed", "cancelled"),
+        (422, "session_empty", "cancelled"),
+        (409, "tool.browser.profile_unavailable", "cancelled"),
+        (422, "tool.browser.provider_unavailable", "cancelled"),
+        (500, "tool.browser.provider_unavailable", "cancelled"),
+        (409, "tool.browser.provider_unavailable", "authentication_required"),
+        (409, "tool.browser.provider_unavailable", "ready"),
+        (409, "tool.browser.provider_unavailable", "unreachable"),
+        (409, "tool.browser.provider_unavailable", "wrong_ceremony"),
+    ])
+    func onlyAnExplicitTemporaryFailureAndConfirmedClosureCanRetry(
+        httpStatus: Int, code: String, closure: String
+    ) async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let begins = Counter()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                _ = begins.next()
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return (httpStatus, "{\"error\":{\"code\":\"\(code)\",\"message\":\"Refused.\"}}")
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel":
+                if closure == "unreachable" { throw URLError(.networkConnectionLost) }
+                return (200, Self.ceremony(
+                    closure == "wrong_ceremony" ? UUID() : ceremonyID,
+                    profileID: profileID, status: closure == "wrong_ceremony" ? "cancelled" : closure
+                ))
+            case "GET veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.emptyPage)
+            default: return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let result = await model.completeDeviceSignIn(
+            request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+        )
+
+        #expect(begins.value == 1)
+        #expect(server.routes.filter { $0.hasSuffix("/handoff") }.count == 1)
+        #expect(result != .signedIn(profileID: profileID))
+        #expect(model.selectedBrowserProfileID == nil)
+    }
+
+    @Test
+    func aRetryDoesNotCancelAnotherSignInThatWonTheProfile() async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let begins = Counter()
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return begins.next() == 1
+                    ? (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+                    : (409, #"{"error":{"code":"conflict","message":"In use.","details":{},"request_id":"r"}}"#)
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return (409, #"{"error":{"code":"tool.browser.provider_unavailable","message":"Unavailable."}}"#)
+            case "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel":
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            default: return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+
+        let result = await model.completeDeviceSignIn(
+            request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+        )
+
+        #expect(begins.value == 2)
+        #expect(result == .failed(DeviceSignInFailure(message: DeviceSignInMessage.websiteInUse, canRetry: true)))
+        #expect(!server.routes.contains { $0.hasPrefix("GET") && $0.hasSuffix("/authentication-ceremonies") })
+        #expect(server.routes.filter { $0.hasSuffix("/cancel") }.count == 1)
+        #expect(server.routes.filter { $0.hasSuffix("/handoff") }.count == 1)
+    }
+
+    @Test func replacementCredentialsWaitForCancelledCleanup() async throws {
+        let profileID = UUID(), ceremonyID = UUID()
+        let tokens = InMemoryTokenStore()
+        let cancelRoute = "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel"
+        let handoffRoute = "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff"
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case handoffRoute: return (422, #"{"error":{"code":"session_empty","message":"Empty."}}"#)
+            case cancelRoute: return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            case "GET replacement.test /v1/sessions": return (200, Self.emptyPage)
+            default: return nil
+            }
+        }
+        let model = try await configuredModel(server, tokens: tokens)
+        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let handingOff = server.hold(handoffRoute), closing = server.hold(cancelRoute)
+        defer { handingOff.open(); closing.open() }
+        let confirming = Task { await model.completeDeviceSignIn(request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil) }
+        #expect(await server.arrival(of: handoffRoute))
+        confirming.cancel()
+        handingOff.open()
+        #expect(await server.arrival(of: cancelRoute))
+        let changing = Task { await model.configure(baseURLString: "https://replacement.test", token: "replacement-token") }
+        #expect(!(await server.arrival(of: "GET replacement.test /v1/sessions")))
+        #expect(await tokens.readToken() == "test-token")
+        closing.open()
+        _ = await confirming.value
+        #expect(await changing.value)
+        #expect(await tokens.readToken() == "replacement-token")
+        #expect(server.entry(of: cancelRoute)?.authorization == "Bearer test-token")
+    }
+
+    @Test func cancellingAnEarlierAttemptPreservesTheClosedNewWindow() async throws {
+        let firstProfile = UUID(), secondProfile = UUID(), firstCeremony = UUID(), secondCeremony = UUID()
+        let server = DeviceFlowServer { request in
+            let route = Self.route(request)
+            if route == "POST veetbot.test /v1/browser-profiles" {
+                return (201, Self.profile(secondProfile, origins: ["https://example.org"], status: "authentication_required"))
+            }
+            for (profile, ceremony) in [(firstProfile, firstCeremony), (secondProfile, secondCeremony)] {
+                switch route {
+                case "POST veetbot.test /v1/browser-profiles/\(profile.uuidString)/authentication-ceremonies":
+                    return (201, Self.ceremony(ceremony, profileID: profile, launch: true))
+                case "POST browser.example /authentication/\(ceremony.uuidString)/handoff":
+                    return (422, #"{"error":{"code":"session_empty","message":"Empty."}}"#)
+                case "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremony.uuidString)/cancel":
+                    return (200, Self.ceremony(ceremony, profileID: profile, status: "cancelled"))
+                case "POST veetbot.test /v1/browser-profiles/\(profile.uuidString)/revoke":
+                    return (200, Self.profile(profile, origins: ["https://example.org"], status: "revoked"))
+                case "DELETE veetbot.test /v1/browser-profiles/\(profile.uuidString)": return (204, "")
+                default: break
+                }
+            }
+            if route == "GET veetbot.test /v1/browser-profiles" { return (200, Self.emptyPage) }
+            return nil
+        }
+        let model = try await configuredModel(server)
+        let first = try #require(model.beginDeviceSignIn(profile: Self.profileView(firstProfile)))
+        let firstRoute = "POST browser.example /authentication/\(firstCeremony.uuidString)/handoff"
+        let secondRoute = "POST browser.example /authentication/\(secondCeremony.uuidString)/handoff"
+        let firstGate = server.hold(firstRoute), secondGate = server.hold(secondRoute)
+        defer { firstGate.open(); secondGate.open() }
+        let earlier = Task { await model.completeDeviceSignIn(first, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil) }
+        #expect(await server.arrival(of: firstRoute))
+        let second = try #require(model.beginDeviceSignIn(websiteURL: "example.org"))
+        let later = Task { await model.completeDeviceSignIn(second, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil) }
+        #expect(await server.arrival(of: secondRoute))
+        await model.abandonDeviceSignIn()
+        earlier.cancel()
+        firstGate.open()
+        _ = await earlier.value
+        secondGate.open()
+        _ = await later.value
+        #expect(server.routes.contains("DELETE veetbot.test /v1/browser-profiles/\(secondProfile.uuidString)"))
+    }
+
+    @Test(arguments: ["window", "connection", "task"], [false, true])
+    func stoppingWhileATemporaryFailureClosesPreventsAnotherAttempt(stop: String, newProfile: Bool) async throws {
+        let profileID = UUID()
+        let ceremonyID = UUID()
+        let begins = Counter()
+        let cancelRoute = "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel"
+        let server = DeviceFlowServer { request in
+            switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles":
+                return (201, Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/revoke":
+                return (200, Self.profile(profileID, origins: ["https://example.org"], status: "revoked"))
+            case "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)":
+                return (204, "")
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
+                _ = begins.next()
+                return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
+            case "POST browser.example /authentication/\(ceremonyID.uuidString)/handoff":
+                return (409, #"{"error":{"code":"tool.browser.provider_unavailable","message":"Unavailable."}}"#)
+            case cancelRoute:
+                return (200, Self.ceremony(ceremonyID, profileID: profileID, status: "cancelled"))
+            case "GET veetbot.test /v1/browser-profiles":
+                return (200, Self.emptyPage)
+            default: return nil
+            }
+        }
+        let model = try await configuredModel(server)
+        let request = try #require(newProfile ? model.beginDeviceSignIn(websiteURL: "example.org") : model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let closing = server.hold(cancelRoute)
+        let confirming = Task {
+            await model.completeDeviceSignIn(
+                request, handoff: Self.handoff(confirmed: "https://example.org/learn"), adoptedOrigin: nil
+            )
+        }
+        #expect(await server.arrival(of: cancelRoute))
+        switch stop {
+        case "window": await model.abandonDeviceSignIn()
+        case "connection":
+            await model.configure(baseURLString: "https://veetbot.test", token: "different-owner")
+        default: confirming.cancel()
+        }
+        closing.open()
+        let result = await confirming.value
+
+        #expect(begins.value == 1)
+        #expect(result != .signedIn(profileID: profileID))
+        #expect(model.selectedBrowserProfileID == nil)
+        if newProfile && stop != "connection" {
+            #expect(server.routes.contains { $0 == "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)" })
+        }
+    }
+
     @Test
     func aNewWebsiteIsCreatedBegunHandedOffCheckedAndSelectedInThatOrder() async throws {
         let profileID = UUID()
@@ -1737,13 +2008,14 @@ import Testing
 
     private func configuredModel(
         _ server: DeviceFlowServer,
-        timing: DeviceSignInTiming = DeviceSignInTiming(pollInterval: 0.01, pollLimit: 0.2)
+        timing: DeviceSignInTiming = DeviceSignInTiming(pollInterval: 0.01, pollLimit: 0.2),
+        tokens: any TokenStore = InMemoryTokenStore()
     ) async throws -> ChatViewModel {
         let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
         let model = ChatViewModel(
-            tokenStore: InMemoryTokenStore(),
+            tokenStore: tokens,
             configurationStore: ConnectionConfigurationStore(defaults: defaults),
             historyStore: VolatileSessionHistoryStore(),
             urlSession: URLSession(configuration: server.configuration(base: .ephemeral)),

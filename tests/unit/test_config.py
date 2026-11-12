@@ -48,6 +48,18 @@ def base_environment() -> dict[str, str]:
     }
 
 
+def test_email_owner_timezone_is_an_optional_valid_iana_zone() -> None:
+    assert load_settings(base_environment()).email_owner_timezone is None
+    assert (
+        load_settings(
+            {**base_environment(), "AGENT_EMAIL_OWNER_TIMEZONE": "America/New_York"}
+        ).email_owner_timezone
+        == "America/New_York"
+    )
+    with pytest.raises(ConfigurationError, match="AGENT_EMAIL_OWNER_TIMEZONE"):
+        load_settings({**base_environment(), "AGENT_EMAIL_OWNER_TIMEZONE": "Not/AZone"})
+
+
 def test_loads_frozen_settings() -> None:
     settings = load_settings(base_environment())
     assert settings.deployment_mode is DeploymentMode.DEVELOPMENT

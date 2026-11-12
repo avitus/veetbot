@@ -839,6 +839,17 @@ password or one-time-code field counts in a visible frame of the page as well as
 in the page itself, because some websites keep their sign-in form in a frame
 (ADR-0288).
 
+A visible security-verification heading or a remembered-account **Sign in as**
+link/button also counts as an unresolved sign-in (ADR-0316), in both ceremony
+verification and ordinary browser readiness. Remembering an account is not
+evidence of an authenticated session. Hidden controls and incidental article
+text do not trigger these checks; the checks never interact with the challenge.
+A security interstitial in either verification browser makes the comparison
+unconfirmed, including configured-site checks. Passing a bot check alone is
+not proof of authentication; a blocked empty-session control supplies no such
+proof. Internal page evidence distinguishes this from a sign-in prompt using
+only a boolean, with no additional page data in logs or public responses.
+
 In the remote ceremony the runtime reports `ready` only on evidence of a sign-in
 it mediated itself: during this ceremony the user sent text while one of those
 challenges was visible, no challenge is visible now, the page is on an allowed
@@ -922,13 +933,27 @@ loads the page, and the profile is created with every allowed origin, up to the
 stays refused, and an existing profile's origins never change. When
 the user confirms, the client reads the store's cookies and keeps those whose
 domain is an allowed host or a parent of one. It reads `localStorage` of the
-allowed origins it visited in an isolated script world, and sends them once with
+allowed origins it visited in an isolated script world, and sends them once per ceremony with
 the confirmed page's URL. It then clears the store. It never persists or logs a
 cookie, storage value, or capability, never places one in durable or published
 client state, and never sends the handoff with its Veetbot API credential or to
 any address but the launch URL. A begin whose answer is lost, or that meets an
 open ceremony, is recovered once by cancelling the newest open ceremony and
 beginning again.
+
+After an explicit `409 tool.browser.provider_unavailable` handoff response,
+the native client closes the failed ceremony and requires its authoritative
+`cancelled` outcome before starting another (ADR-0316). One press permits at
+most three sequential handoffs, each in a fresh ceremony with a new single-use
+capability and the same locally scoped session. The retry delays are 0.5 and
+1 second; the window shows the attempt number. A retry begin does not recover
+an open-ceremony conflict by cancelling another ceremony. Unknown outcomes,
+other refusals, unsuccessful closure, cancellation, a closed window or a
+changed connection stop retries. Session material stays only in the completion
+call's local variables. Every attempt runs the full unchanged thirty-second
+server verification; the user operation may take roughly ninety seconds plus
+orchestration and cleanup. A transport failure still uses status reconciliation
+and never replays a handoff.
 
 `POST /authentication/{ceremony_id}/handoff` is a direct surface route. The
 boundary authenticates `X-Browser-Ceremony-Capability` before buffering, then
@@ -1881,7 +1906,7 @@ retains `main_document`. Composed-ancestor checks for slotted nodes share the
 visit limit. A focused shadow region does not adopt assigned light nodes outside
 its DOM subtree. Hidden, editable and transparent hosts or slot ancestors exclude
 their content. Focus rechecks composed ancestors before capture. Closed roots
-remain excluded; collection extraction keeps its separate main-document scope.
+remain excluded; collection extraction has its separately versioned scope.
 The existing general readable-text field and control capture are unchanged.
 
 Both coverage versions record scope, scanned nodes, scan exhaustion and the known
@@ -1918,8 +1943,9 @@ that cannot be used for actions or expansion.
 The optional provider capability uses the existing hosted observe route, lease,
 lock and origin binding. It does not dispatch or consume action authority.
 Capture failure/cancellation uses atomic cleanup; unsupported adapters refuse.
-Collection discovery scans at most 8,192 main-document nodes; row discovery at
-most 4,096 descendants; frames and shadow roots are excluded. Requested cell
+Collection discovery scans at most 8,192 nodes; row discovery at
+most 4,096 descendants. Pinned observe versions 1.7.0 and 1.8.0 exclude shadow
+roots. Requested cell
 summaries inspect at most 256 nodes and retain 256 UTF-16 code units without
 splitting a character. Hidden and editable values are excluded. Table spanning
 cells are unsupported; lists expose text; forms expose label, role, disabled,
@@ -1936,6 +1962,27 @@ otherwise the whole extraction is explicitly omitted. In extraction mode,
 requested rows precede optional controls, regions and ordinary prose, with exact
 revision, coverage, untrusted framing and durable artifact/replay preserved.
 Fresh reference bytes never count as progress.
+
+Under ADR-0311, `browser.observe` 1.9.0 automatically includes main-document open
+shadow roots for table/list/form extraction. Its trusted request names
+`main_document_and_open_shadow`; no model-authored scope is accepted. Result
+version 2 reports that scope, while version 1 retains the document-only scopes.
+The provider boundary rejects a result from a different scope. Pinned older
+tools send their unchanged document-only requests, omitting the new scope field
+on the hosted wire. Older services may refuse a widened request; they cannot
+silently narrow it. Article extraction retains its document-only scope. Row
+completion predicates remain document-only until the tool versions introduced
+by ADR-0313 below.
+
+Collection, row and cell walks visit shadow children before light children;
+composed-ancestor checks share their existing visit ceilings. Hidden, transparent
+and editable hosts and slot ancestors cannot supply content. A form may retain
+an editor's own metadata but never reads its descendants as additional rows.
+Referenced form labels resolve inside the control's own root, with their
+ancestor checks sharing the cell budget. This remains DOM-subtree extraction:
+assigned light nodes outside a shadow collection's subtree are not adopted as
+rows. Frames, closed roots and nested collections are excluded. Wider indexes
+still describe the currently visible collection, not stable identity.
 
 ### Bounded readable snapshots (ADR-0162)
 
@@ -2041,6 +2088,19 @@ CAPTCHA detection excludes the passive reCAPTCHA badge and its descendants;
 credential fields still interrupt there. Detection is bounded negative evidence, not
 positive login verification.
 
+Challenge detection also traverses open shadow roots in the main document.
+Its 8,192-visit budget includes composed-ancestor checks, including assigned
+slots, so hidden hosts or slot ancestors cannot create a visible challenge.
+Passkey, verification-code, MFA and consent wording is read only from visible,
+noneditable text in a form, dialog or button context, including corresponding
+ARIA roles across shadow boundaries; each text read retains the 512-unit bound.
+Password and OTP checks inspect field metadata, never values. The passive badge
+exception follows composed ancestry and still cannot suppress credential fields.
+Closed roots are not inspected; ADR-0288's separate frame-credential check is
+unchanged. Exhaustion or no match is not positive authentication evidence.
+Existing pre-dispatch refusal, reference invalidation and post-dispatch
+`outcome_unknown` handling remain unchanged.
+
 ### Autonomous verification and continuation (ADR-0164)
 
 The owner-authorized minimal-user-involvement tranche extends visible conditions
@@ -2071,6 +2131,27 @@ truncated or absent evidence cannot prove completion. Row checks use fresh
 revision-bound extraction. A stale verification read permits one fresh capture
 within the shared five-second/21-read limit, never another action. Condition
 status, rather than unrelated page churn, drives repeated-wait detection.
+
+Under [ADR-0313](../adr/0313-open-shadow-browser-completion.md), observe 1.10.0
+and act 1.9.0 select `main_document_and_open_shadow` for row predicates and return
+version-2 extraction evidence. Pinned earlier versions retain document-only
+scope; workflow calls follow their run's tool pins. The tool selects scope;
+model arguments cannot override it. Evidence must match scope as well as revision, collection
+kind/index, fields and row limit, including when checking a cached zero-timeout
+observation. Fresh reads and stale-revision recovery preserve that scope through
+the existing provider boundary; a mismatched or unsupported response refuses
+rather than silently narrowing. The new act output schema admits the widened
+extraction alongside the existing saved-file result. Polling limits, privacy,
+authentication interrupts and non-retryable uncertain effects are unchanged.
+
+Authentication interrupts completion polling immediately, including row extraction
+and its fresh-observation recovery. An interrupted observation cannot satisfy
+even a matching legacy control predicate or start another verification read.
+After an action was dispatched, `needs_user` or `authentication_required` during
+verification retains the non-retryable `outcome_unknown` result and the existing
+trusted sign-in interruption marker. The ordinary suspension path may then ask
+for sign-in without treating the action as unsent or replaying it. Other read
+failures remain uncertain without inventing an authentication requirement.
 
 The isolated service optionally loads `BROWSER_PROFILE_VERIFICATION_FILE`, a
 private absolute mode-0600 JSON file of at most 64 KiB. Its version-1 `sites`
@@ -2116,6 +2197,55 @@ pending actions. An uncertain dispatched action gets read-only reconciliation,
 then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
+
+An extraction step first queues its own ordinary `browser.observe` and persists
+the `before_extract` phase. Only that successful, uninterrupted, same-origin
+result supplies the extraction revision; conversation history cannot substitute
+for this read. The extraction is a second separately audited call. The preliminary
+read does not complete the step. Missing, invalid or stale extraction evidence
+stops unverified; the existing bounded recovery read cannot retry extraction or
+replay an earlier action. Generation changes restart the unfinished read through
+the existing workflow binding checks. Both calls spend the existing workflow and
+run budgets, and final reporting retains the extraction's bounded coverage.
+
+[ADR-0314](../adr/0314-reviewed-browser-read-branches.md) adds optional
+`branches` to reviewed observe steps with a postcondition and positive
+`failure_evidence`. The closed object names `satisfied` and `failed` destinations
+as strict zero-based integer indexes, strictly after the current step and at
+most the recipe length. Missing or ambiguous evidence cannot choose a branch.
+A destination equal to the recipe length terminates: satisfied is `verified`,
+failed is explicitly `observed_failure`. No loops, selectors, expressions or
+page-authored destinations are accepted. Actions and their uncertain-effect
+reconciliation cannot branch. A reached action still requires a fresh target
+and the ordinary current policy/approval path.
+
+A branch checkpoints `next_step` and its source/status/destination before further
+work. `completed_steps` counts executed steps, never skipped ones. Legacy state
+without `next_step` keeps its sequential cursor. Resume and generation changes
+preserve the selected cursor while retaining all existing action fences and
+budgets. Omitted branch fields do not change legacy definition digests; branch
+changes do. The existing catalog is unchanged and no new site recipe is activated.
+This is bounded execution construction, not broader live workflow acceptance.
+
+Under [ADR-0315](../adr/0315-bounded-workflow-target-discovery.md), an action
+step with no enabled exact role/name match follows only its current result's
+advertised `next_observe`. A closed `after` request must name a returned control;
+a cursor must match the observation's coverage. The advertised `after` takes
+precedence over a later coverage cursor when only a prefix was returned. No
+invented offsets, text/region continuation or fallback cursor is accepted.
+
+Each action may request at most four target windows, including its initial
+read. The step index and requested count are checkpointed before each read and
+survive suspension and generation changes; a new action step gets a fresh
+allowance. Existing separately audited recovery reads retain their existing
+per-run cap and spend workflow/run budgets. Each successful window replaces
+prior action references. One enabled exact match in the current window permits
+ordinary action proposal; duplicates stop as `ambiguous_target`. Missing usable
+continuation or exhausted discovery stops as `target_not_observed`, not a claim
+of whole-page absence. Failed discovery never selects an older window's target.
+Once dispatch begins, uncertainty only follows existing read-only reconciliation;
+it cannot restart target discovery or resend the action. Public tools, live
+policy/grant checks, approvals and the deployed recipe catalog are unchanged.
 
 The shipped catalog includes the reviewed X home-feed briefing below; private
 account definitions remain deployment-owned. Engineering-owned definitions

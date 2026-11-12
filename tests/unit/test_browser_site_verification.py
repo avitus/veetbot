@@ -13,6 +13,7 @@ from agent_core.browser_control_plane.verification import BrowserVerificationCat
 from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserObservation,
+    BrowserPageEvidence,
     BrowserProviderError,
     BrowserRegionCoverage,
     BrowserSemanticRegion,
@@ -290,7 +291,18 @@ async def test_saved_session_verification_uses_its_configured_budget(
 
 
 @pytest.mark.parametrize("mode", ["device", "remote"])
-@pytest.mark.parametrize("case", ["verified", "wrong_account", "truncated", "public", "no_success"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "verified",
+        "wrong_account",
+        "truncated",
+        "public",
+        "no_success",
+        "security_control",
+        "security_session",
+    ],
+)
 async def test_curated_verification_requires_unique_complete_account_and_protected_state(
     tmp_path: Path,
     mode: str,
@@ -331,6 +343,19 @@ async def test_curated_verification_requires_unique_complete_account_and_protect
         region_coverage=BrowserRegionCoverage(scanned_nodes=5),
     )
     scenario = HandoffScenario(with_observation=observed)
+    if case in {"security_control", "security_session"}:
+        # Even if the interstitial disappears before the final reading, it
+        # cannot supply a trustworthy signed-in/signed-out comparison.
+        blocked = BrowserPageEvidence(
+            on_allowed_origin=True,
+            path="/current",
+            challenge_visible=False,
+            security_challenge_seen=True,
+        )
+        if case == "security_control":
+            scenario.without_session = blocked
+        else:
+            scenario.with_session = blocked
     if case == "public":
         scenario.without_session = None
         scenario.without_observation = observed

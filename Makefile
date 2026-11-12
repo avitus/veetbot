@@ -225,6 +225,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailRowArchiveOfOpenConversationDisplaysNext \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailArchiveFailurePreservesInboxRow \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingKeepsFeedbackOptionalAndReplyReachable \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReplyCreatesAMissingDraft \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingInDarkAppearance \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingAtDefaultMacWindowSize \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailSidebarShowsFivePrioritiesWithoutScrolling \
@@ -262,6 +263,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailReadingViewCanRevealOriginal \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testBrowserApprovalAllowsForThisTaskAfterConfirmation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailBudgetPauseKeepsAccountingCollapsed \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testClosedEmailComposerKeepsSendUndoVisible \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 

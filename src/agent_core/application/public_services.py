@@ -60,6 +60,7 @@ from agent_core.domain.approvals import (
 )
 from agent_core.domain.artifacts import (
     ATTACHMENT_METADATA_KEY,
+    EMAIL_SOURCE_METADATA_KEY,
     UPLOAD_UNCLAIMED_TTL,
     ArtifactMetadata,
     ArtifactOrigin,
@@ -2344,6 +2345,11 @@ class PublicArtifactService:
             except NotFoundError:
                 artifact = await uow.artifacts.get(artifact_id, principal)
                 is_trajectory = False
+        if artifact.origin == ArtifactOrigin.EMAIL_DRAFT_ATTACHMENT.value:
+            source = artifact.metadata.get(EMAIL_SOURCE_METADATA_KEY, {})
+            server = source.get("server_id")
+            if not isinstance(server, str) or f"mcp.{server}.use" not in principal.scopes:
+                raise AuthorizationError("The source mailbox is no longer accessible.")
         # ArtifactRef requires an expiry, and persistence mapping rejects legacy null rows.
         if artifact.expires_at is not None and artifact.expires_at <= self._clock.now():
             raise NotFoundError("artifact not found")

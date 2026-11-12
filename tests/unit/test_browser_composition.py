@@ -71,7 +71,7 @@ from agent_core.domain.tools import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.browser import browser_lease_upkeep
-from agent_core.tools.browser_act import BrowserActTool, PinnedBrowserActTool
+from agent_core.tools.browser_act import BrowserActTool, PinnedBrowserActTool, ShadowBrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
     BrowserObserveTool,
@@ -180,14 +180,18 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         observe = cast(RegisteredTool, registry.get("browser.observe"))
         act = cast(RegisteredTool, registry.get("browser.act"))
         # ADR-0294: new chats take the latest; a chat pinned to the earlier spec keeps it.
-        assert act.spec.version == BrowserActTool.spec.version
+        assert act.spec.version == ShadowBrowserActTool.spec.version
+        assert isinstance(act.implementation, ShadowBrowserActTool)
         pinned = cast(
             RegisteredTool, registry.get("browser.act", PinnedBrowserActTool.spec.version)
         )
         assert isinstance(pinned.implementation, PinnedBrowserActTool)
         assert isinstance(navigate.implementation, BrowserNavigateTool)
         assert isinstance(observe.implementation, BrowserObserveTool)
-        assert observe.spec.version == "1.8.0"
+        assert observe.spec.version == "1.10.0"
+        assert registry.get("browser.observe", version="1.9.0").spec.version == "1.9.0"
+        assert registry.get("browser.act", version="1.8.0").spec == BrowserActTool.spec
+        assert registry.get("browser.observe", version="1.8.0").spec.version == "1.8.0"
         assert registry.get("browser.observe", version="1.7.0").spec.version == "1.7.0"
         paged = cast(RegisteredTool, registry.get("browser.observe", version="1.1.0"))
         assert isinstance(paged.implementation, PagedBrowserObserveTool)

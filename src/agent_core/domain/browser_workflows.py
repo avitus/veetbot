@@ -15,6 +15,15 @@ from agent_core.domain.browser import (
 from agent_core.domain.browser_extraction import BrowserExtractionField
 
 
+class BrowserWorkflowBranches(BaseModel):
+    """Reviewed forward destinations for two positively observed alternatives."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    satisfied: int = Field(ge=0, le=16, strict=True)
+    failed: int = Field(ge=0, le=16, strict=True)
+
+
 class BrowserWorkflowStep(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -31,18 +40,23 @@ class BrowserWorkflowStep(BaseModel):
     index: int = Field(default=0, ge=0, le=15)
     fields: list[BrowserExtractionField] = Field(default_factory=list, max_length=8)
     row_limit: int = Field(default=20, ge=1, le=50)
+    branches: BrowserWorkflowBranches | None = None
 
     @model_validator(mode="after")
     def closed_step(self) -> BrowserWorkflowStep:
         permitted = {
             "navigate": {"kind", "url"},
-            "observe": {"kind", "postcondition"},
+            "observe": {"kind", "postcondition", "branches"},
             "act": {"kind", "role", "name", "action", "value", "key", "delta_y", "postcondition"},
             "extract": {"kind", "collection_kind", "index", "fields", "row_limit"},
             "collect_feed": {"kind", "role", "name"},
         }[self.kind]
         if not self.model_fields_set <= permitted:
             raise ValueError("workflow step mixes modes")
+        if self.branches is not None and (
+            self.postcondition is None or self.postcondition.failure_evidence is None
+        ):
+            raise ValueError("read branches require positive success and failure predicates")
         if self.kind == "navigate":
             browser_origin(self.url or "")
         elif self.kind == "collect_feed":
@@ -103,6 +117,12 @@ class BrowserWorkflowRecipe(BaseModel):
             step.url is not None and browser_origin(step.url) != self.origin for step in self.steps
         ):
             raise ValueError("workflow navigation leaves its origin")
+        for index, step in enumerate(self.steps):
+            if step.branches is not None and any(
+                not index < target <= len(self.steps)
+                for target in (step.branches.satisfied, step.branches.failed)
+            ):
+                raise ValueError("workflow branches must move forward within the recipe")
         if any(step.kind == "collect_feed" for step in self.steps) and (
             self.origin != "https://x.com"
             or len(self.steps) != 2

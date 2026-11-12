@@ -11,6 +11,7 @@ from uuid import UUID
 from agent_core.domain.browser import (
     BrowserCondition,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserProfileStatus,
     browser_origin,
 )
@@ -34,7 +35,13 @@ def _intent(value: str) -> str:
 
 
 def _definition(recipe: BrowserWorkflowRecipe) -> str:
-    return hashlib.sha256(recipe.model_dump_json().encode()).hexdigest()
+    # Omitted optional branching must not change legacy recipe/checkpoint identity.
+    excluded = {
+        "steps": {
+            index: {"branches"} for index, step in enumerate(recipe.steps) if step.branches is None
+        }
+    }
+    return hashlib.sha256(recipe.model_dump_json(exclude=excluded).encode()).hexdigest()
 
 
 def _condition(condition: BrowserCondition) -> dict[str, Any]:
@@ -55,6 +62,30 @@ def _observation(result: ToolResultItem | None) -> BrowserObservation | None:
                 return BrowserObservation.model_validate_json(part.text)
             except ValueError:
                 pass
+    return None
+
+
+def _control_continuation(
+    result: ToolResultItem, observation: BrowserObservation
+) -> dict[str, str] | None:
+    """Copy only a current, advertised control continuation, never a guessed cursor."""
+    if result.is_error or observation.coverage is None:
+        return None
+    if not result.content or not isinstance(result.content[0], TextPart):
+        return None
+    try:
+        payload = json.loads(result.content[0].text)
+        if not isinstance(payload, dict):
+            return None
+        request = BrowserObservationExpansion.model_validate(payload.get("next_observe"))
+    except ValueError:
+        return None
+    if request.after is not None and any(
+        element.ref == request.after for element in observation.elements
+    ):
+        return {"after": request.after}
+    if request.cursor is not None and request.cursor == observation.coverage.next_cursor:
+        return {"cursor": request.cursor}
     return None
 
 
@@ -195,7 +226,7 @@ class BrowserWorkflowRunner:
             # An interrupted write is reconciled below. Only pre-action reads can restart.
             if state["phase"] not in {"action", "verify"}:
                 state.update(phase="start", call_id=None)
-        while state["completed_steps"] < len(recipe.steps):
+        while state.get("next_step", state["completed_steps"]) < len(recipe.steps):
             context.token.raise_if_cancelled()
             if (
                 context.clock.now() >= datetime.fromisoformat(state["expires_at"])
@@ -212,7 +243,8 @@ class BrowserWorkflowRunner:
             if context.checkpoint.pending_tool_calls:
                 # Includes a pending approved call or the fresh read queued by verified sign-in.
                 await self._dispatch_pending(context, state)
-            step = recipe.steps[state["completed_steps"]]
+            step_index = state.get("next_step", state["completed_steps"])
+            step = recipe.steps[step_index]
             result = next(
                 (
                     item
@@ -258,6 +290,23 @@ class BrowserWorkflowRunner:
                 ):
                     await self._stop(context, state, "unverified")
                     return None
+                if state["phase"] == "before_extract":
+                    await self._queue(
+                        context,
+                        state,
+                        "read",
+                        "browser.observe",
+                        {
+                            "extract": {
+                                "expected_revision": observed.revision,
+                                "kind": step.collection_kind,
+                                "index": step.index,
+                                "fields": [field.model_dump() for field in step.fields],
+                                "row_limit": step.row_limit,
+                            }
+                        },
+                    )
+                    continue
                 if state["phase"] == "before_action":
                     targets = [
                         element
@@ -266,6 +315,14 @@ class BrowserWorkflowRunner:
                         and element.name == step.name
                         and not element.disabled
                     ]
+                    if not targets:
+                        continuation = _control_continuation(result, observed)
+                        if continuation is None:
+                            await self._stop(context, state, "target_not_observed")
+                            return None
+                        if not await self._read_target_window(context, state, continuation):
+                            return None
+                        continue
                     if len(targets) != 1:
                         await self._stop(context, state, "ambiguous_target")
                         return None
@@ -284,6 +341,35 @@ class BrowserWorkflowRunner:
                         },
                     )
                     continue
+                if step.branches is not None:
+                    if (
+                        state["phase"] != "read"
+                        or observed.condition is None
+                        or observed.condition.status not in {"satisfied", "failed"}
+                    ):
+                        await self._stop(context, state, "unverified")
+                        return None
+                    status = observed.condition.status
+                    destination = (
+                        step.branches.satisfied if status == "satisfied" else step.branches.failed
+                    )
+                    state["completed_steps"] += 1
+                    state.update(
+                        next_step=destination,
+                        last_branch={
+                            "step": step_index,
+                            "status": status,
+                            "next_step": destination,
+                        },
+                        phase="start",
+                        call_id=None,
+                    )
+                    if destination == len(recipe.steps) and status == "failed":
+                        await self._stop(context, state, "observed_failure")
+                        return None
+                    # Persist the decision before any target read, approval or dispatch.
+                    await checkpoint(context, "browser_workflow_progress")
+                    continue
                 if observed.condition is not None and observed.condition.status != "satisfied":
                     await self._stop(context, state, "unverified")
                     return None
@@ -298,13 +384,16 @@ class BrowserWorkflowRunner:
                     await self._stop(context, state, "unverified")
                     return None
                 state["completed_steps"] += 1
+                if "next_step" in state:
+                    state["next_step"] = step_index + 1
                 state.update(phase="start", call_id=None)
                 await checkpoint(context, "browser_workflow_progress")
                 continue
             if step.kind == "navigate":
                 await self._queue(context, state, "read", "browser.navigate", {"url": step.url})
             elif step.kind == "act":
-                await self._queue(context, state, "before_action", "browser.observe", {})
+                if not await self._read_target_window(context, state, {}):
+                    return None
             elif step.kind == "observe":
                 args = (
                     {}
@@ -313,34 +402,35 @@ class BrowserWorkflowRunner:
                 )
                 await self._queue(context, state, "read", "browser.observe", args)
             else:
-                previous = next(
-                    (
-                        _observation(item)
-                        for item in reversed(context.checkpoint.conversation)
-                        if isinstance(item, ToolResultItem) and _observation(item) is not None
-                    ),
-                    None,
-                )
-                if previous is None:
-                    await self._stop(context, state, "unverified")
-                    return None
-                await self._queue(
-                    context,
-                    state,
-                    "read",
-                    "browser.observe",
-                    {
-                        "extract": {
-                            "expected_revision": previous.revision,
-                            "kind": step.collection_kind,
-                            "index": step.index,
-                            "fields": [field.model_dump() for field in step.fields],
-                            "row_limit": step.row_limit,
-                        }
-                    },
-                )
+                await self._queue(context, state, "before_extract", "browser.observe", {})
         await self._stop(context, state, "verified")
         return None
+
+    async def _read_target_window(
+        self, context: RunContext, state: dict[str, Any], arguments: dict[str, str]
+    ) -> bool:
+        step_index = state.get("next_step", state["completed_steps"])
+        search = state.get("target_search")
+        if search is not None and (
+            not isinstance(search, dict)
+            or set(search) != {"step", "windows"}
+            or type(search["step"]) is not int
+            or not 0 <= search["step"] < 16
+            or type(search["windows"]) is not int
+            or not 0 <= search["windows"] <= 4
+        ):
+            raise ConflictError("the browser workflow target search is malformed")
+        if search is None or search["step"] != step_index:
+            # Legacy checkpoints may already contain an initial observation.
+            search = {"step": step_index, "windows": int(bool(arguments))}
+            state["target_search"] = search
+        if search["windows"] >= 4:
+            await self._stop(context, state, "target_not_observed")
+            return False
+        search["windows"] += 1
+        # _queue persists this allowance with the pending read before dispatch.
+        await self._queue(context, state, "before_action", "browser.observe", arguments)
+        return bool(state["status"] == "running")
 
     async def _queue(
         self,

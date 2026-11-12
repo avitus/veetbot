@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+BrowserExtractionScope = Literal["main_document", "main_document_and_open_shadow"]
+
 
 class BrowserExtractionField(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -25,9 +27,12 @@ class BrowserExtractionRequest(BaseModel):
     index: int = Field(default=0, ge=0, le=15)
     fields: list[BrowserExtractionField] = Field(min_length=1, max_length=8)
     row_limit: int = Field(default=20, ge=1, le=50)
+    scope: BrowserExtractionScope = "main_document"
 
     @model_validator(mode="after")
     def unique_fields(self) -> BrowserExtractionRequest:
+        if self.kind == "articles" and self.scope != "main_document":
+            raise ValueError("article extraction remains document-only")
         if len({field.name for field in self.fields}) != len(self.fields):
             raise ValueError("extraction field names must be unique")
         return self
@@ -55,7 +60,7 @@ class BrowserExtractedRow(BaseModel):
 class BrowserExtractionResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 1
     revision: str = Field(min_length=1, max_length=128)
     kind: Literal["table", "list", "form", "articles"]
     index: int = Field(ge=0, le=15)
@@ -64,7 +69,9 @@ class BrowserExtractionResult(BaseModel):
     source_name: str = Field(default="", max_length=256)
     fields: list[BrowserExtractionField] = Field(min_length=1, max_length=8)
     rows: tuple[BrowserExtractedRow, ...] = Field(default=(), max_length=50)
-    scope: Literal["main_document", "main_document_viewport_articles"] = "main_document"
+    scope: Literal[
+        "main_document", "main_document_viewport_articles", "main_document_and_open_shadow"
+    ] = "main_document"
     source_nodes: int = Field(ge=0, le=8192)
     source_scan_limit_reached: bool
     row_nodes: int = Field(ge=0, le=4096)
@@ -75,6 +82,10 @@ class BrowserExtractionResult(BaseModel):
 
     @model_validator(mode="after")
     def records_match_schema(self) -> BrowserExtractionResult:
+        if (self.version == 2) != (self.scope == "main_document_and_open_shadow"):
+            raise ValueError("extraction scope does not match its version")
+        if self.version == 2 and self.kind == "articles":
+            raise ValueError("article extraction remains document-only")
         if len({field.name for field in self.fields}) != len(self.fields):
             raise ValueError("extraction field names must be unique")
         if len(self.rows) > self.row_limit or (self.status != "extracted" and self.rows):

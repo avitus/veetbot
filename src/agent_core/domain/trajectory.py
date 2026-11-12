@@ -43,6 +43,7 @@ class ArtifactRef(BaseModel):
         "upload",
         "knowledge_source",
         "email_attachment",
+        "email_draft_attachment",
     ] = "trajectory_export"
     trust: TrustLevel
     expires_at: datetime | None

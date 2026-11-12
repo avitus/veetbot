@@ -151,6 +151,59 @@ of a misleading `dom_quiet`. The existing two-second deadline and single-action
 semantics remain. This is construction evidence under ADR-0159, separate from
 live-site and production acceptance.
 
+The W5 follow-up extends the existing human-only challenge interruption into
+open shadow roots. Password/OTP metadata and bounded visible prompts now pause
+automation there, with composed visibility and passive-badge checks. The read
+does not expose credential values, prove sign-in, or replay an action whose
+effect already occurred. ADR-0163 records construction evidence; broader W5
+and live-site acceptance remain separate.
+
+The W4/W5 continuation preserves authentication interruptions that arrive during
+completion polling, including extraction reads. Polling stops, the already-sent
+action stays uncertain and non-retryable, and the existing sign-in suspension
+receives its trusted marker. This closes the gap between immediate action
+interruptions and later verification reads without replaying an effect or adding
+another approval path. ADR-0164 records construction evidence; broader acceptance
+and production delivery remain separate.
+
+The next W3 slice adds open-shadow table/list/form extraction through
+`browser.observe` 1.9.0 ([ADR-0311](adr/0311-open-shadow-browser-extraction.md)).
+Versioned evidence names its wider scope; pinned observe versions keep their
+document-only indexes and wire requests. Composed visibility, editable-content
+exclusion and existing scan/cell limits apply across roots. Article extraction,
+frames, closed roots and stable collection identity remain outside this slice.
+This is construction evidence, separate from live-site and production acceptance.
+
+The next W4 slice connects open-shadow collection evidence to row waits and
+action postconditions ([ADR-0313](adr/0313-open-shadow-browser-completion.md)).
+Observe 1.10.0 and act 1.9.0 use the widened scope; earlier pinned versions
+keep document-only indexes. Workflow calls follow their run's tool pins.
+Wrong-scope evidence cannot satisfy a row predicate, and failed verification
+never repeats a write.
+Construction and direct-dev delivery do not establish live-site acceptance.
+
+The next W6 slice adds forward-only branches on positively observed alternatives
+in reviewed recipes ([ADR-0314](adr/0314-reviewed-browser-read-branches.md)).
+Already-complete states can skip unnecessary actions; necessary actions still
+use fresh targets and ordinary approvals. Missing/ambiguous evidence and uncertain
+writes cannot select another action. Persisted branch choices preserve resume
+and truthful completed-step counts. The deployed recipe catalog is unchanged;
+live-site and efficiency acceptance remain pending.
+
+The next W4/W6 slice connects reviewed action steps to existing bounded control
+continuation ([ADR-0315](adr/0315-bounded-workflow-target-discovery.md)). A target
+outside the first window can be discovered within four requested windows, using
+only advertised current continuations. Search counts survive suspension, and
+approval still binds the newly observed target. Ambiguity, stale evidence and
+exhausted discovery stop safely; uncertain actions never restart discovery.
+The deployed recipe catalog and broader live-site acceptance remain unchanged.
+
+The following W6 repair gives every reviewed extraction step its own fresh,
+audited observation before requesting typed rows. Earlier conversation evidence
+cannot provide its revision, and the preliminary read cannot count as completed
+extraction. Stale or failed reads stop without replaying an earlier write. This
+repairs ADR-0164's fresh-step contract; it activates no new deployed recipe.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

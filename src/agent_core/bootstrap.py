@@ -362,6 +362,7 @@ from agent_core.application.device_management import (
 )
 from agent_core.application.email import EmailExperienceService
 from agent_core.application.email_attachments import EmailAttachmentSaver
+from agent_core.application.email_draft_files import EmailDraftFiles
 from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.application.job_execution import JobExecution
@@ -767,12 +768,15 @@ from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
     BrowserActTool,
     PinnedBrowserActTool,
+    ShadowBrowserActTool,
 )
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import (
     ArticleBrowserObserveTool,
     BrowserObserveTool,
+    CompletionBrowserObserveTool,
     PagedBrowserObserveTool,
+    ShadowBrowserObserveTool,
 )
 from agent_core.tools.browser_upload import BrowserUploadTool
 from agent_core.tools.calculator import CalculatorTool
@@ -3738,6 +3742,8 @@ async def _compose(
         )
         registry.register(BrowserObserveTool(browser_provider))
         registry.register(ArticleBrowserObserveTool(browser_provider))
+        registry.register(ShadowBrowserObserveTool(browser_provider))
+        registry.register(CompletionBrowserObserveTool(browser_provider))
         if isinstance(browser_provider, BrowserImageUploader):
             registry.register(
                 BrowserUploadTool(
@@ -3761,6 +3767,7 @@ async def _compose(
         # ADR-0294: a chat pinned to the earlier spec keeps it; the latest is offered.
         registry.register(PinnedBrowserActTool(browser_provider, presenter=act_presenter))
         registry.register(BrowserActTool(browser_provider, presenter=act_presenter))
+        registry.register(ShadowBrowserActTool(browser_provider, presenter=act_presenter))
     if settings.delegation_enabled:
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
@@ -4875,6 +4882,7 @@ async def _compose(
             warmup_attempts=int(warmup_limits["warmup_attempts"]),
             call_interceptor=None if call_service is None else call_service.invoke,
             email_attachment_saver=EmailAttachmentSaver(SignatureAttachmentInspector()),
+            email_draft_interceptor=lambda *args: email_draft_files.invoke(*args),
             access_tokens=owner_mcp_servers,
             owner_servers_enabled=settings.mcp_servers_enabled,
         )
@@ -5017,6 +5025,9 @@ async def _compose(
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
         registry.register(KnowledgeSearchTool(knowledge_service, factory=uow_factory))
+        email_draft_files = EmailDraftFiles(
+            uow_factory, general_artifact_store, SignatureAttachmentInspector(), clock
+        )
         artifact_writers = ArtifactWriterFactory(
             uow_factory,
             general_artifact_store,
@@ -6214,6 +6225,7 @@ async def _compose(
             mcp_servers=owner_mcp_servers,
             calls=call_service,
             email=EmailExperienceService(
+                draft_files=email_draft_files,
                 read_image=PublicImageReader().read_email,
                 uow_factory=uow_factory,
                 clock=clock,
@@ -6235,6 +6247,7 @@ async def _compose(
                 resolve_archive_approval=resolve_email_archive_approval,
                 resolve_send_approval=resolve_email_send_approval,
                 send_undo_seconds=settings.email_send_undo_seconds,
+                owner_timezone=settings.email_owner_timezone,
                 current_archive_principal=lambda: (
                     principal
                     if settings.email_mode_enabled

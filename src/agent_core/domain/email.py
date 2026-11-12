@@ -14,6 +14,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, ConfigDict, Field
 
 from agent_core.domain.email_base import EmailValue as EmailValue
+from agent_core.domain.email_drafting import DraftAttachment
 from agent_core.domain.email_semantics import EmailSemanticFact
 from agent_core.domain.email_subscriptions import EmailSubscriptionConsent
 
@@ -189,16 +190,22 @@ class EmailSendConsent(EmailValue):
     arguments_digest: str
     expires_at: datetime
     undo_until: datetime
+    with_attachments: bool = False
 
     @property
     def tool_name(self) -> str:
         """The one account-bound send capability this press may satisfy."""
-        return f"mcp.{self.send_server_id}.send_message"
+        return f"mcp.{self.send_server_id}." + (
+            "send_attached_message" if self.with_attachments else "send_message"
+        )
 
     @property
     def digest(self) -> str:
         """Fingerprint of the whole consent, recorded in the gesture event."""
-        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        value = self.model_dump_json(
+            exclude=None if self.with_attachments else {"with_attachments"}
+        )
+        return hashlib.sha256(value.encode()).hexdigest()
 
 
 def send_arguments_digest(arguments: dict[str, Any]) -> str:
@@ -217,6 +224,11 @@ def send_message_arguments(draft: EmailDraft, provider_thread_id: str) -> dict[s
         "thread_id": provider_thread_id,
         "in_reply_to": draft.in_reply_to,
         "references": " ".join(draft.references) or None,
+        **(
+            {"attachments": [item.model_dump(mode="json") for item in draft.attachments]}
+            if draft.attachments
+            else {}
+        ),
     }
 
 
@@ -266,6 +278,7 @@ class EmailThread(EmailValue):
     last_accessed_at: datetime
     in_inbox: bool = True
     source_session_ids: list[UUID] = Field(default_factory=list)
+    preparation_issue: str | None = None
     reply_blocked_reason: str | None = None
     archive_operation: EmailArchiveOperation | None = None
     # ADR-0165: a flag never moves mail; the owner clears it or reports the thread.
@@ -286,6 +299,7 @@ class EmailDraftStatus(StrEnum):
 
 
 class EmailDraft(EmailValue):
+    composition: Literal["manual", "veetbot"] = "veetbot"
     id: UUID
     thread_id: UUID
     account_id: str
@@ -297,6 +311,7 @@ class EmailDraft(EmailValue):
     bcc: list[str] = Field(default_factory=list)
     subject: str
     body: str
+    attachments: list[DraftAttachment] = Field(default_factory=list, max_length=10)
     status: EmailDraftStatus = EmailDraftStatus.READY
     stale: bool = False
     run_id: UUID | None = None
@@ -379,6 +394,7 @@ class EmailDraftEdit(EmailValue):
     bcc: list[str] = Field(default_factory=list, max_length=100)
     subject: str = Field(max_length=998)
     body: str = Field(max_length=500_000)
+    attachment_ids: list[UUID] | None = Field(default=None, max_length=10)
 
 
 class EmailLearningState(EmailValue):

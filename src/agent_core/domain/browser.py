@@ -174,6 +174,8 @@ class BrowserPageEvidence(BaseModel):
     on_allowed_origin: bool
     path: str = Field(max_length=4096, repr=False)
     challenge_visible: bool
+    # A bot-protection interstitial in either copy cannot establish authentication.
+    security_challenge_seen: bool = False
     # How long the page had been loaded when this was read (ADR-0297).
     observed_seconds: float = Field(default=0.0, ge=0.0)
 

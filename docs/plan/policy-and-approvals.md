@@ -1660,6 +1660,15 @@ as a network read. The profile is unchanged. The application-only
 `fetch_attachment` stays out of the arm, since the model cannot call it and the
 owner's press on Save is the request.
 
+ADR-0317 separately authorizes automatic private draft staging through the
+application-only `stage_attachment` read. It requires a current owner-scoped typed
+email drafting/refresh task, read authority for the source account, and a source
+selection validated against observed mail. It creates no Chat save or knowledge
+admission. `send_attached_message` stays on the send server's approval floor and
+requires exact consent for the envelope, body and immutable attachment manifest.
+Its interceptor accepts only the matching typed send task and resolves bytes
+outside persistent tool payloads. The existing Save approval floor is unchanged.
+
 
 ADR-0143 adds the exact `notification.write` scope for the bounded notification
 sync route. It authorizes terminal-result receipts and reconciliation, never

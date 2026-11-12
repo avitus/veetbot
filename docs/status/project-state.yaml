@@ -1,3 +1,22 @@
+# ADR-0164 follow-up: Owner-authorized W6 continuation gives each extraction
+# step a fresh audited observation, preserving budgets and non-replay handling.
+# No deployed recipe, milestone or gate changes.
+# ADR-0315: Owner-authorized W4/W6 continuation adds bounded workflow target
+# discovery through current control continuations. Four requested windows per
+# action retain ordinary approvals, revision fences and uncertain-write handling.
+# No deployed recipe, milestone or gate changes.
+# ADR-0314: Owner-authorized W6 continuation adds forward-only branches on
+# positive observe results in reviewed recipes. Existing permissions, uncertain
+# effect handling and deployed recipe catalog remain unchanged. No gate moves.
+# ADR-0313: Owner-authorized W4 continuation adds versioned open-shadow row
+# completion checks. Pinned earlier tools retain document scope;
+# verification never replays actions. No milestone or gate moves.
+# ADR-0311: The owner-authorized browser continuation extends W3 table/list/form
+# extraction into open shadow roots under observe 1.9.0. Pinned tools retain
+# document-only extraction; no authority, milestone or gate moves.
+# ADR-0317: Owner approved researched email drafts and automatic private attachment
+# staging on 2026-11-11, then PR 250 and merge after review/verification.
+# Exact-message sending remains owner-controlled; live acceptance remains pending.
 # ADR-0308: The owner-authorized browser continuation extends W3 semantic
 # regions and focus into open shadow roots, with versioned coverage and the
 # existing privacy and visit limits. No frame authority or milestone moves.
@@ -2672,6 +2691,7 @@ milestones:
       - foreground-request-driven Gmail synchronization and resumable history limited to the latest ninety days for now (ADR-0096)
       - shared reversible sender, content and writing-style personalization
       - internal versioned drafts and exact-action approval for every send
+      - bounded email and Calendar research and private draft attachment staging (ADR-0317, authorized 2026-11-11)
       - evaluated attributed semantic email memory shared with Chat and both accounts
       - scoped source erasure, retention and bounded automatic email accounting
       - USD 20 per UTC day and USD 200 per rolling thirty days for aggregate automatic email work
@@ -2683,7 +2703,7 @@ milestones:
     deferred_scope:
       - other unattended monitoring, Gmail push, scheduled digests and schedule-row interval scheduling
       - autonomous sending, automatic Gmail writes and Gmail draft synchronization
-      - another provider, self-service OAuth, attachments and calendar operations
+      - another provider, self-service OAuth, general attachment processing and calendar writes
       - offline-authoritative editing, separate email persona and model routing
       - general learned memory policy, reinforcement learning and a temporal entity graph
     open_items:

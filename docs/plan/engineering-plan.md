@@ -4069,6 +4069,8 @@ Implement:
   versioned cross-device editing, correct reply headers and verified recipients,
   exact-message approval for every external send, atomic local claims and no
   retry of potentially dispatched non-idempotent messages.
+  ADR-0317 extends this with bounded email and selected-calendar research,
+  automatic private draft attachment staging, and exact-file send consent.
 - Separately versioned and evaluated semantic correspondence formation with exact
   source provenance, inferred authority, owner-correction precedence, historical
   source-time lifecycle and shared contextual recall. Preserve existing extractor
@@ -4098,7 +4100,7 @@ Acceptance criteria:
 
 Excluded: background monitoring beyond ADR-0286's arrival checks, Gmail push/digests, automatic Gmail writes,
 Gmail draft synchronization, standing send grants, another provider, public OAuth,
-attachments, calendar, permanent mailbox deletion, terminal UI work, autonomous
+general attachment processing beyond ADR-0317, calendar writes, permanent mailbox deletion, terminal UI work, autonomous
 sending, offline-authoritative edits, model routing and a general learned memory
 policy. PR creation, deployment and live sends retain explicit authorization
 boundaries; implementation approval is not authorization for those actions.

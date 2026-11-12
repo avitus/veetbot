@@ -158,7 +158,10 @@ def test_primitive_conversion_is_explicit_and_schema_checked(
 
 
 @pytest.mark.parametrize("budget", [512, 1024, 4096, 8192])
-def test_extraction_projection_keeps_whole_typed_rows_or_explicit_omissions(budget: int) -> None:
+@pytest.mark.parametrize("scope", ["main_document", "main_document_and_open_shadow"])
+def test_extraction_projection_keeps_whole_typed_rows_or_explicit_omissions(
+    budget: int, scope: str
+) -> None:
     import json
     from uuid import UUID
 
@@ -174,11 +177,14 @@ def test_extraction_projection_keeps_whole_typed_rows_or_explicit_omissions(budg
     from agent_core.domain.tool_output import content_bytes
     from agent_core.tools.browser_results import (
         OUTPUT_SCHEMA,
+        SHADOW_OUTPUT_SCHEMA,
         observation_evidence_key,
         observation_result,
     )
 
-    request = BrowserExtractionRequest.model_validate(extraction_arguments()["extract"])
+    request = BrowserExtractionRequest.model_validate(
+        {**extraction_arguments()["extract"], "scope": scope}
+    )
     raw = {
         "status": "extracted",
         "source_name": "Fixture",
@@ -193,7 +199,8 @@ def test_extraction_projection_keeps_whole_typed_rows_or_explicit_omissions(budg
     page = extracted_page(request).model_copy(update={"extraction": extracted})
     original = observation_result(FakeBrowserProvider(), page, 512 * 1024)
     assert original.structured is not None
-    Draft202012Validator(OUTPUT_SCHEMA).validate(original.structured)
+    schema = SHADOW_OUTPUT_SCHEMA if scope == "main_document_and_open_shadow" else OUTPUT_SCHEMA
+    Draft202012Validator(schema).validate(original.structured)
     projected = browser_context_projection(
         original.structured,
         budget=budget,
@@ -204,6 +211,7 @@ def test_extraction_projection_keeps_whole_typed_rows_or_explicit_omissions(budg
     data = json.loads(projected[0].text)
     if "extraction" in data:
         admitted = BrowserExtractionResult.model_validate(data["extraction"])
+        assert admitted.scope == scope and admitted.version == extracted.version
         assert admitted.omitted_rows == 3 + 20 - len(admitted.rows)
         assert all(row in extracted.rows for row in admitted.rows)
         if budget >= 4096:
@@ -219,7 +227,7 @@ def test_extraction_projection_keeps_whole_typed_rows_or_explicit_omissions(budg
     bounded = observation_result(FakeBrowserProvider(), page, 4096)
     assert len(content_bytes(bounded.content)) <= 4096
     assert bounded.structured is not None
-    Draft202012Validator(OUTPUT_SCHEMA).validate(bounded.structured)
+    Draft202012Validator(schema).validate(bounded.structured)
 
 
 def test_extraction_byte_ceiling_omits_whole_rows() -> None:

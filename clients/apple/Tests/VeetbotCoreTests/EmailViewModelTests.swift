@@ -14,6 +14,96 @@ import SwiftUI
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    @Test func testDraftAttachmentManifestSurvivesNativeRoundTrip() throws {
+        var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])
+        let fileID = UUID().uuidString
+        payload["attachments"] = [["artifact_id": fileID, "filename": "board.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]]
+        let draft = try JSONDecoder.server.decode(EmailDraftView.self,
+            from: JSONSerialization.data(withJSONObject: payload))
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder.server.encode(draft)) as? [String: Any])
+        let files = try #require(encoded["attachments"] as? [[String: Any]])
+        #expect(files.first?["artifact_id"] as? String == fileID)
+    }
+
+    @Test(arguments: ["matching", "different_id", "different_digest"])
+    func testReviewAcceptsRedactedFilenameOnlyForTheSameFile(change: String) async throws {
+        let fileID = UUID().uuidString
+        let file: [String: Any] = ["artifact_id": fileID, "filename": "token=abc.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]
+        var draft = try #require(JSONSerialization.jsonObject(with: Data(draftJSON(status: "awaiting_approval").utf8)) as? [String: Any])
+        draft["attachments"] = [file]
+        draft["send_tool_name"] = "mcp.gmail_send.send_attached_message"
+        let draftText = String(data: try JSONSerialization.data(withJSONObject: draft), encoding: .utf8)!
+        var presented = file
+        presented["filename"] = "[REDACTED]"
+        if change == "different_id" { presented["artifact_id"] = UUID().uuidString }
+        if change == "different_digest" { presented["sha256"] = String(repeating: "b", count: 64) }
+        var approval = try #require(JSONSerialization.jsonObject(with: Data(approvalJSON(body: "Thanks, I will review the agenda.").utf8)) as? [String: Any])
+        var arguments = try #require(approval["arguments"] as? [String: Any])
+        arguments["attachments"] = [presented]
+        approval["arguments"] = arguments
+        approval["tool_name"] = "mcp.gmail_send.send_attached_message"
+        let approvalText = String(data: try JSONSerialization.data(withJSONObject: approval), encoding: .utf8)!
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/approvals/") { return (200, approvalText) }
+            return (200, self.threadJSON(draft: draftText))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.loadReview()
+        #expect((model.review != nil) == (change == "matching"))
+    }
+
+    @Test func testSendAcknowledgesTheDisplayedAttachmentIDs() async throws {
+        let fileID = UUID()
+        var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])
+        payload["attachments"] = [["artifact_id": fileID.uuidString, "filename": "board.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]]
+        let withFile = String(data: try JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(pollNanoseconds: 1_000) { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("/send") {
+                requests.append(request)
+                return (200, "{\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\",\"draft\":\(self.parkedDraftJSON())}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "QUEUED")) }
+            return (200, self.threadJSON(draft: withFile))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.sendNow()
+        let request = try #require(requests.snapshot.first)
+        let sent = try Self.archiveRequestBody(request)
+        #expect(sent["reviewed_attachment_ids"] as? [String] == [fileID.uuidString])
+    }
+
+    @Test func testRemovingDraftAttachmentSavesOnlyReviewedIDs() async throws {
+        let fileID = UUID()
+        var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])
+        payload["attachments"] = [["artifact_id": fileID.uuidString, "filename": "board.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]]
+        let withFile = String(data: try JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            if request.httpMethod == "PUT" {
+                requests.append(request)
+                return (200, self.draftJSON(revision: 2).dropLast() + ",\"attachments\":[]}")
+            }
+            return (200, self.threadJSON(draft: withFile))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.removeDraftAttachment(fileID)
+        let request = try #require(requests.snapshot.first)
+        let sent = try Self.archiveRequestBody(request)
+        #expect(sent["attachment_ids"] as? [String] == [])
+        #expect(model.currentEdit?.attachmentIDs == [])
+        #expect(model.currentEdit?.isDirty == false)
+    }
+
     @Test func testCollectionSwitchShowsCachedRowsBeforeSlowRefresh() async throws {
         let requests = EmailRequestRecorder()
         let gate = DispatchSemaphore(value: 0)
@@ -1810,6 +1900,106 @@ import SwiftUI
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
     }
 
+    @Test(arguments: ["none", "ready", "discarded", "sent", "sent_manual"])
+    func testReplySelectsBlankManualCompositionWithoutGeneration(status: String) async throws {
+        let requests = EmailRequestRecorder()
+        let blank = draftJSON(body: "")
+            .replacingOccurrences(of: "\"revision\":1", with: "\"composition\":\"manual\",\"revision\":2")
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("/reply") { return (200, blank) }
+            if request.url!.path.hasSuffix("/revisions") { return (200, "{\"items\":[],\"next_cursor\":null}") }
+            let existing = status == "sent_manual"
+                ? self.draftJSON(status: "sent").replacingOccurrences(of: "\"revision\":1", with: "\"composition\":\"manual\",\"revision\":1")
+                : self.draftJSON(status: status)
+            let detail = self.threadJSON(draft: status == "none" ? "null" : existing)
+            return (200, status != "none" ? detail : detail.replacingOccurrences(
+                of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(await model.selectReply(manual: true))
+        #expect(model.draft?.isManual == true)
+        #expect(model.currentEdit?.body == "")
+        #expect(!model.canReview, "A blank reply is editable but cannot be sent")
+        let posts = requests.snapshot.filter { $0.httpMethod == "POST" }
+        #expect(posts.count == 1)
+        #expect(posts.first?.url?.path.hasSuffix("/reply") == true)
+        #expect(!model.isSelectingReply)
+    }
+
+    @Test func testReplySelectionWaitsForGeneration() async throws {
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "POST" {
+                return (200, "{\"draft\":\(self.draftJSON()),\"run_id\":\"\(self.runID)\",\"status\":\"COMPLETED\"}", gate)
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "COMPLETED"), nil) }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        let generating = Task { await model.generateDraft() }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        #expect(model.isGeneratingDraft)
+        #expect(!model.canSelectReply)
+        gate.release()
+        await generating.value
+    }
+
+    @Test func testOnlyExplicitVeetbotChoiceGeneratesAMissingSuggestion() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("/reply") { return (404, Self.error("not_found", "No Veetbot draft")) }
+            if request.httpMethod == "POST" {
+                return (200, "{\"draft\":\(self.draftJSON()),\"run_id\":\"\(self.runID)\",\"status\":\"COMPLETED\"}")
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "COMPLETED")) }
+            let generated = requests.snapshot.contains { $0.httpMethod == "POST" && $0.url!.path.hasSuffix("/drafts") }
+            let detail = self.threadJSON(draft: generated ? self.draftJSON() : "null")
+            return (200, generated ? detail : detail.replacingOccurrences(
+                of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(await model.selectReply(manual: false))
+        #expect(model.draft?.isManual == false)
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.map { $0.url!.lastPathComponent } == ["reply", "drafts"])
+        #expect(!model.isGeneratingDraft && !model.isSelectingReply)
+    }
+
+    @Test func testManualReplyDoesNotDisplayVeetbotPreparationFailure() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let manual = self.draftJSON().replacingOccurrences(of: "\"revision\":1", with: "\"composition\":\"manual\",\"revision\":1")
+            return (200, self.threadJSON(draft: manual).replacingOccurrences(of: "\"summary\":", with: "\"preparation_issue\":\"Missing files\",\"summary\":"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(model.thread?.preparationIssue == "Missing files")
+        #expect(model.draftActionMessage == nil)
+    }
+
+    @Test func testManualReplyFailureNeverFallsBackToGeneration() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.httpMethod == "POST" { return (404, Self.error("not_found", "Reply unavailable")) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(!(await model.selectReply(manual: true)))
+        #expect(model.currentEdit?.body == "Thanks, I will review the agenda.")
+        #expect(model.draftActionMessage == "Reply unavailable")
+        #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
+    }
+
     /// A terminal generation failure must be visible even before the first draft exists.
     @Test(arguments: ["FAILED", "CANCELLED"], [false, true])
     func testDraftGenerationReportsTerminalFailure(status: String, existingDraft: Bool) async throws {
@@ -2366,6 +2556,7 @@ import SwiftUI
         model.changeEdit(\.body, to: "Edited on the first draft")
         let pressed = Task { await model.sendNow() }
         try await waitForEmailTestCondition { saveGate.isWaiting }
+        #expect(!model.canSelectReply)
         await model.openThread(otherThreadID)
         #expect(model.draft?.id == otherDraftID)
         saveGate.release()

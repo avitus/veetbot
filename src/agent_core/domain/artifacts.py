@@ -23,6 +23,7 @@ class ArtifactOrigin(StrEnum):
     KNOWLEDGE_SOURCE = "knowledge_source"
     # ADR-0296: a file saved from an email; the owner's press or approval admits it.
     EMAIL_ATTACHMENT = "email_attachment"
+    EMAIL_DRAFT_ATTACHMENT = "email_draft_attachment"
 
 
 # ADR-0277: deletes files Chat generated in a chat; an unindexed deferral that

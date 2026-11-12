@@ -6,7 +6,7 @@ import builtins
 from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
@@ -20,12 +20,16 @@ from agent_core.domain.email import (
     EmailTask,
     EmailThread,
 )
+from agent_core.domain.email_drafting import DraftAttachment
 from agent_core.domain.email_junk import JunkAuthorization
 from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSource
 from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.messages import ConversationItem
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run
+
+if TYPE_CHECKING:
+    from agent_core.ports.persistence import RepositoryUnitOfWork
 
 
 class EmailStore(Protocol):
@@ -36,6 +40,8 @@ class EmailStore(Protocol):
     the in-memory implementation holds it to context exit. Callers perform no
     network calls while holding it. `put` requires the exact existing revision
     (zero means absent) and a record with revision expected+1 or raises ConflictError.
+    ADR-0317's bounded attached-send transport is the sole network exception:
+    it holds this lock through exact dispatch to serialize source erasure.
     Records returned to callers cannot mutate the durable store by aliasing.
     """
 
@@ -174,9 +180,22 @@ class EmailRuntimeServices(Protocol):
     """Scoped projection and personalization boundary used by governed tasks."""
 
     account_servers: dict[str, dict[str, str]]
+    owner_timezone: str | None
 
     @property
     def subscriptions(self) -> EmailSubscriptionRuntime: ...
+
+    async def validate_draft_attachments(
+        self, uow: RepositoryUnitOfWork, principal: Principal, draft: EmailDraft
+    ) -> None: ...
+
+    async def settle_draft_attachments(
+        self, uow: RepositoryUnitOfWork, principal: Principal, draft: EmailDraft
+    ) -> None: ...
+
+    async def retry_draft_attachment_cleanup(
+        self, principal: Principal, draft_id: UUID
+    ) -> None: ...
 
     async def get_task(self, principal: Principal, run_id: UUID) -> EmailTask | None: ...
 
@@ -282,6 +301,8 @@ class EmailRuntimeServices(Protocol):
         instruction: str | None = None,
         run: Run | None = None,
         lease: WorkerLease | None = None,
+        attachments: list[DraftAttachment] | None = None,
+        expected_draft_revision: int | None = None,
     ) -> EmailDraft: ...
 
     async def learning_context(

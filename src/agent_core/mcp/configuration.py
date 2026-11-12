@@ -49,7 +49,8 @@ def is_email_attachment_tool(server_id: str | None, remote_name: str) -> bool:
         is_email_server_id(server_id)
         and server_id is not None
         and server_id.endswith("_read")
-        and remote_name in {EMAIL_FETCH_ATTACHMENT_TOOL, EMAIL_SAVE_ATTACHMENT_TOOL}
+        and remote_name
+        in {EMAIL_FETCH_ATTACHMENT_TOOL, EMAIL_SAVE_ATTACHMENT_TOOL, "stage_attachment"}
     )
 
 

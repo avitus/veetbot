@@ -101,6 +101,15 @@ extension VeetbotAPIClient {
         ))
     }
 
+    public func selectEmailReply(
+        thread: EmailThreadView, draft: EmailDraftView?, kind: String, idempotencyKey: String
+    ) async throws -> EmailDraftView {
+        try await emailCommand(path: "/threads/\(thread.id.uuidString)/reply", values: [
+            "kind": .string(kind), "source_revision": .number(Double(thread.revision)),
+            "expected_revision": draft.map { .number(Double($0.revision)) } ?? .null,
+        ], key: idempotencyKey)
+    }
+
     public func generateEmailDraft(
         threadID: UUID, instruction: String?, idempotencyKey: String
     ) async throws -> EmailDraftOperation {
@@ -155,6 +164,9 @@ extension VeetbotAPIClient {
             "bcc": .array(EmailDraftEdit.addresses(edit.bcc).map(JSONValue.string)),
             "subject": .string(edit.subject), "body": .string(edit.body)
         ]
+        if edit.base.attachments != nil || !edit.attachmentIDs.isEmpty {
+            values["attachment_ids"] = .array(edit.attachmentIDs.map { .string($0.uuidString) })
+        }
         if let revision = edit.reviewedSourceRevision { values["source_revision"] = .number(Double(revision)) }
         return try await transport.send(TransportRequest(
             method: .put, path: "/v1/email/drafts/\(edit.base.id.uuidString)",
@@ -173,14 +185,16 @@ extension VeetbotAPIClient {
     public func sendEmailDraft(
         _ draft: EmailDraftView, sourceRevision: Int, idempotencyKey: String
     ) async throws -> EmailDraftOperation {
-        try await emailCommand(
-            path: "/drafts/\(draft.id.uuidString)/send",
-            values: [
-                "expected_revision": .number(Double(draft.revision)),
-                "source_revision": .number(Double(sourceRevision)),
-                "idempotency_key": .string(idempotencyKey),
-            ],
-            key: idempotencyKey
+        var values: [String: JSONValue] = [
+            "expected_revision": .number(Double(draft.revision)),
+            "source_revision": .number(Double(sourceRevision)),
+            "idempotency_key": .string(idempotencyKey),
+        ]
+        if let files = draft.attachments, !files.isEmpty {
+            values["reviewed_attachment_ids"] = .array(files.map { .string($0.artifactID.uuidString) })
+        }
+        return try await emailCommand(
+            path: "/drafts/\(draft.id.uuidString)/send", values: values, key: idempotencyKey
         )
     }
 

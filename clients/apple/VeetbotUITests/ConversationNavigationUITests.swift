@@ -1218,6 +1218,35 @@ final class ConversationNavigationUITests: XCTestCase {
         checkEmailReadingFlow()
     }
 
+    /// Reply opens a blank owner-written draft, without asking Veetbot to write.
+    func testEmailReplyCreatesAMissingDraft() {
+        app.launchArguments.append("--ui-testing-email-no-draft")
+        app.launch()
+        checkEmailReadingFlow()
+    }
+
+    func testClosedEmailComposerKeepsSendUndoVisible() {
+        app.launchArguments.append("--ui-testing-email-send-on-save")
+        app.launch()
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        activate(mode)
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        activate(row)
+        let reply = app.buttons["email.jump-to-reply"]
+        XCTAssertTrue(reply.waitForExistence(timeout: 5))
+        activate(reply)
+        let editor = app.textViews["email.draft-body"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        app.typeText("My reply.")
+        #if os(iOS)
+        activate(app.buttons["email.keyboard-done"])
+        #endif
+        activate(app.buttons["email.save-close"])
+        XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 5))
+    }
+
     /// Exercises the same native controls with a deterministic dark appearance.
     func testEmailReadingInDarkAppearance() {
         app.launchEnvironment["VEETBOT_UI_TEST_COLOR_SCHEME"] = "dark"
@@ -1279,14 +1308,54 @@ final class ConversationNavigationUITests: XCTestCase {
         let reply = app.buttons["email.jump-to-reply"]
         XCTAssertTrue(reply.waitForExistence(timeout: 5), "A reply must be reachable without scrolling through the conversation")
         XCTAssertTrue(reply.isHittable)
+        XCTAssertLessThan(reply.frame.height, 80, "Reply controls must fit a narrow reader without vertical text")
         XCTAssertFalse(app.textFields["Explain what matters (optional)"].isHittable,
                        "Feedback must not compete with reading the message")
+        if app.launchArguments.contains("--ui-testing-email-no-draft") {
+            XCTAssertFalse(app.textViews["email.draft-body"].exists, "The regression starts without a draft")
+        }
         activate(reply)
         let editor = app.textViews["email.draft-body"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         XCTAssertTrue(editor.isHittable)
-        XCTAssertTrue(app.buttons["email.send"].isHittable)
+        XCTAssertEqual(editor.value as? String, "", "Reply must never insert an AI suggestion")
         attachEmailScreenshot("Reply composer")
+        XCTAssertFalse(app.buttons["email.send"].isEnabled, "An empty reply cannot be sent")
+        let aiDraft = app.buttons["email.draft-with-veetbot"]
+        XCTAssertTrue(aiDraft.isHittable, "The two composition choices stay side by side")
+        XCTAssertLessThan(aiDraft.frame.height, 80)
+        XCTAssertEqual(reply.frame.midY, aiDraft.frame.midY, accuracy: 2)
+        // Reply focuses the body: typing goes straight into the manual composer.
+        app.typeText("My own reply.")
+        XCTAssertEqual(editor.value as? String, "My own reply.")
+        #if os(iOS)
+        activate(app.buttons["email.keyboard-done"])
+        #endif
+        XCTAssertTrue(app.buttons["email.send"].isHittable)
+        activate(aiDraft)
+        XCTAssertTrue(app.staticTexts["Veetbot draft"].waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "Thanks, Alex. I'll review the agenda.")
+        XCTAssertTrue(NSPredicate(format: "enabled == true").evaluate(with: reply)
+            || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: reply)], timeout: 5) == .completed)
+        activate(reply)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "My own reply."), object: editor)], timeout: 5), .completed,
+            "Switching must retain owner writing")
+        #if os(iOS)
+        activate(app.buttons["email.keyboard-done"])
+        #endif
+        let saveClose = app.buttons["email.save-close"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: saveClose)], timeout: 5), .completed)
+        activate(saveClose)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: editor)], timeout: 5), .completed)
+        activate(reply)
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "My own reply.", "Save & close must retain the composition")
+        #if os(iOS)
+        activate(app.buttons["email.keyboard-done"])
+        #endif
 
         let envelope = app.buttons["email.draft-envelope"]
         XCTAssertTrue(envelope.exists)

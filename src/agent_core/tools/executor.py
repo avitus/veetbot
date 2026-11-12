@@ -67,7 +67,7 @@ from agent_core.domain.errors import (
     UserInputRequiredError,
     WorkspaceEscape,
 )
-from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, NewEvent
+from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, EventEnvelope, NewEvent
 from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.memory import (
     _RECALL_FUNCTION_WORDS,
@@ -324,7 +324,11 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
             return ArtifactOrigin.MODEL_OUTPUT
         return ArtifactOrigin.SANDBOX_EXPORT
     if is_email_attachment_tool(tool.spec.server_id, tool.spec.name.rpartition(".")[2]):
-        return ArtifactOrigin.EMAIL_ATTACHMENT
+        return (
+            ArtifactOrigin.EMAIL_DRAFT_ATTACHMENT
+            if tool.spec.name.endswith(".stage_attachment")
+            else ArtifactOrigin.EMAIL_ATTACHMENT
+        )
     return ArtifactOrigin.TOOL_OUTPUT
 
 
@@ -963,6 +967,30 @@ class ToolPipeline:
         parallel_group: UUID | None,
         batch_results: Sequence[ToolResultItem] = (),
     ) -> ToolResultItem:
+        # Recovery re-enters a whole pending batch for accounting and control
+        # updates. Early refusals have no invocation row to deduplicate them;
+        # the adopted conversation is their durable receipt. Failed results
+        # have no context update to replay. Successful calls still take the
+        # invocation path below so their control updates are restored.
+        for item in reversed(checkpoint.conversation):
+            if (
+                isinstance(item, ToolResultItem)
+                and item.call_id == call.call_id
+                and item.is_error
+                and item.source_event_sequence is not None
+                and item.source_event_sequence >= run.seed_event_sequence
+            ):
+                return item.model_copy(deep=True)
+        # Inline checkpoints can precede the partial batch's results. The
+        # run-scoped receipt also covers those resumes and bridge replays.
+        async with self._uow_factory() as uow:
+            refusal = await uow.events.get_by_derivation(
+                f"tool-refusal:{run.id}:{call.call_id}", principal
+            )
+        if refusal is not None:
+            return ToolResultItem.model_validate(refusal.payload["result_item"]).model_copy(
+                update={"source_event_sequence": refusal.sequence}
+            )
         progress: list[int] = []
         through_index = False
         if _unwraps_deferred_call(call, agent):
@@ -2747,7 +2775,7 @@ class ToolPipeline:
             detail_text=None if untrusted else definition_text,
         )
         async with self._uow_factory() as uow:
-            await self._event_in(
+            event = await self._event_in(
                 uow,
                 run,
                 event_type,
@@ -2758,8 +2786,11 @@ class ToolPipeline:
                     "result_item": result_item.model_dump(mode="json"),
                 },
                 lease,
+                derivation_key=f"tool-refusal:{run.id}:{call.call_id}",
             )
-        return result_item
+        return ToolResultItem.model_validate(event.payload["result_item"]).model_copy(
+            update={"source_event_sequence": event.sequence}
+        )
 
     @staticmethod
     async def _event_in(
@@ -2768,14 +2799,16 @@ class ToolPipeline:
         event_type: str,
         payload: dict[str, Any],
         lease: WorkerLease | None,
-    ) -> None:
+        *,
+        derivation_key: str | None = None,
+    ) -> EventEnvelope:
         payload_schema_version = 1
         if event_type == "tool.call.denied":
             # Session history replays this item to the model with its call.
             if not isinstance(payload.get("result_item"), dict):
                 raise AssertionError("a tool.call.denied payload must carry its result item")
             payload_schema_version = TOOL_CALL_DENIED_PAYLOAD_VERSION
-        await uow.events.append(
+        return await uow.events.append(
             NewEvent(
                 payload_schema_version=payload_schema_version,
                 session_id=run.session_id,
@@ -2783,6 +2816,7 @@ class ToolPipeline:
                 event_type=event_type,
                 actor_type="runtime",
                 payload=payload,
+                derivation_key=derivation_key,
             ),
             lease=lease,
         )

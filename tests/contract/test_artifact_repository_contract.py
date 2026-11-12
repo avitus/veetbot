@@ -1,6 +1,7 @@
 """Tenant-scoped artifact metadata repository contract."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -258,3 +259,42 @@ async def test_reply_retention_is_fenced_by_people_erasure() -> None:
         await repository.retain_for_reply([exported.id], owner, run_id=UUID(int=72))
 
     assert (await repository.get(exported.id, owner)).expires_at == exported.expires_at
+
+
+@pytest.mark.parametrize("invalid", ["expired", "target", "origin", "owner", "run"])
+async def test_draft_retention_is_atomic_and_cannot_adopt_foreign_or_erased_files(
+    invalid: str,
+) -> None:
+    repository = InMemoryArtifactRepository()
+    owner = Principal(tenant_id="tenant-a", principal_id="user-a")
+    target = UUID(int=80)
+    now = datetime(2026, 1, 2, tzinfo=UTC)
+    good = await repository.create(
+        _export(origin="email_draft_attachment", metadata={"email_draft_thread": str(target)})
+    )
+    cases: dict[str, dict[str, Any]] = {
+        "expired": {"expires_at": now},
+        "target": {"metadata": {}},
+        "origin": {"origin": "email_attachment"},
+        "owner": {"principal_id": "other"},
+        "run": {"run_id": UUID(int=99)},
+    }
+    changes = cases[invalid]
+    bad = await repository.create(
+        good.model_copy(update={"id": UUID(int=81), "sha256": "2" * 64, **changes})
+    )
+    with pytest.raises(NotFoundError):
+        await repository.retain_for_email_draft(
+            [good.id, bad.id],
+            owner,
+            run_id=UUID(int=72),
+            session_id=UUID(int=82),
+            thread_id=target,
+            now=now,
+        )
+    assert (await repository.get(good.id, owner)).expires_at == good.expires_at
+    [retained] = await repository.retain_for_email_draft(
+        [good.id], owner, run_id=UUID(int=72), session_id=UUID(int=82), thread_id=target, now=now
+    )
+    assert retained.session_id == UUID(int=82)
+    assert retained.expires_at is None
