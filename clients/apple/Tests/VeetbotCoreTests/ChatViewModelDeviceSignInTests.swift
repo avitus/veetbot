@@ -147,14 +147,20 @@ import Testing
         #expect(server.routes.filter { $0.hasSuffix("/handoff") }.count == 1)
     }
 
-    @Test(arguments: ["window", "connection", "task"])
-    func stoppingWhileATemporaryFailureClosesPreventsAnotherAttempt(stop: String) async throws {
+    @Test(arguments: ["window", "connection", "task"], [false, true])
+    func stoppingWhileATemporaryFailureClosesPreventsAnotherAttempt(stop: String, newProfile: Bool) async throws {
         let profileID = UUID()
         let ceremonyID = UUID()
         let begins = Counter()
         let cancelRoute = "POST veetbot.test /v1/browser-authentication-ceremonies/\(ceremonyID.uuidString)/cancel"
         let server = DeviceFlowServer { request in
             switch Self.route(request) {
+            case "POST veetbot.test /v1/browser-profiles":
+                return (201, Self.profile(profileID, origins: ["https://example.org"], status: "authentication_required"))
+            case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/revoke":
+                return (200, Self.profile(profileID, origins: ["https://example.org"], status: "revoked"))
+            case "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)":
+                return (204, "")
             case "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies":
                 _ = begins.next()
                 return (201, Self.ceremony(ceremonyID, profileID: profileID, launch: true))
@@ -168,7 +174,7 @@ import Testing
             }
         }
         let model = try await configuredModel(server)
-        let request = try #require(model.beginDeviceSignIn(profile: Self.profileView(profileID)))
+        let request = try #require(newProfile ? model.beginDeviceSignIn(websiteURL: "example.org") : model.beginDeviceSignIn(profile: Self.profileView(profileID)))
         let closing = server.hold(cancelRoute)
         let confirming = Task {
             await model.completeDeviceSignIn(
@@ -188,6 +194,9 @@ import Testing
         #expect(begins.value == 1)
         #expect(result != .signedIn(profileID: profileID))
         #expect(model.selectedBrowserProfileID == nil)
+        if newProfile && stop != "connection" {
+            #expect(server.routes.contains { $0 == "DELETE veetbot.test /v1/browser-profiles/\(profileID.uuidString)" })
+        }
     }
 
     @Test

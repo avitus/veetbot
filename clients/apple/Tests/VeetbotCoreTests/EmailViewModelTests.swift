@@ -1919,6 +1919,18 @@ import SwiftUI
         #expect(!model.isGeneratingDraft && !model.isSelectingReply)
     }
 
+    @Test func testManualReplyDoesNotDisplayVeetbotPreparationFailure() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let manual = self.draftJSON().replacingOccurrences(of: "\"revision\":1", with: "\"composition\":\"manual\",\"revision\":1")
+            return (200, self.threadJSON(draft: manual).replacingOccurrences(of: "\"summary\":", with: "\"preparation_issue\":\"Missing files\",\"summary\":"))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(model.thread?.preparationIssue == "Missing files")
+        #expect(model.draftActionMessage == nil)
+    }
+
     @Test func testManualReplyFailureNeverFallsBackToGeneration() async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
@@ -2491,6 +2503,7 @@ import SwiftUI
         model.changeEdit(\.body, to: "Edited on the first draft")
         let pressed = Task { await model.sendNow() }
         try await waitForEmailTestCondition { saveGate.isWaiting }
+        #expect(!model.canSelectReply)
         await model.openThread(otherThreadID)
         #expect(model.draft?.id == otherDraftID)
         saveGate.release()

@@ -262,6 +262,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static let emailLock = NSLock()
     private static var emailBody = "Thanks, Alex. I'll review the agenda."
     private static var emailHasDraft = true
+    private static var emailHasVeetbotDraft = true
     private static var emailComposition = "veetbot"
     private static var emailManualBody = ""
     private static var emailVeetbotBody = "Thanks, Alex. I'll review the agenda."
@@ -452,6 +453,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         emailLock.lock()
         defer { emailLock.unlock() }
         emailHasDraft = !ProcessInfo.processInfo.arguments.contains("--ui-testing-email-no-draft")
+        emailHasVeetbotDraft = emailHasDraft
         emailBody = "Thanks, Alex. I'll review the agenda."
         emailComposition = "veetbot"
         emailManualBody = ""
@@ -828,19 +830,23 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = Self.emailThreadJSON
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/reply"):
             let kind = requestJSON()["kind"] as? String ?? "manual"
-            Self.emailLock.withLock {
+            let selected = Self.emailLock.withLock {
+                if kind == "veetbot" && !Self.emailHasVeetbotDraft { return false }
                 if Self.emailComposition == "manual" { Self.emailManualBody = Self.emailBody }
                 else { Self.emailVeetbotBody = Self.emailBody }
                 Self.emailBody = kind == "manual" ? Self.emailManualBody : Self.emailVeetbotBody
                 Self.emailComposition = kind
                 Self.emailHasDraft = true
                 Self.emailRevision += 1
+                return true
             }
-            statusCode = 200
-            body = Self.emailDraftJSON
+            statusCode = selected ? 200 : 404
+            body = selected ? Self.emailDraftJSON : "{\"error\":{\"code\":\"not_found\",\"message\":\"No Veetbot draft\",\"details\":{},\"request_id\":\"fixture\"}}"
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/drafts"):
             Self.emailLock.withLock {
+                if Self.emailComposition == "manual" { Self.emailManualBody = Self.emailBody }
                 Self.emailHasDraft = true
+                Self.emailHasVeetbotDraft = true
                 Self.emailComposition = "veetbot"
                 Self.emailBody = Self.emailVeetbotBody
             }

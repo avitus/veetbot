@@ -73,9 +73,17 @@ class EmailDraftFiles:
             server = source.get("server_id")
             if not isinstance(server, str) or f"mcp.{server}.use" not in principal.scopes:
                 raise AuthorizationError("The source mailbox is no longer accessible.")
+            if row.session_id != draft.session_id:
+                # A closed session can be replaced, but the immutable file must
+                # still belong to this owner's original conversation binding.
+                original_session = await uow.sessions.get(row.session_id, principal)
+                if (
+                    original_session.metadata.get("email_thread_id") != str(draft.thread_id)
+                    or original_session.metadata.get("email_account_id") != draft.account_id
+                ):
+                    raise ConflictError("The attachment belongs to another conversation.")
             if (
                 row.origin != DRAFT_ATTACHMENT_ORIGIN
-                or row.session_id != draft.session_id
                 or row.metadata.get(DRAFT_TARGET_KEY) != str(draft.thread_id)
                 or (row.expires_at is not None and row.expires_at <= self.clock.now())
                 or row.sha256 != item.sha256
@@ -327,4 +335,12 @@ class EmailDraftFiles:
                     }
                 )
             # The email lock serializes source erasure with this exact dispatch.
+            run = await uow.runs.get(context.run_id, context.principal)
+            if (
+                run.status.value != "RUNNING"
+                or run.cancel_requested_at is not None
+                or run.lease_epoch != context.lease_epoch
+                or (run.lease_expires_at is not None and run.lease_expires_at <= self.clock.now())
+            ):
+                raise ConflictError("The send was cancelled or its lease changed")
             return await call({**args, "attachments": payloads})

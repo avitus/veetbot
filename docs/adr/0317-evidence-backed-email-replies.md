@@ -154,9 +154,9 @@ itself. Research completion must not be represented as a completed external acti
 ## Current status
 
 Implemented and locally verified for development delivery. Sending remains under the owner's
-exact-message consent. The owner requested a push to `dev` without a PR; production
-release and regeneration of the owner's real reply remain pending. No milestone
-or production acceptance is claimed.
+exact-message consent. The owner subsequently authorized PR 250, review fixes and
+merge after verification. Production delivery and regeneration of the owner's real
+reply remain pending. No milestone or production acceptance is claimed.
 
 ## Local verification
 
@@ -193,6 +193,25 @@ run in the headless Tart macOS VM.
 Production delivery and representative private drafting evaluation are pending.
 Retrieval success, correct document selection, unnecessary-clarification rate,
 latency and cost have not yet been measured against the owner's live mailbox.
+
+## Review hardening
+
+PR 250 adds regression coverage for retained files across replacement sessions,
+lease expiry during file reads, safe pre-dispatch failure recovery, stale text
+edits after attachment removal, legacy consent digests and committed-proposal replay.
+Planning receives the configured `AGENT_EMAIL_OWNER_TIMEZONE` before its first call,
+or reads selected-calendar metadata first when no explicit zone is configured.
+The native client blocks composition switching during Send preparation, binds the
+press to the settled revision and displays filenames in recovered approvals.
+
+Review regressions first reproduced ten email failures, five browser visibility/editor
+failures, three native issues and the missing timezone setting. The corrected focused
+runs passed 403 static tests, 185 contract tests and 200 native tests. The browser
+sweep passed 86 of 87 cases; its only failure was an incorrectly added assertion
+classifying a remembered-account prompt as a security interstitial. After removing
+that incorrect assertion, all 32 tests in its file passed; the real security challenge
+retains the explicit evidence assertion. Lint, typing (1,828 sources) and strict
+documentation checks passed. These are isolated sandbox results, not live-send evidence.
 
 ## Protected transport
 

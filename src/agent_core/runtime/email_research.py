@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agent_core.domain.email import EmailAccount, EmailDraftStatus, EmailThread
 from agent_core.domain.email_drafting import (
@@ -260,31 +260,7 @@ class DraftResearch:
             if "mcp.calendar_read.use" not in self.c.principal.scopes:
                 self.state["evidence"].append({"kind": "calendar", "available": False})
                 continue
-            calendars = await self.calendar_call("list_calendars", {}, "calendars")
-            if calendars is None:
-                continue
-            async with self.c.uow_factory() as uow:
-                account = await read_value(
-                    uow.email, self.c.principal, "account", self.thread.account_id, EmailAccount
-                )
-            available = calendars.get("calendars", [])
-            matching = [
-                cal
-                for cal in available
-                if cal.get("id") == (account.email_address if account else "")
-            ]
-            chosen = matching or [
-                cal for cal in available if cal.get("primary") or cal.get("id") == "primary"
-            ]
-            if chosen:
-                self.state["owner_timezone"] = chosen[0].get("timeZone")
-            self.state["evidence"].append(
-                {
-                    "kind": "calendar_selection",
-                    "calendars": chosen,
-                    "other_calendars_queried": False,
-                }
-            )
+            chosen = await self.selected_calendars()
             for cal in chosen:
                 self.admit("calendar_windows", f"{round_number}:{index}:{cal['id']}", 2)
                 calendar_result = await self.calendar_call(
@@ -313,6 +289,37 @@ class DraftResearch:
             )
             self.state["evidence"].append({"kind": "memory", "result": result})
 
+    async def selected_calendars(self) -> list[dict[str, Any]]:
+        if "selected_calendars" in self.state:
+            return cast(list[dict[str, Any]], self.state["selected_calendars"])
+        calendars = await self.calendar_call("list_calendars", {}, "calendars")
+        if calendars is None:
+            self.state["selected_calendars"] = []
+            return []
+        async with self.c.uow_factory() as uow:
+            account = await read_value(
+                uow.email, self.c.principal, "account", self.thread.account_id, EmailAccount
+            )
+        available = calendars.get("calendars", [])
+        matching = [
+            cal for cal in available if cal.get("id") == (account.email_address if account else "")
+        ]
+        preferred = matching or [
+            cal for cal in available if cal.get("primary") or cal.get("id") == "primary"
+        ]
+        chosen = preferred or available
+        self.state["selected_calendars"] = chosen
+        if not self.state.get("owner_timezone") and chosen:
+            self.state["owner_timezone"] = chosen[0].get("timeZone")
+        self.state["evidence"].append(
+            {
+                "kind": "calendar_selection",
+                "calendars": chosen,
+                "other_calendars_queried": False,
+            }
+        )
+        return chosen
+
     async def prepare(self, learning: dict[str, Any]) -> tuple[str, list[DraftAttachment], int]:
         c = self.c
         if "expected_draft_revision" not in self.state:
@@ -337,6 +344,11 @@ class DraftResearch:
             )
             self.candidates(self.thread)
         await self.progress("finding_context")
+        if self.io.service.owner_timezone:
+            self.state["owner_timezone"] = self.io.service.owner_timezone
+        if "mcp.calendar_read.use" in c.principal.scopes:
+            await self.selected_calendars()
+
         for round_number in range(3):
             data = {
                 "thread": self.thread.model_dump(

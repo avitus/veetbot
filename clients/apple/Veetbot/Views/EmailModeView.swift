@@ -2727,6 +2727,15 @@ struct EmailSendReview: View {
                         }.veetType(.ui).foregroundColor(AppTheme.inkSoft).textSelection(.enabled)
                         HairlineDivider()
                         Text(draft.subject).veetType(.ui, weight: .semibold)
+                        if let files = draft.attachments, !files.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Attachments (\(files.count))").veetType(.ui, weight: .semibold)
+                                ForEach(files) { file in
+                                    Label(file.filename, systemImage: "paperclip").veetType(.ui)
+                                }
+                            }
+                            .accessibilityIdentifier("email.review-attachments")
+                        }
                         Text(draft.body).veetType(.ui).lineSpacing(5).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }.padding(24).frame(maxWidth: .infinity, alignment: .leading)

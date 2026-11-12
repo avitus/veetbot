@@ -12,6 +12,28 @@ from tests.unit.test_browser_runtime_real_chromium import browsing, html
 
 
 @pytest.mark.parametrize(
+    "markup",
+    [
+        "<button><span hidden>Sign in as Alice</span>Continue</button>",
+        "<h2><span contenteditable>Performing security verification</span>Welcome</h2>",
+        '<div style="opacity:0"><h2>Performing security verification</h2></div>',
+        '<button style="opacity:0">Sign in as Alice</button>',
+    ],
+)
+async def test_hidden_or_editable_named_challenge_text_is_not_evidence(markup: str) -> None:
+    async def home(request: Request) -> Response:
+        del request
+        return html(markup)
+
+    async with browsing([Route("/", home)]) as (site, runtime):
+        page = runtime._current_page()
+        await page.goto(site.url("/"))
+        assert not await page.evaluate(AUTHENTICATION_SCRIPT)
+        assert not await runtime._sign_in_challenge_visible(page)
+        assert not runtime._security_challenge_seen
+
+
+@pytest.mark.parametrize(
     "challenge",
     [
         '<input type="password" value="SECRET_CANARY">',

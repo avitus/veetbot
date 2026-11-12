@@ -188,7 +188,9 @@ EXTRACTION_SCRIPT = (
                 : request.kind === 'list' ? node.matches('li,[role="listitem"]')
                 : request.kind === 'articles' ? node.matches('article,[role="article"]')
                 : node.matches('input,select,textarea,button,[role="textbox"],'
-                    + '[role="checkbox"],[role="radio"],[role="combobox"]');
+                    + '[role="checkbox"],[role="radio"],[role="combobox"]')
+                    || openShadow && request.kind === 'form'
+                        && node.matches('[role="spinbutton"],[role="searchbox"]');
             if (isRow) {
                 article = request.kind === 'articles';
                 const box = article ? node.getBoundingClientRect() : null;

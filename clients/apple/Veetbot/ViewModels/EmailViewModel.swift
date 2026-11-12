@@ -224,6 +224,7 @@ public final class EmailViewModel: ObservableObject {
     private var autosaveTask: Task<Void, Never>?
     /// The save currently on the wire; a later save or Review & Send waits for it.
     private var inflightSave: Task<Bool, Never>?
+    private var lastSavedDraft: EmailDraftView?
     /// A send proposal that outlasted the local wait; the next read of its draft opens the review.
     private var pendingReviewRunID: UUID?
     /// The poll following a one-press send; Undo cancels it.
@@ -331,7 +332,9 @@ public final class EmailViewModel: ObservableObject {
     /// An owner action that failed, so a refusal can be shown beside the control that
     /// caused it. Reporting it only above the conversation leaves the action looking
     /// inert, because the button that triggered it is far below.
-    public var draftActionMessage: String? { draftActionError ?? thread?.preparationIssue }
+    public var draftActionMessage: String? {
+        draftActionError ?? (draft?.isManual == true ? nil : thread?.preparationIssue)
+    }
     /// A failed mail read, reported with the conversation it could not refresh.
     public var threadReadMessage: String? { threadReadError }
     /// Says where held edits are while a stale draft waits for the owner's review of the new mail.
@@ -429,6 +432,7 @@ public final class EmailViewModel: ObservableObject {
         operationTask?.cancel()
         autosaveTask?.cancel()
         inflightSave = nil
+        lastSavedDraft = nil
         pendingReviewRunID = nil
         sendProgressMessage = nil
         isPreparingSend = false
@@ -1141,6 +1145,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let saved = try await api.saveEmailDraft(edit, idempotencyKey: key)
             guard generation == connection else { return false }
+            lastSavedDraft = saved
             saveKeys.removeValue(forKey: id)
             if var latest = edits[id] {
                 // Typing can continue during a save. Advance only its base,
@@ -1246,7 +1251,7 @@ public final class EmailViewModel: ObservableObject {
     }
 
     public var canSelectReply: Bool {
-        !isSelectingReply && conflict == nil
+        !isSelectingReply && !isPreparingSend && conflict == nil
             && (draft == nil || draft?.canEdit == true || draft?.status == "discarded")
     }
 
@@ -1980,6 +1985,7 @@ public final class EmailViewModel: ObservableObject {
     /// sheet. The server parks it for the undo window and this watches it through to Sent.
     public func sendNow() async {
         guard canReview, let api = makeAPIClient(), let pressed = draft else { return }
+        var reviewed = pressed
         isPreparingSend = true
         sendProgressMessage = nil
         pendingReviewRunID = nil
@@ -1989,10 +1995,14 @@ public final class EmailViewModel: ObservableObject {
             autosaveTask?.cancel()
             guard currentEdit?.isDirty == true else { break }
             guard await saveDraft(pressed.id) else { return }
+            guard let saved = lastSavedDraft, saved.id == pressed.id,
+                  saved.isManual == pressed.isManual else { return }
+            reviewed = saved
         }
         // The press belongs to the draft it was made on. If the owner moved to another
         // conversation while that save settled, nothing is sent from here.
-        guard let draft, draft.id == pressed.id, let thread, thread.id == draft.threadID,
+        guard generation == connection, let draft, draft == reviewed,
+              draft.isManual == pressed.isManual, let thread, thread.id == draft.threadID,
               selectedThreadID == draft.threadID else { return }
         guard !draft.stale else {
             draftActionError = staleMailMessage() ?? Self.sendEndedByNewMailMessage

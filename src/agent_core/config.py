@@ -19,6 +19,7 @@ from types import MappingProxyType
 from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from dotenv import dotenv_values
@@ -205,6 +206,7 @@ class Settings:
     email_background_checks_enabled: bool = False
     # The window in which a one-press send can still be undone (ADR-0279).
     email_send_undo_seconds: int = 10
+    email_owner_timezone: str | None = None
     attachment_uploads_enabled: bool = False
     email_semantic_evidence: Path | None = None
     email_account_ids: tuple[str, ...] = ()
@@ -2114,6 +2116,12 @@ def _load_settings(
         raise ConfigurationError("AGENT_EMAIL_SEND_UNDO_SECONDS must be an integer") from exc
     if not 0 <= email_send_undo_seconds <= 60:
         raise ConfigurationError("AGENT_EMAIL_SEND_UNDO_SECONDS must be between 0 and 60")
+    email_owner_timezone = values.get("AGENT_EMAIL_OWNER_TIMEZONE", "").strip() or None
+    if email_owner_timezone is not None:
+        try:
+            ZoneInfo(email_owner_timezone)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ConfigurationError("AGENT_EMAIL_OWNER_TIMEZONE must be an IANA timezone") from exc
     attachment_uploads_enabled = _parse_flag(values, "AGENT_ATTACHMENT_UPLOADS_ENABLED")
     raw_email_semantic_evidence = values.get("AGENT_EMAIL_SEMANTIC_EVIDENCE", "").strip()
     email_semantic_evidence = (
@@ -2413,6 +2421,7 @@ def _load_settings(
         email_unsubscribe_enabled=email_unsubscribe_enabled,
         email_background_checks_enabled=email_background_checks_enabled,
         email_send_undo_seconds=email_send_undo_seconds,
+        email_owner_timezone=email_owner_timezone,
         attachment_uploads_enabled=attachment_uploads_enabled,
         email_semantic_evidence=email_semantic_evidence,
         email_account_ids=email_account_ids,

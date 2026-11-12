@@ -250,6 +250,7 @@ class EmailExperienceService:
         resolve_send_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
         | None = None,
         send_undo_seconds: int = 10,
+        owner_timezone: str | None = None,
         archive_self_approval_enabled: bool = True,
         current_archive_principal: Callable[[], Principal] | None = None,
         unsubscribe_enabled: bool = False,
@@ -279,6 +280,7 @@ class EmailExperienceService:
         self.resolve_archive_approval = resolve_archive_approval
         self.resolve_send_approval = resolve_send_approval
         self.send_undo_seconds = send_undo_seconds
+        self.owner_timezone = owner_timezone
         self.archive_self_approval_enabled = archive_self_approval_enabled
         self.current_archive_principal = current_archive_principal
         self._arrival_refused_at: datetime | None = None
@@ -781,7 +783,19 @@ class EmailExperienceService:
                     "New mail arrived on this thread. Read it, then save your reply again."
                 )
             if edit.attachment_ids is not None:
-                available = {item.artifact_id: item for item in current.attachments}
+                base = current
+                if edit.expected_revision != current.revision:
+                    retained_base = await read_value(
+                        uow.email,
+                        principal,
+                        "draft_revision",
+                        f"{current.id}:{edit.expected_revision:012d}",
+                        EmailDraft,
+                    )
+                    if retained_base is None:
+                        raise ConflictError("The edited draft revision is no longer retained.")
+                    base = retained_base
+                available = {item.artifact_id: item for item in base.attachments}
                 if len(set(edit.attachment_ids)) != len(edit.attachment_ids) or any(
                     identifier not in available for identifier in edit.attachment_ids
                 ):
@@ -3620,6 +3634,24 @@ class EmailExperienceService:
                 expected_draft_revision is not None
                 and (old.revision if old else 0) != expected_draft_revision
             ):
+                if (
+                    old is not None
+                    and old.revision == expected_draft_revision + 1
+                    and old.run_id == run_id
+                    and old.composition == "veetbot"
+                    and old.status == EmailDraftStatus.READY
+                    and not old.owner_edited
+                    and not old.stale
+                    and old.source_revision == source_revision
+                    and old.body == body
+                    and old.attachments == (attachments or [])
+                    and old.to == to
+                    and old.cc == cc
+                    and not old.bcc
+                    and old.in_reply_to == target.message_id_header
+                ):
+                    await self.validate_draft_attachments(uow, principal, old)
+                    return old
                 raise ConflictError(
                     "The draft changed during preparation; your edits are preserved."
                 )

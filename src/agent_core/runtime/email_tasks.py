@@ -58,10 +58,12 @@ from agent_core.domain.email_semantics import (
 )
 from agent_core.domain.errors import (
     ApprovalRequiredError,
+    ArtifactStorageError,
     AuthorizationError,
     BudgetExceededError,
     ConflictError,
     ContextOverflow,
+    NotFoundError,
     ToolTrustRejectedError,
     ToolValidationError,
 )
@@ -2448,7 +2450,31 @@ class _TaskIO:
                 # The claim is taken in the same transaction as the freshness check,
                 # so no import can reset the draft between validating and claiming.
                 if approved:
-                    await self.service.validate_draft_attachments(uow, c.principal, draft)
+                    try:
+                        await self.service.validate_draft_attachments(uow, c.principal, draft)
+                    except (ArtifactStorageError, AuthorizationError, ConflictError, NotFoundError):
+                        await uow.approvals.cancel_for_run(c.run.id)
+                        c.checkpoint.pending_tool_calls = []
+                        c.checkpoint.pending_approval_ids = []
+                        await save_value(
+                            uow.email,
+                            c.principal,
+                            "draft",
+                            str(draft.id),
+                            draft.model_copy(
+                                update={
+                                    "status": EmailDraftStatus.FAILED,
+                                    "send_claim_id": None,
+                                    "send_undo_until": None,
+                                    "approval_id": None,
+                                }
+                            ),
+                            c.clock.now(),
+                        )
+                        return _finished(
+                            "An attachment is unavailable. Nothing was sent; "
+                            "the draft is preserved."
+                        )
                     if draft.send_claim_id not in {None, self.task.id}:
                         raise ConflictError(
                             "the draft is already claimed by another send operation"

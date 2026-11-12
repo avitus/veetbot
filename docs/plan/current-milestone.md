@@ -8,7 +8,8 @@ title: Current Milestone
   2026-11-11. Bounded email/Calendar research precedes drafting; matching files
   are staged privately and reviewed with the reply. Send remains an exact owner
   action. Implementation is locally verified; production and live-draft
-  acceptance remain pending. The owner requested `dev` delivery without a PR. No milestone moves.
+  acceptance remain pending. The owner subsequently authorized PR 250, review fixes
+  and merge after verification. No milestone moves.
 
 - **Read-only Google Calendar — ADR-0305:** The owner authorized implementation
   on 2026-11-09. [Calendar integration](calendar-integration.md) specifies selected

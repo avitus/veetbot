@@ -180,6 +180,7 @@ class EmailRuntimeServices(Protocol):
     """Scoped projection and personalization boundary used by governed tasks."""
 
     account_servers: dict[str, dict[str, str]]
+    owner_timezone: str | None
 
     @property
     def subscriptions(self) -> EmailSubscriptionRuntime: ...

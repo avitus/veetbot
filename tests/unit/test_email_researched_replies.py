@@ -20,6 +20,67 @@ from tests.gates.test_email_m18 import _email_settings, _generated_gmail_discove
 from tests.gates.test_email_runtime_m26 import _mailbox_factory
 
 
+def test_text_only_consent_keeps_legacy_gesture_digest() -> None:
+    import hashlib
+    from datetime import UTC, datetime
+
+    from agent_core.domain.email import EmailSendConsent
+
+    consent = EmailSendConsent(
+        tenant_id="t",
+        principal_id="p",
+        account_id="work",
+        provider_thread_id="thread",
+        read_server_id="read",
+        send_server_id="send",
+        draft_id=uuid4(),
+        draft_revision=1,
+        source_revision=1,
+        arguments_digest="a" * 64,
+        expires_at=datetime(2026, 1, 1, tzinfo=UTC),
+        undo_until=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    legacy = consent.model_dump_json(exclude={"with_attachments"})
+    assert consent.digest == hashlib.sha256(legacy.encode()).hexdigest()
+    assert consent.model_copy(update={"with_attachments": True}).digest != consent.digest
+
+
+async def test_generated_proposal_replay_recognizes_own_commit_but_not_owner_edit() -> None:
+    from agent_core.domain.email import EmailDraftEdit
+    from agent_core.domain.errors import ConflictError
+
+    async with build(settings=replace(_email_settings(), email_mode_enabled=True)) as app:
+        service = await prepare(app)
+        thread = await service.import_thread(app.principal, "work", observation(), uuid4())
+        run_id = uuid4()
+        arguments: dict[str, Any] = {
+            "run_id": run_id,
+            "instruction": "",
+            "expected_draft_revision": 0,
+        }
+        first = await service.save_generated_draft(
+            app.principal, thread.id, thread.revision, "Prepared reply", **arguments
+        )
+        replay = await service.save_generated_draft(
+            app.principal, thread.id, thread.revision, "Prepared reply", **arguments
+        )
+        assert replay == first
+        await service.edit_draft(
+            app.principal,
+            first.id,
+            EmailDraftEdit(
+                expected_revision=first.revision,
+                to=first.to,
+                subject=first.subject,
+                body="Owner edit",
+            ),
+        )
+        with pytest.raises(ConflictError, match="changed during preparation"):
+            await service.save_generated_draft(
+                app.principal, thread.id, thread.revision, "Prepared reply", **arguments
+            )
+
+
 async def test_draft_searches_other_mail_before_asking_for_known_context() -> None:
     """A named meeting's date is in another email, not the selected request."""
     source = observation(body="The Cedar board meeting is January 4. No files are needed.")
@@ -57,6 +118,7 @@ async def test_draft_searches_other_mail_before_asking_for_known_context() -> No
         mcp_client_factory=factory,
     ) as app:
         service = await prepare(app)
+        vars(service)["owner_timezone"] = "America/New_York"
         thread = await service.import_thread(
             app.principal, "work", observation(body="When is the Cedar board meeting?"), uuid4()
         )
@@ -70,6 +132,9 @@ async def test_draft_searches_other_mail_before_asking_for_known_context() -> No
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
         detail = cast(dict[str, Any], await service.thread(app.principal, thread.id))
         assert detail["draft"]["body"] == "The Cedar board meeting is January 4."
+        provider = app.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        assert "America/New_York" in provider.requests[0].model_dump_json()
         assert not {"send_message", "send_attached_message", "create_draft"}.intersection(reads)
 
 
@@ -102,6 +167,10 @@ async def test_attachment_capabilities_are_application_only() -> None:
         "manual_switch",
         "legacy_send",
         "expired_dispatch",
+        "expired_during_read",
+        "closed_session",
+        "invalid_claim",
+        "stale_attachment_edit",
     ],
 )
 async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(after: str) -> None:
@@ -323,7 +392,7 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
                     idempotency_key="missing-file",
                 )
             assert sent_payloads == []
-        elif after == "remove":
+        elif after in {"remove", "stale_attachment_edit"}:
             from uuid import UUID
 
             from agent_core.domain.email import EmailDraftEdit, send_message_arguments
@@ -343,6 +412,28 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             )
             assert edited.revision == draft.revision + 1 and edited.attachments == []
             assert "attachments" not in send_message_arguments(edited, thread.provider_thread_id)
+            if after == "stale_attachment_edit":
+                from agent_core.domain.errors import ConflictError
+
+                with pytest.raises(ConflictError, match="both edits were preserved"):
+                    await service.edit_draft(
+                        app.principal,
+                        draft.id,
+                        EmailDraftEdit(
+                            expected_revision=draft.revision,
+                            to=draft.to,
+                            subject=draft.subject,
+                            body="Stale device's useful edit",
+                            attachment_ids=[artifact.id],
+                        ),
+                    )
+                versions = await service.draft_revisions(app.principal, draft.id)
+                assert any(
+                    v["body"] == "Stale device's useful edit"
+                    for v in cast(list[dict[str, Any]], versions["items"])
+                )
+                assert (await service.draft(app.principal, draft.id)).attachments == []
+                return
             await service.discard_draft(app.principal, edited.id, edited.revision)
             async with app.uow_factory() as uow:
                 prior_file = await uow.artifacts.get(artifact.id, app.principal)
@@ -413,7 +504,13 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
                 )
             assert response.status_code == 409
             assert sent_payloads == []
-        elif after in {"send", "expired_dispatch"}:
+        elif after in {
+            "send",
+            "expired_dispatch",
+            "expired_during_read",
+            "closed_session",
+            "invalid_claim",
+        }:
             from uuid import UUID
 
             import httpx
@@ -421,7 +518,21 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             from agent_core.api import create_app
             from tests.gates.test_email_runtime_m26 import _drain
 
-            if after == "expired_dispatch":
+            if after == "closed_session":
+                async with app.uow_factory() as uow:
+                    await uow.sessions.close(artifact.session_id, app.principal, app.clock.now())
+            if after == "invalid_claim":
+                from agent_core.domain.errors import ConflictError
+
+                validate_files = service.validate_draft_attachments
+
+                async def unavailable_on_claim(uow: Any, principal: Any, draft: Any) -> None:
+                    if draft.status.value == "sending":
+                        raise ConflictError("File is no longer readable")
+                    await validate_files(uow, principal, draft)
+
+                vars(service)["validate_draft_attachments"] = unavailable_on_claim
+            if after in {"expired_dispatch", "expired_during_read"}:
                 from collections.abc import AsyncIterator
                 from contextlib import asynccontextmanager
                 from datetime import timedelta
@@ -429,6 +540,7 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
                 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
                 original_factory = service.draft_files.uow_factory
+                authority_reads = 0
 
                 @asynccontextmanager
                 async def expired_factory() -> AsyncIterator[RepositoryUnitOfWork]:
@@ -436,7 +548,11 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
                         original_get = uow.runs.get
 
                         async def expired_get(*args: Any, **kwargs: Any) -> Any:
+                            nonlocal authority_reads
+                            authority_reads += 1
                             value = await original_get(*args, **kwargs)
+                            if after == "expired_during_read" and authority_reads == 1:
+                                return value
                             return value.model_copy(
                                 update={"lease_expires_at": app.clock.now() - timedelta(seconds=1)}
                             )
@@ -474,8 +590,13 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
                 )
             await _drain(app)
             run = await app.runs.get(UUID(response.json()["run_id"]))
-            if after == "expired_dispatch":
+            if after in {"expired_dispatch", "expired_during_read"}:
                 assert sent_payloads == [], "An expired worker must not dispatch reviewed bytes"
+                return
+            if after == "invalid_claim":
+                assert sent_payloads == []
+                kept = await service.draft(app.principal, UUID(detail["draft"]["id"]))
+                assert kept.status.value in {"ready", "failed"}
                 return
             assert run.status is RunStatus.COMPLETED, run.failure
             current_detail = cast(dict[str, Any], await service.thread(app.principal, thread.id))
@@ -666,8 +787,10 @@ async def test_research_stops_at_three_mail_queries_without_saving_partial_reply
 
 
 @pytest.mark.parametrize("calendar_unavailable", [False, True])
+@pytest.mark.parametrize("shared_calendar", [False, True])
 async def test_draft_reads_selected_calendar_and_exposes_timezone_to_synthesis(
     calendar_unavailable: bool,
+    shared_calendar: bool,
 ) -> None:
     from pydantic import SecretStr
 
@@ -708,9 +831,11 @@ async def test_draft_reads_selected_calendar_and_exposes_timezone_to_synthesis(
                             structured={
                                 "calendars": [
                                     {
-                                        "id": "owner@example.com",
+                                        "id": "shared-calendar"
+                                        if shared_calendar
+                                        else "owner@example.com",
                                         "timeZone": "America/Los_Angeles",
-                                        "primary": True,
+                                        "primary": not shared_calendar,
                                     }
                                 ]
                             }
@@ -788,6 +913,7 @@ async def test_draft_reads_selected_calendar_and_exposes_timezone_to_synthesis(
         provider = app.executor._model_provider
         assert isinstance(provider, FakeModelProvider)
         contexts = [request.model_dump_json() for request in provider.requests]
+        assert "America/Los_Angeles" in contexts[0]
         assert "America/Los_Angeles" in contexts[-1]
         if calendar_unavailable:
             assert '"available":false' in contexts[-1].replace('\\"', '"').replace(" ", "")

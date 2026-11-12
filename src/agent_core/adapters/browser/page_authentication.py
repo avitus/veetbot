@@ -14,6 +14,15 @@ REMEMBERED_SIGN_IN_TEXT = r"sign\s+in\s+as\s+\S"
 SECURITY_CHALLENGE_HEADINGS = "h1,h2,h3,h4,h5,h6,[role=heading]"
 REMEMBERED_SIGN_IN_CONTROLS = "a,button,[role=link],[role=button]"
 
+NAMED_CHALLENGE_SCRIPT = (
+    "(node, pattern) => {"
+    + PAGE_TEXT_HELPERS
+    + """
+    const value = summary(node, 512, false, null, false, true);
+    return !value.text_truncated && new RegExp(pattern, 'i').test(value.text);
+}"""
+)
+
 AUTHENTICATION_SCRIPT = (
     "() => {"
     + PAGE_TEXT_HELPERS
@@ -52,10 +61,15 @@ AUTHENTICATION_SCRIPT = (
         const captcha = element && node.matches(
             'iframe[src*="captcha" i],iframe[title*="captcha" i],'
             + '[id*="captcha" i],[class*="captcha" i]');
-        const namedChallenge = element && (
-            (node.matches(securityHeadings) && securityText.test(cut(node.textContent || '', 512)))
-            || (node.matches(rememberedControls)
-                && rememberedText.test(cut(node.textContent || '', 512))));
+        let namedChallenge = false;
+        if (element && (node.matches(securityHeadings) || node.matches(rememberedControls))) {
+            const budget = {remaining: 8192 - scanned};
+            const value = summary(node, 512, false, budget, false, true);
+            scanned = 8192 - budget.remaining;
+            namedChallenge = !value.text_truncated && (
+                node.matches(securityHeadings) && securityText.test(value.text)
+                || node.matches(rememberedControls) && rememberedText.test(value.text));
+        }
         let context = null;
         if (credential || captcha || namedChallenge || node === root || node.assignedSlot) {
             context = ancestry(node);

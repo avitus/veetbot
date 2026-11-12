@@ -543,6 +543,7 @@ async def test_visible_security_verification_is_a_challenge(operation: str) -> N
         if operation == "verify":
             evidence = await runtime.load_page_evidence(site.url("/"))
             assert evidence.challenge_visible
+            assert evidence.security_challenge_seen
         else:
             # Readiness must stop before an ordinary observation reaches the model.
             await runtime._current_page().goto(site.url("/"))

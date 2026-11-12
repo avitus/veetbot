@@ -2441,16 +2441,23 @@ public final class ChatViewModel: ObservableObject {
             else {
                 return stopped
             }
-            closedDuringDeviceSignInID = nil
-            if let openCeremonyID {
-                _ = try? await api.cancelBrowserAuthentication(openCeremonyID)
-            }
-            if let createdProfileID {
-                if deviceSignInCreatedProfile?.profileID == createdProfileID {
+            // An unstructured task does not inherit the cancelled caller's flag.
+            // Keep ownership until deletion succeeds, so closing can retry it.
+            await Task { @MainActor in
+                guard generation == connectionGeneration else { return }
+                closedDuringDeviceSignInID = nil
+                if let openCeremonyID {
+                    _ = try? await api.cancelBrowserAuthentication(openCeremonyID)
+                }
+                guard generation == connectionGeneration else { return }
+                if let createdProfileID,
+                    await discardDeviceSignInProfile(createdProfileID, using: api),
+                    generation == connectionGeneration,
+                    deviceSignInCreatedProfile?.profileID == createdProfileID
+                {
                     deviceSignInCreatedProfile = nil
                 }
-                await discardDeviceSignInProfile(createdProfileID, using: api)
-            }
+            }.value
             return stopped
         }
 
@@ -2466,9 +2473,13 @@ public final class ChatViewModel: ObservableObject {
             // The owner allowed another address after an earlier attempt. A
             // profile's origins never change, so its unused one gives way.
             if let unused = deviceSignInCreatedProfile, unused.requestID == request.id {
-                deviceSignInCreatedProfile = nil
-                await discardDeviceSignInProfile(unused.profileID, using: api)
+                guard await discardDeviceSignInProfile(unused.profileID, using: api) else {
+                    return await settle(failure(DeviceSignInMessage.couldNotFinish))
+                }
                 guard !superseded() else { return await settle(stopped) }
+                if deviceSignInCreatedProfile?.profileID == unused.profileID {
+                    deviceSignInCreatedProfile = nil
+                }
             }
             let profile: BrowserProfileView
             do {
@@ -2477,8 +2488,10 @@ public final class ChatViewModel: ObservableObject {
                 return await settle(failure(DeviceSignInMessage.couldNotStart))
             }
             createdProfileID = profile.id
+            if generation == connectionGeneration {
+                deviceSignInCreatedProfile = (request.id, profile.id, origins)
+            }
             guard !superseded() else { return await settle(stopped) }
-            deviceSignInCreatedProfile = (request.id, profile.id, origins)
             profileID = profile.id
         }
 
@@ -2610,24 +2623,31 @@ public final class ChatViewModel: ObservableObject {
         }
         let created = deviceSignInCreatedProfile?.profileID
         deviceSignInRequest = nil
-        deviceSignInCreatedProfile = nil
         guard let api, let created else { return }
+        let generation = connectionGeneration
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
-        await discardDeviceSignInProfile(created, using: api)
+        if await discardDeviceSignInProfile(created, using: api),
+            generation == connectionGeneration,
+            deviceSignInCreatedProfile?.profileID == created
+        { deviceSignInCreatedProfile = nil }
     }
 
     /// Removes a profile a device sign-in window created and no longer needs.
-    private func discardDeviceSignInProfile(_ profileID: UUID, using api: VeetbotAPIClient) async {
+    @discardableResult
+    private func discardDeviceSignInProfile(_ profileID: UUID, using api: VeetbotAPIClient) async -> Bool {
+        let generation = connectionGeneration
         let cleanupError = await discardUnusedBrowserProfile(
             using: api, profileID: profileID, authenticationID: nil
         )
+        guard generation == connectionGeneration else { return false }
         browserProfiles.removeAll { $0.id == profileID }
         try? await reloadBrowserProfiles(using: api)
         if let cleanupError {
             errorMessage =
                 "The unused website login could not be fully removed: \(displayMessage(for: cleanupError)). Refresh Website Access and use the trash button to try again."
         }
+        return cleanupError == nil
     }
 
     /// The owner chose the remote browser from the sign-in window: the device
@@ -3065,6 +3085,7 @@ public final class ChatViewModel: ObservableObject {
         profileID: UUID,
         authenticationID: UUID?
     ) async -> Error? {
+        let generation = connectionGeneration
         var firstError: Error?
         if let authenticationID {
             do {
@@ -3073,11 +3094,13 @@ public final class ChatViewModel: ObservableObject {
                 firstError = error
             }
         }
+        guard generation == connectionGeneration else { return CancellationError() }
         do {
             _ = try await api.revokeBrowserProfile(profileID)
         } catch {
             if firstError == nil { firstError = error }
         }
+        guard generation == connectionGeneration else { return CancellationError() }
         do {
             try await api.deleteBrowserProfile(profileID)
             return nil

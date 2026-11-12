@@ -42,6 +42,7 @@ from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
 from agent_core.adapters.browser.page_authentication import (
     AUTHENTICATION_SCRIPT,
+    NAMED_CHALLENGE_SCRIPT,
     REMEMBERED_SIGN_IN_CONTROLS,
     REMEMBERED_SIGN_IN_TEXT,
     SECURITY_CHALLENGE_HEADINGS,
@@ -1960,11 +1961,9 @@ class PythonPlaywrightRuntime:
 
     async def _sign_in_challenge_visible(self, page: Page) -> bool:
         """Report a password, one-time-code, CAPTCHA, passkey, MFA, or consent prompt."""
-        headings = page.locator(SECURITY_CHALLENGE_HEADINGS).filter(
-            has_text=re.compile(SECURITY_CHALLENGE_TEXT, re.IGNORECASE)
-        )
+        headings = page.locator(SECURITY_CHALLENGE_HEADINGS)
         for index in range(await headings.count()):
-            if await headings.nth(index).is_visible():
+            if await headings.nth(index).evaluate(NAMED_CHALLENGE_SCRIPT, SECURITY_CHALLENGE_TEXT):
                 # Keep this for the whole verification, including its second
                 # look. A later redirect cannot turn bot clearance into proof
                 # of an account session, on either side of the comparison.
@@ -1988,11 +1987,9 @@ class PythonPlaywrightRuntime:
         for index in range(await interactive_text.count()):
             if await interactive_text.nth(index).is_visible():
                 return True
-        prompts = page.locator(REMEMBERED_SIGN_IN_CONTROLS).filter(
-            has_text=re.compile(REMEMBERED_SIGN_IN_TEXT, re.IGNORECASE)
-        )
+        prompts = page.locator(REMEMBERED_SIGN_IN_CONTROLS)
         for index in range(await prompts.count()):
-            if await prompts.nth(index).is_visible():
+            if await prompts.nth(index).evaluate(NAMED_CHALLENGE_SCRIPT, REMEMBERED_SIGN_IN_TEXT):
                 return True
         return await _credential_field_in_frame(page)
 

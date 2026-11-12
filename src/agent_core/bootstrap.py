@@ -6247,6 +6247,7 @@ async def _compose(
                 resolve_archive_approval=resolve_email_archive_approval,
                 resolve_send_approval=resolve_email_send_approval,
                 send_undo_seconds=settings.email_send_undo_seconds,
+                owner_timezone=settings.email_owner_timezone,
                 current_archive_principal=lambda: (
                     principal
                     if settings.email_mode_enabled

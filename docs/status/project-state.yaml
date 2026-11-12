@@ -15,7 +15,8 @@
 # extraction into open shadow roots under observe 1.9.0. Pinned tools retain
 # document-only extraction; no authority, milestone or gate moves.
 # ADR-0317: Owner approved researched email drafts and automatic private attachment
-# staging on 2026-11-11. Exact-message sending remains owner-controlled.
+# staging on 2026-11-11, then PR 250 and merge after review/verification.
+# Exact-message sending remains owner-controlled; live acceptance remains pending.
 # ADR-0308: The owner-authorized browser continuation extends W3 semantic
 # regions and focus into open shadow roots, with versioned coverage and the
 # existing privacy and visit limits. No frame authority or milestone moves.

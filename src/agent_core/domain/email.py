@@ -202,7 +202,10 @@ class EmailSendConsent(EmailValue):
     @property
     def digest(self) -> str:
         """Fingerprint of the whole consent, recorded in the gesture event."""
-        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        value = self.model_dump_json(
+            exclude=None if self.with_attachments else {"with_attachments"}
+        )
+        return hashlib.sha256(value.encode()).hexdigest()
 
 
 def send_arguments_digest(arguments: dict[str, Any]) -> str:

@@ -32,11 +32,12 @@ async def test_open_shadow_collection_is_discovered_by_the_bounded_reader() -> N
         assert result["rows"][0][0]["text"] == "Receipt"
 
 
-async def test_form_metadata_does_not_descend_into_a_shadow_editor() -> None:
+@pytest.mark.parametrize("role", ["textbox", "searchbox", "spinbutton"])
+async def test_form_metadata_does_not_descend_into_a_shadow_editor(role: str) -> None:
     async def home(request: Request) -> Response:
         del request
         return html(
-            '<form><div role="textbox" aria-label="Editor" id="editor"></div></form>',
+            f'<form><div role="{role}" aria-label="Editor" id="editor"></div></form>',
             script="document.querySelector('#editor').attachShadow({mode:'open'}).innerHTML = "
             "'<input aria-label=EDITOR_CANARY value=VALUE_CANARY>';",
         )

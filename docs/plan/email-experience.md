@@ -745,6 +745,12 @@ resolves and verifies bytes after approval and injects them only into the privat
 stdio request. Text-only drafts retain the original send tool. No remote provider
 file is refetched after send approval.
 
+Set `AGENT_EMAIL_OWNER_TIMEZONE` to the owner’s IANA zone for planning, including
+mail-only preparation. When unset, selected-calendar metadata supplies the zone
+before the first planning call; if neither is available, the zone remains explicitly
+unknown. A shared selected calendar is eligible when neither the originating mailbox
+nor a primary calendar is selected, within the same two-window/read limits.
+
 The task checkpoints research admissions and results, so replay does not buy a
 second query allowance. Calendar evidence includes the selected calendar's IANA
 zone; absent Calendar evidence is not a claim about the owner's agenda. Preview
