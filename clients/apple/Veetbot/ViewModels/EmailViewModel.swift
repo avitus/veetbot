@@ -1276,7 +1276,7 @@ public final class EmailViewModel: ObservableObject {
             draftActionError = "Finish editing before switching replies. Your text is preserved."
             return false
         }
-        if let draft, draft.status != "discarded", draft.isManual == manual { return true }
+        if let draft, draft.status != "discarded", draft.status != "sent", draft.isManual == manual { return true }
         do {
             let value = try await api.selectEmailReply(
                 thread: selected, draft: draft, kind: manual ? "manual" : "veetbot",

@@ -221,7 +221,7 @@ class DraftResearch:
                 tokens: set[str] = set()
                 while observed.get("next_page_token"):
                     token = str(observed["next_page_token"])
-                    if token in tokens or len(self.state["reads"]) >= 10:
+                    if token in tokens:
                         raise DraftPreparationError(
                             "The required source remains incomplete "
                             "within the reply research limit."

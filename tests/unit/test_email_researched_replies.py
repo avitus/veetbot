@@ -81,9 +81,31 @@ async def test_generated_proposal_replay_recognizes_own_commit_but_not_owner_edi
             )
 
 
-@pytest.mark.parametrize("paged", [False, True])
-async def test_draft_searches_other_mail_before_asking_for_known_context(paged: bool) -> None:
+@pytest.mark.parametrize("mode", ["single", "paged", "replay_at_limit"])
+async def test_draft_searches_other_mail_before_asking_for_known_context(
+    mode: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A named meeting's date is in another email, not the selected request."""
+    paged = mode != "single"
+    if mode == "replay_at_limit":
+        from copy import deepcopy
+
+        from agent_core.runtime.email_research import DraftResearch
+
+        gather = DraftResearch.gather
+
+        async def replay(self: Any, plan: Any, round_number: int) -> None:
+            before = deepcopy(self.state)
+            await gather(self, plan, round_number)
+            admitted = list(self.state["reads"])
+            admitted.extend(f"other-read:{i}" for i in range(10 - len(admitted)))
+            # Recovery has admissions and cached results but no gathered checkpoint.
+            self.state.clear()
+            self.state.update(before)
+            self.state["reads"] = admitted
+            await gather(self, plan, round_number)
+
+        monkeypatch.setattr(DraftResearch, "gather", replay)
     source = observation(body="The Cedar board meeting is January 4. No files are needed.")
     source["thread_id"] = "meeting-source"
     source["messages"][0].update(id="meeting-message", thread_id="meeting-source")

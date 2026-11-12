@@ -211,7 +211,10 @@ retry from the existing count/byte limits. Calendar fallback selects only the
 remaining allowed windows and records omitted calendars as incomplete evidence.
 Native approval matching uses stable attachment identity and content metadata;
 a redacted presentation filename does not invalidate the matching draft. The
-server still validates the full approved arguments before dispatch.
+server still validates the full approved arguments before dispatch. Retention
+maintenance defers individual attachment-cleanup failures without blocking other
+cleanup records or body expiry. Cached source-page replay reuses its existing
+read admission even when the allowance is full; new reads remain bounded.
 
 Review regressions first reproduced ten email failures, five browser visibility/editor
 failures, three native issues and the missing timezone setting. The corrected focused

@@ -73,6 +73,63 @@ async def test_detail_reads_do_not_scan_unrelated_mail(
         assert unchanged is not None and unchanged.revision == 2
 
 
+async def test_failed_attachment_cleanup_does_not_block_other_retention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_core.domain.errors import ArtifactStorageError
+
+    async with email_client() as (app, _):
+        thread, draft = await seed_mail(app)
+        service = app.services.email
+        pending_ids = [UUID(int=1), UUID(int=2)]
+        old = app.clock.now() - timedelta(days=31)
+        async with app.uow_factory() as uow:
+            for identifier in pending_ids:
+                await service._put_data(
+                    uow.email, app.principal, "draft_attachment_cleanup", str(identifier), {}
+                )
+            for kind, value in (
+                ("thread", thread.model_copy(update={"last_accessed_at": old})),
+                (
+                    "draft",
+                    draft.model_copy(update={"status": EmailDraftStatus.SENT, "updated_at": old}),
+                ),
+            ):
+                row = await uow.email.get(app.principal, kind, str(value.id))
+                assert row is not None
+                await uow.email.put(
+                    row.model_copy(
+                        update={
+                            "revision": row.revision + 1,
+                            "payload": value.model_dump(mode="json"),
+                        }
+                    ),
+                    expected_revision=row.revision,
+                )
+        attempted: list[UUID] = []
+
+        async def retry(principal: Principal, identifier: UUID) -> None:
+            attempted.append(identifier)
+            if identifier == pending_ids[0]:
+                raise ArtifactStorageError("temporary cleanup failure")
+
+        monkeypatch.setattr(service, "retry_draft_attachment_cleanup", retry)
+        await service.expire_cache(app.principal)
+        assert attempted == pending_ids
+        async with app.uow_factory() as uow:
+            assert (
+                await uow.email.get(app.principal, "draft_attachment_cleanup", str(pending_ids[0]))
+                is not None
+            )
+            kept_thread = await uow.email.get(app.principal, "thread", str(thread.id))
+            kept_draft = await uow.email.get(app.principal, "draft", str(draft.id))
+            assert (
+                kept_thread is not None
+                and EmailThread.model_validate(kept_thread.payload).messages[0].body == ""
+            )
+            assert kept_draft is not None and kept_draft.payload["body"] == ""
+
+
 async def test_point_reads_still_enforce_body_and_draft_retention() -> None:
     """Removing global cleanup must never return or renew expired bodies."""
     async with email_client() as (app, client):

@@ -4133,7 +4133,11 @@ class EmailExperienceService:
     async def expire_cache(self, principal: Principal) -> int:
         """Scan outside the lock; recheck each candidate in a short mutation transaction."""
         async for pending in self._cache_records(principal, "draft_attachment_cleanup"):
-            await self.retry_draft_attachment_cleanup(principal, UUID(pending.key))
+            try:
+                await self.retry_draft_attachment_cleanup(principal, UUID(pending.key))
+            except Exception:
+                # Keep the durable retry record; independent retention must continue.
+                logger.warning("email_draft_attachment_cleanup_deferred")
         cutoff = body_cutoff(self.clock.now())
         removed = 0
         expired: set[str] = set()

@@ -1900,7 +1900,7 @@ import SwiftUI
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
     }
 
-    @Test(arguments: ["none", "ready", "discarded", "sent"])
+    @Test(arguments: ["none", "ready", "discarded", "sent", "sent_manual"])
     func testReplySelectsBlankManualCompositionWithoutGeneration(status: String) async throws {
         let requests = EmailRequestRecorder()
         let blank = draftJSON(body: "")
@@ -1910,7 +1910,10 @@ import SwiftUI
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
             if request.url!.path.hasSuffix("/reply") { return (200, blank) }
             if request.url!.path.hasSuffix("/revisions") { return (200, "{\"items\":[],\"next_cursor\":null}") }
-            let detail = self.threadJSON(draft: status == "none" ? "null" : self.draftJSON(status: status))
+            let existing = status == "sent_manual"
+                ? self.draftJSON(status: "sent").replacingOccurrences(of: "\"revision\":1", with: "\"composition\":\"manual\",\"revision\":1")
+                : self.draftJSON(status: status)
+            let detail = self.threadJSON(draft: status == "none" ? "null" : existing)
             return (200, status != "none" ? detail : detail.replacingOccurrences(
                 of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null"))
         }
