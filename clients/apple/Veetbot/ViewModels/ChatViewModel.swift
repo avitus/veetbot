@@ -252,6 +252,8 @@ public final class ChatViewModel: ObservableObject {
     /// change clears this, since nothing may be sent once the credential that
     /// began the attempt is being replaced.
     private var closedDuringDeviceSignInID: UUID?
+    private var deviceSignInCleanupTasks: [UUID: Task<Void, Never>] = [:]
+    private var deviceSignInConnectionChanges = 0
     var notificationAttention = NotificationAttentionCoordinator(store: SystemDeliveredNotificationStore())
     @Published var notificationSyncActive = false
     @Published var notificationAttentionEnabled = false
@@ -437,12 +439,19 @@ public final class ChatViewModel: ObservableObject {
 
     @discardableResult
     public func configure(baseURLString: String, token: String) async -> Bool {
+        deviceSignInConnectionChanges += 1
+        defer { deviceSignInConnectionChanges -= 1 }
         do {
             let configuration = try ConnectionConfiguration(baseURLString: baseURLString)
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
             let previousToken = try await tokenStore.readToken()
             let credentialsChanged = !trimmedToken.isEmpty && trimmedToken != previousToken
             let previousConfiguration = await configurationStore.load()
+            // Old clients read the shared token store on every request. Finish
+            // their registered cleanup before replacing that credential.
+            for cleanup in Array(deviceSignInCleanupTasks.values) {
+                await cleanup.value
+            }
             if credentialsChanged || previousConfiguration?.baseURL != configuration.baseURL {
                 await abandonWebsiteAuthenticationCeremony()
             }
@@ -2289,7 +2298,7 @@ public final class ChatViewModel: ObservableObject {
     /// remote path. The window first loads the address as typed.
     @discardableResult
     public func beginDeviceSignIn(websiteURL: String) -> DeviceSignInRequest? {
-        guard api != nil else { return nil }
+        guard deviceSignInConnectionChanges == 0, api != nil else { return nil }
         websiteConnectionSessionID = selectedSessionID
         guard let target = Self.websiteLoginTarget(websiteURL),
             let startURL = URL(string: target.loginURL)
@@ -2314,7 +2323,7 @@ public final class ChatViewModel: ObservableObject {
         profile: BrowserProfileView, startOrigin: String? = nil, from surface: DeviceSignInSurface = .websiteAccess
     ) -> DeviceSignInRequest? {
         // A start origin the profile does not allow falls back to its first.
-        guard api != nil, profile.status != .revoked,
+        guard deviceSignInConnectionChanges == 0, api != nil, profile.status != .revoked,
             let origin = startOrigin.flatMap({ profile.allowedOrigins.contains($0) ? $0 : nil })
                 ?? profile.allowedOrigins.first,
             let startURL = URL(string: origin + "/")
@@ -2388,7 +2397,9 @@ public final class ChatViewModel: ObservableObject {
                 )
             )
         }
-        guard let api else { return failure(DeviceSignInMessage.couldNotStart) }
+        guard deviceSignInConnectionChanges == 0, let api else {
+            return failure(DeviceSignInMessage.couldNotStart)
+        }
         let generation = connectionGeneration
         let origins = request.profileID == nil
             ? (adoptedOrigin.map { [$0] } ?? request.allowedOrigins) + addedOrigins
@@ -2422,7 +2433,8 @@ public final class ChatViewModel: ObservableObject {
         // The window can close, or the connection change, during any await
         // below, so each step after one checks first.
         func superseded() -> Bool {
-            Task.isCancelled || deviceSignInRequest?.id != request.id || generation != connectionGeneration
+            Task.isCancelled || deviceSignInConnectionChanges > 0
+                || deviceSignInRequest?.id != request.id || generation != connectionGeneration
         }
         // What a superseded attempt undoes: the profile a new website's window
         // created, and a ceremony that may still be open.
@@ -2437,15 +2449,18 @@ public final class ChatViewModel: ObservableObject {
         func settle(_ result: DeviceSignInResult) async -> DeviceSignInResult {
             guard superseded() else { return result }
             guard closedDuringDeviceSignInID == request.id || Task.isCancelled,
-                generation == connectionGeneration
+                deviceSignInConnectionChanges == 0, generation == connectionGeneration
             else {
                 return stopped
             }
             // An unstructured task does not inherit the cancelled caller's flag.
             // Keep ownership until deletion succeeds, so closing can retry it.
-            await Task { @MainActor in
+            let cleanupID = UUID()
+            let cleanup = Task { @MainActor in
                 guard generation == connectionGeneration else { return }
-                closedDuringDeviceSignInID = nil
+                if closedDuringDeviceSignInID == request.id {
+                    closedDuringDeviceSignInID = nil
+                }
                 if let openCeremonyID {
                     _ = try? await api.cancelBrowserAuthentication(openCeremonyID)
                 }
@@ -2457,7 +2472,10 @@ public final class ChatViewModel: ObservableObject {
                 {
                     deviceSignInCreatedProfile = nil
                 }
-            }.value
+            }
+            deviceSignInCleanupTasks[cleanupID] = cleanup
+            await cleanup.value
+            deviceSignInCleanupTasks.removeValue(forKey: cleanupID)
             return stopped
         }
 

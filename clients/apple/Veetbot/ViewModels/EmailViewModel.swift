@@ -1508,6 +1508,9 @@ public final class EmailViewModel: ObservableObject {
                 guard var fields = value.objectValue,
                       let id = fields["artifact_id"]?.stringValue else { return value }
                 fields["artifact_id"] = .string(id.lowercased())
+                // Approval presentation can redact a filename. Identity and
+                // content metadata still have to match the retained draft.
+                fields.removeValue(forKey: "filename")
                 return .object(fields)
             }
             return expected.map(normalized) == observed.map(normalized)

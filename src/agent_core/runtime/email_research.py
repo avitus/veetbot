@@ -292,7 +292,19 @@ class DraftResearch:
                 continue
             chosen = await self.selected_calendars()
             for cal in chosen:
-                self.admit("calendar_windows", f"{round_number}:{index}:{cal['id']}", 2)
+                window_key = f"{round_number}:{index}:{cal['id']}"
+                admitted = self.state.get("admitted_calendar_windows", [])
+                if window_key not in admitted and len(admitted) >= 2:
+                    self.state["evidence"].append(
+                        {
+                            "kind": "calendar",
+                            "complete": False,
+                            "calendar_id": cal["id"],
+                            "issue": "The calendar window allowance is exhausted.",
+                        }
+                    )
+                    continue
+                self.admit("calendar_windows", window_key, 2)
                 calendar_result = await self.calendar_call(
                     "list_events",
                     {
@@ -337,7 +349,9 @@ class DraftResearch:
         preferred = matching or [
             cal for cal in available if cal.get("primary") or cal.get("id") == "primary"
         ]
-        chosen = preferred or available
+        eligible = preferred or available
+        remaining = max(0, 2 - len(self.state.get("admitted_calendar_windows", [])))
+        chosen = eligible[:remaining]
         self.state["selected_calendars"] = chosen
         if not self.state.get("owner_timezone") and chosen:
             self.state["owner_timezone"] = chosen[0].get("timeZone")
@@ -345,6 +359,8 @@ class DraftResearch:
             {
                 "kind": "calendar_selection",
                 "calendars": chosen,
+                "complete": len(chosen) == len(eligible),
+                "omitted_calendar_ids": [cal["id"] for cal in eligible[remaining:]],
                 "other_calendars_queried": False,
             }
         )

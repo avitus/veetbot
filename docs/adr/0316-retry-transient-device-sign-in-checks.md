@@ -50,6 +50,9 @@ The session remains only in the existing completion call's local variables;
 no session or capability is published, logged or persisted. Half-second then
 one-second delays separate attempts. A closed window, changed connection or
 cancelled task stops further attempts. The UI names the current retry.
+Cancelled cleanup retains its request identity. Connection reconfiguration blocks
+new device attempts and waits for registered cleanup before replacing the shared
+credential, so an old client cannot dispatch cleanup with the replacement token.
 
 Each attempt receives the unchanged server verification: two isolated browsers,
 ordinary application-request completion, signed-in/signed-out differentiation,

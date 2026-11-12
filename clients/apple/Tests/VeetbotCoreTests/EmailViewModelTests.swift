@@ -26,6 +26,36 @@ import SwiftUI
         #expect(files.first?["artifact_id"] as? String == fileID)
     }
 
+    @Test(arguments: ["matching", "different_id", "different_digest"])
+    func testReviewAcceptsRedactedFilenameOnlyForTheSameFile(change: String) async throws {
+        let fileID = UUID().uuidString
+        let file: [String: Any] = ["artifact_id": fileID, "filename": "token=abc.pdf",
+            "media_type": "application/pdf", "size_bytes": 123, "sha256": String(repeating: "a", count: 64)]
+        var draft = try #require(JSONSerialization.jsonObject(with: Data(draftJSON(status: "awaiting_approval").utf8)) as? [String: Any])
+        draft["attachments"] = [file]
+        draft["send_tool_name"] = "mcp.gmail_send.send_attached_message"
+        let draftText = String(data: try JSONSerialization.data(withJSONObject: draft), encoding: .utf8)!
+        var presented = file
+        presented["filename"] = "[REDACTED]"
+        if change == "different_id" { presented["artifact_id"] = UUID().uuidString }
+        if change == "different_digest" { presented["sha256"] = String(repeating: "b", count: 64) }
+        var approval = try #require(JSONSerialization.jsonObject(with: Data(approvalJSON(body: "Thanks, I will review the agenda.").utf8)) as? [String: Any])
+        var arguments = try #require(approval["arguments"] as? [String: Any])
+        arguments["attachments"] = [presented]
+        approval["arguments"] = arguments
+        approval["tool_name"] = "mcp.gmail_send.send_attached_message"
+        let approvalText = String(data: try JSONSerialization.data(withJSONObject: approval), encoding: .utf8)!
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.contains("/approvals/") { return (200, approvalText) }
+            return (200, self.threadJSON(draft: draftText))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        await model.loadReview()
+        #expect((model.review != nil) == (change == "matching"))
+    }
+
     @Test func testSendAcknowledgesTheDisplayedAttachmentIDs() async throws {
         let fileID = UUID()
         var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])

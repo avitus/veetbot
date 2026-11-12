@@ -895,9 +895,11 @@ async def test_research_stops_at_three_mail_queries_without_saving_partial_reply
 
 @pytest.mark.parametrize("calendar_unavailable", [False, True])
 @pytest.mark.parametrize("shared_calendar", [False, True])
+@pytest.mark.parametrize("calendar_count", [1, 3])
 async def test_draft_reads_selected_calendar_and_exposes_timezone_to_synthesis(
     calendar_unavailable: bool,
     shared_calendar: bool,
+    calendar_count: int,
 ) -> None:
     from pydantic import SecretStr
 
@@ -938,32 +940,36 @@ async def test_draft_reads_selected_calendar_and_exposes_timezone_to_synthesis(
                             structured={
                                 "calendars": [
                                     {
-                                        "id": "shared-calendar"
+                                        "id": f"shared-calendar-{index}"
                                         if shared_calendar
                                         else "owner@example.com",
                                         "timeZone": "America/Los_Angeles",
                                         "primary": not shared_calendar,
                                     }
+                                    for index in range(calendar_count if shared_calendar else 1)
                                 ]
                             }
                         ),
                     ),
-                    ScriptedMCPResponse(
-                        name="list_events",
-                        result=MCPCallResult(is_error=True, content=("calendar.unavailable",))
-                        if calendar_unavailable
-                        else MCPCallResult(
-                            structured={
-                                "events": [
-                                    {
-                                        "summary": "Cedar board",
-                                        "start": {"dateTime": "2026-11-11T09:00:00-08:00"},
-                                    }
-                                ],
-                                "next_page_token": None,
-                            }
+                    *(
+                        ScriptedMCPResponse(
+                            name="list_events",
+                            result=MCPCallResult(is_error=True, content=("calendar.unavailable",))
+                            if calendar_unavailable
+                            else MCPCallResult(
+                                structured={
+                                    "events": [
+                                        {
+                                            "summary": "Cedar board",
+                                            "start": {"dateTime": "2026-11-11T09:00:00-08:00"},
+                                        }
+                                    ],
+                                    "next_page_token": None,
+                                }
+                            ),
                         ),
-                    ),
+                    )
+                    * calendar_count,
                 ),
             )
         }
@@ -1028,10 +1034,12 @@ async def test_draft_reads_selected_calendar_and_exposes_timezone_to_synthesis(
             assert "2026-11-11T09:00:00-08:00" in contexts[-1]
         async with app.uow_factory() as uow:
             calls = await uow.invocations.list_for_run(run.id, app.principal)
-        assert [call.tool_name for call in calls] == [
-            "mcp.calendar_read.list_calendars",
-            "mcp.calendar_read.list_events",
-        ]
+        expected_windows = min(calendar_count, 2) if shared_calendar else 1
+        assert [call.tool_name for call in calls] == ["mcp.calendar_read.list_calendars"] + [
+            "mcp.calendar_read.list_events"
+        ] * expected_windows
+        if shared_calendar and calendar_count > 2:
+            assert '"complete":false' in contexts[-1].replace('\\"', '"').replace(" ", "")
 
 
 async def test_private_mcp_send_accepts_verified_transport_bytes_and_encodes_multiple_files() -> (

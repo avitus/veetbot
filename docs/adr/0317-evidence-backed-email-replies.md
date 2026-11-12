@@ -207,7 +207,11 @@ Further review preserves claimed send states during source erasure, retries rete
 cleanup after durably recording a send, and follows source pages within the same
 read budget. MIME expansion is checked before staging and consent against the
 unchanged 24 MiB encoded-message cap. Exact artifact reuse alone exempts a staging
-retry from the existing count/byte limits.
+retry from the existing count/byte limits. Calendar fallback selects only the
+remaining allowed windows and records omitted calendars as incomplete evidence.
+Native approval matching uses stable attachment identity and content metadata;
+a redacted presentation filename does not invalidate the matching draft. The
+server still validates the full approved arguments before dispatch.
 
 Review regressions first reproduced ten email failures, five browser visibility/editor
 failures, three native issues and the missing timezone setting. The corrected focused
@@ -225,6 +229,13 @@ tests, 61 real-browser tests and two macOS UI journeys (missing draft and Undo
 after closing the composer). Lint, full typing and strict documentation checks
 passed. Source erasure retains unresolved dispatch ownership; injected retention
 failure leaves a successful send recorded and is completed by maintenance.
+
+The third pass reproduced three native regressions (four failed assertions) and
+two shared-calendar overflow cases. After repair, all 204 focused native tests
+and 45 researched-reply tests passed. The full native sweep then passed 1,209
+tests in 103 suites plus four contrast tests. The attachment tests also reject changed
+file IDs and digests despite allowing a redacted filename. Lint, typing and
+strict documentation checks passed in the isolated sandboxes.
 
 ## Protected transport
 
