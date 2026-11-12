@@ -74,7 +74,11 @@ from agent_core.domain.email import (
     send_gesture,
     send_message_arguments,
 )
-from agent_core.domain.email_drafting import DRAFT_ATTACHMENT_BYTES, DraftAttachment
+from agent_core.domain.email_drafting import (
+    DRAFT_ATTACHMENT_BYTES,
+    DraftAttachment,
+    draft_transport_fits,
+)
 from agent_core.domain.email_junk import JunkAuthorization, JunkPilotUnavailableError
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -660,6 +664,8 @@ class EmailExperienceService:
         """Verify retained bytes before consent and before taking a dispatch claim."""
         if not draft.attachments:
             return
+        if not draft_transport_fits(draft.body, (item.size_bytes for item in draft.attachments)):
+            raise ConflictError("The attachments exceed the encoded email size limit.")
         if self.draft_files is None:
             raise ConflictError("Reply attachments are unavailable.")
         for row in await self.draft_files.validate(uow, principal, draft):
@@ -669,7 +675,12 @@ class EmailExperienceService:
         self, uow: RepositoryUnitOfWork, principal: Principal, draft: EmailDraft
     ) -> None:
         """Settled files expire after thirty days without extending prior erasure."""
-        deadline = self.clock.now() + timedelta(days=30)
+        settled_at = (
+            draft.updated_at
+            if draft.status in {EmailDraftStatus.SENT, EmailDraftStatus.DISCARDED}
+            else self.clock.now()
+        )
+        deadline = settled_at + timedelta(days=30)
         files = {item.artifact_id: item for item in draft.attachments}
         async for record in records(uow.email, principal, "draft_revision"):
             if str(record.payload.get("id")) == str(draft.id):
@@ -684,6 +695,27 @@ class EmailExperienceService:
                 item.artifact_id,
                 principal,
                 min(deadline, row.expires_at) if row.expires_at else deadline,
+            )
+
+    async def retry_draft_attachment_cleanup(self, principal: Principal, draft_id: UUID) -> None:
+        """Retry retention independently of a durably recorded send result."""
+        async with self.uow_factory() as uow, uow.email.lock(principal):
+            pending = await uow.email.get(principal, "draft_attachment_cleanup", str(draft_id))
+            if pending is None:
+                return
+            draft = await read_value(uow.email, principal, "draft", str(draft_id), EmailDraft)
+            if draft is not None:
+                settled = draft.model_copy(
+                    update={
+                        "updated_at": datetime.fromisoformat(str(pending.payload["settled_at"]))
+                    }
+                )
+                await self.settle_draft_attachments(uow, principal, settled)
+            await uow.email.delete(
+                principal,
+                "draft_attachment_cleanup",
+                str(draft_id),
+                expected_revision=pending.revision,
             )
 
     async def _retained_draft(
@@ -3505,13 +3537,17 @@ class EmailExperienceService:
                 EmailDraftStatus.READY,
                 EmailDraftStatus.FAILED,
                 EmailDraftStatus.DISCARDED,
+                EmailDraftStatus.SENT,
             }:
                 raise ConflictError("Finish the current draft action before switching replies.")
-            if current is not None and current.stale:
+            active = current is not None and current.status not in {
+                EmailDraftStatus.DISCARDED,
+                EmailDraftStatus.SENT,
+            }
+            if active and current is not None and current.stale:
                 raise ConflictError("Read the new mail and review your reply before switching.")
             target, to, cc = await self._reply_envelope(uow.email, principal, thread)
             assert target.message_id_header is not None
-            active = current is not None and current.status != EmailDraftStatus.DISCARDED
             selected = (
                 current if active and current is not None and current.composition == kind else None
             )
@@ -3978,11 +4014,28 @@ class EmailExperienceService:
                                 "stale": True,
                                 "revision": proposal.revision + 1
                                 if kind == "draft"
+                                and proposal.status
+                                not in {
+                                    EmailDraftStatus.SENDING,
+                                    EmailDraftStatus.UNCERTAIN,
+                                    EmailDraftStatus.SENT,
+                                }
                                 else proposal.revision,
                                 "approval_id": None,
-                                "send_claim_id": None,
-                                "send_undo_until": None,
-                                "status": EmailDraftStatus.READY,
+                                **(
+                                    {}
+                                    if proposal.status
+                                    in {
+                                        EmailDraftStatus.SENDING,
+                                        EmailDraftStatus.UNCERTAIN,
+                                        EmailDraftStatus.SENT,
+                                    }
+                                    else {
+                                        "send_claim_id": None,
+                                        "send_undo_until": None,
+                                        "status": EmailDraftStatus.READY,
+                                    }
+                                ),
                                 "updated_at": now,
                             }
                         ),
@@ -4079,6 +4132,8 @@ class EmailExperienceService:
 
     async def expire_cache(self, principal: Principal) -> int:
         """Scan outside the lock; recheck each candidate in a short mutation transaction."""
+        async for pending in self._cache_records(principal, "draft_attachment_cleanup"):
+            await self.retry_draft_attachment_cleanup(principal, UUID(pending.key))
         cutoff = body_cutoff(self.clock.now())
         removed = 0
         expired: set[str] = set()

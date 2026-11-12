@@ -52,6 +52,14 @@ import Testing
         let result = await model.completeDeviceSignIn(request, handoff: handoff, adoptedOrigin: nil)
 
         #expect(begins.value == 3)
+        let ordered = server.routes
+        let beginRoute = "POST veetbot.test /v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"
+        let beginPositions = ordered.indices.filter { ordered[$0] == beginRoute }
+        for index in 0..<2 {
+            let cancelRoute = "POST veetbot.test /v1/browser-authentication-ceremonies/\(ids[index].uuidString)/cancel"
+            let cancelPosition = try #require(ordered.firstIndex(of: cancelRoute))
+            #expect(beginPositions[index] < cancelPosition && cancelPosition < beginPositions[index + 1])
+        }
         #expect(result == (succeeds ? .signedIn(profileID: profileID)
             : .failed(DeviceSignInFailure(message: DeviceSignInMessage.couldNotCheck, canRetry: true))))
         for (index, id) in ids.enumerated() {

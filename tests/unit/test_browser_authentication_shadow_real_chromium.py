@@ -169,7 +169,7 @@ async def test_editable_shadow_prompt_values_are_not_read(editor: str) -> None:
         await runtime.check_automation_ready()
 
 
-@pytest.mark.parametrize("case", ["closed", "outside_prompt", "scan_bound"])
+@pytest.mark.parametrize("case", ["closed", "outside_prompt", "scan_bound", "long_main"])
 async def test_bounded_negative_detection_does_not_claim_positive_authentication(case: str) -> None:
     async def home(request: Request) -> Response:
         del request
@@ -183,6 +183,10 @@ async def test_bounded_negative_detection_does_not_claim_positive_authentication
                 const root = document.querySelector('#host').attachShadow({
                     mode: kind === 'closed' ? 'closed' : 'open'
                 });
+                if (kind === 'long_main') {
+                    document.body.innerHTML = '<p>x</p>'.repeat(9000) + '<input type="password">';
+                    return;
+                }
                 root.innerHTML = kind === 'outside_prompt' ? '<p>Use a passkey</p>'
                     : (kind === 'scan_bound' ? '<span></span>'.repeat(9000) : '')
                         + '<input type="password">';
@@ -190,6 +194,9 @@ async def test_bounded_negative_detection_does_not_claim_positive_authentication
             case,
         )
         assert await runtime._page.evaluate(AUTHENTICATION_SCRIPT) is False
+        if case in {"scan_bound", "long_main"}:
+            with pytest.raises(BrowserProviderError, match="needs_user"):
+                await runtime.check_automation_ready()
 
 
 async def test_shadow_challenge_after_dispatch_returns_no_evidence_and_one_effect() -> None:

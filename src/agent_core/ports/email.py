@@ -193,6 +193,10 @@ class EmailRuntimeServices(Protocol):
         self, uow: RepositoryUnitOfWork, principal: Principal, draft: EmailDraft
     ) -> None: ...
 
+    async def retry_draft_attachment_cleanup(
+        self, principal: Principal, draft_id: UUID
+    ) -> None: ...
+
     async def get_task(self, principal: Principal, run_id: UUID) -> EmailTask | None: ...
 
     async def validate_archive(

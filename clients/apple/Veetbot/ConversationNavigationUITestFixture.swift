@@ -859,6 +859,9 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let values = requestJSON()
             Self.emailLock.lock()
             if let value = values["body"] as? String { Self.emailBody = value }
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-email-send-on-save") {
+                Self.emailStatus = "sending"
+            }
             Self.emailRevision += 1
             Self.emailLock.unlock()
             statusCode = 200

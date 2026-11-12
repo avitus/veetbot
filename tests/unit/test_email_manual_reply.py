@@ -156,3 +156,37 @@ async def test_reply_rejects_changed_retry_and_preserves_a_send_in_progress() ->
         refused = await client.post(path, json={**body, "expected_revision": draft.revision})
         assert refused.status_code == 409
         assert (await service.draft(app.principal, draft.id)).status == "sending"
+
+
+@pytest.mark.parametrize("status", [EmailDraftStatus.SENT, EmailDraftStatus.DISCARDED])
+async def test_reply_starts_fresh_after_inactive_stale_composition(
+    status: EmailDraftStatus,
+) -> None:
+    async with email_client() as (app, client):
+        service = await prepare(app)
+        thread = await service.import_thread(app.principal, "work", observation(), uuid4())
+        old = await service.save_generated_draft(
+            app.principal, thread.id, thread.revision, "Old reply", run_id=uuid4()
+        )
+        async with app.uow_factory() as uow:
+            await save_value(
+                uow.email,
+                app.principal,
+                "draft",
+                str(old.id),
+                old.model_copy(update={"status": status, "stale": True}),
+                app.clock.now(),
+            )
+        response = await client.post(
+            f"/v1/email/threads/{thread.id}/reply",
+            json={
+                "kind": "manual",
+                "source_revision": thread.revision,
+                "expected_revision": old.revision,
+            },
+        )
+        assert response.status_code == 200, response.text
+        fresh = response.json()
+        assert fresh["id"] != str(old.id)
+        assert fresh["body"] == "" and fresh["status"] == "ready" and not fresh["stale"]
+        assert (await service.draft(app.principal, old.id)).status == status

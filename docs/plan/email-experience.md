@@ -743,7 +743,11 @@ successful draft binds its manifest and owns those blobs. The application-only
 `send_attached_message` keeps only metadata in tool arguments; its interceptor
 resolves and verifies bytes after approval and injects them only into the private
 stdio request. Text-only drafts retain the original send tool. No remote provider
-file is refetched after send approval.
+file is refetched after send approval. Preparation and send admission conservatively
+check MIME wrapping and outer base64 expansion against the existing 24 MiB cap,
+so the 15 MiB decoded-file cap never implies that every such message fits transport.
+Source pages consume the same ten-read allowance; an unfinished required source
+is a preparation failure, not evidence that a document is absent.
 
 Set `AGENT_EMAIL_OWNER_TIMEZONE` to the owner’s IANA zone for planning, including
 mail-only preparation. When unset, selected-calendar metadata supplies the zone
@@ -763,7 +767,12 @@ manifest/byte validation through the bounded provider dispatch. This narrow
 exception to keeping network I/O outside projection locks serializes source
 erasure with the exact approved dispatch. No model call or attachment download
 holds that lock. Excluding a source clears affected proposal wording and file
-references, invalidates consent and preserves unrelated file copies.
+references, invalidates consent and preserves unrelated file copies. Claimed,
+uncertain and completed sends retain their status, revision and claim identity.
+A successful send commits `sent` together with an owner-scoped
+`draft_attachment_cleanup` record before attempting retention cleanup. The normal
+cache-retention sweep retries pending cleanup without changing the send result;
+the record preserves the original settlement time for the thirty-day deadline.
 
 ### Editing and sending
 

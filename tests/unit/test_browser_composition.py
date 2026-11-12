@@ -181,6 +181,7 @@ async def test_configured_playwright_provider_registers_browser_tools() -> None:
         act = cast(RegisteredTool, registry.get("browser.act"))
         # ADR-0294: new chats take the latest; a chat pinned to the earlier spec keeps it.
         assert act.spec.version == ShadowBrowserActTool.spec.version
+        assert isinstance(act.implementation, ShadowBrowserActTool)
         pinned = cast(
             RegisteredTool, registry.get("browser.act", PinnedBrowserActTool.spec.version)
         )

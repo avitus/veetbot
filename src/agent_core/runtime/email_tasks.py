@@ -2598,8 +2598,6 @@ class _TaskIO:
             draft = await self.service._draft(uow.email, c.principal, self.task.draft_id)
             if draft.run_id != c.run.id or draft.revision != self.task.expected_revision:
                 return
-            if status is EmailDraftStatus.SENT:
-                await self.service.settle_draft_attachments(uow, c.principal, draft)
             await save_value(
                 uow.email,
                 c.principal,
@@ -2627,6 +2625,32 @@ class _TaskIO:
                 ),
                 c.clock.now(),
             )
+
+            if status is EmailDraftStatus.SENT:
+                prior = await uow.email.get(c.principal, "draft_attachment_cleanup", str(draft.id))
+                revision = 0 if prior is None else prior.revision
+                await uow.email.put(
+                    EmailRecord(
+                        tenant_id=c.principal.tenant_id,
+                        principal_id=c.principal.principal_id,
+                        kind="draft_attachment_cleanup",
+                        key=str(draft.id),
+                        revision=revision + 1,
+                        payload=prior.payload
+                        if prior is not None
+                        else {"draft_id": str(draft.id), "settled_at": c.clock.now().isoformat()},
+                        created_at=c.clock.now() if prior is None else prior.created_at,
+                        updated_at=c.clock.now(),
+                    ),
+                    expected_revision=revision,
+                )
+
+        if status is EmailDraftStatus.SENT:
+            # Sending is already committed. Retention maintenance retries cleanup
+            # independently, so a storage outage cannot change the send result.
+            # The persisted cleanup record remains for retention maintenance.
+            with suppress(Exception):
+                await self.service.retry_draft_attachment_cleanup(c.principal, self.task.draft_id)
 
     async def _finish_send(self, invocation: ToolInvocation) -> RunOutcome:
         status = (

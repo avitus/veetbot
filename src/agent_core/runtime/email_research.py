@@ -12,6 +12,7 @@ from agent_core.domain.email_drafting import (
     DraftPreparationError,
     DraftResearchPlan,
     EmailToolError,
+    draft_transport_fits,
 )
 from agent_core.domain.errors import MCPUnavailableError
 from agent_core.runtime.email_state import read_value, save_value
@@ -216,6 +217,34 @@ class DraftResearch:
                 )
                 if observed.get("thread_id") != provider_id or observed.get("source_changed"):
                     raise DraftPreparationError("A document source changed while being read.")
+                pages = [observed]
+                tokens: set[str] = set()
+                while observed.get("next_page_token"):
+                    token = str(observed["next_page_token"])
+                    if token in tokens or len(self.state["reads"]) >= 10:
+                        raise DraftPreparationError(
+                            "The required source remains incomplete "
+                            "within the reply research limit."
+                        )
+                    tokens.add(token)
+                    page = await self.call(
+                        server,
+                        "get_thread_page",
+                        {"thread_id": provider_id, "max_messages": 10, "page_token": token},
+                        f"source:{source_key}:page:{len(pages)}",
+                    )
+                    if (
+                        page.get("thread_id") != provider_id
+                        or page.get("source_changed")
+                        or page.get("history_id") != observed.get("history_id")
+                    ):
+                        raise DraftPreparationError("A document source changed while being read.")
+                    pages.append(page)
+                    observed = {
+                        **observed,
+                        **page,
+                        "messages": [*observed.get("messages", []), *page.get("messages", [])],
+                    }
                 complete = (
                     not observed.get("next_page_token")
                     and bool(observed.get("messages"))
@@ -236,7 +265,8 @@ class DraftResearch:
                         }
                     )
                     continue
-                await self.io._register_sources(query.account_id, observed)
+                for page in pages:
+                    await self.io._register_sources(query.account_id, page)
                 source = await self.io.service.import_thread(
                     self.c.principal,
                     query.account_id,
@@ -415,6 +445,15 @@ class DraftResearch:
             if sum(item["size_bytes"] for item in selected) > DRAFT_ATTACHMENT_BYTES:
                 raise DraftPreparationError(
                     "The requested attachments exceed the email size limit."
+                )
+            file_sizes = (
+                [item["size_bytes"] for item in selected]
+                if selected
+                else [item.size_bytes for item in retained_files]
+            )
+            if file_sizes and not draft_transport_fits(plan.body, file_sizes):
+                raise DraftPreparationError(
+                    "The requested attachments exceed the encoded email size limit."
                 )
             await self.progress("staging_files")
             attachments: list[DraftAttachment] = [] if selected else retained_files

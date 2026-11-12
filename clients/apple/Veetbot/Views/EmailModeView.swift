@@ -1385,7 +1385,7 @@ private struct EmailThreadScreen: View {
             Button("Discard draft", role: .destructive) { Task { await model.discardDraft() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the proposal from Veetbot. It does not change Gmail.")
+            Text("This removes the saved reply from Veetbot. It does not change Gmail.")
         }
         .confirmationDialog("Exclude this email thread?", isPresented: $showingExclusion, titleVisibility: .visible) {
             Button("Exclude thread", role: .destructive) { Task { await model.excludeSelectedThread() } }
@@ -1651,6 +1651,9 @@ private struct EmailThreadScreen: View {
     /// decision the draft is waiting on, the envelope and body in a single
     /// well, then Send and Save & close with rarer actions folded into a menu.
     @ViewBuilder private var draftEditor: some View {
+        if let draft = model.draft, let edit = model.currentEdit {
+            draftNotices(draft, edit: edit)
+        }
         if let draft = model.draft, let edit = model.currentEdit, !composerClosed {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -1660,7 +1663,6 @@ private struct EmailThreadScreen: View {
                         .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                         .multilineTextAlignment(.trailing)
                 }
-                draftNotices(draft, edit: edit)
                 draftWell(draft, edit: edit).disabled(model.isSelectingReply)
                 draftActions(draft, edit: edit)
                 // A refused send belongs next to the control that asked for it; above the
@@ -1843,7 +1845,7 @@ private struct EmailThreadScreen: View {
                 }
             }
             .buttonStyle(QuietCapsuleButtonStyle())
-            .disabled(model.isSelectingReply || model.conflict != nil || !draft.canEdit)
+            .disabled(model.isSelectingReply || model.isPreparingSend || model.conflict != nil || !draft.canEdit)
             .accessibilityIdentifier("email.save-close")
             Spacer(minLength: 0)
             Menu {

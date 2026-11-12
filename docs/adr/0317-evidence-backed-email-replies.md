@@ -203,6 +203,11 @@ Planning receives the configured `AGENT_EMAIL_OWNER_TIMEZONE` before its first c
 or reads selected-calendar metadata first when no explicit zone is configured.
 The native client blocks composition switching during Send preparation, binds the
 press to the settled revision and displays filenames in recovered approvals.
+Further review preserves claimed send states during source erasure, retries retention
+cleanup after durably recording a send, and follows source pages within the same
+read budget. MIME expansion is checked before staging and consent against the
+unchanged 24 MiB encoded-message cap. Exact artifact reuse alone exempts a staging
+retry from the existing count/byte limits.
 
 Review regressions first reproduced ten email failures, five browser visibility/editor
 failures, three native issues and the missing timezone setting. The corrected focused
@@ -212,6 +217,14 @@ classifying a remembered-account prompt as a security interstitial. After removi
 that incorrect assertion, all 32 tests in its file passed; the real security challenge
 retains the explicit evidence assertion. Lint, typing (1,828 sources) and strict
 documentation checks passed. These are isolated sandbox results, not live-send evidence.
+
+The second review pass reproduced inactive-reply, source-erasure, cleanup,
+pagination, encoded-size admission, staging-count and native selection failures.
+The corrected run passed 278 focused static tests, 185 contract tests, 201 native
+tests, 61 real-browser tests and two macOS UI journeys (missing draft and Undo
+after closing the composer). Lint, full typing and strict documentation checks
+passed. Source erasure retains unresolved dispatch ownership; injected retention
+failure leaves a successful send recorded and is completed by maintenance.
 
 ## Protected transport
 

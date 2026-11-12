@@ -23,6 +23,24 @@ NAMED_CHALLENGE_SCRIPT = (
 }"""
 )
 
+CREDENTIAL_VISIBLE_SCRIPT = (
+    "node => {"
+    + PAGE_TEXT_HELPERS
+    + """
+    let parent = node, scanned = 0;
+    while (parent && scanned++ < 256) {
+        const style = getComputedStyle(parent);
+        if (parent.hidden || parent.getAttribute('aria-hidden') === 'true'
+            || style.display === 'none' || style.visibility !== 'visible'
+            || style.opacity === '0') return false;
+        parent = composedParent(parent);
+    }
+    if (parent) return true; // Incomplete ancestry cannot authorize automation.
+    const box = node.getBoundingClientRect();
+    return box.width > 0 && box.height > 0;
+}"""
+)
+
 AUTHENTICATION_SCRIPT = (
     "() => {"
     + PAGE_TEXT_HELPERS

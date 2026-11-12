@@ -1225,6 +1225,28 @@ final class ConversationNavigationUITests: XCTestCase {
         checkEmailReadingFlow()
     }
 
+    func testClosedEmailComposerKeepsSendUndoVisible() {
+        app.launchArguments.append("--ui-testing-email-send-on-save")
+        app.launch()
+        let mode = app.buttons["mode.email"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 10))
+        activate(mode)
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        activate(row)
+        let reply = app.buttons["email.jump-to-reply"]
+        XCTAssertTrue(reply.waitForExistence(timeout: 5))
+        activate(reply)
+        let editor = app.textViews["email.draft-body"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        app.typeText("My reply.")
+        #if os(iOS)
+        activate(app.buttons["email.keyboard-done"])
+        #endif
+        activate(app.buttons["email.save-close"])
+        XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 5))
+    }
+
     /// Exercises the same native controls with a deterministic dark appearance.
     func testEmailReadingInDarkAppearance() {
         app.launchEnvironment["VEETBOT_UI_TEST_COLOR_SCHEME"] = "dark"

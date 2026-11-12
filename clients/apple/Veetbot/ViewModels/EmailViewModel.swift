@@ -1251,8 +1251,8 @@ public final class EmailViewModel: ObservableObject {
     }
 
     public var canSelectReply: Bool {
-        !isSelectingReply && !isPreparingSend && conflict == nil
-            && (draft == nil || draft?.canEdit == true || draft?.status == "discarded")
+        !isSelectingReply && !isPreparingSend && !isGeneratingDraft && conflict == nil
+            && (draft == nil || draft?.canEdit == true || draft?.status == "discarded" || draft?.status == "sent")
     }
 
     public var hasVeetbotDraft: Bool {

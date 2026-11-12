@@ -81,7 +81,8 @@ async def test_generated_proposal_replay_recognizes_own_commit_but_not_owner_edi
             )
 
 
-async def test_draft_searches_other_mail_before_asking_for_known_context() -> None:
+@pytest.mark.parametrize("paged", [False, True])
+async def test_draft_searches_other_mail_before_asking_for_known_context(paged: bool) -> None:
     """A named meeting's date is in another email, not the selected request."""
     source = observation(body="The Cedar board meeting is January 4. No files are needed.")
     source["thread_id"] = "meeting-source"
@@ -90,7 +91,21 @@ async def test_draft_searches_other_mail_before_asking_for_known_context() -> No
         [
             ("get_profile", {"email_address": "owner@example.com"}),
             ("search_threads", {"threads": [{"thread_id": "meeting-source"}]}),
-            ("get_thread_page", source),
+            ("get_thread_page", {**source, "next_page_token": "page-two"} if paged else source),
+            *(
+                [
+                    (
+                        "get_thread_page",
+                        {
+                            **source,
+                            "next_page_token": None,
+                            "messages": [{**source["messages"][0], "id": "second-message"}],
+                        },
+                    )
+                ]
+                if paged
+                else []
+            ),
         ]
     )
     script = FakeModelScript(
@@ -126,6 +141,8 @@ async def test_draft_searches_other_mail_before_asking_for_known_context() -> No
         async with app.uow_factory() as uow:
             invocations = await uow.invocations.list_for_run(operation.run_id, app.principal)
         reads = [invocation.tool_name.rsplit(".", 1)[-1] for invocation in invocations]
+        if paged:
+            assert reads.count("get_thread_page") == 2
         assert "search_threads" in reads, (
             "Drafting must research missing context through governed reads"
         )
@@ -157,6 +174,12 @@ async def test_attachment_capabilities_are_application_only() -> None:
         "discard",
         "revoke_preview",
         "exclude_source",
+        "exclude_sending",
+        "exclude_sent",
+        "exclude_uncertain",
+        "cleanup_failure",
+        "encoded_limit",
+        "staging_count",
         "send",
         "progress",
         "expire_send",
@@ -183,6 +206,8 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
     source["messages"][0]["attachments"] = [
         {"filename": "board.pdf", "mime_type": "application/pdf", "size": len(CONTENT)}
     ]
+    if after == "encoded_limit":
+        source["messages"][0]["attachments"][0]["size"] = 14 * 1024 * 1024
     factory = await _mailbox_factory(
         [
             ("get_profile", {"email_address": "owner@example.com"}),
@@ -234,6 +259,35 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
                             body="Owner edit during preparation",
                         ),
                     )
+                if after == "staging_count":
+                    from uuid import UUID
+
+                    from agent_core.domain.policies import TrustLevel
+                    from agent_core.domain.trajectory import ArtifactRef
+
+                    async with app.uow_factory() as uow:
+                        tasks = await uow.email.list(app.principal, "task")
+                        active_run = await uow.runs.get(UUID(tasks[-1].key), app.principal)
+                        for index in range(10):
+                            await uow.artifacts.create(
+                                ArtifactRef(
+                                    id=uuid4(),
+                                    tenant_id=app.principal.tenant_id,
+                                    principal_id=app.principal.principal_id,
+                                    session_id=active_run.session_id,
+                                    run_id=active_run.id,
+                                    name=f"other-{index}.pdf",
+                                    media_type="application/pdf",
+                                    storage_uri="",
+                                    sha256=hashlib.sha256(CONTENT).hexdigest(),
+                                    size_bytes=len(CONTENT),
+                                    origin="email_draft_attachment",
+                                    trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                                    created_at=app.clock.now(),
+                                    expires_at=None,
+                                    metadata={"email_draft_thread": str(thread.id)},
+                                )
+                            )
                 visible = await service.thread(app.principal, thread.id)
                 observed_stages.append(visible.get("preparation_stage"))
             if name == "send_attached_message":
@@ -316,6 +370,16 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
         )
         operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
         run = await app.runs.get(operation.run_id)
+        if after in {"encoded_limit", "staging_count"}:
+            assert run.status is RunStatus.FAILED
+            async with app.uow_factory() as uow:
+                calls = await uow.invocations.list_for_run(run.id, app.principal)
+                files = await uow.artifacts.list_for_run(run.id, app.principal)
+            if after == "encoded_limit":
+                assert not any(call.tool_name.endswith("stage_attachment") for call in calls)
+            else:
+                assert len(files) == 10
+            return
         if after in {"concurrent_edit", "early_edit"}:
             assert run.status is RunStatus.FAILED
             current = await service.draft(app.principal, original.id)
@@ -366,7 +430,23 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             )
             with pytest.raises(AuthorizationError):
                 await app.services.artifacts.get(limited, artifact.id)
-        elif after == "exclude_source":
+        elif after in {"exclude_source", "exclude_sending", "exclude_sent", "exclude_uncertain"}:
+            from uuid import UUID
+
+            from agent_core.application.email import save_value
+            from agent_core.domain.email import EmailDraftStatus
+
+            draft = await service.draft(app.principal, UUID(detail["draft"]["id"]))
+            claim = uuid4()
+            protected = after.removeprefix("exclude_")
+            if protected != "source":
+                draft = draft.model_copy(
+                    update={"status": EmailDraftStatus(protected), "send_claim_id": claim}
+                )
+                async with app.uow_factory() as uow:
+                    await save_value(
+                        uow.email, app.principal, "draft", str(draft.id), draft, app.clock.now()
+                    )
             await service.exclude_source(
                 app.principal, document_thread.id, document_thread.revision
             )
@@ -374,6 +454,10 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             assert detail["draft"]["attachments"] == []
             assert detail["draft"]["body"] == ""
             assert detail["draft"]["stale"] is True
+            if protected != "source":
+                assert detail["draft"]["status"] == protected
+                assert detail["draft"]["send_claim_id"] == str(claim)
+                assert detail["draft"]["revision"] == draft.revision
         elif after == "progress":
             assert observed_stages == ["staging_files"]
         elif after == "expire_send":
@@ -506,6 +590,7 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             assert sent_payloads == []
         elif after in {
             "send",
+            "cleanup_failure",
             "expired_dispatch",
             "expired_during_read",
             "closed_session",
@@ -518,6 +603,15 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             from agent_core.api import create_app
             from tests.gates.test_email_runtime_m26 import _drain
 
+            if after == "cleanup_failure":
+                from agent_core.domain.errors import ArtifactStorageError
+
+                original_settle = service.settle_draft_attachments
+
+                async def fail_cleanup(*args: Any, **kwargs: Any) -> None:
+                    raise ArtifactStorageError("temporary expiry failure")
+
+                vars(service)["settle_draft_attachments"] = fail_cleanup
             if after == "closed_session":
                 async with app.uow_factory() as uow:
                     await uow.sessions.close(artifact.session_id, app.principal, app.clock.now())
@@ -592,6 +686,11 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             run = await app.runs.get(UUID(response.json()["run_id"]))
             if after in {"expired_dispatch", "expired_during_read"}:
                 assert sent_payloads == [], "An expired worker must not dispatch reviewed bytes"
+                assert authority_reads >= (2 if after == "expired_during_read" else 1)
+                assert run.status is RunStatus.COMPLETED  # The task completed with a refused send.
+                assert (
+                    await service.draft(app.principal, UUID(detail["draft"]["id"]))
+                ).status.value == "failed"
                 return
             if after == "invalid_claim":
                 assert sent_payloads == []
@@ -601,6 +700,13 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             assert run.status is RunStatus.COMPLETED, run.failure
             current_detail = cast(dict[str, Any], await service.thread(app.principal, thread.id))
             assert current_detail["draft"]["status"] == "sent"
+            if after == "cleanup_failure":
+                vars(service)["settle_draft_attachments"] = original_settle
+                await service.expire_cache(app.principal)
+                async with app.uow_factory() as uow:
+                    assert (
+                        await uow.artifacts.get(artifact.id, app.principal)
+                    ).expires_at is not None
             [payload] = sent_payloads
             [outbound] = cast(list[dict[str, Any]], payload["attachments"])
             assert base64.b64decode(outbound["data_base64"]) == CONTENT
@@ -619,7 +725,8 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
             assert send.normalized_arguments["attachments"][0]["sha256"] == file["sha256"]
 
 
-def test_multipart_reply_keeps_headers_and_exact_file_bytes() -> None:
+@pytest.mark.parametrize("near_limit", [False, True])
+def test_multipart_reply_keeps_headers_and_exact_file_bytes(near_limit: bool) -> None:
     import base64
     import hashlib
     from email import policy
@@ -628,7 +735,7 @@ def test_multipart_reply_keeps_headers_and_exact_file_bytes() -> None:
     from gmail_mcp.client import GmailClient
     from gmail_mcp.errors import GmailError
 
-    content = b"board evidence\x00\xff"
+    content = b"x" * (12 * 1024 * 1024) if near_limit else b"board evidence\x00\xff"
     item = {
         "filename": "Board_十一月.pdf",
         "media_type": "application/pdf",

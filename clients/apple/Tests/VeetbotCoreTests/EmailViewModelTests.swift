@@ -1870,7 +1870,7 @@ import SwiftUI
         #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("send-proposal") })
     }
 
-    @Test(arguments: ["none", "ready", "discarded"])
+    @Test(arguments: ["none", "ready", "discarded", "sent"])
     func testReplySelectsBlankManualCompositionWithoutGeneration(status: String) async throws {
         let requests = EmailRequestRecorder()
         let blank = draftJSON(body: "")
@@ -1894,6 +1894,26 @@ import SwiftUI
         #expect(posts.count == 1)
         #expect(posts.first?.url?.path.hasSuffix("/reply") == true)
         #expect(!model.isSelectingReply)
+    }
+
+    @Test func testReplySelectionWaitsForGeneration() async throws {
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "POST" {
+                return (200, "{\"draft\":\(self.draftJSON()),\"run_id\":\"\(self.runID)\",\"status\":\"COMPLETED\"}", gate)
+            }
+            if request.url!.path.contains("/runs/") { return (200, self.runJSON(status: "COMPLETED"), nil) }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        let generating = Task { await model.generateDraft() }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        #expect(model.isGeneratingDraft)
+        #expect(!model.canSelectReply)
+        gate.release()
+        await generating.value
     }
 
     @Test func testOnlyExplicitVeetbotChoiceGeneratesAMissingSuggestion() async throws {

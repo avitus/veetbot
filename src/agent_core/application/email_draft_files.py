@@ -257,7 +257,22 @@ class EmailDraftFiles:
                 and a.metadata.get(DRAFT_TARGET_KEY) == str(target.id)
             ]
             digest = hashlib.sha256(content).hexdigest()
-            if not any(a.sha256 == digest for a in existing) and (
+            source_metadata = {
+                "account_id": source.account_id,
+                "server_id": server,
+                "thread_id": source.provider_thread_id,
+                "message_id": args["message_id"],
+                "attachment_index": args["attachment_index"],
+            }
+            reusable = any(
+                a.sha256 == digest
+                and a.name == name
+                and a.media_type == facts.media_type
+                and a.metadata.get(EMAIL_SOURCE_METADATA_KEY) == source_metadata
+                and (a.expires_at is None or a.expires_at > self.clock.now())
+                for a in existing
+            )
+            if not reusable and (
                 len(existing) >= 10
                 or sum(a.size_bytes for a in existing) + len(content) > DRAFT_ATTACHMENT_BYTES
             ):
@@ -270,13 +285,7 @@ class EmailDraftFiles:
                 metadata={
                     DRAFT_TARGET_KEY: str(target.id),
                     ATTACHMENT_METADATA_KEY: facts.metadata(),
-                    EMAIL_SOURCE_METADATA_KEY: {
-                        "account_id": source.account_id,
-                        "server_id": server,
-                        "thread_id": source.provider_thread_id,
-                        "message_id": args["message_id"],
-                        "attachment_index": args["attachment_index"],
-                    },
+                    EMAIL_SOURCE_METADATA_KEY: source_metadata,
                 },
             )
         receipt = DraftAttachment(

@@ -1,5 +1,6 @@
 """Bounded research and immutable draft file values (ADR-0317)."""
 
+from collections.abc import Iterable
 from uuid import UUID
 
 from pydantic import AwareDatetime, Field
@@ -11,6 +12,21 @@ DRAFT_ATTACHMENT_BYTES = 15 * 1024 * 1024
 DRAFT_ATTACHMENT_LIMIT = 10
 DRAFT_ATTACHMENT_ORIGIN = "email_draft_attachment"
 DRAFT_TARGET_KEY = "email_draft_thread"
+
+
+def draft_transport_fits(body: str, sizes: Iterable[int]) -> bool:
+    """Conservative MIME/outer-base64 admission under the existing 24 MiB cap.
+
+    Reserve one MiB for bounded envelope, filenames and MIME headers. Text may
+    use quoted-printable; attachments use wrapped base64, then Gmail wraps the
+    complete MIME message in base64url. No file content is needed for admission.
+    """
+    text_bytes = 3 * len(body.encode("utf-8"))
+    mime_bytes = 1024 * 1024 + text_bytes + 2 * ((text_bytes + 71) // 72)
+    for size in sizes:
+        encoded = 4 * ((size + 2) // 3)
+        mime_bytes += encoded + 2 * ((encoded + 75) // 76)
+    return 4 * ((mime_bytes + 2) // 3) <= 24 * 1024 * 1024
 
 
 class EmailToolError(Exception):

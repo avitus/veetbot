@@ -42,6 +42,7 @@ from agent_core.adapters.browser.draft_confirmation import CONFIRM_DRAFT_SCRIPT
 from agent_core.adapters.browser.extraction import EXTRACTION_SCRIPT, extracted_observation
 from agent_core.adapters.browser.page_authentication import (
     AUTHENTICATION_SCRIPT,
+    CREDENTIAL_VISIBLE_SCRIPT,
     NAMED_CHALLENGE_SCRIPT,
     REMEMBERED_SIGN_IN_CONTROLS,
     REMEMBERED_SIGN_IN_TEXT,
@@ -473,8 +474,11 @@ async def _frame_shows_credential_field(frame: Frame) -> bool:
     with suppress(PlaywrightError):
         if await _frame_is_visible(frame):
             fields = frame.locator(_CREDENTIAL_FIELDS)
-            for index in range(await fields.count()):
-                if await fields.nth(index).is_visible():
+            count = await fields.count()
+            if count > 128:
+                return True  # An unbounded credential surface is not automation-ready.
+            for index in range(count):
+                if await fields.nth(index).evaluate(CREDENTIAL_VISIBLE_SCRIPT):
                     return True
     return False
 
@@ -482,6 +486,7 @@ async def _frame_shows_credential_field(frame: Frame) -> bool:
 async def _credential_field_in_frame(page: Page) -> bool:
     """Report a visible password or one-time-code field in a visible frame of ``page``.
 
+    Include the main frame independently of the bounded general text scan.
     Some websites keep their whole sign-in form in a frame (ADR-0288). Only
     credential fields count there: a CAPTCHA class or challenge wording inside
     an embedded widget says nothing about this page. A frame that goes away or
@@ -489,11 +494,7 @@ async def _credential_field_in_frame(page: Page) -> bool:
     verification load. Frames are scanned together, so a stalled one cannot
     hide a field in another.
     """
-    scans = [
-        asyncio.create_task(_frame_shows_credential_field(frame))
-        for frame in page.frames
-        if frame != page.main_frame
-    ]
+    scans = [asyncio.create_task(_frame_shows_credential_field(frame)) for frame in page.frames]
     try:
         with suppress(TimeoutError):
             for finished in asyncio.as_completed(scans, timeout=_FRAME_SCAN_SECONDS):
