@@ -126,6 +126,7 @@ struct QuietCapsuleButtonStyle: ButtonStyle {
 /// A filter pill on a touch surface: field-coloured at rest, ink when chosen.
 struct FilterPillButtonStyle: ButtonStyle {
     let selected: Bool
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -134,7 +135,7 @@ struct FilterPillButtonStyle: ButtonStyle {
             .frame(minHeight: A2Metrics.controlHeight)
             .foregroundColor(selected ? AppTheme.paper : AppTheme.inkSoft)
             .background(Capsule().fill(selected ? AppTheme.ink : AppTheme.field))
-            .opacity(configuration.isPressed ? 0.85 : 1)
+            .opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.85 : 1)
             .contentShape(Capsule())
     }
 }

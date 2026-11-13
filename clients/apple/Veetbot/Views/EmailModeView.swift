@@ -2041,15 +2041,20 @@ struct EmailTeachCard: View {
                     .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let message = model.feedbackMessage {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "checkmark").veetType(.meta, weight: .semibold)
-                    Text(message).veetType(.meta)
-                    if model.feedbackID != nil {
-                        Button("Undo") { Task { await model.undoFeedback() } }
+            // Importance and reply need each keep their own line and their own Undo.
+            ForEach(EmailFeedbackKind.allCases, id: \.self) { kind in
+                if let given = model.feedbackGiven[kind] {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "checkmark").veetType(.meta, weight: .semibold)
+                        Text(given.message).veetType(.meta)
+                        Button("Undo") { Task { await model.undoFeedback(kind) } }
                             .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
-                    }
-                }.foregroundColor(AppTheme.inkSoft)
+                            .accessibilityIdentifier("email.feedback-undo.\(kind.rawValue)")
+                    }.foregroundColor(AppTheme.inkSoft)
+                }
+            }
+            if model.feedbackGiven.isEmpty, let message = model.feedbackMessage {
+                Label(message, systemImage: "checkmark").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -2095,34 +2100,43 @@ struct EmailTeachCard: View {
             }
             TextField("Explain what matters (optional)", text: $explanation, prompt: .a2Prompt("Explain what matters (optional)")).focused(explanationFocused)
                 .textFieldStyle(.plain).a2Field()
+            Text("Is it important?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
-                Button("Important") {
-                    Task {
-                        await model.giveFeedback(
-                            target: target, judgment: "important", explanation: explanation, targetValue: targetValue)
-                    }
-                }
-                .accessibilityIdentifier("email.feedback-important")
-                Button("Less important") {
-                    Task {
-                        await model.giveFeedback(
-                            target: target, judgment: "less_important", explanation: explanation,
-                            targetValue: targetValue)
-                    }
-                }
-                .accessibilityIdentifier("email.feedback-less-important")
-            }.buttonStyle(SecondaryCapsuleButtonStyle())
+                choice("Important", judgment: "important", identifier: "email.feedback-important")
+                choice("Less important", judgment: "less_important", identifier: "email.feedback-less-important")
+            }
                 .disabled(target == .person && targetValue.isEmpty)
                 .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
             HairlineDivider()
             Text("Does this thread need a reply?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
-                Button("Needs reply") { Task { await model.giveFeedback(target: .thread, judgment: "needs_reply") } }
-                Button("No reply needed") {
-                    Task { await model.giveFeedback(target: .thread, judgment: "no_reply_needed") }
-                }
-            }.buttonStyle(QuietCapsuleButtonStyle())
+                choice("Needs reply", judgment: "needs_reply", identifier: "email.feedback-needs-reply")
+                choice("No reply needed", judgment: "no_reply_needed", identifier: "email.feedback-no-reply")
+            }
         }.veetType(.ui).disabled(model.isPerformingAction).padding(.top, 4)
+    }
+
+    /// One choice in a row. The two rows are separate judgments, so a choice in one never clears
+    /// the other; a row marks the choice already given for the scope now showing.
+    private func choice(_ title: String, judgment: String, identifier: String) -> some View {
+        let kind = EmailFeedbackKind(judgment: judgment)
+        let scope = kind == .replyNeed ? EmailFeedbackTarget.thread : target
+        let value = kind == .replyNeed || target == .thread ? "" : targetValue
+        let given = model.feedbackGiven[kind]
+        let chosen = given?.judgment == judgment && given?.target == scope && given?.targetValue == value
+        return Button(title) {
+            Task {
+                if kind == .replyNeed {
+                    await model.giveFeedback(target: .thread, judgment: judgment)
+                } else {
+                    await model.giveFeedback(
+                        target: target, judgment: judgment, explanation: explanation, targetValue: targetValue)
+                }
+            }
+        }
+        .buttonStyle(FilterPillButtonStyle(selected: chosen))
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
     }
 
 }
