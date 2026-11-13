@@ -318,7 +318,8 @@ scans read thread summaries without message content and do not hold the
 principal mutation lock; pending archive reconciliation re-reads its one target
 under a short lock before applying an outcome. A list compares every thread's
 change mark on each request and re-reads only the summaries whose mark moved,
-so its cost follows what changed, not the size of the mailbox (ADR-0318). No email
+so its cost follows what changed, not the size of the mailbox (ADR-0318). Excluding
+a source drops that thread's kept summary once the erasure commits. No email
 command starts MCP servers while holding that lock (ADR-0103). Refresh, archive
 and source-exclusion audit sessions render no skill catalog, so they record an
 empty one without starting any MCP server. When the worker executes a typed

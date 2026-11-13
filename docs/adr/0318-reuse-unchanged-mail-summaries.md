@@ -57,6 +57,10 @@ read of a visit has nothing to show and waits for one or two full scans.
   plus the per-request filtering. At ten thousand threads on the in-memory
   store a repeat list request measured about 90 ms locally, against about
   550 ms before. The production figure is to be measured after deployment.
+- Excluding a source drops that thread's kept summary in the process that
+  handled the exclusion as soon as the erasure commits, waiting for any list of
+  that owner already in flight. Any other process drops its copy at that
+  owner's next list, or when the process restarts.
 - The first list after an API restart still reads every summary once.
 - Each API process holds one owner's summaries in memory, about 10 MB of
   source JSON at the current mailbox size.

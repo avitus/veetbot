@@ -1,10 +1,12 @@
 """A2 mailbox collections count authorized cached mail before pagination."""
 
-from typing import Any
+import asyncio
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 
+from agent_core.application.email import ThreadSummaryCache
 from agent_core.domain.email import EmailRecord
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
@@ -229,3 +231,53 @@ async def test_lists_reread_only_the_threads_that_changed(
         rows = {row["id"]: row["subject"] for row in after["items"]}  # type: ignore[attr-defined]
         assert rows == {str(kept.id): "Board materials", str(changed.id): "Moved date"}
         assert after["collection_counts"]["inbox"] == 2  # type: ignore[index]
+
+
+async def test_excluding_a_source_drops_its_kept_summary() -> None:
+    """An erased thread leaves no summary in the list's process memory (ADR-0318)."""
+    async with email_client() as (composition, client):
+        kept, _ = await seed_mail(composition)
+        erased, _ = await seed_mail(composition)
+        response = await client.get("/v1/email/threads", params={"view": "inbox", "limit": 100})
+        assert response.status_code == 200 and response.json()["total_count"] == 2
+        service: Any = composition.services.email
+        owner = (composition.principal.tenant_id, composition.principal.principal_id)
+        assert set(service._summaries._kept[owner]) == {str(kept.id), str(erased.id)}
+
+        await service.exclude_source(composition.principal, erased.id, erased.revision)
+
+        assert set(service._summaries._kept[owner]) == {str(kept.id)}
+
+
+async def test_forgetting_a_summary_waits_for_a_list_in_flight() -> None:
+    """A list that began before the erasure cannot put the summary back (ADR-0318)."""
+    async with email_client() as (composition, _):
+        erased, _ = await seed_mail(composition)
+        principal = composition.principal
+        cache = ThreadSummaryCache()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        class Held:
+            def __init__(self, store: Any) -> None:
+                self.store = store
+
+            async def list_thread_marks(self, *args: Any, **kwargs: Any) -> Any:
+                page = await self.store.list_thread_marks(*args, **kwargs)
+                started.set()
+                await release.wait()
+                return page
+
+            async def get_thread_summaries(self, *args: Any, **kwargs: Any) -> Any:
+                return await self.store.get_thread_summaries(*args, **kwargs)
+
+        async with composition.uow_factory() as uow:
+            reading = asyncio.create_task(cache.read(cast(Any, Held(uow.email)), principal))
+            await started.wait()
+            forgetting = asyncio.create_task(cache.forget(principal, [str(erased.id)]))
+            await asyncio.sleep(0)
+            assert not forgetting.done()
+            release.set()
+            assert [item.id for item in await reading] == [erased.id]
+            await forgetting
+        owner = (principal.tenant_id, principal.principal_id)
+        assert cache._kept[owner] == {}

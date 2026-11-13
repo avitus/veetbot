@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -161,6 +161,14 @@ class ThreadSummaryCache:
             while len(self._kept) > self.owners:
                 del self._kept[next(iter(self._kept))]
             return [current[key][1] for key in marks if key in current]
+
+    async def forget(self, principal: Principal, keys: Sequence[str]) -> None:
+        """Drop erased threads, after any list of this owner already in flight."""
+        owner = (principal.tenant_id, principal.principal_id)
+        async with self._reading.setdefault(owner, asyncio.Lock()):
+            kept = self._kept.get(owner, {})
+            for key in keys:
+                kept.pop(key, None)
 
 
 async def task_records(
@@ -4122,6 +4130,7 @@ class EmailExperienceService:
                         principal, kind, key, expected_revision=current_record.revision
                     )
             await self._bump_profile(uow.email, principal)
+        await self._summaries.forget(principal, [str(thread_id)])
         if self.forget_source is not None:
             await self.forget_source(principal, account_id, provider_id, message_ids)
         if self.cleanup_artifacts is not None:
