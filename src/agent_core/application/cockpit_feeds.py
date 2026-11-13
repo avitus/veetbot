@@ -170,6 +170,29 @@ class CockpitFeeds:
             )
         return feed, stored
 
+    async def mark_failed(self, principal: Principal, feed_id: str, *, error: str) -> bool:
+        """Report a refresh that did not finish, keeping the feed's last value and its age.
+
+        Returns whether there was a value to mark: a feed with no snapshot stays pending.
+        """
+
+        require_scope(principal, "cockpit.write")
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            if await uow.cockpit_feeds.get(principal, feed_id) is None:
+                return False
+            current = (await uow.cockpit_feeds.latest(principal, [feed_id])).get(feed_id)
+            if current is None:
+                return False
+            await uow.cockpit_feeds.publish(
+                current.model_copy(update={"error": error, "recorded_at": now}),
+                history_max=self._history_max,
+            )
+            await uow.cockpit_events.append(
+                principal, kind=CockpitEventKind.FEED_UPDATED, subject=feed_id, occurred_at=now
+            )
+        return True
+
     async def list_feeds(self, principal: Principal) -> list[Feed]:
         require_scope(principal, "cockpit.read")
         async with self._uow_factory() as uow:

@@ -642,7 +642,12 @@ five a day. Run-now refuses a request key with that prefix as
 `schedule.run_key_reserved`, so it can neither replay a refresh nor pass as
 one. It skips a schedule whose latest run is still going, or started
 under a minute ago. It reports a failed check for that schedule instead of
-raising it, and its completed run sends no report notification.
+raising it. Its session also carries the reserved marker
+`cockpit_entry_refresh: true`, and its run sends no report notification,
+whatever the outcome: the accountant enqueues no `schedule_run_finished`, and
+a `run_failed` alert is superseded before delivery (ADR-0320). A failed job run
+is reported on its tile instead
+([cockpit.md](cockpit.md#a-failed-run-shows-on-its-tile-adr-0320)).
 
 Validation rejects unknown cadence fields, naive datetimes, invalid IANA zones,
 duplicate or out-of-range weekdays, duplicate or out-of-range monthly days,
@@ -1166,7 +1171,8 @@ accounted, the outbox emits `schedule_run_finished`, which can arrive after the
 nominal instant by the duration of the scheduled run, unless the occurrence's
 pinned revision sets `notify: attention_only` and the run completed (ADR-0225
 part D); a failed or cancelled run, approvals, questions and skipped
-occurrences notify regardless. ADR-0091 subsequently
+occurrences notify regardless, except that a Cockpit refresh on entry never
+reports its run (ADR-0320). ADR-0091 subsequently
 authorizes the occurrence's pinned revision title and nominal firing time in
 the alert; instructions and run results remain excluded. The accountant and
 materializer pass the already loaded revision to notification production so

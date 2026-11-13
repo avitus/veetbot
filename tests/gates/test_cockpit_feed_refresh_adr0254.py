@@ -557,4 +557,13 @@ async def test_refresh_runs_leave_run_now_its_five_a_day_and_stay_quiet() -> Non
         assert failed is not None
         await _finish(composition, failed, RunStatus.FAILED)
         assert await accountant.account(failed)
-        assert [run.id for run in recorder.finished] == [failed]
+        # ADR-0320: the tile reports a failed refresh on entry, so no report is pushed.
+        assert recorder.finished == []
+        entry_session = (await _latest(composition, _id(1))).session_id
+        assert entry_session is not None and manual.session_id is not None
+        async with composition.uow_factory() as uow:
+            entry = await uow.sessions.get(entry_session, OWNER)
+            asked = await uow.sessions.get(manual.session_id, OWNER)
+        assert entry.metadata["cockpit_entry_refresh"] is True
+        assert entry.metadata["cockpit_refresh"] is True
+        assert "cockpit_entry_refresh" not in asked.metadata

@@ -19,6 +19,8 @@ from agent_core.ports.jobs import JobRunner
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 logger = logging.getLogger(__name__)
+# Worded by the platform: the reason may name a host, so it is never stored in a feed.
+REFRESH_FAILED = "The last refresh did not finish."
 
 
 class MCPReadsPort(Protocol):
@@ -131,6 +133,19 @@ class JobExecution:
             model=model,
             trial=True,
         )
+
+    async def _mark_feeds_failed(
+        self, principal: Principal, access: JobAccess, run_id: UUID
+    ) -> None:
+        """Show a failed run on each granted feed; never let that hide the failure itself."""
+        for feed_id in sorted(access.feeds):
+            try:
+                await self.feeds.mark_failed(principal, feed_id, error=REFRESH_FAILED)
+            except Exception as error:
+                logger.warning(
+                    "job_feed_failure_not_recorded",
+                    extra={"run_id": str(run_id), "error_class": type(error).__name__},
+                )
 
     async def _execute(
         self,
@@ -246,16 +261,22 @@ class JobExecution:
                 )
             return result
 
-        async with asyncio.timeout(access.timeout_seconds):
-            result = await self.runner(access.timeout_seconds).run(
-                program,
-                access.inputs,
-                tenant_id=principal.tenant_id,
-                run_id=run_id,
-                lease_epoch=lease_epoch,
-                dispatch=dispatch,
-            )
-        broker.check_result()
+        try:
+            async with asyncio.timeout(access.timeout_seconds):
+                result = await self.runner(access.timeout_seconds).run(
+                    program,
+                    access.inputs,
+                    tenant_id=principal.tenant_id,
+                    run_id=run_id,
+                    lease_epoch=lease_epoch,
+                    dispatch=dispatch,
+                )
+            broker.check_result()
+        except (ValueError, TimeoutError):
+            # ADR-0320: these end the run as failed, so its tiles say so.
+            if not trial:
+                await self._mark_feeds_failed(principal, access, run_id)
+            raise
         return JobResult(
             result.value, "\n".join([*logs, result.diagnostics]).strip(), result.broker_calls
         )

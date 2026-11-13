@@ -19,6 +19,10 @@ from agent_core.domain.web import is_public_https_url
 from agent_core.execution.egress_core import address_is_public
 from agent_core.ports.credentials import CredentialResolver
 
+# ADR-0320: one request waits far less than the shortest useful job limit, so a
+# stalled host is an error the program can handle instead of the end of its run.
+JOB_HTTP_TIMEOUT_SECONDS = 10
+
 
 async def resolve_job_host(host: str) -> tuple[str, ...]:
     """Resolve a hostname once and return distinct addresses for public-address checks."""
@@ -78,7 +82,11 @@ class JobHTTP:
         transport: httpx.AsyncBaseTransport | None = None,
         operator_hosts: frozenset[str] | None = None,
         stored_credentials: Callable[[str, str], Awaitable[tuple[str, SecretValue]]] | None = None,
+        timeout_seconds: float = JOB_HTTP_TIMEOUT_SECONDS,
     ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("A job request needs a positive time limit.")
+        self._timeout_seconds = timeout_seconds
         self._credentials = credentials
         self._stored_credentials = stored_credentials
         self._resolver = resolver
@@ -129,7 +137,7 @@ class JobHTTP:
             raise JobBrokerError("job.request_limit")
         transport = self._transport or httpx.AsyncHTTPTransport(trust_env=False, retries=0)
         try:
-            async with asyncio.timeout(30):
+            async with asyncio.timeout(self._timeout_seconds):
                 addresses = await self._resolver(host)
                 if not addresses or any(not address_is_public(address) for address in addresses):
                     raise JobBrokerError("job.address_refused")
@@ -166,7 +174,10 @@ class JobHTTP:
                     httpx.URL(url).copy_with(host=addresses[0]),
                     headers=headers,
                     content=encoded,
-                    extensions={"sni_hostname": host, "timeout": httpx.Timeout(30).as_dict()},
+                    extensions={
+                        "sni_hostname": host,
+                        "timeout": httpx.Timeout(self._timeout_seconds).as_dict(),
+                    },
                 )
                 response = await transport.handle_async_request(request)
                 try:

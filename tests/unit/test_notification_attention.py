@@ -250,3 +250,54 @@ async def test_operational_email_failure_cleanup_preserves_chat_alerts() -> None
         assert settled.status is NotificationStatus.SUPERSEDED
         assert (await uow.runs.get(hidden_run.id, owner)).status is RunStatus.FAILED
         assert (await uow.sessions.get(operational.id, owner)).metadata["email_operational"] is True
+
+
+async def test_a_failed_refresh_on_entry_is_never_pushed_but_a_timer_failure_is() -> None:
+    """ADR-0320: the tile reports an entry refresh; a failed timer run still alerts."""
+    from agent_core.adapters.determinism import SequenceIdFactory
+    from agent_core.adapters.push import FakePushTransport
+    from agent_core.application.notification_producer import NotificationProducer
+    from agent_core.domain.notifications import NotificationStatus
+    from agent_core.domain.runs import RunStatus
+    from tests.contract.support import memory_uow_factory, run, session
+    from tests.contract.test_device_registry_contract import device
+    from tests.unit.test_notification_dispatcher_m12 import _dispatcher
+
+    clock, factory = await memory_uow_factory()
+    ids = SequenceIdFactory()
+    owner = principal()
+    on_entry = session().model_copy(
+        update={
+            "id": UUID(int=9501),
+            "metadata": {"cockpit_refresh": True, "cockpit_entry_refresh": True},
+        }
+    )
+    on_timer = session().model_copy(
+        update={"id": UUID(int=9503), "metadata": {"cockpit_refresh": True}}
+    )
+    entry_run = run(status=RunStatus.FAILED).model_copy(
+        update={"id": UUID(int=9502), "session_id": on_entry.id}
+    )
+    timer_run = run(status=RunStatus.FAILED).model_copy(
+        update={"id": UUID(int=9504), "session_id": on_timer.id}
+    )
+    producer = NotificationProducer(clock=clock, ids=ids)
+    async with factory() as uow:
+        await uow.devices.upsert(device(), owner)
+        for hidden, failed in ((on_entry, entry_run), (on_timer, timer_run)):
+            await uow.sessions.create(hidden)
+            await uow.runs.create(failed)
+            assert await producer.for_run_transition(
+                uow, run=failed, principal_id=owner.principal_id, status=RunStatus.FAILED
+            )
+        rows = await uow.notification_outbox.list(owner, limit=10)
+    quiet = next(row for row in rows if row.run_id == entry_run.id)
+    loud = next(row for row in rows if row.run_id == timer_run.id)
+    transport = FakePushTransport()
+    assert await _dispatcher(factory, clock, ids, transport).run_once() == 2
+    assert len(transport.calls) == 1
+    async with factory() as uow:
+        [settled] = await uow.notification_outbox.get_many(owner, (quiet.id,))
+        [sent] = await uow.notification_outbox.get_many(owner, (loud.id,))
+    assert settled.status is NotificationStatus.SUPERSEDED
+    assert sent.status is not NotificationStatus.SUPERSEDED

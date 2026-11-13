@@ -457,4 +457,5 @@ nav:
       - "ADR-0316: Recognize unresolved sign-ins and retry checks": adr/0316-retry-transient-device-sign-in-checks.md
       - "ADR-0317: Evidence-backed email replies": adr/0317-evidence-backed-email-replies.md
       - "ADR-0318: Reuse unchanged mail summaries": adr/0318-reuse-unchanged-mail-summaries.md
+      - "ADR-0320: A failed refresh shows on its tile": adr/0320-failed-refresh-shows-on-the-tile.md
   - Changelog: changelog.md

@@ -225,3 +225,124 @@ async def test_a_lost_timing_event_does_not_lose_the_broker_result(
     )
     assert result.value == {"outcomes": ["succeeded", "succeeded"]}
     assert calls == 2
+
+
+class StalledRunner:
+    """Stands in for a sandboxed program that outlasts its limit."""
+
+    async def run(self, program: JobProgram, inputs: Any, **kwargs: Any) -> JobResult:
+        raise TimeoutError
+
+
+FEED_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["tasks"],
+    "properties": {"tasks": {"type": "array"}},
+}
+
+
+async def _feed_job(
+    feed_ids: frozenset[str], runner: Any
+) -> tuple[JobExecution, CockpitFeeds, Any, Any]:
+    clock, factory = await memory_uow_factory()
+    owner = principal().model_copy(update={"scopes": {"cockpit.read", "cockpit.write"}})
+    saved = record(owner)
+    revision = saved.revisions[str(UUID(int=1))]
+    grant = saved.grants[str(UUID(int=2))]
+    saved = saved.model_copy(
+        update={
+            "revisions": {
+                str(revision.id): revision.model_copy(
+                    update={"manifest": revision.manifest.model_copy(update={"feeds": feed_ids})}
+                )
+            },
+            "grants": {
+                str(grant.id): grant.model_copy(
+                    update={"access": JobAccess({"items": [1]}, {}, feeds=feed_ids)}
+                )
+            },
+        }
+    )
+    async with factory() as uow:
+        await uow.jobs.put(saved, expected_version=None)
+        await uow.runs.create(run())
+    feeds = CockpitFeeds(
+        uow_factory=factory, clock=clock, schema_check=Draft202012SchemaCheck(), history_max=10
+    )
+
+    async def unused(**kwargs: Any) -> dict[str, Any]:
+        pytest.fail("No remote call was expected.")
+
+    service = JobExecution(
+        uow_factory=factory,
+        clock=clock,
+        runner=lambda timeout: runner,
+        schema_check=Draft202012SchemaCheck(),
+        http=unused,
+        feeds=feeds,
+    )
+    return service, feeds, owner, clock
+
+
+async def test_a_failed_run_marks_its_feeds_failed_and_keeps_their_last_values() -> None:
+    """ADR-0320: the tile, not a push, reports a refresh that did not finish."""
+    service, feeds, owner, clock = await _feed_job(
+        frozenset({"agent.garden", "agent.never-published"}), StalledRunner()
+    )
+    _, good = await feeds.publish(
+        owner,
+        "agent.garden",
+        data={"tasks": ["water"]},
+        expected_interval_seconds=21600,
+        schema=FEED_SCHEMA,
+    )
+    clock.advance(timedelta(hours=1))
+
+    async def unused(**kwargs: Any) -> dict[str, Any]:
+        pytest.fail("No model call was expected.")
+
+    with pytest.raises(TimeoutError):
+        await service.run(
+            principal=owner,
+            slug="count-items",
+            revision_id=UUID(int=1),
+            grant_id=UUID(int=2),
+            run_id=RUN_ID,
+            lease_epoch=1,
+            model=unused,
+        )
+    reading = await feeds.read(owner, "agent.garden", history=0)
+    assert reading.current is not None
+    assert reading.current.sequence == good.sequence + 1
+    assert reading.current.error == "The last refresh did not finish."
+    assert reading.current.data == {"tasks": ["water"]}
+    assert reading.current.observed_at == good.observed_at
+    assert reading.current.expected_interval_seconds == 21600
+    # A feed the job has never published stays pending: there is nothing to mark.
+    assert [feed.id for feed in await feeds.list_feeds(owner)] == ["agent.garden"]
+
+
+async def test_a_run_that_completes_leaves_its_feeds_alone() -> None:
+    service, feeds, owner, _ = await _feed_job(frozenset({"agent.garden"}), Runner())
+    _, good = await feeds.publish(
+        owner,
+        "agent.garden",
+        data={"tasks": []},
+        expected_interval_seconds=21600,
+        schema=FEED_SCHEMA,
+    )
+
+    async def unused(**kwargs: Any) -> dict[str, Any]:
+        pytest.fail("No model call was expected.")
+
+    await service.run(
+        principal=owner,
+        slug="count-items",
+        revision_id=UUID(int=1),
+        grant_id=UUID(int=2),
+        run_id=RUN_ID,
+        lease_epoch=1,
+        model=unused,
+    )
+    reading = await feeds.read(owner, "agent.garden", history=0)
+    assert reading.current == good

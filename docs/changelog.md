@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-13 — A failed widget refresh shows on its tile (ADR-0320)
+
+- Opening Cockpit no longer sends a "Run failed" notification when a widget's
+  refresh fails. The tile shows that its last refresh did not finish and keeps
+  its last value. A failed scheduled refresh still notifies.
+- One web request from a widget's job waits ten seconds at most, so a stalled
+  source is an error the job can report instead of the end of its run.
+
 ## 2026-11-09 — HTML email stays readable
 
 - HTML-only messages with retained HTML no longer display stylesheet code above
