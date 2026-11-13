@@ -457,4 +457,5 @@ nav:
       - "ADR-0316: Recognize unresolved sign-ins and retry checks": adr/0316-retry-transient-device-sign-in-checks.md
       - "ADR-0317: Evidence-backed email replies": adr/0317-evidence-backed-email-replies.md
       - "ADR-0318: Reuse unchanged mail summaries": adr/0318-reuse-unchanged-mail-summaries.md
+      - "ADR-0319: Pinned call agent and fifteen-minute calls": adr/0319-pinned-willow-agent-and-fifteen-minute-calls.md
   - Changelog: changelog.md

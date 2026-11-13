@@ -65,6 +65,18 @@ release supporting `assistant_name` before adding the field; older releases
 reject it. Upgrading to the explicit assistant identity changes the normalized
 configuration revision, so obtain fresh approvals for any pending calls.
 
+`max_duration_minutes` is at most 15 and defaults to 5. To run outbound calls
+on a Bland V2 agent (ADR-0319), add both `agent_id` and `agent_version`, for
+example `"agent_version": "1.0.0"`. Use the minted version number shown after
+publishing; `production`, `latest` and other moving selectors are refused.
+Before pinning, review that version at the provider: the owner's introduction,
+a truthful answer when asked about AI identity or transcription, recipient
+speaks first, recording off, and no tools, transfers, memory or knowledge
+sources. Removing both fields restores the prompt-based outbound call. When the
+number is attached to the agent, the generated inbound prompt below no longer
+applies; read back the number's callback URL, recording and transfer fields
+instead, and keep the callback pointed at Veetbot.
+
 The file is a bounded, closed schema. Keep it writable only by the operator.
 Its SHA-256 revision pins the outbound approval; restart the application and
 workers after a reviewed change. Existing approvals using an old revision cannot
