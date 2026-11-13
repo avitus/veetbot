@@ -8,19 +8,26 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from agent_core.adapters.browser import playwright as playwright_adapter
 from agent_core.adapters.browser.page_readiness import DOM_QUIET_SCRIPT
 from agent_core.domain.browser import BrowserAction, BrowserActionKind
 from agent_core.domain.browser_diagnostics import collect_browser_diagnostics
 from tests.unit.test_browser_runtime_real_chromium import browsing, html
 
 
-@pytest.mark.parametrize("input_type", ["checkbox", "radio"])
 async def test_covered_check_is_refused_without_an_effect_and_can_be_observed_again(
-    input_type: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A covered check must leave time for recovery instead of an uncertain timeout."""
+    """A covered check must leave time for recovery instead of an uncertain timeout.
+
+    A radio takes the same check path as a checkbox. The click bound's value is
+    pinned by ``test_browser_check_dispatch``; here a shorter one only makes the
+    covered check fail sooner.
+    """
     from agent_core.domain.browser import BrowserAction, BrowserActionKind, BrowserProviderError
 
+    monkeypatch.setattr(playwright_adapter, "CLICK_TIMEOUT_MILLISECONDS", 1_500)
+    input_type = "checkbox"
     effects: list[bool] = []
 
     async def home(request: Request) -> Response:

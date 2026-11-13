@@ -515,29 +515,16 @@ async def test_a_form_the_next_document_draws_late_does_not_confirm_a_sign_in(
     assert status.status is BrowserAuthenticationStatus.CANCELLED
 
 
-async def test_a_page_anyone_can_see_does_not_confirm_a_sign_in(tmp_path: Path) -> None:
-    require_real_browser()
-    members = MembersSite()
-    async with (
-        local_https_site(members.app) as site,
-        profile_service(site, tmp_path / "profiles") as service,
-    ):
-        response, ceremony_id = await hand_off(
-            service, cookie=await signed_in_cookie(members), confirmed_path="/"
-        )
-        status = await service.sessions.authentication_status(ceremony_id, OWNER)
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "session_unconfirmed"
-    assert status.status is BrowserAuthenticationStatus.CANCELLED
-
-
 @pytest.mark.parametrize("outcome", ["ready", "signed_out", "challenge", "unconfirmed"])
 @pytest.mark.parametrize("resource", ["image", "embedded_page"])
 async def test_a_pending_image_does_not_prevent_the_site_from_verifying_the_session(
     tmp_path: Path, outcome: str, resource: str
 ) -> None:
-    """The site's document can prove or reject sign-in while a passive resource waits."""
+    """The site's document can prove or reject sign-in while a passive resource waits.
+
+    ``unconfirmed`` confirms on ``/``, a page anyone can see, so the signed-out
+    control reads the same page and nothing proves the sign-in.
+    """
     require_real_browser()
     release_image = asyncio.Event()
     image_requested = asyncio.Event()
@@ -592,10 +579,14 @@ async def test_a_pending_image_does_not_prevent_the_site_from_verifying_the_sess
     embedded_app = Starlette(
         routes=[Route("/frame", members.frame), Route("/pending.svg", members.image)]
     )
+    # An unconfirmed control waits for a sign-in form until five seconds before
+    # the budget ends; a shorter budget ends that wait sooner and still leaves
+    # room for the second look.
+    budget = 20 if outcome == "unconfirmed" else 30
     async with (
         local_https_site(members.app) as site,
         local_https_site(embedded_app, host="resource.test") as resources,
-        profile_service(site, tmp_path / "profiles") as service,
+        profile_service(site, tmp_path / "profiles", verification_seconds=budget) as service,
     ):
         site.relay.targets.update(resources.relay.targets)
         cookie = await signed_in_cookie(members)

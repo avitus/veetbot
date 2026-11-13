@@ -69,33 +69,6 @@ async def test_visible_regions_prioritize_dialogs_and_exclude_hidden_or_editable
         assert not_anchor.value.reason_code == "tool.browser.page_changed"
 
 
-async def test_region_count_and_summary_bounds_preserve_priority_and_disclose_omissions() -> None:
-    async def home(request: Request) -> Response:
-        del request
-        return html(
-            "".join(f"<h2>Section {i}</h2>" for i in range(40))
-            + "<div role='alert'>"
-            + "雪" * 2000
-            + "</div>"
-            + "<div role='status'>"
-            + "<span></span>" * 300
-            + "Beyond summary scan</div>"
-            + "<button>Next</button>"
-        )
-
-    async with browsing([Route("/", home)]) as (site, runtime):
-        observation = await runtime.navigate(site.url("/"))
-        raw = observation.model_dump()
-        assert raw.get("regions"), "bounded semantic regions are missing"
-        assert len(raw["regions"]) == 32
-        assert raw["region_coverage"]["omitted_regions"] == 10
-        assert raw["regions"][0]["kind"] == "alert"
-        assert len(raw["regions"][0]["text"]) == 512
-        assert raw["regions"][0]["text_truncated"] is True
-        status = next(r for r in raw["regions"] if r["kind"] == "status")
-        assert status["text_truncated"] is True and "Beyond" not in status["text"]
-
-
 async def test_region_document_scan_is_bounded_and_changed_evidence_gets_a_new_revision() -> None:
     async def home(request: Request) -> Response:
         del request

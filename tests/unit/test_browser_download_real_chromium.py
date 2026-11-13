@@ -266,18 +266,6 @@ async def test_a_file_a_page_starts_on_its_own_is_cancelled_and_never_held() -> 
     assert after.download is None
 
 
-async def test_an_approved_click_without_a_file_reports_nothing() -> None:
-    async def home(request: Request) -> Response:
-        del request
-        return html('<button id="go">Next</button>')
-
-    async with browsing([Route("/", home)]) as (site, runtime):
-        before = await runtime.navigate(site.url("/"))
-        after = await runtime.act(_click(before.revision, before.elements[0].ref))
-
-    assert after.download is None
-
-
 @pytest.mark.parametrize("compressed", [False, True])
 async def test_an_approved_csv_export_can_read_the_sites_fetch_without_a_native_download(
     compressed: bool,

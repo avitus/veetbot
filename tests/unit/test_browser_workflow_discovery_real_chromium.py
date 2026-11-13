@@ -31,7 +31,8 @@ from tests.unit.test_config import base_environment
 @pytest.mark.parametrize(
     "controls,shadow,loss,replace",
     [
-        (300, False, False, False),
+        # 768 controls is the plain found-and-verified path; 300 controls is
+        # found after one expansion and varies shadow, lost response and replace.
         (300, True, False, False),
         (768, False, False, False),
         (1100, False, False, False),

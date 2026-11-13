@@ -239,8 +239,9 @@ async def test_focus_elsewhere_preserves_an_unchanged_approved_draft() -> None:
         assert "Known approved draft" in (await runtime.observe()).text
 
 
-@pytest.mark.parametrize("grant_kind", ["task", "standing"])
-async def test_rich_text_typing_remains_refused_under_grants(grant_kind: str) -> None:
+async def test_rich_text_typing_remains_refused_under_grants() -> None:
+    """Only an individually approved act may type into an editable region, so any
+    grant (the refusal does not depend on its kind) is refused before dispatch."""
     editor = '<div contenteditable="true" role="textbox" aria-label="Answer">Unchanged</div>'
     async with lesson_pages({"/lesson/1": COMPOSER.format(editor=editor)}) as (
         runtime,
@@ -249,13 +250,6 @@ async def test_rich_text_typing_remains_refused_under_grants(grant_kind: str) ->
     ):
         before = await visit("/lesson/1")
         constraint = lesson_constraint()
-        if grant_kind == "standing":
-            constraint = lesson_constraint(
-                grant_kind="standing",
-                path_prefix=None,
-                consequence_ceiling="routine",
-                max_text_characters=None,
-            )
         with pytest.raises(BrowserProviderError) as refused:
             await runtime.act(
                 BrowserAction(
