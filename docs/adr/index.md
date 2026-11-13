@@ -368,3 +368,4 @@ implementation without one.
 - [ADR-0316: Recognize unresolved sign-ins and retry temporary checks (Proposed)](0316-retry-transient-device-sign-in-checks.md)
 
 - [ADR-0317: Gather evidence and stage attachments before drafting email replies (Accepted)](0317-evidence-backed-email-replies.md)
+- [ADR-0318: A mail list re-reads only the threads that changed (Accepted)](0318-reuse-unchanged-mail-summaries.md)

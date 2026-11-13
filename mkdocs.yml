@@ -456,4 +456,5 @@ nav:
       - "ADR-0315: Bounded workflow target discovery": adr/0315-bounded-workflow-target-discovery.md
       - "ADR-0316: Recognize unresolved sign-ins and retry checks": adr/0316-retry-transient-device-sign-in-checks.md
       - "ADR-0317: Evidence-backed email replies": adr/0317-evidence-backed-email-replies.md
+      - "ADR-0318: Reuse unchanged mail summaries": adr/0318-reuse-unchanged-mail-summaries.md
   - Changelog: changelog.md

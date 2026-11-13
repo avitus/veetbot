@@ -168,22 +168,20 @@ async def test_mailbox_scan_does_not_hold_up_selected_thread(
     async with email_client() as (app, _):
         thread, _ = await seed_mail(app)
         scanning, release = asyncio.Event(), asyncio.Event()
-        original = InMemoryEmailStore.list
+        # The inbox reads change marks first (ADR-0318); maintenance pages full records.
+        scan = "list_thread_marks" if background == "inbox" else "list"
+        original = getattr(InMemoryEmailStore, scan)
 
         async def delayed_scan(
-            store: InMemoryEmailStore,
-            principal: Principal,
-            kind: str,
-            *,
-            after: str | None = None,
-            limit: int = 1000,
-        ) -> list[EmailRecord]:
-            if kind == "thread" and not scanning.is_set():
+            store: InMemoryEmailStore, principal: Principal, *kind: str, **page: Any
+        ) -> list[Any]:
+            if kind in {(), ("thread",)} and not scanning.is_set():
                 scanning.set()
                 await release.wait()
-            return await original(store, principal, kind, after=after, limit=limit)
+            rows: list[Any] = await original(store, principal, *kind, **page)
+            return rows
 
-        monkeypatch.setattr(InMemoryEmailStore, "list", delayed_scan)
+        monkeypatch.setattr(InMemoryEmailStore, scan, delayed_scan)
         service = app.services.email
         work = asyncio.create_task(
             service.threads(app.principal)

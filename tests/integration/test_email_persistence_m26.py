@@ -70,6 +70,28 @@ async def test_postgres_thread_summaries_omit_content_and_mask_pending_erasure()
         await session.rollback()
 
 
+async def test_postgres_thread_marks_change_with_the_summary_and_pending_erasure() -> None:
+    from tests.contract.test_email_store_contract import thread_mark_contract, thread_record
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        store = PostgresEmailStore(session)
+        await thread_mark_contract(store)
+        await store.put(thread_record("mark-erased"), expected_revision=0)
+        before = dict(await store.list_thread_marks(principal()))
+        await session.execute(
+            update(EmailRecordRow)
+            .where(EmailRecordRow.kind == "thread", EmailRecordRow.key == "mark-erased")
+            .values(erasure_pending=True)
+        )
+        after = dict(await store.list_thread_marks(principal()))
+        assert after["mark-erased"] != before["mark-erased"]
+        assert after["mark-a"] == before["mark-a"]
+        [erased] = await store.get_thread_summaries(principal(), ["mark-erased"])
+        assert erased.payload["reason"] == "Related People memory was erased."
+        await session.rollback()
+
+
 async def test_email_records_roll_back_with_the_owning_transaction() -> None:
     async with database() as engine:
         factory = create_session_factory(engine)

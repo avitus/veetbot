@@ -153,10 +153,10 @@ itself. Research completion must not be represented as a completed external acti
 
 ## Current status
 
-Implemented and locally verified for development delivery. Sending remains under the owner's
-exact-message consent. The owner subsequently authorized PR 250, review fixes and
-merge after verification. Production delivery and regeneration of the owner's real
-reply remain pending. No milestone or production acceptance is claimed.
+PR 250 merged and deployed as revision `9870bb7`. Sending remains under the owner's
+exact-message consent. Autonomous production regeneration then exposed the read-budget
+failure described below; a targeted retry succeeded. The follow-up budget repair is
+for dev delivery only and has not been production-verified. No milestone is completed.
 
 ## Local verification
 
@@ -190,9 +190,9 @@ run in the headless Tart macOS VM.
 - Lint, full typing and strict documentation checks passed. Citation repairs were
   reviewed; no gate or milestone was marked complete.
 
-Production delivery and representative private drafting evaluation are pending.
-Retrieval success, correct document selection, unnecessary-clarification rate,
-latency and cost have not yet been measured against the owner's live mailbox.
+These initial local checks preceded production delivery. The later private
+research-budget acceptance below records retrieval, selection, clarification,
+latency and cost for one original-message replay; broader evaluation remains open.
 
 ## Review hardening
 
@@ -239,6 +239,55 @@ and 45 researched-reply tests passed. The full native sweep then passed 1,209
 tests in 103 suites plus four contrast tests. The attachment tests also reject changed
 file IDs and digests despite allowing a redacted filename. Lint, typing and
 strict documentation checks passed in the isolated sandboxes.
+
+## Research-budget repair
+
+The initial autonomous production preparation exhausted its ten-read allowance
+by opening unrelated search matches after finding the requested source. The
+subsequent targeted retry worked but did not establish unassisted acceptance.
+The repair retains all existing caps: discovery yields after a complete file-bearing
+source, exposes unread observed matches for deliberate selection, reserves selected
+file reads, reuses identical governed reads and preflights the entire staging set.
+A promise of a future supplement alone does not make that supplement essential;
+explicitly requested or otherwise essential missing files still block preparation.
+
+The fabricated broad-search regression first failed with `DraftPreparationError`
+under `circleci testsuite run static --run-tests=all -t
+'^tests/unit/test_email_research_budget.py$'`. The repaired focused suite passed
+157 tests, including unread-source selection, repeated-query reuse, forged-source
+rejection, complete-set overflow without partial downloads, existing-draft
+preservation and governed file/send boundaries. A further regression reproduced
+preparing a proposal after the read allowance interrupted source pagination.
+That incomplete-source path now fails closed; the final focused run passed all
+60 tests, including the current dev summary-erasure cases.
+
+The final full static sweep ran 600 atoms: 10,318 tests passed and three existing
+root-permission checks skipped. Its one failure was the workflow test asserting
+the default two workers: the invocation's four-worker environment override was
+inherited by that test's nested Make process. No product or test change was made
+for this runner mismatch; all 12 tests in the affected file passed without the
+override. The full sweep took 634.95 seconds, plus 51.952 seconds of discovery.
+Lint, full typing (1,829 sources) and strict docs checks passed; citation repairs
+remain limited to shifted references.
+
+A private acceptance replay used the original owner-selected incoming message,
+without a current draft, source subject/date hints or a supplied file count. The
+production model policy ran against recorded mailbox/calendar results and original
+file bytes in the isolated Linux sandbox. A supplemental read-only mailbox search
+checked a separately promised document; only the original source matched. The
+candidate produced a ready, unsent proposal with all four expected file digests,
+no signature image and no clarification question: ten tool reads, three model
+calls, 22.06 seconds and USD 0.243076 in recorded model usage. A second original-message
+replay on the final candidate also passed with the same four digests and ten reads,
+in 20.92 seconds for USD 0.243076. An earlier candidate
+incorrectly treated the promise of a future supplement as a blocking requirement;
+the clarified selection guidance resolved that failure without allowing missing
+essential files. A separate negative control explicitly required the missing
+supplement and correctly refused preparation without a draft or partial staging
+(five reads, three model calls, 23.03 seconds). These private cases are not a
+reliability estimate or proof of a deployed repair. Correspondence, filenames, recordings and credentials remain
+outside the repository. This follow-up is for dev delivery only; it neither sends
+mail nor updates the production draft, and it moves no milestone gate.
 
 ## Protected transport
 

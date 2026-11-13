@@ -9,7 +9,6 @@ import pytest
 from agent_core.adapters.persistence.email import PostgresEmailStore
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
-from agent_core.domain.email import EmailRecord
 from agent_core.domain.errors import NotFoundError
 from tests.gates.test_email_experience_m26 import seed_mail
 from tests.integration.m2_support import database_settings
@@ -35,14 +34,14 @@ async def test_postgres_mailbox_scan_does_not_block_thread_read(
     ) as app:
         thread, draft = await seed_mail(app)
         scanning, release = asyncio.Event(), asyncio.Event()
-        # The inbox reads summaries; maintenance pages full thread records.
-        scan = "list_thread_summaries" if background == "inbox" else "list"
+        # The inbox reads change marks first (ADR-0318); maintenance pages full records.
+        scan = "list_thread_marks" if background == "inbox" else "list"
         original = getattr(PostgresEmailStore, scan)
 
         async def held_scan(
             store: PostgresEmailStore, owner: Principal, *kind: str, **page: Any
-        ) -> list[EmailRecord]:
-            rows: list[EmailRecord] = await original(store, owner, *kind, **page)
+        ) -> list[Any]:
+            rows: list[Any] = await original(store, owner, *kind, **page)
             if kind in {(), ("thread",)} and not scanning.is_set():
                 scanning.set()
                 await release.wait()

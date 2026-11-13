@@ -63,6 +63,26 @@ class EmailStore(Protocol):
         """
         ...
 
+    async def list_thread_marks(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[tuple[str, str]]:
+        """Key-ordered `(key, mark)` pairs for `thread` records, without payloads.
+
+        A mark is opaque and changes whenever that thread's summary read would,
+        so a list re-reads only the summaries whose marks moved (ADR-0318).
+        """
+        ...
+
+    async def get_thread_summaries(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        """The named threads' summaries in key order; at most one thousand keys.
+
+        Absent and foreign keys are omitted. Payloads omit `messages` exactly as
+        `list_thread_summaries` does.
+        """
+        ...
+
     async def list_semantic_window(
         self,
         principal: Principal,

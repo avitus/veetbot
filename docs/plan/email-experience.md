@@ -316,7 +316,10 @@ draft. They do not sweep unrelated threads, drafts or draft histories, and
 neither does admitting an operation or endorsing a writing example. Inbox
 scans read thread summaries without message content and do not hold the
 principal mutation lock; pending archive reconciliation re-reads its one target
-under a short lock before applying an outcome. No email
+under a short lock before applying an outcome. A list compares every thread's
+change mark on each request and re-reads only the summaries whose mark moved,
+so its cost follows what changed, not the size of the mailbox (ADR-0318). Excluding
+a source drops that thread's kept summary once the erasure commits. No email
 command starts MCP servers while holding that lock (ADR-0103). Refresh, archive
 and source-exclusion audit sessions render no skill catalog, so they record an
 empty one without starting any MCP server. When the worker executes a typed
@@ -748,6 +751,18 @@ check MIME wrapping and outer base64 expansion against the existing 24 MiB cap,
 so the 15 MiB decoded-file cap never implies that every such message fits transport.
 Source pages consume the same ten-read allowance; an unfinished required source
 is a preparation failure, not evidence that a document is absent.
+
+Discovery yields to planning after a complete source offers files. Planning receives
+remaining reads and observed unread search matches, and may select those matches
+by opaque IDs in the next round. Reserve reads for selected files, and for verifying
+any mailbox of theirs not yet verified, before optional further discovery; identical governed reads reuse durable results. Admit the whole
+selected staging set before downloading any of it. All existing caps remain.
+A general request for meeting materials refers to the relevant documents actually
+circulated. A source's promise of a future supplement alone does not establish
+that it was circulated or that the requester requires it. Search for relevant
+supplements within budget; describe exactly the materials attached without claiming
+an unverified complete packet. An explicitly requested or otherwise essential
+missing document still blocks preparation, as does an unfinished required source.
 
 Set `AGENT_EMAIL_OWNER_TIMEZONE` to the owner’s IANA zone for planning, including
 mail-only preparation. When unset, selected-calendar metadata supplies the zone
@@ -1462,7 +1477,10 @@ and updated time are explicit columns. The repository never returns mutable
 aliases into stored payloads. Key-ordered pagination accepts an exclusive `after`
 key and a limit from one to one thousand. A thread-summary read pages the same
 thread records with `messages` omitted; PostgreSQL drops them in the query, so
-listing neither transfers nor decodes message bodies. `put` compares the exact existing
+listing neither transfers nor decodes message bodies. A thread-mark read pages
+thread keys with an opaque mark that changes whenever that thread's summary
+would, including when erasure is fenced, and a keyed summary read returns up to
+one thousand named threads in key order, omitting absent ones (ADR-0318). `put` compares the exact existing
 revision (zero means absent), requires the new revision to be expected plus one,
 and raises a conflict without mutation on a mismatch. Delete likewise requires
 the exact positive existing revision; missing or foreign records conflict.
