@@ -2037,7 +2037,10 @@ def _load_settings(
                 raise ConfigurationError("calling requires BLAND_API_KEY_FILE")
             call_key = _read_private_surface_secret_file(call_key_path, "BLAND_API_KEY_FILE")
             credential_json = json.dumps(
-                {"api_key": call_key, "configuration": call_configuration.model_dump()},
+                {
+                    "api_key": call_key,
+                    "configuration": call_configuration.provider_configuration(),
+                },
                 sort_keys=True,
             )
             for server_id in ("bland_read", "bland_call"):
