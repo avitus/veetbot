@@ -2290,8 +2290,11 @@ collection; it cannot mix other actions into that recipe. It seeks six distinct
 linked excerpts from at most four windows of three articles, accepting explicitly
 partial excerpts but never missing/invalid links. Exact home location and X post
 URL structure are mandatory; post IDs deduplicate evidence. Up to six empty or
-stale-read retries wait one second and recheck bounds before dispatch. The empty
-home shell cannot complete collection. A window of only unseen unlinked articles
+stale-read retries wait one second and recheck bounds before dispatch. A home
+navigation that only timed out is repeated at most twice, likewise bounded: the
+first call also acquires and verifies the signed-in browser, which can leave the
+page load too little of its allowance. Exhausted startup recovery stays final.
+The empty home shell cannot complete collection. A window of only unseen unlinked articles
 (an ad, or an incomplete or ambiguous link walk) is scrolled past, never reread;
 excerpt digests recognize it. Repeated content ends with an explicit
 insufficient-evidence result. At most three bounded scrolls use one unique fresh

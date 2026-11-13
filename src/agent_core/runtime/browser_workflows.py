@@ -21,6 +21,7 @@ from agent_core.domain.messages import TextPart, ToolCallItem, ToolResultItem, U
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import BudgetScope, RunOutcome, Step
 from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
+from agent_core.domain.tools import ToolOutcome
 from agent_core.runtime.loop import (
     RunContext,
     apply_tool_evidence,
@@ -63,6 +64,27 @@ def _observation(result: ToolResultItem | None) -> BrowserObservation | None:
             except ValueError:
                 pass
     return None
+
+
+MAXIMUM_NAVIGATION_RETRIES = 2
+
+
+def _retryable_navigation(result: ToolResultItem | None) -> bool:
+    """A navigation that only ran out of time read nothing and can repeat.
+
+    Exhausted startup recovery (``provider_unavailable``) stays final: its three
+    acquisition attempts are the whole allowance.
+    """
+    if result is None or not result.is_error:
+        return False
+    for part in result.content[:1]:
+        if isinstance(part, TextPart):
+            try:
+                outcome = ToolOutcome.model_validate_json(part.text)
+            except ValueError:
+                return False
+            return outcome.retryable and outcome.reason_code == "tool.timeout"
+    return False
 
 
 def _control_continuation(
@@ -262,6 +284,19 @@ class BrowserWorkflowRunner:
                 )
                 if state["status"] != "running":
                     return None
+                continue
+            if (
+                step.kind == "navigate"
+                and state["phase"] == "read"
+                and _retryable_navigation(result)
+                and state.get("navigation_retries", 0) < MAXIMUM_NAVIGATION_RETRIES
+            ):
+                # The first call also acquires and verifies the signed-in browser, which
+                # can leave the page load too little of the tool's time. The lease then
+                # exists, so the same read-only navigation is repeated, inside every bound.
+                state["navigation_retries"] = state.get("navigation_retries", 0) + 1
+                await context.clock.sleep(1)
+                await self._queue(context, state, "read", "browser.navigate", {"url": step.url})
                 continue
             if result is not None:
                 if state["phase"] == "action":

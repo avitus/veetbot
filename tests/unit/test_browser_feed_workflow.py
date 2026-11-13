@@ -334,6 +334,57 @@ async def test_unlinked_window_that_never_moves_stops_bounded() -> None:
         assert provider.reads <= 8
 
 
+class SlowStartProvider(FeedProvider):
+    """The first home navigations outlast the tool's time allowance."""
+
+    def __init__(self, *, timeouts: int) -> None:
+        super().__init__()
+        self.timeouts = timeouts
+
+    async def navigate(self, url: str) -> BrowserObservation:
+        self.navigations.append(url)
+        if len(self.navigations) <= self.timeouts:
+            raise TimeoutError
+        return self._observation(url)
+
+
+async def test_home_navigation_that_times_out_is_retried_before_collection() -> None:
+    # Production 2026-11-12: acquiring and verifying the signed-in browser took 25 of
+    # the first call's 30 seconds, the home navigation timed out, and the briefing
+    # stopped with nearly all of its collection ceiling unspent.
+    provider = SlowStartProvider(timeouts=1)
+    async with feed_app(provider) as app:
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await app.runs.submit(INTENT, session.id)
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        state = checkpoint.working_state["browser_workflow"]
+        assert state["status"] == "verified", "one slow home navigation ended the briefing"
+        assert provider.navigations == ["https://x.com/home"] * 2
+        assert len(state["feed"]["post_ids"]) == 6
+
+
+async def test_home_navigation_that_keeps_timing_out_stops_bounded() -> None:
+    provider = SlowStartProvider(timeouts=100)
+    async with feed_app(provider) as app:
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await app.runs.submit(INTENT, session.id)
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+        assert checkpoint is not None
+        state = checkpoint.working_state["browser_workflow"]
+        assert state["status"] == "unverified"
+        assert provider.navigations == ["https://x.com/home"] * 3
+        assert not provider.reads and not provider.actions
+
+
 async def test_stale_extraction_recovers_with_fresh_evidence() -> None:
     class Provider(FeedProvider):
         stale = True
