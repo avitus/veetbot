@@ -72,7 +72,9 @@ publishing; `production`, `latest` and other moving selectors are refused.
 Before pinning, review that version at the provider: the owner's introduction,
 a truthful answer when asked about AI identity or transcription, recipient
 speaks first, recording off, and no tools, transfers, memory or knowledge
-sources. Removing both fields restores the prompt-based outbound call. When the
+sources. Refuse a version that references any `{{env.KEY}}` variable: the
+provider fills those in outside the version, so a later edit there would
+change approved calls. Removing both fields restores the prompt-based outbound call. When the
 number is attached to the agent, the generated inbound prompt below no longer
 applies; read back the number's callback URL, recording and transfer fields
 instead, and keep the callback pointed at Veetbot.

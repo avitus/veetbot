@@ -220,7 +220,10 @@ explicit voicemail action and `request_data` with exactly `call_mode`
 approved disclosed facts). The pinned version owns the introduction "Hi, this
 is Willow, Andy's assistant.", the truthful answer when asked, the
 recipient-speaks-first order and the absence of tools; the operator reviews
-those before pinning. Without a pin, dispatch is the prompt-based form above.
+those before pinning. A version that references a provider environment
+variable (`{{env.KEY}}`) must not be pinned: the provider resolves it outside
+the version, so the approved revision would not bind it. Without a pin,
+dispatch is the prompt-based form above.
 The agent has no post-call setting: outbound results arrive through the
 per-call callback and inbound results through the number's callback.
 

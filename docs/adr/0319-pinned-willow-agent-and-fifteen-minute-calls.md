@@ -49,6 +49,15 @@ file. The review confirms the owner's introduction, a truthful answer when
 asked about AI identity or transcription, recipient-speaks-first, recording
 off, no tools, no transfers, no memory and no knowledge sources.
 
+The review also confirms that the version references no provider environment
+variable (`{{env.KEY}}`). The provider resolves those from its development
+environment at call time for a version-numbered call, outside the version and
+therefore outside the approved revision. A version that references one must
+not be pinned. Veetbot holds no provider administration read, so it cannot
+check this at dispatch; the rule is part of the operator review. The only
+variables a pinned version may read are the three `request_data` keys Veetbot
+sends with each call.
+
 ## Consequences
 
 - The boundary that the call agent receives no tools moves from fields Veetbot
