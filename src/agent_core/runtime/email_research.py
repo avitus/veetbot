@@ -146,7 +146,12 @@ class DraftResearch:
                 raise _ResearchReadLimitError(
                     "Reply research reached its read limit. Existing edits are preserved."
                 )
-            if remote != "stage_attachment" and remaining <= self.state.get("staging_reserve", 0):
+            unverified = self.reserved_accounts()
+            reserved = remote == "stage_attachment" or (
+                remote == "get_profile" and key.removeprefix("profile:") in unverified
+            )
+            reserve = self.state.get("staging_reserve", 0) + len(unverified)
+            if not reserved and remaining <= reserve:
                 raise _ResearchReadLimitError("Remaining reply reads are reserved for attachments.")
             self.state["reads"].append(operation)
         self.state.setdefault("read_operations", {})[self.read_identity(server, remote, args)] = (
@@ -163,6 +168,14 @@ class DraftResearch:
             )
         name = f"mcp.{server}.{remote}" if server else remote
         return await self.io._dispatch(name, server, args, operation)
+
+    def reserved_accounts(self) -> set[str]:
+        """Mailboxes of the reserved files whose identity read is still owed."""
+        return {
+            self.state["candidates"][identifier]["account_id"]
+            for identifier in self.state.get("reserved_attachments", [])
+            if identifier in self.state["candidates"]
+        } - set(self.state["verified_accounts"])
 
     async def calendar_call(
         self, remote: str, args: dict[str, Any], key: str
@@ -229,6 +242,7 @@ class DraftResearch:
         if any(identifier not in self.state["candidates"] for identifier in plan.attachment_ids):
             raise DraftPreparationError("A reserved attachment was not found in the source mail.")
         self.state["staging_reserve"] = len(set(plan.attachment_ids))
+        self.state["reserved_attachments"] = sorted(set(plan.attachment_ids))
         try:
             await self._gather(plan, round_number)
         except _ResearchReadLimitError:
@@ -517,7 +531,8 @@ class DraftResearch:
                 "calendar_available": "mcp.calendar_read.use" in c.principal.scopes,
                 "research_budget": {
                     "reads_remaining": max(0, 10 - len(self.state["reads"])),
-                    "staging_reads_reserved": self.state.get("staging_reserve", 0),
+                    "staging_reads_reserved": self.state.get("staging_reserve", 0)
+                    + len(self.reserved_accounts()),
                 },
                 "unread_sources": self.unread_sources(),
                 "evidence": self.state["evidence"],
@@ -580,6 +595,7 @@ class DraftResearch:
                     "The requested attachments exceed the encoded email size limit."
                 )
             self.state["staging_reserve"] = 0
+            self.state["reserved_attachments"] = []
             needed = sum(
                 self.operation(
                     self.io.service.account_servers[item["account_id"]]["read"],

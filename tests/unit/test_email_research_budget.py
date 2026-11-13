@@ -199,3 +199,87 @@ async def test_broad_search_leaves_room_for_the_complete_document_set(mode: str)
         assert isinstance(provider, FakeModelProvider)
         assert "reads_remaining" in provider.requests[-1].model_dump_json()
         assert "unread_sources" in provider.requests[-1].model_dump_json()
+
+
+async def test_reserve_covers_verifying_the_mailbox_of_selected_files() -> None:
+    """Optional discovery leaves the profile read that staging the files needs."""
+    documents = [CONTENT + f"\n% document {i}\n".encode() for i in range(8)]
+    request = observation(body="Please send these files back to me.")
+    request["thread_id"] = "request"
+    request["messages"][0].update(id="request-message", thread_id="request")
+    request["messages"][0]["attachments"] = [
+        {"filename": f"board-{i}.pdf", "mime_type": "application/pdf", "size": len(data)}
+        for i, data in enumerate(documents)
+    ]
+    base = await _mailbox_factory([])
+    reads: list[str] = []
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+
+        async def call(name: str, arguments: dict[str, object]) -> MCPCallResult:
+            reads.append(name)
+            value: dict[str, Any]
+            if name == "get_profile":
+                value = {"email_address": "owner@example.com"}
+            elif name == "stage_attachment":
+                index = cast(int, arguments["attachment_index"])
+                value = {
+                    "thread_id": "request",
+                    "message_id": "request-message",
+                    "filename": f"board-{index}.pdf",
+                    "mime_type": "application/pdf",
+                    "size_bytes": len(documents[index]),
+                    "data_base64": base64.b64encode(documents[index]).decode(),
+                }
+            else:
+                raise AssertionError(f"Drafting must not perform {name}")
+            return MCPCallResult(content=(json.dumps(value),), structured=value)
+
+        client.call_tool = call  # type: ignore[method-assign]
+        return client
+
+    script = FakeModelScript(turns=[])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=script,
+        mcp_client_factory=factory,
+    ) as app:
+        service = await prepare(app)
+        thread = await service.import_thread(app.principal, "work", request, uuid4())
+        identifiers = [
+            hashlib.sha256(f"work:{thread.id}:request-message:{i}".encode()).hexdigest()[:20]
+            for i in range(len(documents))
+        ]
+        script.turns.extend(
+            [
+                ScriptedTurn(
+                    text=json.dumps(
+                        {
+                            "attachment_ids": identifiers,
+                            "memory_queries": ["board preferences", "prior board replies"],
+                        }
+                    )
+                ),
+                ScriptedTurn(
+                    text=json.dumps(
+                        {
+                            "body": "The files are attached.",
+                            "attachment_ids": identifiers,
+                            "requires_attachments": True,
+                        }
+                    )
+                ),
+            ]
+        )
+        operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure and run.failure.message
+        detail = await service.thread(app.principal, thread.id)
+        files = cast(dict[str, Any], detail)["draft"]["attachments"]
+        assert {f["sha256"] for f in files} == {
+            hashlib.sha256(data).hexdigest() for data in documents
+        }
+        assert reads.count("get_profile") == 1 and reads.count("stage_attachment") == 8
