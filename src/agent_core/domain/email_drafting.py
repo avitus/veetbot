@@ -74,6 +74,7 @@ class DraftResearchPlan(EmailValue):
     mail_queries: list[MailResearchQuery] = Field(default_factory=list, max_length=3)
     calendar_queries: list[CalendarResearchQuery] = Field(default_factory=list, max_length=2)
     memory_queries: list[str] = Field(default_factory=list, max_length=2)
+    source_ids: list[str] = Field(default_factory=list, max_length=5)
     attachment_ids: list[str] = Field(default_factory=list, max_length=DRAFT_ATTACHMENT_LIMIT)
     requires_attachments: bool = False
     preparation_issue: str | None = Field(default=None, max_length=500)

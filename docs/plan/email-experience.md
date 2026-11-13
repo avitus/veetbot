@@ -752,6 +752,18 @@ so the 15 MiB decoded-file cap never implies that every such message fits transp
 Source pages consume the same ten-read allowance; an unfinished required source
 is a preparation failure, not evidence that a document is absent.
 
+Discovery yields to planning after a complete source offers files. Planning receives
+remaining reads and observed unread search matches, and may select those matches
+by opaque IDs in the next round. Reserve reads for selected files before optional
+further discovery; identical governed reads reuse durable results. Admit the whole
+selected staging set before downloading any of it. All existing caps remain.
+A general request for meeting materials refers to the relevant documents actually
+circulated. A source's promise of a future supplement alone does not establish
+that it was circulated or that the requester requires it. Search for relevant
+supplements within budget; describe exactly the materials attached without claiming
+an unverified complete packet. An explicitly requested or otherwise essential
+missing document still blocks preparation, as does an unfinished required source.
+
 Set `AGENT_EMAIL_OWNER_TIMEZONE` to the owner’s IANA zone for planning, including
 mail-only preparation. When unset, selected-calendar metadata supplies the zone
 before the first planning call; if neither is available, the zone remains explicitly

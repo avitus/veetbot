@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import TYPE_CHECKING, Any, cast
 
 from agent_core.domain.email import EmailAccount, EmailDraftStatus, EmailThread
@@ -41,11 +42,30 @@ empty. A preparation_issue reports missing/ambiguous required material to the ow
 it is not text to send. Do not pretend a failed or incomplete read proves absence.
 You have at most two research rounds, three mail queries, five source threads, two
 calendar windows and ten total read calls including staging. Use targeted queries.
+research_budget reports remaining reads. Each selected file needs one staging read.
+Search reads yield after finding a file-bearing source so you can select the needed
+files before spending their allowance on unrelated results. unread_sources contains
+observed search matches you may read by source_ids; choose by organization, date and
+purpose. Prefer these observed matches over repeating a broad search. Include known
+attachment_ids with further research to reserve their staging calls. Deferred reads
+are incomplete evidence, not proof that materials are absent. When evidence suffices,
+return the reply and complete file set without more research. Never omit required
+files merely to fit the allowance; report a preparation_issue if they cannot fit.
+For a general materials request, attach the relevant documents actually circulated.
+A source promising a future supplement does not prove it was circulated or required
+by this request. Check for it within budget, but do not turn that promise alone into
+a blocking preparation_issue. Describe exactly the circulated files attached, without
+claiming an unverified complete packet. An explicitly requested or essential missing
+file still blocks preparation; never omit one to fit the allowance.
 When refining current_draft, preserve its meaning and use the owner instruction.
 Its existing attachments remain when you select no new files; selecting new files
 replaces that set. The owner can remove existing files in the draft editor.
 Simple replies needing no outside evidence may return a body immediately. The
 application selects recipients and saves an internal proposal; nothing is sent."""
+
+
+class _ResearchReadLimitError(DraftPreparationError):
+    """Discovery yields to planning; required file staging still fails closed."""
 
 
 class DraftResearch:
@@ -93,18 +113,46 @@ class DraftResearch:
                     c.clock.now(),
                 )
 
+    @staticmethod
+    def read_identity(server: str | None, remote: str, args: dict[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps([server, remote, args], sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    def operation(self, server: str | None, remote: str, args: dict[str, Any], key: str) -> str:
+        """Equal governed reads in this preparation reuse their durable result."""
+        return str(
+            self.state.get("read_operations", {}).get(
+                self.read_identity(server, remote, args), f"research:{self.thread.id}:{key}"
+            )
+        )
+
+    def unread_sources(self) -> list[dict[str, Any]]:
+        seen = self.state.get("seen_sources", [])
+        return [
+            source
+            for source in self.state.get("offered_sources", {}).values()
+            if f"{source['account_id']}:{source['thread_id']}" not in seen
+        ]
+
     async def call(
         self, server: str | None, remote: str, args: dict[str, Any], key: str
     ) -> dict[str, Any]:
         """Every unique read consumes the same bounded durable allowance, even on failure."""
-        operation = f"research:{self.thread.id}:{key}"
+        operation = self.operation(server, remote, args, key)
         if operation not in self.state["reads"]:
-            if len(self.state["reads"]) >= 10:
-                raise DraftPreparationError(
+            remaining = 10 - len(self.state["reads"])
+            if remaining <= 0:
+                raise _ResearchReadLimitError(
                     "Reply research reached its read limit. Existing edits are preserved."
                 )
+            if remote != "stage_attachment" and remaining <= self.state.get("staging_reserve", 0):
+                raise _ResearchReadLimitError("Remaining reply reads are reserved for attachments.")
             self.state["reads"].append(operation)
-            await checkpoint(self.c, "email_research_read_admitted")
+        self.state.setdefault("read_operations", {})[self.read_identity(server, remote, args)] = (
+            operation
+        )
+        await checkpoint(self.c, "email_research_read_admitted")
         if server is not None:
             if f"mcp.{server}.use" not in self.c.principal.scopes:
                 raise DraftPreparationError("A required source is not accessible to this account.")
@@ -178,114 +226,21 @@ class DraftResearch:
 
     async def gather(self, plan: DraftResearchPlan, round_number: int) -> None:
         await self.progress("finding_documents")
-        for index, query in enumerate(plan.mail_queries):
-            self.admit("mail_queries", f"{round_number}:{index}", 3)
-            if query.account_id != self.thread.account_id and not self.state["verified_accounts"]:
-                raise DraftPreparationError(
-                    "Reply research must start with the originating mailbox."
-                )
-            server = await self.verify_account(query.account_id)
-            result = await self.call(
-                server,
-                "search_threads",
-                {"query": query.query, "max_results": 5},
-                f"{round_number}:search:{index}",
-            )
+        if any(identifier not in self.state["candidates"] for identifier in plan.attachment_ids):
+            raise DraftPreparationError("A reserved attachment was not found in the source mail.")
+        self.state["staging_reserve"] = len(set(plan.attachment_ids))
+        try:
+            await self._gather(plan, round_number)
+        except _ResearchReadLimitError:
             self.state["evidence"].append(
                 {
-                    "kind": "search",
-                    "account": query.account_id,
-                    "query": query.query,
-                    "reason": query.reason,
-                    "complete": not bool(result.get("next_page_token")),
-                    "matches": result.get("threads", []),
+                    "kind": "research_budget",
+                    "complete": False,
+                    "issue": "Further discovery was deferred to preserve the read allowance.",
                 }
             )
-            for match in result.get("threads", []):
-                provider_id = match.get("thread_id")
-                if not isinstance(provider_id, str):
-                    continue
-                source_key = f"{query.account_id}:{provider_id}"
-                if source_key in self.state.get("seen_sources", []):
-                    continue
-                self.admit("sources", source_key, 5)
-                observed = await self.call(
-                    server,
-                    "get_thread_page",
-                    {"thread_id": provider_id, "max_messages": 10},
-                    f"source:{source_key}",
-                )
-                if observed.get("thread_id") != provider_id or observed.get("source_changed"):
-                    raise DraftPreparationError("A document source changed while being read.")
-                pages = [observed]
-                tokens: set[str] = set()
-                while observed.get("next_page_token"):
-                    token = str(observed["next_page_token"])
-                    if token in tokens:
-                        raise DraftPreparationError(
-                            "The required source remains incomplete "
-                            "within the reply research limit."
-                        )
-                    tokens.add(token)
-                    page = await self.call(
-                        server,
-                        "get_thread_page",
-                        {"thread_id": provider_id, "max_messages": 10, "page_token": token},
-                        f"source:{source_key}:page:{len(pages)}",
-                    )
-                    if (
-                        page.get("thread_id") != provider_id
-                        or page.get("source_changed")
-                        or page.get("history_id") != observed.get("history_id")
-                    ):
-                        raise DraftPreparationError("A document source changed while being read.")
-                    pages.append(page)
-                    observed = {
-                        **observed,
-                        **page,
-                        "messages": [*observed.get("messages", []), *page.get("messages", [])],
-                    }
-                complete = (
-                    not observed.get("next_page_token")
-                    and bool(observed.get("messages"))
-                    and all(
-                        m.get("body_complete")
-                        and m.get("headers_complete")
-                        and not m.get("body_offset", 0)
-                        for m in observed["messages"]
-                    )
-                )
-                if not complete:
-                    self.state["evidence"].append(
-                        {
-                            "kind": "source",
-                            "complete": False,
-                            "source": provider_id,
-                            "issue": "The source exceeds the bounded preparation read.",
-                        }
-                    )
-                    continue
-                for page in pages:
-                    await self.io._register_sources(query.account_id, page)
-                source = await self.io.service.import_thread(
-                    self.c.principal,
-                    query.account_id,
-                    {**observed, "complete": True},
-                    self.c.run.session_id,
-                    run=self.c.run,
-                    lease=self.c.lease,
-                )
-                self.candidates(source)
-                self.state.setdefault("seen_sources", []).append(source_key)
-                self.state["evidence"].append(
-                    {
-                        "kind": "source",
-                        "complete": True,
-                        "thread": source.model_dump(
-                            mode="json", exclude={"messages": {"__all__": {"reader_html"}}}
-                        ),
-                    }
-                )
+
+    async def _gather(self, plan: DraftResearchPlan, round_number: int) -> None:
         for index, calendar_query in enumerate(plan.calendar_queries):
             if "mcp.calendar_read.use" not in self.c.principal.scopes:
                 self.state["evidence"].append({"kind": "calendar", "available": False})
@@ -320,6 +275,55 @@ class DraftResearch:
                     self.state["evidence"].append(
                         {"kind": "calendar", "available": True, "result": calendar_result}
                     )
+        for identifier in dict.fromkeys(plan.source_ids):
+            offered = self.state.get("offered_sources", {}).get(identifier)
+            if offered is None:
+                raise DraftPreparationError(
+                    "The requested source was not found in observed search results."
+                )
+            await self.read_source(offered["account_id"], offered["thread_id"])
+        found_files = False
+        for index, query in enumerate(plan.mail_queries):
+            self.admit("mail_queries", f"{round_number}:{index}", 3)
+            if query.account_id != self.thread.account_id and not self.state["verified_accounts"]:
+                raise DraftPreparationError(
+                    "Reply research must start with the originating mailbox."
+                )
+            server = await self.verify_account(query.account_id)
+            result = await self.call(
+                server,
+                "search_threads",
+                {"query": query.query, "max_results": 5},
+                f"{round_number}:search:{index}",
+            )
+            self.state["evidence"].append(
+                {
+                    "kind": "search",
+                    "account": query.account_id,
+                    "query": query.query,
+                    "reason": query.reason,
+                    "complete": not bool(result.get("next_page_token")),
+                    "matches": result.get("threads", []),
+                }
+            )
+            offers = self.state.setdefault("offered_sources", {})
+            for match in result.get("threads", []):
+                provider_id = match.get("thread_id")
+                if not isinstance(provider_id, str):
+                    continue
+                identifier = hashlib.sha256(
+                    f"{query.account_id}:{provider_id}".encode()
+                ).hexdigest()[:20]
+                offers[identifier] = {**match, "id": identifier, "account_id": query.account_id}
+            for match in result.get("threads", []):
+                provider_id = match.get("thread_id")
+                if isinstance(provider_id, str) and await self.read_source(
+                    query.account_id, provider_id
+                ):
+                    found_files = True
+                    break
+            if found_files:
+                break
         for index, memory_query in enumerate(plan.memory_queries):
             if not memory_query.strip() or len(memory_query) > 1024:
                 raise DraftPreparationError("The memory research query is invalid.")
@@ -330,6 +334,96 @@ class DraftResearch:
                 f"{round_number}:memory:{index}",
             )
             self.state["evidence"].append({"kind": "memory", "result": result})
+
+    async def read_source(self, account: str, provider_id: str) -> bool:
+        """Read one observed source completely before offering any of its files."""
+        source_key = f"{account}:{provider_id}"
+        if source_key in self.state.get("seen_sources", []):
+            return False
+        server = await self.verify_account(account)
+        self.admit("sources", source_key, 5)
+        observed = await self.call(
+            server,
+            "get_thread_page",
+            {"thread_id": provider_id, "max_messages": 10},
+            f"source:{source_key}",
+        )
+        if observed.get("thread_id") != provider_id or observed.get("source_changed"):
+            raise DraftPreparationError("A document source changed while being read.")
+        pages = [observed]
+        tokens: set[str] = set()
+        while observed.get("next_page_token"):
+            token = str(observed["next_page_token"])
+            if token in tokens:
+                raise DraftPreparationError(
+                    "The required source remains incomplete within the reply research limit."
+                )
+            tokens.add(token)
+            try:
+                page = await self.call(
+                    server,
+                    "get_thread_page",
+                    {"thread_id": provider_id, "max_messages": 10, "page_token": token},
+                    f"source:{source_key}:page:{len(pages)}",
+                )
+            except _ResearchReadLimitError as exc:
+                raise DraftPreparationError(
+                    "The required source remains incomplete within the reply research limit."
+                ) from exc
+            if (
+                page.get("thread_id") != provider_id
+                or page.get("source_changed")
+                or page.get("history_id") != observed.get("history_id")
+            ):
+                raise DraftPreparationError("A document source changed while being read.")
+            pages.append(page)
+            observed = {
+                **observed,
+                **page,
+                "messages": [*observed.get("messages", []), *page.get("messages", [])],
+            }
+        complete = (
+            not observed.get("next_page_token")
+            and bool(observed.get("messages"))
+            and all(
+                m.get("body_complete") and m.get("headers_complete") and not m.get("body_offset", 0)
+                for m in observed["messages"]
+            )
+        )
+        if not complete:
+            self.state["evidence"].append(
+                {
+                    "kind": "source",
+                    "complete": False,
+                    "source": provider_id,
+                    "issue": "The source exceeds the bounded preparation read.",
+                }
+            )
+            return False
+        for page in pages:
+            await self.io._register_sources(account, page)
+        source = await self.io.service.import_thread(
+            self.c.principal,
+            account,
+            {**observed, "complete": True},
+            self.c.run.session_id,
+            run=self.c.run,
+            lease=self.c.lease,
+        )
+        self.candidates(source)
+        self.state.setdefault("seen_sources", []).append(source_key)
+        self.state["evidence"].append(
+            {
+                "kind": "source",
+                "complete": True,
+                "thread": source.model_dump(
+                    mode="json", exclude={"messages": {"__all__": {"reader_html"}}}
+                ),
+            }
+        )
+        file_count = sum(len(message.attachments) for message in source.messages)
+        self.state["staging_reserve"] = max(self.state.get("staging_reserve", 0), file_count)
+        return bool(file_count)
 
     async def selected_calendars(self) -> list[dict[str, Any]]:
         if "selected_calendars" in self.state:
@@ -365,6 +459,15 @@ class DraftResearch:
             }
         )
         return chosen
+
+    def staging_arguments(self, item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "draft_thread_id": str(self.thread.id),
+            "source_thread_id": item["source_thread_id"],
+            "message_id": item["message_id"],
+            "attachment_index": item["attachment_index"],
+            "filename": item["filename"],
+        }
 
     async def prepare(self, learning: dict[str, Any]) -> tuple[str, list[DraftAttachment], int]:
         c = self.c
@@ -412,6 +515,11 @@ class DraftResearch:
                     if f"mcp.{servers['read']}.use" in c.principal.scopes
                 ],
                 "calendar_available": "mcp.calendar_read.use" in c.principal.scopes,
+                "research_budget": {
+                    "reads_remaining": max(0, 10 - len(self.state["reads"])),
+                    "staging_reads_reserved": self.state.get("staging_reserve", 0),
+                },
+                "unread_sources": self.unread_sources(),
                 "evidence": self.state["evidence"],
                 "attachment_candidates": list(self.state["candidates"].values()),
             }
@@ -429,7 +537,7 @@ class DraftResearch:
                     "Required reply materials are missing or ambiguous. "
                     "Existing edits are preserved."
                 )
-            if plan.mail_queries or plan.calendar_queries or plan.memory_queries:
+            if plan.mail_queries or plan.calendar_queries or plan.memory_queries or plan.source_ids:
                 if round_number == 2:
                     raise DraftPreparationError(
                         "Reply research reached its planning limit. Existing edits are preserved."
@@ -471,6 +579,24 @@ class DraftResearch:
                 raise DraftPreparationError(
                     "The requested attachments exceed the encoded email size limit."
                 )
+            self.state["staging_reserve"] = 0
+            needed = sum(
+                self.operation(
+                    self.io.service.account_servers[item["account_id"]]["read"],
+                    "stage_attachment",
+                    self.staging_arguments(item),
+                    f"stage:{item['id']}",
+                )
+                not in self.state["reads"]
+                for item in selected
+            ) + len(
+                {item["account_id"] for item in selected} - set(self.state["verified_accounts"])
+            )
+            if needed > 10 - len(self.state["reads"]):
+                raise DraftPreparationError(
+                    "The complete attachment set exceeds the remaining reply read allowance. "
+                    "Existing edits are preserved."
+                )
             await self.progress("staging_files")
             attachments: list[DraftAttachment] = [] if selected else retained_files
             for item in selected:
@@ -478,13 +604,7 @@ class DraftResearch:
                 receipt = await self.call(
                     server,
                     "stage_attachment",
-                    {
-                        "draft_thread_id": str(self.thread.id),
-                        "source_thread_id": item["source_thread_id"],
-                        "message_id": item["message_id"],
-                        "attachment_index": item["attachment_index"],
-                        "filename": item["filename"],
-                    },
+                    self.staging_arguments(item),
                     f"stage:{item['id']}",
                 )
                 file = DraftAttachment.model_validate(
