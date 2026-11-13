@@ -458,4 +458,5 @@ nav:
       - "ADR-0317: Evidence-backed email replies": adr/0317-evidence-backed-email-replies.md
       - "ADR-0318: Reuse unchanged mail summaries": adr/0318-reuse-unchanged-mail-summaries.md
       - "ADR-0320: A failed refresh shows on its tile": adr/0320-failed-refresh-shows-on-the-tile.md
+      - "ADR-0322: The hosted browser job runs on four workers": adr/0322-hosted-browser-job-runs-on-four-workers.md
   - Changelog: changelog.md

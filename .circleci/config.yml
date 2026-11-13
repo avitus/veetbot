@@ -209,7 +209,10 @@ jobs:
   browser:
     docker:
       - image: cimg/python:3.12
-    resource_class: medium
+    # Four xdist workers on four CPUs, each taking whole files (ADR-0322).
+    resource_class: large
+    environment:
+      BROWSER_TEST_WORKERS: "4"
     steps:
       - checkout
       - skip_verified_tree:

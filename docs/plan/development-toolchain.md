@@ -467,7 +467,8 @@ baseline report. `VEETBOT_BROWSER_ON_HOST=1` runs either on the Mac deliberately
 
 `make check` includes `test-browser`, which depends on `browser-install`.
 Hosted CI runs a separate browser job and packaging depends on
-it. The job publishes JUnit and a JSON runtime baseline with source revision,
+it. The job runs on a four-CPU runner with `BROWSER_TEST_WORKERS=4` (ADR-0322);
+the sidecar stays serial. The job publishes JUnit and a JSON runtime baseline with source revision,
 dirty status, observed browser builds, outcomes, counts, and durations. Case
 identities omit parameter values. This report contains no page text,
 URLs, exceptions, or tool output and makes no claim about live model task

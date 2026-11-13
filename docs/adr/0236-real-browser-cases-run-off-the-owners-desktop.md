@@ -3,6 +3,8 @@
 - Status: Proposed (requested by the repository owner, 2026-10-20)
 - Date: 2026-10-20
 - Related: ADR-0106, ADR-0107, ADR-0145, ADR-0156
+- Amended by: ADR-0322 (2026-11-13), under which the hosted browser job runs on
+  four workers
 - Detailed design: `docs/plan/development-toolchain.md`
 
 ## Context

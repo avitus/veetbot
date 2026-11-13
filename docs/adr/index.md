@@ -370,3 +370,4 @@ implementation without one.
 - [ADR-0317: Gather evidence and stage attachments before drafting email replies (Accepted)](0317-evidence-backed-email-replies.md)
 - [ADR-0318: A mail list re-reads only the threads that changed (Accepted)](0318-reuse-unchanged-mail-summaries.md)
 - [ADR-0320: A failed refresh shows on its tile, and one job request waits ten seconds (Accepted)](0320-failed-refresh-shows-on-the-tile.md)
+- [ADR-0322: The hosted browser job runs on four workers (Proposed)](0322-hosted-browser-job-runs-on-four-workers.md)
