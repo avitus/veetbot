@@ -1,6 +1,6 @@
 # ADR-0318: A mail list re-reads only the threads that changed
 
-- Status: Proposed (implemented on the owner's 2026-11-12 report; awaiting acceptance)
+- Status: Accepted — owner accepted on 2026-11-12
 - Date: 2026-11-12
 - Related: ADR-0103, ADR-0303; Milestone 26
 - Detailed design: `docs/plan/email-experience.md`
