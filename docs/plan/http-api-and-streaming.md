@@ -1044,6 +1044,43 @@ every client to implement the routing rule the server already has the
 state to apply. The setting exists so a deployment that wants strictly
 explicit input delivery can have it.
 
+### Follow-ups to a working run (ADR-0321, proposed)
+
+With `AGENT_RUN_STEERING_ENABLED` set, the third row of the table splits.
+The run is steerable when it is a top-level interactive run and the caller
+is its principal.
+
+| Active run | Result |
+| --- | --- |
+| steerable; `QUEUED`, `RUNNING`, `WAITING_FOR_APPROVAL` | held as a follow-up, `202` |
+| steerable, eight follow-ups already pending | `conflict`, `409`, `pending_input_limit` |
+| child, scheduled or delegated run, or another principal | `conflict`, `409`, `active_run_exists` |
+
+A follow-up is text. An `image` or `file` block is `validation_error`, and
+the client keeps staged attachments for the next initiating message. The
+response is the message route's body with one more field:
+
+```json
+{"run_id": "uuid", "status": "RUNNING", "pending_input_id": "uuid"}
+```
+
+`run_id` and `status` are the active run's. The `Idempotency-Key` behaves as
+it does for a new run: a repeat with the same body returns the same
+`pending_input_id`, including after the follow-up was read. In step 8 the
+handler locks the run row, rechecks that the run is not terminal, inserts
+the row and appends `run.input.queued`; a run that ended in between is
+routed again as a session with no active run. There is no `NOTIFY`, because
+the worker reads the inbox at its next step.
+
+The run view gains `pending_inputs`, a list of `{"id", "content",
+"created_at"}` in arrival order, so a second device can show what is
+waiting. The stream carries `run.input.queued` and `run.input.dropped` with
+`pending_input_id` only, and a read follow-up arrives as an ordinary
+`user.message.created` that repeats the id. `POST /v1/runs/{run_id}/input`
+is unchanged and still requires `WAITING_FOR_USER`. A follow-up never
+resolves an approval. The loop and the terminal rule are in
+[runtime-loop.md](runtime-loop.md#follow-ups-to-a-working-run-adr-0321-proposed).
+
 ### Two idempotency mechanisms, two scopes, one word
 
 This is the disambiguation, and it is load-bearing because the corpus

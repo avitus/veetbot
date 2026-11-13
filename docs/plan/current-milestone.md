@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Steering a working chat — ADR-0321 (proposed):** On 2026-11-13 the owner asked
+  to steer a working chat with a follow-up and asked for a draft.
+  [The proposal](../adr/0321-follow-ups-steer-a-running-run.md) holds a follow-up
+  in an inbox and has the same run read it at its next step, default off behind
+  `AGENT_RUN_STEERING_ENABLED`. Design only: implementation is not authorized
+  until the owner accepts it. No milestone or gate moves.
+
 - **Researched email replies — ADR-0317:** Owner approved implementation on
   2026-11-11. Bounded email/Calendar research precedes drafting; matching files
   are staged privately and reviewed with the reply. Send remains an exact owner

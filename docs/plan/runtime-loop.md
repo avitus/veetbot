@@ -1998,3 +1998,64 @@ The additive `dependency_unavailable` failure reason distinguishes a bounded
 email-source recovery failure from a platform defect. Unexpected failures retain
 a diagnostic UUID, code fingerprint, phase and release in `RunFailure.details`;
 raw exception text stays absent. Public run views expose only the optional UUID.
+
+## Follow-ups to a working run (ADR-0321, proposed)
+
+With `AGENT_RUN_STEERING_ENABLED` set, a message the run's principal sends
+while the run is `QUEUED`, `RUNNING` or `WAITING_FOR_APPROVAL` is held in
+`run_pending_inputs` and joins that run. This replaces contradiction 14's
+reject for those messages only; the one-active-run index, the state machine and
+the single terminal writer are unchanged. Unset, the reject stands. See
+[ADR-0321](../adr/0321-follow-ups-steer-a-running-run.md).
+
+**The loop reads the inbox in phase 1.** After the cancellation and budget
+checks, and only when no synthesis reserve or report-only stop is active, the
+loop opens one unit of work under the run's lease. For each pending row in
+arrival order it appends `user.message.created` with the row's content, the
+sender's trust and `pending_input_id`, using that id as the derivation key,
+then deletes the row. The messages are appended to the checkpoint conversation
+and the loop writes a checkpoint with the trigger `follow_up`. Every earlier
+tool call has its result at this point, so the stored history keeps its
+call/result pairs and the provider continuation is kept.
+
+```text
+# when a follow-up arrives            what the run does
+before the run is claimed             read at the first step
+during a model call or tool batch     read at the next step; nothing is interrupted
+during an approval or child-run wait  read at the first step after resume
+after the last step began             handled by the terminal transition
+```
+
+A follow-up is not a cancellation observation point and sets no token. Its
+worst-case delay is the longest step. A resumed run needs no special case: the
+executor adopts committed history after the checkpoint (ADR-0166), and a row
+whose derivation key already exists is deleted without a second event.
+
+**Reading a follow-up ends single-request consent.** In the same unit of work
+the loop ends the run's request grant (ADR-0302) and clears a pending specific
+Follow consent (ADR-0172). Task grants, the pinned roster, limits, the
+deadline and the agent and policy versions are unchanged. Pre-turn recall is
+not repeated.
+
+**The terminal transition settles what was never read.** `finalize` locks the
+run row, which the inbox insert also locks, so a follow-up is either visible to
+this transaction or refused as arriving on a terminal run.
+
+```text
+# outcome                      pending rows
+COMPLETED                      one new QUEUED run, in arrival order
+CANCELLED, owner request       rows after cancel_requested_at: one new run
+                               rows before it: dropped
+CANCELLED by deadline, FAILED  dropped
+SUSPENDED                      kept
+```
+
+The new run is created through a port the shared submission function
+implements, after the old run's transition and in the same transaction, so the
+index admits it. Admission, the surface run budget and idempotency apply as
+for any message; an admission refusal drops the rows. Each drop appends a
+content-free `run.input.dropped` event with `pending_input_id` and a reason of
+`run_failed`, `run_cancelled`, `deadline_exceeded` or `admission_refused`.
+
+This section adds two event types, `run.input.queued` and `run.input.dropped`,
+and one checkpoint trigger. Both events carry identifiers only.

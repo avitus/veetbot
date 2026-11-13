@@ -1,3 +1,7 @@
+# ADR-0321: On 2026-11-13 the owner asked to steer a working chat with a
+# follow-up and asked for a draft. Proposed, design only: a follow-up joins the
+# active run through an inbox, default off. Implementation is not authorized
+# until the owner accepts it. No milestone or gate moves.
 # ADR-0164 follow-up: Owner-authorized W6 continuation gives each extraction
 # step a fresh audited observation, preserving budgets and non-replay handling.
 # No deployed recipe, milestone or gate changes.

@@ -1685,3 +1685,29 @@ in the same transaction. Deletion clears ciphertext and increments revision.
 The additive `e8a270b10301` migration refuses downgrade while any row remains.
 Ciphertext AAD binds tenant, principal, ID, origin, scheme and revision. The host
 master key is kept outside the database and its backups.
+
+## Pending follow-ups (ADR-0321, proposed)
+
+`run_pending_inputs` is an inbox, not a log. A row holds one follow-up from
+the moment the API accepts it until the run reads or drops it.
+
+```text
+# column             note
+id                   the pending_input_id clients see
+tenant_id            repository argument, as everywhere
+run_id               foreign key to runs, ON DELETE CASCADE
+session_id           the run's session
+principal_id         the sender; always the run's principal
+content              text content blocks, validated on insert
+idempotency_key_hash the HTTP key's hash, unique per session when present
+created_at           arrival order, with id as the tie-break
+```
+
+The insert locks the run row, refuses a terminal run, enforces at most eight
+rows per run, and appends `run.input.queued` in the same transaction. The row
+is deleted in the transaction that appends its `user.message.created` or its
+`run.input.dropped`, so a follow-up's content is never stored in both places.
+Neither inbox event carries content. Session deletion and erasure remove the
+rows by cascade before they remove the run. The migration is additive, and
+the worker role needs select and delete on the table, the API role select and
+insert.
