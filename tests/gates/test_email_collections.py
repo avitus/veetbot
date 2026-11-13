@@ -1,5 +1,6 @@
 """A2 mailbox collections count authorized cached mail before pagination."""
 
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -161,3 +162,70 @@ async def test_navigation_counts_and_spam_filter_apply_before_paging() -> None:
         composition.principal.scopes.discard("email.read")
         response = await client.get("/v1/email/threads", params={"view": "suspected_spam"})
         assert response.status_code == 403
+
+
+async def test_lists_reread_only_the_threads_that_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A list reuses unchanged thread summaries and still shows every change (ADR-0318)."""
+    async with email_client() as (composition, client):
+        kept, _ = await seed_mail(composition)
+        changed, _ = await seed_mail(composition)
+        removed, _ = await seed_mail(composition)
+        store = type(composition.uow_factory().email)
+        read: list[list[str]] = []
+        original = store.get_thread_summaries
+        scans = 0
+
+        async def reading(self: Any, owner: Any, keys: list[str]) -> list[EmailRecord]:
+            read.append(sorted(keys))
+            rows: list[EmailRecord] = await original(self, owner, keys)
+            return rows
+
+        async def scanning(*args: object, **kwargs: object) -> list[EmailRecord]:
+            nonlocal scans
+            scans += 1
+            return []
+
+        monkeypatch.setattr(store, "get_thread_summaries", reading)
+        monkeypatch.setattr(store, "list_thread_summaries", scanning)
+
+        async def listed(view: str) -> dict[str, object]:
+            response = await client.get("/v1/email/threads", params={"view": view, "limit": 100})
+            assert response.status_code == 200
+            data: dict[str, object] = response.json()
+            return data
+
+        first = await listed("inbox")
+        assert first["total_count"] == 3
+        assert read == [sorted(str(item.id) for item in (kept, changed, removed))]
+        # Another collection and a repeat read no thread again.
+        assert (await listed("priority"))["total_count"] == 3
+        assert (await listed("inbox"))["items"] == first["items"]
+        assert len(read) == 1 and scans == 0
+
+        now = composition.clock.now()
+        async with composition.uow_factory() as uow:
+            await uow.email.put(
+                EmailRecord(
+                    tenant_id="local",
+                    principal_id="owner",
+                    kind="thread",
+                    key=str(changed.id),
+                    revision=2,
+                    payload=changed.model_copy(update={"subject": "Moved date"}).model_dump(
+                        mode="json"
+                    ),
+                    created_at=now,
+                    updated_at=now,
+                ),
+                expected_revision=1,
+            )
+            await uow.email.delete(
+                composition.principal, "thread", str(removed.id), expected_revision=1
+            )
+        after = await listed("inbox")
+        assert read[1:] == [[str(changed.id)]]
+        rows = {row["id"]: row["subject"] for row in after["items"]}  # type: ignore[attr-defined]
+        assert rows == {str(kept.id): "Board materials", str(changed.id): "Moved date"}
+        assert after["collection_counts"]["inbox"] == 2  # type: ignore[index]

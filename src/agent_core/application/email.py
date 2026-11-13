@@ -125,6 +125,44 @@ async def thread_summaries(store: EmailStore, principal: Principal) -> AsyncIter
         after = page[-1].key
 
 
+class ThreadSummaryCache:
+    """Validated message-free conversations, re-read only where a mark changed (ADR-0318).
+
+    Every list scanned and validated the whole mailbox. Marks are compared on
+    every read, so a list is exactly as current as that scan; what is kept is
+    the same per-owner projection, never message content.
+    """
+
+    owners = 4
+
+    def __init__(self) -> None:
+        self._kept: dict[tuple[str, str], dict[str, tuple[str, EmailThread]]] = {}
+        self._reading: dict[tuple[str, str], asyncio.Lock] = {}
+
+    async def read(self, store: EmailStore, principal: Principal) -> list[EmailThread]:
+        """Current conversations in key order; never mutate or save one back."""
+        owner = (principal.tenant_id, principal.principal_id)
+        async with self._reading.setdefault(owner, asyncio.Lock()):
+            kept = self._kept.get(owner, {})
+            marks: dict[str, str] = {}
+            after: str | None = None
+            while page := await store.list_thread_marks(principal, after=after):
+                marks.update(page)
+                after = page[-1][0]
+            current = {
+                key: kept[key] for key, mark in marks.items() if kept.get(key, ("",))[0] == mark
+            }
+            stale = [key for key in marks if key not in current]
+            for start in range(0, len(stale), 1000):
+                for row in await store.get_thread_summaries(principal, stale[start : start + 1000]):
+                    current[row.key] = (marks[row.key], EmailThread.model_validate(row.payload))
+            self._kept.pop(owner, None)
+            self._kept[owner] = current
+            while len(self._kept) > self.owners:
+                del self._kept[next(iter(self._kept))]
+            return [current[key][1] for key in marks if key in current]
+
+
 async def task_records(
     store: EmailStore, principal: Principal, *, created_since: datetime | None = None
 ) -> AsyncIterator[EmailRecord]:
@@ -266,6 +304,7 @@ class EmailExperienceService:
         self.draft_files = draft_files
         self.read_image = read_image
         self._image_slots = asyncio.Semaphore(4)
+        self._summaries = ThreadSummaryCache()
         self.uow_factory = uow_factory
         self.clock = clock
         self.ids = ids
@@ -376,7 +415,7 @@ class EmailExperienceService:
         async with self.uow_factory() as uow:
             feedback = await self._feedback(uow.email, principal)
             threads = []
-            async for stored in thread_summaries(uow.email, principal):
+            for stored in await self._summaries.read(uow.email, principal):
                 if (
                     stored.account_id not in self.account_servers
                     or f"mcp.{self.account_servers[stored.account_id]['read']}.use"

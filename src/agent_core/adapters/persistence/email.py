@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    ColumnElement,
     DateTime,
     Numeric,
     Text,
@@ -24,6 +25,7 @@ from sqlalchemy import (
     literal,
     or_,
     select,
+    true,
     type_coerce,
     update,
 )
@@ -84,6 +86,11 @@ def _validate_limit(limit: int) -> None:
 def _validate_revision(record: EmailRecord, expected_revision: int) -> None:
     if expected_revision < 0 or record.revision != expected_revision + 1:
         raise ConflictError("email record revision does not follow expected revision")
+
+
+def _validate_keys(keys: Sequence[str]) -> None:
+    if len(keys) > 1000:
+        raise ValueError("email thread summary read is limited to 1000 keys")
 
 
 def _validate_source_window(
@@ -147,6 +154,31 @@ class InMemoryEmailStore:
         return [
             row.model_copy(update={"payload": _without_messages(row.payload)})
             for row in await self.list(principal, "thread", after=after, limit=limit)
+        ]
+
+    async def list_thread_marks(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[tuple[str, str]]:
+        _validate_limit(limit)
+        owner = (principal.tenant_id, principal.principal_id, "thread")
+        marks = sorted(
+            (key[3], f"{row.revision}:{row.updated_at.isoformat()}")
+            for key, row in self._records.items()
+            if key[:3] == owner and (after is None or key[3] > after)
+        )
+        return marks[:limit]
+
+    async def get_thread_summaries(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        _validate_keys(keys)
+        rows = [
+            self._records.get((principal.tenant_id, principal.principal_id, "thread", key))
+            for key in sorted(set(keys))
+        ]
+        return [
+            copy.model_copy(update={"payload": _without_messages(copy.payload)})
+            for copy in (row.model_copy(deep=True) for row in rows if row is not None)
         ]
 
     async def list_semantic_window(
@@ -388,6 +420,13 @@ class PostgresEmailStore:
         self, principal: Principal, *, after: str | None = None, limit: int = 1000
     ) -> builtins.list[EmailRecord]:
         _validate_limit(limit)
+        return await self._thread_summaries(
+            principal, true() if after is None else EmailRecordRow.key > after, limit
+        )
+
+    async def _thread_summaries(
+        self, principal: Principal, selected: ColumnElement[bool], limit: int | None
+    ) -> builtins.list[EmailRecord]:
         # Dropping bodies in SQL skips transferring and decoding most of each row.
         summary = type_coerce(EmailRecordRow.payload.op("-")(_MESSAGES), JSONB)
         query = select(
@@ -401,9 +440,8 @@ class PostgresEmailStore:
             EmailRecordRow.tenant_id == principal.tenant_id,
             EmailRecordRow.principal_id == principal.principal_id,
             EmailRecordRow.kind == "thread",
+            selected,
         )
-        if after is not None:
-            query = query.where(EmailRecordRow.key > after)
         rows = await self._session.execute(query.order_by(EmailRecordRow.key).limit(limit))
         return [
             EmailRecord(
@@ -418,6 +456,37 @@ class PostgresEmailStore:
             )
             for key, revision, erasure_pending, created_at, updated_at, payload in rows
         ]
+
+    async def list_thread_marks(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[tuple[str, str]]:
+        _validate_limit(limit)
+        query = select(
+            EmailRecordRow.key,
+            EmailRecordRow.revision,
+            EmailRecordRow.erasure_pending,
+            EmailRecordRow.updated_at,
+        ).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.kind == "thread",
+        )
+        if after is not None:
+            query = query.where(EmailRecordRow.key > after)
+        rows = await self._session.execute(query.order_by(EmailRecordRow.key).limit(limit))
+        # Erasure is fenced and purged outside `put`, so the flag is part of the mark.
+        return [
+            (key, f"{revision}:{int(erasure_pending)}:{updated_at.isoformat()}")
+            for key, revision, erasure_pending, updated_at in rows
+        ]
+
+    async def get_thread_summaries(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        _validate_keys(keys)
+        if not keys:
+            return []
+        return await self._thread_summaries(principal, EmailRecordRow.key.in_(set(keys)), None)
 
     async def list_semantic_window(
         self,

@@ -316,7 +316,9 @@ draft. They do not sweep unrelated threads, drafts or draft histories, and
 neither does admitting an operation or endorsing a writing example. Inbox
 scans read thread summaries without message content and do not hold the
 principal mutation lock; pending archive reconciliation re-reads its one target
-under a short lock before applying an outcome. No email
+under a short lock before applying an outcome. A list compares every thread's
+change mark on each request and re-reads only the summaries whose mark moved,
+so its cost follows what changed, not the size of the mailbox (ADR-0318). No email
 command starts MCP servers while holding that lock (ADR-0103). Refresh, archive
 and source-exclusion audit sessions render no skill catalog, so they record an
 empty one without starting any MCP server. When the worker executes a typed
@@ -1462,7 +1464,10 @@ and updated time are explicit columns. The repository never returns mutable
 aliases into stored payloads. Key-ordered pagination accepts an exclusive `after`
 key and a limit from one to one thousand. A thread-summary read pages the same
 thread records with `messages` omitted; PostgreSQL drops them in the query, so
-listing neither transfers nor decodes message bodies. `put` compares the exact existing
+listing neither transfers nor decodes message bodies. A thread-mark read pages
+thread keys with an opaque mark that changes whenever that thread's summary
+would, including when erasure is fenced, and a keyed summary read returns up to
+one thousand named threads in key order, omitting absent ones (ADR-0318). `put` compares the exact existing
 revision (zero means absent), requires the new revision to be expected plus one,
 and raises a conflict without mutation on a mismatch. Delete likewise requires
 the exact positive existing revision; missing or foreign records conflict.

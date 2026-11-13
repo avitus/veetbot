@@ -284,6 +284,54 @@ async def test_thread_summaries_omit_message_content() -> None:
         await thread_summary_contract(uow.email)
 
 
+async def thread_mark_contract(store: EmailStore) -> None:
+    """A list re-reads only the thread summaries whose marks changed (ADR-0318)."""
+    for key in ("mark-c", "mark-a", "mark-b"):
+        await store.put(thread_record(key), expected_revision=0)
+    await store.put(record("mark-draft"), expected_revision=0)
+    marks = getattr(store, "list_thread_marks", None)
+    summaries = getattr(store, "get_thread_summaries", None)
+    assert marks is not None and summaries is not None, "the inbox list needs change marks"
+    first = await marks(principal(), limit=2)
+    assert [key for key, _ in first] == ["mark-a", "mark-b"]
+    assert [key for key, _ in await marks(principal(), after="mark-b")] == ["mark-c"]
+    before = dict(await marks(principal()))
+    changed = thread_record("mark-b").model_copy(update={"revision": 2})
+    changed.payload["subject"] = "Changed"
+    await store.put(changed, expected_revision=1)
+    stored = await store.get(principal(), "thread", "mark-c")
+    assert stored is not None
+    await store.delete(principal(), "thread", "mark-c", expected_revision=stored.revision)
+    after = dict(await marks(principal()))
+    assert set(after) == {"mark-a", "mark-b"}
+    assert after["mark-a"] == before["mark-a"] and after["mark-b"] != before["mark-b"]
+    rows = await summaries(principal(), ["mark-b", "mark-c", "mark-a", "mark-draft"])
+    assert rows == await store.list_thread_summaries(principal())
+    assert [row.key for row in rows] == ["mark-a", "mark-b"]
+    assert rows[1].payload["subject"] == "Changed" and "messages" not in rows[1].payload
+    rows[0].payload["senders"].append("changed@example.test")
+    [again] = await summaries(principal(), ["mark-a"])
+    assert again.payload["senders"] == ["sender@example.test"]
+    assert await summaries(principal(), []) == []
+    for owner in (
+        principal().model_copy(update={"principal_id": "foreign"}),
+        principal().model_copy(update={"tenant_id": "foreign"}),
+    ):
+        assert await marks(owner) == []
+        assert await summaries(owner, ["mark-a"]) == []
+    for boundary in (0, -1, 1001):
+        with pytest.raises(ValueError):
+            await marks(principal(), limit=boundary)
+    with pytest.raises(ValueError):
+        await summaries(principal(), [f"key-{index}" for index in range(1001)])
+
+
+async def test_thread_marks_change_with_the_summary() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await thread_mark_contract(uow.email)
+
+
 async def semantic_source_timestamp_contract(store: EmailStore) -> None:
     """Both stores validate active sources before any insert or revision change."""
     from datetime import timezone
