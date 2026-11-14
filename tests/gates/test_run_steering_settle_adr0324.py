@@ -240,7 +240,7 @@ async def test_a_repeated_key_finds_its_follow_up_after_it_was_carried_over(
         for key in ("k1", "k2"):
             with pytest.raises(ConflictError) as refused:
                 await _keyed(composition, session_id, "Something else.", key)
-            changed.append(refused.value.reason)
+            changed.append(str(refused.value.reason))
         # Turning the setting off must not turn an accepted follow-up into new work.
         monkeypatch.setattr(composition.services.runs, "_run_steering_enabled", False)
         after_off = await _keyed(composition, session_id, "And feet.", "k2")
