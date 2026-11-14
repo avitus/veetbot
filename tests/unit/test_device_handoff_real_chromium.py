@@ -835,7 +835,7 @@ async def test_an_open_event_stream_does_not_prevent_session_verification(tmp_pa
     members.app.routes.append(Route("/updates", members.updates))
     async with (
         local_https_site(members.app) as site,
-        profile_service(site, tmp_path / "profiles", verification_seconds=10) as service,
+        profile_service(site, tmp_path / "profiles") as service,
     ):
         try:
             response, ceremony_id = await hand_off(
