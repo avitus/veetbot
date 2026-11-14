@@ -30,6 +30,24 @@ _DISPATCH_KEYS = frozenset(
         "wait_for_greeting",
     }
 )
+# ADR-0319: a pinned agent call names the reviewed version and nothing that overrides it.
+_AGENT_DISPATCH_KEYS = frozenset(
+    {
+        "phone_number",
+        "from",
+        "agent_id",
+        "agent_version",
+        "request_data",
+        "max_duration",
+        "record",
+        "webhook",
+        "metadata",
+        "voicemail",
+    }
+)
+_AGENT_REQUEST_DATA = frozenset({"call_mode", "call_objective", "call_context"})
+_AGENT_VERSION = re.compile(r"^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$")
+_MAXIMUM_DURATION_MINUTES = 15
 _VOICEMAIL_MESSAGE_CHARACTERS = 1000
 # complete_error is a post-call fault such as a failed webhook, not a failed call.
 _FAILED_STAGES = frozenset(
@@ -83,6 +101,44 @@ def _ended_by_voicemail_detection(transcripts: object) -> bool:
         isinstance(last, dict)
         and last.get("user") == "assistant"
         and last.get("text") == "<Call ended due to voicemail detection>"
+    )
+
+
+def _approved_agent(payload: dict[str, Any]) -> bool:
+    """Exactly the pinned version in outbound mode, with the brief as its only input."""
+    version = payload.get("agent_version")
+    data = payload.get("request_data")
+    if (
+        set(payload) - _AGENT_DISPATCH_KEYS
+        or not isinstance(version, str)
+        or _AGENT_VERSION.fullmatch(version) is None
+        or not isinstance(data, dict)
+        or set(data) != _AGENT_REQUEST_DATA
+        or data["call_mode"] != "outbound"
+    ):
+        return False
+    try:
+        identifier(payload.get("agent_id"))
+    except BlandError:
+        return False
+    objective, context = data["call_objective"], data["call_context"]
+    return (
+        isinstance(objective, str)
+        and isinstance(context, str)
+        and objective != ""
+        and len(objective.encode()) + len(context.encode()) <= 12_000
+    )
+
+
+def _approved_task(payload: dict[str, Any]) -> bool:
+    task = payload.get("task")
+    return (
+        not set(payload) - _DISPATCH_KEYS
+        and isinstance(task, str)
+        and 1 <= len(task.encode()) <= 12_000
+        and payload.get("tools") == []
+        and payload.get("transfer_list") == {}
+        and payload.get("wait_for_greeting") is True
     )
 
 
@@ -170,24 +226,18 @@ class BlandClient:
 
     async def start_call(self, payload: dict[str, Any]) -> dict[str, Any]:
         recipient = payload.get("phone_number")
-        task = payload.get("task")
         duration = payload.get("max_duration")
         metadata = payload.get("metadata")
         if (
-            set(payload) - _DISPATCH_KEYS
-            or not isinstance(recipient, str)
+            not isinstance(recipient, str)
             or _PHONE.fullmatch(recipient) is None
-            or not isinstance(task, str)
-            or not 1 <= len(task.encode()) <= 12_000
+            or not (_approved_agent(payload) if "agent_id" in payload else _approved_task(payload))
             or payload.get("from") != self.number
             or type(duration) is not int
-            or not 1 <= duration <= 5
+            or not 1 <= duration <= _MAXIMUM_DURATION_MINUTES
             or payload.get("record") is not False
-            or payload.get("tools") != []
-            or payload.get("transfer_list") != {}
             or not isinstance(metadata, dict)
             or set(metadata) != {"veetbot_request_id"}
-            or payload.get("wait_for_greeting") is not True
             or not _approved_voicemail(payload.get("voicemail"))
         ):
             raise BlandError("bland.arguments_invalid")

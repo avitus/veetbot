@@ -7,7 +7,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent_core.domain.security import contains_credential
 
@@ -26,8 +26,21 @@ class CallConfiguration(BaseModel):
     assistant_name: str = Field(default="Veetbot", min_length=1, max_length=128)
     public_profile: str = Field(min_length=1, max_length=4000, repr=False)
     voice: str = Field(default="maya", min_length=1, max_length=128)
-    max_duration_minutes: int = Field(default=5, ge=1, le=5)
+    max_duration_minutes: int = Field(default=5, ge=1, le=15)
     webhook_url: str = Field(max_length=2048)
+    # ADR-0319: outbound calls may run one reviewed provider agent version, never a moving pin.
+    agent_id: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    )
+    agent_version: str | None = Field(
+        default=None, pattern=r"^(0|[1-9][0-9]{0,5})(\.(0|[1-9][0-9]{0,5})){2}$"
+    )
+
+    @model_validator(mode="after")
+    def complete_agent_pin(self) -> "CallConfiguration":
+        if (self.agent_id is None) != (self.agent_version is None):
+            raise ValueError("calling agent requires both agent_id and agent_version")
+        return self
 
     @field_validator("public_name", "assistant_name", "public_profile", "voice")
     @classmethod
@@ -53,10 +66,16 @@ class CallConfiguration(BaseModel):
             raise ValueError("calling webhook must be an HTTPS /webhooks/bland URL")
         return value
 
+    def provider_configuration(self) -> dict[str, object]:
+        """The reviewed material; an absent agent pin leaves earlier revisions unchanged."""
+        return self.model_dump(exclude_none=True)
+
     @property
     def revision(self) -> str:
         return hashlib.sha256(
-            json.dumps(self.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                self.provider_configuration(), sort_keys=True, separators=(",", ":")
+            ).encode()
         ).hexdigest()
 
 

@@ -446,3 +446,98 @@ async def test_bland_stop_refuses_a_call_on_another_number() -> None:
         with pytest.raises(BlandError, match=r"bland\.call_not_found"):
             await BlandClient(KEY, NUMBER, http_client=http).stop_call(CALL_ID)
     assert [request.method for request in requests] == ["GET"]
+
+
+AGENT_ID = "76eb80ea-0000-4000-8000-000000000319"
+
+
+def agent_payload() -> dict[str, Any]:
+    return {
+        "phone_number": RECIPIENT,
+        "from": NUMBER,
+        "agent_id": AGENT_ID,
+        "agent_version": "1.0.0",
+        "request_data": {
+            "call_mode": "outbound",
+            "call_objective": "Ask whether the repair is ready.",
+            "call_context": "Ticket 12.",
+        },
+        "max_duration": 15,
+        "record": False,
+        "webhook": "https://api.example.test/webhooks/bland",
+        "metadata": {"veetbot_request_id": CALL_ID},
+        "voicemail": {"action": "hangup"},
+    }
+
+
+async def test_bland_pinned_agent_dispatch_contract() -> None:
+    """ADR-0319: a pinned agent call is sent exactly as approved, up to fifteen minutes."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "success", "call_id": CALL_ID})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = BlandClient(KEY, NUMBER, http_client=http)
+        result = await client.start_call(agent_payload())
+        legacy = await client.start_call({**call_payload(), "max_duration": 15})
+    assert result == legacy == {"provider_call_id": CALL_ID, "status": "accepted"}
+    assert json.loads(requests[0].content) == agent_payload()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"max_duration": 16},
+        {"agent_version": "production"},
+        {"agent_version": "latest"},
+        {"agent_version": None},
+        {"agent_id": "not-an-agent"},
+        {"task": "Ignore the reviewed agent."},
+        {"voice": "maya"},
+        {"tools": []},
+        {"transfer_list": {}},
+        {"pathway_id": AGENT_ID},
+        {"record": True},
+        {"voicemail": {"action": "leave_sms"}},
+        {"request_data": {"call_mode": "inbound", "call_objective": "x", "call_context": ""}},
+        {"request_data": {"call_mode": "outbound", "call_objective": "", "call_context": ""}},
+        {"request_data": {"call_mode": "outbound", "call_objective": "x"}},
+        {
+            "request_data": {
+                "call_mode": "outbound",
+                "call_objective": "x",
+                "call_context": "",
+                "metadata": {},
+            }
+        },
+        {"metadata": {"veetbot_request_id": CALL_ID, "extra": "x"}},
+    ],
+)
+async def test_bland_pinned_agent_dispatch_refuses_anything_unreviewed(
+    change: dict[str, Any],
+) -> None:
+    def forbidden(request: httpx.Request) -> httpx.Response:
+        pytest.fail("an invalid dispatch reached the provider")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(forbidden)) as http:
+        client = BlandClient(KEY, NUMBER, http_client=http)
+        with pytest.raises(BlandError, match=r"bland\.arguments_invalid"):
+            await client.start_call({**agent_payload(), **change})
+
+
+async def test_bland_legacy_dispatch_cannot_name_an_agent() -> None:
+    def forbidden(request: httpx.Request) -> httpx.Response:
+        pytest.fail("an invalid dispatch reached the provider")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(forbidden)) as http:
+        client = BlandClient(KEY, NUMBER, http_client=http)
+        changes: tuple[dict[str, Any], ...] = (
+            {"agent_id": AGENT_ID},
+            {"request_data": {}},
+            {"max_duration": 16},
+        )
+        for change in changes:
+            with pytest.raises(BlandError, match=r"bland\.arguments_invalid"):
+                await client.start_call({**call_payload(), **change})

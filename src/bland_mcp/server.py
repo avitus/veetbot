@@ -29,8 +29,14 @@ CONFIGURATION_FIELDS = frozenset(
 )
 
 
+AGENT_FIELDS = frozenset({"agent_id", "agent_version"})
+
+
 def configuration_revision(configuration: dict[str, Any]) -> str:
-    if set(configuration) != CONFIGURATION_FIELDS or configuration.get("version") != 1:
+    if (
+        set(configuration) not in (CONFIGURATION_FIELDS, CONFIGURATION_FIELDS | AGENT_FIELDS)
+        or configuration.get("version") != 1
+    ):
         raise BlandError("bland.configuration_invalid")
     return hashlib.sha256(
         json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode()
@@ -59,6 +65,8 @@ async def _call(operation: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolR
 def create_server(mode: str, client: BlandClient, configuration: dict[str, Any]) -> MCPServer:
     if mode not in {"read", "call"}:
         raise BlandError("bland.configuration_invalid")
+    # An absent agent pin may arrive as nulls; the reviewed material omits it.
+    configuration = {key: value for key, value in configuration.items() if value is not None}
     revision = configuration_revision(configuration)
     if configuration["phone_number"] != client.number:
         raise BlandError("bland.configuration_invalid")
@@ -128,7 +136,7 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
             brief: Annotated[str, Field(min_length=1, max_length=4000)],
             disclosed_facts: Annotated[str, Field(max_length=4000)],
             config_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")],
-            max_duration_minutes: Annotated[int, Field(ge=1, le=5)] = 5,
+            max_duration_minutes: Annotated[int, Field(ge=1, le=15)] = 5,
             record: bool = False,
             request_id: str | None = None,
             voicemail_message: Annotated[str, Field(min_length=1, max_length=1000)] | None = None,
@@ -144,6 +152,34 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
                 correlation = identifier(request_id)
             except BlandError:
                 return _error("bland.platform_required")
+            voicemail: dict[str, str] = (
+                {"action": "hangup"}
+                if voicemail_message is None
+                else {"action": "leave_message", "message": voicemail_message}
+            )
+            if "agent_id" in configuration:
+                # ADR-0319: the pinned agent version owns the prompt, voice, greeting order
+                # and tools; the approved brief travels only as its trusted request data.
+                return await _call(
+                    lambda: client.start_call(
+                        {
+                            "phone_number": phone_number,
+                            "from": from_number,
+                            "agent_id": configuration["agent_id"],
+                            "agent_version": configuration["agent_version"],
+                            "request_data": {
+                                "call_mode": "outbound",
+                                "call_objective": brief,
+                                "call_context": disclosed_facts,
+                            },
+                            "max_duration": max_duration_minutes,
+                            "record": False,
+                            "webhook": configuration["webhook_url"],
+                            "metadata": {"veetbot_request_id": correlation},
+                            "voicemail": voicemail,
+                        }
+                    )
+                )
             task = (
                 "You are "
                 + str(configuration["assistant_name"])
@@ -179,9 +215,7 @@ def create_server(mode: str, client: BlandClient, configuration: dict[str, Any])
                         # ADR-0108: the answering side speaks first, and voicemail
                         # handling is explicit rather than a provider default.
                         "wait_for_greeting": True,
-                        "voicemail": {"action": "hangup"}
-                        if voicemail_message is None
-                        else {"action": "leave_message", "message": voicemail_message},
+                        "voicemail": voicemail,
                     }
                 )
             )

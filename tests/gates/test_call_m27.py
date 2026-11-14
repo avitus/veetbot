@@ -228,7 +228,7 @@ async def test_approved_voicemail_reaches_the_provider_and_is_bounded() -> None:
 
 
 @pytest.mark.parametrize(
-    "change", [{"record": True}, {"tools": ["email"]}, {"max_duration_minutes": 6}]
+    "change", [{"record": True}, {"tools": ["email"]}, {"max_duration_minutes": 16}]
 )
 def test_public_configuration_has_no_private_capabilities(change: dict[str, object]) -> None:
     with pytest.raises(ValueError):
@@ -495,3 +495,139 @@ async def test_bland_child_stderr_carries_no_provider_request_lines(tmp_path: Pa
         KEY,
     ):
         assert value not in stderr
+
+
+AGENT_ID = "76eb80ea-0000-4000-8000-000000000319"
+
+
+def agent_configuration() -> CallConfiguration:
+    return CallConfiguration.model_validate(
+        {
+            **call_configuration().provider_configuration(),
+            "max_duration_minutes": 15,
+            "agent_id": AGENT_ID,
+            "agent_version": "1.0.0",
+        }
+    )
+
+
+def test_call_length_ceiling_is_fifteen_minutes_and_default_stays_five() -> None:
+    """ADR-0319: the owner raised the reviewed ceiling; an unset file keeps five."""
+    assert call_configuration().max_duration_minutes == 5
+    assert agent_configuration().max_duration_minutes == 15
+
+
+def test_agent_pin_is_complete_reviewed_and_bound_to_the_revision() -> None:
+    """ADR-0319: an unpinned file keeps its revision; a pin changes the approval binding."""
+    import hashlib
+
+    base = call_configuration()
+    legacy = {
+        "version": 1,
+        "account_id": "primary",
+        "phone_number": NUMBER,
+        "public_name": "Example Owner",
+        "assistant_name": "Veetbot",
+        "public_profile": "Take messages. The office is open Monday to Friday.",
+        "voice": "maya",
+        "max_duration_minutes": 5,
+        "webhook_url": "https://api.example.test/webhooks/bland",
+    }
+    assert base.provider_configuration() == legacy
+    assert (
+        base.revision
+        == hashlib.sha256(
+            json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    pinned = agent_configuration()
+    assert pinned.revision != base.revision
+    repinned = CallConfiguration.model_validate(
+        {**pinned.provider_configuration(), "agent_version": "1.0.1"}
+    )
+    assert repinned.revision != pinned.revision
+    for change in (
+        {"agent_version": None},
+        {"agent_id": None},
+        {"agent_version": "production"},
+        {"agent_version": "latest"},
+        {"agent_id": "not-an-agent"},
+    ):
+        values = {**pinned.provider_configuration(), **change}
+        with pytest.raises(ValueError):
+            CallConfiguration.model_validate({k: v for k, v in values.items() if v is not None})
+
+
+async def test_pinned_agent_dispatch_carries_only_the_approved_brief_as_request_data() -> None:
+    """ADR-0319: the pinned agent version speaks; Veetbot sends no prompt, voice or tools."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "success", "call_id": CALL_ID})
+
+    config = agent_configuration()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        server = create_server(
+            "call", BlandClient(KEY, NUMBER, http_client=http), config.provider_configuration()
+        )
+        catalog = {tool.name: tool for tool in await server.list_tools()}
+        assert "Maximum duration is 15 minutes." in (catalog["start_call"].description or "")
+        args: dict[str, Any] = {
+            "phone_number": RECIPIENT,
+            "from_number": NUMBER,
+            "brief": "Ask whether the repair is ready.",
+            "disclosed_facts": "Ticket 12.",
+            "config_revision": config.revision,
+            "request_id": CALL_ID,
+            "max_duration_minutes": 15,
+        }
+        result = await server.call_tool("start_call", args)
+        assert isinstance(result, CallToolResult) and not result.is_error
+        assert json.loads(requests[-1].content) == {
+            "phone_number": RECIPIENT,
+            "from": NUMBER,
+            "agent_id": AGENT_ID,
+            "agent_version": "1.0.0",
+            "request_data": {
+                "call_mode": "outbound",
+                "call_objective": "Ask whether the repair is ready.",
+                "call_context": "Ticket 12.",
+            },
+            "max_duration": 15,
+            "record": False,
+            "webhook": config.webhook_url,
+            "metadata": {"veetbot_request_id": CALL_ID},
+            "voicemail": {"action": "hangup"},
+        }
+        with pytest.raises(ToolError, match="max_duration_minutes"):
+            await server.call_tool("start_call", {**args, "max_duration_minutes": 16})
+        assert len(requests) == 1
+
+
+async def test_unpinned_configuration_still_refuses_a_call_longer_than_its_own_ceiling() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "success", "call_id": CALL_ID})
+
+    config = call_configuration()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        server = create_server(
+            "call", BlandClient(KEY, NUMBER, http_client=http), config.provider_configuration()
+        )
+        rejected = await server.call_tool(
+            "start_call",
+            {
+                "phone_number": RECIPIENT,
+                "from_number": NUMBER,
+                "brief": "Ask whether the repair is ready.",
+                "disclosed_facts": "",
+                "config_revision": config.revision,
+                "request_id": CALL_ID,
+                "max_duration_minutes": 6,
+            },
+        )
+        assert isinstance(rejected, CallToolResult) and rejected.is_error
+        assert requests == []

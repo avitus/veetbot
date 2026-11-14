@@ -207,6 +207,26 @@ one occurrence with no scopes, which tells the owner the outcome and cannot
 call. Its scheduled-run alert is the plan's only alert. The scheduling design
 gives the materialization contract.
 
+### Pinned agent version (ADR-0319)
+
+The reviewed configuration may name one provider agent with `agent_id` and
+`agent_version`, both or neither. The version is a minted semantic version;
+moving selectors such as `production` or `latest` are refused, and both values
+are part of the revision that binds approval. With a pin, dispatch sends no
+prompt, voice, tools, transfers or greeting-order field. It sends the pin, the
+duration, recording off, the callback URL, the correlation metadata, the
+explicit voicemail action and `request_data` with exactly `call_mode`
+(`outbound`), `call_objective` (the approved brief) and `call_context` (the
+approved disclosed facts). The pinned version owns the introduction "Hi, this
+is Willow, Andy's assistant.", the truthful answer when asked, the
+recipient-speaks-first order and the absence of tools; the operator reviews
+those before pinning. A version that references a provider environment
+variable (`{{env.KEY}}`) must not be pinned: the provider resolves it outside
+the version, so the approved revision would not bind it. Without a pin,
+dispatch is the prompt-based form above.
+The agent has no post-call setting: outbound results arrive through the
+per-call callback and inbound results through the number's callback.
+
 The server's stderr is not a private channel: the API or worker process that
 spawns the child passes on its own stderr, so anything the child logs lands in
 that service's journal. The package therefore holds HTTP transport logging at
@@ -345,7 +365,8 @@ rejected: it would add root reads of paths taken from the environment files.
 The [setup guide](../bland-setup.md) holds the commands, and
 `deploy/app/release.test.sh` replays them as each deploy identity.
 
-Initial call limits are five minutes per call and one concurrent outbound call.
+Call limits are fifteen minutes per call (ADR-0319; the configured ceiling
+still defaults to five) and one concurrent outbound call.
 Inbound concurrency follows the reviewed provider plan's limits; a stricter
 one-at-a-time inbound limit is optional and is not an activation requirement.
 These limits do not authorize placing a live call. Outbound admission uses
