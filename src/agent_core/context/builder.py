@@ -390,6 +390,9 @@ def _insert_provider_continuation(
         raise ValueError("checkpoint continuation contains a mismatched provider")
     trailing_result_ids: set[str] = set()
     for item in reversed(result):
+        if isinstance(item, UserMessage) and not trailing_result_ids:
+            # A follow-up read after the batch leaves the batch as the anchor (ADR-0324).
+            continue
         if not isinstance(item, ToolResultItem):
             break
         trailing_result_ids.add(item.call_id)
@@ -404,6 +407,28 @@ def _insert_provider_continuation(
         raise ValueError("checkpoint continuation has no matching tool-call anchor")
     result[min(matching) : min(matching)] = opaque_items
     return result
+
+
+def turn_user_text(items: list[ConversationItem]) -> str | None:
+    """The owner text a turn's recall searches on (ADR-0324).
+
+    Without follow-ups it is the latest owner message, as before. Once the run
+    has read follow-ups, they are appended in order to the message they
+    follow, so a follow-up that only adds a detail does not hide the request
+    it refines.
+    """
+
+    base = current_user_text([item for item in items if not _is_follow_up(item)])
+    follow_ups = [
+        text
+        for item in items
+        if _is_follow_up(item) and (text := current_user_text([item])) is not None
+    ]
+    return "\n".join([*([] if base is None else [base]), *follow_ups]) or None
+
+
+def _is_follow_up(item: ConversationItem) -> bool:
+    return isinstance(item, UserMessage) and item.follow_up
 
 
 class MinimalContextBuilder:
@@ -1076,7 +1101,7 @@ class BudgetedContextBuilder:
     ) -> _RecallBundle:
         if self._memory_retriever is None or self._query_former is None:
             return _RecallBundle()
-        message = current_user_text(active)
+        message = turn_user_text(active)
         if message is None:
             return _RecallBundle()
         # A checkpoint identifies a question, not the continued validity of its

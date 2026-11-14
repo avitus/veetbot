@@ -332,13 +332,14 @@ The transaction performs no model, tool, or Telegram I/O; the adapter's
 advances only from committed receipts, so a crash before commit re-delivers
 the update and the receipt insert makes the retry idempotent.
 
-With `AGENT_RUN_STEERING_ENABLED` set (ADR-0321, proposed), step 9's active-run
+Not yet built: a surface still answers a working chat with the notice above.
+With `AGENT_RUN_STEERING_ENABLED` set (ADR-0324), step 9's active-run
 case changes for a run the paired principal started: the shared submission
 function holds the text as a follow-up, the receipt records
 `ACCEPTED_FOLLOW_UP`, and the notice becomes an acknowledgement ("got it;
 I'll read this at my next step"). It reserves no budget and starts no run.
 `/stop` is unchanged, and `gate.surface.input_routing` is restated for both
-values of the setting when the decision is accepted.
+values of the setting when the implementation lands.
 
 Surface runs are interactive priority 0 — a human is typing — and use
 interactive reserved capacity.

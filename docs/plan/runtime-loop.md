@@ -1999,21 +1999,21 @@ email-source recovery failure from a platform defect. Unexpected failures retain
 a diagnostic UUID, code fingerprint, phase and release in `RunFailure.details`;
 raw exception text stays absent. Public run views expose only the optional UUID.
 
-## Follow-ups to a working run (ADR-0321, proposed)
+## Follow-ups to a working run (ADR-0324)
 
 With `AGENT_RUN_STEERING_ENABLED` set, a message the run's principal sends
 while the run is `QUEUED`, `RUNNING` or `WAITING_FOR_APPROVAL` is held in
 `run_pending_inputs` and joins that run. This replaces contradiction 14's
 reject for those messages only; the one-active-run index, the state machine and
 the single terminal writer are unchanged. Unset, the reject stands. See
-[ADR-0321](../adr/0321-follow-ups-steer-a-running-run.md).
+[ADR-0324](../adr/0324-follow-ups-steer-a-running-run.md).
 
 **The loop reads the inbox in phase 1.** After the cancellation and budget
 checks, and only when no synthesis reserve or report-only stop is active, the
 loop opens one unit of work under the run's lease. For each pending row in
 arrival order it appends `user.message.created` with the row's content, the
-sender's trust and `pending_input_id`, using that id as the derivation key,
-then deletes the row. The messages are appended to the checkpoint conversation
+sender's trust and `pending_input_id`,
+then deletes the row. The derivation key is `run.follow_up:<id>`. The messages are appended to the checkpoint conversation
 and the loop writes a checkpoint with the trigger `follow_up`. Every earlier
 tool call has its result at this point, so the stored history keeps its
 call/result pairs and the provider continuation is kept.
@@ -2034,12 +2034,19 @@ whose derivation key already exists is deleted without a second event.
 **Reading a follow-up ends single-request consent.** In the same unit of work
 the loop ends the run's request grant (ADR-0302) and clears a pending specific
 Follow consent (ADR-0172). Task grants, the pinned roster, limits, the
-deadline and the agent and policy versions are unchanged. Pre-turn recall is
-not repeated.
+deadline and the agent and policy versions are unchanged.
 
-**The terminal transition settles what was never read.** `finalize` locks the
-run row, which the inbox insert also locks, so a follow-up is either visible to
-this transaction or refused as arriving on a terminal run.
+**Recall after a follow-up searches on the whole turn.** The context builder
+recomputes recall on each assembly from the latest owner message. Once the
+conversation holds follow-ups, `turn_user_text` forms the query from the
+message they follow plus every follow-up, in order. `UserMessage.follow_up`
+marks them, set by the loop and, on a rebuild from the log, by the event's
+`pending_input_id`. A run without follow-ups forms its query exactly as before.
+
+**The terminal transition settles what was never read.** `finalize` scans the
+inbox after it appends the terminal event. That append holds the session's
+row, which a follow-up insert also needs, so a follow-up is either visible to
+this transaction or routed as arriving on a session with no active run.
 
 ```text
 # outcome                      pending rows
@@ -2050,12 +2057,16 @@ CANCELLED by deadline, FAILED  dropped
 SUSPENDED                      kept
 ```
 
-The new run is created through a port the shared submission function
-implements, after the old run's transition and in the same transaction, so the
-index admits it. Admission, the surface run budget and idempotency apply as
-for any message; an admission refusal drops the rows. Each drop appends a
+The new run is created by a callable the shared submission function
+implements, after the old run's transition and in the same transaction, so
+the index admits it; the executor dispatches it after the commit. The kept
+rows become one user message in arrival order, with `pending_input_ids`, and
+each further row leaves a content-free `run.input.promoted` marker. The three
+writers that end a parked run (the owner's cancel, a surface `/stop`, and the
+child-budget failure) drop what the run held. Each drop appends a
 content-free `run.input.dropped` event with `pending_input_id` and a reason of
-`run_failed`, `run_cancelled`, `deadline_exceeded` or `admission_refused`.
+`run_failed` or `run_cancelled`.
 
-This section adds two event types, `run.input.queued` and `run.input.dropped`,
-and one checkpoint trigger. Both events carry identifiers only.
+This section adds two event types, `run.input.dropped` and
+`run.input.promoted`, and one checkpoint trigger. Both events carry
+identifiers only. Holding a follow-up appends no event.

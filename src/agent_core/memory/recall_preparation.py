@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from jsonschema import Draft202012Validator
 
-from agent_core.context.builder import current_user_text
+from agent_core.context.builder import turn_user_text
 from agent_core.context.recall_budget import automatic_reserve, select_current_search_results
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import Principal
@@ -131,7 +131,7 @@ class SemanticRecallPreparation:
                     or sequence >= run.seed_event_sequence
                 )
             ]
-            message = current_user_text(active)
+            message = turn_user_text(active)
             if message is None:
                 return []
             async with self._factory() as uow:

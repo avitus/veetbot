@@ -1686,28 +1686,29 @@ The additive `e8a270b10301` migration refuses downgrade while any row remains.
 Ciphertext AAD binds tenant, principal, ID, origin, scheme and revision. The host
 master key is kept outside the database and its backups.
 
-## Pending follow-ups (ADR-0321, proposed)
+## Pending follow-ups (ADR-0324)
 
 `run_pending_inputs` is an inbox, not a log. A row holds one follow-up from
-the moment the API accepts it until the run reads or drops it.
+the moment the API accepts it until the run reads, carries over or drops it.
 
 ```text
-# column             note
-id                   the pending_input_id clients see
-tenant_id            repository argument, as everywhere
-run_id               foreign key to runs, ON DELETE CASCADE
-session_id           the run's session
-principal_id         the sender; always the run's principal
-content              text content blocks, validated on insert
-idempotency_key_hash the HTTP key's hash, unique per session when present
-created_at           arrival order, with id as the tie-break
+# column        note
+id              the pending_input_id clients see
+position        identity column; arrival order
+tenant_id       repository argument, as everywhere
+principal_id    the sender; always the run's principal
+session_id      foreign key to sessions, ON DELETE CASCADE
+run_id          the run it waits for; deliberately not a foreign key
+content         text content parts, validated on insert
+created_at      compared with the run's cancel time
 ```
 
-The insert locks the run row, refuses a terminal run, enforces at most eight
-rows per run, and appends `run.input.queued` in the same transaction. The row
-is deleted in the transaction that appends its `user.message.created` or its
+The insert runs under the session's admission lock and enforces at most eight
+rows per run. It takes no lock on the run's row, and the foreign key is to the
+session for that reason: a key check against `runs` would wait on the row the
+run's worker locks before the session's, in the opposite order. The row is
+deleted in the transaction that appends its `user.message.created` or its
 `run.input.dropped`, so a follow-up's content is never stored in both places.
-Neither inbox event carries content. Session deletion and erasure remove the
-rows by cascade before they remove the run. The migration is additive, and
-the worker role needs select and delete on the table, the API role select and
-insert.
+Session deletion removes the rows by cascade. The migration is additive. The
+application's owner login needs no grant; a least-privilege login that ends or
+holds runs does.

@@ -54,6 +54,7 @@ from agent_core.ports.repositories import (
     IdempotencyRepository,
     MaintenanceRepository,
     PolicyProfileRepository,
+    RunPendingInputRepository,
     RunRepository,
     SessionDeletionRepository,
     SessionHistoryRepository,
@@ -107,6 +108,7 @@ class UnitOfWorkRepositories:
     invocations: ToolInvocationRepository
     checkpoints: CheckpointRepository
     idempotency: IdempotencyRepository
+    pending_inputs: RunPendingInputRepository
     usage: UsageRepository
     history: SessionHistoryRepository
     trajectory: TrajectoryProjectionRepository
@@ -188,6 +190,7 @@ class MemoryUnitOfWork:
         self.invocations = repositories.invocations
         self.checkpoints = repositories.checkpoints
         self.idempotency = repositories.idempotency
+        self.pending_inputs = repositories.pending_inputs
         self.usage = repositories.usage
         self.history = repositories.history
         self.trajectory = repositories.trajectory
@@ -344,6 +347,7 @@ class PostgresUnitOfWork:
         self.checkpoints = repositories.checkpoints
         self.invocations = repositories.invocations
         self.idempotency = repositories.idempotency
+        self.pending_inputs = repositories.pending_inputs
         self.usage = repositories.usage
         self.export_consent = repositories.export_consent
         self.trajectory_exports = repositories.trajectory_exports

@@ -124,6 +124,8 @@ class Settings:
     credentials: Mapping[str, SecretStr]
     interpolation: Mapping[str, str]
     trajectory_export_enabled: bool = False
+    # ADR-0324: a follow-up joins the working run instead of a 409.
+    run_steering_enabled: bool = False
     skill_authoring_enabled: bool = False
     skill_background_review_enabled: bool = False
     # Observe-only: the advisor is consulted and recorded and no decision changes,
@@ -1934,6 +1936,7 @@ def _load_settings(
         credentials["openai"] = SecretStr(veetbot_openai_key)
     interpolation = {"OPENAI_MODEL": values.get("OPENAI_MODEL", "")}
     trajectory_export_enabled = _parse_flag(values, "AGENT_TRAJECTORY_EXPORT_ENABLED")
+    run_steering_enabled = _parse_flag(values, "AGENT_RUN_STEERING_ENABLED")
     skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
     policy_advisory_observe_enabled = _parse_flag(values, "AGENT_POLICY_ADVISORY_OBSERVE_ENABLED")
@@ -2330,6 +2333,7 @@ def _load_settings(
         credentials=MappingProxyType(credentials),
         interpolation=MappingProxyType(interpolation),
         trajectory_export_enabled=trajectory_export_enabled,
+        run_steering_enabled=run_steering_enabled,
         skill_authoring_enabled=skill_authoring_enabled,
         skill_background_review_enabled=skill_background_review_enabled,
         policy_advisory_observe_enabled=policy_advisory_observe_enabled,

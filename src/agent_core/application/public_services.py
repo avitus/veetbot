@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal, Protocol, cast
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from agent_core.application.attachments import (
     admit_content,
@@ -134,6 +134,12 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.model_settings import ModelSettingsCatalog
+from agent_core.domain.pending_inputs import (
+    MAX_PENDING_RUN_INPUTS,
+    PendingRunInput,
+    follow_up_derivation,
+    follow_up_drop_derivation,
+)
 from agent_core.domain.persistence import IdempotencyRecord, WorkerLease
 from agent_core.domain.persona import (
     KEEP_PERSONA_FIELD,
@@ -150,7 +156,13 @@ from agent_core.domain.persona import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.reconsolidation_summary import SummaryMemory
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunCheckpoint, RunStatus
+from agent_core.domain.runs import (
+    TERMINAL_RUN_STATUSES,
+    Run,
+    RunCheckpoint,
+    RunKind,
+    RunStatus,
+)
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
     SESSION_RESERVED_METADATA_KEYS,
@@ -175,6 +187,7 @@ from agent_core.domain.views import (
     MemoryEvidenceView,
     MemoryView,
     Page,
+    PendingInputView,
     PersistedStreamFrame,
     PersonaNominationView,
     PersonaView,
@@ -825,9 +838,12 @@ class PublicRunService:
         trajectory_export_enabled: bool,
         live_events: LiveEventBroadcaster,
         offers_websites: bool = False,
+        run_steering_enabled: bool = False,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
+        # ADR-0324: off, a message to a working run is the 409 it always was.
+        self._run_steering_enabled = run_steering_enabled
         # ADR-0251: only a composition that resolves profiles per chat offers
         # to connect one.
         self._offers_websites = offers_websites
@@ -886,64 +902,242 @@ class PublicRunService:
                                 reason="idempotency_key_reused",
                             )
                         raise _ExistingRunError(original)
-                if browser_profile_id is not None:
-                    session = await bind_chat_website(uow, principal, session, browser_profile_id)
-                follow_handle = None
-                offer = None
-                owner_text = "\n".join(
-                    block.text for block in content if isinstance(block, TextContentBlock)
-                )
-                if await uow.runs.active_for_session(session.id, principal) is None:
-                    session, follow_handle = await prepare_follow_request(
-                        uow, principal, session, owner_text
-                    )
-                    # ADR-0251: only a new owner run from an authenticated client
-                    # is matched; an exact X follow keeps its own rules.
-                    if follow_handle is None and self._offers_websites:
-                        offer = await prepare_website_offer(uow, principal, session, owner_text)
-                prepared = await self._submit_in(
+                held = await self._hold_owner_follow_up(
                     uow,
                     principal,
                     session,
                     content,
-                    trace_id=trace_id,
-                    payload_extra=(
-                        {"browser_follow_target": follow_handle} if follow_handle else None
-                    ),
+                    idempotency_key,
+                    browser_profile_id=browser_profile_id,
                 )
-                if follow_handle and not session.metadata.get("browser_profile_id"):
-                    pending = await uow.checkpoints.latest(prepared.run.id)
-                    assert pending is not None
-                    pending.version += 1
-                    pending.working_state["browser_access_wait"] = "https://x.com"
-                    await uow.checkpoints.write(prepared.run.id, pending, full=True)
-                if offer is not None:
-                    await record_website_offer(
-                        uow, principal, prepared.run.id, session.id, offer, self._ids.new_id()
-                    )
-                if idempotency_key is not None:
-                    record = await uow.idempotency.create(
-                        IdempotencyRecord(
-                            key=idempotency_key,
-                            tenant_id=principal.tenant_id,
-                            principal_id=principal.principal_id,
-                            request_hash=request_hash,
-                            run_id=prepared.run.id,
-                            created_at=now,
-                            expires_at=now + timedelta(hours=24),
+                if held is None:
+                    if browser_profile_id is not None:
+                        session = await bind_chat_website(
+                            uow, principal, session, browser_profile_id
                         )
+                    follow_handle = None
+                    offer = None
+                    owner_text = "\n".join(
+                        block.text for block in content if isinstance(block, TextContentBlock)
                     )
-                    if record.run_id != prepared.run.id:
-                        original = await uow.runs.get(record.run_id, principal)
-                        raise _ExistingRunError(original)
+                    if await uow.runs.active_for_session(session.id, principal) is None:
+                        session, follow_handle = await prepare_follow_request(
+                            uow, principal, session, owner_text
+                        )
+                        # ADR-0251: only a new owner run from an authenticated client
+                        # is matched; an exact X follow keeps its own rules.
+                        if follow_handle is None and self._offers_websites:
+                            offer = await prepare_website_offer(uow, principal, session, owner_text)
+                    prepared = await self._submit_in(
+                        uow,
+                        principal,
+                        session,
+                        content,
+                        trace_id=trace_id,
+                        payload_extra=(
+                            {"browser_follow_target": follow_handle} if follow_handle else None
+                        ),
+                    )
+                    if follow_handle and not session.metadata.get("browser_profile_id"):
+                        pending = await uow.checkpoints.latest(prepared.run.id)
+                        assert pending is not None
+                        pending.version += 1
+                        pending.working_state["browser_access_wait"] = "https://x.com"
+                        await uow.checkpoints.write(prepared.run.id, pending, full=True)
+                    if offer is not None:
+                        await record_website_offer(
+                            uow, principal, prepared.run.id, session.id, offer, self._ids.new_id()
+                        )
+                    if idempotency_key is not None:
+                        record = await uow.idempotency.create(
+                            IdempotencyRecord(
+                                key=idempotency_key,
+                                tenant_id=principal.tenant_id,
+                                principal_id=principal.principal_id,
+                                request_hash=request_hash,
+                                run_id=prepared.run.id,
+                                created_at=now,
+                                expires_at=now + timedelta(hours=24),
+                            )
+                        )
+                        if record.run_id != prepared.run.id:
+                            original = await uow.runs.get(record.run_id, principal)
+                            raise _ExistingRunError(original)
         except _ExistingRunError as duplicate:
             return SubmitResult(
                 run_id=duplicate.run.id,
                 status=duplicate.run.status,
                 replayed=True,
             )
+        if held is not None:
+            return held
         await self._dispatch_prepared(prepared)
         return SubmitResult(run_id=prepared.run.id, status=prepared.run.status)
+
+    async def _hold_owner_follow_up(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        session: Session,
+        content: list[ContentBlock],
+        idempotency_key: str | None,
+        *,
+        browser_profile_id: UUID | None,
+    ) -> SubmitResult | None:
+        """Hold an owner message for the working run, or decline to (ADR-0324).
+
+        The caller holds the session's admission lock, which the run's terminal
+        transition also takes, so the run cannot end between this check and the
+        insert. Nothing here touches the run's own row: its worker locks that
+        row before the session's, and the opposite order would deadlock.
+        """
+
+        if not self._run_steering_enabled:
+            return None
+        input_id = (
+            self._ids.new_id()
+            if idempotency_key is None
+            else uuid5(
+                session.id,
+                canonical_json([principal.tenant_id, principal.principal_id, idempotency_key]),
+            )
+        )
+        text_only = all(isinstance(block, TextContentBlock) for block in content)
+        parts = [
+            TextPart(text=block.text) for block in content if isinstance(block, TextContentBlock)
+        ]
+        if idempotency_key is not None:
+            replay = await self._follow_up_replay(
+                uow, principal, input_id, parts if text_only else None
+            )
+            if replay is not None:
+                return replay
+        active = await uow.runs.active_for_session(session.id, principal)
+        bound_profile = session.metadata.get("browser_profile_id")
+        if (
+            active is None
+            or active.status
+            not in {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_FOR_APPROVAL}
+            or active.kind is not RunKind.INTERACTIVE
+            or active.parent_run_id is not None
+            or (browser_profile_id is not None and str(browser_profile_id) != bound_profile)
+        ):
+            return None
+        if not text_only:
+            raise AttachmentValidationError(
+                "A follow-up to a working run is text only; send files with the next message."
+            )
+        held = await uow.pending_inputs.list_for_run(active.id, principal)
+        if len(held) >= MAX_PENDING_RUN_INPUTS:
+            raise ConflictError(
+                "The working run already has the most follow-ups it can hold.",
+                reason="pending_input_limit",
+                details={"run_id": str(active.id)},
+            )
+        await uow.pending_inputs.add(
+            PendingRunInput(
+                id=input_id,
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                session_id=session.id,
+                run_id=active.id,
+                content=list(parts),
+                created_at=self._clock.now(),
+            )
+        )
+        return SubmitResult(run_id=active.id, status=active.status, pending_input_id=input_id)
+
+    async def promote_follow_ups_in(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        ended: Run,
+        pending: Sequence[PendingRunInput],
+    ) -> UUID | None:
+        """Start the next run from follow-ups the ended run never read (ADR-0324).
+
+        Runs inside the ended run's terminal transaction, after its transition,
+        so the session has no active run. The follow-ups become one message in
+        arrival order. Returns the new run for dispatch after the commit.
+        """
+
+        session = await uow.sessions.get(ended.session_id, principal)
+        if session.status is SessionStatus.CLOSED or not pending:
+            return None
+        first, *rest = pending
+        prepared = await self._submit_in(
+            uow,
+            principal,
+            session,
+            [
+                TextContentBlock(text=part.text)
+                for held in pending
+                for part in held.content
+                if isinstance(part, TextPart)
+            ],
+            trace_id=None,
+            payload_extra={"pending_input_ids": [str(held.id) for held in pending]},
+            derivation_namespace="run.follow_up",
+            derivation_suffix=str(first.id),
+        )
+        for held in rest:
+            # One marker per further follow-up, so a repeated key finds its run.
+            await uow.events.append(
+                NewEvent(
+                    session_id=session.id,
+                    run_id=prepared.run.id,
+                    event_type="run.input.promoted",
+                    actor_type="application",
+                    payload={"pending_input_id": str(held.id)},
+                    derivation_key=follow_up_derivation(held.id),
+                )
+            )
+        for held in pending:
+            await uow.pending_inputs.delete(held.id, principal)
+        return prepared.run.id
+
+    async def dispatch_promoted(self, run_id: UUID) -> None:
+        await self._dispatcher.dispatch(run_id)
+
+    async def _follow_up_replay(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        input_id: UUID,
+        parts: list[TextPart] | None,
+    ) -> SubmitResult | None:
+        """Answer a repeated key with the follow-up it first produced, wherever it is now."""
+
+        reused = ConflictError(
+            "The idempotency key was reused with a different body.",
+            reason="idempotency_key_reused",
+        )
+        waiting = await uow.pending_inputs.get(input_id, principal)
+        if waiting is not None:
+            if parts is None or waiting.content != parts:
+                raise reused
+            run = await uow.runs.get(waiting.run_id, principal)
+        else:
+            read = await uow.events.get_by_derivation(follow_up_derivation(input_id), principal)
+            settled = read or await uow.events.get_by_derivation(
+                follow_up_drop_derivation(input_id), principal
+            )
+            if settled is None or settled.run_id is None:
+                return None
+            if (
+                read is not None
+                and read.payload.get("pending_input_id") == str(input_id)
+                and (
+                    parts is None
+                    or read.payload.get("content")
+                    != [part.model_dump(mode="json") for part in parts]
+                )
+            ):
+                raise reused
+            run = await uow.runs.get(settled.run_id, principal)
+        return SubmitResult(
+            run_id=run.id, status=run.status, pending_input_id=input_id, replayed=True
+        )
 
     async def website_offer(
         self, principal: Principal, session_id: UUID
@@ -1328,7 +1522,23 @@ class PublicRunService:
         require_scope(principal, "run.read")
         async with self._uow_factory() as uow:
             run = await uow.runs.get(run_id, principal)
-        return _run_view(run)
+            held = await uow.pending_inputs.list_for_run(run_id, principal)
+        return _run_view(run).model_copy(
+            update={
+                "pending_inputs": [
+                    PendingInputView(
+                        id=pending.id,
+                        content=[
+                            TextContentBlock(text=part.text)
+                            for part in pending.content
+                            if isinstance(part, TextPart)
+                        ],
+                        created_at=pending.created_at,
+                    )
+                    for pending in held
+                ]
+            }
+        )
 
     async def cancel(self, principal: Principal, run_id: UUID) -> CancelResult:
         require_scope(principal, "run.cancel")

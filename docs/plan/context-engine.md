@@ -125,7 +125,7 @@ their order before the fresh rows. This makes the portable history grow without
 freezing context updates (ADR-0139). It changes neither selection nor budgets:
 active items are still never-yield inputs, not candidates for the history cut.
 
-A follow-up the run reads mid-turn (ADR-0321, proposed) is an ordinary user
+A follow-up the run reads mid-turn (ADR-0324) is an ordinary user
 message appended after a complete tool batch. It is the unanswered trailing
 user message for that step and becomes part of the completed exchanges once
 the next batch returns. An active run may therefore hold several user

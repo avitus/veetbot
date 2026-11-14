@@ -1044,7 +1044,7 @@ every client to implement the routing rule the server already has the
 state to apply. The setting exists so a deployment that wants strictly
 explicit input delivery can have it.
 
-### Follow-ups to a working run (ADR-0321, proposed)
+### Follow-ups to a working run (ADR-0324)
 
 With `AGENT_RUN_STEERING_ENABLED` set, the third row of the table splits.
 The run is steerable when it is a top-level interactive run and the caller
@@ -1056,7 +1056,7 @@ is its principal.
 | steerable, eight follow-ups already pending | `conflict`, `409`, `pending_input_limit` |
 | child, scheduled or delegated run, or another principal | `conflict`, `409`, `active_run_exists` |
 
-A follow-up is text. An `image` or `file` block is `validation_error`, and
+A follow-up is text. An `image` or `file` block is `malformed_request`, and
 the client keeps staged attachments for the next initiating message. The
 response is the message route's body with one more field:
 
@@ -1064,22 +1064,26 @@ response is the message route's body with one more field:
 {"run_id": "uuid", "status": "RUNNING", "pending_input_id": "uuid"}
 ```
 
-`run_id` and `status` are the active run's. The `Idempotency-Key` behaves as
-it does for a new run: a repeat with the same body returns the same
-`pending_input_id`, including after the follow-up was read. In step 8 the
-handler locks the run row, rechecks that the run is not terminal, inserts
-the row and appends `run.input.queued`; a run that ended in between is
-routed again as a session with no active run. There is no `NOTIFY`, because
-the worker reads the inbox at its next step.
+`run_id` and `status` are the active run's, and a new run's body is unchanged:
+it has no `pending_input_id`. With an `Idempotency-Key` the id is derived from
+the session, the principal and the key, so a repeat with the same body
+returns the same `pending_input_id` with `200`, whether the follow-up is
+still held, was read, was carried over to the next run, or was dropped; the
+same key with another body is `409` `idempotency_key_reused`. The handler
+holds the session's admission lock, as for any message. It inserts the row
+and appends nothing: it must not touch the run's row, which the run's worker
+locks before the session's. A run that ended first is routed as a session
+with no active run. There is no `NOTIFY`, because the worker reads the inbox
+at its next step.
 
 The run view gains `pending_inputs`, a list of `{"id", "content",
 "created_at"}` in arrival order, so a second device can show what is
-waiting. The stream carries `run.input.queued` and `run.input.dropped` with
-`pending_input_id` only, and a read follow-up arrives as an ordinary
-`user.message.created` that repeats the id. `POST /v1/runs/{run_id}/input`
+waiting. The stream carries `run.input.dropped` with `pending_input_id` only,
+and a read follow-up arrives as an ordinary `user.message.created` that
+repeats the id. `POST /v1/runs/{run_id}/input`
 is unchanged and still requires `WAITING_FOR_USER`. A follow-up never
 resolves an approval. The loop and the terminal rule are in
-[runtime-loop.md](runtime-loop.md#follow-ups-to-a-working-run-adr-0321-proposed).
+[runtime-loop.md](runtime-loop.md#follow-ups-to-a-working-run-adr-0324).
 
 ### Two idempotency mechanisms, two scopes, one word
 

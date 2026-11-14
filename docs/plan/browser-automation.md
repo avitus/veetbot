@@ -1429,7 +1429,7 @@ observation that named the element. A changed generation is accepted only
 when the profile's newest sign-in began after the approval and is the one a
 `browser.authentication.resumed` event of this run names. A follow-up message
 is a new run and asks again; stopping the request ends it. A follow-up read
-inside the run (ADR-0321, proposed) ends the grant at that step, so the next
+inside the run (ADR-0324) ends the grant at that step, so the next
 action asks again.
 
 Request coverage (`request_grant_coverage`) allows routine and unknown

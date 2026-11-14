@@ -70,6 +70,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     PolicyProfileRow,
     ProcessEventRow,
     ProjectionWatermarkRow,
+    RunPendingInputRow,
     RunRow,
     SessionRow,
     ToolInvocationRow,
@@ -137,6 +138,7 @@ from agent_core.domain.memory_sources import (
     source_admission_digest,
 )
 from agent_core.domain.messages import ProviderPin
+from agent_core.domain.pending_inputs import PendingRunInput
 from agent_core.domain.persistence import (
     IdempotencyRecord,
     ModelCallRecord,
@@ -2849,6 +2851,74 @@ class PostgresProcessEventRepository:
             )
         ).all()
         return [self._to_domain(row) for row in reversed(rows)]
+
+
+def _pending_input(row: RunPendingInputRow) -> PendingRunInput:
+    return PendingRunInput.model_validate(
+        {
+            "id": row.id,
+            "tenant_id": row.tenant_id,
+            "principal_id": row.principal_id,
+            "session_id": row.session_id,
+            "run_id": row.run_id,
+            "content": row.content,
+            "created_at": row.created_at,
+        }
+    )
+
+
+class PostgresRunPendingInputRepository:
+    """The follow-up inbox; rows leave when their run reads or drops them (ADR-0324)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, pending: PendingRunInput) -> PendingRunInput:
+        await self._session.execute(
+            pg_insert(RunPendingInputRow).values(
+                id=pending.id,
+                tenant_id=pending.tenant_id,
+                principal_id=pending.principal_id,
+                session_id=pending.session_id,
+                run_id=pending.run_id,
+                content=[part.model_dump(mode="json") for part in pending.content],
+                created_at=pending.created_at,
+            )
+        )
+        return pending
+
+    async def get(self, input_id: UUID, principal: Principal) -> PendingRunInput | None:
+        row = (
+            await self._session.scalars(
+                select(RunPendingInputRow).where(
+                    RunPendingInputRow.id == input_id,
+                    RunPendingInputRow.tenant_id == principal.tenant_id,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else _pending_input(row)
+
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[PendingRunInput]:
+        rows = await self._session.scalars(
+            select(RunPendingInputRow)
+            .where(
+                RunPendingInputRow.run_id == run_id,
+                RunPendingInputRow.tenant_id == principal.tenant_id,
+            )
+            .order_by(RunPendingInputRow.position)
+        )
+        return [_pending_input(row) for row in rows]
+
+    async def delete(self, input_id: UUID, principal: Principal) -> bool:
+        deleted = await self._session.scalars(
+            delete(RunPendingInputRow)
+            .where(
+                RunPendingInputRow.id == input_id,
+                RunPendingInputRow.tenant_id == principal.tenant_id,
+            )
+            .returning(RunPendingInputRow.id)
+        )
+        return deleted.first() is not None
 
 
 class PostgresIdempotencyRepository:

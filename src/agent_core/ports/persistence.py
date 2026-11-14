@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from types import TracebackType
 from typing import Protocol, Self
+from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.pending_inputs import PendingRunInput
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
@@ -47,6 +49,7 @@ from agent_core.ports.repositories import (
     IdempotencyRepository,
     MaintenanceRepository,
     PolicyProfileRepository,
+    RunPendingInputRepository,
     RunRepository,
     SessionDeletionRepository,
     SessionHistoryRepository,
@@ -84,6 +87,7 @@ class RepositoryUnitOfWork(Protocol):
     checkpoints: CheckpointRepository
     invocations: ToolInvocationRepository
     idempotency: IdempotencyRepository
+    pending_inputs: RunPendingInputRepository
     usage: UsageRepository
     history: SessionHistoryRepository
     trajectory: TrajectoryProjectionRepository
@@ -183,6 +187,12 @@ class ScheduleUnitOfWorkFactory(Protocol):
     def is_open(self) -> bool: ...
 
 
+# ADR-0324: start the next run from follow-ups the ended run never read, inside
+# the ended run's terminal transaction. Returns the new run, or None if refused.
+type PromoteFollowUps = Callable[
+    [RepositoryUnitOfWork, Principal, Run, Sequence[PendingRunInput]],
+    Awaitable[UUID | None],
+]
 type CheckpointSeeder = Callable[
     [RepositoryUnitOfWork, Run, int | None, WorkerLease | None, Principal],
     Awaitable[RunCheckpoint],

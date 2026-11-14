@@ -774,6 +774,27 @@ class IdempotencyKeyRow(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class RunPendingInputRow(Base):
+    """A follow-up held until its run reads or drops it (ADR-0324)."""
+
+    __tablename__ = "run_pending_inputs"
+    __table_args__ = (Index("ix_run_pending_inputs_run_id_position", "run_id", "position"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    # Arrival order: identifiers and timestamps do not order concurrent inserts.
+    position: Mapped[int] = mapped_column(BigInteger, Identity(always=True))
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    # The key is to the session, not the run: an insert's key check must not
+    # wait on the run row, which the run's worker locks before the session's.
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    content: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ProjectionWatermarkRow(Base):
     __tablename__ = "projection_watermarks"
 
