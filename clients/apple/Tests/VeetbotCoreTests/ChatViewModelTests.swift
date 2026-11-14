@@ -4300,6 +4300,93 @@ import UserNotifications
         finish.signal()
         await settle(model) { model.runState.runStatus == .completed }
         #expect(ChatView(model: model).canSendDraft)
+
+        // Another connection may be to a server that does take follow-ups.
+        _ = await model.configure(baseURLString: "https://veetbot.test", token: "token")
+        #expect(model.acceptsFollowUps)
+    }
+
+    @Test
+    func testARetriedFollowUpReusesItsKey() async throws {
+        let finish = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var keys: [String] = []
+        var serverFailing = true
+        let model = try steeringModel(
+            followUp: { [self] request in
+                let failing = lock.withLock {
+                    keys.append(request.value(forHTTPHeaderField: "Idempotency-Key") ?? "")
+                    return serverFailing
+                }
+                if failing {
+                    // The server may have accepted it; the app cannot tell.
+                    return try response(
+                        for: request, statusCode: 500,
+                        body: #"{"error":{"code":"internal_error","message":"failed","details":{},"request_id":"req-1"}}"#)
+                }
+                return try response(
+                    for: request, statusCode: 202,
+                    body: #"{"run_id":"\#(Self.steeringRun)","status":"RUNNING","pending_input_id":"\#(Self.steeringInput)"}"#)
+            },
+            events: "",
+            finish: finish
+        )
+        await startWorkingChat(model)
+
+        #expect(await model.send("Use metric units.") == false)
+        lock.withLock { serverFailing = false }
+        #expect(await model.send("Use metric units."))
+        let sent = lock.withLock { keys }
+        #expect(sent.count >= 2)
+        #expect(Set(sent).count == 1)
+
+        // Different words are a different follow-up.
+        _ = await model.send("And be brief.")
+        #expect(Set(lock.withLock { keys }).count == 2)
+        finish.signal()
+    }
+
+    @Test
+    func testAFollowUpReadBeforeItsAcceptanceArrivesIsNotReturnedToTheComposer() async throws {
+        let finish = DispatchSemaphore(value: 0)
+        let acceptance = DispatchSemaphore(value: 0)
+        let model = try steeringModel(
+            followUp: { [self] request in
+                #expect(acceptance.wait(timeout: .now() + 10) == .success)
+                return try response(
+                    for: request, statusCode: 202,
+                    body: #"{"run_id":"\#(Self.steeringRun)","status":"RUNNING","pending_input_id":"\#(Self.steeringInput)"}"#)
+            },
+            events: """
+                id: 2
+                event: user.message.created
+                data: {"content":[{"type":"text","text":"How long is it?"}]}
+
+                id: 5
+                event: user.message.created
+                data: {"content":[{"type":"text","text":"Use metric units."}],"pending_input_id":"\(Self.steeringInput)"}
+
+                id: 6
+                event: run.completed
+                data: {"run_id":"\(Self.steeringRun)"}
+
+                """,
+            finish: finish,
+            sessionAfterRun: Self.sessionJSON(active: nil, last: Self.steeringRun)
+        )
+        await startWorkingChat(model)
+
+        let sending = Task { await model.send("Use metric units.") }
+        await settle(model) { model.runState.hasUnreadFollowUps }
+        // The run reads it and ends while the acceptance is still in flight.
+        finish.signal()
+        await settle(model) { model.runState.runStatus == .completed }
+        acceptance.signal()
+        #expect(await sending.value)
+        await settle(model) { !model.runState.hasUnreadFollowUps }
+
+        #expect(model.runState.timeline.map(\.id) == ["event-2", "event-5"])
+        #expect(model.composerText.isEmpty)
     }
 
     @Test

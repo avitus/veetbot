@@ -224,6 +224,7 @@ public struct BrowserSignInPause: Equatable, Sendable {
 private struct FollowUp {
     let itemID: String
     var pendingInputID: UUID?
+    var orphaned = false
 }
 
 @MainActor
@@ -437,6 +438,24 @@ public final class RunStateReducer: ObservableObject {
         if pendingUserMessageID == nil { pendingUserMessageID = itemID }
     }
 
+    /// The run these follow-ups waited for has ended. Whatever the next run
+    /// does not carry was dropped; a follow-up sent later belongs to that run.
+    func markUnreadFollowUpsOrphaned() {
+        for index in followUps.indices { followUps[index].orphaned = true }
+    }
+
+    /// Remove the follow-ups the ended run left and return their words, in order.
+    func dropOrphanedFollowUps() -> [String] {
+        var texts: [String] = []
+        for followUp in followUps where followUp.orphaned {
+            if let text = timeline.first(where: { $0.id == followUp.itemID })?.text, !text.isEmpty {
+                texts.append(text)
+            }
+        }
+        while let index = followUps.firstIndex(where: \.orphaned) { removeFollowUp(at: index) }
+        return texts
+    }
+
     /// Remove every follow-up no run read and return their words, in order.
     func dropUnreadFollowUps() -> [String] {
         let texts = followUps.compactMap { followUp in
@@ -498,7 +517,12 @@ public final class RunStateReducer: ObservableObject {
             return
         }
         if let id = frame.id {
-            guard persistedSequences.insert(id).inserted else { return }
+            guard persistedSequences.insert(id).inserted else {
+                // A restored message is not reduced twice, but its replay still
+                // says which follow-up it was (ADR-0324).
+                if frame.event == "user.message.created" { settleFollowUps(for: frame) }
+                return
+            }
         }
         let previousRunID = activeRunID
         defer {

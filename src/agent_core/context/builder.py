@@ -413,18 +413,20 @@ def turn_user_text(items: list[ConversationItem]) -> str | None:
     """The owner text a turn's recall searches on (ADR-0324).
 
     Without follow-ups it is the latest owner message, as before. Once the run
-    has read follow-ups, they are appended in order to the message they
-    follow, so a follow-up that only adds a detail does not hide the request
-    it refines.
+    has read a follow-up, it is the message that follow-up refines plus every
+    later owner message in order, so a follow-up that only adds a detail does
+    not hide the request.
     """
 
-    base = current_user_text([item for item in items if not _is_follow_up(item)])
-    follow_ups = [
-        text
-        for item in items
-        if _is_follow_up(item) and (text := current_user_text([item])) is not None
+    first = next((index for index, item in enumerate(items) if _is_follow_up(item)), None)
+    if first is None:
+        return current_user_text(items)
+    # The request the follow-ups refine, then every later owner message in the
+    # order it was sent: follow-ups and answers to the agent's own questions.
+    texts = [current_user_text(items[:first])] + [
+        current_user_text([item]) for item in items[first:]
     ]
-    return "\n".join([*([] if base is None else [base]), *follow_ups]) or None
+    return "\n".join(text for text in texts if text is not None) or None
 
 
 def _is_follow_up(item: ConversationItem) -> bool:

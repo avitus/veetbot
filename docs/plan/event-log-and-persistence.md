@@ -1701,6 +1701,7 @@ session_id      foreign key to sessions, ON DELETE CASCADE
 run_id          the run it waits for; deliberately not a foreign key
 content         text content parts, validated on insert
 created_at      compared with the run's cancel time
+request_hash    a keyed request's fingerprint; null without a key
 ```
 
 The insert runs under the session's admission lock and enforces at most eight
@@ -1709,6 +1710,8 @@ session for that reason: a key check against `runs` would wait on the row the
 run's worker locks before the session's, in the opposite order. The row is
 deleted in the transaction that appends its `user.message.created` or its
 `run.input.dropped`, so a follow-up's content is never stored in both places.
-Session deletion removes the rows by cascade. The migration is additive. The
+Session deletion removes the rows by cascade. The migration is additive, and
+its downgrade locks the table and refuses while any row remains, because a
+held follow-up exists nowhere else. The
 application's owner login needs no grant; a least-privilege login that ends or
 holds runs does.

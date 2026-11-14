@@ -2863,6 +2863,7 @@ def _pending_input(row: RunPendingInputRow) -> PendingRunInput:
             "run_id": row.run_id,
             "content": row.content,
             "created_at": row.created_at,
+            "request_hash": row.request_hash,
         }
     )
 
@@ -2883,6 +2884,7 @@ class PostgresRunPendingInputRepository:
                 run_id=pending.run_id,
                 content=[part.model_dump(mode="json") for part in pending.content],
                 created_at=pending.created_at,
+                request_hash=pending.request_hash,
             )
         )
         return pending

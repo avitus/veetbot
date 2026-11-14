@@ -13,6 +13,7 @@ import pytest
 import agent_core.runtime.loop as runtime_loop
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.bootstrap import Composition, build
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.messages import FakeModelScript, ModelPermanentError, ScriptedTurn
 from agent_core.domain.runs import RunStatus
@@ -202,3 +203,91 @@ async def test_a_message_sent_after_stop_starts_the_next_run(
     }
     assert second.status is RunStatus.COMPLETED, second.failure
     assert second.final_message == "Doing that instead."
+
+
+async def _keyed(composition: Composition, session_id: UUID, text: str, key: str) -> SubmitResult:
+    result: SubmitResult = await composition.services.runs.submit(
+        composition.principal, session_id, [TextContentBlock(text=text)], key, None
+    )
+    return result
+
+
+async def test_a_repeated_key_finds_its_follow_up_after_it_was_carried_over(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="About two yards."), ScriptedTurn(text="Done both.")]
+    )
+    held: list[SubmitResult] = []
+    original = runtime_loop.checkpoint
+
+    async def checkpoint(context: Any, trigger: str, **options: Any) -> None:
+        await original(context, trigger, **options)
+        if trigger == "model_response" and not held:
+            held.append(await _keyed(composition, context.run.session_id, "In metres.", "k1"))
+            held.append(await _keyed(composition, context.run.session_id, "And feet.", "k2"))
+
+    monkeypatch.setattr(runtime_loop, "checkpoint", checkpoint)
+    async with _steering(FixedClock(NOW), script) as composition:
+        first_id = await composition.runs.submit("How long is it?")
+        first = await composition.runs.wait_terminal(first_id)
+        session_id = first.session_id
+        again = [
+            await _keyed(composition, session_id, "In metres.", "k1"),
+            await _keyed(composition, session_id, "And feet.", "k2"),
+        ]
+        changed: list[str] = []
+        for key in ("k1", "k2"):
+            with pytest.raises(ConflictError) as refused:
+                await _keyed(composition, session_id, "Something else.", key)
+            changed.append(refused.value.reason)
+        # Turning the setting off must not turn an accepted follow-up into new work.
+        monkeypatch.setattr(composition.services.runs, "_run_steering_enabled", False)
+        after_off = await _keyed(composition, session_id, "And feet.", "k2")
+        events = await _session_events(composition, session_id)
+
+    # Both retries name the run that carried them, not a new one.
+    assert [result.replayed for result in again] == [True, True]
+    assert [result.pending_input_id for result in again] == [item.pending_input_id for item in held]
+    assert len({result.run_id for result in again}) == 1 and again[0].run_id != first_id
+    assert changed == ["idempotency_key_reused", "idempotency_key_reused"]
+    assert after_off.replayed and after_off.run_id == again[0].run_id
+    assert len({event.run_id for event in events if event.event_type == "run.queued"}) == 2
+
+
+async def test_a_repeated_key_finds_its_follow_up_after_it_was_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rejected = ModelPermanentError(
+        provider="fake",
+        model="scripted",
+        attempt_id=UUID(int=1),
+        message="The model provider rejected the request.",
+        http_status=400,
+        provider_code="invalid_json_schema",
+    )
+    held: list[SubmitResult] = []
+    original = runtime_loop.build_with_pressure
+
+    async def build_with_pressure(context: Any, step: Any) -> Any:
+        if not held:
+            held.append(await _keyed(composition, context.run.session_id, FOLLOW_UP, "k1"))
+        return await original(context, step)
+
+    monkeypatch.setattr(runtime_loop, "build_with_pressure", build_with_pressure)
+    async with _steering(
+        FixedClock(NOW), FakeModelScript(turns=[ScriptedTurn(fail_with=rejected)])
+    ) as composition:
+        run_id = await composition.runs.submit("How long is it?")
+        run = await composition.runs.wait_terminal(run_id)
+        again = await _keyed(composition, run.session_id, FOLLOW_UP, "k1")
+        with pytest.raises(ConflictError) as refused:
+            await _keyed(composition, run.session_id, "Something else.", "k1")
+        async with composition.uow_factory() as uow:
+            active = await uow.runs.active_for_session(run.session_id, composition.principal)
+
+    # The retry reports the dropped follow-up; it does not start a run from it.
+    assert again.replayed and again.run_id == run_id
+    assert again.pending_input_id == held[0].pending_input_id
+    assert refused.value.reason == "idempotency_key_reused"
+    assert active is None

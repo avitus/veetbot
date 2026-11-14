@@ -36,7 +36,11 @@ from agent_core.domain.messages import (
     ToolResultItem,
 )
 from agent_core.domain.model_settings import ModelSettingsCatalog, chat_reasoning_effort
-from agent_core.domain.pending_inputs import PendingRunInput, follow_up_drop_derivation
+from agent_core.domain.pending_inputs import (
+    PendingRunInput,
+    follow_up_drop_derivation,
+    settlement_payload,
+)
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.recall_execution import recall_phase
@@ -334,7 +338,7 @@ async def drop_unread_follow_ups(
                 run_id=run.id,
                 event_type="run.input.dropped",
                 actor_type="runtime",
-                payload={"pending_input_id": str(pending.id), "reason": reason},
+                payload={**settlement_payload(pending), "reason": reason},
                 derivation_key=follow_up_drop_derivation(pending.id),
             ),
             lease=lease,
@@ -1590,6 +1594,9 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
     context.checkpoint.version += 1
     context.checkpoint.status = status
     context.checkpoint.created_at = context.clock.now()
+    # Published only after the commit: a rolled-back promotion started nothing.
+    context.promoted_run_id = None
+    promoted_run_id: UUID | None = None
     async with context.uow_factory() as uow:
         terminal_event = await uow.events.append(
             NewEvent(
@@ -1684,7 +1691,7 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             context.finalization_write_probe("run")
         if unread and context.promote_follow_ups is not None:
             # After the transition, so the one-active-run rule admits the new run.
-            context.promoted_run_id = await context.promote_follow_ups(
+            promoted_run_id = await context.promote_follow_ups(
                 uow, context.principal, context.run, unread
             )
         if status in TERMINAL_RUN_STATUSES:
@@ -1726,3 +1733,4 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             await uow.queue.release(context.lease, status)
             if context.finalization_write_probe is not None:
                 context.finalization_write_probe("queue")
+    context.promoted_run_id = promoted_run_id

@@ -1529,6 +1529,9 @@ public final class ChatViewModel: ObservableObject {
     /// False once the server has refused a follow-up the way it did before
     /// steering; the composer then waits for the run, as it used to.
     @Published public private(set) var acceptsFollowUps = true
+    private var pendingFollowUpSubmission: (signature: String, key: String)?
+    /// The ended run whose unread follow-ups wait for an in-flight submission.
+    private var settlementAwaitingSubmission: UUID?
 
     /// Send words to the run that is already working. Staged files stay staged
     /// for the next message, because a follow-up is text.
@@ -1538,14 +1541,32 @@ public final class ChatViewModel: ObservableObject {
             errorMessage = "Veetbot is still working. Wait for it to finish, or stop it."
             return false
         }
-        let key = UUID().uuidString.lowercased()
+        // The same words retried after an unclear failure keep their key, so
+        // a follow-up the server did accept is replayed, not sent twice.
+        let signature = "\(sessionID.uuidString)\u{1F}\(text)"
+        let key: String
+        if let pendingFollowUpSubmission, pendingFollowUpSubmission.signature == signature {
+            key = pendingFollowUpSubmission.key
+        } else {
+            key = UUID().uuidString.lowercased()
+            pendingFollowUpSubmission = (signature, key)
+        }
         isSending = true
-        defer { isSending = false }
+        defer {
+            isSending = false
+            if let runID = settlementAwaitingSubmission {
+                // The run ended while this was in flight; settle now that its
+                // identifier is known.
+                settlementAwaitingSubmission = nil
+                Task { await self.settleUnreadFollowUps(after: runID) }
+            }
+        }
         runState.beginFollowUp(content: [.text(text)], submissionID: key)
         do {
             let submit = try await api.submitMessage(
                 sessionID: sessionID, content: [.text(text)], idempotencyKey: key
             )
+            pendingFollowUpSubmission = nil
             guard selectedSessionID == sessionID else { return true }
             if let pendingInputID = submit.pendingInputID {
                 runState.confirmFollowUp(submissionID: key, pendingInputID: pendingInputID)
@@ -1563,6 +1584,8 @@ public final class ChatViewModel: ObservableObject {
                 present(error)
                 return false
             }
+            // A conflict is the server's definite answer: nothing was accepted.
+            pendingFollowUpSubmission = nil
             switch apiError.details.reason {
             case "active_run_exists":
                 acceptsFollowUps = false
@@ -1594,6 +1617,12 @@ public final class ChatViewModel: ObservableObject {
         guard runState.hasUnreadFollowUps, runState.activeRunID == runID,
             runState.runStatus?.isTerminal == true, let api, let sessionID = selectedSessionID
         else { return }
+        guard !isSending else {
+            // The run may already have read the follow-up whose acceptance is
+            // still in flight; decide once its identifier is known.
+            settlementAwaitingSubmission = runID
+            return
+        }
         do {
             let session = try await api.getSession(sessionID)
             guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
@@ -1604,6 +1633,8 @@ public final class ChatViewModel: ObservableObject {
             }
             let run = try await api.getRun(next)
             guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
+            // Only what the ended run left can be dropped when the next run starts.
+            runState.markUnreadFollowUpsOrphaned()
             runState.seed(run: run)
             watch(runID: next)
         } catch is CancellationError {
@@ -3290,6 +3321,9 @@ public final class ChatViewModel: ObservableObject {
         isSavingTaskScopes = false
         await artifactCache.removeAll()
         pendingSubmission = nil
+        pendingFollowUpSubmission = nil
+        // Another server may take follow-ups; a refusal turns this off again.
+        acceptsFollowUps = true
         clearAttachments()
         let transport = HTTPTransport(
             configuration: configuration,
@@ -3382,8 +3416,9 @@ public final class ChatViewModel: ObservableObject {
                     self.runState.reduce(frame)
                     if frame.event == "user.message.created",
                         frame.data["pending_input_ids"] != nil {
-                        // The next run took what it carried; the rest were dropped.
-                        self.returnToComposer(self.runState.dropUnreadFollowUps())
+                        // The next run took what it carried; the rest of what the
+                        // ended run left was dropped.
+                        self.returnToComposer(self.runState.dropOrphanedFollowUps())
                     }
                     // A question keeps this stream open until the owner answers.
                     // Load the offer now so accepting it can be that answer.

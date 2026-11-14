@@ -121,6 +121,57 @@ struct RunSteeringReducerTests {
     }
 
     @Test
+    func testOnlyFollowUpsLeftByTheEndedRunAreReturnedWhenTheNextRunStarts() {
+        let reducer = RunStateReducer()
+        reducer.beginFollowUp(content: [.text("Typed before Stop.")], submissionID: "key-1")
+        reducer.confirmFollowUp(submissionID: "key-1", pendingInputID: first)
+        // The run ended; the app now follows the run the server started.
+        reducer.markUnreadFollowUpsOrphaned()
+        reducer.beginFollowUp(content: [.text("For the new run.")], submissionID: "key-2")
+        reducer.confirmFollowUp(submissionID: "key-2", pendingInputID: second)
+
+        #expect(reducer.dropOrphanedFollowUps() == ["Typed before Stop."])
+        #expect(reducer.timeline.map(\.text) == ["For the new run."])
+        #expect(reducer.hasUnreadFollowUps)
+    }
+
+    @Test
+    func testAFollowUpReadBetweenTheRunAndMessageReadsIsNotShownAsWaiting() throws {
+        // A reopened chat restores saved messages, then seeds a run snapshot
+        // that still lists a follow-up the run has since read.
+        let reducer = RunStateReducer()
+        let message = try JSONDecoder.server.decode(
+            SessionMessageView.self,
+            from: Data(
+                #"{"sequence":5,"role":"user","content":[{"type":"text","text":"Use metric units."}]}"#
+                    .utf8)
+        )
+        let run = try JSONDecoder.server.decode(
+            RunView.self,
+            from: Data(
+                #"{"id":"00000000-0000-0000-0000-000000000456","session_id":"00000000-0000-0000-0000-000000000123","parent_run_id":null,"status":"RUNNING","step_count":0,"model_call_count":0,"tool_call_count":0,"usage":{"input_tokens":0,"output_tokens":0,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-10-07T15:33:00Z","updated_at":"2026-10-07T15:46:00Z","pending_inputs":[{"id":"00000000-0000-0000-0000-0000000000a1","content":[{"type":"text","text":"Use metric units."}],"created_at":"2026-10-07T15:40:00Z"}]}"#
+                    .utf8)
+        )
+        reducer.restore(messages: [message])
+        reducer.seed(run: run)
+        #expect(reducer.hasUnreadFollowUps)
+
+        // The run's replay repeats the saved sequence; it still settles the bubble.
+        reducer.reduce(
+            userFrame(
+                id: 5, text: "Use metric units.",
+                extra: ["pending_input_id": .string(first.uuidString.lowercased())]
+            )
+        )
+
+        #expect(!reducer.hasUnreadFollowUps)
+        #expect(messageIDs(reducer) == ["event-5"])
+        // A later snapshot that still lists it does not bring it back.
+        reducer.seed(run: run)
+        #expect(!reducer.hasUnreadFollowUps)
+    }
+
+    @Test
     func testARefusedFollowUpLeavesNoBubble() {
         let reducer = RunStateReducer()
         reducer.beginFollowUp(content: [.text("Use metric units.")], submissionID: "key-1")

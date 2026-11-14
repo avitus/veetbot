@@ -48,6 +48,16 @@ def test_follow_ups_join_the_message_they_follow_in_order() -> None:
     assert current_user_text(items) == "And my mother is coming."
 
 
+def test_an_answer_after_a_follow_up_keeps_the_request_and_the_order() -> None:
+    items: list[ConversationItem] = [
+        _owner("Plan the trip to Lisbon."),
+        _owner("Keep it under a week.", follow_up=True),
+        AssistantMessage(content=[TextPart(text="Which month?")]),
+        _owner("October."),
+    ]
+    assert turn_user_text(items) == "Plan the trip to Lisbon.\nKeep it under a week.\nOctober."
+
+
 def test_a_read_follow_up_is_marked_when_history_is_rebuilt_from_the_log() -> None:
     def message(payload: dict[str, object]) -> UserMessage:
         (item,) = conversation_items(

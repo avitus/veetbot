@@ -139,6 +139,8 @@ from agent_core.domain.pending_inputs import (
     PendingRunInput,
     follow_up_derivation,
     follow_up_drop_derivation,
+    follow_up_promoted_derivation,
+    settlement_payload,
 )
 from agent_core.domain.persistence import IdempotencyRecord, WorkerLease
 from agent_core.domain.persona import (
@@ -908,6 +910,7 @@ class PublicRunService:
                     session,
                     content,
                     idempotency_key,
+                    request_hash,
                     browser_profile_id=browser_profile_id,
                 )
                 if held is None:
@@ -981,6 +984,7 @@ class PublicRunService:
         session: Session,
         content: list[ContentBlock],
         idempotency_key: str | None,
+        request_hash: str,
         *,
         browser_profile_id: UUID | None,
     ) -> SubmitResult | None:
@@ -992,8 +996,6 @@ class PublicRunService:
         row before the session's, and the opposite order would deadlock.
         """
 
-        if not self._run_steering_enabled:
-            return None
         input_id = (
             self._ids.new_id()
             if idempotency_key is None
@@ -1007,11 +1009,13 @@ class PublicRunService:
             TextPart(text=block.text) for block in content if isinstance(block, TextContentBlock)
         ]
         if idempotency_key is not None:
-            replay = await self._follow_up_replay(
-                uow, principal, input_id, parts if text_only else None
-            )
+            # Looked up even with the setting off: turning it off must not turn
+            # a follow-up the server already accepted into new work.
+            replay = await self._follow_up_replay(uow, principal, input_id, request_hash)
             if replay is not None:
                 return replay
+        if not self._run_steering_enabled:
+            return None
         active = await uow.runs.active_for_session(session.id, principal)
         bound_profile = session.metadata.get("browser_profile_id")
         if (
@@ -1043,6 +1047,7 @@ class PublicRunService:
                 run_id=active.id,
                 content=list(parts),
                 created_at=self._clock.now(),
+                request_hash=None if idempotency_key is None else request_hash,
             )
         )
         return SubmitResult(run_id=active.id, status=active.status, pending_input_id=input_id)
@@ -1064,7 +1069,6 @@ class PublicRunService:
         session = await uow.sessions.get(ended.session_id, principal)
         if session.status is SessionStatus.CLOSED or not pending:
             return None
-        first, *rest = pending
         prepared = await self._submit_in(
             uow,
             principal,
@@ -1077,19 +1081,19 @@ class PublicRunService:
             ],
             trace_id=None,
             payload_extra={"pending_input_ids": [str(held.id) for held in pending]},
-            derivation_namespace="run.follow_up",
-            derivation_suffix=str(first.id),
+            derivation_namespace="run.follow_up.carried",
+            derivation_suffix=str(pending[0].id),
         )
-        for held in rest:
-            # One marker per further follow-up, so a repeated key finds its run.
+        for held in pending:
+            # One marker each, so a repeated key finds its run and its fingerprint.
             await uow.events.append(
                 NewEvent(
                     session_id=session.id,
                     run_id=prepared.run.id,
                     event_type="run.input.promoted",
                     actor_type="application",
-                    payload={"pending_input_id": str(held.id)},
-                    derivation_key=follow_up_derivation(held.id),
+                    payload=settlement_payload(held),
+                    derivation_key=follow_up_promoted_derivation(held.id),
                 )
             )
         for held in pending:
@@ -1104,37 +1108,38 @@ class PublicRunService:
         uow: RepositoryUnitOfWork,
         principal: Principal,
         input_id: UUID,
-        parts: list[TextPart] | None,
+        request_hash: str,
     ) -> SubmitResult | None:
-        """Answer a repeated key with the follow-up it first produced, wherever it is now."""
+        """Answer a repeated key with the follow-up it first produced, wherever it is now.
 
-        reused = ConflictError(
-            "The idempotency key was reused with a different body.",
-            reason="idempotency_key_reused",
-        )
+        Every state the follow-up can be in keeps the keyed request's
+        fingerprint: the inbox row, then the event that read it, carried it to
+        the next run, or dropped it. The same key with another body is a
+        conflict in all of them.
+        """
+
         waiting = await uow.pending_inputs.get(input_id, principal)
         if waiting is not None:
-            if parts is None or waiting.content != parts:
-                raise reused
-            run = await uow.runs.get(waiting.run_id, principal)
+            recorded, run_id = waiting.request_hash, waiting.run_id
         else:
-            read = await uow.events.get_by_derivation(follow_up_derivation(input_id), principal)
-            settled = read or await uow.events.get_by_derivation(
-                follow_up_drop_derivation(input_id), principal
-            )
+            settled = None
+            for derivation in (
+                follow_up_derivation(input_id),
+                follow_up_promoted_derivation(input_id),
+                follow_up_drop_derivation(input_id),
+            ):
+                settled = await uow.events.get_by_derivation(derivation, principal)
+                if settled is not None:
+                    break
             if settled is None or settled.run_id is None:
                 return None
-            if (
-                read is not None
-                and read.payload.get("pending_input_id") == str(input_id)
-                and (
-                    parts is None
-                    or read.payload.get("content")
-                    != [part.model_dump(mode="json") for part in parts]
-                )
-            ):
-                raise reused
-            run = await uow.runs.get(settled.run_id, principal)
+            recorded, run_id = settled.payload.get("request_hash"), settled.run_id
+        if recorded != request_hash:
+            raise ConflictError(
+                "The idempotency key was reused with a different body.",
+                reason="idempotency_key_reused",
+            )
+        run = await uow.runs.get(run_id, principal)
         return SubmitResult(
             run_id=run.id, status=run.status, pending_input_id=input_id, replayed=True
         )

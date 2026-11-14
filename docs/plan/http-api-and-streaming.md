@@ -1066,10 +1066,13 @@ response is the message route's body with one more field:
 
 `run_id` and `status` are the active run's, and a new run's body is unchanged:
 it has no `pending_input_id`. With an `Idempotency-Key` the id is derived from
-the session, the principal and the key, so a repeat with the same body
-returns the same `pending_input_id` with `200`, whether the follow-up is
-still held, was read, was carried over to the next run, or was dropped; the
-same key with another body is `409` `idempotency_key_reused`. The handler
+the session, the principal and the key, and the request's fingerprint is kept
+on the inbox row and on the event that reads, carries over or drops it. A
+repeat with the same body therefore returns the same `pending_input_id` with
+`200` in every one of those states, and the same key with another body is
+`409` `idempotency_key_reused` in every one. The lookup runs even with the
+setting off, so turning it off cannot turn an accepted follow-up into a new
+run. The handler
 holds the session's admission lock, as for any message. It inserts the row
 and appends nothing: it must not touch the run's row, which the run's worker
 locks before the session's. A run that ended first is routed as a session

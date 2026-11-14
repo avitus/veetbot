@@ -52,7 +52,7 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UserMessage,
 )
-from agent_core.domain.pending_inputs import follow_up_derivation
+from agent_core.domain.pending_inputs import follow_up_derivation, settlement_payload
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.recall_execution import RecallExecutionPermit, recall_phase
@@ -1522,7 +1522,7 @@ async def read_follow_ups(context: RunContext) -> bool:
                     actor_id=pending.principal_id,
                     payload={
                         "content": [part.model_dump(mode="json") for part in pending.content],
-                        "pending_input_id": str(pending.id),
+                        **settlement_payload(pending),
                     },
                     derivation_key=follow_up_derivation(pending.id),
                 ),

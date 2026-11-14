@@ -115,9 +115,10 @@ Three constraints shape any answer:
    is text; an `image` or `file` block is `malformed_request`, and attachments
    staged in the composer wait for the next initiating message, as they do
    for an answer to a question. With an `Idempotency-Key` the
-   `pending_input_id` is derived from the key, so a repeat finds the same
-   follow-up in the inbox, or its read, carried-over or dropped event, and
-   answers `200`.
+   `pending_input_id` is derived from the key and the request's fingerprint
+   travels with the follow-up, so a repeat finds it in the inbox, or its
+   read, carried-over or dropped event, and answers `200`; another body under
+   the same key is a conflict in each state, with the setting on or off.
 
 10. **One configured rule, default off.** `AGENT_RUN_STEERING_ENABLED` selects
     this routing. Off, every route and gate behaves as today. Section 27.8
@@ -138,7 +139,7 @@ Three constraints shape any answer:
 13. **Recall after a follow-up searches on the whole turn.** The context
     builder already recomputes recall on every assembly from the latest owner
     message. Once a run has read follow-ups, the query is formed from the
-    message they follow plus every follow-up read so far, in order, so one
+    message they follow plus every later owner message, in order, so one
     result serves the original request and the new direction. A run without
     follow-ups forms its query exactly as before. The confidence floor, token
     budget and recall limits are unchanged.

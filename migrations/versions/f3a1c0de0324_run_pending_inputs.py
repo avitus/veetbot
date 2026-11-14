@@ -32,6 +32,7 @@ def upgrade() -> None:
         sa.Column("run_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("content", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("request_hash", sa.String(length=64), nullable=True),
         sa.ForeignKeyConstraint(
             ["session_id"],
             ["sessions.id"],
@@ -46,5 +47,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the inbox only once no accepted follow-up would be lost.
+
+    A held follow-up exists nowhere else: it reaches the event log only when a
+    run reads it. The lock holds new inserts out until the table is gone.
+    """
+    op.execute("LOCK TABLE run_pending_inputs IN ACCESS EXCLUSIVE MODE")
+    if op.get_bind().scalar(sa.text("SELECT EXISTS (SELECT 1 FROM run_pending_inputs)")):
+        raise RuntimeError(
+            "Let working runs read or drop their follow-ups before downgrade; "
+            "held follow-ups must not be lost."
+        )
     op.drop_index("ix_run_pending_inputs_run_id_position", table_name="run_pending_inputs")
     op.drop_table("run_pending_inputs")

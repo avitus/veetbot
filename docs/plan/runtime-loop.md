@@ -2039,7 +2039,7 @@ deadline and the agent and policy versions are unchanged.
 **Recall after a follow-up searches on the whole turn.** The context builder
 recomputes recall on each assembly from the latest owner message. Once the
 conversation holds follow-ups, `turn_user_text` forms the query from the
-message they follow plus every follow-up, in order. `UserMessage.follow_up`
+message they follow plus every later owner message, in order. `UserMessage.follow_up`
 marks them, set by the loop and, on a rebuild from the log, by the event's
 `pending_input_id`. A run without follow-ups forms its query exactly as before.
 
@@ -2061,7 +2061,7 @@ The new run is created by a callable the shared submission function
 implements, after the old run's transition and in the same transaction, so
 the index admits it; the executor dispatches it after the commit. The kept
 rows become one user message in arrival order, with `pending_input_ids`, and
-each further row leaves a content-free `run.input.promoted` marker. The three
+each row leaves a content-free `run.input.promoted` marker. The three
 writers that end a parked run (the owner's cancel, a surface `/stop`, and the
 child-budget failure) drop what the run held. Each drop appends a
 content-free `run.input.dropped` event with `pending_input_id` and a reason of

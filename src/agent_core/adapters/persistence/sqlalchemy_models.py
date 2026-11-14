@@ -793,6 +793,7 @@ class RunPendingInputRow(Base):
     run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     content: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    request_hash: Mapped[str | None] = mapped_column(String(64))
 
 
 class ProjectionWatermarkRow(Base):

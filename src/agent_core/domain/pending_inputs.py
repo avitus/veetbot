@@ -22,12 +22,29 @@ class PendingRunInput(BaseModel):
     run_id: UUID
     content: list[ContentPart] = Field(min_length=1)
     created_at: datetime
+    # The keyed request's fingerprint, so a repeat is recognised in any state.
+    request_hash: str | None = None
 
 
 def follow_up_derivation(input_id: UUID) -> str:
     """Derivation key of the user message a read or promoted follow-up becomes."""
 
     return f"run.follow_up:{input_id}"
+
+
+def follow_up_promoted_derivation(input_id: UUID) -> str:
+    """Derivation key of the marker a follow-up leaves on the run that carried it."""
+
+    return f"run.input.promoted:{input_id}"
+
+
+def settlement_payload(pending: PendingRunInput) -> dict[str, str]:
+    """What every settlement event records about the follow-up it settles."""
+
+    payload = {"pending_input_id": str(pending.id)}
+    if pending.request_hash is not None:
+        payload["request_hash"] = pending.request_hash
+    return payload
 
 
 def follow_up_drop_derivation(input_id: UUID) -> str:
