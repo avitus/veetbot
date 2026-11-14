@@ -4145,7 +4145,8 @@ import UserNotifications
         events: String,
         finish: DispatchSemaphore,
         sessionAfterRun: String = "",
-        nextRunEvents: String = ""
+        nextRunEvents: String = "",
+        sessionRead: @escaping () -> Bool = { true }
     ) throws -> ChatViewModel {
         let lock = NSLock()
         var submissions = 0
@@ -4160,6 +4161,11 @@ import UserNotifications
                 return try response(
                     for: request, statusCode: 201, body: Self.sessionJSON(active: nil, last: nil))
             case ("GET", "/v1/sessions/\(session)"):
+                guard sessionRead() else {
+                    return try response(
+                        for: request, statusCode: 400,
+                        body: #"{"error":{"code":"malformed_request","message":"failed","details":{},"request_id":"req-1"}}"#)
+                }
                 return try response(for: request, statusCode: 200, body: sessionAfterRun)
             case ("POST", "/v1/sessions/\(session)/messages"):
                 let number = lock.withLock { submissions += 1; return submissions }
@@ -4421,6 +4427,73 @@ import UserNotifications
         #expect(model.runState.runStatus == .failed)
         #expect(model.runState.timeline.map(\.id) == ["event-2"])
         #expect(model.composerText == "Use metric units.\nand be brief")
+    }
+
+    @Test
+    func testAFailedSettlementReadIsRetriedSoTheFollowUpStillReturns() async throws {
+        let finish = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var sessionReads = 0
+        let model = try steeringModel(
+            followUp: { [self] request in
+                try response(
+                    for: request, statusCode: 202,
+                    body: #"{"run_id":"\#(Self.steeringRun)","status":"RUNNING","pending_input_id":"\#(Self.steeringInput)"}"#)
+            },
+            events: """
+                id: 2
+                event: user.message.created
+                data: {"content":[{"type":"text","text":"How long is it?"}]}
+
+                id: 6
+                event: run.failed
+                data: {"run_id":"\(Self.steeringRun)","failure":{"reason":"model_permanent_error","message":"rejected"}}
+
+                """,
+            finish: finish,
+            sessionAfterRun: Self.sessionJSON(active: nil, last: Self.steeringRun),
+            sessionRead: { lock.withLock { sessionReads += 1; return sessionReads > 1 } }
+        )
+        await startWorkingChat(model)
+        #expect(await model.send("Use metric units."))
+
+        finish.signal()
+        await settle(model) { !model.runState.hasUnreadFollowUps }
+        for _ in 0 ..< 200 where model.runState.hasUnreadFollowUps {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        #expect(lock.withLock { sessionReads } >= 2)
+        #expect(model.composerText == "Use metric units.")
+        #expect(model.runState.timeline.map(\.id) == ["event-2"])
+    }
+
+    @Test
+    func testAnAnswerForAChatNoLongerShownChangesNothing() async throws {
+        let finish = DispatchSemaphore(value: 0)
+        let refusal = DispatchSemaphore(value: 0)
+        let model = try steeringModel(
+            followUp: { [self] request in
+                #expect(refusal.wait(timeout: .now() + 10) == .success)
+                return try response(
+                    for: request, statusCode: 409,
+                    body: #"{"error":{"code":"conflict","message":"The session already has an active run.","details":{"reason":"active_run_exists","run_id":"\#(Self.steeringRun)","run_status":"RUNNING"},"request_id":"req-1"}}"#)
+            },
+            events: "",
+            finish: finish
+        )
+        await startWorkingChat(model)
+
+        let sending = Task { await model.send("Use metric units.") }
+        await settle(model) { model.runState.hasUnreadFollowUps }
+        // The owner opens a new conversation before the old chat's answer arrives.
+        model.newSession()
+        refusal.signal()
+        _ = await sending.value
+
+        #expect(model.acceptsFollowUps)
+        #expect(model.errorMessage == nil)
+        finish.signal()
     }
 
     @Test

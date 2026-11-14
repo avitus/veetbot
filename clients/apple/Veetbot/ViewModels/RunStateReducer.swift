@@ -416,6 +416,10 @@ public final class RunStateReducer: ObservableObject {
         if readFollowUpIDs.contains(pendingInputID) {
             // The run read it before the acceptance arrived; its message is already placed.
             removeFollowUp(at: index)
+        } else if followUps.contains(where: { $0.pendingInputID == pendingInputID }) {
+            // A run snapshot listed it while the acceptance was in flight: one
+            // waiting bubble is enough, and the snapshot's already has the id.
+            removeFollowUp(at: index)
         } else {
             followUps[index].pendingInputID = pendingInputID
         }

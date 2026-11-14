@@ -15,9 +15,10 @@ from agent_core.adapters.persistence.repositories import (
     PostgresEventRepository,
     execute_run_insert,
 )
-from agent_core.adapters.persistence.sqlalchemy_models import RunRow
+from agent_core.adapters.persistence.sqlalchemy_models import RunPendingInputRow, RunRow
 from agent_core.domain.errors import ConflictError, WorkerFencedError
 from agent_core.domain.events import NewEvent
+from agent_core.domain.pending_inputs import follow_up_drop_derivation
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.runs import FailureReason, Run, RunFailure, RunLimits, RunStatus
 from agent_core.ports.determinism import Clock
@@ -236,4 +237,36 @@ class PostgresRunQueue:
                     payload=payload,
                 )
             )
+            if row.status == RunStatus.FAILED.value:
+                await self._drop_unread_follow_ups(row)
         return len(rows)
+
+    async def _drop_unread_follow_ups(self, run: RunRow) -> None:
+        """Settle what a run failed here was holding (ADR-0324).
+
+        Called after the run's terminal event, whose append holds the session's
+        row, so no follow-up can join the inbox before this commits.
+        """
+
+        held = (
+            await self._session.scalars(
+                select(RunPendingInputRow)
+                .where(RunPendingInputRow.run_id == run.id)
+                .order_by(RunPendingInputRow.position)
+            )
+        ).all()
+        for pending in held:
+            payload = {"pending_input_id": str(pending.id), "reason": "run_failed"}
+            if pending.request_hash is not None:
+                payload["request_hash"] = pending.request_hash
+            await self._events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="run.input.dropped",
+                    actor_type="maintenance",
+                    payload=payload,
+                    derivation_key=follow_up_drop_derivation(pending.id),
+                )
+            )
+            await self._session.delete(pending)

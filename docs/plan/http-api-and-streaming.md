@@ -1066,11 +1066,12 @@ response is the message route's body with one more field:
 
 `run_id` and `status` are the active run's, and a new run's body is unchanged:
 it has no `pending_input_id`. With an `Idempotency-Key` the id is derived from
-the session, the principal and the key, and the request's fingerprint is kept
+the principal and the key, and the request's fingerprint is kept
 on the inbox row and on the event that reads, carries over or drops it. A
 repeat with the same body therefore returns the same `pending_input_id` with
 `200` in every one of those states, and the same key with another body is
-`409` `idempotency_key_reused` in every one. The lookup runs even with the
+`409` `idempotency_key_reused` in every one, as is the same key in another
+chat. These receipts do not expire. The lookup runs even with the
 setting off, so turning it off cannot turn an accepted follow-up into a new
 run. The handler
 holds the session's admission lock, as for any message. It inserts the row

@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_core.domain.messages import ContentPart
 
 MAX_PENDING_RUN_INPUTS = 8
+# A keyed follow-up's identifier is derived under this namespace from the
+# principal and the key alone, so the key means the same follow-up in any chat.
+FOLLOW_UP_KEY_NAMESPACE = UUID("6f0c0324-5a1e-4a7b-9d57-0c0a0f0e0324")
 
 
 class PendingRunInput(BaseModel):

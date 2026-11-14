@@ -1562,12 +1562,20 @@ public final class ChatViewModel: ObservableObject {
             }
         }
         runState.beginFollowUp(content: [.text(text)], submissionID: key)
+        // An answer belongs to the chat and connection that asked. After either
+        // changes, even back to the same chat, it must not touch what is shown.
+        let selection = selectionRequestID
+        let connection = connectionGeneration
+        func stillShown() -> Bool {
+            selectedSessionID == sessionID && selectionRequestID == selection
+                && connectionGeneration == connection
+        }
         do {
             let submit = try await api.submitMessage(
                 sessionID: sessionID, content: [.text(text)], idempotencyKey: key
             )
+            guard stillShown() else { return true }
             pendingFollowUpSubmission = nil
-            guard selectedSessionID == sessionID else { return true }
             if let pendingInputID = submit.pendingInputID {
                 runState.confirmFollowUp(submissionID: key, pendingInputID: pendingInputID)
             } else {
@@ -1578,6 +1586,7 @@ public final class ChatViewModel: ObservableObject {
             }
             return true
         } catch {
+            guard stillShown() else { return false }
             runState.discardFollowUp(submissionID: key)
             if error is CancellationError { return false }
             guard let apiError = apiError(from: error), apiError.code == .conflict else {
@@ -1623,26 +1632,39 @@ public final class ChatViewModel: ObservableObject {
             settlementAwaitingSubmission = runID
             return
         }
-        do {
-            let session = try await api.getSession(sessionID)
-            guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
-            let next = session.activeRunID ?? (session.lastRunID == runID ? nil : session.lastRunID)
-            guard let next else {
-                returnToComposer(runState.dropUnreadFollowUps())
+        // A failed read must not strand the follow-ups as waiting: try again a
+        // few times, for this chat only, before reporting it.
+        for attempt in 1...Self.settlementAttempts {
+            do {
+                let session = try await api.getSession(sessionID)
+                guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
+                let next =
+                    session.activeRunID ?? (session.lastRunID == runID ? nil : session.lastRunID)
+                guard let next else {
+                    returnToComposer(runState.dropUnreadFollowUps())
+                    return
+                }
+                let run = try await api.getRun(next)
+                guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
+                // Only what the ended run left can be dropped when the next run starts.
+                runState.markUnreadFollowUpsOrphaned()
+                runState.seed(run: run)
+                watch(runID: next)
                 return
+            } catch is CancellationError {
+                return
+            } catch {
+                guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
+                guard attempt < Self.settlementAttempts else {
+                    present(error)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * 300_000_000)
             }
-            let run = try await api.getRun(next)
-            guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
-            // Only what the ended run left can be dropped when the next run starts.
-            runState.markUnreadFollowUpsOrphaned()
-            runState.seed(run: run)
-            watch(runID: next)
-        } catch is CancellationError {
-            return
-        } catch {
-            present(error)
         }
     }
+
+    private static let settlementAttempts = 3
 
     // MARK: - Attachments (ADR-0120)
 

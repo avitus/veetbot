@@ -2063,7 +2063,8 @@ the index admits it; the executor dispatches it after the commit. The kept
 rows become one user message in arrival order, with `pending_input_ids`, and
 each row leaves a content-free `run.input.promoted` marker. The three
 writers that end a parked run (the owner's cancel, a surface `/stop`, and the
-child-budget failure) drop what the run held. Each drop appends a
+child-budget failure) drop what the run held, and so does the queue when it
+fails a run that exhausted its crash allowance. Each drop appends a
 content-free `run.input.dropped` event with `pending_input_id` and a reason of
 `run_failed` or `run_cancelled`.
 

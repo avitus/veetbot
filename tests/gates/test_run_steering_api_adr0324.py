@@ -128,6 +128,19 @@ async def test_a_follow_up_is_held_for_the_active_run(tmp_path: Path) -> None:
         async with composition.uow_factory() as uow:
             assert len(await uow.pending_inputs.list_for_run(run_id, composition.principal)) == 1
 
+        # A key belongs to the principal, not the chat: another chat cannot reuse it.
+        other_session = await _create_session(client)
+        for text in ("Also add a date.", "Something else."):
+            elsewhere = await client.post(
+                f"/v1/sessions/{other_session}/messages",
+                json=_text(text),
+                headers={"Idempotency-Key": "follow-up-1"},
+            )
+            assert elsewhere.status_code == 409
+            assert elsewhere.json()["error"]["details"]["reason"] == "idempotency_key_reused"
+        async with composition.uow_factory() as uow:
+            assert await uow.runs.active_for_session(other_session, composition.principal) is None
+
 
 async def test_a_ninth_pending_follow_up_is_refused(tmp_path: Path) -> None:
     async with _parked(tmp_path, steering=True) as (_composition, client, session_id, run_id):

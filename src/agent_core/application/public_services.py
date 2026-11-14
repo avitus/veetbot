@@ -135,6 +135,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.model_settings import ModelSettingsCatalog
 from agent_core.domain.pending_inputs import (
+    FOLLOW_UP_KEY_NAMESPACE,
     MAX_PENDING_RUN_INPUTS,
     PendingRunInput,
     follow_up_derivation,
@@ -1000,7 +1001,7 @@ class PublicRunService:
             self._ids.new_id()
             if idempotency_key is None
             else uuid5(
-                session.id,
+                FOLLOW_UP_KEY_NAMESPACE,
                 canonical_json([principal.tenant_id, principal.principal_id, idempotency_key]),
             )
         )
@@ -1011,7 +1012,9 @@ class PublicRunService:
         if idempotency_key is not None:
             # Looked up even with the setting off: turning it off must not turn
             # a follow-up the server already accepted into new work.
-            replay = await self._follow_up_replay(uow, principal, input_id, request_hash)
+            replay = await self._follow_up_replay(
+                uow, principal, session.id, input_id, request_hash
+            )
             if replay is not None:
                 return replay
         if not self._run_steering_enabled:
@@ -1107,6 +1110,7 @@ class PublicRunService:
         self,
         uow: RepositoryUnitOfWork,
         principal: Principal,
+        session_id: UUID,
         input_id: UUID,
         request_hash: str,
     ) -> SubmitResult | None:
@@ -1114,13 +1118,13 @@ class PublicRunService:
 
         Every state the follow-up can be in keeps the keyed request's
         fingerprint: the inbox row, then the event that read it, carried it to
-        the next run, or dropped it. The same key with another body is a
-        conflict in all of them.
+        the next run, or dropped it. The same key with another body, or in
+        another chat, is a conflict in all of them, as it is for a new run.
         """
 
         waiting = await uow.pending_inputs.get(input_id, principal)
         if waiting is not None:
-            recorded, run_id = waiting.request_hash, waiting.run_id
+            recorded, run_id, home = waiting.request_hash, waiting.run_id, waiting.session_id
         else:
             settled = None
             for derivation in (
@@ -1134,7 +1138,8 @@ class PublicRunService:
             if settled is None or settled.run_id is None:
                 return None
             recorded, run_id = settled.payload.get("request_hash"), settled.run_id
-        if recorded != request_hash:
+            home = settled.session_id
+        if recorded != request_hash or home != session_id:
             raise ConflictError(
                 "The idempotency key was reused with a different body.",
                 reason="idempotency_key_reused",

@@ -175,9 +175,8 @@ Three constraints shape any answer:
   when false so stored prefixes keep their bytes.
 - A run stopped by a People erasure also has a cancel time, so a follow-up
   sent after that stop starts the next run, as after an owner's Stop.
-- A run ended by a path outside the executor's three parked-run writers and
-  its terminal transition (for example the queue's crash-allowance sweep)
-  leaves its inbox rows until the session is deleted.
+- The queue's crash-allowance sweep, the one terminal writer outside the
+  executor, drops what the run it fails was holding.
 - A steered run is longer, so it reaches its cost or deadline limit sooner
   than two separate runs would.
 
