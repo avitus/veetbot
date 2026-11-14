@@ -16,6 +16,10 @@ import pytest
 from tests.browser_host import host_browser_refusal
 from tests.browser_partition import BROWSER_MODULES
 
+# The directories whose tests form the integration partition. CI's integration
+# discovery collects only these (.circleci/test-suites.yml).
+INTEGRATION_DIRECTORIES = ("integration", "resilience", "security")
+
 NetworkMode = Literal["blocked", "integration", "live"]
 type SocketAddress = tuple[Any, ...] | str | Buffer
 NETWORK_MODE: ContextVar[NetworkMode] = ContextVar("test_network_mode", default="blocked")
@@ -104,10 +108,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.browser)
         elif "/tests/gates/" in path or "/tests/unit/" in path:
             item.add_marker(pytest.mark.static)
-        elif any(
-            part in path
-            for part in ("/tests/integration/", "/tests/resilience/", "/tests/security/")
-        ):
+        elif any(f"/tests/{directory}/" in path for directory in INTEGRATION_DIRECTORIES):
             item.add_marker(pytest.mark.integration)
         elif "/tests/live/" in path:
             item.add_marker(pytest.mark.live)

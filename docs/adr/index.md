@@ -372,3 +372,4 @@ implementation without one.
 - [ADR-0320: A failed refresh shows on its tile, and one job request waits ten seconds (Accepted)](0320-failed-refresh-shows-on-the-tile.md)
 - [ADR-0321: Owner-added servers share the index in turn, and the rest are named (Accepted)](0321-owner-tools-share-the-index-and-are-named.md)
 - [ADR-0322: The hosted browser job runs on four workers (Proposed)](0322-hosted-browser-job-runs-on-four-workers.md)
+- [ADR-0323: The static and integration jobs run on four nodes (Proposed)](0323-static-and-integration-run-on-four-nodes.md)

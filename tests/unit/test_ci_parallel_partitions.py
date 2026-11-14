@@ -86,15 +86,36 @@ def test_the_macos_job_keys_its_record_on_the_apple_inputs() -> None:
 
 
 @pytest.mark.parametrize("name", ["static", "integration"])
-def test_the_longest_python_partitions_split_across_two_executors(name: str) -> None:
-    assert _config()["jobs"][name]["parallelism"] == 2
+def test_the_longest_python_partitions_split_across_four_executors(name: str) -> None:
+    """ADR-0323: four nodes halved both jobs at about the same credits."""
+    assert _config()["jobs"][name]["parallelism"] == 4
 
 
-def test_static_runs_its_non_test_checks_on_one_node() -> None:
+def test_integration_nodes_stay_on_one_cpu() -> None:
+    """ADR-0323: two CPUs a node measured no faster at twice the credits."""
+    assert _config()["jobs"]["integration"]["resource_class"] == "small"
+
+
+def test_static_spreads_its_non_test_checks_over_the_nodes() -> None:
+    """ADR-0323: the checks run before the tests, on nodes other than the first.
+
+    The node that discovers the test files has no check ahead of it, and each
+    other node runs its check while discovery is still in progress.
+    """
     steps = _config()["jobs"]["static"]["steps"]
+    names = [step["run"]["name"] for step in steps if "run" in step]
     named = {step["run"]["name"]: step["run"]["command"] for step in steps if "run" in step}
-    for check in ("Lint", "Type check", "Deployment tests", "Documentation checks"):
-        assert '"$CIRCLE_NODE_INDEX" != 0' in named[check], check
+    nodes = {
+        "Type check": 1,
+        "Install Pandoc": 2,
+        "Documentation checks": 2,
+        "Lint": 3,
+        "Deployment tests": 3,
+        "Build downloadable client": 3,
+    }
+    for check, node in nodes.items():
+        assert f'[[ "$CIRCLE_NODE_INDEX" != {node} ]] && exit 0' in named[check], check
+        assert names.index(check) < names.index("Static tests"), check
     assert "CIRCLE_NODE_INDEX" not in named["Static tests"]
     assert "CIRCLE_NODE_INDEX" not in named["Reading lane floor"]
 
@@ -122,7 +143,7 @@ def test_each_node_records_its_own_pass_of_the_tree() -> None:
     restored = [step["restore_cache"]["keys"] for step in skip if "restore_cache" in step]
     assert restored == [
         [f'verified-v2-<< parameters.job >>-{node}-{{{{ checksum "/tmp/veetbot-verified/tree" }}}}']
-        for node in (0, 1)
+        for node in range(4)
     ]
 
 
@@ -133,8 +154,17 @@ def test_each_node_records_its_own_pass_of_the_tree() -> None:
         ("2", ["0-of-2"], False),
         ("2", ["0-of-2", "1-of-2"], True),
         ("2", ["0-of-1", "1-of-1"], False),
+        ("4", ["0-of-4", "1-of-4", "2-of-4"], False),
+        ("4", ["0-of-4", "1-of-4", "2-of-4", "3-of-4"], True),
     ],
-    ids=["single-node-passed", "one-of-two-passed", "both-passed", "other-split-passed"],
+    ids=[
+        "single-node-passed",
+        "one-of-two-passed",
+        "both-passed",
+        "other-split-passed",
+        "three-of-four-passed",
+        "all-four-passed",
+    ],
 )
 @pytest.mark.parametrize("branch", ["main", "dev"])
 def test_a_job_skips_on_any_branch_only_when_every_node_passed_its_identity(

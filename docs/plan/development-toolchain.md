@@ -568,8 +568,8 @@ does not assume. No check appears in more than one lane, and a developer who
 runs `make check` locally has run all four jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
 Job 1 uses the Python 3.12 image's Node variant so the jobs privacy-screen
-subprocess tests run in the static lane. It uses a two-vCPU CircleCI executor
-and runs only `test-static` with two
+subprocess tests run in the static lane. Each of its nodes is a two-vCPU CircleCI executor
+and runs `test-static` with two
 processes and load-scope scheduling, matching the local target's default.
 The selected tests and required checks are unchanged. Its Makefile
 targets are separate CircleCI steps so timing data identifies the remaining
@@ -583,12 +583,16 @@ atoms and reports that name each case's file. Only the free features are
 configured, so every run executes the whole partition; rerunning a workflow from
 failed runs only the files that failed in the earlier attempt on the same
 commit. No credit-charged feature is enabled: test impact analysis would reduce
-the selection of a required check. Jobs 1 and 3 run on two executors each
-(`parallelism: 2`, ADR-0230), and the free static splitting divides their test
-files by recorded timing, so the two nodes together run the whole partition.
-Job 3's nodes each have their own PostgreSQL container. Job 1's lint, type,
-deployment, documentation, and client-build steps run on its first node only;
-the reading-lane floor runs on both.
+the selection of a required check. Jobs 1 and 3 run on four executors each
+(`parallelism: 4`, ADR-0230, ADR-0323), and the free static splitting divides
+their test files by recorded timing, so the four nodes together run the whole
+partition. Job 3's nodes each have their own PostgreSQL container and one vCPU.
+Job 1 runs its checks before its tests on nodes other than the first, which
+discovers the files meanwhile: the type check on node 1, the documentation
+check on node 2, and lint, deployment tests and the client build on node 3. The
+reading-lane floor runs on every node. Job 3's discovery collects only the
+directories that hold integration tests, so it does not import the static tree
+only to deselect it.
 Job 6 is an additional native-client gate outside `make check`, split across
 two macOS executors that run at the same time. Job 6a runs `make test-apple`
 under full Xcode because Command Line Tools can compile a Swift Testing bundle

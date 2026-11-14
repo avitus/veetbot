@@ -55,13 +55,19 @@ commands:
                 | git hash-object --stdin > /tmp/veetbot-verified/tree
             fi
       # Each node of a parallel job records its own pass (ADR-0230); a job
-      # runs on at most two nodes.
+      # runs on at most four nodes (ADR-0323).
       - restore_cache:
           keys:
             - 'verified-v2-<< parameters.job >>-0-{{ checksum "/tmp/veetbot-verified/tree" }}'
       - restore_cache:
           keys:
             - 'verified-v2-<< parameters.job >>-1-{{ checksum "/tmp/veetbot-verified/tree" }}'
+      - restore_cache:
+          keys:
+            - 'verified-v2-<< parameters.job >>-2-{{ checksum "/tmp/veetbot-verified/tree" }}'
+      - restore_cache:
+          keys:
+            - 'verified-v2-<< parameters.job >>-3-{{ checksum "/tmp/veetbot-verified/tree" }}'
       - run:
           name: Skip a tree this job already verified
           command: |
@@ -154,7 +160,9 @@ jobs:
       - image: cimg/python:3.12-node
     resource_class: medium
     # Smarter Testing splits the static files by recorded timing (ADR-0230).
-    parallelism: 2
+    # Four nodes; the checks below run before the tests on nodes 1-3, while
+    # the first node discovers the files (ADR-0323).
+    parallelism: 4
     steps:
       - checkout
       - install_uv
@@ -166,40 +174,40 @@ jobs:
       - skip_verified_tree:
           job: static
       - run:
+          name: Type check
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 1 ]] && exit 0
+            make typecheck
+      - run:
           name: Install Pandoc
           command: |
-            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            [[ "$CIRCLE_NODE_INDEX" != 2 ]] && exit 0
             sudo apt-get update && sudo apt-get install -y pandoc
+      - run:
+          name: Documentation checks
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 2 ]] && exit 0
+            make docs-check
       - run:
           name: Lint
           command: |
-            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
+            [[ "$CIRCLE_NODE_INDEX" != 3 ]] && exit 0
             make lint
       - run:
-          name: Type check
+          name: Deployment tests
           command: |
-            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
-            make typecheck
+            [[ "$CIRCLE_NODE_INDEX" != 3 ]] && exit 0
+            make test-deploy
+      - run:
+          name: Build downloadable client
+          command: |
+            [[ "$CIRCLE_NODE_INDEX" != 3 ]] && exit 0
+            make client-build
       - run:
           name: Static tests
           command: circleci testsuite run "static"
       - store_test_results:
           path: test-results/static
-      - run:
-          name: Deployment tests
-          command: |
-            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
-            make test-deploy
-      - run:
-          name: Documentation checks
-          command: |
-            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
-            make docs-check
-      - run:
-          name: Build downloadable client
-          command: |
-            [[ "$CIRCLE_NODE_INDEX" != 0 ]] && exit 0
-            make client-build
       - record_verified_tree:
           job: static
       - store_artifacts:
@@ -257,8 +265,9 @@ jobs:
           POSTGRES_USER: agent
           POSTGRES_PASSWORD: agent
     resource_class: small
-    # Each node has its own PostgreSQL container (ADR-0228, ADR-0230).
-    parallelism: 2
+    # Each node has its own PostgreSQL container (ADR-0228, ADR-0230). Four
+    # one-CPU nodes; two CPUs a node measured no faster (ADR-0323).
+    parallelism: 4
     environment:
       DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent
       # This job's secondary container is created empty for the run. The URL

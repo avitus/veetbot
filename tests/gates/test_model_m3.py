@@ -23,7 +23,7 @@ from agent_core.domain.messages import (
     UsageEvent,
 )
 from agent_core.model.streaming import ModelStreamError, validated_stream
-from scripts.architecture_checks import architecture_errors
+from tests.architecture_scan import repository_architecture_errors
 
 ROOT = Path(__file__).resolve().parents[2]
 ATTEMPT_ID = UUID("00000000-0000-0000-0000-000000000311")
@@ -179,7 +179,7 @@ async def test_provider_key_detector_does_not_start_inside_an_ordinary_url_word(
 
 
 def test_provider_sdks_are_isolated_to_their_own_adapter_modules() -> None:
-    assert architecture_errors(ROOT) == []
+    assert repository_architecture_errors() == ()
     adapter_dir = ROOT / "src/agent_core/adapters/models"
     imports: dict[str, set[str]] = {}
     for path in adapter_dir.glob("*.py"):

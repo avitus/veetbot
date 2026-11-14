@@ -33,7 +33,7 @@ from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import PersistedStreamFrame
 from agent_core.policy.scopes import PLATFORM_SCOPES
-from tests.conftest import NETWORK_MODE, _integration_endpoints
+from tests.conftest import INTEGRATION_DIRECTORIES, NETWORK_MODE, _integration_endpoints
 from tests.contract.memory_fixtures import memory, trace
 from tests.contract.support import NOW, SESSION_ID, principal, run
 from tests.integration.m2_support import memory_settings
@@ -1629,7 +1629,8 @@ def test_smarter_testing_runs_three_partitions_through_their_make_targets() -> N
     for name, suite in suites.items():
         assert set(suite) == {"name", "discover", "run", "outputs"}
         discover = suite["discover"]
-        assert discover.startswith(f'make -s test-{name} PYTEST_ARGS="--collect-only -q"')
+        # Integration discovery also names its directories (ADR-0323).
+        assert re.match(rf'make -s test-{name} PYTEST_ARGS="--collect-only -q[^"]*"', discover)
         assert discover.endswith(r"| sed -nE 's#^(tests/[^:[:space:]]+\.py)::.*#\1#p' | sort -u")
         run = suite["run"]
         assert run.startswith(f"make test-{name} PYTEST_ARGS=")
@@ -1647,6 +1648,30 @@ def test_smarter_testing_runs_three_partitions_through_their_make_targets() -> N
             }
         } in steps
         assert {"store_test_results": {"path": f"test-results/{name}"}} in steps
+
+
+def test_integration_discovery_collects_only_the_integration_directories() -> None:
+    """ADR-0323: discovery does not collect the static tree only to deselect it.
+
+    It names the directories conftest routes to the partition and every other
+    top-level test directory holding a module that marks itself integration, so
+    no integration file falls outside discovery.
+    """
+    discover = _test_suites()["integration"]["discover"]
+    named = re.search(r'--collect-only -q ([^"]+)"', discover)
+    assert named is not None, discover
+    tests = ROOT / "tests"
+    self_marked = {
+        path.relative_to(tests).parts[0]
+        for path in tests.rglob("test_*.py")
+        if re.search(
+            r"^(?:pytestmark\b.*|@)pytest\.mark\.integration\b",
+            path.read_text(encoding="utf-8"),
+            re.M,
+        )
+    }
+    expected = {f"tests/{name}" for name in (*INTEGRATION_DIRECTORIES, *self_marked)}
+    assert sorted(named.group(1).split()) == sorted(expected)
 
 
 def test_testflight_archive_uses_the_uploaded_distribution_profile() -> None:
