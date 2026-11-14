@@ -458,11 +458,23 @@ its name sorts earlier.
 An owner-added MCP server's tools
 ([ADR-0255](../adr/0255-owner-added-mcp-servers.md)) never take a definition.
 When the agent enables `tool.call` they fill their own Region A class,
-`owner_tool_index`, forty entries and 2,000 tokens, in the same reads-first
-order, rendered after the shared index's entries in its discovered envelope;
-the rest are recorded in `skipped_tool_names`. Each part keeps its own cap, so
-adding a server moves no existing definition or index entry. Without
-`tool.call` the owner-added tools are recorded as skipped.
+`owner_tool_index`, forty entries and 2,000 tokens, rendered after the shared
+index's entries in its discovered envelope. Servers take entries in turn, by
+server name, each offering its tools in the reads-first order, so one server's
+reads cannot fill the class before another server's first tool
+([ADR-0321](../adr/0321-owner-tools-share-the-index-and-are-named.md)); a tool
+that does not fit gives up that turn, and the server's next tool may still fit.
+What misses an entry is named in a second Region A class,
+`owner_tool_names`, three hundred names and 1,500 tokens: one line per server,
+`- <server prefix>: <name>, <name>, …`, after a heading in the same envelope
+that says a named tool is called through `tool.call` and that an invalid call
+returns its definition. Names are admitted in the same turns. A named tool is
+pinned and deferred like an indexed one, and the plan records it in
+`listed_tool_names`; only what misses both classes is recorded in
+`skipped_tool_names`. A plan from before ADR-0321 has no listed names and
+renders byte-for-byte as it did. Each part keeps its own cap, so adding a
+server moves no existing definition or index entry. Without `tool.call` the
+owner-added tools are recorded as skipped.
 
 [ADR-0261](../adr/0261-read-a-capture-in-sections.md) adds one *unindexed
 deferral*, `artifact.read_capture`. It is pinned with the deferred tools and
@@ -519,7 +531,8 @@ at three passages because a document that answers a question usually answers it 
 one or two, and it yields before recall because a corpus is re-queryable by an
 explicit `knowledge.search` while the beliefs in a snapshot are not.
 
-The prefix classes sum to a hard ceiling of 25,000 tokens — 24,500 before
+The prefix classes sum to a hard ceiling of 26,500 tokens — 25,000 before
+ADR-0321 added the 1,500 of the owner-added tools it names, 24,500 before
 ADR-0267 added 500 more to the deferred tool index, 24,000 before
 ADR-0262 added 500 to it, 22,000 before ADR-0255 added
 the 2,000 of the owner-added servers' index, 15,000 before

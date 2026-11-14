@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections import OrderedDict, deque
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from typing import Literal
 from uuid import UUID
 from weakref import WeakValueDictionary
@@ -133,6 +133,33 @@ def _discovered_rank(tool: ToolSpec) -> tuple[int, str, str]:
         tool.server_id or tool.device_id or "",
         tool.name,
     )
+
+
+def _by_server(tools: Sequence[ToolSpec]) -> list[list[ToolSpec]]:
+    """Owner-added tools grouped by server, servers by name, each keeping its order."""
+    servers: dict[str, list[ToolSpec]] = {}
+    for tool in tools:
+        servers.setdefault(tool.server_id or "", []).append(tool)
+    return [servers[server_id] for server_id in sorted(servers)]
+
+
+def _take_in_turn(
+    groups: Sequence[Sequence[ToolSpec]], admit: Callable[[ToolSpec], bool]
+) -> list[ToolSpec]:
+    """Offer each group's next tool in turn (ADR-0321); return what ``admit`` refused.
+
+    A refused tool does not end its group's turns: a shorter one behind it may
+    still fit.
+    """
+    queues = [deque(group) for group in groups]
+    refused: list[ToolSpec] = []
+    while any(queues):
+        for queue in queues:
+            if queue:
+                tool = queue.popleft()
+                if not admit(tool):
+                    refused.append(tool)
+    return refused
 
 
 def _cache_ttl(session: Session) -> CacheTtl:
@@ -349,6 +376,7 @@ class EventContextPlanner:
                     current.memory_snapshot,
                     persona=current.persona_text,
                     deferred_tools=current.deferred_tool_specs,
+                    listed_tools=current.listed_tool_names,
                 )
                 current_prefix_sha256 = hashlib.sha256(
                     prefix_bytes(current_prefix, current.tool_specs, current.deferred_tool_specs)
@@ -689,22 +717,29 @@ class EventContextPlanner:
         shared_index_tools = list(deferred_tools)
         owner_index_config = classes.get("owner_tool_index")
 
-        def index_tokens_of(entries: Sequence[ToolSpec]) -> int:
+        def index_tokens_of(entries: Sequence[ToolSpec], listed: Collection[str] = ()) -> int:
             return (
-                self._estimator.estimate(envelope_items(deferred_index_items(entries)), model_id)
+                self._estimator.estimate(
+                    envelope_items(deferred_index_items(entries, listed)), model_id
+                )
                 if entries
                 else 0
             )
 
+        owner_index: list[ToolSpec] = []
+        owner_named: list[ToolSpec] = []
         if owner_tools and not deferring:
             # Without tool.call there is no index to hold them.
             skipped_tools.extend(owner_tools)
         elif owner_tools:
+            names_config = classes.get("owner_tool_names")
             if not isinstance(owner_index_config, dict):
                 raise ValueError("owner-tool-index context configuration must be a mapping")
-            owner_index: list[ToolSpec] = []
+            if not isinstance(names_config, dict):
+                raise ValueError("owner-tool-names context configuration must be a mapping")
             shared_tokens = index_tokens_of(shared_index_tools)
-            for tool in owner_tools:
+
+            def admit_entry(tool: ToolSpec) -> bool:
                 proposed_owner = [*owner_index, tool]
                 # An owner entry costs what it adds to the rendered index, the
                 # measure the cap check below applies to the finished plan.
@@ -712,17 +747,46 @@ class EventContextPlanner:
                     index_tokens_of([*shared_index_tools, *proposed_owner]) - shared_tokens
                     > int(owner_index_config["max_tokens"])
                 ):
-                    skipped_tools.append(tool)
-                    continue
+                    return False
                 owner_index.append(tool)
-            deferred_tools.extend(owner_index)
+                return True
+
+            # ADR-0321: servers take entries in turn, so one server's reads
+            # cannot fill the index before another server's first tool.
+            past_index = _take_in_turn(_by_server(owner_tools), admit_entry)
+            entry_tokens = index_tokens_of([*shared_index_tools, *owner_index])
+
+            def admit_name(tool: ToolSpec) -> bool:
+                proposed_named = [*owner_named, tool]
+                if len(proposed_named) > int(names_config["max_items"]) or (
+                    index_tokens_of(
+                        [*shared_index_tools, *owner_index, *proposed_named],
+                        {named.name for named in proposed_named},
+                    )
+                    - entry_tokens
+                    > int(names_config["max_tokens"])
+                ):
+                    return False
+                owner_named.append(tool)
+                return True
+
+            # What misses an entry is named, in the same turns; only what
+            # misses both is skipped.
+            skipped_tools.extend(_take_in_turn(_by_server(past_index), admit_name))
+            rank = {tool.name: position for position, tool in enumerate(owner_tools)}
+
+            def server_order(tool: ToolSpec) -> tuple[str, int]:
+                return (tool.server_id or "", rank[tool.name])
+
+            owner_index.sort(key=server_order)
+            owner_named.sort(key=server_order)
+            deferred_tools.extend([*owner_index, *owner_named])
+        listed_names = frozenset(tool.name for tool in owner_named)
         if deferring:
             deferred_tools.extend(unindexed)
         else:
             skipped_tools.extend(unindexed)
-        owner_indexed = len(deferred_tools) - (len(unindexed) if deferring else 0) > len(
-            shared_index_tools
-        )
+        owner_indexed = bool(owner_index or owner_named)
         tools = sorted(selected_tools, key=lambda tool: tool.name)
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
@@ -730,7 +794,11 @@ class EventContextPlanner:
         base_prefix = build_prefix(agent, tools)
         persona_prefix = build_prefix(agent, tools, persona=persona_text)
         index_prefix = build_prefix(
-            agent, tools, persona=persona_text, deferred_tools=deferred_tools
+            agent,
+            tools,
+            persona=persona_text,
+            deferred_tools=deferred_tools,
+            listed_tools=listed_names,
         )
         catalog_prefix = build_prefix(
             agent,
@@ -738,6 +806,7 @@ class EventContextPlanner:
             catalog_metadata,
             persona=persona_text,
             deferred_tools=deferred_tools,
+            listed_tools=listed_names,
         )
         memory_config = classes.get("memory_snapshot")
         if self._memory_retriever is not None and not isinstance(memory_config, dict):
@@ -764,6 +833,7 @@ class EventContextPlanner:
                     rendered,
                     persona=persona_text,
                     deferred_tools=deferred_tools,
+                    listed_tools=listed_names,
                 )
                 return self._estimator.estimate(candidate_prefix[len(catalog_prefix) :], model_id)
 
@@ -796,6 +866,7 @@ class EventContextPlanner:
             memory_snapshot,
             persona=persona_text,
             deferred_tools=deferred_tools,
+            listed_tools=listed_names,
         )
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
@@ -822,10 +893,16 @@ class EventContextPlanner:
                 model_id,
             )
         )
+        owner_entry_tokens = (
+            index_tokens_of([*shared_index_tools, *owner_index]) if owner_indexed else 0
+        )
         owner_index_tokens = (
+            0 if not owner_index else owner_entry_tokens - index_tokens_of(shared_index_tools)
+        )
+        owner_names_tokens = (
             0
-            if not owner_indexed
-            else index_tokens_of(deferred_tools) - index_tokens_of(shared_index_tools)
+            if not owner_named
+            else index_tokens_of(deferred_tools, listed_names) - owner_entry_tokens
         )
         skill_catalog_tokens = self._estimator.estimate(
             catalog_prefix[len(index_prefix) :], model_id
@@ -858,6 +935,11 @@ class EventContextPlanner:
             or owner_index_tokens > int(owner_index_config["max_tokens"])
         ):
             raise ContextOverflow("context prefix class owner_tool_index exceeds its cap")
+        if owner_names_tokens > 0 and (
+            not isinstance(classes.get("owner_tool_names"), dict)
+            or owner_names_tokens > int(classes["owner_tool_names"]["max_tokens"])
+        ):
+            raise ContextOverflow("context prefix class owner_tool_names exceeds its cap")
         skill_config = classes.get("skill_catalog")
         if not isinstance(skill_config, dict):
             raise ValueError("skill-catalog context configuration must be a mapping")
@@ -922,6 +1004,7 @@ class EventContextPlanner:
             deferred_tool_names=tuple(tool.name for tool in deferred_tools),
             deferred_tool_specs=tuple(tool.model_copy(deep=True) for tool in deferred_tools),
             skipped_tool_names=tuple(tool.name for tool in skipped_tools),
+            listed_tool_names=tuple(tool.name for tool in owner_named),
             browser_origins=browser_origins,
             browser_profile_id=session.metadata.get("browser_profile_id"),
         )

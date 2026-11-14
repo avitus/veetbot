@@ -122,8 +122,8 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import (
-    CONVERSATION_MESSAGE_EVENTS,
     CONTEXT_ONLY_SEED_ACTOR_TYPES,
+    CONVERSATION_MESSAGE_EVENTS,
     SCHEDULE_INSTRUCTION_EVENT_TYPE,
     EventEnvelope,
     NewEvent,

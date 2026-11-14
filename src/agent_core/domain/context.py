@@ -30,6 +30,8 @@ class ContextClass(StrEnum):
     DEFERRED_TOOL_INDEX = "deferred_tool_index"
     # ADR-0255: owner-added MCP servers' index entries.
     OWNER_TOOL_INDEX = "owner_tool_index"
+    # ADR-0321: owner-added tools past that index, listed by name only.
+    OWNER_TOOL_NAMES = "owner_tool_names"
     SKILL_CATALOG = "skill_catalog"
     MEMORY_SNAPSHOT = "memory_snapshot"
     COMPACTED_SUMMARY = "compacted_summary"
@@ -53,6 +55,7 @@ REGION_ASSIGNMENTS: dict[ContextClass, ContextRegion] = {
     ContextClass.TOOL_DEFINITIONS: ContextRegion.PREFIX,
     ContextClass.DEFERRED_TOOL_INDEX: ContextRegion.PREFIX,
     ContextClass.OWNER_TOOL_INDEX: ContextRegion.PREFIX,
+    ContextClass.OWNER_TOOL_NAMES: ContextRegion.PREFIX,
     ContextClass.SKILL_CATALOG: ContextRegion.PREFIX,
     ContextClass.MEMORY_SNAPSHOT: ContextRegion.PREFIX,
     ContextClass.COMPACTED_SUMMARY: ContextRegion.BODY,
@@ -135,6 +138,9 @@ class ContextPlan(BaseModel):
     deferred_tool_names: tuple[str, ...] = ()
     deferred_tool_specs: tuple[ToolSpec, ...] = ()
     skipped_tool_names: tuple[str, ...] = ()
+    # ADR-0321: deferred owner-added tools the index names without an entry.
+    # The default keeps every earlier plan event rendering byte-for-byte.
+    listed_tool_names: tuple[str, ...] = ()
     # ADR-0130: the origins browser.navigate accepts in this session, named in
     # the runtime metadata row. The default keeps older plan events valid.
     browser_origins: tuple[str, ...] = Field(default=(), max_length=64)
@@ -148,6 +154,8 @@ class ContextPlan(BaseModel):
             raise ValueError("context plan deferred names do not match their specifications")
         if set(self.deferred_tool_names) & set(self.tool_names):
             raise ValueError("a context plan tool is either defined or deferred, not both")
+        if not set(self.listed_tool_names) <= set(self.deferred_tool_names):
+            raise ValueError("a context plan lists by name only tools it defers")
         return self
 
     @property

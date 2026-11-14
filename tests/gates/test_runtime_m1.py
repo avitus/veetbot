@@ -40,7 +40,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.runs import FailureReason, OutcomeKind, RunLimits, RunOutcome, RunStatus
 from agent_core.evals.cases import load_cases
 from agent_core.evals.runner import run_case
-from scripts.architecture_checks import architecture_errors
+from tests.architecture_scan import repository_architecture_errors
 from tests.contract.support import NOW
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,18 +88,22 @@ def test_one_terminal_writer() -> None:
 def test_runtime_has_no_provider_adapter_dependency() -> None:
     assert not [
         error
-        for error in architecture_errors(ROOT)
+        for error in repository_architecture_errors()
         if "provider SDK" in error or "runtime/application reaches" in error
     ]
 
 
 def test_no_ambient_time() -> None:
-    assert not [error for error in architecture_errors(ROOT) if "ambient nondeterminism" in error]
+    assert not [
+        error for error in repository_architecture_errors() if "ambient nondeterminism" in error
+    ]
 
 
 def test_no_ambient_id() -> None:
     assert not [
-        error for error in architecture_errors(ROOT) if "ambient nondeterminism call uuid." in error
+        error
+        for error in repository_architecture_errors()
+        if "ambient nondeterminism call uuid." in error
     ]
 
 

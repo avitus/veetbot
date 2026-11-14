@@ -153,11 +153,12 @@ class ScheduleOutcomeAccountant:
             )
             self._write_probe("process_event")
             # ADR-0225 part D: a completed report may stay quiet; a run that
-            # failed or was cancelled always tells the owner. A completed
-            # Cockpit refresh is shown by its widget (ADR-0254).
-            quiet = run.status is RunStatus.COMPLETED and (
-                revision.notify is ScheduleNotify.ATTENTION_ONLY
-                or is_cockpit_refresh(occurrence.manual_request_key)
+            # failed or was cancelled always tells the owner.
+            # A refresh on entry is quiet whatever its outcome: its tile reports a
+            # failure (ADR-0320).
+            quiet = is_cockpit_refresh(occurrence.manual_request_key) or (
+                run.status is RunStatus.COMPLETED
+                and revision.notify is ScheduleNotify.ATTENTION_ONLY
             )
             if (
                 self._notification_producer is not None

@@ -60,7 +60,9 @@ def main(inputs, job):
     return {"summary": text.splitlines()[0]}
 ```
 
-`job.http.request` returns `{status, json}`. `job.model.complete` returns text.
+`job.http.request` returns `{status, json}`. It waits ten seconds at most; a
+slower or unreachable host fails as `job.service_unavailable`, which a program
+may catch and report in what it publishes. `job.model.complete` returns text.
 `job.feed.publish(feed_id, data, expected_interval_seconds=300, schema=schema)`
 uses the existing feed validator. `job.log(message)` records at most 2,000 bytes
 per line. Declare operations in `manifest.calls` and feeds in `manifest.feeds`.

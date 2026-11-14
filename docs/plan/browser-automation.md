@@ -1877,7 +1877,8 @@ The trusted tool reads the current observation window, with at most twenty
 additional observations spaced at least 250 ms apart. The predicate's deadline
 and existing tool/run deadline bound all reads. After each polling delay, the
 checker rechecks the remaining time and avoids starting another capture when
-less time remains than the preceding capture consumed. This measured estimate
+less time remains than twice the slowest capture of this check consumed, since
+one quick capture does not show the next will be. This measured estimate
 never extends the deadline; a capture that actually times out still invalidates
 prior references. A result reports `satisfied`,
 `ambiguous` or `not_observed`, window scope, observation count and elapsed time.

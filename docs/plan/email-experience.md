@@ -56,13 +56,12 @@ presentation module; this feature does not build a dynamic plugin system.
 
 ### Priority inbox
 
-The priority view combines both accounts. On macOS, Important shows the total
-number of qualifying threads and initially loads up to 100. On touch it opens
-with up to five. Important is the initial collection and the default on each
-switch into Email; this supersedes ADR-0231's Inbox default. On touch, Inbox pages five
-threads at a time (ADR-0231). On macOS every list, Inbox, Needs you, Handled,
+The priority view combines both accounts. Important shows the total number of
+qualifying threads and initially loads up to 100. Important is the initial
+collection and the default on each switch into Email; this supersedes
+ADR-0231's Inbox default. On every device every list, Inbox, Needs you, Handled,
 Important, Other mail and search results alike, loads up to 100 threads per
-page and scrolls (ADR-0303). Account badges and an account filter identify the source
+page and scrolls (ADR-0303, ADR-0324). Account badges and an account filter identify the source
 of each conversation.
 
 Each row shows the correspondent, subject, a concise statement of what needs
@@ -92,19 +91,23 @@ state from another device also invalidates them. A failed background read retain
 the visible cached list
 with the existing error indication. A collection without a snapshot still
 loads from the server; obsolete switch responses cannot replace the active list.
-On macOS, scrolling near the end of any list fetches the next page
-automatically, with no More button. Refresh preserves the visible thread and
+Scrolling near the end of any list fetches the next page automatically. On
+the Mac there is no More button; on touch one appears only to retry a page
+that failed to load (ADR-0324). Refresh preserves the visible thread and
 the selected conversation independently, in every Mac list.
 It can fetch later pages to retain an eligible displaced thread, but does not
 chase an anchor its known state has taken out of the list: handled for
 Important and Needs you, not handled for Handled, archived or in Spam for
 Inbox and its collections. The search reads at most five pages past the rows
 on screen, then keeps the rows without restoring the position (ADR-0303).
-On touch, More important expands to ten, then pages through the rest. Find
+Find
 mail and Review other mail make false negatives discoverable without cluttering
 the default list. Rows are ordered by each conversation's latest activity,
 newest first, whatever ranking selected them; ties keep the server's order
-(owner-requested, 2026-10-21, ADR-0234). On foreground refresh, surviving rows
+(owner-requested, 2026-10-21, ADR-0234). The rank selects the rows of
+Important, Other mail and search results; Inbox, Needs you, Handled and
+Suspected spam page by latest activity, so their first page is the newest
+mail rather than Important's top-ranked conversations (ADR-0324). On foreground refresh, surviving rows
 stay, new qualifying threads appear automatically in that order, and a
 conversation with new mail moves up. Preserve the open conversation and unsent
 edits; no reveal action or automatic scroll is required. Use a subtle insertion
@@ -553,10 +556,14 @@ ahead of them even outside the Inbox, since until it is analyzed the thread's
 newer messages cannot be read. Automatic drafts are prepared only for conversations
 the slice assessed, and need a finished analysis. Expired Inbox bodies and unsubscribe
 verification proceed as usual. The first page of an Inbox pass is also read;
-it holds the newest mail, so a resynchronization still recovers new mail. Re-assessment
+it holds the newest mail, so a resynchronization still recovers new mail. Reads
+that new mail leaves continue the Inbox catch-up through later pages, which
+calls no model, so an account held above the share still reaches its catch-up
+floor; mail older than the arrival window that it imports stays unassessed
+(ADR-0324). Re-assessment
 after a profile, model or prompt revision, further passes of a long conversation,
-assessment of mail older than the arrival window, later
-catch-up pages, the ninety-day history pass, other non-Inbox assessment and
+assessment of mail older than the arrival window, the ninety-day history pass,
+other non-Inbox assessment and
 correspondence summaries wait until a refresh again passes the 75% admission
 check, counted spending and live reservations included. A new-mail slice that found
 nothing makes no model call, requests no memory formation and is removed after seven

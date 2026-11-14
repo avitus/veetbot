@@ -207,6 +207,22 @@ import Testing
         #expect(email.contains("email.collection.suspectedSpam"))
     }
 
+    /// Every device pages 100 rows and fetches the next page near the end (ADR-0324):
+    /// a five-row touch page left Important and Inbox at five conversations.
+    @Test
+    func testEveryDeviceScrollsTheMailListInHundredRowPages() throws {
+        let model = try source(at: "Veetbot/ViewModels/EmailViewModel.swift")
+        #expect(model.contains("private let pageSize = 100"))
+        #expect(!model.contains("scrollsMailList"))
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        #expect(!email.contains("scrollsMailList"))
+        let start = try #require(email.range(of: "private var pagedList:")).upperBound
+        let end = try #require(email.range(of: "private var scrollingList:")).lowerBound
+        let touch = String(email[start..<end])
+        #expect(touch.contains(".task(id: model.isLoading || model.isReadingList) { await model.loadMore() }"))
+        #expect(touch.contains("email.list.loading-more"))
+    }
+
     private func source(at relativePath: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

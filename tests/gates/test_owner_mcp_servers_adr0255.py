@@ -800,11 +800,13 @@ async def test_an_owner_server_fills_its_own_index_and_moves_no_existing_tool(
     added = set(owner.deferred_tool_names) - set(baseline.deferred_tool_names)
     assert added <= owner_names
     assert set(baseline.deferred_tool_names) <= set(owner.deferred_tool_names)
-    # Forty-two tools exceed the forty-item index: the rest are recorded, not dropped silently.
-    skipped = set(owner.skipped_tool_names) - set(baseline.skipped_tool_names)
-    assert added | skipped == owner_names
-    assert len(added) <= 40 and skipped
-    # Reads take the owner index first.
+    # Forty-two tools exceed the forty-item index: ADR-0321 names the rest
+    # instead of skipping them, so every tool stays callable.
+    assert added == owner_names
+    assert set(owner.skipped_tool_names) == set(baseline.skipped_tool_names)
+    listed = set(owner.listed_tool_names)
+    assert listed and listed <= owner_names
+    assert len(owner_names - listed) <= 40
     assert {"mcp.magicpath.get_selection", "mcp.magicpath.list_projects"} <= added
 
 

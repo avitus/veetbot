@@ -7,7 +7,8 @@
   that tenant-configured HTTP servers reach the network only through the
   sandbox egress allowlist
 - Detailed design: `docs/plan/tool-system.md`
-- Amended by: ADR-0291, under which scheduled work is offered only the servers it names
+- Amended by: ADR-0291, under which scheduled work is offered only the servers it names;
+  ADR-0321, under which servers share the owner index in turn and the rest are named
 
 ## Context
 

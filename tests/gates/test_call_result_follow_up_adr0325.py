@@ -223,7 +223,7 @@ async def test_a_scheduled_call_is_not_reported_a_second_time() -> None:
                         name="schedule.create",
                         arguments={
                             "title": "Call Riv",
-                            "instruction": f"Place one call to Riv at {arguments()['phone_number']}.",
+                            "instruction": f"Place one call to Riv at {RECIPIENT}.",
                             "at": FIRE_AT.isoformat(),
                             "place_call": True,
                         },

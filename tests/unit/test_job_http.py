@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
-from agent_core.adapters.jobs.http import JobHTTP
+from agent_core.adapters.jobs.http import JOB_HTTP_TIMEOUT_SECONDS, JobHTTP
 from agent_core.domain.credentials import CredentialRef, SecretValue
+from agent_core.domain.jobs import JobBrokerError
 
 CANARY = "github-job-test-canary"
 
@@ -224,3 +227,53 @@ async def test_encoded_credential_echo_is_refused_before_returning_to_job(encodi
             maximum_response_bytes=1024,
             call_id="encoded-echo",
         )
+
+
+async def test_one_request_waits_ten_seconds_at_most() -> None:
+    """ADR-0320: a request is capped well below the shortest useful job limit."""
+    sent: list[httpx.Request] = []
+
+    async def resolve(host: str) -> tuple[str, ...]:
+        return ("140.82.112.6",)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={})
+
+    broker = JobHTTP(Credentials(), resolver=resolve, transport=httpx.MockTransport(respond))
+    await broker.request(
+        method="GET",
+        url="https://api.example.com/forecast",
+        json=None,
+        credential=None,
+        maximum_response_bytes=1024,
+        call_id="read",
+    )
+    assert JOB_HTTP_TIMEOUT_SECONDS == 10
+    [request] = sent
+    assert set(request.extensions["timeout"].values()) == {JOB_HTTP_TIMEOUT_SECONDS}
+
+
+async def test_a_stalled_host_is_an_unavailable_service_the_job_can_handle() -> None:
+    """ADR-0320: a stall ends the request, not the run, and is reported as retryable."""
+
+    class Stalled(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+    async def resolve(host: str) -> tuple[str, ...]:
+        return ("140.82.112.6",)
+
+    broker = JobHTTP(Credentials(), resolver=resolve, transport=Stalled(), timeout_seconds=0.01)
+    with pytest.raises(JobBrokerError) as caught:
+        await broker.request(
+            method="GET",
+            url="https://api.example.com/forecast",
+            json=None,
+            credential=None,
+            maximum_response_bytes=1024,
+            call_id="read",
+        )
+    assert caught.value.reason == "job.service_unavailable"
+    assert caught.value.retryable

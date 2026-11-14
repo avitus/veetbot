@@ -3799,6 +3799,42 @@ import SwiftUI
         #expect(model.feedbackID == nil)
     }
 
+    /// Importance and reply need are separate judgments: giving one keeps the other chosen,
+    /// each with its own Undo.
+    @Test func testImportanceAndReplyNeedAreHeldTogether() async throws {
+        let requests = EmailRequestRecorder()
+        let importanceID = UUID(), replyID = UUID()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("/feedback") {
+                let judgment = (try? Self.archiveRequestBody(request))?["judgment"] as? String
+                let id = judgment == "important" ? importanceID : replyID
+                return (200, "{\"feedback_id\":\"\(id)\",\"thread\":\(self.threadJSON())}")
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            return (200, self.threadJSON())
+        }
+        await model.openThread(threadID)
+        await model.giveFeedback(target: .thread, judgment: "important")
+        await model.giveFeedback(target: .thread, judgment: "needs_reply")
+        #expect(model.feedbackGiven[.importance]?.judgment == "important")
+        #expect(model.feedbackGiven[.importance]?.message == "Marked this thread as important.")
+        #expect(model.feedbackGiven[.importance]?.id == importanceID)
+        #expect(model.feedbackGiven[.replyNeed]?.judgment == "needs_reply")
+        #expect(model.feedbackGiven[.replyNeed]?.message == "This thread needs a reply.")
+        #expect(model.feedbackGiven[.replyNeed]?.id == replyID)
+
+        await model.undoFeedback(.importance)
+        let undone = requests.snapshot.filter { $0.httpMethod == "DELETE" }.map { $0.url!.lastPathComponent.lowercased() }
+        #expect(undone == [importanceID.uuidString.lowercased()])
+        #expect(model.feedbackGiven[.importance] == nil)
+        #expect(model.feedbackGiven[.replyNeed]?.id == replyID)
+
+        model.clearSelection()
+        #expect(model.feedbackGiven.isEmpty)
+    }
+
     /// Foreground arrivals appear immediately without reordering surviving rows or disturbing edits.
     @Test func testRefreshInsertsNewThreadsWithoutChangingSelection() async throws {
         let requests = EmailRequestRecorder()

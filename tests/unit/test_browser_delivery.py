@@ -23,3 +23,10 @@ def test_browser_verification_blocks_packaging_and_runs_required_chromium() -> N
     check = next(line for line in makefile.splitlines() if line.startswith("check:"))
     assert "test-browser" in check
     assert "VEETBOT_REQUIRE_REAL_BROWSER=1" in makefile
+
+
+def test_hosted_browser_job_spreads_the_partition_over_four_workers() -> None:
+    """ADR-0322: four xdist workers on a four-CPU runner, not one serial worker."""
+    job = yaml.safe_load((ROOT / ".circleci/config.yml").read_text())["jobs"]["browser"]
+    assert job["resource_class"] == "large"
+    assert job["environment"]["BROWSER_TEST_WORKERS"] == "4"

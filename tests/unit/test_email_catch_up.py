@@ -599,24 +599,28 @@ async def test_catch_up_progress_reports_cutoff_and_oldest_inbox_mail_reached(
 
 
 @pytest.mark.parametrize(
-    ("age_days", "spent", "scope", "resync"),
+    ("age_days", "spent", "scope", "resync", "arrived"),
     [
-        (10, "250", "full", False),
-        (10, "350", "new_mail", False),
-        (0, "35", "new_mail", False),
-        (10, "350", "new_mail", True),
+        (10, "250", "full", False, 6),
+        (10, "350", "new_mail", False, 6),
+        (0, "35", "new_mail", False, 6),
+        (10, "350", "new_mail", True, 6),
+        (10, "350", "new_mail", False, 0),
     ],
 )
 async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
-    age_days: int, spent: str, scope: str, resync: bool
+    age_days: int, spent: str, scope: str, resync: bool, arrived: int
 ) -> None:
-    """Above 75% of either ceiling, a refresh reads only new mail (ADR-0256).
+    """Above 75% of either ceiling, a refresh reads new mail first (ADR-0256).
 
     A resynchronization restarts the Inbox pass, whose first page is the newest
-    mail, so a new-mail slice still lists and reads it.
+    mail, so a new-mail slice still lists and reads it. Reads left after new
+    mail continue the Inbox catch-up, which calls no model, so a mailbox held
+    above the share still reaches its floor (ADR-0324). The ninety-day history
+    pass stays with full slices.
     """
     inbox = {f"inbox-{index}": NOW - timedelta(days=10 + index) for index in range(8)}
-    changes = [f"change-{index}" for index in range(6)]
+    changes = [f"change-{index}" for index in range(arrived)]
     factory, reads = await _catching_up_mailbox(inbox, changes, resync=resync)
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
@@ -667,11 +671,13 @@ async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
                 NOW,
             )
         operation = await service.submit_task(app.principal, kind="refresh")
-        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED
         task = await service.get_task(app.principal, operation.run_id)
         async with app.uow_factory() as uow:
             sync = await uow.email.get(app.principal, "sync", "default")
-    assert task is not None and sync is not None
+            account = await uow.email.get(app.principal, "account", "default")
+    assert task is not None and sync is not None and account is not None
     assert task.scope == scope
     if scope == "full":
         assert reads[:4] == changes[::-1][:4]
@@ -680,8 +686,16 @@ async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
     elif resync:
         assert sorted(reads) == sorted(inbox)
     else:
-        assert reads == changes[::-1]
+        # New mail first, then the next catch-up page with the reads that remain.
+        caught_up = [f"inbox-{index}" for index in range(8 - len(changes))]
+        assert reads == changes[::-1] + caught_up
+        assert not {"history-0", "history-1"} & set(reads)
         assert sync.payload["change_pending"] == []
+        reached = datetime.fromisoformat(str(account.payload["inbox_reached_at"]))
+        assert reached == inbox[caught_up[-1]]
+        if not changes:
+            # Mail ten days old is no arrival, so reaching back through it ranks nothing.
+            assert run.model_call_count == 0
 
 
 @pytest.mark.parametrize("arrival_check", [False, True])

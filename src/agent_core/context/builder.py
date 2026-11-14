@@ -598,6 +598,7 @@ class BudgetedContextBuilder:
             plan.memory_snapshot,
             persona=plan.persona_text,
             deferred_tools=plan.deferred_tool_specs,
+            listed_tools=plan.listed_tool_names,
         )
         actual_prefix_hash = hashlib.sha256(
             prefix_bytes(prefix, plan.tool_specs, plan.deferred_tool_specs)

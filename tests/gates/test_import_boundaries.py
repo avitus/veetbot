@@ -5,21 +5,22 @@ from pathlib import Path
 import pytest
 
 from scripts.architecture_checks import architecture_errors
+from tests.architecture_scan import repository_architecture_errors
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_import_boundaries() -> None:
-    assert architecture_errors(ROOT) == []
+    assert repository_architecture_errors() == ()
 
 
 def test_evals_isolation() -> None:
-    errors = architecture_errors(ROOT)
+    errors = repository_architecture_errors()
     assert not [error for error in errors if "agent_core.evals" in error]
 
 
 def test_orm_confined() -> None:
-    errors = architecture_errors(ROOT)
+    errors = repository_architecture_errors()
     assert not [
         error for error in errors if "sqlalchemy" in error.lower() or "ORM type crosses" in error
     ]

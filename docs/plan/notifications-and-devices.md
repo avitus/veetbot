@@ -368,7 +368,9 @@ run.failed                                terminal writer                       
 schedule.run_accounted                    scheduling accountant, same            schedule_run_finished
                                           transaction as the accounting event;   (not for a completed run
                                                                                  under notify:
-                                                                                 attention_only, ADR-0225)
+                                                                                 attention_only, ADR-0225;
+                                                                                 never for a Cockpit refresh
+                                                                                 on entry, ADR-0320)
 schedule.occurrence.{missed,              scheduling materializer, same          schedule_occurrence_skipped
   skipped_overlap,                        transaction as the occurrence
   authorization_failed,
@@ -419,7 +421,10 @@ For each claimed row it:
    or a session that no longer exists settles the row `superseded` with no
    transport call. A `run_failed` row for a server-marked `email_operational`
    session is also superseded: its failure belongs to Email refresh status,
-   never a Chat conversation. The triggering event and transactional outbox
+   never a Chat conversation. So is a `run_failed` row for a session marked
+   `cockpit_entry_refresh`: the widget's tile reports a failed refresh on
+   entry, and the accountant enqueues no `schedule_run_finished` for one
+   (ADR-0320). The triggering event and transactional outbox
    remain audited. Delivered-notification reconciliation applies this same
    rule to remove alerts sent by earlier versions; approvals and questions
    retain their ordinary attention rules. A focused operational approval or

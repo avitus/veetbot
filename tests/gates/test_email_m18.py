@@ -86,7 +86,7 @@ from gmail_mcp.constants import (
 )
 from gmail_mcp.errors import GmailError
 from gmail_mcp.server import create_server
-from scripts.architecture_checks import architecture_errors
+from tests.architecture_scan import repository_architecture_errors
 from tests.contract.support import tool_context
 from tests.unit.test_web_tools import FakeWebProvider
 
@@ -198,7 +198,7 @@ def test_gmail_package_is_import_isolated_from_agent_core() -> None:
 
     package = ROOT / "src" / "gmail_mcp"
     assert package.is_dir(), "Milestone 18 gmail_mcp package has not been implemented"
-    errors = architecture_errors(ROOT)
+    errors = repository_architecture_errors()
     assert not [error for error in errors if "gmail_mcp" in error]
 
 

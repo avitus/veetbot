@@ -145,8 +145,15 @@ async def test_the_production_runtime_still_refuses_the_harness_certificate() ->
     assert raised.value.reason_code == "tool.browser.provider_unavailable"
 
 
-async def test_verification_accepts_a_document_loading_within_its_thirty_second_budget() -> None:
-    """A slow subresource must not spend an undocumented twenty-second sub-budget."""
+async def test_verification_reads_a_document_whose_subresource_is_still_loading() -> None:
+    """A slow subresource must not spend an undocumented twenty-second sub-budget.
+
+    The image is held until the evidence is read, so the evidence cannot have
+    waited for it. The thirty-second navigation bound itself is pinned by a fast
+    case in ``test_browser_playwright``.
+    """
+
+    released = asyncio.Event()
 
     async def members(request: Request) -> Response:
         del request
@@ -154,7 +161,7 @@ async def test_verification_accepts_a_document_loading_within_its_thirty_second_
 
     async def slow_image(request: Request) -> Response:
         del request
-        await asyncio.sleep(20.5)
+        await released.wait()
         return Response(
             '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>',
             media_type="image/svg+xml",
@@ -164,8 +171,11 @@ async def test_verification_accepts_a_document_loading_within_its_thirty_second_
         site,
         runtime,
     ):
-        async with asyncio.timeout(30):
-            evidence = await runtime.load_page_evidence(site.url("/learn"))
+        try:
+            async with asyncio.timeout(30):
+                evidence = await runtime.load_page_evidence(site.url("/learn"))
+        finally:
+            released.set()
 
     assert evidence.on_allowed_origin
     assert evidence.path == "/learn"
@@ -401,16 +411,6 @@ async def _logon_form(request: Request) -> Response:
     return html("<form><input name='user'><input type='password' name='secret'></form>")
 
 
-async def _framed_code(request: Request) -> Response:
-    del request
-    return html("<iframe src='/code-form' width='400'></iframe>")
-
-
-async def _code_form(request: Request) -> Response:
-    del request
-    return html("<input autocomplete='one-time-code' name='code'>")
-
-
 async def _sectioned_code(request: Request) -> Response:
     """`autocomplete` is a case-insensitive token list, not one exact value."""
     del request
@@ -465,8 +465,6 @@ async def _accounts(request: Request) -> Response:
 FRAMED_SIGN_IN_ROUTES = [
     Route("/framed-sign-in", _framed_sign_in),
     Route("/logon-form", _logon_form),
-    Route("/framed-code", _framed_code),
-    Route("/code-form", _code_form),
     Route("/sectioned-code", _sectioned_code),
     Route("/framed-sectioned-code", _framed_sectioned_code),
     Route("/visible-inner-frame", _visible_inner_frame),
@@ -491,13 +489,6 @@ async def test_a_remote_sign_in_through_a_frame_reaches_ready() -> None:
         await runtime.navigate(site.url("/accounts"))
 
         assert await runtime.authentication_status() is BrowserAuthenticationStatus.READY
-
-
-async def test_a_one_time_code_field_in_a_frame_still_needs_the_user() -> None:
-    async with browsing(FRAMED_SIGN_IN_ROUTES) as (site, runtime):
-        await runtime.navigate(site.url("/framed-code"))
-
-        assert await runtime.authentication_status() is BrowserAuthenticationStatus.NEEDS_USER
 
 
 @pytest.mark.parametrize(
