@@ -158,6 +158,8 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
                 trust=trust,
                 principal_id=event.actor_id,
                 source_event_sequence=event.sequence,
+                # ADR-0324: a message the run read mid-turn carries its inbox id.
+                follow_up="pending_input_id" in payload,
             )
         ]
     if event.event_type == "assistant.message.completed":

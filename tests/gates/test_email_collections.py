@@ -119,7 +119,7 @@ async def test_collection_rejects_unknown_view(view: str) -> None:
 
 
 async def test_collections_page_newest_first_and_important_by_rank() -> None:
-    """Inbox and its collections select by latest activity; Important by rank (ADR-0324).
+    """Inbox and its collections select by latest activity; Important by rank (ADR-0326).
 
     Ranking every list first made a five-row Inbox page the same five
     conversations as Important, and newer ordinary mail never reached it.

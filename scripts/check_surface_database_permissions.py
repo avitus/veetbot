@@ -34,6 +34,8 @@ REQUIRED_TABLE_PRIVILEGES: Mapping[str, frozenset[str]] = {
     "notification_run_receipts": frozenset({"SELECT"}),
     "process_events": frozenset({"INSERT", "SELECT"}),
     "projection_watermarks": frozenset({"INSERT", "SELECT", "UPDATE"}),
+    # ADR-0324: stopping a run from a surface drops the follow-ups it held.
+    "run_pending_inputs": frozenset({"DELETE", "SELECT"}),
     "runs": frozenset({"INSERT", "SELECT", "UPDATE"}),
     "session_history_items": frozenset({"INSERT", "SELECT"}),
     "sessions": frozenset({"INSERT", "SELECT", "UPDATE"}),

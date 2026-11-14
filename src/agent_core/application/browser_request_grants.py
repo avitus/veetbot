@@ -78,6 +78,14 @@ async def request_approval_for_run(
     )
     if created is None or created.run_id != run.id:
         return None
+    # ADR-0324: a follow-up the run read after the approval is a later owner
+    # message, and a later owner message asks again.
+    later = await uow.events.list_after(run.session_id, created.sequence, principal, run_id=run.id)
+    if any(
+        event.event_type == "user.message.created" and "pending_input_id" in event.payload
+        for event in later
+    ):
+        return None
     try:
         approval = await uow.approvals.get(UUID(str(created.payload["approval_id"])), principal)
     except (KeyError, ValueError, NotFoundError):

@@ -251,6 +251,10 @@ up to three minutes for a missing summary. Thirty minutes after the call ended
 it records `expired` and the push is the only notice.
 `AGENT_CALL_RESULT_FOLLOW_UP_ENABLED=0` turns the report off.
 
+The report run takes no follow-ups (ADR-0324). A message sent while it works
+is refused with `active_run_exists`, as before steering, because the run
+holds no scope to act on the owner's next request.
+
 The server's stderr is not a private channel: the API or worker process that
 spawns the child passes on its own stderr, so anything the child logs lands in
 that service's journal. The package therefore holds HTTP transport logging at

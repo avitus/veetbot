@@ -207,7 +207,7 @@ import Testing
         #expect(email.contains("email.collection.suspectedSpam"))
     }
 
-    /// Every device pages 100 rows and fetches the next page near the end (ADR-0324):
+    /// Every device pages 100 rows and fetches the next page near the end (ADR-0326):
     /// a five-row touch page left Important and Inbox at five conversations.
     @Test
     func testEveryDeviceScrollsTheMailListInHundredRowPages() throws {

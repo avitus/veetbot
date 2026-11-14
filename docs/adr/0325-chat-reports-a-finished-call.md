@@ -57,6 +57,9 @@ the conversation that placed it, and that run tells the owner the outcome.**
   the event stream leave it out, so the owner sees the report and not a
   message they did not write. Memory formation already ignores user messages
   whose actor is not the owner.
+- The report run takes no follow-ups. With ADR-0324 steering on, a message
+  sent while it works is refused with `active_run_exists` and is never handed
+  to a run that cannot act on it.
 - The dispatch records that its report was queued, skipped or expired, in the
   same transaction that queues the run, so a call is reported at most once.
 - `AGENT_CALL_RESULT_FOLLOW_UP_ENABLED` defaults to `1`; `0` leaves results to

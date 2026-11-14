@@ -616,7 +616,7 @@ async def test_new_mail_keeps_reading_when_learning_reaches_its_budget_share(
     A resynchronization restarts the Inbox pass, whose first page is the newest
     mail, so a new-mail slice still lists and reads it. Reads left after new
     mail continue the Inbox catch-up, which calls no model, so a mailbox held
-    above the share still reaches its floor (ADR-0324). The ninety-day history
+    above the share still reaches its floor (ADR-0326). The ninety-day history
     pass stays with full slices.
     """
     inbox = {f"inbox-{index}": NOW - timedelta(days=10 + index) for index in range(8)}

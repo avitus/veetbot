@@ -144,7 +144,7 @@ public final class EmailViewModel: ObservableObject {
     /// The visible Mac row, independent of the conversation open in the reader.
     var scrollAnchor: UUID?
     let restoreScrollAnchor = PassthroughSubject<UUID, Never>()
-    /// Every list on every device loads 100 rows a page and scrolls (ADR-0303, ADR-0324).
+    /// Every list on every device loads 100 rows a page and scrolls (ADR-0303, ADR-0326).
     private let pageSize = 100
 
     /// Do not search later pages for a row already confirmed absent from the current list.

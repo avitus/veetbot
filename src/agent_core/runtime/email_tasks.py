@@ -977,7 +977,7 @@ class _TaskIO:
                 # A pass's first page is the newest Inbox mail, which a
                 # resynchronization must recover even in a server check. A
                 # new-mail slice continues later pages with the reads new mail
-                # left, since reading them calls no model (ADR-0324).
+                # left, since reading them calls no model (ADR-0326).
                 catch_up = not arrival_check or account.inbox_cursor is None
                 if not account.inbox_complete and not sync.inbox_page_open and catch_up:
                     page = await self.call(

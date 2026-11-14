@@ -919,7 +919,7 @@ def create_app(
         )
         return JSONResponse(
             status_code=200 if result.replayed else 202,
-            content=result.model_dump(mode="json"),
+            content=result.model_dump(mode="json", exclude_none=True),
         )
 
     @app.get(
@@ -1005,6 +1005,7 @@ def create_app(
     @app.post(
         "/v1/runs/{run_id}/input",
         status_code=202,
+        response_model_exclude_none=True,
         openapi_extra={"required_scope": "run.write"},
     )
     async def deliver_input(

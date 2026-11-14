@@ -151,6 +151,8 @@ class WebsiteOfferView(BaseModel):
 class SubmitResult(BaseModel):
     run_id: UUID
     status: RunStatus
+    # ADR-0324: set only when the message was held as a follow-up.
+    pending_input_id: UUID | None = None
     replayed: bool = Field(default=False, exclude=True)
 
 
@@ -180,6 +182,14 @@ class RunFailureView(BaseModel):
     occurred_at: datetime
 
 
+class PendingInputView(BaseModel):
+    """A follow-up the run has not read yet (ADR-0324)."""
+
+    id: UUID
+    content: list[ContentBlock]
+    created_at: datetime
+
+
 class RunView(BaseModel):
     id: UUID
     session_id: UUID
@@ -194,6 +204,8 @@ class RunView(BaseModel):
     cancel_requested_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # ADR-0324: follow-ups held for this run, in arrival order.
+    pending_inputs: list[PendingInputView] = Field(default_factory=list)
 
 
 class PersistedStreamFrame(BaseModel):

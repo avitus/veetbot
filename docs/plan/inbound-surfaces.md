@@ -21,7 +21,7 @@ presence and a capability set, unified under one session-key resolver (DM per
 user, group per participant, thread shared)", and requires that "an unknown
 sender on a Surface is default-denied and must complete an explicit pairing
 step (one-time code, expiry, rate-limit, lockout) before any run is created on
-their behalf" (engineering-plan.md:4915-4916). Section 22 repeats the
+their behalf" (engineering-plan.md:4917-4918). Section 22 repeats the
 default-deny as a security-baseline item (engineering-plan.md:4533), ADR-0017
 decided the pairing shape, and the seam audit found the rest: "Surfaces are
 Devices with an empty capability set", the session-key resolver is "the one
@@ -331,6 +331,15 @@ The transaction performs no model, tool, or Telegram I/O; the adapter's
 `getUpdates` happens before it and `sendMessage` after it. The poll offset
 advances only from committed receipts, so a crash before commit re-delivers
 the update and the receipt insert makes the retry idempotent.
+
+Not yet built: a surface still answers a working chat with the notice above.
+With `AGENT_RUN_STEERING_ENABLED` set (ADR-0324), step 9's active-run
+case changes for a run the paired principal started: the shared submission
+function holds the text as a follow-up, the receipt records
+`ACCEPTED_FOLLOW_UP`, and the notice becomes an acknowledgement ("got it;
+I'll read this at my next step"). It reserves no budget and starts no run.
+`/stop` is unchanged, and `gate.surface.input_routing` is restated for both
+values of the setting when the implementation lands.
 
 Surface runs are interactive priority 0 — a human is typing — and use
 interactive reserved capacity.

@@ -61,7 +61,7 @@ qualifying threads and initially loads up to 100. Important is the initial
 collection and the default on each switch into Email; this supersedes
 ADR-0231's Inbox default. On every device every list, Inbox, Needs you, Handled,
 Important, Other mail and search results alike, loads up to 100 threads per
-page and scrolls (ADR-0303, ADR-0324). Account badges and an account filter identify the source
+page and scrolls (ADR-0303, ADR-0326). Account badges and an account filter identify the source
 of each conversation.
 
 Each row shows the correspondent, subject, a concise statement of what needs
@@ -93,7 +93,7 @@ with the existing error indication. A collection without a snapshot still
 loads from the server; obsolete switch responses cannot replace the active list.
 Scrolling near the end of any list fetches the next page automatically. On
 the Mac there is no More button; on touch one appears only to retry a page
-that failed to load (ADR-0324). Refresh preserves the visible thread and
+that failed to load (ADR-0326). Refresh preserves the visible thread and
 the selected conversation independently, in every Mac list.
 It can fetch later pages to retain an eligible displaced thread, but does not
 chase an anchor its known state has taken out of the list: handled for
@@ -107,7 +107,7 @@ newest first, whatever ranking selected them; ties keep the server's order
 (owner-requested, 2026-10-21, ADR-0234). The rank selects the rows of
 Important, Other mail and search results; Inbox, Needs you, Handled and
 Suspected spam page by latest activity, so their first page is the newest
-mail rather than Important's top-ranked conversations (ADR-0324). On foreground refresh, surviving rows
+mail rather than Important's top-ranked conversations (ADR-0326). On foreground refresh, surviving rows
 stay, new qualifying threads appear automatically in that order, and a
 conversation with new mail moves up. Preserve the open conversation and unsent
 edits; no reveal action or automatic scroll is required. Use a subtle insertion
@@ -560,7 +560,7 @@ it holds the newest mail, so a resynchronization still recovers new mail. Reads
 that new mail leaves continue the Inbox catch-up through later pages, which
 calls no model, so an account held above the share still reaches its catch-up
 floor; mail older than the arrival window that it imports stays unassessed
-(ADR-0324). Re-assessment
+(ADR-0326). Re-assessment
 after a profile, model or prompt revision, further passes of a long conversation,
 assessment of mail older than the arrival window, the ninety-day history pass,
 other non-Inbox assessment and

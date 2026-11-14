@@ -462,6 +462,7 @@ nav:
       - "ADR-0321: Owner-added servers share the index in turn": adr/0321-owner-tools-share-the-index-and-are-named.md
       - "ADR-0322: The hosted browser job runs on four workers": adr/0322-hosted-browser-job-runs-on-four-workers.md
       - "ADR-0323: The static and integration jobs run on four nodes": adr/0323-static-and-integration-run-on-four-nodes.md
-      - "ADR-0324: Every mail list scrolls and catch-up continues": adr/0324-every-list-scrolls-and-catch-up-continues.md
+      - "ADR-0324: Follow-ups steer a working run": adr/0324-follow-ups-steer-a-running-run.md
       - "ADR-0325: Chat reports a finished call": adr/0325-chat-reports-a-finished-call.md
+      - "ADR-0326: Every mail list scrolls and catch-up continues": adr/0326-every-list-scrolls-and-catch-up-continues.md
   - Changelog: changelog.md

@@ -547,7 +547,7 @@ public struct EmailModeView: View {
     }
 
     /// Touch keeps the List rows and fetches the next page as its end scrolls into view;
-    /// a failed page offers the press that retries it (ADR-0324).
+    /// a failed page offers the press that retries it (ADR-0326).
     private var pagedList: some View {
         List {
             inboxNotices

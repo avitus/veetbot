@@ -1,4 +1,4 @@
-# ADR-0324: Every mail list scrolls, collections page newest first, and catch-up continues above the share
+# ADR-0326: Every mail list scrolls, collections page newest first, and catch-up continues above the share
 
 - Status: Accepted (the owner asked for these repairs on 2026-11-14)
 - Date: 2026-11-14

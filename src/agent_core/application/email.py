@@ -493,7 +493,7 @@ class EmailExperienceService:
             )
         else:
             # Inbox and its collections page by latest activity, so a page is
-            # never Important's top-ranked conversations again (ADR-0324).
+            # never Important's top-ranked conversations again (ADR-0326).
             eligible.sort(
                 key=lambda item: (-item.updated_at.timestamp(), -item.priority, str(item.id))
             )

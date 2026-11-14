@@ -36,6 +36,11 @@ from agent_core.domain.messages import (
     ToolResultItem,
 )
 from agent_core.domain.model_settings import ModelSettingsCatalog, chat_reasoning_effort
+from agent_core.domain.pending_inputs import (
+    PendingRunInput,
+    follow_up_drop_derivation,
+    settlement_payload,
+)
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.recall_execution import recall_phase
@@ -66,6 +71,7 @@ from agent_core.ports.models import ModelProvider, ModelRouter
 from agent_core.ports.notifications import RunNotificationProducer
 from agent_core.ports.persistence import (
     CheckpointSeeder,
+    PromoteFollowUps,
     RepositoryUnitOfWork,
     UnitOfWorkFactory,
 )
@@ -173,6 +179,12 @@ class SurfaceRunStateWriter:
                 actor_id=principal_id,
                 payload={"reason": "requested"},
             )
+        )
+        await drop_unread_follow_ups(
+            uow,
+            run,
+            Principal(tenant_id=run.tenant_id, principal_id=principal_id),
+            "run_cancelled",
         )
         return cancelled
 
@@ -294,6 +306,45 @@ class _FinalizationContext:
     principal: Principal
     notification_producer: RunNotificationProducer | None
     finalization_write_probe: FinalizationWriteProbe | None
+    promote_follow_ups: PromoteFollowUps | None = None
+    promoted_run_id: UUID | None = None
+
+
+async def drop_unread_follow_ups(
+    uow: RepositoryUnitOfWork,
+    run: Run,
+    owner: Principal,
+    reason: str,
+    *,
+    keep: Callable[[PendingRunInput], bool] | None = None,
+    lease: WorkerLease | None = None,
+) -> list[PendingRunInput]:
+    """Drop follow-ups an ending run never read; return those `keep` selects (ADR-0324).
+
+    Call it after the run's terminal event is appended. That append holds the
+    session's row, which a follow-up insert also needs, so nothing can join
+    the inbox between this scan and the commit. A drop records identifiers
+    only: the words are the client's to restore.
+    """
+
+    kept: list[PendingRunInput] = []
+    for pending in await uow.pending_inputs.list_for_run(run.id, owner):
+        if keep is not None and keep(pending):
+            kept.append(pending)
+            continue
+        await uow.events.append(
+            NewEvent(
+                session_id=run.session_id,
+                run_id=run.id,
+                event_type="run.input.dropped",
+                actor_type="runtime",
+                payload={**settlement_payload(pending), "reason": reason},
+                derivation_key=follow_up_drop_derivation(pending.id),
+            ),
+            lease=lease,
+        )
+        await uow.pending_inputs.delete(pending.id, owner)
+    return kept
 
 
 class RunExecutor:
@@ -322,6 +373,8 @@ class RunExecutor:
         release_id: str | None = None,
         on_run_complete: RunCompleteCallback | None = None,
         on_child_suspension: ChildSuspensionCallback | None = None,
+        promote_follow_ups: PromoteFollowUps | None = None,
+        dispatch_promoted: Callable[[UUID], Awaitable[None]] | None = None,
         on_model_event: ModelEventCallback | None = None,
         notification_producer: RunNotificationProducer | None = None,
         finalization_write_probe: FinalizationWriteProbe | None = None,
@@ -365,6 +418,9 @@ class RunExecutor:
         self._on_token_complete = on_token_complete
         self._on_run_complete = on_run_complete
         self._on_child_suspension = on_child_suspension
+        self._promote_follow_ups = promote_follow_ups
+        self._dispatch_promoted = dispatch_promoted
+        self._promoted: dict[UUID, UUID] = {}
         self._on_model_event = on_model_event
         self._notification_producer = notification_producer
         self._finalization_write_probe = finalization_write_probe
@@ -433,6 +489,7 @@ class RunExecutor:
                 payload={"failure": failure.model_dump(mode="json")},
             )
         )
+        await drop_unread_follow_ups(uow, run, self._principal, "run_failed")
         return failed
 
     async def cancel_parked_run(
@@ -498,6 +555,12 @@ class RunExecutor:
                 actor_id=principal_id,
                 payload={"reason": "requested"},
             )
+        )
+        await drop_unread_follow_ups(
+            uow,
+            run,
+            Principal(tenant_id=run.tenant_id, principal_id=principal_id),
+            "run_cancelled",
         )
         return cancelled
 
@@ -642,6 +705,11 @@ class RunExecutor:
             logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
         finally:
             self._complete_token(run_id)
+        promoted = self._promoted.pop(run_id, None)
+        if promoted is not None and self._dispatch_promoted is not None:
+            # The ended run's follow-ups became this run; start it now that the
+            # ended run holds nothing (ADR-0324).
+            await self._dispatch_promoted(promoted)
 
     def _complete_token(self, run_id: UUID) -> None:
         if self._on_token_complete is not None:
@@ -740,6 +808,7 @@ class RunExecutor:
             principal=self._principal,
             notification_producer=self._notification_producer,
             finalization_write_probe=self._finalization_write_probe,
+            promote_follow_ups=self._promote_follow_ups,
         )
         context: RunContext | None = None
         try:
@@ -870,6 +939,7 @@ class RunExecutor:
                 add_open_question=self._add_open_question,
                 notification_producer=self._notification_producer,
                 finalization_write_probe=self._finalization_write_probe,
+                promote_follow_ups=self._promote_follow_ups,
                 on_model_event=self._on_model_event,
                 max_internal_attempts=self._max_internal_attempts,
                 identical_call_threshold=self._identical_call_threshold,
@@ -1039,12 +1109,15 @@ class RunExecutor:
             outcome = self._internal_failure(run, exc)
             assert outcome.failure is not None
             outcome.failure.details.update(details)
+        finalized = context or finalization
         try:
-            await finalize(context or finalization, outcome)
+            await finalize(finalized, outcome)
         except WorkerFencedError:
             if lease is None:
                 raise
         else:
+            if finalized.promoted_run_id is not None:
+                self._promoted[run.id] = finalized.promoted_run_id
             # The parked parent is the safe instant to start its children: the
             # suspension is durable, so an inline child chain (and even its
             # join) can never race this run's own finalize.
@@ -1435,6 +1508,43 @@ async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutco
         )
 
 
+async def _settle_follow_ups(
+    uow: RepositoryUnitOfWork,
+    context: RunContext | _FinalizationContext,
+    status: RunStatus,
+) -> list[PendingRunInput]:
+    """Drop what the ended run never read; return what starts the next run (ADR-0324).
+
+    A completed run's follow-ups all carry over. A run the owner stopped
+    carries over only what arrived after the stop: "stop, then say something
+    else". A failed run carries nothing, so a spent budget does not restart.
+    """
+
+    reason = "run_cancelled" if status is RunStatus.CANCELLED else "run_failed"
+    if context.promote_follow_ups is None or status is RunStatus.FAILED:
+        return await drop_unread_follow_ups(
+            uow, context.run, context.principal, reason, lease=context.lease
+        )
+    if status is RunStatus.COMPLETED:
+        return await drop_unread_follow_ups(
+            uow,
+            context.run,
+            context.principal,
+            reason,
+            keep=lambda _pending: True,
+            lease=context.lease,
+        )
+    stopped_at = (await uow.runs.get(context.run.id, context.principal)).cancel_requested_at
+    return await drop_unread_follow_ups(
+        uow,
+        context.run,
+        context.principal,
+        reason,
+        keep=lambda pending: stopped_at is not None and pending.created_at > stopped_at,
+        lease=context.lease,
+    )
+
+
 async def _finalize_once(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
     """Apply one terminal outcome without retrying its persistence operations."""
 
@@ -1484,6 +1594,9 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
     context.checkpoint.version += 1
     context.checkpoint.status = status
     context.checkpoint.created_at = context.clock.now()
+    # Published only after the commit: a rolled-back promotion started nothing.
+    context.promoted_run_id = None
+    promoted_run_id: UUID | None = None
     async with context.uow_factory() as uow:
         terminal_event = await uow.events.append(
             NewEvent(
@@ -1563,6 +1676,9 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
         )
         if context.finalization_write_probe is not None:
             context.finalization_write_probe("checkpoint")
+        unread: list[PendingRunInput] = []
+        if status in TERMINAL_RUN_STATUSES:
+            unread = await _settle_follow_ups(uow, context, status)
         await uow.runs.transition(
             context.run.id,
             RunStatus.RUNNING,
@@ -1573,6 +1689,11 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
         )
         if context.finalization_write_probe is not None:
             context.finalization_write_probe("run")
+        if unread and context.promote_follow_ups is not None:
+            # After the transition, so the one-active-run rule admits the new run.
+            promoted_run_id = await context.promote_follow_ups(
+                uow, context.principal, context.run, unread
+            )
         if status in TERMINAL_RUN_STATUSES:
             seed = await uow.events.latest_before(
                 context.run.session_id,
@@ -1612,3 +1733,4 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             await uow.queue.release(context.lease, status)
             if context.finalization_write_probe is not None:
                 context.finalization_write_probe("queue")
+    context.promoted_run_id = promoted_run_id

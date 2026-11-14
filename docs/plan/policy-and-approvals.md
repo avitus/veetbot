@@ -1682,7 +1682,9 @@ message, validates ownership and current website access, and consumes it once
 before a matching dispatch. It applies only to a top-level interactive owner
 run, within thirty minutes and before any subsequent owner message supersedes
 it. Scheduled text, delegated work, inbound-surface content, memory and website
-text cannot supply that consent. Policy DENY decisions remain final.
+text cannot supply that consent. Policy DENY decisions remain final. A
+follow-up read inside the run (ADR-0324) is a subsequent owner
+message and supersedes it.
 
 When policy returns REQUIRE_APPROVAL for the exact Follow action, this recorded
 consent satisfies it without a second prompt. Authorization is audited as

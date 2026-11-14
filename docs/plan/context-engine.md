@@ -125,6 +125,12 @@ their order before the fresh rows. This makes the portable history grow without
 freezing context updates (ADR-0139). It changes neither selection nor budgets:
 active items are still never-yield inputs, not candidates for the history cut.
 
+A follow-up the run reads mid-turn (ADR-0324) is an ordinary user
+message appended after a complete tool batch. It is the unanswered trailing
+user message for that step and becomes part of the completed exchanges once
+the next batch returns. An active run may therefore hold several user
+messages, all never-yield.
+
 Rows 7 and 11 are added by [skills.md](skills.md), which owns their content,
 their caps, and their trust derivation. Row 4 is added at Milestone 22 by
 [persona-surface.md](persona-surface.md), which owns its content (entries, and

@@ -52,6 +52,7 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UserMessage,
 )
+from agent_core.domain.pending_inputs import follow_up_derivation, settlement_payload
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.recall_execution import RecallExecutionPermit, recall_phase
@@ -76,7 +77,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.notifications import RunNotificationProducer
-from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.persistence import PromoteFollowUps, UnitOfWorkFactory
 from agent_core.ports.repositories import BudgetLedger
 from agent_core.runtime.response_text import response_text_stream
 
@@ -113,6 +114,9 @@ class RunContext:
     add_open_question: AddOpenQuestion
     notification_producer: RunNotificationProducer | None = None
     finalization_write_probe: Callable[[str], None] | None = None
+    # ADR-0324: how the terminal transition starts the next run, and what it started.
+    promote_follow_ups: PromoteFollowUps | None = None
+    promoted_run_id: UUID | None = None
     on_model_event: ModelEventCallback | None = None
     max_internal_attempts: int = 3
     identical_call_threshold: int = 5
@@ -1496,6 +1500,52 @@ def guard_tool_turn(
     return None
 
 
+async def read_follow_ups(context: RunContext) -> bool:
+    """Move held follow-ups into the conversation, in arrival order (ADR-0324).
+
+    Called at the top of a step, when every earlier tool call has its result, so
+    the stored history keeps its call/result pairs. Each follow-up becomes one
+    ordinary `user.message.created` in the transaction that deletes its row; its
+    content is therefore never held in both places, and the derivation key
+    makes a repeated read after a crash a no-op.
+    """
+
+    read: list[UserMessage] = []
+    async with context.uow_factory() as uow:
+        for pending in await uow.pending_inputs.list_for_run(context.run.id, context.principal):
+            event = await uow.events.append(
+                NewEvent(
+                    session_id=context.run.session_id,
+                    run_id=context.run.id,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=pending.principal_id,
+                    payload={
+                        "content": [part.model_dump(mode="json") for part in pending.content],
+                        **settlement_payload(pending),
+                    },
+                    derivation_key=follow_up_derivation(pending.id),
+                ),
+                lease=context.lease,
+            )
+            await uow.pending_inputs.delete(pending.id, context.principal)
+            read.append(
+                UserMessage(
+                    content=list(pending.content),
+                    principal_id=pending.principal_id,
+                    source_event_sequence=event.sequence,
+                    follow_up=True,
+                )
+            )
+    if not read:
+        return False
+    context.checkpoint.conversation.extend(read)
+    # A later owner message supersedes consent given on the first (ADR-0172).
+    context.checkpoint.working_state.pop("browser_access_wait", None)
+    await checkpoint(context, "follow_up")
+    return True
+
+
 async def run_loop(context: RunContext) -> RunOutcome:
     """Run model/tool steps until a final answer, failure, or cancellation."""
 
@@ -1507,6 +1557,10 @@ async def run_loop(context: RunContext) -> RunOutcome:
             else _synthesis_reserve_dimension(context.run, now=context.clock.now())
         )
         context.budgets.check(context.run, BudgetScope.STEP)
+        if synthesis_reserve is None:
+            # A run already writing its final answer leaves follow-ups for the
+            # terminal transition to settle (ADR-0324).
+            await read_follow_ups(context)
         context.run.step_count += 1
         context.run.updated_at = context.clock.now()
         async with context.uow_factory() as uow:

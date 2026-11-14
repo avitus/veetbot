@@ -374,5 +374,6 @@ implementation without one.
 - [ADR-0321: Owner-added servers share the index in turn, and the rest are named (Accepted)](0321-owner-tools-share-the-index-and-are-named.md)
 - [ADR-0322: The hosted browser job runs on four workers (Proposed)](0322-hosted-browser-job-runs-on-four-workers.md)
 - [ADR-0323: The static and integration jobs run on four nodes (Proposed)](0323-static-and-integration-run-on-four-nodes.md)
-- [ADR-0324: Every mail list scrolls, collections page newest first, and catch-up continues above the share (Accepted)](0324-every-list-scrolls-and-catch-up-continues.md)
+- [ADR-0324: A follow-up message steers the run that is already working (Accepted)](0324-follow-ups-steer-a-running-run.md)
 - [ADR-0325: Chat reports a finished call in the conversation that placed it (Accepted)](0325-chat-reports-a-finished-call.md)
+- [ADR-0326: Every mail list scrolls, collections page newest first, and catch-up continues above the share (Accepted)](0326-every-list-scrolls-and-catch-up-continues.md)

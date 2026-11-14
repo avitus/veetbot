@@ -9,11 +9,15 @@ import asyncio
 from datetime import timedelta
 from uuid import UUID
 
+import pytest
+
 from agent_core.adapters.determinism import FixedClock
 from agent_core.application.call_authorization import _PHONE_NUMBER
 from agent_core.bootstrap import Composition, build
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.runs import Run, RunStatus
+from agent_core.domain.views import TextContentBlock
 from tests.contract.test_bland_client_contract import CALL_ID, RECIPIENT
 from tests.gates.test_call_lifecycle import arguments
 from tests.gates.test_owner_requested_calls import (
@@ -269,3 +273,50 @@ async def test_the_kill_switch_leaves_results_to_the_push_alone() -> None:
         mcp_client_factory=factory,
     ) as app:
         assert app.call_follow_ups is None
+
+
+class _HeldDispatcher:
+    """Leave the report run queued so a message can arrive while it is active."""
+
+    async def dispatch(self, run_id: UUID) -> None:
+        return None
+
+    async def resume(self, run_id: UUID) -> None:
+        return None
+
+
+async def test_a_follow_up_is_never_steered_into_the_read_only_report_run() -> None:
+    """ADR-0324 steering would hand the owner's next request to a run that cannot act."""
+    factory = await call_factory(read_tools=True)
+    async with build(
+        settings=call_settings(run_steering_enabled=True),
+        script=FakeModelScript(turns=turns()),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        mcp_client_factory=factory,
+    ) as app:
+        assert app.call_follow_ups is not None
+        call_run = await place(app)
+        await settle(app, call_run, "completed")
+        dispatcher = app.call_follow_ups._dispatcher
+        app.call_follow_ups._dispatcher = _HeldDispatcher()
+        assert await app.call_follow_ups.run_once() == 1
+        [_, report] = await session_runs(app, call_run.session_id)
+        assert report.status is RunStatus.QUEUED
+
+        with pytest.raises(ConflictError) as refused:
+            await app.services.runs.submit(
+                app.principal,
+                call_run.session_id,
+                [TextContentBlock(text="Also book the salon.")],
+                None,
+                None,
+            )
+        async with app.uow_factory() as uow:
+            held = await uow.pending_inputs.list_for_run(report.id, app.principal)
+        await dispatcher.dispatch(report.id)
+        finished = await asyncio.wait_for(app.runs.wait_terminal(report.id), timeout=5)
+
+    assert refused.value.reason == "active_run_exists"
+    assert held == []
+    assert finished.final_message == REPORT
