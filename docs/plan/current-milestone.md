@@ -4,6 +4,14 @@ title: Current Milestone
 
 # Current milestone
 
+- **Steering a working chat — ADR-0324:** On 2026-11-13 the owner asked to steer
+  a working chat with a follow-up, settled the draft's open questions and accepted
+  [the decision](../adr/0324-follow-ups-steer-a-running-run.md), authorizing its
+  implementation. A follow-up waits in an inbox and the same run reads it at its
+  next step, default off behind `AGENT_RUN_STEERING_ENABLED`. The server side for
+  owner chat and the Apple client are built and tested in the sandbox and the Mac
+  VM; surface follow-ups are not. Not delivered. No milestone or gate moves.
+
 - **Researched email replies — ADR-0317:** Owner approved implementation on
   2026-11-11. Bounded email/Calendar research precedes drafting; matching files
   are staged privately and reviewed with the reply. Send remains an exact owner

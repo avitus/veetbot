@@ -370,3 +370,4 @@ implementation without one.
 - [ADR-0317: Gather evidence and stage attachments before drafting email replies (Accepted)](0317-evidence-backed-email-replies.md)
 - [ADR-0318: A mail list re-reads only the threads that changed (Accepted)](0318-reuse-unchanged-mail-summaries.md)
 - [ADR-0319: Outbound calls run a pinned provider agent version, up to fifteen minutes (Proposed)](0319-pinned-willow-agent-and-fifteen-minute-calls.md)
+- [ADR-0324: A follow-up message steers the run that is already working (Accepted)](0324-follow-ups-steer-a-running-run.md)

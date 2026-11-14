@@ -1,3 +1,8 @@
+# ADR-0324: On 2026-11-13 the owner asked to steer a working chat with a
+# follow-up, then accepted the decision and authorized its implementation. A
+# follow-up joins the active run through an inbox, default off. Server side
+# for owner chat and the Apple client built; surface follow-ups are not. Not delivered.
+# No milestone or gate moves.
 # ADR-0319: On 2026-11-13 the owner rebuilt Willow as a Bland V2 agent and asked
 # for fifteen-minute calls, the plain "Andy's assistant" introduction and the
 # agent's outbound mode. Outbound dispatch may run one pinned agent version;

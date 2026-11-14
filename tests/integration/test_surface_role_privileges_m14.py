@@ -50,7 +50,14 @@ from agent_core.bootstrap import (
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.delegations import DelegationChild, DelegationStatus
 from agent_core.domain.devices import PushProvider
-from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    StopReason,
+    TextPart,
+)
+from agent_core.domain.pending_inputs import PendingRunInput, follow_up_drop_derivation
 from agent_core.domain.policies import RiskLevel, SideEffectClass
 from agent_core.domain.runs import RunKind, RunStatus
 from agent_core.domain.surfaces import InboundDisposition, InboundReceipt
@@ -633,10 +640,31 @@ async def exercise_surface_role(role_url: str) -> None:
             await work()
             assert await status(parked.run_id) is RunStatus.WAITING_FOR_APPROVAL
             await poll(surface)
+            # ADR-0324: the owner's app held a follow-up for this parked run;
+            # stopping it from the surface drops what it held.
+            async with composition.uow_factory() as uow:
+                parked_run = await uow.runs.get(parked.run_id, owner)
+                await uow.pending_inputs.add(
+                    PendingRunInput(
+                        id=uuid5(parked.run_id, "held"),
+                        tenant_id=owner.tenant_id,
+                        principal_id=owner.principal_id,
+                        session_id=parked_run.session_id,
+                        run_id=parked.run_id,
+                        content=[TextPart(text="Also add a date.")],
+                        created_at=parked_run.created_at,
+                    )
+                )
             stop_parked = bot.message("/stop")
             await poll(surface)
             assert await reason(stop_parked) == "surface.run_stopped"
             assert await status(parked.run_id) is RunStatus.CANCELLED
+            async with composition.uow_factory() as uow:
+                assert await uow.pending_inputs.list_for_run(parked.run_id, owner) == []
+                dropped = await uow.events.get_by_derivation(
+                    follow_up_drop_derivation(uuid5(parked.run_id, "held")), owner
+                )
+            assert dropped is not None and dropped.payload["reason"] == "run_cancelled"
 
             # Stopping a parent parked for approval also ends its delegated child.
             delegating_ask = bot.message("Split this up.")

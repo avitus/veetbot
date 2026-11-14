@@ -57,6 +57,7 @@ from agent_core.domain.memory_sources import (
 )
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.model_settings import ModelSettings
+from agent_core.domain.pending_inputs import PendingRunInput
 from agent_core.domain.persistence import (
     IdempotencyRecord,
     ModelCallRecord,
@@ -1366,6 +1367,45 @@ class InMemoryIdempotencyRepository:
                 return existing.model_copy(deep=True)
             self._records[scoped_key] = record.model_copy(deep=True)
             return record.model_copy(deep=True)
+
+
+class InMemoryRunPendingInputRepository:
+    """The follow-up inbox; list order is arrival order (ADR-0324)."""
+
+    def __init__(self) -> None:
+        self._inputs: list[PendingRunInput] = []
+        self._lock = asyncio.Lock()
+
+    async def add(self, pending: PendingRunInput) -> PendingRunInput:
+        async with self._lock:
+            self._inputs.append(pending.model_copy(deep=True))
+            return pending.model_copy(deep=True)
+
+    async def get(self, input_id: UUID, principal: Principal) -> PendingRunInput | None:
+        async with self._lock:
+            for pending in self._inputs:
+                if pending.id == input_id and pending.tenant_id == principal.tenant_id:
+                    return pending.model_copy(deep=True)
+            return None
+
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[PendingRunInput]:
+        async with self._lock:
+            return [
+                pending.model_copy(deep=True)
+                for pending in self._inputs
+                if pending.run_id == run_id and pending.tenant_id == principal.tenant_id
+            ]
+
+    async def delete(self, input_id: UUID, principal: Principal) -> bool:
+        async with self._lock:
+            kept = [
+                pending
+                for pending in self._inputs
+                if pending.id != input_id or pending.tenant_id != principal.tenant_id
+            ]
+            removed = len(kept) != len(self._inputs)
+            self._inputs = kept
+            return removed
 
 
 class InMemoryUsageRepository:

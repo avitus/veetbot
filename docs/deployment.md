@@ -443,7 +443,9 @@ Delegation (Milestone 13) is off until `AGENT_DELEGATION_ENABLED=1` in the
 application environment; the `run.delegate` scope alone enables nothing. The
 other default-off switches without a section of their own on this page are
 `AGENT_TRAJECTORY_EXPORT_ENABLED` (governed trajectory export,
-[events.md](events.md)), `AGENT_MEMORY_API_ENABLED` (the `/v1/memories`
+[events.md](events.md)), `AGENT_RUN_STEERING_ENABLED` (a follow-up joins the
+working run, ADR-0324; leave off until an Apple client that supports it is
+released), `AGENT_MEMORY_API_ENABLED` (the `/v1/memories`
 routes), `AGENT_PERSONA_API_ENABLED` (the persona routes),
 `AGENT_THREAD_FOLDERS_API_ENABLED` (the chat-folder routes),
 `AGENT_SKILL_AUTHORING_ENABLED` (the `skill.manage` tool) and
@@ -652,6 +654,7 @@ GRANT SELECT ON
   notification_run_receipts,
   process_events,
   projection_watermarks,
+  run_pending_inputs,
   runs,
   session_history_items,
   sessions,
@@ -697,6 +700,7 @@ GRANT UPDATE ON
   tool_invocations
 TO veetbot_surface;
 GRANT DELETE ON
+  run_pending_inputs,
   surface_sender_lockouts
 TO veetbot_surface;
 ```

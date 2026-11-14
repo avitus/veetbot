@@ -176,6 +176,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryPersonaStore,
     InMemoryPolicyProfileRepository,
     InMemoryProcessEventRepository,
+    InMemoryRunPendingInputRepository,
     InMemoryRunRepository,
     InMemorySessionHistoryRepository,
     InMemorySessionRepository,
@@ -229,6 +230,7 @@ from agent_core.adapters.persistence.repositories import (
     PostgresMaintenanceRepository,
     PostgresPolicyProfileRepository,
     PostgresProcessEventRepository,
+    PostgresRunPendingInputRepository,
     PostgresRunRepository,
     PostgresSessionRepository,
     PostgresToolInvocationRepository,
@@ -574,6 +576,7 @@ from agent_core.domain.model_settings import (
     ModelSettingsCatalog,
     default_chat_effort,
 )
+from agent_core.domain.pending_inputs import PendingRunInput
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
     LoadedRuleset,
@@ -1938,6 +1941,7 @@ def _memory_uow_repositories(
         invocations=invocations,
         checkpoints=checkpoints,
         idempotency=idempotency,
+        pending_inputs=InMemoryRunPendingInputRepository(),
         usage=usage,
         history=InMemorySessionHistoryRepository(events),
         trajectory=InMemoryTrajectoryProjectionRepository(events),
@@ -2042,6 +2046,7 @@ def _postgres_repository_factory(
             invocations=invocations,
             checkpoints=checkpoints,
             idempotency=PostgresIdempotencyRepository(session, clock),
+            pending_inputs=PostgresRunPendingInputRepository(session),
             usage=PostgresUsageRepository(session),
             history=history,
             trajectory=trajectory,
@@ -5665,9 +5670,28 @@ async def _compose(
                 lease=lease,
             )
 
+        # ADR-0324: the run service is composed after the executor that calls it.
+        follow_up_runs: PublicRunService | None = None
+
+        async def promote_follow_ups(
+            uow: RepositoryUnitOfWork,
+            owner: Principal,
+            ended: Run,
+            pending: Sequence[PendingRunInput],
+        ) -> UUID | None:
+            if follow_up_runs is None:
+                return None
+            return await follow_up_runs.promote_follow_ups_in(uow, owner, ended, pending)
+
+        async def dispatch_promoted(run_id: UUID) -> None:
+            if follow_up_runs is not None:
+                await follow_up_runs.dispatch_promoted(run_id)
+
         executor = RunExecutor(
             principal=principal,
             release_id=settings.release_id,
+            promote_follow_ups=promote_follow_ups,
+            dispatch_promoted=dispatch_promoted,
             principals=principal_resolver,
             uow_factory=uow_factory,
             context_builder=context_builder,
@@ -5953,7 +5977,9 @@ async def _compose(
             trajectory_export_enabled=trajectory_export_enabled,
             live_events=live_events,
             offers_websites=isinstance(browser_provider, SessionBoundHostedBrowserProvider),
+            run_steering_enabled=settings.run_steering_enabled,
         )
+        follow_up_runs = public_run_service
         browser_continuation = BrowserContinuationService(
             uow_factory=uow_factory,
             clock=clock,

@@ -75,6 +75,9 @@ class UserMessage(BaseModel):
     # "records.catalog". Absent, it is left out of the serialized item so
     # every existing envelope nonce and prefix hash keeps its bytes.
     source: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # ADR-0324: the owner sent this while the run was working. Left out when
+    # false, for the same reason as `source`.
+    follow_up: bool = Field(default=False, exclude_if=lambda value: value is False)
 
 
 class AssistantMessage(BaseModel):

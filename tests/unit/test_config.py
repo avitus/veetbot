@@ -793,6 +793,14 @@ def test_trajectory_export_enablement_is_strictly_boolean() -> None:
         load_settings(values)
 
 
+def test_run_steering_is_off_until_the_operator_enables_it() -> None:
+    assert load_settings(base_environment()).run_steering_enabled is False
+    enabled = load_settings({**base_environment(), "AGENT_RUN_STEERING_ENABLED": "1"})
+    assert enabled.run_steering_enabled is True
+    with pytest.raises(ConfigurationError, match="AGENT_RUN_STEERING_ENABLED must be 0 or 1"):
+        load_settings({**base_environment(), "AGENT_RUN_STEERING_ENABLED": "yes"})
+
+
 def test_provider_memory_extraction_defaults_to_automatic_selection() -> None:
     settings = load_settings(base_environment())
 

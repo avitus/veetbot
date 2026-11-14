@@ -8,12 +8,18 @@ public struct TimelineItem: Identifiable, Sendable {
     public let role: Role
     public var content: [ContentBlock]
     public var isStreaming: Bool
+    /// ADR-0324: a follow-up the working run has not read yet.
+    public var isAwaitingRead: Bool
 
-    public init(id: String, role: Role, content: [ContentBlock], isStreaming: Bool = false) {
+    public init(
+        id: String, role: Role, content: [ContentBlock], isStreaming: Bool = false,
+        isAwaitingRead: Bool = false
+    ) {
         self.id = id
         self.role = role
         self.content = content
         self.isStreaming = isStreaming
+        self.isAwaitingRead = isAwaitingRead
     }
 
     public var text: String {
@@ -214,6 +220,13 @@ public struct BrowserSignInPause: Equatable, Sendable {
     public var host: String? { origin.flatMap { URL(string: $0)?.host } }
 }
 
+/// A follow-up shown as waiting, and the server's identifier once it accepted it.
+private struct FollowUp {
+    let itemID: String
+    var pendingInputID: UUID?
+    var orphaned = false
+}
+
 @MainActor
 public final class RunStateReducer: ObservableObject {
     @Published public private(set) var timeline: [TimelineItem] = []
@@ -231,6 +244,9 @@ public final class RunStateReducer: ObservableObject {
 
     private var persistedSequences: Set<Int> = []
     private var pendingUserMessageID: String?
+    /// ADR-0324: follow-ups shown as waiting, in the order they were sent.
+    private var followUps: [FollowUp] = []
+    private var readFollowUpIDs: Set<UUID> = []
     private var streamingMessageID: String?
     private var toolIndex: [String: Int] = [:]
     private var pendingApprovalIDs: Set<UUID> = []
@@ -256,6 +272,8 @@ public final class RunStateReducer: ObservableObject {
         lastTaskGrantEvent = snapshot.lastTaskGrantEvent
         persistedSequences = snapshot.persistedSequences
         pendingUserMessageID = snapshot.pendingUserMessageID
+        followUps = snapshot.followUps
+        readFollowUpIDs = snapshot.readFollowUpIDs
         streamingMessageID = snapshot.streamingMessageID
         toolIndex = snapshot.toolIndex
         pendingApprovalIDs = snapshot.pendingApprovalIDs
@@ -322,6 +340,8 @@ public final class RunStateReducer: ObservableObject {
         failure = nil
         persistedSequences = []
         pendingUserMessageID = nil
+        followUps = []
+        readFollowUpIDs = []
         streamingMessageID = nil
         toolIndex = [:]
         pendingApprovalIDs = []
@@ -352,6 +372,16 @@ public final class RunStateReducer: ObservableObject {
         runStatus = run.status
         if !historicalDeadline { failure = run.failure }
         if run.status != .waitingForUser { clarifyingQuestion = nil }
+        // ADR-0324: what another device, or this one before a restart, left waiting.
+        for held in run.pendingInputs ?? []
+        where !readFollowUpIDs.contains(held.id)
+            && !followUps.contains(where: { $0.pendingInputID == held.id })
+        {
+            addFollowUp(
+                itemID: "pending-input-\(held.id.uuidString.lowercased())",
+                content: held.content, pendingInputID: held.id
+            )
+        }
     }
 
     /// Begin or refresh a run, retaining live progress only for the same running task.
@@ -368,6 +398,107 @@ public final class RunStateReducer: ObservableObject {
         pendingUserMessageID = id
         activityOrder.append(.message(id))
         timeline.append(TimelineItem(id: id, role: .user, content: content))
+    }
+
+    // MARK: - Follow-ups to a working run (ADR-0324)
+
+    public var hasUnreadFollowUps: Bool { !followUps.isEmpty }
+
+    /// Show a follow-up as waiting, before the server has accepted it.
+    func beginFollowUp(content: [ContentBlock], submissionID: String) {
+        addFollowUp(itemID: "pending-user-\(submissionID)", content: content, pendingInputID: nil)
+    }
+
+    /// Record the identifier the server gave an accepted follow-up.
+    func confirmFollowUp(submissionID: String, pendingInputID: UUID) {
+        let itemID = "pending-user-\(submissionID)"
+        guard let index = followUps.firstIndex(where: { $0.itemID == itemID }) else { return }
+        if readFollowUpIDs.contains(pendingInputID) {
+            // The run read it before the acceptance arrived; its message is already placed.
+            removeFollowUp(at: index)
+        } else if followUps.contains(where: { $0.pendingInputID == pendingInputID }) {
+            // A run snapshot listed it while the acceptance was in flight: one
+            // waiting bubble is enough, and the snapshot's already has the id.
+            removeFollowUp(at: index)
+        } else {
+            followUps[index].pendingInputID = pendingInputID
+        }
+    }
+
+    func discardFollowUp(submissionID: String) {
+        let itemID = "pending-user-\(submissionID)"
+        guard let index = followUps.firstIndex(where: { $0.itemID == itemID }) else { return }
+        removeFollowUp(at: index)
+    }
+
+    /// The server started a new run from it instead: it is that run's optimistic message.
+    func adoptFollowUpAsMessage(submissionID: String) {
+        let itemID = "pending-user-\(submissionID)"
+        guard let index = followUps.firstIndex(where: { $0.itemID == itemID }) else { return }
+        followUps.remove(at: index)
+        if let timelineIndex = timeline.firstIndex(where: { $0.id == itemID }) {
+            timeline[timelineIndex].isAwaitingRead = false
+        }
+        if pendingUserMessageID == nil { pendingUserMessageID = itemID }
+    }
+
+    /// The run these follow-ups waited for has ended. Whatever the next run
+    /// does not carry was dropped; a follow-up sent later belongs to that run.
+    func markUnreadFollowUpsOrphaned() {
+        for index in followUps.indices { followUps[index].orphaned = true }
+    }
+
+    /// Remove the follow-ups the ended run left and return their words, in order.
+    func dropOrphanedFollowUps() -> [String] {
+        var texts: [String] = []
+        for followUp in followUps where followUp.orphaned {
+            if let text = timeline.first(where: { $0.id == followUp.itemID })?.text, !text.isEmpty {
+                texts.append(text)
+            }
+        }
+        while let index = followUps.firstIndex(where: \.orphaned) { removeFollowUp(at: index) }
+        return texts
+    }
+
+    /// Remove every follow-up no run read and return their words, in order.
+    func dropUnreadFollowUps() -> [String] {
+        let texts = followUps.compactMap { followUp in
+            timeline.first { $0.id == followUp.itemID }?.text
+        }
+        while !followUps.isEmpty { removeFollowUp(at: 0) }
+        return texts.filter { !$0.isEmpty }
+    }
+
+    private func addFollowUp(itemID: String, content: [ContentBlock], pendingInputID: UUID?) {
+        guard !followUps.contains(where: { $0.itemID == itemID }) else { return }
+        followUps.append(FollowUp(itemID: itemID, pendingInputID: pendingInputID))
+        activityOrder.append(.message(itemID))
+        timeline.append(
+            TimelineItem(id: itemID, role: .user, content: content, isAwaitingRead: true)
+        )
+    }
+
+    private func removeFollowUp(at index: Int) {
+        let itemID = followUps.remove(at: index).itemID
+        timeline.removeAll { $0.id == itemID }
+        activityOrder.removeAll { $0 == .message(itemID) }
+    }
+
+    /// Take a read or carried follow-up's waiting bubble away; its message follows.
+    private func settleFollowUps(for frame: SSEFrame) {
+        var settled: [UUID] = []
+        if let read = frame.data["pending_input_id"]?.stringValue.flatMap(UUID.init(uuidString:)) {
+            settled.append(read)
+        }
+        if case .array(let carried)? = frame.data["pending_input_ids"] {
+            settled += carried.compactMap { $0.stringValue.flatMap(UUID.init(uuidString:)) }
+        }
+        for pendingInputID in settled {
+            readFollowUpIDs.insert(pendingInputID)
+            if let index = followUps.firstIndex(where: { $0.pendingInputID == pendingInputID }) {
+                removeFollowUp(at: index)
+            }
+        }
     }
 
     func discardPendingUserMessage(submissionID: String) {
@@ -390,7 +521,12 @@ public final class RunStateReducer: ObservableObject {
             return
         }
         if let id = frame.id {
-            guard persistedSequences.insert(id).inserted else { return }
+            guard persistedSequences.insert(id).inserted else {
+                // A restored message is not reduced twice, but its replay still
+                // says which follow-up it was (ADR-0324).
+                if frame.event == "user.message.created" { settleFollowUps(for: frame) }
+                return
+            }
         }
         let previousRunID = activeRunID
         defer {
@@ -519,6 +655,7 @@ public final class RunStateReducer: ObservableObject {
         guard let content = frame.data["content"].flatMap({ decode([ContentBlock].self, from: $0) })
         else { return }
         let id = frameID(frame)
+        settleFollowUps(for: frame)
         if let pendingUserMessageID,
             let timelineIndex = timeline.firstIndex(where: { $0.id == pendingUserMessageID })
         {

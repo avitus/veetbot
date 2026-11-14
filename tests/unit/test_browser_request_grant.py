@@ -549,6 +549,40 @@ async def test_another_runs_grant_does_not_apply() -> None:
     assert result.reason_code == NO_REQUEST_GRANT
 
 
+async def test_a_follow_up_read_by_the_run_ends_the_grant() -> None:
+    # ADR-0324: a later owner message asks again, whether it starts a new run
+    # or is read inside this one.
+    subject = await world(granted=True)
+    allowed_by_the_grant(await subject.authorize())
+    await subject.append(
+        "user.message.created",
+        {
+            "content": [{"kind": "text", "text": "Only the last month."}],
+            "pending_input_id": str(UUID(int=0xF0)),
+        },
+    )
+    # A later answer to the agent's own question does not hide the follow-up.
+    await subject.append(
+        "user.message.created",
+        {"content": [{"kind": "text", "text": "Yes."}], "question_id": str(UUID(int=0xF1))},
+    )
+
+    result = await subject.authorize()
+
+    assert not result.allowed
+    assert result.reason_code == NO_REQUEST_GRANT
+
+
+async def test_an_answer_to_the_agents_question_keeps_the_grant() -> None:
+    subject = await world(granted=True)
+    await subject.append(
+        "user.message.created",
+        {"content": [{"kind": "text", "text": "Yes."}], "question_id": str(UUID(int=0xF1))},
+    )
+
+    allowed_by_the_grant(await subject.authorize())
+
+
 @pytest.mark.parametrize(
     "profile_update",
     [

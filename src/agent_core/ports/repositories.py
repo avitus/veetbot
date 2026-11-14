@@ -26,6 +26,7 @@ from agent_core.domain.messages import (
     ResolvedModel,
     StopReason,
 )
+from agent_core.domain.pending_inputs import PendingRunInput
 from agent_core.domain.people import PeopleCopyCleanup
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -289,6 +290,18 @@ class IdempotencyRepository(Protocol):
     ) -> IdempotencyRecord | None: ...
 
     async def create(self, record: IdempotencyRecord) -> IdempotencyRecord: ...
+
+
+class RunPendingInputRepository(Protocol):
+    """Follow-ups a working run has not read yet, in arrival order (ADR-0324)."""
+
+    async def add(self, pending: PendingRunInput) -> PendingRunInput: ...
+
+    async def get(self, input_id: UUID, principal: Principal) -> PendingRunInput | None: ...
+
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[PendingRunInput]: ...
+
+    async def delete(self, input_id: UUID, principal: Principal) -> bool: ...
 
 
 class UsageRepository(Protocol):
