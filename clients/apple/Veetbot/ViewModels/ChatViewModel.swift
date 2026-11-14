@@ -1406,9 +1406,7 @@ public final class ChatViewModel: ObservableObject {
                 guard !text.isEmpty else { return false }
                 return await answerQuestion(prompt, answer: text)
             } else {
-                sessionBusy = true
-                errorMessage = "This session already has an active run."
-                return false
+                return await sendFollowUp(text, api: api)
             }
         }
 
@@ -1523,6 +1521,95 @@ public final class ChatViewModel: ObservableObject {
                 present(error)
             }
             return false
+        }
+    }
+
+    // MARK: - Follow-ups to a working run (ADR-0324)
+
+    /// False once the server has refused a follow-up the way it did before
+    /// steering; the composer then waits for the run, as it used to.
+    @Published public private(set) var acceptsFollowUps = true
+
+    /// Send words to the run that is already working. Staged files stay staged
+    /// for the next message, because a follow-up is text.
+    private func sendFollowUp(_ text: String, api: VeetbotAPIClient) async -> Bool {
+        guard !text.isEmpty, acceptsFollowUps, let sessionID = selectedSessionID else {
+            sessionBusy = true
+            errorMessage = "Veetbot is still working. Wait for it to finish, or stop it."
+            return false
+        }
+        let key = UUID().uuidString.lowercased()
+        isSending = true
+        defer { isSending = false }
+        runState.beginFollowUp(content: [.text(text)], submissionID: key)
+        do {
+            let submit = try await api.submitMessage(
+                sessionID: sessionID, content: [.text(text)], idempotencyKey: key
+            )
+            guard selectedSessionID == sessionID else { return true }
+            if let pendingInputID = submit.pendingInputID {
+                runState.confirmFollowUp(submissionID: key, pendingInputID: pendingInputID)
+            } else {
+                // The run ended first, so the server started a new one from these words.
+                runState.adoptFollowUpAsMessage(submissionID: key)
+                runState.begin(runID: submit.runID, status: submit.status)
+                watch(runID: submit.runID)
+            }
+            return true
+        } catch {
+            runState.discardFollowUp(submissionID: key)
+            if error is CancellationError { return false }
+            guard let apiError = apiError(from: error), apiError.code == .conflict else {
+                present(error)
+                return false
+            }
+            switch apiError.details.reason {
+            case "active_run_exists":
+                acceptsFollowUps = false
+                sessionBusy = true
+                errorMessage = "Veetbot is still working. Wait for it to finish, or stop it."
+            case "pending_input_limit":
+                errorMessage = "Veetbot is holding as many follow-ups as it can. Wait for it to read one."
+            default:
+                present(error)
+            }
+            return false
+        }
+    }
+
+    /// Put follow-ups no run read back in the message box, ahead of any draft.
+    private func returnToComposer(_ texts: [String]) {
+        guard !texts.isEmpty else { return }
+        composerText = (texts + (composerText.isEmpty ? [] : [composerText]))
+            .joined(separator: "\n")
+        errorMessage = texts.count == 1
+            ? "Veetbot stopped before reading your follow-up. It is back in the message box."
+            : "Veetbot stopped before reading your follow-ups. They are back in the message box."
+    }
+
+    /// After a run ends with follow-ups unread: follow the run the server
+    /// started from them, or return them to the composer. Called last in the
+    /// watch task, because watching the next run replaces that task.
+    private func settleUnreadFollowUps(after runID: UUID) async {
+        guard runState.hasUnreadFollowUps, runState.activeRunID == runID,
+            runState.runStatus?.isTerminal == true, let api, let sessionID = selectedSessionID
+        else { return }
+        do {
+            let session = try await api.getSession(sessionID)
+            guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
+            let next = session.activeRunID ?? (session.lastRunID == runID ? nil : session.lastRunID)
+            guard let next else {
+                returnToComposer(runState.dropUnreadFollowUps())
+                return
+            }
+            let run = try await api.getRun(next)
+            guard selectedSessionID == sessionID, runState.activeRunID == runID else { return }
+            runState.seed(run: run)
+            watch(runID: next)
+        } catch is CancellationError {
+            return
+        } catch {
+            present(error)
         }
     }
 
@@ -3293,6 +3380,11 @@ public final class ChatViewModel: ObservableObject {
                         continue
                     }
                     self.runState.reduce(frame)
+                    if frame.event == "user.message.created",
+                        frame.data["pending_input_ids"] != nil {
+                        // The next run took what it carried; the rest were dropped.
+                        self.returnToComposer(self.runState.dropUnreadFollowUps())
+                    }
                     // A question keeps this stream open until the owner answers.
                     // Load the offer now so accepting it can be that answer.
                     if offerAnnounced, frame.event == "run.waiting_for_user",
@@ -3327,6 +3419,7 @@ public final class ChatViewModel: ObservableObject {
                     self.scheduleTitleRefresh()
                 }
                 if offerAnnounced { await self.refreshWebsiteOffer() }
+                if replay == nil { await self.settleUnreadFollowUps(after: runID) }
             } catch is CancellationError {
                 return
             } catch {

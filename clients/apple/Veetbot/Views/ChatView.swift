@@ -770,11 +770,13 @@ public struct ChatView: View {
         // ADR-0280: a verified sign-in resumes this run, or its deadline has
         // passed, so no reply can answer it.
         let replyRefused = answering && state.clarifyingQuestion?.acceptsReply() == false
-        // Attachments alone make a message, but an answer to a question is text.
-        return (hasText || (!model.attachments.isEmpty && !answering))
-            && (answering || model.attachmentsReady)
+        // ADR-0324: words sent while Veetbot works join that run.
+        let steering = state.isRunActive && !answering
+        // Attachments alone make a message, but an answer or a follow-up is text.
+        return (hasText || (!model.attachments.isEmpty && !answering && !steering))
+            && (answering || steering || model.attachmentsReady)
             && !model.isSending
-            && (!state.isRunActive || answering)
+            && (!steering || model.acceptsFollowUps)
             && !replyRefused
             && model.isConfigured
     }
@@ -1233,6 +1235,14 @@ private struct TimelineBubble: View {
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .fill(AppTheme.tealWash)
                         )
+                        .opacity(item.isAwaitingRead ? 0.6 : 1)
+                    if item.isAwaitingRead {
+                        // ADR-0324: sent while Veetbot was working, not read yet.
+                        Text("Veetbot will read this at its next step")
+                            .veetType(.meta)
+                            .foregroundColor(AppTheme.inkFaint)
+                            .accessibilityIdentifier("chat.followUp.waiting")
+                    }
                     actions
                 }
                 .frame(maxWidth: 560, alignment: .trailing)

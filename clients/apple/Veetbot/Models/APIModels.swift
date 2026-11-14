@@ -506,9 +506,12 @@ public struct RunView: Codable, Identifiable, Sendable {
     public let cancelRequestedAt: Date?
     public let createdAt: Date
     public let updatedAt: Date
+    /// ADR-0324: follow-ups held for this run; absent from an older server.
+    public let pendingInputs: [PendingInputView]?
 
     enum CodingKeys: String, CodingKey {
         case id, status, usage, limits, failure
+        case pendingInputs = "pending_inputs"
         case sessionID = "session_id"
         case parentRunID = "parent_run_id"
         case stepCount = "step_count"
@@ -670,10 +673,26 @@ public struct ArtifactView: Codable, Identifiable, Sendable {
 public struct SubmitResult: Codable, Sendable {
     public let runID: UUID
     public let status: RunStatus
+    /// ADR-0324: present when the message was held as a follow-up for the
+    /// working run instead of starting a run.
+    public let pendingInputID: UUID?
 
     enum CodingKeys: String, CodingKey {
         case runID = "run_id"
         case status
+        case pendingInputID = "pending_input_id"
+    }
+}
+
+/// A follow-up a working run has not read yet (ADR-0324).
+public struct PendingInputView: Codable, Identifiable, Sendable {
+    public let id: UUID
+    public let content: [ContentBlock]
+    public let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, content
+        case createdAt = "created_at"
     }
 }
 
