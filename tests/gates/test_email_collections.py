@@ -1,12 +1,13 @@
 """A2 mailbox collections count authorized cached mail before pagination."""
 
 import asyncio
+from datetime import timedelta
 from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 
-from agent_core.application.email import ThreadSummaryCache
+from agent_core.application.email import ThreadSummaryCache, save_value
 from agent_core.domain.email import EmailRecord
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 
@@ -115,6 +116,37 @@ async def test_collection_rejects_unknown_view(view: str) -> None:
     async with email_client() as (_, client):
         response = await client.get("/v1/email/threads", params={"view": view})
         assert response.status_code == 400
+
+
+async def test_collections_page_newest_first_and_important_by_rank() -> None:
+    """Inbox and its collections select by latest activity; Important by rank (ADR-0324).
+
+    Ranking every list first made a five-row Inbox page the same five
+    conversations as Important, and newer ordinary mail never reached it.
+    """
+    async with email_client() as (composition, client):
+        important, _ = await seed_mail(composition, priority=0.9)
+        newer, _ = await seed_mail(composition, priority=0.1)
+        now = composition.clock.now()
+        async with composition.uow_factory() as uow, uow.email.lock(composition.principal):
+            for thread, age in ((important, 2), (newer, 0)):
+                await save_value(
+                    uow.email,
+                    composition.principal,
+                    "thread",
+                    str(thread.id),
+                    thread.model_copy(update={"updated_at": now - timedelta(days=age)}),
+                    now,
+                )
+        for view, first in (
+            ("inbox", newer),
+            ("needs_you", newer),
+            ("priority", important),
+            ("all", important),
+        ):
+            response = await client.get("/v1/email/threads", params={"view": view, "limit": 1})
+            assert response.status_code == 200
+            assert response.json()["items"][0]["id"] == str(first.id), view
 
 
 async def test_navigation_counts_and_spam_filter_apply_before_paging() -> None:

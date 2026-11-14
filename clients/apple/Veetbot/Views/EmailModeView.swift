@@ -540,16 +540,14 @@ public struct EmailModeView: View {
 
     @ViewBuilder private var inboxList: some View {
         #if os(macOS)
-        if model.scrollsMailList {
-            scrollingList
-        } else {
-            pagedList
-        }
+        scrollingList
         #else
         pagedList
         #endif
     }
 
+    /// Touch keeps the List rows and fetches the next page as its end scrolls into view;
+    /// a failed page offers the press that retries it (ADR-0324).
     private var pagedList: some View {
         List {
             inboxNotices
@@ -557,13 +555,20 @@ public struct EmailModeView: View {
                 inboxRow(thread)
                     .modifier(EmailRowChrome(selected: thread.id == model.selectedThreadID))
             }
-            if model.hasMore {
+            if model.hasMore && model.pagingFailed {
                 Button(model.listView == "priority" ? "More important" : "More mail") {
                     Task { await model.loadMore() }
                 }
                 .buttonStyle(QuietCapsuleButtonStyle())
                 .disabled(model.isLoading).padding(.vertical, 8)
                 .emailHideSeparator()
+            } else if model.hasMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    // Re-runs once a read in flight ends, so a skipped fetch is not lost.
+                    .task(id: model.isLoading || model.isReadingList) { await model.loadMore() }
+                    .accessibilityIdentifier("email.list.loading-more")
+                    .emailHideSeparator()
             }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15), value: model.items.map(\.id))
@@ -596,7 +601,7 @@ public struct EmailModeView: View {
             } action: { _, nearEnd in nearListEnd = nearEnd }
             .onChange(of: nearListEnd && model.hasMore && !model.isLoading && !model.isReadingList && !model.pagingFailed,
                       initial: true) { _, shouldLoad in
-                if shouldLoad { Task { if model.scrollsMailList { await model.loadMore() } } }
+                if shouldLoad { Task { await model.loadMore() } }
             }
             .onReceive(model.restoreScrollAnchor) { id in
                 // Apply the new row order before positioning the conversation back at the top.
@@ -619,7 +624,7 @@ public struct EmailModeView: View {
                 Text(error).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                 Button("Try again") {
                     Task {
-                        await model.reload(preserveOrder: model.scrollsMailList)
+                        await model.reload(preserveOrder: true)
                         await model.refresh()
                     }
                 }

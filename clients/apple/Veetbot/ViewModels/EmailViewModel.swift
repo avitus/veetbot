@@ -144,15 +144,8 @@ public final class EmailViewModel: ObservableObject {
     /// The visible Mac row, independent of the conversation open in the reader.
     var scrollAnchor: UUID?
     let restoreScrollAnchor = PassthroughSubject<UUID, Never>()
-    /// Every Mac list loads 100 rows a page and scrolls; touch pages by five (ADR-0303).
-    var scrollsMailList: Bool {
-        #if os(macOS)
-        true
-        #else
-        false
-        #endif
-    }
-    private var pageSize: Int { scrollsMailList ? 100 : 5 }
+    /// Every list on every device loads 100 rows a page and scrolls (ADR-0303, ADR-0324).
+    private let pageSize = 100
 
     /// Do not search later pages for a row already confirmed absent from the current list.
     private var eligibleScrollAnchor: UUID? {
@@ -712,6 +705,7 @@ public final class EmailViewModel: ObservableObject {
             hasMore = false
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             hasMore = nextCursor != nil
+            pagingFailed = false
             cacheMailList()
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
