@@ -150,3 +150,19 @@ class ProviderCall(BaseModel):
         if parsed.utcoffset() is None:
             raise ValueError("provider call time must be aware")
         return parsed.astimezone(UTC).isoformat()
+
+
+# ADR-0325: a call identifier spelled in letters, so a platform note can name
+# one call without a digit run the owner-request number check could read.
+_REFERENCE_ALPHABET = "ghijklmnopqrstuv"
+
+
+def call_reference(call_id: str) -> str:
+    return "".join(_REFERENCE_ALPHABET[int(digit, 16)] for digit in UUID(call_id).hex)
+
+
+def call_identifier_from(value: object) -> str:
+    """Accept a call identifier or the lettered reference to one."""
+    if isinstance(value, str) and len(value) == 32 and set(value) <= set(_REFERENCE_ALPHABET):
+        return str(UUID(hex="".join(f"{_REFERENCE_ALPHABET.index(letter):x}" for letter in value)))
+    return call_identifier(value)

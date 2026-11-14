@@ -239,9 +239,11 @@ the dispatch in the same transaction.
 The run holds exactly `mcp.bland_read.use`, so it reads the call through
 `get_call` and cannot place one. Its seed is a `user.message.created` event
 with actor type `calling`: the time the call was placed, the closed outcome, a
-request to report, and a statement that the record is untrusted. It carries no
-call content, no identifier and no digit run the owner-request check could
-read as a number. Like the scheduler's seed it is context only, so
+reference to the call, a request to report, and a statement that the record is
+untrusted. The reference is the call identifier spelled in the letters `g` to
+`v`; the governed `get_call` accepts it in place of the identifier. The seed
+carries no call content and no digit run the owner-request check could read as
+a number. Like the scheduler's seed it is context only, so
 conversation reads and the event stream omit it.
 
 The pass reports only a call placed by the owner's own message in an open,

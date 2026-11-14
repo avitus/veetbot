@@ -565,8 +565,10 @@ public struct EmailModeView: View {
             } else if model.hasMore {
                 ProgressView()
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
-                    // Re-runs once a read in flight ends, so a skipped fetch is not lost.
-                    .task(id: model.isLoading || model.isReadingList) { await model.loadMore() }
+                    // Re-runs once a read in flight ends, so a skipped fetch is not lost. The fetch
+                    // runs in its own task: it flips this identity itself, and a fetch owned by the
+                    // view task would be cancelled by its own start and never apply its page.
+                    .task(id: model.isLoading || model.isReadingList) { Task { await model.loadMore() } }
                     .accessibilityIdentifier("email.list.loading-more")
                     .emailHideSeparator()
             }

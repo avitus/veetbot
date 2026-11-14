@@ -307,6 +307,8 @@ class _TaskIO:
         self.imported: dict[UUID, EmailThread] = {}
         # Provider threads whose retained window this slice's discovery waited on.
         self.window_waiting: set[tuple[str, str]] = set()
+        # Full windows only Inbox catch-up reached: no Gmail change waits on them.
+        self.catch_up_windows: set[tuple[str, str]] = set()
         # Anything a new-mail slice or server check saw that makes it more than an empty look.
         self.found_work = False
         counts = context.checkpoint.working_state.setdefault("email_read_counts", {})
@@ -999,10 +1001,14 @@ class _TaskIO:
                     sync.inbox_page_open = True
                     await self._save_sync(account, sync)
                 # Reserve historical progress even if the current inbox stays busy.
+                change_windows = set(self.window_waiting)
                 for provider_id in list(sync.inbox_pending) if catch_up else []:
                     if self.full_reads.get(account_id, 0) >= 8:
                         break
                     completed, thread = await self._import(account_id, provider_id)
+                    # A window catch-up filled waits for a full slice; a new-mail
+                    # slice must not rank old mail on its account (ADR-0326).
+                    self.catch_up_windows |= self.window_waiting - change_windows
                     if not completed:
                         continue
                     if thread is not None and (
@@ -1177,7 +1183,8 @@ class _TaskIO:
         cutoff = body_cutoff(now)
 
         def waiting(thread: EmailThread) -> bool:
-            return (thread.account_id, thread.provider_thread_id) in self.window_waiting
+            key = (thread.account_id, thread.provider_thread_id)
+            return key in self.window_waiting and key not in self.catch_up_windows
 
         def arrival(thread: EmailThread, prior: EmailRecord | None, reading: bool) -> bool:
             """One pass per source ranks a conversation; later passes wait for a full slice.

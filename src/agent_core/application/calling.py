@@ -19,6 +19,7 @@ from agent_core.domain.calls import (
     CallRecord,
     ProviderCall,
     call_identifier,
+    call_identifier_from,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.mcp import MCPCallResult
@@ -100,7 +101,9 @@ class CallService:
                 if name == "list_calls":
                     return result(await self.list_calls(context.principal, **arguments))
                 if name == "get_call":
-                    return result(await self.get_call(context.principal, **arguments))
+                    # ADR-0325: a platform note names its call by a lettered reference.
+                    named = {**arguments, "call_id": call_identifier_from(arguments.get("call_id"))}
+                    return result(await self.get_call(context.principal, **named))
             except (ValueError, TypeError, NotFoundError):
                 return failure("bland.call_not_found")
             return failure("bland.tool_unavailable")

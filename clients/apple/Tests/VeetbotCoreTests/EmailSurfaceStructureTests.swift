@@ -219,7 +219,8 @@ import Testing
         let start = try #require(email.range(of: "private var pagedList:")).upperBound
         let end = try #require(email.range(of: "private var scrollingList:")).lowerBound
         let touch = String(email[start..<end])
-        #expect(touch.contains(".task(id: model.isLoading || model.isReadingList) { await model.loadMore() }"))
+        // The fetch flips the task's identity; owned by the view task it would cancel itself.
+        #expect(touch.contains(".task(id: model.isLoading || model.isReadingList) { Task { await model.loadMore() } }"))
         #expect(touch.contains("email.list.loading-more"))
     }
 

@@ -1222,21 +1222,25 @@ public final class EmailViewModel: ObservableObject {
             let result = try await api.emailFeedback(thread: thread, target: target, judgment: judgment,
                                                     explanation: explanation, targetValue: targetValue, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
-            feedbackID = result.feedbackID
             cachedMailLists = [:]
-            let message: String
-            switch judgment {
-            case "needs_reply": message = "This thread needs a reply."
-            case "no_reply_needed": message = "This thread needs no reply."
-            default:
-                let scope = target == .topic ? (targetValue ?? target.title.lowercased()) : target.title.lowercased()
-                message = "Marked \(scope) as \(judgment.replacingOccurrences(of: "_", with: " "))."
+            // The owner may have opened another thread while this was in flight: the
+            // acknowledgment and its Undo belong to the thread that was judged.
+            if selectedThreadID == thread.id {
+                feedbackID = result.feedbackID
+                let message: String
+                switch judgment {
+                case "needs_reply": message = "This thread needs a reply."
+                case "no_reply_needed": message = "This thread needs no reply."
+                default:
+                    let scope = target == .topic ? (targetValue ?? target.title.lowercased()) : target.title.lowercased()
+                    message = "Marked \(scope) as \(judgment.replacingOccurrences(of: "_", with: " "))."
+                }
+                feedbackMessage = message
+                // A later judgment of the same kind replaces its own row only; the other kind stays.
+                feedbackGiven[EmailFeedbackKind(judgment: judgment)] = EmailFeedbackGiven(
+                    id: result.feedbackID, judgment: judgment, target: target, targetValue: targetValue ?? "",
+                    message: message)
             }
-            feedbackMessage = message
-            // A later judgment of the same kind replaces its own row only; the other kind stays.
-            feedbackGiven[EmailFeedbackKind(judgment: judgment)] = EmailFeedbackGiven(
-                id: result.feedbackID, judgment: judgment, target: target, targetValue: targetValue ?? "",
-                message: message)
             await reload(preserveOrder: true)
             if selectedThreadID == thread.id { await openThread(thread.id, refreshOnly: true) }
         } catch { if generation == connection { report(error, draft: true) } }

@@ -52,6 +52,10 @@ On 2026-11-14 the owner reported three Email problems:
   five, as the Mac already does.
 - Catch-up mail imported above the share appears in Inbox unranked until a
   full slice assesses it. It does not enter Important until then.
+- A long conversation that fills its window during catch-up above the share
+  waits for a full slice. A new-mail slice assesses a full window only when a
+  Gmail change waits on it, so old mail never spends the new-mail budget, and
+  that account's catch-up page stays open until a full slice runs.
 - A new-mail slice that reads catch-up mail is not an empty look, so it
   requests memory formation like any slice that read mail. That cost follows
   the catch-up and ends when the account reaches its floor.

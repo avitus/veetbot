@@ -50,9 +50,12 @@ the conversation that placed it, and that run tells the owner the outcome.**
   through the governed reader and cannot place a call, send mail, or use any
   other scoped tool. Its seed is a platform note with the actor type
   `calling`. The note states the time the call was placed and its closed
-  outcome, asks for a report, and says the record is untrusted. It contains
-  no call content, no call identifier and no digit run that ADR-0213's number
-  check could read as dialable.
+  outcome, names the call, asks for a report, and says the record is
+  untrusted. It names the call by a reference: the call identifier spelled in
+  the letters `g` to `v`, which `get_call` resolves. Two calls placed in the
+  same minute with the same outcome therefore get different notes. The note
+  contains no call content, no call identifier in its usual form, and no
+  digit run that ADR-0213's number check could read as dialable.
 - The note is context only, like the scheduler's seed. Conversation reads and
   the event stream leave it out, so the owner sees the report and not a
   message they did not write. Memory formation already ignores user messages

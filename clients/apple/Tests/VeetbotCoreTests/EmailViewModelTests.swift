@@ -3835,6 +3835,34 @@ import SwiftUI
         #expect(model.feedbackGiven.isEmpty)
     }
 
+    /// A judgment answered after the owner opened another thread must not appear on that thread.
+    @Test func testFeedbackAnsweredAfterAnotherThreadOpensStaysOffThatThread() async throws {
+        let other = UUID()
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("/feedback") {
+                return (200, "{\"feedback_id\":\"\(self.threadID)\",\"thread\":\(self.threadJSON())}", gate)
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON(), nil) }
+            if request.url!.path.hasSuffix(other.uuidString) {
+                return (200, self.threadJSON().replacingOccurrences(of: self.threadID.uuidString, with: other.uuidString), nil)
+            }
+            return (200, self.threadJSON(), nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        let pending = Task { await model.giveFeedback(target: .thread, judgment: "important") }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        await model.openThread(other)
+        gate.release()
+        await pending.value
+        #expect(model.selectedThreadID == other)
+        #expect(model.feedbackGiven.isEmpty, "Another thread must not show this judgment or its Undo")
+        #expect(model.feedbackMessage == nil)
+        #expect(model.feedbackID == nil)
+    }
+
     /// Foreground arrivals appear immediately without reordering surviving rows or disturbing edits.
     @Test func testRefreshInsertsNewThreadsWithoutChangingSelection() async throws {
         let requests = EmailRequestRecorder()

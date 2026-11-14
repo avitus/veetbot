@@ -14,6 +14,7 @@ import pytest
 from agent_core.adapters.determinism import FixedClock
 from agent_core.application.call_authorization import _PHONE_NUMBER
 from agent_core.bootstrap import Composition, build
+from agent_core.domain.calls import call_reference
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.runs import Run, RunStatus
@@ -53,7 +54,9 @@ def turns(*, report: bool = True) -> list[ScriptedTurn]:
         ScriptedTurn(
             tool_calls=[
                 ScriptedToolCall(
-                    name="mcp.bland_read.get_call", arguments={"call_id": CALL_ID}, call_id="read"
+                    name="mcp.bland_read.get_call",
+                    arguments={"call_id": call_reference(CALL_ID)},
+                    call_id="read",
                 )
             ],
             stop_reason=StopReason.TOOL_USE,
@@ -106,6 +109,7 @@ async def test_chat_reports_the_outcome_in_the_conversation_that_placed_the_call
             shown = await uow.events.list_conversation_after(
                 follow_up.session_id, 0, app.principal, limit=100
             )
+            logged = await uow.events.list_after(follow_up.session_id, 0, app.principal)
         pending = await app.approvals.list_pending(run_id=follow_up.id)
 
     assert follow_up.status is RunStatus.COMPLETED, follow_up.failure
@@ -120,6 +124,12 @@ async def test_chat_reports_the_outcome_in_the_conversation_that_placed_the_call
     note = seed.payload["content"]
     assert isinstance(note, str)
     assert "answered" in note
+    # Two calls placed in one minute with one outcome must not share a note: the
+    # reference names this call alone, and the reader resolves it.
+    assert call_reference(CALL_ID) in note and CALL_ID not in note
+    assert not any(character.isdigit() for character in call_reference(CALL_ID))
+    read = [event.event_type for event in logged if event.run_id == follow_up.id]
+    assert "tool.call.completed" in read and "tool.call.failed" not in read
     assert "She said she was awake." not in note, "the note carries no call content"
     assert _PHONE_NUMBER.findall(note) == [], "nothing the number check could read as dialable"
     assert seed.sequence not in {event.sequence for event in shown}

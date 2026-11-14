@@ -559,7 +559,8 @@ verification proceed as usual. The first page of an Inbox pass is also read;
 it holds the newest mail, so a resynchronization still recovers new mail. Reads
 that new mail leaves continue the Inbox catch-up through later pages, which
 calls no model, so an account held above the share still reaches its catch-up
-floor; mail older than the arrival window that it imports stays unassessed
+floor; mail older than the arrival window that it imports stays unassessed,
+and a full window that only catch-up reached waits for a full slice
 (ADR-0326). Re-assessment
 after a profile, model or prompt revision, further passes of a long conversation,
 assessment of mail older than the arrival window, the ninety-day history pass,
