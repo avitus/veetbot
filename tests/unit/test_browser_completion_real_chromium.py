@@ -1,10 +1,11 @@
 """A delayed server effect is reconciled through visible evidence, exactly once."""
 
+import asyncio
 from typing import Any
 
 import pytest
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from agent_core.browser_control_plane.runtime import HostedPlaywrightSessionRuntime
@@ -39,6 +40,9 @@ from tests.unit.test_browser_tools import FakeBrowserProvider
 async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
     """Verify delayed receipt does not duplicate an effect."""
     effects: list[bool] = []
+    # The receipt is late by an order of events, not by a timer: it is drawn only
+    # after the click's own observation has returned, however slow the host is.
+    click_returned = asyncio.Event()
 
     async def home(request: Request) -> Response:
         """Serve the synthetic page used to observe browser behavior."""
@@ -56,7 +60,10 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
             + """
             document.querySelector('#save').onclick = async () => {
                 await fetch('/effect', {method:'POST'});
-                setTimeout(() => {
+                while (!(await (await fetch('/click-returned')).json())) {
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+                {
                     const receipt = document.createElement('div');
                     receipt.innerHTML =
                         '<p role="status">Saved successfully</p>' +
@@ -68,7 +75,7 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
                     receipt.hidden = hiddenReceipt;
                     receiptRoot.append(receipt);
                     history.replaceState({}, '', '/complete');
-                }, 850);
+                }
             };
         """,
         )
@@ -78,10 +85,17 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
         effects.append(True)
         return Response("ok")
 
-    async with browsing([Route("/", home), Route("/effect", effect, methods=["POST"])]) as (
-        site,
-        runtime,
-    ):
+    async def returned(request: Request) -> Response:
+        del request
+        return JSONResponse(click_returned.is_set())
+
+    async with browsing(
+        [
+            Route("/", home),
+            Route("/effect", effect, methods=["POST"]),
+            Route("/click-returned", returned),
+        ]
+    ) as (site, runtime):
 
         class Provider(FakeBrowserProvider):
             def allows(self, url: str) -> bool:
@@ -96,7 +110,10 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
             async def act(
                 self, action: BrowserAction, *, constraint: BrowserDispatchConstraint | None = None
             ) -> BrowserObservation:
-                return await runtime.act(action, constraint=constraint)
+                try:
+                    return await runtime.act(action, constraint=constraint)
+                finally:
+                    click_returned.set()
 
         evidence: dict[str, Any] = {"kind": "text", "text": "Saved successfully"}
         if kind in {"region", "shadow_region"}:
@@ -122,7 +139,9 @@ async def test_delayed_receipt_does_not_duplicate_an_effect(kind: str) -> None:
                 "kind": "click",
                 "expected_revision": before.revision,
                 "ref": before.elements[0].ref,
-                "postcondition": {"evidence": evidence, "timeout_ms": 1500},
+                # The longest bound the tool accepts: a satisfied check returns as
+                # soon as it sees the receipt, so only the unmet kinds wait it out.
+                "postcondition": {"evidence": evidence, "timeout_ms": 5000},
             },
             tool_context(),
         )

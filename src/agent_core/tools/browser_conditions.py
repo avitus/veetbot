@@ -119,12 +119,12 @@ async def check_browser_condition(
     started = loop.time()
     deadline = started + condition.timeout_ms / 1000
     count = 1
-    capture_seconds = 0.0
+    slowest_capture = 0.0
     row = condition.evidence if isinstance(condition.evidence, BrowserRowEvidence) else None
 
     async def capture(previous: BrowserObservation) -> BrowserObservation:
         """Capture fresh evidence within the shared deadline and record its elapsed duration."""
-        nonlocal count, capture_seconds
+        nonlocal count, slowest_capture
         capture_started = loop.time()
 
         async def read(*, extract: bool, revision: str) -> BrowserObservation:
@@ -164,7 +164,7 @@ async def check_browser_condition(
         except TimeoutError as error:
             raise BrowserProviderError("tool.browser.page_changed", retryable=False) from error
         finally:
-            capture_seconds = loop.time() - capture_started
+            slowest_capture = max(slowest_capture, loop.time() - capture_started)
 
     with browser_phase("postcondition", "orchestrator") as phase:
         if not provider.allows(observation.url):
@@ -179,10 +179,11 @@ async def check_browser_condition(
             if status in {"satisfied", "failed"} or remaining <= 0.25 or count >= 21:
                 break
             await asyncio.sleep(0.25)
-            # Recheck after the delay: starting a read with less time than the
-            # preceding capture consumed can turn an unmet predicate into lost
-            # evidence. This estimate never extends the hard capture deadline.
-            if deadline - loop.time() <= capture_seconds:
+            # Recheck after the delay: a read that cannot finish turns an unmet
+            # predicate into lost evidence. One quick read does not show the next
+            # will be quick, so the slowest read so far is the measure, doubled for
+            # a busy host. This estimate never extends the hard capture deadline.
+            if deadline - loop.time() <= 2 * slowest_capture:
                 break
             observation = await capture(observation)
         if status != "satisfied":

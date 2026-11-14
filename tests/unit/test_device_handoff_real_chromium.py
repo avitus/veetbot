@@ -307,10 +307,14 @@ class RestlessSignInSite:
         )
 
     ROUTING = "<script>let n=0;setInterval(()=>{location.hash=String(++n)},2)</script>"
+    # The page a frame is taken of routes fifty times a second, which already refuses
+    # an agent's read. At five hundred Chromium on a busy host stops drawing, and no
+    # screenshot of a page that never draws returns.
+    DRAWABLE_ROUTING = ROUTING.replace("},2)", "},20)")
 
     async def routing(self, request: Request) -> Response:
         del request
-        return HTMLResponse(self.FORM + self.ROUTING)
+        return HTMLResponse(self.FORM + self.DRAWABLE_ROUTING)
 
     async def account(self, request: Request) -> Response:
         """Signed in, the form gives way to a page that keeps routing."""
