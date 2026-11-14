@@ -39,6 +39,8 @@ _HEX = frozenset("0123456789abcdef")
 # one fixed, content-free outcome at a level the unconfigured service still emits.
 logger = logging.getLogger(__name__)
 
+CALL_FOLLOW_UP_WANTED = "wanted"
+
 
 def _rejected(reason: str) -> bool:
     logger.warning("calling.callback_rejected reason=%s", reason)
@@ -148,6 +150,9 @@ class CallService:
                     ).hexdigest(),
                     "run_id": str(context.run_id),
                     "session_id": str(context.session_id),
+                    # ADR-0325: only a call dispatched with this marker is reported in
+                    # its conversation, so no earlier call is reported after a deploy.
+                    "follow_up": CALL_FOLLOW_UP_WANTED,
                 },
             )
         # Keep the executor watermark and reservation durable before network I/O.

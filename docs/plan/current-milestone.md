@@ -4,6 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
+- **Chat reports a finished call — ADR-0325:** On 2026-11-14 the owner found that
+  Chat never said how a call went and asked for the fix. Bland's post-call
+  callbacks already delivered every result; nothing wrote it to the conversation.
+  [The decision](../adr/0325-chat-reports-a-finished-call.md) queues one read-only
+  run in the placing conversation. Implemented with offline tests; production
+  and a live call remain pending. No milestone or gate moves.
+
 - **Researched email replies — ADR-0317:** Owner approved implementation on
   2026-11-11. Bounded email/Calendar research precedes drafting; matching files
   are staged privately and reviewed with the reply. Send remains an exact owner

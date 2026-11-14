@@ -249,6 +249,7 @@ secret ownership and provider-side admission limits are verified:
 | `AGENT_CALL_ENABLED=1` | Add the fixed Bland tool rosters, owner call API and reconciliation worker |
 | `AGENT_CALL_INGRESS_ENABLED=1` | Add the separate signed callback listener and exact public proxy route |
 | `AGENT_CALL_NOTIFICATIONS_ENABLED=1` | Enqueue `call_finished`; requires the existing notification API and delivery setup |
+| `AGENT_CALL_RESULT_FOLLOW_UP_ENABLED=0` | Stop Chat from reporting a finished call in the conversation that placed it (default `1`, ADR-0325); the `call_finished` push is unaffected |
 | `AGENT_CALL_OWNER_REQUESTS_ENABLED=0` | Require the approval card for the owner's own call requests (default `1`: with calling enabled, a call the owner asks for dials without a second confirmation, ADR-0213) |
 
 Enabling the third flag touches all three environments. Each calling role

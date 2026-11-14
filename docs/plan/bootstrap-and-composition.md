@@ -1727,6 +1727,11 @@ derives `mcp.bland_call.use` and `mcp.bland_read.use` from `AGENT_CALL_ENABLED`
 as it derives Gmail scopes, reading `BLAND_CONFIGURATION_FILE` but never a
 Bland credential. The contract is [bland-calling.md](bland-calling.md).
 
+`AGENT_CALL_RESULT_FOLLOW_UP_ENABLED` (ADR-0325) also defaults to `1` and
+accepts only `0` or `1`. With `AGENT_CALL_ENABLED=1`, composition gives the
+maintenance pass the call-result sweep, which queues a read-only run in the
+conversation that placed a finished call; `0` omits it.
+
 ## Milestone 35 Cockpit composition
 
 `AGENT_COCKPIT_ENABLED` defaults to off. When it is set, the composition root:

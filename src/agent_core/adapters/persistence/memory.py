@@ -39,7 +39,7 @@ from agent_core.domain.events import (
     NewEvent,
     ProcessEvent,
     advances_session_activity,
-    is_schedule_instruction_event,
+    is_context_only_seed_event,
 )
 from agent_core.domain.folders import (
     FolderProposal,
@@ -852,7 +852,7 @@ class InMemoryEventRepository:
                 for event in self._events[session_id]
                 if event.sequence > sequence
                 and event.event_type in CONVERSATION_MESSAGE_EVENTS
-                and not is_schedule_instruction_event(event)
+                and not is_context_only_seed_event(event)
             ][:limit]
 
     async def existing_sequences(

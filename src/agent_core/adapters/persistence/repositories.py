@@ -123,7 +123,7 @@ from agent_core.domain.errors import (
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import (
     CONVERSATION_MESSAGE_EVENTS,
-    SCHEDULE_INSTRUCTION_ACTOR_TYPE,
+    CONTEXT_ONLY_SEED_ACTOR_TYPES,
     SCHEDULE_INSTRUCTION_EVENT_TYPE,
     EventEnvelope,
     NewEvent,
@@ -1175,7 +1175,7 @@ class PostgresEventRepository:
                     EventRow.event_type.in_(CONVERSATION_MESSAGE_EVENTS),
                     or_(
                         EventRow.event_type != SCHEDULE_INSTRUCTION_EVENT_TYPE,
-                        EventRow.actor_type != SCHEDULE_INSTRUCTION_ACTOR_TYPE,
+                        EventRow.actor_type.not_in(sorted(CONTEXT_ONLY_SEED_ACTOR_TYPES)),
                     ),
                 )
                 .order_by(EventRow.sequence, EventRow.id)

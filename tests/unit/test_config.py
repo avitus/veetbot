@@ -1448,6 +1448,15 @@ def test_owner_call_permission_defaults_on_and_can_be_disabled() -> None:
         load_settings(_hosted(AGENT_CALL_OWNER_REQUESTS_ENABLED="yes"))
 
 
+def test_call_result_follow_up_defaults_on_and_can_be_disabled() -> None:
+    """ADR-0325: the kill switch leaves call results to the push alone."""
+    assert load_settings(_hosted()).call_result_follow_up_enabled is True
+    disabled = load_settings(_hosted(AGENT_CALL_RESULT_FOLLOW_UP_ENABLED="0"))
+    assert disabled.call_result_follow_up_enabled is False
+    with pytest.raises(ConfigurationError, match="AGENT_CALL_RESULT_FOLLOW_UP_ENABLED"):
+        load_settings(_hosted(AGENT_CALL_RESULT_FOLLOW_UP_ENABLED="yes"))
+
+
 def test_task_grant_scopes_parse_and_refuse() -> None:
     """ADR-0129 D2/D20: exact origin-and-segment scopes behind a hosted-only flag."""
 

@@ -108,7 +108,7 @@ from agent_core.domain.events import (
     NewEvent,
     ProcessEvent,
     conversation_items,
-    is_schedule_instruction_event,
+    is_context_only_seed_event,
 )
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import (
@@ -1393,7 +1393,7 @@ class PublicRunService:
                 current, events = await self._events_after(principal, run_id, watermark)
                 for event in events:
                     watermark = max(watermark, event.sequence)
-                    if is_schedule_instruction_event(event):
+                    if is_context_only_seed_event(event):
                         continue
                     if event.event_type == "assistant.message.completed":
                         answer_delivered = True

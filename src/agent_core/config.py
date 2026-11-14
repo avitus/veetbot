@@ -188,6 +188,8 @@ class Settings:
     call_notifications_enabled: bool = False
     # ADR-0213: the owner's own call request needs no confirmation card.
     call_owner_requests_enabled: bool = True
+    # ADR-0325: Chat reports a finished call in the conversation that placed it.
+    call_result_follow_up_enabled: bool = True
     call_configuration: CallConfiguration | None = None
     call_webhook_secret: SecretStr | None = None
     calendar_enabled: bool = False
@@ -2409,6 +2411,9 @@ def _load_settings(
         call_notifications_enabled=call_notifications_enabled,
         call_owner_requests_enabled=_parse_flag(
             values, "AGENT_CALL_OWNER_REQUESTS_ENABLED", default=True
+        ),
+        call_result_follow_up_enabled=_parse_flag(
+            values, "AGENT_CALL_RESULT_FOLLOW_UP_ENABLED", default=True
         ),
         call_configuration=call_configuration,
         call_webhook_secret=call_webhook_secret,

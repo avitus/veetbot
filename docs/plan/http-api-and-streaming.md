@@ -893,6 +893,8 @@ An assistant item carries a `file` block for each file its run exported
 block whose artifact is expired or gone, as after `artifact.delete` (ADR-0277).
 The event keeps the reference. A reply left with no block still counts toward the
 page and moves the cursor, so a page can hold fewer items than its limit.
+The `calling`-authored `user.message.created` event that seeds a call report
+(ADR-0325) is context-only and produces no transcript item.
 The scheduler-authored `user.message.created` event that seeds a scheduled run
 is context-only and does not produce a transcript item; its complete
 instruction remains available through the authorized schedule point read. Tool

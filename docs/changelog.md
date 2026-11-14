@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-14 — Chat tells you how a call went (ADR-0325)
+
+- After a call you ask for in Chat ends, Chat adds a message to the same
+  conversation saying whether the person answered, it reached voicemail, nobody
+  picked up or the call failed, and what was said.
+- The message usually follows the end of the call by a minute or two. The
+  "New call result" notification still arrives as before.
+
 ## 2026-11-09 — HTML email stays readable
 
 - HTML-only messages with retained HTML no longer display stylesheet code above
