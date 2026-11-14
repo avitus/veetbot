@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from html import escape
 from typing import Any
 
@@ -56,6 +56,11 @@ DEFERRED_INDEX_NOTE = (
     "arguments object; an invalid call returns the tool's input schema."
 )
 DEFERRED_INDEX_DISCOVERED_HEADING = "Discovered tools in the deferred tool index:"
+# ADR-0321: owner-added tools past their index entries, named by server.
+DEFERRED_INDEX_NAMED_HEADING = (
+    "Further discovered tools, by name only. Call one with tool.call as the server "
+    "prefix, a dot and the name; an invalid call returns its definition:"
+)
 # ADR-0261: pinned and reached through tool.call like any deferred tool, but the
 # capture marker that prints its call is its advertisement, so the index renders
 # no entry for it and it uses none of the index's caps. ADR-0277 adds
@@ -109,17 +114,32 @@ def _index_line(spec: ToolSpec) -> str:
     return f"- {spec.name}({', '.join(parameters)}): {_first_sentence(spec.description)}"
 
 
-def deferred_index_items(tools: Sequence[ToolSpec]) -> list[ConversationItem]:
+def _named_lines(tools: Sequence[ToolSpec]) -> list[str]:
+    """ADR-0321: one line per server, naming its tools without entries."""
+
+    by_prefix: dict[str, list[str]] = {}
+    for spec in tools:
+        prefix, _separator, name = spec.name.rpartition(".")
+        by_prefix.setdefault(prefix, []).append(name)
+    return [f"- {prefix}: {', '.join(names)}" for prefix, names in by_prefix.items()]
+
+
+def deferred_index_items(
+    tools: Sequence[ToolSpec], listed: Collection[str] = ()
+) -> list[ConversationItem]:
     """Render the deferred tool index (ADR-0123); an empty index inserts nothing.
 
     Builtin entries and the calling convention are trusted configuration.
     Entries whose descriptions come from a server or device are data, so they
-    render in their own untrusted envelope.
+    render in their own untrusted envelope. Tools in ``listed`` take no entry:
+    the same envelope names them, a line per server (ADR-0321).
     """
 
     tools = [spec for spec in tools if not is_unindexed_deferred(spec)]
     if not tools:
         return []
+    named = [spec for spec in tools if spec.name in listed]
+    tools = [spec for spec in tools if spec.name not in listed]
     builtin = [spec for spec in tools if spec.source is ToolSource.BUILTIN]
     discovered = [spec for spec in tools if spec.source is not ToolSource.BUILTIN]
     items: list[ConversationItem] = [
@@ -128,16 +148,15 @@ def deferred_index_items(tools: Sequence[ToolSpec]) -> list[ConversationItem]:
             trust=TrustLevel.TRUSTED_CONFIGURATION,
         )
     ]
-    if discovered:
+    if discovered or named:
+        lines = (
+            [DEFERRED_INDEX_DISCOVERED_HEADING, *map(_index_line, discovered)] if discovered else []
+        )
+        if named:
+            lines.extend([DEFERRED_INDEX_NAMED_HEADING, *_named_lines(named)])
         items.append(
             UserMessage(
-                content=[
-                    TextPart(
-                        text="\n".join(
-                            [DEFERRED_INDEX_DISCOVERED_HEADING, *map(_index_line, discovered)]
-                        )
-                    )
-                ],
+                content=[TextPart(text="\n".join(lines))],
                 trust=TrustLevel.EXTERNAL_UNTRUSTED,
                 principal_id=None,
             )
@@ -153,6 +172,7 @@ def build_prefix(
     *,
     persona: str = "",
     deferred_tools: Sequence[ToolSpec] = (),
+    listed_tools: Collection[str] = (),
 ) -> list[ConversationItem]:
     base: list[ConversationItem] = [
         SystemMessage(content=[TextPart(text=PLATFORM_FRAMING)]),
@@ -212,7 +232,7 @@ def build_prefix(
     )
     # The deferred tool index follows the tool row. With no deferred tools it
     # inserts nothing, so earlier plans reproduce their prefix byte-for-byte.
-    index_items = deferred_index_items(deferred_tools)
+    index_items = deferred_index_items(deferred_tools, listed_tools)
     return [*base, *envelope_items([*index_items, *catalog_items, *memory_items])]
 
 

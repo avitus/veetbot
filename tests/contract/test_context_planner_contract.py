@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +17,7 @@ from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.rendering import build_prefix, deferred_index_items
+from agent_core.domain.agents import AgentSpec
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.memory import (
@@ -31,6 +32,7 @@ from agent_core.domain.messages import (
     ResolvedModel,
     SystemMessage,
     TextPart,
+    UserMessage,
 )
 from agent_core.domain.persona import PersonaDocument, PersonaEntry, PersonaEntrySource
 from agent_core.domain.skills import SessionSkillCatalog
@@ -1344,6 +1346,208 @@ async def test_owner_index_admission_measures_what_the_cap_check_measures() -> N
         *(spec.name for spec in owner_specs),
     }
     assert plan.skipped_tool_names == ()
+
+
+MAGICPATH_TOOL_NAMES = (
+    "add_project_image",
+    "arrange_canvas_shapes",
+    "cancel_component_code_session",
+    "create_canvas_shapes",
+    "create_project",
+    "create_skill",
+    "delete_canvas_shapes",
+    "delete_skill",
+    "get_active_projects",
+    "get_api_quota",
+    "get_canvas_context",
+    "get_component_build_status",
+    "get_component_code_context",
+    "get_component_install_plan",
+    "get_context",
+    "get_project",
+    "get_project_export",
+    "get_selection",
+    "get_share_url",
+    "get_skill",
+    "get_theme",
+    "group_canvas_shapes",
+    "import_skill",
+    "inspect_component",
+    "list_components",
+    "list_project_images",
+    "list_projects",
+    "list_skills",
+    "list_team_members",
+    "list_teams",
+    "list_themes",
+    "order_canvas_shapes",
+    "prepare_asset_upload",
+    "recover_component_code_session",
+    "search_components",
+    "start_component_code_session",
+    "style_canvas_shapes",
+    "submit_component_code",
+    "transform_canvas_shapes",
+    "update_skill",
+    "view_canvas_image",
+    "view_component",
+)
+
+
+def _owner_server_specs(server_id: str, names: Sequence[str], *, read_only: bool) -> list[ToolSpec]:
+    """One owner-added server's tools, classified by its access (ADR-0255).
+
+    Descriptions and parameters are as long as production servers' are, so
+    the owner index's token cap binds before its item cap, as it does live.
+    """
+    from agent_core.domain.mcp import (
+        OWNER_ACCESS_CLASSIFICATIONS,
+        MCPAuthScheme,
+        MCPRemoteTool,
+        MCPServerAccess,
+        MCPServerConfig,
+        MCPTransport,
+    )
+    from agent_core.mcp.mapping import map_discovered_tools
+
+    side_effect, risk, idempotency = OWNER_ACCESS_CLASSIFICATIONS[
+        MCPServerAccess.READ_ONLY if read_only else MCPServerAccess.CHANGES
+    ]
+    config = MCPServerConfig(
+        tenant_id=principal().tenant_id,
+        server_id=server_id,
+        transport=MCPTransport.HTTP,
+        endpoint=f"https://{server_id}.example.com/mcp",
+        owner_managed=True,
+        auth_scheme=MCPAuthScheme.NONE,
+        side_effect=side_effect,
+        risk=risk,
+        idempotency=idempotency,
+    )
+    return [
+        mapped.spec
+        for mapped in map_discovered_tools(
+            config,
+            tuple(
+                MCPRemoteTool(
+                    name=name,
+                    description=(
+                        f"Use {name.replace('_', ' ')} on the selected project, keeping the "
+                        "revision the owner is viewing and returning every identifier the "
+                        "next step needs. Further detail follows."
+                    ),
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "projectId": {"type": "string"},
+                            "componentId": {"type": "string"},
+                            "revisionId": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                        "required": ["projectId"],
+                    },
+                )
+                for name in names
+            ),
+        ).accepted
+    ]
+
+
+async def _two_owner_server_plan() -> tuple[ContextPlan, AgentSpec, list[ToolSpec], list[ToolSpec]]:
+    """MagicPath, which can change things, beside a large read-only server: production
+    on 2026-11-13, when the read-only server's tools took every owner index entry."""
+    clock, factory, _service, _retriever = await formation_stack()
+    design = _owner_server_specs("magicpath", MAGICPATH_TOOL_NAMES, read_only=False)
+    research = _owner_server_specs(
+        "scalevp", [f"get_research_record_{index:03d}" for index in range(100)], read_only=True
+    )
+    registry = StaticToolRegistry()
+    registry.register(ToolCallTool())
+    registry.register(WebFetchTool(FakeWebProvider()))
+    registry.register(CurrentTimeTool(clock))
+    for spec in (*design, *research):
+        registry.register(_OwnerTool(spec))
+    configured_agent = agent().model_copy(
+        update={
+            "enabled_tools": [
+                "web.fetch",
+                "system.current_time",
+                "tool.call",
+                *(spec.name for spec in (*design, *research)),
+            ]
+        }
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    planner = EventContextPlanner(
+        factory,
+        registry,
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+        owner_server_ids=lambda _session_id: frozenset({"magicpath", "scalevp"}),
+    )
+    plan = await planner.plan(
+        session(),
+        configured_agent,
+        principal(),
+        ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+    )
+    return plan, configured_agent, design, research
+
+
+async def test_a_large_read_only_server_leaves_every_owner_tool_callable() -> None:
+    """2026-11-13 regression: a read-only owner server's 100 reads filled the owner
+    index, so MagicPath, which can change things, kept no tool and a chat asked to
+    design something was refused with tool.not_found.not_offered."""
+    plan, _agent, design, research = await _two_owner_server_plan()
+
+    pinned = set(plan.deferred_tool_names)
+    assert {spec.name for spec in design} <= pinned
+    assert "mcp.magicpath.start_component_code_session" in pinned
+    assert "mcp.magicpath.submit_component_code" in pinned
+    assert {spec.name for spec in research} <= pinned
+    assert not {name for name in plan.skipped_tool_names if name.startswith("mcp.")}
+
+
+async def test_owner_servers_share_the_index_and_the_rest_are_named() -> None:
+    """ADR-0321: servers take index entries in turn; what misses an entry is named
+    on one line per server, inside the discovered tools' untrusted envelope."""
+    plan, configured_agent, design, research = await _two_owner_server_plan()
+
+    listed = set(plan.listed_tool_names)
+    entries = set(plan.deferred_tool_names) - listed
+    design_entries = {spec.name for spec in design} & entries
+    research_entries = {spec.name for spec in research} & entries
+    # Turns keep the two servers within one entry of each other.
+    assert design_entries and research_entries
+    assert abs(len(design_entries) - len(research_entries)) <= 1
+    assert "mcp.magicpath.start_component_code_session" in listed
+    [text] = [
+        part.text
+        for item in build_prefix(
+            configured_agent,
+            plan.tool_specs,
+            deferred_tools=plan.deferred_tool_specs,
+            listed_tools=plan.listed_tool_names,
+        )
+        if isinstance(item, UserMessage)
+        for part in item.content
+        if isinstance(part, TextPart) and "Further discovered tools, by name only." in part.text
+    ]
+    assert text.startswith("<untrusted ")
+    named = {
+        line.split(": ", 1)[0]: line.split(": ", 1)[1].split(", ")
+        for line in text.splitlines()
+        if line.startswith("- mcp.") and "(" not in line
+    }
+    assert "start_component_code_session" in named["- mcp.magicpath"]
+    assert "submit_component_code" in named["- mcp.magicpath"]
+    # A named tool takes no entry line of its own.
+    assert "- mcp.magicpath.start_component_code_session(" not in text
 
 
 async def test_registry_change_requires_builder_bump_to_replace_stored_tool_pins(

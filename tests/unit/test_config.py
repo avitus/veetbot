@@ -1186,13 +1186,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_226_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_228_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 226
+    assert len(qualified_paths) == 228
     assert {
         "tools/limits.yaml:mcp.warmup_connect_timeout_seconds",
         "tools/limits.yaml:mcp.warmup_retry_seconds",

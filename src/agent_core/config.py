@@ -343,6 +343,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "classes.deferred_tool_index.max_tokens",
             "classes.owner_tool_index.max_items",
             "classes.owner_tool_index.max_tokens",
+            "classes.owner_tool_names.max_items",
+            "classes.owner_tool_names.max_tokens",
             "classes.skill_catalog.max_items",
             "classes.skill_catalog.max_tokens",
             "classes.memory_snapshot.max_items",

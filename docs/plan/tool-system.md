@@ -1582,8 +1582,9 @@ finishes.
 
 Secrets are AES-GCM sealed with `MCP_AUTHORIZATION_KEY`, with the tenant,
 server and field as additional data, so a sealed value opens only in its own
-row and column. Owner-added tools take only the `owner_tool_index` context
-class ([context-engine.md](context-engine.md)), so a server reaches chats
+row and column. Owner-added tools take only the `owner_tool_index` and
+`owner_tool_names` context classes ([context-engine.md](context-engine.md)),
+shared between servers in turn (ADR-0321), so a server reaches chats
 created after it is ready and moves no existing tool. With the flag off,
 owner-added rows are ignored and their routes are not mounted.
 
