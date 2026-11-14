@@ -96,13 +96,12 @@ class CallResultFollowUps:
         for key in keys:
             try:
                 run_id = await self._follow_up(key)
+                if run_id is not None:
+                    await self._dispatcher.dispatch(run_id)
+                    queued += 1
             except Exception:
                 # One conversation's fault must not hold back another call's report.
                 logger.warning("calling.follow_up_failed", exc_info=True)
-                continue
-            if run_id is not None:
-                await self._dispatcher.dispatch(run_id)
-                queued += 1
         return queued
 
     async def _follow_up(self, key: str) -> UUID | None:

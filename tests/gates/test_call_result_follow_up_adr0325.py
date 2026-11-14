@@ -330,3 +330,32 @@ async def test_a_follow_up_is_never_steered_into_the_read_only_report_run() -> N
     assert refused.value.reason == "active_run_exists"
     assert held == []
     assert finished.final_message == REPORT
+
+
+class _FailingDispatcher(_HeldDispatcher):
+    async def dispatch(self, run_id: UUID) -> None:
+        raise RuntimeError("dispatch unavailable")
+
+
+async def test_a_dispatch_failure_does_not_end_the_pass() -> None:
+    """One report that cannot start must not hold back the other calls in the pass."""
+    factory = await call_factory(read_tools=True)
+    async with build(
+        settings=call_settings(),
+        script=FakeModelScript(turns=turns()),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        mcp_client_factory=factory,
+    ) as app:
+        assert app.call_follow_ups is not None
+        call_run = await place(app)
+        await settle(app, call_run, "completed")
+        dispatcher = app.call_follow_ups._dispatcher
+        app.call_follow_ups._dispatcher = _FailingDispatcher()
+
+        assert await app.call_follow_ups.run_once() == 0
+        [_, report] = await session_runs(app, call_run.session_id)
+        await dispatcher.dispatch(report.id)
+        finished = await asyncio.wait_for(app.runs.wait_terminal(report.id), timeout=5)
+
+    assert finished.final_message == REPORT
